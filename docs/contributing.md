@@ -178,14 +178,20 @@ of its own, which is what keeps several live at once. `worktrees/` and
 repository tracks.
 
 Those symlinks resolve inside a contained session only for a project whose
-registration in `sync.json.local` carries a `"mount"` of `"rw"` or `"ro"` —
+registration carries a `"mount"` of `"rw"` or `"ro"`, in `sync.json` where
+the project decides it for every machine or in `sync.json.local` where one
+machine does —
 `dev sync setup <name> <path> --mount rw` writes one, and `dev sync status`
 shows which projects have it. A mounted project is leased whole: its
 checkout at that mode, its shared git directory with it, and its own sibling
 worktrees read-only, which is what lets a session commit in it. Without the
 key the project is tracked for review and nothing more, and the symlink
 dangles inside the container the way an unmounted path does. The key is why
-`sync.json.local` is a protected edit root: writing one widens the boundary.
+both registry files are protected edit roots: writing one widens the
+boundary. A tracked mount binds nothing until this machine says where the
+project is, and a tracked `"required": true` is what makes that absence a
+report with the command that answers it rather than a workflow that cannot
+start.
 For a folder one session needs without a standing registration, the launchers
 take `--mount <dir>` and `--mount-ro <dir>` (repeatable): the same lease, the
 same widening in every posture, lasting exactly one launch.
@@ -221,11 +227,18 @@ its remote-tracking ref, so refreshing is a fetch and nothing in the clone is
 reset over.
 
 The base the branch is cut from is recorded against it, because topology
-cannot recover a creation point once the parent has merged on. It is read
-from the checkout you run in, so a detached HEAD has nothing to read: rather
-than record nothing and let a later reader guess, creation refuses and asks
-for `--base <branch>`, or `--no-record` to say deliberately that this branch
-has no base worth keeping.
+cannot recover a creation point once the parent has merged on. A fresh branch
+takes the integration branch, where work lands — but the checkout you run in
+is often a worktree on a branch of its own, and continuing *that* work is as
+real an intent as starting new work beside it. Both arrive as the same
+command, so where the checkout carries commits the integration branch lacks,
+creation asks which you mean and names both spellings of `--base <branch>`,
+before there is a branch to reset. Where it carries none, the two bases are
+one line and the integration branch's tip is taken without a word.
+
+A detached HEAD has nothing to read at all: rather than record nothing and
+let a later reader guess, creation refuses and asks for `--base <branch>`, or
+`--no-record` to say deliberately that this branch has no base worth keeping.
 
 The command prints the path and does not move whoever ran it. **Launch a
 session rooted at that path**; do not relocate a running one. The difference
@@ -308,6 +321,27 @@ session. The driver is per-clone git config, so it covers a merge performed in
 a clone that registered it and nothing else: a merge run on the forge's own
 server reads no config and lands the conflict anyway.
 
+Before publishing a PR, fetch its target and run `uv run lup-devtools git pr
+prepare --base origin/<target> --json` in the clean feature checkout. This
+merges the exact target commit using the generated-tree driver, regenerates
+all harnesses from the combined sources, and commits locally. It pushes
+nothing. The resulting head contains the target as an ancestor, so a forge
+needs no custom merge driver. Source conflicts remain open for `git conflict`
+repair; regenerate before completing that merge. Re-run preparation if the
+target advances or the feature history is rebuilt.
+
+Cleanup checks the live coordination roster as well as Git worktree locks.
+A clean checkout owned by a live session remains protected even with
+`--force`; removal becomes available after the session departs or its pulse
+expires. Cleanup rechecks ownership immediately before removing the tree.
+
+Undo snapshots publish and retire duplicate refs in one fsynced Git reference
+transaction. `dev undo` also reports empty or null loose undo refs, which Git
+omits from its ordinary listing but which can break fetch. Run `uv run
+lup-devtools dev undo --repair` to quarantine those bytes under the shared Git
+directory's `lup/undo-damaged/` directory. Valid snapshots and active ref locks
+are preserved; the command prints every quarantine path.
+
 ## What has to be green
 
 ```bash
@@ -323,6 +357,15 @@ redirects to, resolved against the project the way `uv` resolves it, so a
 session keeping its environment elsewhere is not checked against a stale
 `.venv` beside it; with the variable unset, the root configuration's `.venv`
 stands.
+
+For tests spanning the application and library, use
+`uv run lup-devtools dev test tests/unit/test_toolsets.py packages/lup/tests/unit/test_lup_tool.py`.
+It starts a separate pytest process in each declared test root, preserving
+each suite's configuration and imports. A raw pytest invocation naming both
+roots can fail while importing `tests.conftest`, because both independently
+installed suites use that package name. Recover with `dev test` over the same
+paths; changing import mode does not separate those packages. The runner uses
+parallel workers only when pytest-xdist is installed; otherwise it runs serially.
 
 The generated trees include the frontend bundles under `lup.web`'s package
 data, built from `packages/lup/web/` by Vite, so the gate needs `bun`. The

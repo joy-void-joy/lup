@@ -324,3 +324,63 @@ def test_registration_maps_events_and_matchers_without_inventing_entries() -> No
     assert native["PreToolUse"][0].matcher == "Bash"
     assert native["Stop"][0].matcher is None
     assert len(native["PreToolUse"][0].hooks) == 1
+
+
+async def test_informational_context_is_received_without_granting_permission() -> None:
+    receipts: list[str] = []
+
+    async def informational(_event: LupHookInput) -> LupHookOutput:
+        return LupHookOutput(
+            additional_context="new actor mail",
+            delivery_receipt=lambda: receipts.append("accepted"),
+        )
+
+    handler = build_claude_hook_handler(
+        LupHookMatcher(hook=informational), event="PreToolUse"
+    )
+    output = await handler(
+        pre_tool_use_input("Bash", {"command": "git status"}),
+        "use-1",
+        claude_types.HookContext(signal=None),
+    )
+    assert output == {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "additionalContext": "new actor mail",
+        }
+    }
+    assert receipts == ["accepted"]
+
+
+async def test_post_tool_context_and_diagnostics_survive_receipt_translation() -> None:
+    receipts: list[str] = []
+
+    async def informational(_event: LupHookInput) -> LupHookOutput:
+        return LupHookOutput(
+            additional_context="review this result",
+            system_message="tool diagnostic",
+            delivery_receipt=lambda: receipts.append("accepted"),
+        )
+
+    handler = build_claude_hook_handler(
+        LupHookMatcher(hook=informational), event="PostToolUse"
+    )
+    native_input = claude_types.PostToolUseHookInput(
+        hook_event_name="PostToolUse",
+        session_id="session",
+        transcript_path="/transcript",
+        cwd="/cwd",
+        tool_name="Bash",
+        tool_input={"command": "ls"},
+        tool_response="output",
+        tool_use_id="use-2",
+    )
+    output = await handler(native_input, "use-2", claude_types.HookContext(signal=None))
+    assert output == {
+        "systemMessage": "tool diagnostic",
+        "hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "additionalContext": "review this result",
+        },
+    }
+    assert receipts == ["accepted"]

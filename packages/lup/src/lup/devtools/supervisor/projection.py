@@ -315,6 +315,7 @@ def folded_views(state: ResolveState) -> list[PendingQuestionView]:
         for question in (
             state.questions.questions if state.questions is not None else []
         )
+        if question.id not in state.retired_questions
     ]
 
 

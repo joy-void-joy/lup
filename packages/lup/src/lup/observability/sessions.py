@@ -40,14 +40,6 @@ walked on demand by :mod:`lup.observability.sweep`, which records the same
 two kinds through the same writers.
 """
 
-# lup: solved: an on-demand `ledger index-notes` sweep over an existing
-# notes/ tree was not built, by the decision that recording starts from
-# now and backfills nothing. It would walk notes/traces/<version>/sessions/
-# <id>/ and notes/harness/<runtime>/<launch>/, record one closed Session
-# per directory with the journal pinned as found and the outcome read off
-# the journal's last record, and one Output per <timestamp>.json under a
-# session, about that session.
-
 import asyncio
 import logging
 from collections.abc import AsyncGenerator

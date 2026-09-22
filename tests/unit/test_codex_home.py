@@ -456,6 +456,12 @@ def test_a_home_trusting_every_reported_hook_would_run_them_all() -> None:
     assert skipped(report, "lup@proj") == []
 
 
+def test_user_hooks_have_no_plugin_identity() -> None:
+    report = reported([resolved_hook("user-hook", pluginId=None, source="user")])
+    assert report.resolved()[0].plugin_id is None
+    assert hooks_of(report, "lup@proj") == []
+
+
 def test_a_managed_hook_needs_no_record_of_its_own() -> None:
     """Policy trusted it, which is a state a home's own records cannot show.
 

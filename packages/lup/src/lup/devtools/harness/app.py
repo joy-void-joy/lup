@@ -19,6 +19,7 @@ import typer
 import lup.devtools.harness.doctor as doctor
 import lup.devtools.harness.drift as drift
 import lup.devtools.harness.launch as launch
+import lup.devtools.harness.policy_refresh as policy_refresh
 import lup.devtools.harness.reconcile as reconcile
 import lup.devtools.harness.resolve as resolve
 from lup.coordination.refs import ActorRef
@@ -109,6 +110,18 @@ def create_harness_app(
         drift.generate_targets(
             targets.resolve(target, project_root()), repository_wide(target)
         )
+
+    @app.command("policy-refresh")
+    def policy_refresh_command(
+        nonce: Annotated[
+            str, typer.Option(help="Live launch nonce from its policy diagnostic")
+        ],
+        repository: Annotated[
+            Path, typer.Option(help="Already granted destination checkout")
+        ],
+    ) -> None:
+        """Accept changed destination policy from an independent operator terminal."""
+        policy_refresh.refresh_command(project_root(), nonce, repository)
 
     @app.command("check")
     def check_command(
@@ -251,6 +264,20 @@ def create_harness_app(
             not finding.working and finding.requirement.absence.costly()
             for finding in findings
         ):
+            raise typer.Exit(1)
+
+    @app.command("sandbox-check")
+    def sandbox_check_command(
+        image: Annotated[
+            str | None, typer.Option(help="Sandbox image; defaults to the library's")
+        ] = None,
+    ) -> None:
+        """Evaluate arithmetic in a disposable Python sandbox without network access."""
+        from lup.devtools.harness.sandbox import check_sandbox
+
+        outcome = check_sandbox(image)
+        typer.echo(outcome.detail, err=not outcome.proved)
+        if not outcome.proved:
             raise typer.Exit(1)
 
     @app.command("image")
@@ -535,6 +562,32 @@ def create_harness_app(
 
     codex_target = targets.builder("codex")
     if codex_target is not None:
+        codex_plugin = typer.Typer(
+            help="Install and verify this project's Codex plugin"
+        )
+        app.add_typer(codex_plugin, name="codex-plugin")
+
+        @codex_plugin.command("install")
+        def install_codex_plugin(
+            codex_home: Annotated[
+                Path,
+                typer.Option("--codex-home", help="The home the runtime will open"),
+            ],
+            force: Annotated[
+                bool,
+                typer.Option("--force", help="Reinstall a matching cached revision"),
+            ] = False,
+            trust_project: Annotated[
+                bool,
+                typer.Option(
+                    "--trust-project", help="Trust this checkout in a launch-owned home"
+                ),
+            ] = False,
+        ) -> None:
+            """Install the declared plugin and verify native discovery in the selected home."""
+            launch.prepare_codex_plugin(
+                [], codex_home, project_root(), {}, force, trust_project
+            )
 
         @app.command(
             "codex",

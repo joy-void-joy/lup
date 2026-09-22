@@ -13,6 +13,7 @@ from pathlib import Path
 import sh
 
 from lup.policy.kernel.spawns import decide_spawn
+from lup.policy.relay import QuestionRelay
 from lup.types import JsonObject
 from lup_template.harness.catalog import portable_harness
 
@@ -138,16 +139,21 @@ def test_a_misspelled_name_escalates_the_way_a_missing_one_does() -> None:
     assert "the name is the runtime's to reject" in escalated.reason
 
 
-def test_an_escalated_spawn_becomes_the_question_the_caller_asked_for() -> None:
+def test_an_escalated_spawn_becomes_the_question_the_caller_asked_for(
+    tmp_path: Path,
+) -> None:
     """The marker rides in the prompt, the one input a caller writes prose into."""
-    decision = decide(
-        spawn(None, prompt="# lup: escalate: measuring the hook\nReply ok.")
+    payload = spawn(None, prompt="# lup: escalate: measuring the hook\nReply ok.")
+    payload.update(
+        cwd=str(tmp_path), session_id="requester", hook_event_name="PreToolUse"
     )
+    decision = decide(payload)
 
     specific = decision["hookSpecificOutput"]
     assert isinstance(specific, dict)
     assert specific["permissionDecision"] == "ask"
     assert "measuring the hook" in str(specific["permissionDecisionReason"])
+    assert QuestionRelay(tmp_path / ".lup/questions.jsonl").pending() == []
 
 
 def test_a_project_requiring_no_name_leaves_every_spawn_alone() -> None:

@@ -21,7 +21,9 @@ than against the workspace.
 
 import json
 import os
+import shlex
 import sys
+from hashlib import sha256
 from pathlib import Path
 
 # The hook is launched as a bare script, promised no cwd, PYTHONPATH, or
@@ -30,7 +32,7 @@ from pathlib import Path
 # distribution. Naming it as a search path is what lets the imports below
 # resolve, for the interpreter and for a type checker alike.
 sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
-from codex_patch import patched_files
+from codex_patch import patched_files, patched_paths
 from decisions import (
     edit_claim_decision,
     unconfined_by_declaration,
@@ -39,7 +41,9 @@ from decisions import (
     claim_window_closed,
     claim_window_opened,
     fetch_decision,
+    named_claim_recorded,
     refused_tool_decision,
+    reviewed_decision,
     session_contained,
     spawn_decision,
     written_review,
@@ -48,19 +52,25 @@ from host import (
     approval_fingerprint,
     approval_subject,
     declared_identity,
+    file_diagnostics,
     note_ran,
+    observe_hook_call,
+    policy_snapshot_digest,
     publish_edition,
     read_document,
     record_hook_evidence,
-    review_hook_call,
+    repaired_directives,
+    routing_policy_identity,
     sandbox_active,
 )
 from kernel.decision import KernelDecision
-from kernel.lex import parse_shell
-from kernel.syntax import word_text
+import kernel.lex as shell_lex
+from kernel.review import copied_paths, literal_input
 from kernel.shell import auto_escape_matches
+import policy_data as declared_policy
 from policy_data import AUTO_ESCAPE_PREFIXES
 from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
+from policy_data import DIAGNOSTICS_COMMAND, REPAIR_COMMAND
 
 
 def hook_environment():
@@ -97,40 +107,6 @@ def joined(decisions):
             if decision.effect == effect:
                 return decision
     return KernelDecision("allow", "every patched file is declared safe")
-
-
-def shell_patch(command):
-    """Read one literal apply_patch invocation without hiding other shell effects."""
-    tree = parse_shell(command)
-    if isinstance(tree, KernelDecision):
-        return None
-    items = tree["items"]
-    if len(items) != 1 or items[0]["terminator"] == "&":
-        return None
-    pipelines = items[0]["andor"]["pipelines"]
-    if len(pipelines) != 1 or pipelines[0]["negated"]:
-        return None
-    commands = pipelines[0]["commands"]
-    if len(commands) != 1 or commands[0]["kind"] != "simple":
-        return None
-    invocation = commands[0]
-    words = invocation["words"]
-    if not words or word_text(words[0]) != "apply_patch":
-        return None
-    redirects = invocation["redirects"]
-    if len(words) == 2 and not redirects:
-        parts = words[1]["parts"]
-        if all(part["kind"] in ("single", "literal", "escaped") for part in parts):
-            return word_text(words[1])
-    if len(words) == 1 and len(redirects) == 1:
-        redirect = redirects[0]
-        if redirect["operator"] == "<<" and len(redirect["heredoc"]) == 1:
-            heredoc = redirect["heredoc"][0]
-            if heredoc["quoted"]:
-                return heredoc["body"]
-    raise ValueError(
-        "use one apply_patch with a single-quoted patch argument or quoted heredoc"
-    )
 
 
 def patch_changes(command, cwd):
@@ -180,9 +156,13 @@ def dispatch(payload, permission_request=False):
     # things: how a patch is judged, and whether a refusal has a route to
     # name. Read once at the top rather than inside the branch that needed it
     # first, since both branches need it now.
-    autonomous = declared_identity(AGENT_IDENTITY_ENV) in AUTONOMOUS_AGENT_IDENTITIES
+    agent_type = payload["agent_type"] if "agent_type" in payload else ""
+    autonomous = (
+        agent_type in AUTONOMOUS_AGENT_IDENTITIES
+        or declared_identity(AGENT_IDENTITY_ENV) in AUTONOMOUS_AGENT_IDENTITIES
+    )
     if name == "Bash":
-        envelope = shell_patch(tool_input["command"])
+        envelope = literal_input(tool_input["command"], "apply_patch")
         if envelope is not None:
             return patch_decision(envelope, session_directory, autonomous)
         requested_escape = spent_escape(tool_input)
@@ -260,7 +240,7 @@ def dispatch(payload, permission_request=False):
 
 
 def queued_review(payload, decision):
-    """An explicit reviewer answer is the fallback for a hook that cannot prompt."""
+    """Both judging events require the same explicit review authority."""
     cwd = Path(payload["cwd"]) if "cwd" in payload else Path.cwd()
     tool_input = payload["tool_input"]
     name = payload["tool_name"]
@@ -268,61 +248,74 @@ def queued_review(payload, decision):
     envelope = (
         command
         if name == "apply_patch"
-        else shell_patch(command)
+        else literal_input(command, "apply_patch")
         if name == "Bash"
         else None
     )
     before = (
         {
-            str(Path(change.path).resolve()): change.before
+            Path(change.path).resolve(): change.before
             for change in patch_changes(envelope, cwd)
         }
         if envelope is not None
         else {}
     )
-    result = review_hook_call(
+    copied = copied_paths(command) if name == "Bash" else None
+    if copied is not None:
+        if not (cwd / copied["source"]).is_file():
+            raise ValueError("copy review requires a readable source file")
+    if name == "Bash":
+        paths = [
+            *shell_lex.shell_write_targets(command),
+            *shell_lex.shell_path_verb_targets(command, declared_policy.SHELL_RULES),
+            *shell_lex.shell_flag_write_targets(command, declared_policy.SHELL_RULES),
+            *(write["path"] for write in shell_lex.authored_writes(command)),
+            *(
+                path
+                for rewrite in shell_lex.shell_sed_rewrites(
+                    command, declared_policy.SHELL_RULES
+                )
+                for path in rewrite["targets"]
+            ),
+            *(copied.values() if copied is not None else []),
+        ]
+        for path in dict.fromkeys(paths):
+            target = cwd / path
+            if target.exists() and not target.is_file():
+                raise ValueError(
+                    "shell review requires regular files; use an exact patch"
+                )
+            before[target.resolve()] = (
+                target.read_text(encoding="utf-8") if target.exists() else None
+            )
+    reviewed = reviewed_decision(
+        decision,
         cwd,
         payload["session_id"] if "session_id" in payload else "",
         name,
-        json.dumps(tool_input, sort_keys=True),
-        json.dumps(before, sort_keys=True),
-        decision.reason,
-        decision.rule,
-        decision.purpose,
-        decision.reviewer,
-    )
-    if result["state"] == "approved":
-        return decision.revised(effect="allow")
-    if result["state"] == "rejected":
-        return decision.revised(
-            effect="deny",
-            recovery=f"Review {result['id']} was rejected: {result['reason']}. Revise the proposal before retrying.",
-        )
-    identifier = result["id"]
-    if not identifier:
-        return decision.revised(
-            effect="deny",
-            recovery=f"Review queue unavailable: {result['reason']}. Run this operation from an operator terminal.",
-        )
-    return decision.revised(
-        effect="deny",
-        recovery=(
-            f"Review {identifier} is {result['state']}. In {cwd}, the operator can run "
-            f"'uv run lup-devtools dev questions show {identifier}', then "
-            f"'uv run lup-devtools dev questions answer {identifier} --as operator' "
-            f"or 'uv run lup-devtools dev questions reject {identifier} --as operator'. "
-            "After approval, retry this exact tool call; changed file contents require fresh review."
+        tool_input,
+        before,
+        payload["tool_use_id"] if "tool_use_id" in payload else "",
+        payload["hook_event_name"] if "hook_event_name" in payload else "",
+        "PreToolUse"
+        if "hook_event_name" in payload
+        and payload["hook_event_name"] == "PermissionRequest"
+        else "",
+        policy_identity=json.dumps(
+            [
+                routing_policy_identity(cwd),
+                policy_snapshot_digest(Path(__file__).parents[1]),
+                sha256(Path(__file__).read_bytes()).hexdigest(),
+            ]
         ),
     )
+    # A blocked review carries a recovery naming who answers it and how, which
+    # reaches the operator on stdout; exit 2 would hand it to the model alone.
+    return reviewed, reviewed.effect == "deny"
 
 
 def remembered_run(payload):
-    """A call that was asked about and then ran was answered yes: write it down.
-
-    The same reading the Claude half makes, off the same two events: read
-    from the input the tool actually ran with, so a call somebody changed on
-    the way through is a different call and approves nothing.
-    """
+    """Record what executed; a native execution event conveys no authority."""
     name = payload["tool_name"] if "tool_name" in payload else ""
     tool_input = payload["tool_input"] if "tool_input" in payload else {}
     subject = approval_subject(name, tool_input)
@@ -332,32 +325,56 @@ def remembered_run(payload):
     note_ran(root, approval_fingerprint(subject["kind"], subject["text"], root))
 
 
+def patch_snapshot(payload):
+    """One native call's before-image record, without storing command contents."""
+    root = plugin_data_root()
+    if root is None or not payload.get("session_id") or not payload.get("tool_use_id"):
+        return None
+    identity = {
+        key: payload.get(key)
+        for key in ("session_id", "tool_use_id", "cwd", "tool_input")
+    }
+    digest = sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+    return root / "patch-snapshots" / f"{digest}.json"
+
+
+def patch_stamps(payload):
+    """Digest named files so a failed or partly applied patch is observed honestly."""
+    tool_input = payload.get("tool_input", {})
+    command = tool_input.get("command", "")
+    name = payload.get("tool_name", "")
+    envelope = (
+        command
+        if name == "apply_patch"
+        else literal_input(command, "apply_patch")
+        if name == "Bash"
+        else None
+    )
+    if not command or envelope is None:
+        return None
+    directory = Path(payload.get("cwd") or Path.cwd())
+    stamps = {}
+    for path in patched_paths(envelope):
+        target = directory / path
+        try:
+            stamps[str(target)] = sha256(target.read_bytes()).hexdigest()
+        except FileNotFoundError:
+            stamps[str(target)] = None
+    return stamps
+
+
+def remember_patch(payload):
+    """Capture the allowed call immediately before native execution."""
+    path = patch_snapshot(payload)
+    stamps = patch_stamps(payload)
+    if path is None or stamps is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path.write_text(json.dumps(stamps), encoding="utf-8")
+
+
 def observe(payload):
-    """Record which checkout an edit landed in, and decide nothing.
-
-    Codex reads the directory it ran in, where Claude reads the edited file.
-    Not a lesser answer here, and not an available one either way: Codex
-    names its files inside the patch envelope, and the parser that decodes
-    one validates its context against the document on disk — which this
-    event runs after the patch already rewrote. Re-decoding it here would
-    fail on exactly the edits it was called for. Codex hands over its
-    working directory instead, which Claude's hook is promised nothing
-    about, and that is the same fact one step coarser.
-
-    Coarser is enough to say which checkout is being edited and not enough
-    to type-check what changed, so Codex records the edition and Claude also
-    reports diagnostics. Checking the directory instead would answer every
-    patch with every finding in the tree, most of them about files this
-    edit never touched.
-
-    A shell command is not coarser here, and gets the same reading Claude's
-    does. The envelope problem above is about a *patch*, whose files this
-    event can no longer decode; a command carries its own text, names its
-    write targets in that text, and the files it wrote are on disk to be
-    read. So the gates a shell write could never reach before it ran are put
-    to its result here, which is what lets the verdict beforehand answer
-    from the path alone.
-    """
+    """Record each patched path and run the shared post-edit checks."""
     root = payload["cwd"] if "cwd" in payload else ""
     if root:
         publish_edition(root)
@@ -365,6 +382,38 @@ def observe(payload):
     command = tool_input["command"] if "command" in tool_input else ""
     if not command:
         return []
+    name = payload["tool_name"] if "tool_name" in payload else ""
+    envelope = (
+        command if name == "apply_patch" else literal_input(command, "apply_patch")
+    )
+    if envelope is not None:
+        directory = Path(root) if root else Path.cwd()
+        snapshot = patch_snapshot(payload)
+        if snapshot is None or not snapshot.is_file():
+            return [
+                "Patch diagnostics have no matching PreToolUse snapshot; run dev check to verify the result."
+            ]
+        before = json.loads(snapshot.read_text(encoding="utf-8"))
+        snapshot.unlink()
+        after = patch_stamps(payload)
+        assert after is not None
+        changed = [
+            target
+            for target, stamp in after.items()
+            if target in before and before[target] != stamp
+        ]
+        for target in changed:
+            publish_edition(target)
+            named_claim_recorded(target, directory)
+        return [
+            finding
+            for target in changed
+            for check, command in (
+                (repaired_directives, REPAIR_COMMAND),
+                (file_diagnostics, DIAGNOSTICS_COMMAND),
+            )
+            for finding in check(target, command)
+        ]
     # What the command changed, read against the snapshot its own PreToolUse
     # took, and contested where another session had a window open across it.
     claim_window_closed(Path(root) if root else None)
@@ -373,8 +422,14 @@ def observe(payload):
 
 def main():
     payload = {}
+    permission_request = False
+    review_notice = False
     try:
         payload = json.load(sys.stdin)
+        permission_request = (
+            "hook_event_name" in payload
+            and payload["hook_event_name"] == "PermissionRequest"
+        )
         record_hook_evidence(plugin_data_root(), payload, "started")
         # Watching and deciding are separate events, and this one returns
         # before a verdict exists: the patch has already applied, so there is
@@ -383,7 +438,13 @@ def main():
         event = payload["hook_event_name"] if "hook_event_name" in payload else ""
         if event == "PostToolUse":
             remembered_run(payload)
-            found = observe(payload)
+            found = observe_hook_call(
+                Path(payload["cwd"]) if "cwd" in payload else Path.cwd(),
+                payload["session_id"] if "session_id" in payload else "",
+                payload["tool_name"],
+                payload["tool_input"],
+                payload["tool_use_id"] if "tool_use_id" in payload else "",
+            ) + observe(payload)
             # Codex receives post-tool findings through stderr and exit 2.
             # A clean result needs no feedback.
             if found:
@@ -395,12 +456,11 @@ def main():
                 raise SystemExit(2)
             record_hook_evidence(plugin_data_root(), payload, "completed", "observed")
             return
-        permission_request = event == "PermissionRequest"
         decision = dispatch(payload, permission_request)
-        # PreToolUse runs before native approval and cannot request a prompt.
-        # Only a recorded reviewer answer may release its exact pending call.
-        if not permission_request and decision.effect == "ask":
-            decision = queued_review(payload, decision)
+        # Native approval mode does not prove who answers. Both judging events
+        # require a recorded reviewer answer for this exact pending call.
+        if decision.effect == "ask":
+            decision, review_notice = queued_review(payload, decision)
         # A verdict from here places nothing: this hook answers, and the call
         # runs with the arguments the model wrote, so a placement is degraded
         # to its plain effect rather than carrying an intent no channel here
@@ -413,6 +473,8 @@ def main():
         # channel exists the question already says where the call lands.
         root = Path(payload["cwd"]) if "cwd" in payload else None
         decision = decision.placed(escapable=False, contained=session_contained(root))
+        if not permission_request and decision.effect in ("allow", "defer"):
+            remember_patch(payload)
     # Every way this can fail means one thing — the call went unjudged — and
     # one answer is right for all of them. Naming the exceptions instead is
     # what let a plain unreadable file escape, and a traceback exit is not the
@@ -427,32 +489,51 @@ def main():
             "error",
             f"{type(error).__name__}: {error}",
         )
-        sys.stderr.write(f"Malformed hook input requires approval: {error}")
-        raise SystemExit(2) from error
-    if permission_request and decision.effect == "allow":
+        decision = KernelDecision(
+            "deny", f"Malformed hook input requires approval: {error}"
+        )
+        if not permission_request:
+            sys.stderr.write(decision.addressed())
+            raise SystemExit(2) from error
+    if permission_request and decision.effect != "defer":
+        allowed = decision.effect == "allow"
         json.dump(
             {
                 "hookSpecificOutput": {
                     "hookEventName": "PermissionRequest",
-                    "decision": {"behavior": "allow"},
+                    "decision": {
+                        "behavior": "allow" if allowed else "deny",
+                        **({} if allowed else {"message": decision.addressed()}),
+                    },
                 }
             },
             sys.stdout,
         )
-        record_hook_evidence(plugin_data_root(), payload, "completed", "allow")
-        return
-    if permission_request and decision.effect == "ask":
-        record_hook_evidence(plugin_data_root(), payload, "completed", "ask")
+        record_hook_evidence(
+            plugin_data_root(), payload, "completed", "allow" if allowed else "deny"
+        )
         return
     if decision.effect in ("allow", "defer"):
         record_hook_evidence(plugin_data_root(), payload, "completed", decision.effect)
         return
-    # Exit 2 turns the call back to the agent whatever its effect, so a
-    # question stopped here reaches the agent as a refusal does: reason and
-    # recovery both, since no approver reads this channel.
+    # A successful structured denial preserves the operator warning; exit 2
+    # discards systemMessage. Both routes stop the native tool invocation.
     detail = decision.addressed()
     # The journal is metadata-only: the reason names the refused input, which
     # for a fetch is the full URL, so it stays out of the metadata journal.
     record_hook_evidence(plugin_data_root(), payload, "completed", decision.effect)
+    if review_notice:
+        json.dump(
+            {
+                "systemMessage": detail,
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": detail,
+                },
+            },
+            sys.stdout,
+        )
+        return
     sys.stderr.write(detail)
     raise SystemExit(2)

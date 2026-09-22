@@ -130,11 +130,20 @@ def build_claude_hook_handler(
                 stop_hook_active=stop_hook_active,
             )
         )
-        return lup_hook_output_to_claude(
+        rendered = lup_hook_output_to_claude(
             output,
             event=event,
             placed_input=claude_placed_input(tool_name, tool_input, output.sandbox),
         )
+        if output.system_message is not None:
+            rendered["systemMessage"] = output.system_message
+        if event == "PostToolUse" and output.additional_context:
+            rendered["hookSpecificOutput"] = {
+                "hookEventName": "PostToolUse",
+                "additionalContext": output.additional_context,
+            }
+        output.delivered()
+        return rendered
 
     return claude_hook
 
@@ -184,7 +193,7 @@ def lup_hook_output_to_claude(
     permission channel reaches goes out on the context channel beside it, and
     on both the effects a placement survives — an approval question puts its
     reason to a human, which is no more the agent than a grant's record is.
-    :func:`~lup.policy.kernel.decision.escalation_offer` decides what that is.
+    The verdict's own offer decides what that is.
     """
     from claude_agent_sdk import types as claude_types
 
@@ -194,6 +203,13 @@ def lup_hook_output_to_claude(
                 hookSpecificOutput=claude_types.PreToolUseHookSpecificOutput(
                     hookEventName="PreToolUse",
                     updatedInput=output.updated_input,
+                )
+            )
+        case "PreToolUse", None if output.additional_context:
+            return claude_types.SyncHookJSONOutput(
+                hookSpecificOutput=claude_types.PreToolUseHookSpecificOutput(
+                    hookEventName="PreToolUse",
+                    additionalContext=output.additional_context,
                 )
             )
         case "PreToolUse", "allow" if (

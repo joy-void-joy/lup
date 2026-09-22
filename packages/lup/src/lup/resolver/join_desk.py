@@ -16,9 +16,10 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from lup.channels.models import utc_now
+from lup.channels.models import publish_atomic, utc_now
 from lup.resolver.models import CarriedParent, VerificationCommand
 
+# lup: ignore[constant-declaration] — resolver-owned persistent checkpoint directory
 JOIN_DIR = Path("join")
 """Where under a run directory the join plan and its progress are kept."""
 
@@ -109,8 +110,21 @@ class JoinProgressRecord(BaseModel, frozen=True):
 class JoinDesk:
     """The run directory's view of one join, as files both transports read."""
 
-    def __init__(self, run_dir: Path, subdirectory: Path = JOIN_DIR) -> None:
-        self.root = run_dir / subdirectory
+    def __init__(self, run_dir: Path, concern_id: str) -> None:
+        if not concern_id or Path(concern_id).name != concern_id or concern_id == "..":
+            raise ValueError("a join requires a path-safe concern identity")
+        self.concern_id = concern_id
+        self.root = run_dir / JOIN_DIR / concern_id
+
+    @classmethod
+    def active(cls, run_dir: Path) -> list["JoinDesk"]:
+        """Every isolated join with a plan or checkpoint still on the table."""
+        return [
+            cls(run_dir, path.name)
+            for path in sorted((run_dir / JOIN_DIR).glob("*"))
+            if path.is_dir()
+            and ((path / "plan.json").is_file() or (path / "progress.json").is_file())
+        ]
 
     def plan_path(self) -> Path:
         return self.root / "plan.json"
@@ -119,8 +133,9 @@ class JoinDesk:
         return self.root / "progress.json"
 
     def write_plan(self, plan: JoinPlan) -> None:
-        self.root.mkdir(parents=True, exist_ok=True)
-        self.plan_path().write_text(plan.model_dump_json(indent=2), encoding="utf-8")
+        if plan.concern_id != self.concern_id:
+            raise ValueError("a join plan belongs to a different concern")
+        publish_atomic(self.plan_path(), plan)
 
     def plan(self) -> JoinPlan | None:
         path = self.plan_path()
@@ -150,9 +165,7 @@ class JoinDesk:
             ],
             planned=planned,
         )
-        self.progress_path().write_text(
-            record.model_dump_json(indent=2), encoding="utf-8"
-        )
+        publish_atomic(self.progress_path(), record)
 
     def clear(self) -> None:
         """Drop a finished join's plan and progress, so the next starts clean."""

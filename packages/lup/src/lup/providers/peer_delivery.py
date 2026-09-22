@@ -15,8 +15,10 @@ name.
 Two artifacts answer that. A shell guard looks for a file in this member's
 inbox and exits without starting an interpreter where there is none, which is
 almost always. Only where something is waiting does it hand over to
-:mod:`lup.providers.claude.assets.peer_delivery_runtime`, shipped verbatim
-beside the coordination package it reads the inbox through.
+``providers/assets/peer_delivery_runtime.py``, shipped verbatim beside the
+coordination package it reads the inbox through. Named as a path rather than
+a module because an asset is carried to its destination rather than imported
+from here, and `assets` is deliberately not a package.
 
 Every name the guard needs is interpolated from the definition that owns it
 rather than written twice: a store directory renamed in one place moves the
@@ -41,7 +43,7 @@ from lup.harness.models import Artifact
 
 RUNTIME_MODULE = "coordination_delivery.py"
 GUARD_SCRIPT = "coordination_delivery.sh"
-RUNTIME_ORIGIN = "lup.providers.claude.assets.peer_delivery_runtime"
+RUNTIME_ORIGIN = "lup.providers.assets.peer_delivery_runtime"
 """The two files a plugin carries for delivery, and where the reader comes from.
 
 Beside the policy dispatcher's own pair rather than inside it, because they
@@ -53,7 +55,7 @@ cannot decide refuses, and a delivery that cannot answer stands aside.
 def delivery_runtime_source() -> str:
     """The reader, read from the module that owns it rather than restated here."""
     return (
-        resources.files("lup.providers.claude")
+        resources.files("lup.providers")
         .joinpath("assets/peer_delivery_runtime.py")
         .read_text("utf-8")
     )

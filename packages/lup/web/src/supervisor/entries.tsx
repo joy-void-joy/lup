@@ -77,6 +77,8 @@ function Block({ block, name, expand }: { block: AnyTurnBlock; name: string; exp
           <Body text={block.content} name={name} className="pre-body" expand={expand} />
         </div>
       );
+    case "native_activity":
+      return <div className="native-activity"><strong>{block.provider}: {block.activity}</strong><Body text={JSON.stringify(block.payload, null, 2)} name={name} className="pre-body" expand={expand} /></div>;
     default:
       return <div className="say muted">[{String((block as { type: string }).type)}]</div>;
   }
@@ -125,6 +127,7 @@ export function Entry({ entry, expand }: { entry: JournalEntry; expand: Expand }
           {event.message.blocks.map((block, index) => (
             <Block key={index} block={block} name={`${entry.seq}:${index}`} expand={expand} />
           ))}
+          {event.message.native && <details><summary>Native evidence</summary><Body text={JSON.stringify(event.message.native, null, 2)} name={`${entry.seq}:native`} className="pre-body" expand={expand} /></details>}
         </Note>
       );
     case "turn_started":
@@ -259,6 +262,16 @@ export function Entry({ entry, expand }: { entry: JournalEntry; expand: Expand }
           </div>
         </Note>
       );
+    case "recheck_changed":
+      return (
+        <Note stamp={stamp} who={who}>
+          <div><strong>{event.concern_id}</strong> re-check changed at {event.occasion} on <span className="mono">{event.commit}</span>: {event.criteria.join(", ") || "no lost criteria"}</div>
+          <details>
+            <summary>Previous finding: {event.previous_question.id}</summary>
+            <div className="pre-body">{JSON.stringify(event.previous_question, null, 2)}</div>
+          </details>
+        </Note>
+      );
     case "recheck_reused":
       return (
         <Note stamp={stamp} who={who}>
@@ -315,6 +328,25 @@ export function Entry({ entry, expand }: { entry: JournalEntry; expand: Expand }
             <span className="mono">{short(event.expected)}</span>, found{" "}
             <span className="mono">{short(event.found)}</span>
           </div>
+        </Note>
+      );
+    case "integration_recovered":
+      return (
+        <Note stamp={stamp} who={who}>
+          <div>{event.mode === "adopt-head" ? "Repaired integration adopted" : "Recorded integration restored"}: <span className="mono">{event.before}</span> → <span className="mono">{event.after}</span></div>
+          <div>Recorded commit: <span className="mono">{event.recorded}</span></div>
+          <div>Preserved evidence: <span className="mono">{event.evidence}</span></div>
+          {event.retired_questions.length > 0 && <div>Retired findings: {event.retired_questions.join(", ")}</div>}
+        </Note>
+      );
+    case "actor_binding_retired":
+      return (
+        <Note stamp={stamp} who={who}>
+          <div>Conversation binding retired for <strong>{actorDisplay(event.previous.actor)}</strong>: {event.reason}</div>
+          <details>
+            <summary>Previous binding</summary>
+            <div className="pre-body">{JSON.stringify(event.previous, null, 2)}</div>
+          </details>
         </Note>
       );
     case "run_failed":

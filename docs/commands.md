@@ -55,7 +55,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev refutations` | Resolve one file&#x27;s proposed content and report what it refutes. |
 | `dev directives` | Measure every `# lup: ignore` against the canonical inline placement. |
 | `dev report-friction` | File or correct workflow friction, on the tracker that owns the fix. |
-| `dev undo` | List the recoverable snapshots of this tree, or take and expire them. |
+| `dev undo` | List, take, expire, or repair recoverable snapshots of this tree. |
 | `dev history` | Trace a symbol through every branch, past this tree&#x27;s own snapshots. |
 | `dev issues` | List the open issues a resolver run would take as evidence. |
 | `dev rules` | Generate the Lup rule and typed-suppression reference. |
@@ -82,6 +82,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev library use` | Resolve lup from the package index, or from the vendored copy. |
 | `dev library git` | Resolve lup from its repository, for use before a release is published. |
 | `dev scaffold compile` | Materialize upstream&#x27;s copied half at one commit, under this name. |
+| `dev scaffold fit` | Measure which upstream commit this project&#x27;s copied half corresponds to. |
 | `dev scaffold adopt` | Root the scaffold branch, once, at the commit this project came from. |
 | `dev model-config census` | Enumerate every `model_config` declaration by right-hand-side shape. |
 | `dev model-config aliases` | List every shared configuration alias, and who imports each one. |
@@ -101,8 +102,8 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev hooks sweep` | Classify a list of commands at once, and exit non-zero if any is not allowed. |
 | `dev hooks roots` | List the path roles and protected roots the declaration carries. |
 | `dev hooks learn` | Review the commands the policy declined to interrupt about. |
-| `dev hooks approvals` | List the exact calls an approval is remembered for, and since when. |
-| `dev hooks forget` | Retire a remembered approval, so the next identical call asks again. |
+| `dev hooks approvals` | List execution observations, including unverified historical approvals. |
+| `dev hooks forget` | Retire an execution observation without changing authorization. |
 | `dev py info` | Inspect a Python object — adapts to modules, classes, functions, values. |
 | `dev py source` | View source code for a Python object, or a package file tree with --tree. |
 | `dev py imports` | Show what a module imports, or what imports it (--reverse). |
@@ -149,6 +150,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `git worktree adopt-records` | Move lup&#x27;s `branch.*.lup-*` config keys into the shared `lup/` directory. |
 | `git pr status` | Fetch PR review status, checks, and comments for a branch. |
 | `git pr merge` | Merge a PR and pull changes into the integration branch. |
+| `git pr prepare` | Merge an explicit local base, regenerate every harness, and commit. |
 | `git pr sync-base` | Sync the base branch and merge it into the current feature branch. |
 | `git pr push` | Push the current branch and report any existing PR. |
 | `git pr create` | Create a new PR. |
@@ -166,12 +168,14 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | Command | What it does |
 | --- | --- |
 | `harness generate` | Deterministically generate owned native artifacts without launching. |
+| `harness policy-refresh` | Accept changed destination policy from an independent operator terminal. |
 | `harness check` | Read-only ownership and generated-artifact drift check for CI. |
 | `harness reconcile` | Classify local differences without rewriting canonical Python source. |
 | `harness apply-reconciliation` | Apply a stale-base-checked source patch, then regenerate every target. |
 | `harness propose-reconciliation` | Persist a source patch for separate review and stale-base-checked apply. |
 | `harness doctor` | Report installed native runtime evidence without updating either CLI. |
 | `harness requirements` | Check dependencies on the host, or in the session container with --inside. |
+| `harness sandbox-check` | Evaluate arithmetic in a disposable Python sandbox without network access. |
 | `harness image` | Render the container image this project&#x27;s sessions run in. |
 | `harness egress` | Report or remove the network boundary this project&#x27;s sessions run behind. |
 | `harness claude` | Generate/reconcile Claude artifacts and launch the verified plugin. |
@@ -180,6 +184,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `harness profile add` | Register a runtime configuration home under a name. |
 | `harness profile use` | Select the profile a launch uses when none is named. |
 | `harness profile remove` | Forget a profile, leaving its configuration home on disk. |
+| `harness codex-plugin install` | Install the declared plugin and verify native discovery in the selected home. |
 
 ## `ledger`
 
@@ -208,10 +213,13 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | Command | What it does |
 | --- | --- |
 | `resolve status` | Say whether a run is alive, where it stands, and what it last did. |
+| `resolve cost` | Report journal timing, unresolved intervals, actor turns, failures, and idle gaps. |
+| `resolve recover-integration` | Reconcile integration explicitly, retaining answers and completed concern work. |
 | `resolve supervise` | Answer any run under ``.lup/resolve``, live or parked. |
 | `resolve questions` | List a run&#x27;s questions and what each one has been answered. |
 | `resolve answer` | Offer an answer to one or more of a run&#x27;s questions. |
 | `resolve actors` | List every actor this run has recorded, and what each has not read yet. |
+| `resolve rebind-actor` | Retire one binding so resume opens a fresh conversation with current schemas. |
 | `resolve say` | Tell one actor something. It reads this and keeps going. |
 | `resolve accept` | Accept one concern over one failing verification, on the human&#x27;s word. |
 | `resolve retire` | Retire one concern whose work was settled somewhere other than this run. |
@@ -220,6 +228,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `resolve drain` | Ask a busy run to finish what is in flight and stop, resumably. |
 | `resolve refresh` | Bring a run&#x27;s base, and the leases holding work, up to its branch. |
 | `resolve intake` | Print what a run started now would plan from, without starting one. |
+| `resolve admissions` | Inspect accepted evidence and its pending, applied, or rejected result. |
 | `resolve serve-tools` | Serve one worker&#x27;s question tools over stdio, for out-of-process runtimes. |
 | `resolve branch` | Create + switch to the resolve/&lt;id&gt; branch (a resolve editor&#x27;s first step). |
 | `resolve review` | Render a resolve manifest and its branch diffs into one static HTML review. |
@@ -259,8 +268,9 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `sync fetch` | Clone missing repos and fetch cached ones (network + writes). |
 | `sync log` | List commits to review: everything upstream added since the last sync. |
 | `sync diff` | Show full diff for a specific commit. |
-| `sync mark-synced` | Advance the sync checkpoint to where the upstream now stands. |
+| `sync mark-synced` | Share the reviewed checkpoint across this repository&#x27;s worktrees. |
 | `sync setup` | Set the local path for a project (writes to sync.json.local). |
+| `sync remote` | Record how this machine reaches a repository (writes to sync.json.local). |
 | `sync grant` | Grant sessions on this machine a host device (writes to sync.json.local). |
 | `sync revoke` | Take a device back from sessions on this machine (writes to sync.json.local). |
 

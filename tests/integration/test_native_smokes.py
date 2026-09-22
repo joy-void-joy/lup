@@ -74,12 +74,12 @@ async def test_fresh_claude_session_completes_one_turn(tmp_path: Path) -> None:
 
 
 class SmokeSubmission(BaseModel):
-    """Typed output carried by the dynamic tool on ``thread/start``."""
+    """Typed output constrained by each native turn's output schema."""
 
     message: str = Field(min_length=1)
 
 
-async def test_codex_thread_start_carries_a_dynamic_tool(tmp_path: Path) -> None:
+async def test_codex_turn_start_carries_a_native_output_schema(tmp_path: Path) -> None:
     """A typed binding survives the installed app-server schema."""
     factory = create_codex(
         CodexSessionConfig(
@@ -93,10 +93,7 @@ async def test_codex_thread_start_carries_a_dynamic_tool(tmp_path: Path) -> None
     async with factory.open() as handle:
         accepted = await handle.session.start(
             turn_request(
-                (
-                    "Submit your output now: call the submission tool with "
-                    "message set to 'smoke ok'."
-                ),
+                ("Return a JSON object with message set to 'smoke ok'."),
                 SmokeSubmission,
             )
         )
@@ -228,6 +225,7 @@ async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) ->
             ClaudeSessionConfig(
                 model=CLAUDE_SMOKE_MODEL,
                 system_prompt="Execute the persisted Lup resolver assignment.",
+                native_tools=["all"],
                 cwd=context.root,
                 add_dirs=[context.root],
                 tool_servers={"resolver": server},
@@ -242,6 +240,7 @@ async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) ->
             ClaudeSessionConfig(
                 model=CLAUDE_SMOKE_MODEL,
                 system_prompt="Independently review the persisted resolver change.",
+                native_tools=["read", "shell"],
                 cwd=context.root,
                 add_dirs=[context.root],
                 hooks=context.hooks,

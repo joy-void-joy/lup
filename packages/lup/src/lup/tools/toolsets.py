@@ -230,6 +230,9 @@ def registered(
     server carries is what the policy admits. A runtime's own spelling of a
     server is its adapter's to make — this hands over the neutral
     configuration every adapter is built from.
+
+    Registration alone starts no companion lifecycle, so this path provides
+    neither a roster pulse nor receiver-local inbox relay.
     """
     return [
         create_mcp_server(name, tools=policy.filter_tools(tools))
@@ -285,10 +288,14 @@ def coordination_group(name: str = "coordination") -> ToolGroup:
 
     def companions(needs: SessionNeeds) -> list[ServerCompanion]:
         from lup.coordination.peer_tools import RosterPulse
+        from lup.coordination.relay import InboxRelay
 
         if not needs.member:
             return []
-        return [RosterPulse(root=needs.root, member_id=needs.member, wake=needs.wake)]
+        return [
+            RosterPulse(root=needs.root, member_id=needs.member, wake=needs.wake),
+            InboxRelay(root=needs.root, member_id=needs.member),
+        ]
 
     return ToolGroup(name=name, tools=tools, companions=companions)
 

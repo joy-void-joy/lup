@@ -21,9 +21,13 @@ so this page cannot come to name a version nothing was probed on.
 | Codex hooks | Codex CLI {{ codex_cli }} | `codex --enable hooks features list` reported hooks stable; hermetic dispatcher fixtures in {{ dispatcher_fixtures }}; [Codex hooks](https://developers.openai.com/codex/hooks) | Plugin hook commands receive `PLUGIN_ROOT`. Non-allow policy decisions fail closed because the command-hook boundary has no portable ask effect. Hook trust is never *generated*, but a worktree-scoped home seeds it from the account. **A non-interactive `codex exec` reaches the hook**, re-probed on Codex CLI {{ codex_cli }} by {{ exec_fixtures }}: in a scoped home carrying the plugin's trust record, an allowed command ran with `hook: PreToolUse Completed` in the transcript, a denied one was blocked with the dispatcher's own diagnostic, and the same denied command under `--dangerously-bypass-hook-trust` behaved identically — so the seeded trust record is what it governs through rather than a stale hash that the flag was papering over. `exec` still reports `approval: never`, so the `PermissionRequest` half never fires there and a non-allow decision reaches the session as the fail-closed denial. One interactive trust grant per plugin hash is still required on a fresh machine, which `install_declared_policy` enforces by refusing an untrusted home. |
 | Codex blocked edit | Codex CLI {{ codex_cli }} | Scheduled `test_codex_plugin_blocks_a_forbidden_apply_patch` installs the generated plugin in an isolated home and requests an anti-pattern edit through the real CLI | The `apply_patch` call is rejected, the target file remains unchanged, and the native session stays alive to report the rejection. A CLI version drift makes the nightly doctor fail until this observation is repeated. |
 | Codex app-server lifecycle | Codex CLI {{ codex_cli }} | Version-generated JSON Schema plus routed-notification fixtures; [Codex app server](https://developers.openai.com/codex/app-server) | `thread/start`, `thread/resume`, `thread/fork`, `turn/start`, `turn/steer`, and `turn/interrupt` exist; live notifications are distinct from completed replay. |
-| Codex turn tool binding | Codex CLI {{ codex_cli }} | Version-generated `ThreadStartParams`, `TurnStartParams`, `ThreadResumeParams`, and dynamic-tool call/response schemas | `dynamicTools` exists only on `thread/start`. A typed resume or schema transition that would need a new handler is rejected before input to preserve conversation identity. Native `outputSchema` is not enabled alongside Lup submission. |
+| Codex typed output | Codex CLI {{ codex_cli }} | Version-generated `TurnStartParams`, `TurnSteerParams`, and `ItemCompletedNotification` fixtures; scripted adapter lifecycle tests; credential-free native requests captured by a local Responses endpoint | Every typed `turn/start` carries `outputSchema`. Native requests use strict mode without normalizing that schema. Lup closes compatible object schemas; other schemas use a strict `output_json` string carrier and preserve the original schema in the turn prompt. Lup decodes the JSON and applies the original Pydantic validation and submission gate. `CodexSessionConfig.correction` bounds correction turns with the rejection reason; usage, events, steering and interruption cover the logical turn. Untyped turns, schema changes and typed resume preserve the native thread. These fixtures do not prove a live model round-trip. |
+| Codex application tool binding | Codex CLI {{ codex_cli }} | Version-generated `ThreadStartParams`, `ThreadResumeParams`, and dynamic-tool call/response schemas; inert native resume fixture in `packages/lup/tests/integration/test_native_tool_controls.py` | Declared application tools ride `dynamicTools`, which only `thread/start` establishes, so resume cannot replace them and a differing persisted set is rejected before input. Typed output does not use this channel: it rides `outputSchema` per turn, so a schema may change or disappear without disturbing the thread. |
+| Explicit session tool authority | Claude Agent SDK {{ claude_sdk }} and Codex CLI {{ codex_cli }} | Adapter option fixtures in `packages/lup/tests/unit/test_native_tools.py`; native request capture in `packages/lup/tests/integration/test_claude_native_tools.py` and `packages/lup/tests/integration/test_native_tool_controls.py` | `native_tools=None` and `[]` grant no built-in or inherited tool authority. Explicit application tools still execute. The Codex fixture captures both top-level tools and `input.additional_tools`, verifies inherited servers do not start, rejects a fabricated shell call, and proves explicit grants advertise their native facility. Another fixture verifies the declared project hook still blocks a granted native call. `ALL` is an explicit broad built-in opt-in; unsupported exact grants fail before launch. |
 | Codex custom agents | Codex CLI {{ codex_cli }} | Generated TOML fixture parsing; [custom-agent documentation](https://developers.openai.com/codex/agent-configuration/subagents) | Portable agents render as project-scoped `.codex/agents/*.toml`, outside the plugin. |
 | Codex project guidance | Codex CLI {{ codex_cli }} | Generated root fixture; [AGENTS.md documentation](https://developers.openai.com/codex/agent-configuration/agents-md) | Portable repository guidance renders to root `AGENTS.md`. |
+
+Codex's native output schema follows the [Structured Outputs strict subset](https://developers.openai.com/api/docs/guides/structured-outputs): closed objects with every property required. A raw Pydantic schema generally does not satisfy those constraints. Lup uses direct strict output only where it preserves the portable contract; optional fields, defaults, open mappings, root arrays and unsupported schema constructs use the JSON-string carrier. The original model validates the decoded value, so omitted fields still receive their declared defaults and arbitrary mapping keys survive. Native messages retain the wire representation as evidence.
 
 The accepted Codex {{ codex_cli }} schema hashes are:
 
@@ -49,19 +53,39 @@ part of probing.
   selected revision. A mock that merely copies files does not prove this:
   native installation prunes earlier versions in its target home. Lup confines
   that installation to a staging home and publishes verified output separately.
+  Codex selects the highest cached version rather than pinning the configured
+  marketplace version. Lup allocates increasing native cache revisions while
+  retaining the authored package version in its source and cache evidence.
+  Native regression tests cover descending content digests, legacy version ties,
+  repeated installation and switching back to earlier content without deleting
+  any prior revision. Dominating local overrides are refused with clean-home
+  recovery guidance.
 - {{ authentication_fixture }} covers account refresh, post-login verification,
   redacted failures, explicit unverified continuation, and the same host/container
   command boundary used for the session. These fixtures do not prove a live
-  model request or implicit MCP handshake. Named-profile account checks are
-  explicitly unavailable, not substituted with checks of the base configuration.
+  model request or implicit MCP handshake. Contained launches materialize the
+  selected base/profile settings in the actual home before checking its account.
+  Host CLI named-profile account checks remain explicitly unavailable because
+  `account/read` cannot select a profile. SDK named profiles are refused before
+  startup; use the intended configured home or explicit supported settings.
+- Owned stdio coordination servers relay pending Codex inbox messages through
+  their own hook-bound home and execution scope. Acceptance receipts survive
+  restart without consuming mail; failed queues retry, concurrent relays share
+  a lock, and shutdown joins the bounded queue attempt. In-process registrations
+  have no companion lifecycle and provide no relay. Tests use fake native queues;
+  authenticated idle-turn startup remains unmeasured. Delivery is at least once:
+  a crash after acceptance, a direct sender or an external watcher can repeat a
+  wake, and a delivery hook can read the inbox before a queued nudge arrives.
 
 ## Explicit release gaps
 
-- Codex {{ codex_cli }} cannot pass the persistent typed-schema transition acceptance
-  sequence `None -> A -> A -> B -> None` while preserving one thread: the
-  native schema offers no dynamic-tool field on `turn/start` or
-  `thread/resume`. One-shot typed turns and repeated same-schema turns are
-  supported; incompatible transitions fail before input.
+- Codex {{ codex_cli }} has no native exact iteration or thinking-token limit.
+  Portable `max_turns` and `max_thinking_tokens` requests raise
+  `UnsupportedCapability`; use reasoning `effort` or client timeout/budget
+  middleware when those different constraints meet the application's needs.
+- MCP tool-call approval is accepted only for the current thread and a declared
+  server with the native approval marker. Forms, URL and user-verification
+  elicitations require an interactive client and fail explicitly.
 - Claude steering is not claimed by the 0.2 adapter; its handle field is
   `None`. Partial events and latest-turn transcript forking are implemented.
 - Codex exposes project tool groups, including `run_subagent`, through MCP.
@@ -69,11 +93,11 @@ part of probing.
   app-server thread configuration cannot prove that per-subagent restriction;
   the restriction is never silently widened.
 - Both generated dispatchers map a session's declared identity to edit
-  autonomy, taking it from the launcher's environment and, on Claude, from the
-  hook payload as well. Deterministic dispatcher fixtures pin both channels
-  against the installed hook; live confirmation that a native payload carries
-  the agent identity is owed by the nightly lane. The environment channel needs
-  no such confirmation — the launcher writes what it declares.
+  autonomy, taking it from the launcher's environment or the native hook
+  payload. Captured Codex 0.155.1 tool events carry `agent_type`; dispatcher
+  fixtures verify that declared worker names receive their declared edit
+  allowance and human-owned files still require approval. Plugin-qualified
+  names are accepted only where the adapter declares that spelling.
 - Live authenticated provider smoke tests remain locally opt-in through the
   integration marker, run on the credentials-gated nightly lane, and are not
   inferred from unit fixtures.
@@ -100,7 +124,19 @@ part of probing.
   therefore correct rather than a workaround. And `dev questions` is Codex's
   review surface rather than its fallback, which is what makes that surface's
   diff rendering load-bearing instead of a convenience. Issue #180 is this gap
-  met from a real session, and it has no native answer.
+  met from a real session; queue settlement requires an independent operator.
+
+  **Queue delivery is measured without a model or credentials** by
+  `tests/integration/test_codex_review_delivery.py`: an inert loopback Responses
+  endpoint requests a copy, the generated hook blocks it, and `hook/completed`
+  carries the review id and operator commands as a warning. A recorded operator
+  answer permits one exact retry; another retry asks again. The supported
+  `PreToolUse` `deny` plus `systemMessage` shape is documented in the
+  [official hooks reference](https://learn.chatgpt.com/docs/hooks).
+  Exiting 2 drops `systemMessage` on Codex CLI {{ codex_cli }}; successful
+  structured denial preserves both the warning and refusal. `codex exec --json`
+  omits hook notifications, so its agent-facing refusal remains the delivery
+  path on that surface.
 
   Both arms stay in the suite as `xfail(strict=True)`, so the day a vendor
   grows the channel they pass and the suite says so.

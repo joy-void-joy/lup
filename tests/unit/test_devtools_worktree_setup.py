@@ -146,7 +146,7 @@ def test_a_half_made_worktree_is_finished_by_re_running(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """The failure the success message used to hide: setup that never ran.
+    """The failure a bare success message hides: setup that never ran.
 
     The base is the observable half — `uv sync` is not run in tests — and it
     is the record an interruption between `worktree add` and the rest of
@@ -501,9 +501,9 @@ def test_a_base_nobody_can_name_is_refused_before_the_worktree_exists(
 ) -> None:
     """A detached HEAD has no branch to read, so there is nothing to record.
 
-    The old fallback wrote nothing and said nothing, and the loss surfaced
-    much later as a base guessed from a topology that had moved. Refused at
-    creation, where naming the base is one flag.
+    A fallback that writes nothing and says nothing surfaces the loss much
+    later, as a base guessed from a topology that has moved. Refused at
+    creation instead, where naming the base is one flag.
     """
     repo_git(repo)("checkout", "--detach")
     monkeypatch.chdir(repo)
@@ -567,18 +567,35 @@ def on_a_feature_branch(repo: Path) -> str:
     return landing
 
 
-def test_a_fresh_branch_is_cut_from_where_work_lands(
+def on_a_reserved_workspace(repo: Path) -> str:
+    """Put the checkout on a branch nobody committed to, past which work landed.
+
+    Where a session stands right after cutting its own worktree, and the case
+    in which the two candidate bases are one line: the branch carries nothing
+    `main` lacks, so `main`'s tip is the later point on it and no intent can
+    be stranded by taking it.
+    """
+    git = repo_git(repo)
+    git("checkout", "-q", "-b", "reserved")
+    git("checkout", "-q", "main")
+    commit_file(git, repo, "landed.txt", "landed\n", "feat: landed")
+    landing = str(git("rev-parse", "main")).strip()
+    git("checkout", "-q", "reserved")
+    return landing
+
+
+def test_a_branch_with_nothing_of_its_own_is_cut_from_where_work_lands(
     repo: Path, tree_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Not from whichever checkout the command was run in.
+    """Not from whichever checkout the command was run in, where the two differ
+    only in how far along one line they sit.
 
-    A worktree is routinely created from another worktree, which is on a
-    branch holding nothing but its own work. Cut from there, the new branch
-    carries commits its own pull request never asked for: the request opens
-    conflicting against the integration branch, no CI runs on it, and the
-    repair is a rebase and a force-push after the fact.
+    A worktree is routinely created from another worktree. While that one
+    holds nothing the integration branch lacks, cutting from it would only
+    start the new branch further back, and the integration branch's tip is
+    the answer both readings give.
     """
-    landing = on_a_feature_branch(repo)
+    landing = on_a_reserved_workspace(repo)
     monkeypatch.chdir(repo)
 
     create("topic")
@@ -588,24 +605,33 @@ def test_a_fresh_branch_is_cut_from_where_work_lands(
     assert recorded_base(repo, "topic") == "main"
 
 
-def test_the_base_a_feature_checkout_did_not_get_is_said_out_loud(
+def test_a_checkout_ahead_of_where_work_lands_is_asked_which_base(
     repo: Path,
     tree_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Stacking is a real intent, and a default that overrides it silently costs it.
+    """Continuing this work and starting new work arrive as identical arguments.
 
-    Whoever meant to build on the checkout they were standing in has one
-    flag to say so, and this is where they find out they need it.
+    Either default strands the other intent — one branch carries commits its
+    pull request never asked for, the other lacks the code it was written
+    against — so where the two bases give different trees the question is
+    asked instead, and asked while the answer is still a flag rather than a
+    reset. Nothing is created: advice printed after the branch exists is
+    advice nobody can act on without an undo.
     """
     on_a_feature_branch(repo)
     monkeypatch.chdir(repo)
 
-    create("topic")
+    with pytest.raises(typer.Exit) as exit_info:
+        create("topic")
 
-    reported = capsys.readouterr().out
+    assert exit_info.value.exit_code == 1
+    reported = capsys.readouterr().err
     assert "--base feature" in reported
+    assert "--base main" in reported
+    assert not (tree_dir / "topic").exists()
+    assert str(repo_git(repo)("branch", "--list", "topic")).strip() == ""
 
 
 def test_a_named_base_is_taken_over_the_integration_branch(
@@ -625,6 +651,30 @@ def test_a_named_base_is_taken_over_the_integration_branch(
 
     tip = str(repo_git(repo)("rev-parse", "topic")).strip()
     assert tip == str(repo_git(repo)("rev-parse", "feature")).strip()
+
+
+def test_the_integration_branch_named_from_a_feature_checkout_is_honoured(
+    repo: Path, tree_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other half of what the refusal offers, so pasting it works.
+
+    A refusal whose advice does not run is worse than the guess it replaced,
+    and this is the spelling most callers will paste: start fresh from where
+    work lands, said out loud from a checkout that is ahead of it.
+    """
+    landing = on_a_feature_branch(repo)
+    monkeypatch.chdir(repo)
+
+    worktree.create(
+        "topic",
+        no_sync=True,
+        no_copy_data=True,
+        base_branch="main",
+        launcher=relocation_hint,
+    )
+
+    assert str(repo_git(repo)("rev-parse", "topic")).strip() == landing
+    assert recorded_base(repo, "topic") == "main"
 
 
 def test_re_attaching_leaves_a_branch_where_it_stands(

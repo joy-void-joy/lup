@@ -366,17 +366,19 @@ Steps 1-4, 6 and 7 repeat per selected tree; step 5 is tree-independent.
 7. Guidance file — .claude/CLAUDE.md under Claude Code, AGENTS.md under Codex — section-level merge from that tree's template flavor (read template → use `<!-- section: ... -->` markers to identify merge units → adapt for target → compare sections → add missing ones → leave existing untouched)
 8. **Hand off to generation**: everything written in steps 1-4, 6 and 7 becomes a generated artifact once the target's harness runs. From here on, the target edits its declarations under `src/<project>/harness/content/` and regenerates with `uv run lup-devtools harness generate all`; the installed files are outputs, and a hand edit to one is reverted the next time generation runs. Say so explicitly in the Phase 7 report.
 9. **Initialize upstream sync**, which comes last because it records what the previous eight steps installed:
-
-Baseline the upstream checkpoint at *the recorded commit*, not at whatever the
-remote's default branch points to. `--synced` reads the checkpoint from the
-named checkout's HEAD, so that checkout has to be standing at the recorded
-commit when this runs:
+Baseline the upstream checkpoint at *the recorded commit*. Register the
+selected branch, fetch it, and record the exact commit already consumed:
 
 ```
-uv run --directory <target> lup-devtools sync setup lup <source> --branch <branch> --synced
+uv run --directory <target> lup-devtools sync setup lup <source> --branch <branch>
+uv run --directory <target> lup-devtools sync fetch lup
+uv run --directory <target> lup-devtools sync mark-synced lup --at <commit>
 ```
 
-`setup` records that checkout, the branch settled on above, and its HEAD as the checkpoint, so `/lup:update` only shows commits that land afterward. Plain `sync mark-synced lup` is wrong here: the shipped `sync.json` entry carries a URL and no branch, so it clones the remote's default branch and checkpoints *that* HEAD — so every commit the project already carries comes back as unported work once the branch merges.
+`setup` records the checkout and branch. Review reads the fetched upstream
+ref, preserving any work in the checkout. The checkpoint is shared by all
+worktrees of this consuming repository. `--synced` is appropriate only when
+the selected review ref itself is exactly the commit already consumed.
 
 A project that already consumed the library, and knows which commit it took, names it rather than moving a checkout to stand on it:
 
@@ -385,7 +387,6 @@ uv run --directory <target> lup-devtools sync mark-synced lup --at <commit>
 ```
 
 That is the case an adoption mid-stream is always in — the code is already here, and what is missing is only the record of how far it reached. Without the commit, marking synced claims every commit that landed afterward as reviewed, which is the one thing the checkpoint exists to prevent.
-
 ### Settle the seams the target inherits
 
 Everything installed above ships at a default, and a handful of those defaults are places lup holds an opinion the target is meant to overrule. **A default nobody was shown is not a decision** — and it matters more here than in a fresh scaffold, because the target already has conventions of its own, which is exactly what § Guidelines means by respecting them.
@@ -402,6 +403,20 @@ Then regenerate: `uv run --directory <target> lup-devtools harness generate all`
 ## Phase 7: Verify & Report
 
 After installation:
+
+Run `uv run --directory <target> lup-devtools harness requirements` against
+the target's declared external programs. Adapt its requirement manifest to
+the programs the target actually uses, including a real operation and
+recovery for each. The setup-only Python sandbox check creates a disposable
+container and evaluates through its REPL; daemon access alone is insufficient.
+For container sessions, also run
+`uv run --directory <target> lup-devtools harness requirements --inside --launch-only`.
+Full `--inside` checks include a native model turn with the configured login;
+name any checks that remain unexercised instead of reporting them as working.
+Repair what the installation authorization permits, rerun the affected
+checks, and report exact operator actions for host package installation,
+service activation, endpoint corrections, or a fresh session after group
+membership changes. A binary's presence is not a successful verification.
 
 1. **List all files created/modified** in the target repo, marking which ones generation now owns
 2. **Show a summary** of what was installed and why

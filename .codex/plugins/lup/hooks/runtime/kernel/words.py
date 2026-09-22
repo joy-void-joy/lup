@@ -165,15 +165,102 @@ def command_words(words: list[str]) -> list[str]:
     return effective_command(words)["words"]
 
 
+# lup: ignore[library-default] — uv's global options consume one following value
+UV_GLOBAL_VALUE_OPTIONS = (
+    "--cache-dir",
+    "--color",
+    "--allow-insecure-host",
+    "--directory",
+    "--project",
+    "--config-file",
+)
+
+
+def uv_command_words(words: list[str]) -> list[str] | None:
+    """Place global options after uv's verb without losing their arguments."""
+    pending = iter(words[1:])
+    options: list[str] = []
+    for word in pending:
+        if not word.startswith("-"):
+            return [words[0], word, *options, *pending]
+        name, separator, value = word.partition("=")
+        if name in UV_GLOBAL_VALUE_OPTIONS:
+            argument = value if separator else next(pending, None)
+            if argument is None or (not separator and argument.startswith("-")):
+                return None
+            options.extend([name, argument])
+            continue
+        if word in (
+            "--quiet",
+            "--verbose",
+            "--no-cache",
+            "--managed-python",
+            "--no-managed-python",
+            "--no-python-downloads",
+            "--system-certs",
+            "--native-tls",
+            "--offline",
+            "--no-progress",
+            "--no-config",
+        ) or (
+            word.startswith("-")
+            and len(word) > 1
+            and all(letter in "qvn" for letter in word[1:])
+        ):
+            options.append(word)
+            continue
+        return None
+    return None
+
+
 def uv_run_words(words: list[str]) -> list[str]:
     """Return the executable portion of a ``uv run`` invocation."""
     position = 2
     value_options = (
-        "--directory",
+        *UV_GLOBAL_VALUE_OPTIONS,
+        "--extra",
+        "--no-extra",
+        "--group",
+        "--no-group",
+        "--only-group",
+        "--no-editable-package",
         "--package",
-        "--project",
+        "-w",
         "--with",
         "--with-editable",
+        "--with-requirements",
+        "--env-file",
+        "--python-platform",
+        "--index",
+        "--default-index",
+        "-i",
+        "--index-url",
+        "--extra-index-url",
+        "-f",
+        "--find-links",
+        "--index-strategy",
+        "--keyring-provider",
+        "-P",
+        "--upgrade-package",
+        "--upgrade-group",
+        "--resolution",
+        "--prerelease",
+        "--prerelease-package",
+        "--fork-strategy",
+        "--exclude-newer",
+        "--exclude-newer-package",
+        "--no-sources-package",
+        "--reinstall-package",
+        "--link-mode",
+        "-C",
+        "--config-setting",
+        "--config-settings-package",
+        "--no-build-isolation-package",
+        "--no-build-package",
+        "--no-binary-package",
+        "--refresh-package",
+        "-p",
+        "--python",
     )
     while position < len(words) and words[position].startswith("-"):
         option = words[position]

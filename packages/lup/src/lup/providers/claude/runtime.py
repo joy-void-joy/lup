@@ -4,12 +4,13 @@ import asyncio
 import json
 import logging
 from collections import deque
-from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from time import perf_counter
+from types import EllipsisType
 from typing import TYPE_CHECKING, Literal
 from uuid import uuid4
 
@@ -22,13 +23,18 @@ from mcp.types import (
     TextContent,
     Tool,
 )
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from lup.tools.mcp import (
     LupMcpServerConfig,
+    LupMcpTool,
     McpServerEntry,
+    create_mcp_server,
     relay_recursive_agent_to_mcp,
+    running_companions,
 )
+from lup.tools.native import NativeTools, native_grants
+from lup.providers.claude.native_tools import claude_native_tools, claude_tool_allowed
 from lup.sessions.recursion import (
     child_recursive_agent_allowance,
     recursive_agent_scope,
@@ -140,13 +146,19 @@ type ClaudeEffort = Literal["low", "medium", "high", "xhigh", "max"]
 """Claude Code's own reasoning-effort ladder, which starts at ``low``."""
 
 
-class ClaudeSessionConfig(BaseModel, frozen=True, arbitrary_types_allowed=True):
+class ClaudeSessionConfig(
+    BaseModel,
+    frozen=True,
+    arbitrary_types_allowed=True,
+    extra="forbid",
+    revalidate_instances="always",
+):
     """Immutable Claude-only provider configuration."""
 
     model: str | None = None
     system_prompt: str = ""
     coding_harness_preset: bool = True
-    tools: list[str] | None = None
+    native_tools: NativeTools = None
     allowed_tools: list[str] = []
     disallowed_tools: list[str] = []
     tool_servers: dict[str, McpServerEntry] = {}
@@ -162,11 +174,8 @@ class ClaudeSessionConfig(BaseModel, frozen=True, arbitrary_types_allowed=True):
     plugin_dirs: list[Path] = []
     """Plugin directories this session loads, the way `--plugin-dir` does.
 
-    A session given none of these resolves plugins through the project
-    settings at `cwd` instead, and those name a marketplace by a key shared
-    across every checkout that declares it — so a session opened in one
-    worktree can be judged by a plugin generated from another's commit.
-    Naming the directory is what makes a session load the tree it is in.
+    Settings inheritance is disabled; only explicitly named directories load.
+    Plugins can introduce delegated authority and require the broad ALL grant.
     """
     environment: EnvVars = {}
     sandbox: ClaudeSandboxConfig | None = None
@@ -195,6 +204,48 @@ class ClaudeSessionConfig(BaseModel, frozen=True, arbitrary_types_allowed=True):
         ),
     )
     extra_args: dict[str, str | None] = {}  # lup: ignore[dict-str-payload]
+
+    @model_validator(mode="after")
+    def enforce_native_authority(self) -> "ClaudeSessionConfig":
+        """Keep permissions, settings and delegated roles within the grant."""
+        from lup.providers.claude.subagents import subagent_tools
+
+        native_grants(self.native_tools)
+        roster = claude_native_tools(self.native_tools)
+        if self.setting_sources:
+            raise ValueError(
+                "session native_tools cannot inherit setting_sources; declare hooks and tool_servers explicitly"
+            )
+        if self.plugin_dirs and roster is not None:
+            raise ValueError(
+                "plugin_dirs can introduce delegated authority and require NativeToolGroup.ALL"
+            )
+        for argument, value in self.extra_args.items():
+            if argument not in {
+                "no-session-persistence",
+                "strict-mcp-config",
+                "debug",
+                "verbose",
+            }:
+                raise ValueError(
+                    f"extra_args {argument!r} may override native_tools; use a declared session field"
+                )
+            if argument == "strict-mcp-config" and value is not None:
+                raise ValueError("strict-mcp-config cannot be overridden")
+        for name in self.allowed_tools:
+            if name == SUBMISSION_TOOL:
+                continue
+            if not claude_tool_allowed(name, roster, self.tool_servers):
+                raise ValueError(
+                    f"allowed_tools {name!r} is outside native_tools and explicit tool_servers"
+                )
+        for role in self.subagents:
+            for name in subagent_tools(role):
+                if not claude_tool_allowed(name, roster, self.tool_servers):
+                    raise ValueError(
+                        f"subagent {role.name!r} tool {name!r} exceeds session native_tools"
+                    )
+        return self
 
 
 type SubmissionBindingSource = Callable[[], TurnSubmission | None]
@@ -313,6 +364,8 @@ def quota_exhausted(
 
 
 HUMAN_CLEARED_SIGNATURES: tuple[str, ...] = (
+    "account allowance exhausted",
+    "you've hit your session limit",
     "oauth access token has been revoked",
     "failed to authenticate",
     "authentication_error",
@@ -325,11 +378,10 @@ HUMAN_CLEARED_SIGNATURES: tuple[str, ...] = (
 )
 """Which host faults stay broken until a person does something.
 
-A dead credential and an empty balance do not come back on their own, so
-waiting one out is waiting forever. Every other refusal here — an exhausted
-allowance, a rate limit, an overloaded or unreachable upstream — clears with
-nobody doing anything, and those are worth waiting for rather than handing
-back to whoever has to notice.
+A dead credential, an empty balance and an exhausted account allowance need
+an operator's account choice. A reported allowance reset does not require
+waiting: re-login or account switching may clear it. Transient rate limits,
+overload and unreachable upstreams retain the caller's bounded retry policy.
 
 Our judgement rather than the provider's vocabulary, so a caller replaces it
 instead of forking this module. Over-matching costs a run that stops when it
@@ -800,7 +852,7 @@ class ClaudeSessionOpener:
     """Open independently configured reconnecting Claude sessions."""
 
     def __init__(self, config: ClaudeSessionConfig) -> None:
-        self.config = config
+        self.config = ClaudeSessionConfig.model_validate(config)
 
     def create_state(self, resume: SessionId | None) -> ClaudeConversationState:
         """Construct the reconnect state backing one opened session."""
@@ -849,14 +901,21 @@ class ClaudeSessionOpener:
         # trip over — which means finding who closes a session without
         # awaiting it to completion. Needs a live parking run to confirm;
         # do not fix it from the shape alone.
+        companions = [
+            companion
+            for server in config.tool_servers.values()
+            if isinstance(server, LupMcpServerConfig)
+            for companion in server.companions
+        ]
         with recursive_agent_scope(allowance):
-            try:
-                yield SessionHandle(session=session, fork=ClaudeFork(state))
-            finally:
+            async with running_companions(companions):
                 try:
-                    await session.abort_active()
+                    yield SessionHandle(session=session, fork=ClaudeFork(state))
                 finally:
-                    await state.disconnect()
+                    try:
+                        await session.abort_active()
+                    finally:
+                        await state.disconnect()
 
 
 def create_claude(
@@ -867,6 +926,8 @@ def create_claude(
     cwd: Path | None = None,
     base_url: str | None = None,
     api_key: str | None = None,
+    native_tools: NativeTools | EllipsisType = ...,
+    tools: Sequence[LupMcpTool] | None = None,
 ) -> Client:
     """Open Claude sessions, configured by argument or by whole declaration.
 
@@ -892,6 +953,15 @@ def create_claude(
             "model": base.model if model is None else model,
             "system_prompt": system_prompt or base.system_prompt,
             "cwd": base.cwd if cwd is None else cwd,
+            "native_tools": base.native_tools if native_tools is ... else native_tools,
+            "tool_servers": {
+                **base.tool_servers,
+                **(
+                    {"lup-tools": create_mcp_server("lup-tools", tools=tools)}
+                    if tools is not None
+                    else {}
+                ),
+            },
         }
     )
     if base_url is not None:
@@ -991,11 +1061,36 @@ def build_claude_options(
     from lup.providers.claude.hooks import lup_hooks_to_claude
     from lup.providers.claude.subagents import model_alias, subagent_tools
 
+    config = ClaudeSessionConfig.model_validate(config)
+    native = claude_native_tools(config.native_tools)
     servers = dict(config.tool_servers)
     allowed = list(config.allowed_tools)
     if binding() is not None:
         servers["lup-output"] = build_submission_server(binding)
         allowed.append(SUBMISSION_TOOL)
+
+    async def enforce_grants(
+        payload: claude_types.HookInput,
+        _tool_use_id: str | None,
+        _context: claude_types.HookContext,
+    ) -> claude_types.HookJSONOutput:
+        if payload["hook_event_name"] != "PreToolUse":
+            return {}
+        name = payload["tool_name"]
+        if claude_tool_allowed(name, native, servers):
+            return {}
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": f"Tool {name!r} is outside this session's explicit native_tools and tool_servers.",
+            }
+        }
+
+    hooks = lup_hooks_to_claude(config.hooks) if config.hooks is not None else {}
+    hooks.setdefault("PreToolUse", []).insert(
+        0, claude_types.HookMatcher(hooks=[enforce_grants])
+    )
 
     def native_server(server: McpServerEntry) -> "claude_types.McpServerConfig":
         """Project one entry into the server config this SDK's options take.
@@ -1037,7 +1132,7 @@ def build_claude_options(
     return claude.ClaudeAgentOptions(
         model=config.model,
         system_prompt=system_prompt,
-        tools=config.tools,
+        tools={"type": "preset", "preset": "claude_code"} if native is None else native,
         allowed_tools=list(dict.fromkeys(allowed)),
         disallowed_tools=list(config.disallowed_tools),
         mcp_servers={
@@ -1046,6 +1141,7 @@ def build_claude_options(
             )
             for name, server in servers.items()
         },
+        strict_mcp_config=True,
         agents={
             spec.name: claude_types.AgentDefinition(
                 description=spec.description,
@@ -1069,17 +1165,13 @@ def build_claude_options(
         ],
         env=config.environment,
         sandbox=sandbox,
-        hooks=(
-            lup_hooks_to_claude(config.hooks)
-            if config.hooks is not None and config.hooks.by_event()
-            else None
-        ),
+        hooks=hooks,
         include_partial_messages=config.delta_streaming,
         resume=resume,
         session_id=session_id,
         output_format=None,
         max_buffer_size=config.max_buffer_size,
-        setting_sources=config.setting_sources,
+        setting_sources=[],
         cli_path=config.cli_path,
         extra_args=dict(config.extra_args),
     )

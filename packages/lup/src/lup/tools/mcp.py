@@ -35,7 +35,8 @@ import json
 import logging
 import signal
 import time
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from contextlib import asynccontextmanager
 from typing import Literal, NotRequired, TypedDict, cast, get_type_hints
 
 from mcp.server import Server, ServerRequestContext
@@ -126,6 +127,26 @@ class ServerCompanion(BaseModel, frozen=True):
         raise NotImplementedError
 
 
+@asynccontextmanager
+async def running_companions(
+    companions: Sequence[ServerCompanion],
+) -> AsyncIterator[None]:
+    """Keep hosted work alive across either transport's serving lifetime."""
+    beside = [
+        asyncio.create_task(companion.run(), name=type(companion).__name__)
+        for companion in companions
+    ]
+    try:
+        yield
+    finally:
+        for task in beside:
+            task.cancel()
+        outcomes = await asyncio.gather(*beside, return_exceptions=True)
+        for task, outcome in zip(beside, outcomes, strict=True):
+            if isinstance(outcome, Exception):
+                logger.error("companion %s stopped: %s", task.get_name(), outcome)
+
+
 class LupMcpServerConfig(BaseModel, arbitrary_types_allowed=True):
     """SDK-agnostic MCP server configuration.
 
@@ -136,6 +157,7 @@ class LupMcpServerConfig(BaseModel, arbitrary_types_allowed=True):
     name: str
     server: Server
     tool_names: list[str] = []
+    tools: list["LupMcpTool"] = []
     companions: list[ServerCompanion] = []
 
 
@@ -238,6 +260,8 @@ def create_mcp_server(
     """
     registered = list(tools or [])
     tool_map = {tool_def.name: tool_def for tool_def in registered}
+    if len(tool_map) != len(registered):
+        raise ValueError(f"tool server {name!r} declares duplicate tool names")
 
     async def list_tools(
         _context: ServerRequestContext[object],
@@ -311,6 +335,7 @@ def create_mcp_server(
         name=name,
         server=server,
         tool_names=[t.name for t in registered],
+        tools=registered,
         companions=list(companions or []),
     )
 
@@ -352,23 +377,9 @@ def serve_stdio(config: LupMcpServerConfig) -> None:
 
     async def run() -> None:
         init_options = config.server.create_initialization_options()
-        beside = [
-            asyncio.create_task(companion.run(), name=type(companion).__name__)
-            for companion in config.companions
-        ]
-        try:
+        async with running_companions(config.companions):
             async with stdio_server() as (read_stream, write_stream):
                 await config.server.run(read_stream, write_stream, init_options)
-        finally:
-            # The companions' lifetime is the server's: cancelled when it stops,
-            # and a companion that stopped on its own is reported rather than
-            # lost, since its silence is what a peer would have read.
-            for task in beside:
-                task.cancel()
-            outcomes = await asyncio.gather(*beside, return_exceptions=True)
-            for task, outcome in zip(beside, outcomes, strict=True):
-                if isinstance(outcome, Exception):
-                    logger.error("companion %s stopped: %s", task.get_name(), outcome)
 
     asyncio.run(run())
 

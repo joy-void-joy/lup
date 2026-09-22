@@ -39,6 +39,7 @@ class Door(StrEnum):
     PAGE = "page"
     CONSOLE = "console"
     AGENT = "agent"
+    RECOVERY = "recovery"
 
 
 class DoorPolicy(BaseModel, frozen=True):

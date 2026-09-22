@@ -19,8 +19,17 @@ says nothing once there is not.
 from pathlib import Path
 from time import perf_counter
 
+import pytest
+import typer
+
 from lup.devtools.dev.antipatterns import within_scope
-from lup.devtools.dev.check import CheckReport, branch_record_reports, spent
+from lup.devtools.dev.check import (
+    CheckReport,
+    branch_record_reports,
+    named_gate_base,
+    spent,
+)
+from lup.harness.process import LaunchRequest, LocalProcessLauncher
 
 
 def test_a_pending_move_names_the_command_and_counts_the_branches() -> None:
@@ -155,3 +164,53 @@ def test_a_gate_that_timed_nothing_still_says_what_it_cost() -> None:
     line = spent([CheckReport(name="antipatterns", lines=[])], perf_counter() - 3.0)
 
     assert line == " in 3s"
+
+
+def base_history(root: Path) -> Path:
+    """A `topic` cut from `main`, with `main` moving on afterwards."""
+    work = root / "work"
+    who = ("-c", "user.email=gate@example.test", "-c", "user.name=Gate Test")
+    launcher = LocalProcessLauncher()
+    for arguments in (
+        ["git", "init", "-q", "-b", "main", str(work)],
+        ["git", "-C", str(work), *who, "commit", "-q", "--allow-empty", "-m", "base"],
+        ["git", "-C", str(work), "switch", "-q", "-c", "topic"],
+        ["git", "-C", str(work), *who, "commit", "-q", "--allow-empty", "-m", "mine"],
+    ):
+        status = launcher.launch(LaunchRequest(arguments=arguments, cwd=root))
+        if status.code != 0:
+            raise AssertionError(status.stderr)
+    return work
+
+
+def test_a_named_base_is_taken_as_the_merge_base_not_the_tip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The override answers where the branch started, not where the base is.
+
+    A base that has moved on carries commits this branch never made, and read
+    against its tip they come back as capabilities the branch removed — which
+    is how naming `dev` directly reported 504 gone on a branch that had
+    removed none.
+    """
+    work = base_history(tmp_path)
+    monkeypatch.chdir(work)
+    fork = LocalProcessLauncher().launch(
+        LaunchRequest(arguments=["git", "rev-parse", "main"], cwd=work)
+    )
+
+    assert named_gate_base("main") == fork.stdout.strip()
+
+
+def test_a_named_base_nothing_resolves_refuses_the_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Answering nothing would read exactly like a branch that removed nothing.
+
+    Which is the reading a mistyped ref most wants to be mistaken for, so the
+    run stops and names what it could not resolve.
+    """
+    monkeypatch.chdir(base_history(tmp_path))
+
+    with pytest.raises(typer.BadParameter, match="shares no history"):
+        named_gate_base("no-such-branch")

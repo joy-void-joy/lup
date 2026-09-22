@@ -27,6 +27,7 @@ the merge the caller asks for is the one operation that touches the tree.
 import os
 import tarfile
 import tomllib
+from collections.abc import Iterator
 from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 from urllib.parse import urlsplit
@@ -35,6 +36,7 @@ from pydantic import BaseModel
 
 from lup.devtools.utils import short_sha
 from lup.execution.shell import git
+from lup.harness.passages import PASSAGE_SUFFIX, prose_beside
 
 
 class ScaffoldRoot(BaseModel, frozen=True):
@@ -63,6 +65,33 @@ about its subject rather than upstream's, and a merge carrying them would hand
 every project upstream's README. A fork shipping a different layout passes its
 own roots rather than editing these.
 """
+
+
+class ScaffoldFile(BaseModel, frozen=True):
+    """One file of one upstream root, under both of the spellings it has.
+
+    A decline is declared in upstream's spelling and lands in the adopter's,
+    and the file itself is read and written under a third — the compiled tree
+    under a destination directory. Carrying the root beside the relative path
+    keeps all three derivable from the one fact, so nothing here has to
+    reassemble a path from a string somebody else assembled.
+    """
+
+    root: ScaffoldRoot
+    relative: PurePosixPath
+    """Its path under that root, which every spelling is built from."""
+
+    def upstream(self) -> PurePosixPath:
+        """Where it sits in upstream's own repository, as a decline spells it."""
+        return PurePosixPath(self.root.upstream) / self.relative
+
+    def adopter(self, package: str) -> PurePosixPath:
+        """Where it lands in a project whose package is ``package``."""
+        return PurePosixPath(self.root.resolved(package)) / self.relative
+
+    def beside(self, name: str) -> "ScaffoldFile":
+        """The file of this same root in this same directory, under ``name``."""
+        return self.model_copy(update={"relative": self.relative.parent / name})
 
 
 class ScaffoldSource(BaseModel, frozen=True):
@@ -99,11 +128,16 @@ class ScaffoldSource(BaseModel, frozen=True):
     deleting it: a declined path is absent from every scaffold commit, so it
     is absent from the merge base too and git has nothing to report about it.
     A directory declines everything beneath it.
+
+    Coherent as a selection, not only as a list: a path whose only reader is
+    another path the project took is refused by :func:`halved_passages` where
+    the scaffold is compiled, because the declaration is where such a pair can
+    still be edited.
     """
 
-    def declines(self, root: ScaffoldRoot, relative: PurePosixPath) -> bool:
+    def declines(self, file: ScaffoldFile) -> bool:
         """Whether this project declined one file of one upstream root."""
-        spelled = PurePosixPath(root.upstream) / relative
+        spelled = file.upstream()
         return any(spelled.is_relative_to(PurePosixPath(one)) for one in self.declined)
 
 
@@ -166,6 +200,86 @@ def renamed_in_place(path: Path, upstream_package: str, package: str) -> bool:
     return True
 
 
+class HalvedPassage(BaseModel, frozen=True):
+    """A pair of files one declaration is written across, with one half declined.
+
+    A content module and the Markdown beside it are two files of one thing:
+    the module says what the document is and names the passage it places, and
+    the prose holds the words that passage is made of. Whichever half is
+    missing, what is left has no reader — the module reads a file that is not
+    there, the prose sits where nothing looks for it.
+    """
+
+    module: PurePosixPath
+    """The Python half, spelled as upstream spells it."""
+
+    prose: PurePosixPath
+    """The Markdown half beside it, holding that module's words."""
+
+    prose_declined: bool
+    """Which half the decline list covers: the prose, or the module reading it."""
+
+    def spelled(self) -> str:
+        """The one line this pair contributes to the refusal."""
+        match self.prose_declined:
+            case True:
+                return (
+                    f"declined {self.prose}, took {self.module} — "
+                    f"the module whose words those are"
+                )
+            case False:
+                return (
+                    f"declined {self.module}, took {self.prose} — "
+                    f"the words that module is the only reader of"
+                )
+
+
+def halved_passages(
+    source: ScaffoldSource, held: list[ScaffoldFile]
+) -> list[HalvedPassage]:
+    """Every pair this selection takes one half of and declines the other.
+
+    Walked from the Python half, because that is the direction the naming rule
+    runs: a module file names the prose beside it, while a Markdown file
+    upstream does not ship has no half to be coherent with. Both incoherences
+    fall out of the one walk — the pair is reported whenever the decline list
+    covers one of the two and not the other, whichever one that is.
+    """
+    shipped = {file.upstream() for file in held}
+    return [
+        HalvedPassage(
+            module=file.upstream(),
+            prose=prose.upstream(),
+            prose_declined=source.declines(prose),
+        )
+        for file in held
+        if file.relative.suffix == ".py"
+        for prose in [file.beside(prose_beside(file.relative.name))]
+        if prose.upstream() in shipped
+        if source.declines(file) != source.declines(prose)
+    ]
+
+
+def coupling_refusal(halved: list[HalvedPassage]) -> str:
+    """What a project reads when its selection halves a declaration.
+
+    The pairing is explained once and each pair named once, because a reader
+    meeting nineteen of these needs the whole list and the rule behind it, not
+    the rule nineteen times.
+    """
+    return (
+        f"{len(halved)} declined path(s) leave half of a declaration behind. "
+        f"A content module and the `{PASSAGE_SUFFIX}` file beside it are one "
+        f"declaration written across two files: the module says what the "
+        f"document is and names the passage it places, the Markdown holds the "
+        f"words, and generation reads the second through the first. Neither "
+        f"half has a reader without the other, so `declined` takes both or "
+        f"neither.\n"
+        + "".join(f"  {pair.spelled()}\n" for pair in halved)
+        + "Add the other half of each pair to `declined`, or take both halves."
+    )
+
+
 def compiled(
     repository: Path,
     commit: str,
@@ -179,23 +293,46 @@ def compiled(
     commit, renamed, with the declined paths subtracted. Two calls with the
     same arguments write the same bytes, which is what lets the result be
     recorded as a tree and compared as one.
+
+    The whole tree is read before anything is subtracted, because this is the
+    one place holding both halves of the question a decline asks: what
+    upstream ships at this commit, and what the project said it took. A
+    selection that halves a declaration is refused here rather than compiled,
+    since every later reader of it — the merge, the generation — meets it as a
+    file that is simply not there, hundreds of lines from the declaration that
+    said so.
     """
-    written: list[str] = []  # lup: ignore[empty-collection] — path fold
-    for root in source.roots:
-        holding = destination / root.resolved(package)
-        extracted(repository, f"{commit}:{root.upstream}", holding)
-        for path in sorted(holding.rglob("*")):
-            if not path.is_file():
-                continue
-            relative = PurePosixPath(path.relative_to(holding).as_posix())
-            if source.declines(root, relative):
-                path.unlink()
-                continue
-            renamed_in_place(path, source.package, package)
-            written.append(
-                (PurePosixPath(root.resolved(package)) / relative).as_posix()
-            )
-    return CompiledScaffold(commit=commit, files=sorted(written))
+
+    def extracted_files() -> Iterator[ScaffoldFile]:
+        """Every file of every root, each root walked as soon as it arrives.
+
+        Walked root by root rather than after the last extraction, so a root
+        landing under another one is still read as its own tree: the archive
+        it arrives in is written into the directory it fills.
+        """
+        for root in source.roots:
+            holding = destination / root.resolved(package)
+            extracted(repository, f"{commit}:{root.upstream}", holding)
+            for path in sorted(holding.rglob("*")):
+                if path.is_file():
+                    yield ScaffoldFile(
+                        root=root,
+                        relative=PurePosixPath(path.relative_to(holding).as_posix()),
+                    )
+
+    held = list(extracted_files())
+    halved = halved_passages(source, held)
+    if halved:
+        raise ValueError(coupling_refusal(halved))
+    for declined in [file for file in held if source.declines(file)]:
+        (destination / declined.adopter(package)).unlink()
+    taken = [file for file in held if not source.declines(file)]
+    for file in taken:
+        renamed_in_place(destination / file.adopter(package), source.package, package)
+    return CompiledScaffold(
+        commit=commit,
+        files=sorted(file.adopter(package).as_posix() for file in taken),
+    )
 
 
 # lup: ignore[constant-declaration] — an identity this repository defines: the
@@ -302,6 +439,44 @@ def merged_at(root: Path, branch: str) -> str:
     return compiled_at(root, base)
 
 
+def tree_at(root: Path, commit: str) -> str:
+    """The tree one commit holds, so two commits' contents can be compared.
+
+    What a branch decision is made on rather than the commit id: two compiles
+    of one scaffold record identical trees and differing commits, because a
+    commit carries its parent and the time it was written.
+    """
+    return git.out("-C", str(root), "rev-parse", f"{commit}^{{tree}}")
+
+
+class RecordedScaffold(BaseModel, frozen=True):
+    """One compiled scaffold written into the repository, on no branch yet."""
+
+    tree: str
+    """The tree object ``write-tree`` recorded, in full."""
+
+    built: CompiledScaffold
+    """What was compiled into it, for the message a commit of it carries."""
+
+
+def recorded_scaffold(
+    root: Path,
+    repository: Path,
+    source: ScaffoldSource,
+    package: str,
+    commit: str,
+) -> RecordedScaffold:
+    """Compile ``scaffold(commit)`` and record it as a tree of this repository.
+
+    Recorded before any branch moves, because whether the branch should move
+    at all is answered by comparing this tree with the one already there.
+    """
+    with TemporaryDirectory() as holding:
+        contents = Path(holding) / "scaffold"
+        built = compiled(repository, commit, source, package, contents)
+        return RecordedScaffold(tree=written_tree(root, contents), built=built)
+
+
 def advanced(
     root: Path,
     repository: Path,
@@ -315,14 +490,32 @@ def advanced(
     on it where there is. Either way the scaffold tree replaces the branch's
     whole tree, because a file upstream deleted has to leave the scaffold or
     the merge would go on reintroducing it.
+
+    A compile landing exactly what the branch already holds — the same tree,
+    of the same upstream commit — records nothing and hands back the head
+    standing there. What the scaffold is depends on the project's declaration
+    as much as on the commit, so the same commit is compiled again whenever
+    that declaration moves, which is what resolving a scaffold conflict does;
+    and where neither moved, a second commit of identical bytes would advance
+    the branch without advancing what it holds, leaving a merge for git to
+    report with nothing in it. Both halves are read, because the trailer is
+    part of what a scaffold commit carries: an upstream commit that changed
+    nothing in the copied trees compiles the same tree under a new name, and
+    the branch has to take that name or every later reading of what this
+    project merged is a commit behind.
     """
-    with TemporaryDirectory() as holding:
-        contents = Path(holding) / "scaffold"
-        built = compiled(repository, commit, source, package, contents)
-        tree = written_tree(root, contents)
+    holding = recorded_scaffold(root, repository, source, package, commit)
     head = branch_head(root, source.branch)
+    if (
+        head
+        and holding.tree == tree_at(root, head)
+        and compiled_at(root, head) == commit
+    ):
+        return head
     parents = [head] if head else []
-    recorded_commit = recorded(root, tree, scaffold_message(source, built), parents)
+    recorded_commit = recorded(
+        root, holding.tree, scaffold_message(source, holding.built), parents
+    )
     git(
         "-C",
         str(root),
@@ -432,12 +625,64 @@ def planned(root: Path, branch: str) -> MergePlan:
     )
 
 
+def unresolved(root: Path) -> list[str]:
+    """Every path this checkout's merge still holds unmerged in its index.
+
+    The index rather than the working tree, because that is what git answers
+    a commit with: a file edited into shape and not added back is resolved to
+    its reader and unmerged to git, and it is git that refuses the commit.
+    """
+    return git.lines("-C", str(root), "diff", "--name-only", "--diff-filter=U")
+
+
+def merging(root: Path) -> str:
+    """The commit a merge standing in this checkout is bringing in, or nothing.
+
+    Git writes ``MERGE_HEAD`` when a merge stops for a resolution and removes
+    it when the merge commit lands, so this is what says a merge is still
+    open — and whose commit it is open on, which is how an update tells its
+    own interrupted pass from a merge somebody else started.
+
+    A directory that is no repository answers the same as one holding no
+    merge, which is git's 128 beside its 1: nothing is standing there either
+    way, and this is asked before anything has established that the root is a
+    checkout at all.
+    """
+    return git.out(
+        "-C",
+        str(root),
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        "MERGE_HEAD",
+        _ok_code=[0, 1, 128],
+    )
+
+
+def concluded(root: Path) -> str:
+    """Commit the merge standing in this checkout, and hand back the commit.
+
+    Git's own prepared message, so the commit reads as the merge it is. And
+    ``--no-verify``, which is not a way around a gate: a commit concluding a
+    merge is mid-transaction by exactly the definition the drift guard cannot
+    be satisfied at, since the generated trees are compiled from declarations
+    the resolution has just rewritten and the regeneration that settles them
+    comes after. Git draws the same line — a merge it completes on its own
+    runs ``pre-merge-commit`` rather than ``pre-commit`` — so the guard sees
+    only the merges somebody had to resolve by hand, and the commit after
+    this one is read by it as always.
+    """
+    git("-C", str(root), "commit", "--no-verify", "--no-edit")
+    return git.out("-C", str(root), "rev-parse", "HEAD")
+
+
 def merged(root: Path, source: ScaffoldSource) -> MergeOutcome:
     """Merge the scaffold branch into this checkout, and say what happened.
 
     The one operation here that touches the working tree, and it is an
-    ordinary merge: what it leaves conflicted is resolved and committed the
-    way every other conflict in this repository is.
+    ordinary merge: what it leaves conflicted is resolved the way every other
+    conflict in this repository is, and concluded by the update that started
+    it rather than by hand.
     """
     plan = planned(root, source.branch)
     git(
@@ -448,10 +693,7 @@ def merged(root: Path, source: ScaffoldSource) -> MergeOutcome:
         f"refs/heads/{source.branch}",
         _ok_code=[0, 1],
     )
-    return MergeOutcome(
-        plan=plan,
-        conflicted=git.lines("-C", str(root), "diff", "--name-only", "--diff-filter=U"),
-    )
+    return MergeOutcome(plan=plan, conflicted=unresolved(root))
 
 
 def locked_git_source(root: Path, distribution: str) -> str:

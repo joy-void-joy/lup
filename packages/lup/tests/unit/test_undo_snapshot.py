@@ -13,8 +13,10 @@ from pathlib import Path
 
 from lup.execution.shell import git
 from lup.policy.assets.host import undo_expire, undo_namespace, undo_snapshot
+from lup.devtools.dev.undo import damaged_refs, repair_refs
 
 import pytest
+import sh
 
 
 @pytest.fixture
@@ -153,6 +155,57 @@ def test_a_changed_tree_gets_a_snapshot_of_its_own(checkout: Path) -> None:
     first = undo_snapshot(checkout, "before")
     (checkout / "new.txt").write_text("written since\n", encoding="utf-8")
     assert undo_snapshot(checkout, "after") != first
+
+
+def test_deduplication_is_atomic_when_a_retired_ref_is_locked(checkout: Path) -> None:
+    first = undo_snapshot(checkout, "before")
+    original = git.out("-C", str(checkout), "rev-parse", first)
+    lock = checkout / ".git" / f"{first}.lock"
+    lock.write_text("another writer holds this ref\n")
+    assert undo_snapshot(checkout, "replacement") == ""
+    assert git.out("-C", str(checkout), "rev-parse", first) == original
+    assert git.lines(
+        "-C", str(checkout), "for-each-ref", "--format=%(refname)", undo_namespace()
+    ) == [first]
+    assert lock.read_text() == "another writer holds this ref\n"
+    git("-C", str(checkout), "fsck", "--no-dangling")
+
+
+@pytest.mark.parametrize("contents", [b"", b"0" * 40 + b"\n"])
+def test_broken_undo_refs_are_quarantined_and_fetch_recovers(
+    checkout: Path, contents: bytes
+) -> None:
+    # Beside the checkout rather than inside it, and named for it: the
+    # `checkout` fixture *is* `tmp_path`, so its parent is the runner's own
+    # root and a bare `origin.git` there is a path every case in this worker
+    # would clone to. The second one met `destination path already exists`.
+    origin = checkout.parent / f"{checkout.name}-origin.git"
+    git("clone", "--bare", str(checkout), str(origin))
+    git("-C", str(checkout), "remote", "add", "origin", str(origin))
+    first = undo_snapshot(checkout, "good state")
+    saved = git.out("-C", str(checkout), "rev-parse", first)
+    broken = checkout / ".git" / undo_namespace() / "broken"
+    broken.write_bytes(contents)
+    with pytest.raises(sh.ErrorReturnCode):
+        git("-C", str(checkout), "fetch", "origin")
+    assert [damage.path for damage in damaged_refs(checkout)] == [broken]
+    recovered = repair_refs(checkout)
+    assert len(recovered) == 1 and recovered[0].read_bytes() == contents
+    assert not broken.exists()
+    assert git.out("-C", str(checkout), "rev-parse", first) == saved
+    git("-C", str(checkout), "fetch", "origin")
+    git("-C", str(checkout), "fsck", "--no-dangling")
+
+
+def test_undo_repair_respects_another_writers_lock(checkout: Path) -> None:
+    broken = checkout / ".git" / undo_namespace() / "broken"
+    broken.parent.mkdir(parents=True)
+    broken.write_bytes(b"")
+    lock = broken.with_suffix(".lock")
+    lock.write_text("owned")
+    with pytest.raises(FileExistsError):
+        repair_refs(checkout)
+    assert broken.exists() and lock.read_text() == "owned"
 
 
 def test_an_earlier_state_survives_the_states_that_followed_it(

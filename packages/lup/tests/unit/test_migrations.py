@@ -9,6 +9,7 @@ and says nothing about the first.
 from pathlib import Path
 
 from lup.devtools.dev.migrations import (
+    DECLARED,
     Migration,
     MigrationStep,
     rendered,
@@ -17,6 +18,13 @@ from lup.devtools.dev.migrations import (
 )
 from lup.devtools.dev.preservation import Capability
 from lup.execution.shell import git
+from lup.providers.claude.login import CLAUDE_CONFIG_DIR, CLAUDE_LOGIN
+from lup.providers.claude.profile_store import (
+    AccountFile,
+    ClaudeProfileNames,
+    ClaudeProfileRegistrar,
+)
+from lup.providers.profiles import ProfileDirectory
 from tests.unit.test_ledger_placement import committed, repository
 
 GONE = Capability(identity="create_ledger_tools", location="lup.ledger.tools")
@@ -96,3 +104,49 @@ def test_a_step_carries_the_command_that_does_it_where_one_does() -> None:
     )
 
     assert step.spelled().endswith("uv run lup-devtools dev library git")
+
+
+def test_the_profile_split_recipe_preserves_an_existing_registry(
+    tmp_path: Path,
+) -> None:
+    """The documented replacement composes around the caller's existing storage."""
+    registry = tmp_path / "profiles.json"
+    existing_home = Path("existing-home")
+    accounts = AccountFile(registry)
+    registry.write_text(
+        '{"profiles":{"work":{"config_dir":"existing-home"}},"active":"work"}',
+        encoding="utf-8",
+    )
+    names = ClaudeProfileNames(accounts)
+    registrar = ClaudeProfileRegistrar(accounts)
+    directory = ProfileDirectory(names, registrar, CLAUDE_LOGIN)
+
+    assert directory.launch_home(None) == existing_home
+    assert accounts.resolve_config_dir("work") == existing_home
+    personal = registrar.add_profile("personal", tmp_path / "personal-home")
+    registrar.set_active("personal")
+    assert names.names() == ["personal", "work"]
+    assert directory.launch_home(None) == personal
+    assert CLAUDE_LOGIN.environment(personal) == {CLAUDE_CONFIG_DIR: str(personal)}
+    registrar.remove_profile("work")
+    assert AccountFile(registry).resolve_config_dir() == personal
+
+
+def test_every_standing_declaration_says_what_a_caller_does_about_it() -> None:
+    """The property that holds of the window whatever is in it, including nothing.
+
+    Asserting the *contents* of ``DECLARED`` cannot survive a release, because
+    emptying that list is what a release does: this named two capabilities by
+    their retired import paths and failed the moment they shipped, which made
+    the release the one commit the suite could not accept. What is worth
+    pinning is true of any window — a break somebody declared carries steps a
+    caller can act on, and one scoped to a commit says which.
+
+    Vacuous while the window is empty, and that is the honest reading: there
+    are no pending breaks to check between a release and the next declaration.
+    """
+    for migration in DECLARED:
+        assert migration.subjects
+        assert migration.steps, f"{migration.subjects} declares no step to take"
+        assert migration.reason
+        assert all(step.instruction for step in migration.steps)

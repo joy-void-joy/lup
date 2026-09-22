@@ -6,7 +6,9 @@ compiled dispatcher does not use, and the compiled dispatcher is what a native
 session actually runs.
 
 So this drives the emitted script — not a renderer, not the canonical policy —
-and reads the queue back through the surface a reviewer reads it through.
+and reads the queue back through the surface a reviewer reads it through. The
+script is Codex's, because a runtime with an ask effect renders the question
+instead of parking it, and the queue is what the other one falls back to.
 """
 
 import json
@@ -17,23 +19,30 @@ import sh
 from typer.testing import CliRunner
 
 from lup.devtools.dev.questions import create_questions_app, relay
+from lup.types import JsonObject
 
 RUNNER = CliRunner()
 
-DISPATCHER = Path(".claude/plugins/lup/hooks/scripts/policy.py")
+DISPATCHER = Path(".codex/plugins/lup/hooks/scripts/policy.py")
 
 
-def judged(command: str, cwd: Path) -> None:
+def judged(command: str, cwd: Path) -> JsonObject:
     """Put one command through the script a native session runs."""
     payload = {
         "hook_event_name": "PreToolUse",
+        "session_id": "requester",
+        "tool_use_id": "call-one",
         "tool_name": "Bash",
         "tool_input": {"command": command},
         "cwd": str(cwd),
     }
-    sh.Command(str(DISPATCHER.resolve()))(
+    result = sh.Command(str(DISPATCHER.resolve()))(
         _in=json.dumps(payload), _ok_code=[0, 2], _cwd=str(cwd), _return_cmd=True
     )
+    assert isinstance(result, sh.RunningCommand)
+    # A permitted call is answered by saying nothing, so there is no verdict
+    # document to read back — only the absence of one.
+    return json.loads(result.stdout) if result.stdout else {}
 
 
 def test_a_question_the_dispatcher_reaches_is_parked_in_the_relay(
@@ -45,7 +54,10 @@ def test_a_question_the_dispatcher_reaches_is_parked_in_the_relay(
     call the library — which is the shape that makes "every final ask is
     recorded" true of some asks.
     """
-    judged("git push --delete origin feat", tmp_path)
+    response = judged("git push --delete origin feat", tmp_path)
+    specific = response["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    assert specific["permissionDecision"] == "deny"
 
     parked = relay(tmp_path).questions()
 
@@ -111,6 +123,41 @@ def test_a_reviewer_can_answer_what_the_dispatcher_parked(tmp_path: Path) -> Non
     assert settled.state == "approved"
     assert settled.answer is not None
     assert settled.answer.note == "force-with-lease"
+    assert judged("git push --delete origin feat", tmp_path) == {}
+    retried = judged("git push --delete origin feat", tmp_path)["hookSpecificOutput"]
+    assert isinstance(retried, dict) and retried["permissionDecision"] == "deny"
+    (pending,) = relay(tmp_path).pending()
+    assert pending.id != parked.id
+
+
+def test_rejection_stops_retry_and_preserves_the_rule(tmp_path: Path) -> None:
+    command = "git push --delete origin feat"
+    judged(command, tmp_path)
+    (question,) = relay(tmp_path).pending()
+    rejected = RUNNER.invoke(
+        create_questions_app(tmp_path), ["reject", question.id, "--as", "operator"]
+    )
+    assert rejected.exit_code == 0
+    specific = judged(command, tmp_path)["hookSpecificOutput"]
+    assert isinstance(specific, dict) and specific["permissionDecision"] == "deny"
+    reason = str(specific["permissionDecisionReason"])
+    assert "rejected" in reason and "removing a remote ref" in reason
+    persisted = relay(tmp_path).find(question.id)
+    assert persisted is not None and persisted.state == "rejected"
+    assert persisted.rule == "shell:git.push"
+    assert len(relay(tmp_path).questions()) == 1
+
+
+def test_approved_question_cannot_release_a_changed_call(tmp_path: Path) -> None:
+    original = "git push --delete origin feat"
+    judged(original, tmp_path)
+    (question,) = relay(tmp_path).pending()
+    relay(tmp_path).answer(question.id, "operator", True)
+    changed = judged("git push --delete origin different", tmp_path)[
+        "hookSpecificOutput"
+    ]
+    assert isinstance(changed, dict) and changed["permissionDecision"] == "deny"
+    assert judged(original, tmp_path) == {}
 
 
 def test_an_answer_the_dispatcher_could_not_scope_says_so(tmp_path: Path) -> None:

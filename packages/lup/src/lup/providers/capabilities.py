@@ -59,14 +59,14 @@ def canonical_capability_matrix() -> list[AdapterCapabilities]:
             ),
         ),
         AdapterCapabilities(
-            name="codex-app-server-0.144.4",
+            name="codex-app-server-0.155.1",
             cells=cells(
                 live_events=True,
                 interrupt=True,
                 steer=True,
                 fork=True,
-                resume="without a fresh dynamic tool",
-                typed_submission="thread-start schema only",
+                resume=True,
+                typed_submission="per-turn outputSchema with bounded gate correction",
                 background=True,
             ),
         ),

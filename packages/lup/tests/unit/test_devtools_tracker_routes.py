@@ -24,7 +24,7 @@ from lup.devtools.project import Tracker
 from lup.devtools.utils import names_same_repository, repository_reference
 
 UPSTREAM = Tracker(
-    repository="joy-void-joy/lup",
+    repository="upstream/framework",
     what="the framework this project is built on",
     components=["lup"],
 )
@@ -64,10 +64,10 @@ def test_this_checkout_is_reachable_however_it_is_written(spelling: str) -> None
 @pytest.mark.parametrize(
     "spelling",
     [
-        "joy-void-joy/lup",
-        "joy-void-joy/lup.git",
-        "github.com/joy-void-joy/lup",
-        "https://github.com/joy-void-joy/lup",
+        "upstream/framework",
+        "upstream/framework.git",
+        "github.com/upstream/framework",
+        "https://github.com/upstream/framework",
     ],
 )
 def test_a_declared_tracker_is_reachable_by_name(spelling: str) -> None:
@@ -78,7 +78,7 @@ def test_a_declared_tracker_is_reachable_by_name(spelling: str) -> None:
     and a colleague's fork in the next, so a command routed by one would
     reach two repositories under one spelling.
     """
-    assert routes().chosen(["issue", "list"], named=spelling) == "joy-void-joy/lup"
+    assert routes().chosen(["issue", "list"], named=spelling) == "upstream/framework"
 
 
 @pytest.mark.parametrize(
@@ -88,7 +88,7 @@ def test_a_declared_tracker_is_reachable_by_name(spelling: str) -> None:
         "acme/other",
         "github.com/decoy/acme/widget",
         "acme/widget/../../someone-else/widget",
-        "joy-void-joy/lup-plugin",
+        "upstream/framework-plugin",
     ],
 )
 def test_every_other_repository_is_refused(elsewhere: str) -> None:
@@ -149,7 +149,7 @@ def test_an_undeclared_project_reaches_only_the_checkout_it_is_in() -> None:
     assert alone.chosen(["issue", "list"]) == "acme/widget"
     assert alone.chosen(["issue", "list"], named="acme/widget") == "acme/widget"
     with pytest.raises(RuntimeError) as refused:
-        alone.chosen(["issue", "list"], named="joy-void-joy/lup")
+        alone.chosen(["issue", "list"], named="upstream/framework")
     assert "declares no other tracker" in str(refused.value)
 
 
@@ -162,8 +162,8 @@ def test_an_unreadable_origin_grants_nothing() -> None:
     homeless = TrackerRoutes(own="", declared=[UPSTREAM])
 
     assert homeless.chosen(["issue", "list"]) == ""
-    assert homeless.chosen(["issue", "list"], named="joy-void-joy/lup") == (
-        "joy-void-joy/lup"
+    assert homeless.chosen(["issue", "list"], named="upstream/framework") == (
+        "upstream/framework"
     )
     with pytest.raises(RuntimeError):
         homeless.chosen(["issue", "list"], named="acme/widget")
@@ -172,12 +172,12 @@ def test_an_unreadable_origin_grants_nothing() -> None:
 @pytest.mark.parametrize(
     ("component", "expected"),
     [
-        ("lup", "joy-void-joy/lup"),
-        ("lup/policy", "joy-void-joy/lup"),
-        ("lup.resolver.state", "joy-void-joy/lup"),
-        ("lup-devtools", "joy-void-joy/lup"),
-        ("LUP/Sandbox", "joy-void-joy/lup"),
-        ("lup/sandbox, lup/devtools", "joy-void-joy/lup"),
+        ("lup", "upstream/framework"),
+        ("lup/policy", "upstream/framework"),
+        ("lup.resolver.state", "upstream/framework"),
+        ("lup-devtools", "upstream/framework"),
+        ("LUP/Sandbox", "upstream/framework"),
+        ("lup/sandbox, lup/devtools", "upstream/framework"),
         ("lupine/thing", "acme/widget"),
         ("aib.devtools.trace", "acme/widget"),
         ("", "acme/widget"),
@@ -231,7 +231,7 @@ def test_the_refusal_carries_the_command_that_does_reach_it() -> None:
     # The reachable set is read out, because "where may this go?" is a
     # question with an answer and being told no is a poor way to learn it.
     assert "acme/widget" in message
-    assert "joy-void-joy/lup — the framework this project is built on" in message
+    assert "upstream/framework — the framework this project is built on" in message
 
 
 @pytest.mark.parametrize(
@@ -262,7 +262,7 @@ def test_a_tracker_that_takes_no_issues_names_the_ones_that_do() -> None:
 
     advice = disabled_issues_advice(spoken, routes())
 
-    assert "joy-void-joy/lup" in advice
+    assert "upstream/framework" in advice
     assert "--repo" in advice
     # Every other failure keeps the words gh gave it and gains nothing.
     assert disabled_issues_advice("could not resolve to a Repository", routes()) == ""
@@ -277,6 +277,12 @@ def test_a_tracker_that_takes_no_issues_names_the_ones_that_do() -> None:
         ("owner/name.git", "owner/name"),
         ("github.com/owner/name", "github.com/owner/name"),
         ("https://github.com/owner/name.git", "github.com/owner/name"),
+        ("https://forge.example:8443/owner/name.git", "forge.example:8443/owner/name"),
+        ("forge.example:8443/owner/name", "forge.example:8443/owner/name"),
+        (
+            "ssh://git@forge.example:2222/owner/name.git",
+            "forge.example:2222/owner/name",
+        ),
         ("git@github.com:owner/name.git", "github.com/owner/name"),
         ("ssh://git@github.com/owner/name.git", "github.com/owner/name"),
         ("alias:owner/name.git", "alias/owner/name"),
@@ -319,6 +325,18 @@ def test_a_host_is_compared_when_both_sides_name_one() -> None:
     assert not names_same_repository("owner/name/../../other/name", "owner/name")
     assert not names_same_repository("", "owner/name")
     assert not names_same_repository("owner/name", "")
+    assert names_same_repository(
+        "https://forge.example:8443/owner/name", "forge.example:8443/owner/name"
+    )
+    assert not names_same_repository(
+        "https://one.example:8443/owner/name", "https://two.example:8443/owner/name"
+    )
+    for remote in (
+        "git@forge.example:decoy/acme/widget.git",
+        "forge.example:decoy/acme/widget.git",
+        "git@forge.example:1234/acme/widget.git",
+    ):
+        assert not names_same_repository(remote, "acme/widget")
 
 
 @pytest.mark.parametrize(

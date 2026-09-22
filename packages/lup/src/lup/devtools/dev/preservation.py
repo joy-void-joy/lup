@@ -29,6 +29,18 @@ surface declares anywhere has survived. Where a name several modules share —
 no vote in the migration map, whose pairs are drawn only from the names that
 landed in exactly one place.
 
+A pair is a claim about a whole module — respell every import of this path —
+so it is made only for a module that kept nothing back. One that gave a name
+away and went on declaring the rest has not moved, and a pair for it would
+send the names that stayed to a module which never held them, breaking a
+correct importer in a way that surfaces as an unresolved import far from the
+rewrite that caused it. That a name resolves elsewhere is in any case weaker
+evidence than it looks: two modules choosing one word for two purposes leave
+the same trace as a move, and only what the module kept separates them. So
+where no pair can be drawn the names are reported as they stand — which of
+them resolve where now, and which the module still declares — because the
+map is worth having only if it can be trusted whole.
+
 Only what a published root can import is walked. A generated plugin tree is
 derived from the typed catalog that emits it, and a test names what it tests,
 so neither is a surface an adopter can hold — counting them would grow the
@@ -125,6 +137,58 @@ class Relocation(BaseModel, frozen=True):
         return f"{self.capability.spelled()} → {', '.join(self.homes)}"
 
 
+class ModuleDestination(BaseModel, frozen=True):
+    """One module that took names out of another, and which names it took."""
+
+    module: str
+    names: list[str]
+
+
+class ModuleMove(BaseModel, frozen=True):
+    """One module's exported names, and where each of them resolves now.
+
+    Evidence rather than a verdict, because the two are not the same thing.
+    A name this module declared and no longer does, now declared in exactly
+    one other module, is consistent with the module having moved — and just
+    as consistent with two modules having chosen the same word: a ``GUARD``
+    or a ``runtime_source`` written fresh somewhere unrelated resolves the
+    same way a moved one does, and no count of such names tells them apart.
+
+    What does tell them apart is what the module kept. A module declaring
+    none of its own names any more, with one module holding all of them, has
+    moved whole and takes a pair. One still declaring some of them has not
+    moved, whether it split or only shares a word, and a pair for it would
+    respell every import of it — sending the names that stayed to a module
+    that never held them, met long after as an unresolved import.
+    """
+
+    module: str
+    """The module the names were exported from at the earlier revision."""
+
+    destinations: list[ModuleDestination]
+    """Every module now declaring some of them, and which ones it declares."""
+
+    retained: list[str]
+    """What this module still declares itself, which is what refuses a pair."""
+
+    def wholesale(self) -> str | None:
+        """The one module this one's whole surface became, if it became one."""
+        match (self.destinations, self.retained):
+            case ([only], []):
+                return only.module
+            case _:
+                return None
+
+    def spelled(self) -> str:
+        """One line: which names resolve where now, and which did not move."""
+        went = "; ".join(
+            f"{', '.join(destination.names)} now in {destination.module}"
+            for destination in self.destinations
+        )
+        stayed = f"; still declares {', '.join(self.retained)}" if self.retained else ""
+        return f"{self.module}: {went}{stayed}"
+
+
 class Divergence(BaseModel, frozen=True):
     """What a live tree does and does not still answer for a capture."""
 
@@ -137,6 +201,9 @@ class Divergence(BaseModel, frozen=True):
     arrived: list[Capability]
     """Live and uncaptured, so a reader can see what the range added."""
 
+    moves: list[ModuleMove]
+    """Every module that lost a name, and where each of its names ended up."""
+
     def intact(self) -> bool:
         """Whether every captured capability is still reachable somewhere."""
         return not self.disappeared
@@ -144,21 +211,30 @@ class Divergence(BaseModel, frozen=True):
     # lup: ignore[dict-str-payload] — module paths on both sides, open and
     # data-driven: whichever modules the range under review happened to move
     def module_moves(self) -> dict[str, str]:
-        """Old module to new, for every relocation naming one destination.
+        """Old module to new, for every module whose whole surface moved.
 
         The argument list for repointing an adopter, derived rather than
-        written down: each relocated export that landed in exactly one module
-        votes for that module pair, and a pair is reported once. A name that
-        landed in several is left out as ambiguous evidence — the pairs its
-        module siblings supply cover the same move.
+        written down. A pair says *every* import of the old path is to be
+        respelled, so it is drawn only where that is true: one module holds
+        the names now, and the old one declares none of them any more.
         """
         return {
-            relocation.capability.location: relocation.homes[0]
-            for relocation in sorted(
-                self.relocated, key=lambda relocation: relocation.capability.identity
-            )
-            if len(relocation.homes) == 1 and relocation.capability.location
+            move.module: destination
+            for move in sorted(self.moves, key=lambda move: move.module)
+            if (destination := move.wholesale()) is not None
         }
+
+    def unmapped_modules(self) -> list[ModuleMove]:
+        """Every module that lost names and that no pair can repoint.
+
+        Reported rather than dropped: a reader told which of a module's names
+        resolve where now decides what to do about each, where one handed a
+        silently shorter map learns nothing and keeps the imports that broke.
+        """
+        return sorted(
+            (move for move in self.moves if move.wholesale() is None),
+            key=lambda move: move.module,
+        )
 
 
 def walked_roots(
@@ -288,6 +364,11 @@ def compare(captured: SurfaceCapture, live: SurfaceCapture) -> Divergence:
     own module, which is what lets a move read as a move: the name resolving
     anywhere is enough to say it survived, and where it resolves is what makes
     the migration map.
+
+    The map is settled here, where both surfaces are in hand, rather than from
+    the relocations alone: whether a module kept any of its own names is a
+    question about the module, and a list of the names that left cannot answer
+    it.
     """
     homes = live.homes()
     held = {*captured.capabilities()}
@@ -295,6 +376,36 @@ def compare(captured: SurfaceCapture, live: SurfaceCapture) -> Divergence:
     def answers(capability: Capability) -> list[str]:
         """Which modules the later surface declares this name in, if any."""
         return homes.get(capability.identity, [])
+
+    def moved_modules() -> Iterator[ModuleMove]:
+        """Each captured module that lost a name, and where its names went.
+
+        A name several modules declare names no destination: which of them
+        took it is exactly what cannot be told, and the module's unambiguous
+        siblings say where the module went anyway.
+        """
+        for surface in sorted(captured.modules, key=lambda one: one.module):
+            landed = sorted(
+                (found[0], name)
+                for name in surface.declares
+                if len(found := homes.get(name, [])) == 1 and found[0] != surface.module
+            )
+            destinations = [
+                ModuleDestination(
+                    module=module, names=[name for _, name in list(group)]
+                )
+                for module, group in groupby(landed, key=lambda pair: pair[0])
+            ]
+            if destinations and surface.module:
+                yield ModuleMove(
+                    module=surface.module,
+                    destinations=destinations,
+                    retained=[
+                        name
+                        for name in surface.declares
+                        if surface.module in homes.get(name, [])
+                    ],
+                )
 
     return Divergence(
         disappeared=[
@@ -312,4 +423,5 @@ def compare(captured: SurfaceCapture, live: SurfaceCapture) -> Divergence:
         arrived=[
             capability for capability in live.capabilities() if capability not in held
         ],
+        moves=list(moved_modules()),
     )

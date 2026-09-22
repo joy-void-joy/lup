@@ -17,6 +17,7 @@ import typer
 from typer.testing import CliRunner
 
 import lup.devtools.dev.issues as issues_mod
+import lup.devtools.dev.library as library
 from lup_template.devtools.main import app
 
 PLAIN_CONSOLE = {"FORCE_COLOR": None, "NO_COLOR": "1", "TERM": "dumb"}
@@ -119,16 +120,16 @@ def test_the_route_a_refusal_prints_is_the_one_the_command_would_have_run() -> N
     )
 
 
-def test_this_project_declares_the_tracker_its_adopters_inherit() -> None:
-    """The scaffold ships lup's tracker, and that is the point of shipping it.
-
-    A project built on lup meets most of its friction in lup's machinery —
-    the resolver, the permission policy, the sandbox — none of which is
-    editable from the consuming tree. An adopter inheriting this declaration
-    can report where the fix would be made; one that outgrows it replaces the
-    entry, which the customization marker beside it says.
-    """
+def test_the_project_lists_its_configured_dependency_tracker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The scaffold routes to the declared dependency, independent of its owner."""
+    monkeypatch.setattr(
+        library,
+        "configured_repository",
+        lambda *_args: "https://github.com/upstream/framework",
+    )
     listed = runner.invoke(app, ["dev", "tracker", "list"]).output
 
-    assert "joy-void-joy/lup" in listed
+    assert "github.com/upstream/framework" in listed
     assert "components: lup" in listed

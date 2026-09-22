@@ -26,6 +26,7 @@ from lup.sessions.errors import (
     TurnError,
     TurnFailure,
     TurnTimeoutError,
+    TurnContinuationError,
     ValidationAttempt,
 )
 from lup.sessions.client import Client
@@ -71,8 +72,8 @@ class CorrectionConfig(BaseModel, frozen=True):
 
     cycles: int = Field(default=2, ge=0)
     instruction: str = (
-        "The previous response completed without a valid submit_output call. "
-        "Submit a value matching the requested schema before completing."
+        "The previous response completed without a valid structured output. "
+        "Return a value matching the requested schema and validation feedback."
     )
 
 
@@ -307,12 +308,14 @@ class ResilientTurn[T: BaseModel | None](Turn[T]):
         interrupt: SwitchingInterrupt | None,
         events: SwitchingEventStream | None,
         steer: SwitchingSteer | None,
+        continuation: CorrectionConfig | None = None,
     ) -> None:
         self.inner = inner
         self.session = session
         self.request = request
         self.recovery = recovery
         self.correction = correction
+        self.continuation = continuation
         self.interrupt = interrupt
         self.events = events
         self.steer = steer
@@ -328,6 +331,7 @@ class ResilientTurn[T: BaseModel | None](Turn[T]):
         failures: list[TurnFailure] = []
         provider_attempts = 0
         correction_cycles = 0
+        continuation_cycles = 0
         try:
             while True:
                 try:
@@ -352,18 +356,22 @@ class ResilientTurn[T: BaseModel | None](Turn[T]):
                     correction = self.correction
                     if correction is None:
                         raise RuntimeError("correction cycle has no configuration")
-                    current_request = self.request.model_copy(
-                        update={
-                            "input": self.request.input.model_copy(
-                                update={
-                                    "text": (
-                                        f"{self.request.input.text}\n\n"
-                                        "Correction required: "
-                                        f"{correction.instruction}"
-                                    )
-                                }
-                            )
-                        }
+                    current_request = correction_request(
+                        self.request, correction, error.failure
+                    )
+                except TurnContinuationError as error:
+                    failures.append(error.failure)
+                    continuation = self.continuation
+                    cycles = continuation.cycles if continuation is not None else 0
+                    if not error.failure.correctable or continuation_cycles >= cycles:
+                        raise TurnContinuationError(
+                            combined_failure(error.failure, failures)
+                        ) from error
+                    continuation_cycles += 1
+                    if continuation is None:
+                        raise RuntimeError("continuation cycle has no configuration")
+                    current_request = correction_request(
+                        self.request, continuation, error.failure
                     )
                 try:
                     handle = await self.session.start(current_request)
@@ -384,6 +392,25 @@ class ResilientTurn[T: BaseModel | None](Turn[T]):
         finally:
             if self.events is not None:
                 self.events.close()
+
+
+def correction_request[T: BaseModel | None](
+    request: TurnRequest[T], policy: CorrectionConfig, failure: TurnFailure
+) -> TurnRequest[T]:
+    """Keep the original request and deliver complete validation or hook feedback."""
+    feedback = (
+        "\n".join(attempt.message for attempt in failure.validation_history)
+        or failure.message
+    )
+    return request.model_copy(
+        update={
+            "input": request.input.model_copy(
+                update={
+                    "text": f"{request.input.text}\n\nCorrection required: {policy.instruction}\n{feedback}"
+                }
+            )
+        }
+    )
 
 
 class SerializedTurn[T: BaseModel | None](Turn[T]):
@@ -528,6 +555,7 @@ class DecoratingSession(Session):
         tracing: TracingConfig | None = None,
         usage: UsageConfig | None = None,
         display: DisplayConfig | None = None,
+        continuation: CorrectionConfig | None = None,
     ) -> None:
         self.inner = inner
         self.timeout = timeout
@@ -538,6 +566,9 @@ class DecoratingSession(Session):
         self.tracing = tracing
         self.usage = usage
         self.display = display
+        self.continuation = continuation
+        # lup: ignore[set-shape] — owned task identities carry no further fields
+        self.pending: set[asyncio.Task[object]] = set()
 
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
@@ -567,7 +598,11 @@ class DecoratingSession(Session):
             if handle.interrupt is not None
             else None
         )
-        resilient = self.recovery is not None or correction is not None
+        resilient = (
+            self.recovery is not None
+            or correction is not None
+            or self.continuation is not None
+        )
         logical_events = (
             SwitchingEventStream(handle.events)
             if resilient and handle.events is not None
@@ -588,7 +623,10 @@ class DecoratingSession(Session):
                 logical_interrupt,
                 logical_events,
                 logical_steer,
+                self.continuation,
             )
+            self.pending.add(turn.settling)
+            turn.settling.add_done_callback(self.pending.discard)
         if self.timeout is not None and deadline is not None:
             turn = TimeoutTurn(
                 turn,
@@ -612,6 +650,12 @@ class DecoratingSession(Session):
             interrupt=logical_interrupt or handle.interrupt,
             steer=logical_steer or handle.steer,
         )
+
+    async def close(self) -> None:
+        """Cancel and await correction work owned by this session."""
+        for pending in self.pending:
+            pending.cancel()
+        await asyncio.gather(*self.pending, return_exceptions=True)
 
 
 class SerializedSession(Session):
@@ -650,6 +694,7 @@ def decorated_session_factory(
     budget: BudgetConfig | None = None,
     recovery: RecoveryConfig | None = None,
     correction: CorrectionConfig | None = None,
+    continuation: CorrectionConfig | None = None,
     persistence: PersistenceConfig | None = None,
     tracing: TracingConfig | None = None,
     usage: UsageConfig | None = None,
@@ -669,6 +714,7 @@ def decorated_session_factory(
                 budget=budget,
                 recovery=recovery,
                 correction=correction,
+                continuation=continuation,
                 persistence=persistence,
                 tracing=tracing,
                 usage=usage,
@@ -726,6 +772,10 @@ def accumulated_result[T: BaseModel | None](
     return result.model_copy(
         update={
             "blocks": [*blocks, *result.blocks],
+            "messages": [
+                message for failure in failures for message in failure.messages
+            ]
+            + result.messages,
             "usage": add_usage(usage, result.usage),
             "duration": duration + result.duration,
         }
@@ -745,6 +795,9 @@ def combined_failure(last: TurnFailure, failures: list[TurnFailure]) -> TurnFail
     return last.model_copy(
         update={
             "blocks": blocks,
+            "messages": [
+                message for failure in failures for message in failure.messages
+            ],
             "usage": usage,
             "duration": duration,
             "validation_history": history,

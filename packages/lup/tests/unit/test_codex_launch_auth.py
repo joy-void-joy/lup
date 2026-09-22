@@ -9,6 +9,8 @@ import typer
 
 import lup.devtools.harness.launch as launch
 from lup.harness.clipboard import ClipboardBridge, ClipboardTransport
+from lup.harness.egress import SessionEgress
+from lup.sandbox.models import NetworkMode
 from lup.providers.codex.account import CodexAccountState
 from lup.providers.codex.app_server import AppServerError, RpcError
 from lup.providers.codex.login import CODEX_LOGIN
@@ -97,8 +99,10 @@ def test_failed_account_check_is_not_reported_as_ready_or_leaked(
     assert "secret-token-value" not in output
 
 
-def test_contained_authentication_uses_the_container_and_device_login(
+@pytest.mark.parametrize("headless", [False, True])
+def test_contained_authentication_selects_the_requested_login_flow(
     monkeypatch: pytest.MonkeyPatch,
+    headless: bool,
 ) -> None:
     read = AsyncMock(side_effect=[account(False), account(True)])
     login = Mock()
@@ -108,7 +112,7 @@ def test_contained_authentication_uses_the_container_and_device_login(
     monkeypatch.setattr(sh, "Command", command)
 
     launch.codex_login_preflight(
-        Path("/cfg"), {}, ["podman", "run", "-i", "image", "codex"], headless=True
+        Path("/cfg"), {}, ["podman", "run", "-i", "image", "codex"], headless=headless
     )
 
     read.assert_awaited_with(
@@ -124,7 +128,7 @@ def test_contained_authentication_uses_the_container_and_device_login(
         "image",
         "codex",
         "login",
-        "--device-auth",
+        *(["--device-auth"] if headless else []),
         _fg=True,
         _env={"CODEX_HOME": "/cfg"},
     )
@@ -148,9 +152,15 @@ def test_named_profile_is_not_verified_against_an_unselected_base_configuration(
 
 @pytest.mark.parametrize("sandbox", list(launch.LaunchSandbox))
 @pytest.mark.parametrize("transport", ["commands", "x11"])
+@pytest.mark.parametrize(
+    ("network", "headless"),
+    [("host", False), ("filtered", True), ("bridge", True), ("none", True)],
+)
 def test_session_authentication_uses_the_same_execution_boundary(
     sandbox: launch.LaunchSandbox,
     transport: ClipboardTransport,
+    network: NetworkMode,
+    headless: bool,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -158,6 +168,7 @@ def test_session_authentication_uses_the_same_execution_boundary(
     composition.recipe.source.image.config_home = "/cfg"
     composition.recipe.source.image.forge.sourced.return_value = ""
     composition.recipe.source.image.clipboard = ClipboardBridge()
+    composition.recipe.source.image.egress = SessionEgress(mode=network)
     composition.clipboard_transport = transport
     plugin = Mock(hooks=None)
     authenticate = Mock()
@@ -184,7 +195,7 @@ def test_session_authentication_uses_the_same_execution_boundary(
 
     if sandbox.contained():
         authenticate.assert_called_once_with(
-            ["podman", "run", "-i", "image", "codex"], Path("/cfg")
+            ["podman", "run", "-i", "image", "codex"], Path("/cfg"), headless
         )
         assert argv == [
             "podman",
@@ -194,5 +205,5 @@ def test_session_authentication_uses_the_same_execution_boundary(
             *ClipboardBridge().wrap(["codex", "resume", "session"], transport),
         ]
     else:
-        authenticate.assert_called_once_with(["codex"], tmp_path)
+        authenticate.assert_called_once_with(["codex"], tmp_path, False)
         assert argv == ["codex", "resume", "session"]

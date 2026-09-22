@@ -351,7 +351,7 @@ async def test_a_worker_reaches_a_settled_account_inside_one_turn(
 ) -> None:
     """The whole point: converging costs calls, not sessions.
 
-    Every correction here used to be a rejected report, a terminated
+    Charging each correction a session costs a rejected report, a terminated
     session, and a fresh worker respawned with none of its own reasoning —
     for bookkeeping a subprocess can check.
     """

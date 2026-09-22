@@ -36,7 +36,12 @@ from tests.unit.doubles import (
     session_factory,
     turn_result,
 )
-from lup.coordination.mailbox import AnswerDoor, AnswerOffer, ParkRequest
+from lup.coordination.mailbox import (
+    AnswerDoor,
+    AnswerOffer,
+    ParkRequest,
+    RecordedAnswer,
+)
 from lup.coordination.questions import QuestionAnswer
 from lup.resolver.mailbox import PendingQuestion, QuestionMailbox
 from lup.policy.identity import ConcernAllowance
@@ -563,6 +568,7 @@ def test_state_repository_writes_atomic_typed_projection_tree(tmp_path: Path) ->
 
     assert repository.load() == state
     assert sorted(path.name for path in repository.root.iterdir()) == [
+        ".state.lock",
         "agents",
         "answers.json",
         "bases.json",
@@ -1973,10 +1979,10 @@ def test_releasing_a_run_keeps_the_decision_a_retired_concern_carries(
     """Retiring settles the decision; it does not hand back the worktree.
 
     So a retired concern still holds its lease when cleanup arrives, and
-    cleanup used to move it on — into a status the transition table declares
-    unreachable, because retiring is a human's word and nothing overwrites it.
-    That crashed the run at its last step, with every concern integrated and
-    re-checked and 25 of 27 worktrees already removed.
+    cleanup moving it on lands it in a status the transition table declares
+    unreachable, because retiring is a human's word and nothing overwrites
+    it. That crashes the run at its last step, with every concern integrated
+    and re-checked and 25 of 27 worktrees already removed.
     """
     run_id = "acceptance"
     retired_lease = WritableRootLease(
@@ -3075,7 +3081,7 @@ async def test_unresolved_semantic_join_fails_the_dependent_concern(
 async def test_aborting_a_parked_run_frees_its_leases_and_refuses_resumption(
     tmp_path: Path,
 ) -> None:
-    """Cleanup used to be reachable only at acceptance, stranding leases."""
+    """Cleanup reachable only at acceptance strands every lease short of it."""
     launcher = LocalProcessLauncher()
     workspace = failure_leg_workspace(tmp_path, launcher)
 
@@ -4721,12 +4727,12 @@ def accepting_reviewer(_root: Path, output_name: str) -> JsonObject:
 async def test_a_concerns_notes_are_cleared_before_its_worker_runs(
     tmp_path: Path,
 ) -> None:
-    """The regression this whole change exists for.
+    """Who removes the marker, and how much of the file they may touch.
 
-    The worker used to be told to remove its own marker, which the edit
-    policy asks on unconditionally, so every concern parked. The
-    orchestrator now removes it first — and removes only what this concern
-    owns, leaving the sibling's note in the same file untouched.
+    A worker told to remove its own marker meets the edit policy, which asks
+    on that unconditionally, and every concern parks. The orchestrator
+    removes it first — and removes only what this concern owns, leaving the
+    sibling's note in the same file untouched.
     """
     launcher = LocalProcessLauncher()
     workspace = noted_workspace(tmp_path, launcher)
@@ -5013,6 +5019,137 @@ async def test_recheck_prompt_carries_the_record_and_corrects_foreign_labels(
     assert [item.question.id for item in core.mailbox.questions()] == []
 
 
+@pytest.mark.parametrize("published", [False, True])
+async def test_recheck_resume_replays_verdict_across_question_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, published: bool
+) -> None:
+    calls: list[str] = []
+
+    def response(_root: Path, _output_name: str) -> JsonObject:
+        calls.append("review")
+        return {
+            "concern_id": "a",
+            "accepted": False,
+            "generalized": True,
+            "reason": "criterion lost",
+            "criteria_met": [],
+        }
+
+    core = recheck_core(tmp_path, "recheck-interrupted", response, [])
+    queue = core.questions.queue_questions
+
+    def interrupted(questions: list[MaterialQuestion], asked_by: str) -> None:
+        if published:
+            queue(questions, asked_by)
+        raise RuntimeError("interrupted publication")
+
+    monkeypatch.setattr(core.questions, "queue_questions", interrupted)
+    with pytest.raises(RuntimeError, match="interrupted publication"):
+        await core.joiner.recheck_concern(
+            concern("a"),
+            tmp_path,
+            situation="integrated",
+            occasion="integrated",
+            lost_because="after integration",
+            commit="first-tree",
+        )
+    await core.joiner.runner.actors.close()
+    resumed = recheck_core(tmp_path, "recheck-interrupted", response, [])
+    question = await resumed.joiner.recheck_concern(
+        concern("a"),
+        tmp_path,
+        situation="resumed",
+        occasion="integrated",
+        lost_because="after integration",
+        commit="first-tree",
+    )
+    assert calls == ["review"]
+    assert question is not None and question.recheck_commit == "first-tree"
+    assert [pending.question for pending in resumed.mailbox.questions()] == [question]
+    resumed.mailbox.record(
+        RecordedAnswer(
+            run_id="recheck-interrupted",
+            answer=QuestionAnswer(question_id=question.id, value="superseded"),
+            door=AnswerDoor.CONSOLE,
+            answered_at=utc_now(),
+        )
+    )
+    again = await resumed.joiner.recheck_concern(
+        concern("a"),
+        tmp_path,
+        situation="resumed again",
+        occasion="integrated",
+        lost_because="after integration",
+        commit="first-tree",
+    )
+    assert again == question
+    assert resumed.mailbox.answered_ids() == [question.id]
+    assert calls == ["review"]
+    await resumed.joiner.runner.actors.close()
+
+
+async def test_recheck_changed_tree_preserves_old_question_and_answer(
+    tmp_path: Path,
+) -> None:
+    calls: list[str] = []
+
+    def response(_root: Path, _output_name: str) -> JsonObject:
+        calls.append("review")
+        return {
+            "concern_id": "a",
+            "accepted": False,
+            "generalized": True,
+            "reason": "criterion finding",
+            "criteria_met": ["a-done"] if len(calls) == 1 else [],
+        }
+
+    core = recheck_core(tmp_path, "recheck-repaired", response, [])
+    item = concern("a").model_copy(
+        update={
+            "criteria": [
+                *concern("a").criteria,
+                AcceptanceCriterion(id="a-more", description="more"),
+            ]
+        }
+    )
+    first = await core.joiner.recheck_concern(
+        item,
+        tmp_path,
+        situation="integrated",
+        occasion="integrated",
+        lost_because="after integration",
+        commit="first-tree",
+    )
+    assert first is not None
+    core.mailbox.record(
+        RecordedAnswer(
+            run_id="recheck-repaired",
+            answer=QuestionAnswer(question_id=first.id, value="superseded"),
+            door=AnswerDoor.CONSOLE,
+            answered_at=utc_now(),
+        )
+    )
+    second = await core.joiner.recheck_concern(
+        item,
+        tmp_path,
+        situation="repaired",
+        occasion="integrated",
+        lost_because="after repair",
+        commit="repaired-tree",
+    )
+    assert second is not None and second.id != first.id
+    assert first.criteria == ["a-more"]
+    assert second.criteria == ["a-done", "a-more"]
+    assert core.mailbox.answered_ids() == [first.id]
+    assert {pending.question.id for pending in core.mailbox.questions()} == {
+        first.id,
+        second.id,
+    }
+    changed = journal_events(core, "recheck_changed")
+    assert len(changed) == 1 and changed[0]["commit"] == "repaired-tree"
+    await core.joiner.runner.actors.close()
+
+
 def standing_state(run_id: str, ruling: str | None) -> ResolveState:
     asked = MaterialQuestion(
         id="a-superseded-join-one",
@@ -5252,7 +5389,7 @@ async def test_a_carried_residual_takes_the_acceptance_the_reviewer_wrote(
 
 @pytest.mark.asyncio
 async def test_accepted_review_residuals_reach_the_journal(tmp_path: Path) -> None:
-    """Observations beside an accepting verdict used to reach nobody."""
+    """Observations beside an accepting verdict reach the journal, not nobody."""
     launcher = LocalProcessLauncher()
     workspace = failure_leg_workspace(tmp_path, launcher)
 
@@ -5516,8 +5653,8 @@ async def test_a_round_that_commits_nothing_neither_charges_nor_reviews_an_empty
     )
 
     outcome = next(item for item in manifest.outcomes if item.concern_id == "a")
-    # With max_revision_rounds=1 the old rule failed here: the empty second
-    # round was charged even though it gave the reviewer nothing new.
+    # With max_revision_rounds=1 a rule charging every round fails here: the
+    # empty second round gives the reviewer nothing new and costs the budget.
     assert outcome.verified, outcome.failure
     empty = [prompt for prompt in reviewer_prompts if "Commits under review" in prompt]
     assert empty and not any(
@@ -6248,7 +6385,7 @@ async def test_a_parent_an_earlier_run_landed_is_recorded_without_a_second_accou
 
     run_dir = tmp_path / "state" / "resumed-join"
     run_dir.mkdir(parents=True)
-    desk = JoinDesk(run_dir)
+    desk = JoinDesk(run_dir, "integration")
     desk.write_plan(
         JoinPlan(
             concern_id="integration",

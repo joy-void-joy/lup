@@ -22,6 +22,9 @@ import lup.devtools.dev.branches as branches
 import lup.devtools.dev.resolve_review as resolve_review
 from lup.devtools.dev.declarations import DevDeclarations
 from lup.devtools.dev.issues import EXCLUDED_LABEL
+from lup.devtools.resolve.cost import show_cost
+from lup.devtools.resolve.recovery import recover_integration
+from lup.devtools.resolve.actors import rebind_actor
 from lup.devtools.harness.composition import NativeTargets, claude_profile_directory
 from lup.devtools.supervisor.app import serve_supervisor
 from lup.devtools.supervisor.doors import (
@@ -62,10 +65,13 @@ def create_resolve_app(
         no_args_is_help=False,
     )
     app.command("status")(show_status)
+    app.command("cost")(show_cost)
+    app.command("recover-integration")(recover_integration)
     app.command("supervise")(serve_supervisor)
     app.command("questions")(list_questions)
     app.command("answer")(answer_questions)
     app.command("actors")(list_actors)
+    app.command("rebind-actor")(rebind_actor)
     app.command("say")(say_to_actor)
     app.command("accept")(accept_verification)
     app.command("retire")(retire_concern)
@@ -74,6 +80,7 @@ def create_resolve_app(
     app.command("drain")(drain_run)
     app.command("refresh")(resolve.refresh_run)
     app.command("intake")(resolve.preview_intake)
+    app.command("admissions")(resolve.list_admissions)
 
     @app.command("serve-tools")
     def serve_resolver_tools_command() -> None:
@@ -336,6 +343,10 @@ def create_resolve_app(
         admitted = resolve.AdmissionFlags(
             statements=admit or [], notes=admit_note or [], issues=admit_issue or []
         )
+        if abort is None and resolve.queue_existing_admission(
+            admitted, run_id, answer or [], start_new
+        ):
+            return
         if detach:
             if adapter is None:
                 raise typer.BadParameter(

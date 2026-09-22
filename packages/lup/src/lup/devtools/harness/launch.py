@@ -22,7 +22,7 @@ import typer
 from pydantic import BaseModel, Field, ValidationError
 
 from lup.harness.devices import Device
-from lup.providers.login import ProviderLogin
+from lup.providers.login import NativeHomeScope, ProviderLogin
 from lup.providers.profiles import ProfileDirectory
 from lup.devtools.harness.contained import contained_argv
 from lup.providers.claude.confinement import CLAUDE_CONFINEMENT
@@ -32,17 +32,18 @@ from lup.providers.codex.confinement import CODEX_CONFINEMENT
 from lup.providers.codex.harness import CodexSpellings
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.account import read_account
-from lup.providers.codex.harness_runtime import (
-    CodexPluginInstaller,
-    PluginCacheConfig,
-)
+from lup.providers.codex.install import install_codex_plugin
+from lup.providers.codex.marketplace import CodexMarketplace
+from lup.providers.codex.profile import CodexProfileSettings
 from lup.providers.codex.transcripts import CodexTranscripts
 from lup.coordination.identity import MEMBER_ENV, NAME_ENV, LaunchedMember
 from lup.coordination.repository import launched_member
 from lup.harness.environment import non_interactive_environment
 from lup.harness.models import HookSet, NativeName, Plugin, Resumption
 from lup.policy.boundary import BoundaryPreflight
+from lup.policy.identity import POLICY_ROOT_ENV
 from lup.policy.profiles import compile_boundary, depended_on, measured
+from lup.policy.snapshots import accept_destination_policies, destination_authorities
 from lup.sandbox.rail import AccessibleRoot, fleet_lease
 from lup.devtools.sync import accessible_roots, granted_devices
 from lup.harness.notice import Banner, Notice
@@ -91,6 +92,7 @@ from lup.devtools.harness.drift import (
 from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.devtools.harness.preflight import (
     LaunchSentinels,
+    ROOT_VARIABLE,
     exclude_sandbox_placeholders,
     record_preflight,
     release_ledger,
@@ -1381,6 +1383,7 @@ def settle_boundary(
     environment: EnvVars,
     banner: Banner,
     accessible: list[AccessibleRoot] = [],
+    runtime: str = "",
 ) -> BoundaryPreflight:
     """Compile what this launch promised, measure it, and refuse if it fell short.
 
@@ -1415,10 +1418,11 @@ def settle_boundary(
     """
     root = project_root()
     declared = plugin.hooks or HookSet(id="hooks.absent", policy_ids=[])
+    lease = fleet_lease(root, accessible=accessible)
     boundary = compile_boundary(
         declared,
         contained=sandbox.contained(),
-        writable=list(fleet_lease(root, accessible=accessible).writable),
+        writable=list(lease.writable),
     )
     preflight = measured(boundary, depended_on(declared, sandbox.contained()), findings)
     said = preflight.opening()
@@ -1431,7 +1435,16 @@ def settle_boundary(
         )
     if said:
         banner.add([Notice(text=said, urgency="boundary")])
-    record_preflight(preflight, sentinels, root)
+    record_preflight(
+        preflight,
+        sentinels,
+        root,
+        destination_policies=accept_destination_policies(
+            root, accessible, lease, runtime
+        ),
+        read_only_roots=list(lease.read_only),
+        destination_authorities=destination_authorities(accessible, runtime),
+    )
     if not sandbox.contained():
         # No mounts, so no mount table -- and the one a contained launch left
         # behind describes a boundary this session is not behind. Attributing
@@ -1441,6 +1454,7 @@ def settle_boundary(
     environment.update(
         sentinels.within() if sandbox.contained() else sentinels.outside()
     )
+    environment[ROOT_VARIABLE] = str(root.resolve())
     return preflight
 
 
@@ -1458,8 +1472,10 @@ def session_argv(
     cleared: LaunchOpening = LaunchOpening(),
     mounts: list[AccessibleRoot] = [],
     devices: list[Device] = [],
-    authenticate: Callable[[list[str], Path], None] | None = None,
+    authenticate: Callable[[list[str], Path, bool], None] | None = None,
     member: LaunchedMember | None = None,
+    prepare: Callable[[list[str], Path], None] | None = None,
+    state_scope: NativeHomeScope | None = None,
 ) -> list[str]:
     """The argv that opens a session, inside the declared container or on the host.
 
@@ -1501,6 +1517,7 @@ def session_argv(
     # every session they start — two peers answering to one id, which is the
     # one thing the durable id exists to rule out.
     environment.update((member or launched_member(project_root())).environment())
+    environment[POLICY_ROOT_ENV] = str(project_root())
 
     # Settled once and handed to everything that needs it. Resolving a
     # registration can clone it, so a second resolution would be a second
@@ -1534,8 +1551,10 @@ def session_argv(
                     )
                 ]
             )
+        if prepare is not None:
+            prepare([], config_home)
         if authenticate is not None:
-            authenticate([cli], config_home)
+            authenticate([cli], config_home, False)
         settle_boundary(
             plugin,
             sandbox,
@@ -1544,6 +1563,7 @@ def session_argv(
             environment,
             banner,
             accessible,
+            runtime=cli,
         )
         say_opening(cleared, cleared.findings, transcript)
         return [cli, *arguments]
@@ -1577,6 +1597,7 @@ def session_argv(
             ),
             MEMBER_ENV,
             NAME_ENV,
+            POLICY_ROOT_ENV,
         ],
         banner=banner,
         sentinels=sentinels,
@@ -1584,6 +1605,7 @@ def session_argv(
         # This launch's flags lead and the machine's standing grants follow,
         # settled here beside the roots for the same reason they are.
         devices=[*devices, *granted_devices(told)],
+        state_scope=state_scope,
     )
     # Verified on the way in, rather than asserted. This is §6's whole point
     # and the launch is where it has to happen: the boundary was built two
@@ -1603,9 +1625,15 @@ def session_argv(
         environment=environment,
         in_passing=True,
     )
+    if prepare is not None:
+        prepare(probing(opening, stdin=True), Path(harness.image.config_home))
+    # A contained session sharing host loopback can receive a browser callback.
+    # Device login is needed where that callback stays outside its namespace.
     if authenticate is not None:
         authenticate(
-            [*probing(opening, stdin=True), cli], Path(harness.image.config_home)
+            [*probing(opening, stdin=True), cli],
+            Path(harness.image.config_home),
+            not harness.image.egress.shares_host_loopback(),
         )
     # Both halves of one measurement, joined here because this is where the
     # second is taken. The host roster answered for the relay and the store
@@ -1614,7 +1642,14 @@ def session_argv(
     # from either alone would report a capability nothing asked about.
     measured_here = [*cleared.findings, *inside]
     settle_boundary(
-        plugin, sandbox, measured_here, sentinels, environment, banner, accessible
+        plugin,
+        sandbox,
+        measured_here,
+        sentinels,
+        environment,
+        banner,
+        accessible,
+        runtime=cli,
     )
     say_opening(cleared, measured_here, transcript)
     native = harness.image.clipboard.wrap(
@@ -1845,6 +1880,40 @@ def launch_claude(
             checkpoint(provider="claude")
 
 
+def prepare_codex_plugin(
+    prefix: list[str],
+    home: Path,
+    root: Path,
+    environment: EnvVars,
+    force: bool = False,
+    trusted: bool = False,
+    settings: CodexProfileSettings | None = None,
+) -> None:
+    """Prepare the home where the launch runs, through its own execution boundary."""
+    if not prefix:
+        if settings is not None:
+            settings.install(
+                home, enforce_policy=CodexMarketplace.declared(root) is not None
+            )
+        install_codex_plugin(root, home, force, trusted)
+        return
+    assert CODEX_LOGIN.home_preparation is not None
+    command = [
+        *prefix,
+        *CODEX_LOGIN.home_preparation.command(root, home, force, settings is not None),
+    ]
+    typer.echo(
+        str(
+            sh.Command(command[0])(
+                *command[1:],
+                _env=environment,
+                _in=settings.model_dump_json() if settings is not None else None,
+            )
+        ),
+        nl=False,
+    )
+
+
 # For the reason spelled at `launch_claude`: the mode is one optional argument
 # among the ones that actually decide how a runtime starts.
 def launch_codex(
@@ -1901,17 +1970,26 @@ def launch_codex(
     store = CodexWorktreeHomeStore()
     home = select_codex_home(codex_home, environment, project_root(), profile, store)
     selected_home = home.path
+    selected_profile = (
+        CodexProfileSettings.capture(
+            selected_home, profile, as_base=sandbox.contained()
+        )
+        if profile is not None or sandbox.contained()
+        else None
+    )
     if home.isolated:
         typer.echo(f"Using worktree-scoped Codex home: {selected_home}")
-    installer = CodexPluginInstaller(
-        PluginCacheConfig(codex_home=selected_home, marketplace=plugin.marketplace)
-    )
     # The subcommand leads, and everything the envelope carries follows it,
     # because a word placed after a positional session id would be read as
     # another one.
     arguments: list[str] = [*codex_resume_arguments(resume), *envelope]
-    if profile is not None:
-        arguments.extend(["--profile", profile])
+    if selected_profile is not None and not selected_profile.as_base:
+        arguments.extend(
+            [
+                "--profile",
+                selected_profile.installed_name(),
+            ]
+        )
     selected_model = model or (mode.native_model("codex") if mode is not None else None)
     if selected_model is not None:
         arguments.extend(["--model", selected_model])
@@ -1938,25 +2016,29 @@ def launch_codex(
         else mode.opened("codex", transcript.journal, transcribing)
     )
 
-    def authenticate(command: list[str], native_home: Path) -> None:
+    def authenticate(command: list[str], native_home: Path, headless: bool) -> None:
         codex_login_preflight(
             native_home,
             environment,
             command,
-            headless=sandbox.contained(),
-            profile=profile,
+            headless=headless,
+            profile=None if sandbox.contained() else profile,
         )
         if home.isolated and not sandbox.contained():
             store.publish(project_root())
 
-    try:
-        cache = installer.ensure(
-            project_root() / ".codex" / "plugins" / plugin.name,
+    def prepare(prefix: list[str], native_home: Path) -> None:
+        prepare_codex_plugin(
+            prefix,
+            native_home,
             project_root(),
-            force=force_install,
+            environment,
+            force_install,
+            settings=selected_profile,
         )
+
+    try:
         with opening as session:
-            typer.echo(f"Verified installed Codex plugin: {cache.installed_root}")
             environment.update(session)
             argv = session_argv(
                 "codex",
@@ -1973,6 +2055,12 @@ def launch_codex(
                 mounts,
                 devices,
                 authenticate=authenticate,
+                prepare=prepare,
+                state_scope=(
+                    selected_profile.state_scope()
+                    if selected_profile is not None and selected_profile.as_base
+                    else None
+                ),
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True

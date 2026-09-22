@@ -102,6 +102,19 @@ def test_a_failed_concern_can_still_be_retired(tmp_path: Path) -> None:
     assert progress["settled-upstream"].status == ConcernStatus.RETIRED
 
 
+def test_a_stale_scheduler_save_preserves_live_retirement(tmp_path: Path) -> None:
+    repository = seeded(tmp_path, ConcernStatus.LEASED)
+    stale = repository.load()
+    with repository.exclusive():
+        repository.retire(
+            ConcernRetirement(concern_id="settled-upstream", reason="upstream")
+        )
+        saved = repository.save(stale)
+    assert saved == repository.load()
+    assert saved.progress[0].status == ConcernStatus.RETIRED
+    assert saved.retirements[0].reason == "upstream"
+
+
 def test_a_concern_settled_here_is_refused(tmp_path: Path) -> None:
     """Retiring claims a concern was settled elsewhere, so it must not be."""
     repository = seeded(tmp_path, ConcernStatus.CLEANED)

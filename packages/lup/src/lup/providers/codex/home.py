@@ -14,7 +14,7 @@ from lup.providers.codex.harness_runtime import CodexPluginInstaller, PluginCach
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.marketplace import CodexMarketplace
 from lup.providers.codex.theme import claude_daltonized_theme
-from lup.providers.codex.trust import CodexHook, read_hooks, skipped
+from lup.providers.codex.trust import CodexHook, hooks_of, read_hooks, skipped
 from lup.types import EnvVars
 from lup.workspace.paths import declared_project_root, project_root
 
@@ -386,7 +386,13 @@ def seed_hook_trust(home: Path, hooks: list[CodexHook]) -> list[str]:
 
 
 def install_declared_policy(
-    home: Path, root: Path | None = None, seed: bool = False
+    home: Path,
+    root: Path | None = None,
+    seed: bool = False,
+    workspace: Path | None = None,
+    *,
+    executable: Path = Path("codex"),
+    environment: EnvVars | None = None,
 ) -> CodexMarketplace | None:
     """Install the project's own plugin into one home, and say which it was.
 
@@ -407,32 +413,57 @@ def install_declared_policy(
     or whatever the environment already selected — keeps their decisions
     and is refused rather than written into.
 
+    ``root`` selects the application's policy declaration. ``workspace`` is
+    the native session directory whose effective hook configuration is checked;
+    a temporary working directory need not contain another marketplace.
+    ``executable`` and ``environment`` select the same native process boundary
+    as the session, including plugin discovery and hook trust queries.
+
     Failure is raised rather than warned past, either way. A session that
     opened without the policy it was meant to run under is
     indistinguishable from one running under it, which is the property that
     made this worth finding.
     """
     project = root or project_root()
+    native_cwd = workspace or project
     declared = CodexMarketplace.declared(project)
     if declared is None:
         return None
     installer = CodexPluginInstaller(
         PluginCacheConfig(
             codex_home=home, marketplace=declared.name, plugin=declared.plugin
-        )
+        ),
+        executable=executable,
+        environment=environment,
     )
-    installer.ensure(declared.source, project)
-    unanswered = policy_hooks_skipped(home, project, declared)
+    evidence = installer.ensure(declared.source, project)
+    installer.verify(evidence, native_cwd)
+    unanswered = policy_hooks_skipped(
+        home,
+        native_cwd,
+        declared,
+        policy_root=project,
+        executable=executable,
+        environment=environment,
+    )
     if unanswered and seed:
         # Verified rather than asserted: the records were written from the
         # hashes this read reported, and whether Codex then honours them is
         # the runtime's answer rather than a property of having written a
         # file. A record it rejects reads exactly like one never written.
         seed_hook_trust(home, unanswered)
-        unanswered = policy_hooks_skipped(home, project, declared)
+        unanswered = policy_hooks_skipped(
+            home,
+            native_cwd,
+            declared,
+            policy_root=project,
+            executable=executable,
+            environment=environment,
+        )
     if unanswered:
         raise CodexPolicyUntrusted(
-            f"{home} carries {declared.selector} and would run none of "
+            f"{home} carries {declared.selector} from policy root {project} in native "
+            f"workspace {native_cwd} and would skip "
             f"{len(unanswered)} declared hook(s): "
             f"{', '.join(hook.key for hook in unanswered)}. Codex skips a hook it "
             "does not trust rather than refusing it, so this session would run "
@@ -444,7 +475,34 @@ def install_declared_policy(
 
 
 def policy_hooks_skipped(
-    home: Path, project: Path, marketplace: CodexMarketplace
+    home: Path,
+    project: Path,
+    marketplace: CodexMarketplace,
+    *,
+    policy_root: Path | None = None,
+    executable: Path = Path("codex"),
+    environment: EnvVars | None = None,
 ) -> list[CodexHook]:
     """Which of this plugin's hooks the home resolves but would not run."""
-    return skipped(asyncio.run(read_hooks(home, project)), marketplace.selector)
+    report = asyncio.run(
+        read_hooks(home, project, executable=executable, environment=environment)
+    )
+    if report.warnings():
+        logger.warning(
+            "Native hook discovery reported %s warning(s) for %s in %s; "
+            "inspect native hooks/list for details",
+            len(report.warnings()),
+            marketplace.selector,
+            project,
+        )
+    if marketplace.declares_hooks() and (
+        not hooks_of(report, marketplace.selector) or report.failures()
+    ):
+        raise CodexPolicyUntrusted(
+            f"{home} lacks complete hook evidence for {marketplace.selector} from policy root "
+            f"{policy_root or marketplace.source} in native workspace {project}. "
+            f"Native discovery reported {len(report.failures())} unresolved error(s). "
+            "Inspect native hooks/list and this workspace's plugin and hook settings "
+            "before opening a governed session."
+        )
+    return skipped(report, marketplace.selector)

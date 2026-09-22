@@ -1,0 +1,212 @@
+"""A session opened by a program is contained by the program it is started as.
+
+The wrapper is the whole seam: both runtimes take a path to run instead of
+the CLI they would have found, so what is asserted here is what that file
+says and which mounts the argv behind it was built from — not that a
+container started, which needs an engine no unit test has.
+"""
+
+import os
+import sys
+
+import sh
+from pathlib import Path
+from unittest.mock import Mock
+
+import pytest
+from pydantic import BaseModel
+
+from lup.devtools.harness import contained
+from lup.policy.identity import POLICY_ROOT_ENV
+from lup.providers.claude.login import CLAUDE_LOGIN
+from lup.providers.codex.login import CODEX_LOGIN
+from lup.providers.login import ProviderLogin
+from lup.sandbox.rail import Lease, worker_lease
+
+ARGV = ["podman", "run", "-i", "image"]
+
+
+@pytest.fixture
+def recorded(monkeypatch: pytest.MonkeyPatch) -> Mock:
+    """The argv builder, stubbed, so the call it was made with can be read."""
+    builder = Mock(side_effect=lambda *args, **kwargs: list(ARGV))
+    monkeypatch.setattr(contained, "contained_argv", builder)
+    return builder
+
+
+def written(tmp_path: Path, recorded: Mock, lease: Lease | None = None) -> Path:
+    """One wrapper written over a checkout, with the defaults under test."""
+    root = tmp_path / "checkout"
+    root.mkdir()
+    sh.Command("git").bake("-C", str(root), _tty_out=False)("init", "-b", "main")
+    return contained.contained_cli(
+        tmp_path / "enter.sh",
+        Mock(),
+        Mock(),
+        root,
+        "claude",
+        CLAUDE_LOGIN,
+        lease=lease,
+    )
+
+
+def test_the_wrapper_is_a_program_a_runtime_can_start(
+    tmp_path: Path, recorded: Mock
+) -> None:
+    """Executable, because being named as a program is what a runtime does."""
+    wrapper = written(tmp_path, recorded)
+
+    assert os.access(wrapper, os.X_OK)
+    assert "claude" in wrapper.read_text()
+
+
+def test_a_contained_session_is_held_to_the_tree_it_was_given(
+    tmp_path: Path, recorded: Mock
+) -> None:
+    """The default lease, for a session nobody is watching open."""
+    written(tmp_path, recorded)
+
+    assert recorded.call_args.kwargs["lease"] == worker_lease(tmp_path / "checkout")
+
+
+def test_a_caller_naming_its_own_mounts_gets_them(
+    tmp_path: Path, recorded: Mock
+) -> None:
+    """A session meant to reach further, or nothing at all, says so."""
+    lease = Lease(read_only={tmp_path: str(tmp_path)})
+
+    written(tmp_path, recorded, lease)
+
+    assert recorded.call_args.kwargs["lease"] == lease
+
+
+def test_the_streams_are_the_protocol_the_sdk_speaks(
+    tmp_path: Path, recorded: Mock
+) -> None:
+    """Not offered: a session opened through the SDK has no terminal."""
+    written(tmp_path, recorded)
+
+    assert recorded.call_args.kwargs["streams"] == "piped"
+
+
+@pytest.mark.parametrize("worker", [False, True])
+def test_codex_prepares_the_container_home_before_a_wrapper_can_start(
+    tmp_path: Path,
+    recorded: Mock,
+    monkeypatch: pytest.MonkeyPatch,
+    worker: bool,
+) -> None:
+    root = tmp_path / "checkout"
+    root.mkdir()
+    image = Mock(config_home="/private/runtime-home")
+    execute = Mock(return_value="verified\n")
+    monkeypatch.setattr(sh, "Command", Mock(return_value=execute))
+    monkeypatch.setattr(contained, "worker_lease", lambda _root: Lease())
+    wrapper = tmp_path / "enter.sh"
+    if worker:
+        contained.worker_cli(
+            wrapper, image, Mock(), root, None, None, CODEX_LOGIN, "codex"
+        )
+    else:
+        contained.contained_cli(wrapper, image, Mock(), root, "codex", CODEX_LOGIN)
+    assert CODEX_LOGIN.home_preparation is not None
+    execute.assert_called_once_with(
+        *ARGV[1:],
+        "env",
+        f"{POLICY_ROOT_ENV}={root}",
+        *CODEX_LOGIN.home_preparation.command(root, Path("/private/runtime-home")),
+    )
+    assert wrapper.is_file()
+
+
+def test_a_failed_codex_home_preparation_never_publishes_a_wrapper(
+    tmp_path: Path,
+    recorded: Mock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    execute = Mock(side_effect=RuntimeError("plugin missing"))
+    monkeypatch.setattr(sh, "Command", Mock(return_value=execute))
+    monkeypatch.setattr(contained, "worker_lease", lambda _root: Lease())
+    wrapper = tmp_path / "enter.sh"
+    with pytest.raises(RuntimeError, match="plugin missing"):
+        contained.contained_cli(
+            wrapper, Mock(config_home="/cfg"), Mock(), tmp_path, "codex", CODEX_LOGIN
+        )
+    assert not wrapper.exists()
+
+
+class NativeInvocation(BaseModel):
+    program: str
+    arguments: list[str]
+    policy_root: str
+    cwd: str
+
+
+@pytest.mark.parametrize(
+    "program,login", [("claude", CLAUDE_LOGIN), ("codex", CODEX_LOGIN)]
+)
+def test_rendered_wrapper_binds_policy_to_its_plugin_source_across_cwd_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    program: str,
+    login: ProviderLogin,
+) -> None:
+    root = tmp_path / "application with spaces"
+    root.mkdir()
+    workspace = tmp_path / "external scratch"
+    workspace.mkdir()
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    engine = binary / "engine"
+    engine.write_text('#!/bin/sh\nshift 3\nexec "$@"\n')
+    engine.chmod(0o755)
+    reporter = """
+import json
+import os
+import sys
+from pathlib import Path
+with open(os.environ["LUP_NATIVE_PROBE_RECORD"], "a") as record:
+    record.write(json.dumps({
+        "program": Path(sys.argv[0]).name, "arguments": sys.argv[1:],
+        "policy_root": os.environ["LUP_POLICY_ROOT"], "cwd": os.getcwd(),
+    }) + "\\n")
+"""
+    for name in (program, "uv"):
+        executable = binary / name
+        executable.write_text(f"#!{sys.executable}\n{reporter}")
+        executable.chmod(0o755)
+    log = tmp_path / "invocations.jsonl"
+    monkeypatch.setenv("PATH", os.pathsep.join([str(binary), os.defpath]))
+    monkeypatch.setenv("LUP_NATIVE_PROBE_RECORD", str(log))
+    monkeypatch.setenv(POLICY_ROOT_ENV, str(tmp_path / "unrelated ambient project"))
+    monkeypatch.setattr(
+        contained,
+        "contained_argv",
+        Mock(return_value=[str(engine), "run", "-i", "image"]),
+    )
+    monkeypatch.setattr(contained, "worker_lease", lambda _root: Lease())
+    monkeypatch.chdir(tmp_path)
+    wrapper = contained.contained_cli(
+        tmp_path / "enter.sh",
+        Mock(config_home="/cfg"),
+        Mock(),
+        Path(root.name),
+        program,
+        login,
+    )
+
+    sh.Command(str(wrapper))("argument with spaces", _cwd=str(workspace))
+
+    calls = [
+        NativeInvocation.model_validate_json(line)
+        for line in log.read_text().splitlines()
+    ]
+    assert all(call.policy_root == str(root) for call in calls)
+    assert calls[-1].program == program
+    assert calls[-1].arguments == ["argument with spaces"]
+    assert calls[-1].cwd == str(workspace)
+    if login.home_preparation is not None:
+        assert calls[0].program == "uv"
+        assert (
+            calls[0].arguments == login.home_preparation.command(root, Path("/cfg"))[1:]
+        )

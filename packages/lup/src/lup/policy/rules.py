@@ -8,6 +8,7 @@ at generation time, which is how this layer and the generated dispatchers
 stay decision-identical; the shared fixture suite asserts exactly that.
 """
 
+import json
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -17,7 +18,9 @@ from lup.harness.codescan.antipatterns import patterns_for_suffix
 from lup.harness.codescan.common import AntiPattern
 from lup.policy.contracts import DecisionPolicy
 from lup.policy.grants import LeaseGrants
+from lup.policy.identity import AGENT_IDENTITY_ENV
 from lup.policy.kernel.decision import KernelDecision
+from lup.policy.kernel.policy_protocol import read_response, routing_failure
 from lup.policy.kernel.edit import (
     decide_edit,
     path_rule_matches as kernel_path_rule_matches,
@@ -25,6 +28,8 @@ from lup.policy.kernel.edit import (
 from lup.policy.kernel.fetch import decide_fetch
 from lup.policy.kernel.semantics import UnjudgedAmbient
 from lup.policy.assets.host import (
+    declared_identity,
+    routed_edit_response,
     directory_write_targets,
     empty_directory_targets,
     foreign_repository,
@@ -61,10 +66,9 @@ from lup.policy.kernel.rows import (
     unproduced_cause,
 )
 from lup.policy.kernel.shell import decide_shell, decide_shell_segment, shell_context
-from lup.policy.kernel.words import command_words as kernel_command_words
 from lup.policy.edit_rules import EditRule, erase_edit_rules
 from lup.policy.imports import ImportBoundary
-from lup.policy.assets.host import worktree_path
+from lup.policy.assets.host import worktree_path, worktree_root
 from lup.policy.shell_rules import (
     RunnerTargetRule,
     ShellCommandRule,
@@ -157,13 +161,13 @@ class ShellSegment(BaseModel, frozen=True):
     words: list[str] = Field(min_length=1)
 
 
-def command_words(words: list[str]) -> list[str]:
-    """Expose effective-command parsing for compatibility consumers."""
-    return kernel_command_words(words)
-
-
 def parse_shell_segments(command: str) -> list[ShellSegment] | None:
-    """Expose validated segment models for compatibility consumers.
+    """The segments a gate deciding on argv alone may read, or ``None``.
+
+    What the resolver worker's shell gate takes, which is the one reading of
+    a command line that judges the words rather than the effects: it admits
+    `git status` and refuses `git commit`, and it has no facts about the
+    filesystem to decide a write with.
 
     ``None`` for a line the kernel would not read as plain segments: one that
     does not parse, runs nothing, or carries a redirection it would stop when
@@ -294,7 +298,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         ]
         if not changes:
             return None
-        return self.authored.decide(EditBatch(changes=changes))
+        return self.authored.decide(EditBatch(changes=changes, cwd=root))
 
     def rewritten_documents(self, event: ShellCommand) -> RewriteReading:
         """What every in-place rewrite in this command would leave behind.
@@ -345,17 +349,20 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                     UnproducedDocumentRow(target=target, cause="unreadable")
                 )
                 continue
-            documents.append(
-                RewrittenDocumentRow(
-                    target=target,
-                    path=worktree_path(target),
-                    before=before,
-                    after=after,
-                    foreign=foreign_repository(target, root),
-                    outside_project=outside_this_project(target, root),
-                    resolution=None,
-                )
+            document = RewrittenDocumentRow(
+                target=target,
+                path=worktree_path(str((root / target).resolve())),
+                before=before,
+                after=after,
+                foreign=foreign_repository(target, root),
+                outside_project=outside_this_project(target, root),
+                resolution=None,
             )
+            if self.authored is not None:
+                document["decision"] = self.authored.decide_change(
+                    EditChange(path=Path(target), before=before, after=after), root
+                ).as_kernel()
+            documents.append(document)
         return RewriteReading(documents=documents, unproduced=unproduced)
 
     def rewrite_antipatterns(
@@ -586,7 +593,7 @@ class EditPolicy(DecisionPolicy[EditBatch]):
         ]
 
     def decide(self, event: EditBatch) -> Decision:
-        decisions = [self.decide_change(change) for change in event.changes]
+        decisions = [self.decide_change(change, event.cwd) for change in event.changes]
         denied = next((item for item in decisions if item.effect == "deny"), None)
         if denied is not None:
             return denied
@@ -598,14 +605,33 @@ class EditPolicy(DecisionPolicy[EditBatch]):
             return deferred
         return Decision(effect="allow", reason="every edit in the batch is safe")
 
-    def decide_change(self, change: EditChange) -> Decision:
+    def decide_change(self, change: EditChange, cwd: Path | None = None) -> Decision:
+        root = cwd or Path.cwd()
+        path = str((root / change.path).resolve())
+        try:
+            response = routed_edit_response(
+                path,
+                change.before,
+                change.after,
+                Path(path).exists(),
+                self.autonomous,
+                change.operation,
+                root,
+                declared_identity(AGENT_IDENTITY_ENV),
+            )
+            if response is not None:
+                return pydantic_decision(read_response(json.loads(response)))
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            return pydantic_decision(routing_failure(str(error)))
         suffix = change.path.suffix.lower()
         return pydantic_decision(
             decide_edit(
-                worktree_path(change.path.as_posix()),
+                Path(path).relative_to(root).as_posix()
+                if not worktree_root(path) and Path(path).is_relative_to(root)
+                else worktree_path(path),
                 change.before,
                 change.after,
-                path_exists=change.path.exists(),
+                path_exists=Path(path).exists(),
                 path_rules=[path_rule_row(rule) for rule in self.protected],
                 antipattern_rows=antipattern_rows(change),
                 path_roles=self.path_roles,
@@ -618,5 +644,7 @@ class EditPolicy(DecisionPolicy[EditBatch]):
                 operation=change.operation,
                 edit_rules=self.edit_rules,
                 import_boundaries=self.import_boundaries,
+                foreign=foreign_repository(path, root),
+                outside_project=outside_this_project(path, root),
             )
         )

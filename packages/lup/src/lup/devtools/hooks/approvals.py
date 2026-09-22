@@ -1,4 +1,4 @@
-"""The answers the hooks remember, read back and retired.
+"""Execution observations, including unverified historical approval records.
 
 The hook side writes the memory with the pinned standard library alone, in
 :mod:`lup.policy.assets.host`; this is the typed reading of the same file,
@@ -13,21 +13,21 @@ from lup.policy.assets.host import approval_states, forget_approval
 
 
 class Approval(BaseModel, frozen=True):
-    """One exact call the author answered yes to, and when."""
+    """One exact call observed running, without a reusable authority receipt."""
 
     fingerprint: str = Field(description="What the memory keys the call by")
     kind: str = Field(description="What was judged: a shell command or a fetch")
     subject: str = Field(description="The command or URL, as it ran")
     cwd: str = Field(description="The checkout the call ran from")
-    at: str = Field(description="When the answer was observed, as an ISO timestamp")
+    at: str = Field(description="When execution was observed, as an ISO timestamp")
 
 
 def remembered(root: Path) -> list[Approval]:
-    """Every call this checkout remembers an approval for, oldest first."""
+    """Every retained execution observation, oldest first; none grants authority."""
     return [
         Approval.model_validate(held)
         for held in approval_states(root).values()
-        if held["state"] == "approved"
+        if held["state"] in ("approved", "observed")
     ]
 
 

@@ -237,12 +237,16 @@ def create_inbox_hooks(inbox: ActorInbox) -> LupHooksConfig:
     """
 
     async def deliver(_input: LupHookInput) -> LupHookOutput:
-        arrived = inbox.take()
+        delivery = inbox.waiting()
+        arrived = delivery.messages
         if not arrived:
-            return LupHookOutput(decision="allow")
-        # Everything that arrived is carried either way. The position has
-        # already moved past all of it, so a message batched alongside a
-        # redirect has this one delivery and no other.
+            return LupHookOutput()
+
+        def received() -> None:
+            inbox.commit(delivery)
+
+        # Only the adapter can acknowledge that the context reached its
+        # native transport. Until then the next turn must still see this mail.
         delivered = "\n".join(
             f"[{'redirected' if message.redirect else 'message'} by {message.door}] "
             f"{message.text}"
@@ -253,8 +257,9 @@ def create_inbox_hooks(inbox: ActorInbox) -> LupHooksConfig:
                 decision="deny",
                 reason=delivered
                 + "\n\nStop what this call was part of and act on the above.",
+                delivery_receipt=received,
             )
-        return LupHookOutput(decision="allow", additional_context=delivered)
+        return LupHookOutput(additional_context=delivered, delivery_receipt=received)
 
     return LupHooksConfig(pre_tool_use=[LupHookMatcher(hook=deliver, tag="inbox")])
 
@@ -452,7 +457,11 @@ class ActorSession:
         if named in seen and seen[named] != digest:
             raise ActorSchemaChangedError(
                 f"{self.actor.label()} resumed expecting a different {named} "
-                "than the one it was bound to"
+                "than the one it was bound to. Stop the owning run and explicitly "
+                "retire this actor's persisted conversation before rebinding. "
+                "For a resolver run, use `uv run lup-devtools resolve rebind-actor "
+                f"'{self.actor.label()}' --run-id <run-id> --reason '<schema change>'`; "
+                "this loses conversation memory but preserves run checkpoints and answers."
             )
         self.record = self.record.model_copy(
             update={"schema_digests": {**seen, named: digest}}

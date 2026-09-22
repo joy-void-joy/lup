@@ -112,8 +112,9 @@ def test_ensure_never_removes_a_revision_an_active_session_may_use(
     )
     calls: list[tuple[str, ...]] = []
 
-    def command(executable: str):
+    def command(executable: str, search_paths: list[str]):
         assert executable == "codex"
+        assert search_paths
 
         def run(*arguments: str, _env: EnvVars, **_kwargs: object) -> str:
             assert Path(_env["CODEX_HOME"]) != installer.config.codex_home

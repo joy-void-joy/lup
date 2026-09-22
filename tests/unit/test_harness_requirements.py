@@ -582,9 +582,9 @@ def test_a_launch_asks_only_the_image_entries_marked_always() -> None:
 def test_a_launch_asks_something_whatever_the_network_posture_is() -> None:
     """Emptying this set is how the verification disappears without failing.
 
-    Every entry marked always used to be about the proxy, so declaring a
-    posture with none left the launch asking nothing at all -- and nothing
-    asked is indistinguishable from everything passing. The property is that
+    Were every entry marked always about the proxy, declaring a posture with
+    none would leave the launch asking nothing at all -- and nothing asked is
+    indistinguishable from everything passing. The property is that
     the set has a member, not which member it has: a posture answers with its
     own vocabulary, and one that answers with silence is the failure.
     """

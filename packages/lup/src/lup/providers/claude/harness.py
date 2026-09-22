@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, rule_set_for
-from lup.providers.claude.peer_delivery import delivery_artifacts, delivery_command
+from lup.providers.peer_delivery import delivery_artifacts, delivery_command
 from lup.providers.drift_prompt import drift_hook
 from lup.providers.subagent_cleanup import cleanup_hooks
 from lup.providers.roster_prompt import (
@@ -57,6 +57,7 @@ from lup.policy.bundle import (
 from lup.policy.dispatcher import (
     DispatcherDeclaration,
     compile_dispatcher,
+    edit_evaluator_artifact,
     dispatcher_banner,
     guarded_hook_command,
     hook_guard_artifact,
@@ -805,6 +806,11 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                 ),
                 hook_guard_artifact(
                     Path(f".claude/plugins/{self.plugin_name}"), source.id
+                ),
+                edit_evaluator_artifact(
+                    Path(f".claude/plugins/{self.plugin_name}"),
+                    CLAUDE_DISPATCHER,
+                    source.id,
                 ),
                 *delivery_artifacts(
                     Path(f".claude/plugins/{self.plugin_name}"), source.id

@@ -1,11 +1,10 @@
 """Whether a non-interactive ``codex exec`` reaches this project's policy hook.
 
-The question this settles used to be open, and the ledger held the
-conservative reading while it was: `docs/native-capabilities.md` said to treat
-a non-interactive Codex session as ungoverned, because a `codex exec` in a
-scoped home carrying a trust record for the plugin's pre-tool-use hook ran a
-command the policy denies, and nothing separated *the seeded hash is stale*
-from *exec evaluates no hooks at all*.
+Left unsettled, the conservative reading is the one to hold: treat a
+non-interactive Codex session as ungoverned, because a `codex exec` in a
+scoped home carrying a trust record for the plugin's pre-tool-use hook runs a
+command the policy denies, and nothing in that alone separates *the seeded
+hash is stale* from *exec evaluates no hooks at all*.
 
 Three arms separate them, and none alone would:
 

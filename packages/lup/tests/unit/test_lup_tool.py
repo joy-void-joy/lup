@@ -14,6 +14,9 @@ import json
 from datetime import datetime, timezone
 from typing import cast
 
+import anyio
+from mcp import ClientSession
+from mcp.shared.memory import create_client_server_memory_streams
 from pydantic import BaseModel, Field
 
 from lup.tools.mcp import ToolError, ToolResponse, create_mcp_server, lup_tool
@@ -103,3 +106,33 @@ def test_server_initialization_carries_instructions() -> None:
     initialization = server.server.create_initialization_options()
 
     assert initialization.instructions == "Use exact arithmetic."
+
+
+async def test_native_mcp_client_initializes_lists_and_calls_the_server() -> None:
+    """Exercise the installed protocol API without a model or external service."""
+    config = create_mcp_server("echo", tools=[echo], instructions="Echo text.")
+    async with create_client_server_memory_streams() as (client, server):
+        async with anyio.create_task_group() as tasks:
+            tasks.start_soon(
+                config.server.run,
+                *server,
+                config.server.create_initialization_options(),
+            )
+            async with ClientSession(*client) as session:
+                initialized = await session.initialize()
+                assert initialized.instructions == "Echo text."
+                listed = await session.list_tools()
+                assert [tool.name for tool in listed.tools] == ["echo"]
+                assert listed.tools[0].input_schema == EchoInput.model_json_schema()
+                success = await session.call_tool("echo", {"text": "hello"})
+                assert not success.is_error
+                assert success.content[0].model_dump()["text"] == '{"text": "hello"}'
+                for name, arguments, reason in (
+                    ("echo", {"text": "boom"}, "exploded"),
+                    ("echo", {"wrong_field": "hello"}, "Invalid input"),
+                    ("unknown", {}, "not found"),
+                ):
+                    failure = await session.call_tool(name, arguments)
+                    assert failure.is_error
+                    assert reason in failure.content[0].model_dump()["text"]
+            tasks.cancel_scope.cancel()

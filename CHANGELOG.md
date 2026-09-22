@@ -1,5 +1,290 @@
 # Changelog
 
+## 0.4.0 — 2026-09-22
+
+### Native execution carries no reusable approval authority
+
+A native runtime exposes its own prompt's answer to no hook, so the policy
+read that answer off the two events a hook does see: the call was asked
+about, and then it ran. A call that ran was therefore treated as a call
+somebody approved — and Claude's auto mode has executed a native hook ask
+with nobody at the keyboard (#436), which makes that inference a grant no
+human gave.
+
+Approval memory is gone. `remembered_approval` and `remembered_or_asked` are
+removed from both policy adapters, and `note_asked`/`note_ran` now record an
+execution as `observed` rather than `approved`. Authority comes only from an
+explicit single-use review receipt: the call parks in `.lup/questions.jsonl`,
+an operator answers it by its id, and that answer releases one exact retry.
+Historical `approvals.jsonl` records carry no receipt and grant nothing;
+`dev hooks approvals` and `dev hooks forget` still read and retire those
+observations, without changing what is authorized.
+
+A receipt binds what was reviewed, not just the command: captured file
+preimages for every path the call would write, the resolved paths, the
+originating dispatcher's own bytes and the accepted destination policy. A
+changed file, payload or policy re-enters review rather than spending the
+old answer, and an execution whose tool or input differs from the reviewed
+one marks the receipt `in_doubt` instead of completing it.
+
+Codex answers a blocked review on stdout, as a structured denial carrying
+its reason, because the app-server drops `systemMessage` when a hook exits 2
+and that reason names the operator who can release the call. Every other
+refusal still takes exit 2, so exit status alone no longer separates a
+permitted call from a parked one — read the structured answer.
+
+### Native tool authority is explicit
+
+`SessionRequest.tools` and `ClaudeSessionConfig.tools` are `native_tools`,
+and the default grants nothing. `None` and `[]` both mean no built-in or
+inherited tool authority on either provider; pass an explicit sequence of
+`NativeToolGroup` values, or exact supported provider tool names, for what a
+session may actually reach. `NativeToolGroup.ALL` is the broad opt-in, and
+it is the only way to get what an ambient default used to hand over.
+
+Audit `create_client`, `create_claude`, `create_codex` and any directly
+constructed session config that relied on the old ambient grant. `@lup_tool`
+handlers in the factory's `tools=[...]` and explicit MCP servers in
+`tool_servers` need none of it — an application tool declaration is
+independent of native authority. `allowed_tools` selects automatic approval
+within declared authority and cannot grant a tool that authority withholds.
+
+Codex compiles the grant independently of its sandbox and applies it before
+the process starts rather than per thread, so a startup facility cannot
+introduce a tool the session did not ask for. It refuses `READ` and the
+exact `Read`, `Write` and `WebFetch` grants rather than approximating them:
+`SHELL`/`Bash` grants command execution and `WEB`/`WebSearch` grants hosted
+research, and neither silently substitutes for the others. Bounding model
+tool metadata needs an explicit or inherited model present in Codex's own
+catalog, which is read from the binary when a session opens.
+
+### Codex typed output rides each turn
+
+Typed output was a dynamic tool named `submit_output`, installed on
+`thread/start`. `dynamicTools` exists only there and persists for the
+thread's life, so a schema that changed mid-conversation could not be
+rebound without losing conversation identity — the sequence `None -> A -> A
+-> B -> None` was a declared release gap.
+
+Every typed `turn/start` now carries `outputSchema`, so a schema may change
+or disappear between turns and the native thread survives it. `dynamic_tool`
+and `SUBMISSION_TOOL` are gone; pass the output model and submission gate
+through `TurnRequest`, and configure `correction` on `CodexSessionConfig` to
+bound validation retries. Handle `StructuredOutputError` for exhausted
+validation and `UnsupportedCapability` for native controls Codex cannot
+enforce. Native requests use strict mode: compatible object schemas are
+closed, and anything else rides a strict `output_json` string carrier with
+the original schema preserved in the turn prompt and the original Pydantic
+validation applied to what comes back.
+
+The dynamic-tool channel now carries declared application tools alone.
+`CodexSessionConfig.application_tools` names `lup_app_*` tools whose handlers
+run in the hosting process under `@lup_tool` validation, and the channel
+stays silent for a session that declares none. Because it is still
+thread-scoped, resuming with a different application tool set is refused —
+`CodexSchemaRebindingError` now reports application-tool drift alone, and
+output schemas need no fresh thread.
+
+### An edit is judged by the policy of the repository it lands in
+
+An authorized edit into another checkout was judged by the policy of the
+session making it. It is now routed to the destination's own policy, bound
+to a verified evaluator snapshot, while the caller's boundary and identity
+are retained — and it fails closed when the destination policy or its Git
+ownership has changed. An operator can accept a changed destination policy
+without restarting, through `harness policy-refresh`. A repository with no
+explicit grant still meets the foreign-repository ask exactly as before.
+
+`shell_patch` is `lup.policy.kernel.review.literal_input(command,
+'apply_patch')`, which reads any literal single-argument or quoted-heredoc
+invocation rather than that one executable. `patch_review` takes the
+captured preconditions and the shell flag; a parked review never re-reads
+the working tree, because the bytes it was answered about are the bytes it
+holds.
+
+### Repository identity is the consumer's
+
+The library carried a hosting account and an implicit upstream URL.
+`REPOSITORY_URL` and the bare `GitSource` are gone: pass `url` when
+constructing `GitSource`, or call `repository_url(root)`. For CLI use, pass
+`dev library git --url <repository>`, keep an existing Git dependency pin,
+or configure the scaffold's named project in `sync.json.local` with its url
+or checkout path. Declare publication URLs in your own package metadata.
+Dependency tracker routing follows the configured library source; project
+issue routing continues to use its own origin.
+
+### Concurrent resolver joins, and what a resume replays
+
+`JoinDesk` takes the concern it belongs to: construct
+`JoinDesk(run_dir, concern_id)`. With the run stopped, move any existing
+`join/plan.json` and `join/progress.json` into `join/<concern_id>/` under
+the identity recorded in the plan. Dependency checkpoints no longer populate
+the integration-only `ResolveState.join_progress`.
+
+Around it, a run survives more of what interrupts it. An unfinished join
+parks on a durable question rather than dropping; admission into a running
+resolver is queued; a blocker repeated after an answer is retained; an
+interrupted integration and an incompatible actor binding are each
+reconciled explicitly rather than guessed at; run ownership is kept through
+host backoff; and a recheck verdict already settled is replayed on resume
+instead of being asked again. `resolve cost` reports run cost derived from
+the journal without mutating it, and reports incomplete turn timing as
+uncertain rather than as zero.
+
+### Review checkpoints are shared between sibling worktrees
+
+`ProjectEntry.review_from` and `ProjectEntry.last_synced_commit` changed:
+path registrations review fetched origin commits by default, and a review
+checkpoint is bound to the repository and ref reviewed, recorded under the
+common Git directory so every worktree of it reads the same one.
+
+For unpublished local work, set `review_from` to `local` in
+`sync.json.local`, or run `sync setup NAME /path/to/repo --review-from
+local`; a repository with no origin stays local. Check `sync status` for the
+selected review ref — a branchless registration matching the library Git
+source follows its consumed branch, and a reported source/branch mismatch is
+resolved before reviewing. After review, run `sync mark-synced NAME --at
+REVIEWED_SHA` with the immutable commit actually reviewed. An older
+`last_synced_commit` remains the seed until that shared checkpoint exists.
+
+### Codex peer wakes name a verified home
+
+Delivering to a Codex session needs the home and execution scope its arrival
+hook verified, not a bare command. Call `wake(WakePath(...), message)` rather
+than the raw `CODEX_COMMAND`, and retain the native arrival hook's home and
+scope when persisting a wake path. `queued` takes that `WakePath` rather than
+a thread string; a missing or foreign scope leaves durable mail pending
+instead of delivering it somewhere the sender never verified.
+
+### `Runtime.contained` is `Runtime.homed`
+
+`contained` named the configuration home a workspace's sessions are pointed
+at, while everywhere else in this library it names a container — and a
+session can now ask for one. Call `Runtime.homed(request)` where you called
+`Runtime.contained(request)`; nothing else about it moved, and a caller
+reaching it through `Runtime.session_factory` was never naming it. To find
+the call sites:
+
+```bash
+uv run lup-devtools dev py text '\.contained\('
+```
+
+### Migrating personal Claude profile callers
+
+Two earlier public API changes have explicit migration records for adopters
+updating from before those changes:
+
+- `ClaudeProfileStore` split at `fcb61ade6`. Import `AccountFile`,
+  `ClaudeProfileNames`, and `ClaudeProfileRegistrar` from
+  `lup.providers.claude.profile_store`. Construct one
+  `accounts = AccountFile(registry_path)` and share it between
+  `ClaudeProfileNames(accounts)` and `ClaudeProfileRegistrar(accounts)`.
+  Registry reads, writes, home resolution, and `resolver_registry()` belong to
+  `accounts`; `names()`, `config_dir_for()`, and `active_profile()` belong to
+  the names reader; `add_profile()`, `set_active()`, and `remove_profile()`
+  belong to the registrar. A CLI composes these with
+  `ProfileDirectory(names, registrar, CLAUDE_LOGIN)` from
+  `lup.providers.profiles`. The existing registry and account homes remain valid.
+- `CLAUDE_CONFIG_DIR` moved at `da46c6bb2`. Import it from
+  `lup.providers.claude.login`, which also declares `CLAUDE_LOGIN`; use
+  `CLAUDE_LOGIN.environment(config_home)` when constructing a launch environment.
+  The former `lup.adapters` namespace is `lup.providers` in the current API.
+
+`dev update` reports these migration steps when the previous pin predates the
+corresponding change. Run `uv run lup-devtools dev check` after adapting callers
+to catch remaining imports and capability mismatches.
+
+### A session an application opens can be walled
+
+`SessionRequest` could say how much a session may do and nothing about what
+confined it, so an application composing `Client` reached neither boundary
+the launcher already knew how to open: the sandbox settings each adapter
+carried were reachable only by building that adapter's configuration by
+hand, and the wrapper that runs a CLI inside a container was reachable only
+as a resolver actor's.
+
+`containment` is that axis, in the launcher's own three words. `inner`
+establishes the runtime's own sandbox, `outer` starts the runtime as the
+program named in `contained_program` and stands its own sandbox down inside
+the container, and `none` is the default — what every request meant before
+the field existed, so nothing an adopter holds changes until it asks.
+
+The two runtimes render it into what each has. Claude keeps autonomy and
+containment in two fields that decide nothing about each other. Codex has
+one field for both, and takes the narrower of what the wall asks and what
+the autonomy implies, so neither can widen what the other narrowed.
+`contained_cli` writes the program an `outer` request names, for either
+runtime, defaulting to the mounts that hold a session to the tree it was
+given.
+
+### The base an adoption is rooted at is measured
+
+`dev scaffold adopt --base` decides every merge after it and nothing checked
+it, so two wrong answers passed in silence. Rooting at the commit the library
+pin already resolves to leaves the merge base and the merge target one
+commit: the first `dev update` reports `0 fast-forwarded, 0 merged clean, 0
+conflicted` and every change nobody hand-ported stays untaken. Rooting at an
+initialization stamp a year back re-offers a year of already-applied changes
+in a layout the project has left.
+
+The compiled scaffold is a pure function of upstream and the checkout is
+right there, so the base is now *measured* rather than trusted: each
+candidate is compiled and its files compared byte for byte against the
+project's own, and a copy stamped from one commit reads highest at that
+commit. `dev scaffold fit` is that reading on its own — every commit that
+changed the copied half is in range, read at descending resolution, so
+sixteen hundred candidates answer in seventy-eight measurements. `adopt`
+refuses a base equal to the pin, and one a candidate reads a tenth of the
+copied half above; both refusals carry the reading, and restating it as
+`--accept-fit <identical>` is what roots the branch there anyway.
+
+
+### What this release asks of a caller
+
+- command_words — lup.policy.rules.command_words passed its argument to the kernel's own command_words and returned the result, so one reading of a command line had two spellings and the rules module renamed the kernel's on import to make room for its copy
+-   Import command_words from lup.policy.kernel.words, which is where every other caller already reads it and where the behaviour has always lived. Nothing about what it returns changes.
+- remembered_approval, remembered_or_asked — Native execution is observation, not reusable approval authority; both native dispatchers require explicit single-use review receipts.
+-   Remove approval-memory lookups from policy adapters. Keep explicit reusable grants in their declared policy scope; historical approvals.jsonl records have no such receipt and grant no authority. note_ran records observed execution only.
+-   Regenerate both plugins. For unresolved native asks, inspect the named review with dev questions show and answer or reject it from an operator terminal. A recorded answer releases one exact retry; native auto-mode and execution cannot answer it. dev hooks approvals and forget inspect or retire observations without changing authorization.
+- JoinDesk, JoinDesk.__init__ — Concurrent resolver joins require concern-owned checkpoint directories.
+-   Construct JoinDesk(run_dir, concern_id). With the run stopped, move any join/plan.json and join/progress.json into join/<concern_id>/, using the identity recorded in the plan. Dependency checkpoints no longer populate the integration-only ResolveState.join_progress field.
+- ProjectEntry.review_from, ProjectEntry.last_synced_commit — path registrations review fetched origin commits by default and review checkpoints are shared across sibling worktrees, bound to the repository and ref reviewed
+-   For unpublished local work, set review_from to local in sync.json.local, or run sync setup NAME /path/to/repo --review-from local. A repository with no origin remains local. Remote review fetches without moving the checkout.
+-   Check sync status for the selected review ref. A branchless registration matching the library Git source follows its consumed branch; resolve any reported source/branch mismatch before reviewing commits.
+-   After review, run sync mark-synced NAME --at REVIEWED_SHA with the immutable commit actually reviewed. This records the checkpoint under the common Git directory for all worktrees, without fetching an existing upstream. An older last_synced_commit remains the seed until that shared checkpoint is recorded; changing the repository or ref requires reviewing and recording a checkpoint for that source.
+- ClaudeProfileStore, ClaudeProfileStore.homes_root, ClaudeProfileStore.load_registry, ClaudeProfileStore.save_registry, ClaudeProfileStore.resolver_registry, ClaudeProfileStore.resolve_config_dir, ClaudeProfileStore.names, ClaudeProfileStore.config_dir_for, ClaudeProfileStore.active_profile, ClaudeProfileStore.add_profile, ClaudeProfileStore.set_active, ClaudeProfileStore.remove_profile — personal Claude profile storage, reading names, and curating accounts are separate collaborators; the registry file format is unchanged
+-   Import AccountFile, ClaudeProfileNames, and ClaudeProfileRegistrar from lup.providers.claude.profile_store. Construct accounts = AccountFile(registry_path), then pass the same accounts to ClaudeProfileNames(accounts) and ClaudeProfileRegistrar(accounts). Keep homes_root, load_registry, save_registry, resolver_registry, and resolve_config_dir calls on accounts; call names, config_dir_for, and active_profile on the names reader; call add_profile, set_active, and remove_profile on the registrar.
+-   For CLI profile selection, compose ProfileDirectory(names, registrar, CLAUDE_LOGIN) from lup.providers.profiles and lup.providers.claude.login. Preserve the existing registry path and account homes; no credential or data migration is needed.
+- CLAUDE_CONFIG_DIR — the Claude configuration-home declaration belongs to its login adapter
+-   Import CLAUDE_CONFIG_DIR from lup.providers.claude.login instead of the former lup.adapters.claude.config module. When building a launch environment, prefer CLAUDE_LOGIN.environment(config_home) from the same module.
+- CODEX_COMMAND — Codex queue delivery must select the target's verified home and execution scope.
+-   Call wake(WakePath(...), message) rather than the raw CODEX_COMMAND. Retain the native arrival hook's home and scope when persisting a wake path. queued now takes that WakePath, not a thread string; missing or foreign scope leaves durable mail pending.
+- dynamic_tool, SUBMISSION_TOOL — Codex typed output uses a per-turn native schema and portable validation, so submission no longer installs a thread-lifetime dynamic tool. The dynamic-tool channel carries declared application tools only.
+-   Pass the output model and submission gate through TurnRequest. Remove direct dynamic_tool use for submission; declare application tools in CodexSessionConfig.application_tools, which DynamicToolCall still carries. Untyped turns and changed output schemas need no fresh thread, so CodexSchemaRebindingError now reports application-tool drift alone.
+-   Configure correction on CodexSessionConfig to bound validation retries. Handle StructuredOutputError for exhausted output validation, and UnsupportedCapability for native controls that cannot be enforced.
+- runtime_of — Vendored execution environments are declared under the runtime they belong to, so nothing has to read a runtime back out of a path.
+-   Read the runtime from the key it is declared under: VENDORED_EXECUTION_ENVIRONMENTS maps each runtime to its environment. A caller that sniffed one out of a root string was answering a question the declaration now states, and its first entry is no longer the fallback for a root naming no runtime.
+- shell_patch, patch_review — Native hook reviews bind captured documents and policy bytes; Codex approvals remain single-use.
+-   Regenerate both native plugins. Replace direct shell_patch callers with lup.policy.kernel.review.literal_input(command, 'apply_patch'). Pass captured preconditions and the shell flag to patch_review; never re-read the working tree for a parked review.
+- SessionRequest.tools, ClaudeSessionConfig.tools, create_client, create_claude, create_codex, SessionRequest, ClaudeSessionConfig, CodexSessionConfig — Native tool authority is explicit. The native_tools default None grants no built-in or inherited tools on either provider; an application tool declaration remains independent of that authority.
+-   Rename SessionRequest.tools and ClaudeSessionConfig.tools to native_tools. Audit create_client, create_claude, create_codex and direct session configs that relied on ambient tools: pass an explicit sequence of NativeToolGroup values or exact supported provider tool names. Use NativeToolGroup.ALL only where broad built-in authority is intended; None and [] both grant nothing.
+-   Keep @lup_tool handlers in the factory tools=[...] argument and explicit MCP servers in tool_servers. Neither requires native_tools. allowed_tools selects automatic approval within declared authority and cannot grant a missing tool. Remove inherited setting sources and provider overrides that could widen authority. Codex rejects READ and exact Read, Write or WebFetch grants; use its supported facilities only when their broader semantics are intended.
+-   Resume a Codex thread only with the same application tools and compatible native authority; native grants may narrow on resume. Start a fresh session when application tools change: the native resume protocol cannot replace dynamic tools. Output schemas ride each turn and need no fresh thread. Codex requires an explicit or inherited model present in its native catalog to bound model tool metadata.
+- REPOSITORY_URL, GitSource.url — Repository identity is configured by each consumer; the library carries no hosting account or implicit upstream URL.
+-   Pass url when constructing GitSource. Replace imports of REPOSITORY_URL with repository_url(root), or supply your own URL. For CLI use, pass dev library git --url <repository>, keep an existing Git dependency pin, or configure the scaffold's named project in sync.json.local with its url or checkout path.
+-   Declare publication URLs in your package metadata when needed. Dependency tracker routing follows the configured library source; project issue routing continues to use its own origin.
+- sync.json, ProjectEntry.url, ProjectEntry.mount — a tracked registration declares what the project needs -- which repository a name means, whether the project can work without it, and what a session may reach of it -- while the machine's file answers where it is and which transport gets there. The scaffold's `lup` entry is required and mounted, because the workflows that fix a defect upstream and derive a relocation map over its history cannot start without that checkout
+-   Say where lup is on this machine, once: `sync remote lup <url>` for the URL this machine fetches it from, or `sync setup lup /path/to/repo` for a checkout it already has. `sync fetch` then materializes it, and a launch materializes what it also mounts. Until one of them is done, `sync status` names the requirement and exits nonzero rather than reporting `not cloned` in a column.
+    uv run lup-devtools sync status
+-   Move a machine-specific clone URL out of a local `url` override and into `remote`, which is what a transport is now called: `sync remote <name> <url>`. A tracked `url` is the repository's identity, compared on the host and path it names, so an ssh clone of an https registration is one repository and no longer a refusal; two repositories under one name still are, and the refusal names the file and the edit.
+-   Declare a repository the project cannot work without on the tracked entry, with `"required": true`, and the mode a session may open it at beside it. Both keys stay written or absent, never defaulted; a tracked mount binds nothing until this machine says where the project is. A repository registered at this checkout's own origin, and a committed requirement read inside the template scaffold, are owed by nobody here.
+- Runtime.contained — `contained` named the configuration home a workspace's sessions are pointed at, while everywhere else in this library it names a container — and a session can now ask for one. The method takes the word for what it does, `homed`, and the boundary keeps the other
+-   Call `Runtime.homed(request)` where you called `Runtime.contained(request)`; nothing else about it moved. A caller reaching it through `Runtime.session_factory` was never naming it and has nothing to change.
+    uv run lup-devtools dev py text \.contained\(
+- BranchBase.notice — `notice` narrated the base a worktree had already been cut from, which is advice nobody can act on without an undo. A base the command cannot guess is settled before the branch exists now, and `refusal` is what says so: a message the command exits on rather than one trailing a worktree that is already there
+-   Read `BranchBase.refusal()` where you read `BranchBase.notice()`, and exit on it: it is empty wherever the base is settled, and where it is not it names both spellings of `--base` for the caller to re-run with.
+    uv run lup-devtools dev py text \.notice\(
+-   Pass `branch` when you construct a `BranchBase`, which the refusal names the contested branch by, and `ahead` from `commits_ahead(current, integration)`, which is the measurement deciding whether the two bases differ at all.
 ## 0.3.0 — 2026-09-19
 
 Breaking reorganisation of the library's top level. Thirty-four entries became
@@ -124,8 +409,81 @@ A wake is always *on top of* the mail and never instead of it, so the record
 is identical on both and only the latency differs. The agent never touches the
 channel: `coordination_send` remains the one habit.
 
+### Two rules read prose, where seventy-four read shapes
+
+A comment could date the code beside it and a docstring could name a symbol
+that resolves to nothing, and every gate stayed green. Both are claims a
+machine can settle, so both are refused.
+
+`historical-voice` refuses a phrase that can only be about a prior state —
+`previously`, `formerly`, `renamed from`, `used to be`, a design named as the
+one before this one, a migration something is *during*, an audience described
+as needing compatibility — and a bare issue number, which stands in for a
+reason the reader cannot follow. Bare `used to` and `no longer` are
+deliberately absent: both are overwhelmingly present tense, and what
+separates the real ones is the subject. `used to` after a pronoun can only be
+past habitual, because the present reading needs an auxiliary the pronoun
+form has nowhere to put — so *it used to filter* is refused and *a key used
+to select a home* is not.
+
+`stale-reference` resolves every fully-qualified symbol a docstring names and
+refuses the ones reaching nothing. It is a project rule rather than an edit
+rule because deciding it means importing, which the hermetic kernel cannot
+do. Scoped to what resolves without context: a bare name is answered by the
+module it sits in, and an attribute of a class is as often an annotation as a
+binding, so reading only what is bound would report a declaration missing.
+
+Prose is a third scan surface beside the comment and code ones, so a
+docstring is read as sentences rather than blanked with every other string.
+An adopter's own tree meets both rules at its next `dev check`; either is
+suppressed at the site with `# lup: ignore[<rule>]` and a standing reason.
+
 ### The rest
 
+- A contained session binds a checkout once. Where a repository keeps its
+  worktrees beneath its own Git directory, that directory's mount already
+  reaches every one of them at the same path and in the same mode, and the
+  second bind cost what no session could undo: a mount point is not removable
+  from inside its own namespace, so `git worktree remove` emptied the checkout
+  and left the directory standing. One collected per landed branch. A mount
+  whose deepest enclosing mount carries it the same way is dropped, which
+  leaves a read-only `config` inside a writable share exactly where it was.
+- `git delete` reads containment by patch-id, the way the sweep that asks for
+  it does. Ancestry called a branch unmerged whenever its work landed rebased
+  or squashed — which is most of what a sweep clears — so cleaning up after a
+  landing demanded `--force`, the flag for discarding work. Where a branch
+  does hold something, the refusal counts the commits sharing a subject with
+  the integration branch and names `git cherry -v`, since that is the trace a
+  rebase leaves and it is a signal rather than a verdict.
+- A `# lup: ignore` inside a code span is prose about the convention and
+  silences nothing. Documenting the escape declared one, of a rule named after
+  whatever the example used as a placeholder, and put an approval in front of
+  the sentence explaining it. The same reading the note scanner already
+  applied to a marker now answers for a directive, in every language.
+- `dev release` empties the declared-break list into a form the release after
+  it can read. It wrote the annotated assignment and looked for the bare one,
+  so a release crashed on the output of the release before it, with the
+  changelog and version already written — a failure that could only arrive one
+  release late. The round trip is pinned now, since a release's own output is
+  the next release's input.
+- `dev release` regenerates before it commits. The version is a source a
+  generated artifact compiles from, so bumping it leaves those trees behind
+  and the commit guard refuses — which made the release the one commit this
+  repository could not make. What the bump regenerates lands in the same
+  commit as the bump.
+- `dev comments --retire` asks before deleting a claimed-resolved note. It is
+  the one step of the verify-solved pass nothing undoes, and `/lup:release`
+  runs that pass before cutting, so no claim reaches a version unverified.
+- The migrations gate measures from the release, which is the tag rather than
+  the release branch. The two part for as long as it takes a release to land,
+  and read from the branch in that window every break a release had just
+  shipped came back undeclared — against a list that is empty precisely then,
+  because emptying it is what the release did.
+- Each pytest root runs under a base temporary directory of its own. The gate
+  runs both at once and neither named one, so each scanned `pytest-of-<user>`
+  for the next free `pytest-N` and two runners starting together were handed
+  one tree. What that looked like was a fixture meeting a path another suite's
+  test had made, on a machine with too few cores to spread the runs apart.
 - `ledger migrate` copies a kind's journal lines and blobs into the placement
   its mapping now declares, for a kind moved after records already exist. The
   source lines stay: the committed journal is merged by git's union driver, so

@@ -11,12 +11,14 @@ answers already in hand costs no round trip.
 
 Nothing here locks. A run holds its state lock for its entire life, so a
 door that wanted the lock could only ever reach a dead run. Every publish is
-an atomic temp-and-rename instead, and settling is an exclusive create, so
+an atomic temp-and-rename instead, and settling links a complete private file, so
 "first write wins" is decided by the filesystem rather than by a race
 between readers.
 """
 
+import os
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 from pydantic import BaseModel
 
@@ -100,19 +102,40 @@ class Slot[T: BaseModel]:
     def settle(self, record: T, door: Door = Door.CONSOLE) -> bool:
         """Settle this slot, or report that another writer already did.
 
-        The exclusive create is the whole mechanism: two doors racing to
-        settle the same slot both succeed at the call they make, and exactly
-        one of them created the file.
+        A complete, fsynced private file is linked without replacing any winner.
+        Readers see either no answer or a complete answer, even if a writer
+        stops before publication. Directory fsync makes a reported win durable.
         """
         self.admit(door, "a value")
+        payload = (record.model_dump_json(indent=2) + "\n").encode("utf-8")
         path = self.root / SETTLED_FILE
+        created_parents = [
+            directory.parent
+            for directory in (self.root, *self.root.parents)
+            if not directory.exists()
+        ]
         path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            with path.open("x", encoding="utf-8", newline="\n") as handle:
-                handle.write(record.model_dump_json(indent=2) + "\n")
-        except FileExistsError:
-            return False
-        return True
+        with NamedTemporaryFile(
+            dir=self.root, prefix=f".{SETTLED_FILE}.", delete=False
+        ) as handle:
+            temporary = Path(handle.name)
+            try:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+                try:
+                    path.hardlink_to(temporary)
+                except FileExistsError:
+                    return False
+                return True
+            finally:
+                temporary.unlink()
+                for directory in (self.root, *created_parents):
+                    descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+                    try:
+                        os.fsync(descriptor)
+                    finally:
+                        os.close(descriptor)
 
     def settled(self) -> T | None:
         return self.read(SETTLED_FILE)

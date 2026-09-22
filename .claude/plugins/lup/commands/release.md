@@ -58,7 +58,26 @@ commit of its own, before the release. Where the section is empty and the
 range is not, stop and say so: a release whose changelog says nothing is a
 release nobody can read.
 
-### 4. Confirm, then cut
+### 4. Verify every claimed-resolved note before any of it ships
+
+A `# lup: solved:` marker is a claim somebody made about their own work, and
+only the verify-solved pass retires one. A release carries every standing
+claim into a version an adopter pins, where nothing will read it again — so
+the pass runs here, on every release, rather than whenever somebody thinks of
+it.
+
+Run `/lup:verify-solved` and carry out its verdicts. What it decides is not a
+formality: a claim the tree does not meet is restored to open feedback, and a
+release with open notes is ordinary. A release with *unverified* ones is a
+version whose record says a thing was handled because the agent that did it
+said so.
+
+Report what it retired and what it restored before going on. Where it
+restores something that changes what the release should say — a break that
+turns out not to be fixed, an entry describing work that did not land — go
+back to step 3 and say so plainly rather than closing the section around it.
+
+### 5. Confirm, then cut
 
 Show the dry run's plan and Request explicit user approval before cutting.
 Reason: the release writes four files, makes a commit and creates a tag, and
@@ -71,7 +90,7 @@ uv run lup-devtools dev release <level>
 It refuses a dirty tree and an undeclared break. Neither is a reason to force
 anything: commit or discard what is loose, and declare what broke.
 
-### 5. Land it, then push the tag
+### 6. Land it, then push the tag
 
 The release commit is on the integration branch and has to reach the release
 branch the way everything else does — through a pull request, with its checks
@@ -95,7 +114,7 @@ that push is the irreversible step — an index accepts a version once, and a
 release pushed wrong is withdrawn rather than replaced. Request explicit user
 approval before pushing the tag. Reason: it is the act that publishes.
 
-### 6. Report
+### 7. Report
 
 The version, the tag, what the section now says, what the breaks ask of a
 caller, and where the publish run is. Name anything that did not happen —
@@ -107,6 +126,8 @@ leaving it to be discovered.
 - **The level is the user's**, always asked, never inferred from commit count
 - **Read the open section against the range** — its entries were written
   without knowing what the release would hold
+- **No claimed-resolved note ships unverified** — the pass runs on every
+  release, and a claim it cannot confirm is restored rather than carried
 - **Branch before tag**, and the tag last of all
 - **A declared break with no instruction stops the release** — that is the
   gate working, not an obstacle to route around

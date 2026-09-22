@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+import sh
 
 import lup.devtools.dev.branches as branches
 import lup.devtools.dev.git_guards as git_guards_mod
@@ -28,6 +29,8 @@ from lup.devtools.dev.declarations import DevDeclarations
 from lup.devtools.harness.launch import relocation_hint
 from lup.harness.process import LocalProcessLauncher
 from lup.workspace.paths import project_root
+from lup.devtools.git.prepare import prepare
+from lup.devtools.launcher import console_script
 
 
 def create_git_app(declared: Callable[[], DevDeclarations]) -> typer.Typer:
@@ -70,7 +73,8 @@ def create_git_app(declared: Callable[[], DevDeclarations]) -> typer.Typer:
             typer.Option(
                 "--base",
                 "-b",
-                help="Branch to cut from (default: the integration branch)",
+                help="Branch to cut from (default: the integration branch, "
+                "asked for where this checkout is ahead of it)",
             ),
         ] = None,
         force: Annotated[
@@ -384,6 +388,35 @@ def create_git_app(declared: Callable[[], DevDeclarations]) -> typer.Typer:
     ) -> None:
         """Merge a PR and pull changes into the integration branch."""
         pr.merge(pr_number, dry_run, as_json, method, tuple(gh_args or ()), retarget)
+
+    @pr_app.command("prepare")
+    def pr_prepare_cmd(
+        base: Annotated[
+            str, typer.Option("--base", help="Explicit, freshly fetched target ref")
+        ],
+        as_json: Annotated[bool, typer.Option("--json", help="Output as JSON")] = False,
+    ) -> None:
+        """Merge an explicit local base, regenerate every harness, and commit."""
+        root = project_root()
+        launcher = console_script(root)
+        if launcher is None:
+            raise typer.BadParameter(
+                "Sync this checkout's environment before preparing it."
+            )
+
+        def regenerate() -> None:
+            sh.Command(str(launcher))("harness", "generate", "all", _cwd=str(root))
+
+        try:
+            result = prepare(base, root, regenerate)
+        except (RuntimeError, sh.ErrorReturnCode) as error:
+            typer.echo(str(error), err=True)
+            raise typer.Exit(1) from error
+        typer.echo(
+            result.model_dump_json()
+            if as_json
+            else f"Prepared {result.head} against {result.base_commit}; no branch was pushed."
+        )
 
     @pr_app.command("sync-base")
     def pr_sync_base_cmd(

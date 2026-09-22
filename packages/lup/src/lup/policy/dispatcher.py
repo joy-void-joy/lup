@@ -91,6 +91,7 @@ call in the session.
 # lup: ignore[library-default] — the stdlib a compiled dispatcher actually imports; widening it is the hazard the pin exists to prevent
 DISPATCHER_STDLIB = (
     "json",
+    "shlex",
     "os",
     "sys",
     "pathlib",
@@ -98,6 +99,8 @@ DISPATCHER_STDLIB = (
     "datetime",
     "hashlib",
     "csv",
+    "fcntl",
+    "shlex",
     "urllib.parse",
     "typing",
 )
@@ -107,6 +110,11 @@ Pinned rather than open: the script starts through a native CLI with
 ``python3``, outside Lup's import graph and any active virtual environment,
 so a convenient project helper — or the ``lup`` package itself — would make
 permissions disappear precisely where packaging differs.
+
+``fcntl`` serializes question-log readers and appenders across the native
+dispatchers and operator relay. Without a shared file lock, a concurrent
+writer's unfinished record could be mistaken for a crashed append and
+invalidated while that writer is still completing it.
 
 ``subprocess`` earns its place because asking Git whether a path is
 recoverable is a question only a process can answer, and every alternative
@@ -669,6 +677,55 @@ def compiled_docstring(declaration: DispatcherDeclaration) -> str:
         "Runs as a bare script beside its own runtime directory, reaching only\n"
         "the standard library and the kernel copied beside it.\n"
         '"""'
+    )
+
+
+def edit_evaluator_artifact(
+    plugin_root: Path,
+    declaration: DispatcherDeclaration,
+    semantic_id: str,
+) -> Artifact:
+    """Compile the owner-only protocol from the same host and decision sources."""
+    shared = source_half(SHARED_PACKAGE, SHARED_MEMBER)
+    decisions = source_half(SHARED_PACKAGE, DECISIONS_MEMBER)
+    evaluator = source_half(SHARED_PACKAGE, "policy_evaluator")
+    breaches = [
+        *import_breaches(declaration, shared, decisions, evaluator),
+        *host_purity_breaches(shared),
+        *stranded_breaches(shared, decisions),
+        *sharing_breaches(shared, decisions, evaluator),
+    ]
+    if breaches:
+        raise ValueError("; ".join(breaches))
+    prologue = evaluator.prologue()
+    body = (
+        "\n\n\n".join(
+            [
+                "\n".join(
+                    [
+                        prologue,
+                        *[
+                            segment
+                            for half in (shared, decisions)
+                            for segment in half.spliced_prologue(prologue)
+                        ],
+                    ]
+                ),
+                *[shared.source_of(node) for node in shared.functions()],
+                *[decisions.source_of(node) for node in decisions.functions()],
+                *[evaluator.source_of(node) for node in evaluator.functions()],
+                INVOCATION,
+            ]
+        )
+        + "\n"
+    )
+    return Artifact.generated(
+        path=plugin_root / "hooks/scripts/policy_evaluator.py",
+        body=body,
+        semantic_id=semantic_id,
+        banner=GeneratedBanner(
+            source="lup.policy.assets.policy_evaluator", command=REGENERATE_COMMAND
+        ),
     )
 
 

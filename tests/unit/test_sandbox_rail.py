@@ -76,17 +76,11 @@ def read_only_here(leased: Lease, found: Path) -> bool:
     question: everything in the shared directory is under a writable mount,
     and a sibling's administrative entry is read-only inside it regardless.
     A mount engine settles that by applying parents first and letting the
-    deepest entry win, so this has to as well -- a flat test withholds
-    nothing here and passes without exercising anything.
+    deepest entry win, which is what :meth:`Lease.answers_from` reads and the
+    boundary reads after it -- so the test asks the lease rather than keeping
+    a copy that could drift away from the thing under test.
     """
-    covering = [
-        (root, writable)
-        for roots, writable in ((leased.writable, True), (leased.read_only, False))
-        for root in roots
-        if root == found or root in found.parents
-    ]
-    deepest = max(covering, key=lambda pair: len(pair[0].parts), default=None)
-    return deepest is not None and not deepest[1]
+    return leased.covers(found) and not leased.writable_at(found)
 
 
 def holes(withheld: list[Path]) -> list[Path]:
@@ -126,8 +120,51 @@ def test_no_path_is_leased_writable_and_read_only_at_once(
     # worktree, having quietly stopped exercising anything.
     assert layout.common in sibling_worktrees(bare_repository / "mine")
     assert not set(leased.writable) & set(leased.read_only)
-    assert layout.common in leased.writable
-    assert layout.common not in leased.read_only
+    assert leased.writable_at(layout.common)
+
+
+def test_a_checkout_inside_the_shared_directory_is_not_bound_a_second_time(
+    tmp_path: Path,
+) -> None:
+    """The mount that outlived the worktree it held, and the reason it did.
+
+    Where a bare repository keeps its checkouts beneath itself, the shared
+    directory's own mount already reaches every one of them at the same path
+    and in the same mode. Binding each again changes nothing a session can
+    observe and costs what no session can undo: a mount point is not
+    removable from inside its own namespace, so `git worktree remove` empties
+    the checkout, `rmdir` fails with a busy device, and the directory outlives
+    the branch. They accumulated one per landed branch until nobody could say
+    which of sixty were live.
+    """
+    bare = tmp_path / "repo.git"
+    source = tmp_path / "source"
+    source.mkdir()
+    git("-C", str(source), "init", "-q", "-b", "main")
+    git("-C", str(source), "config", "user.email", "test@example.invalid")
+    git("-C", str(source), "config", "user.name", "Test")
+    (source / "README.md").write_text("readme\n", encoding="utf-8")
+    git("-C", str(source), "add", "-A")
+    git("-C", str(source), "commit", "-qm", "first")
+    git("clone", "-q", "--bare", str(source), str(bare))
+    for name in ("mine", "other"):
+        git(
+            "-C",
+            str(bare),
+            "worktree",
+            "add",
+            "-q",
+            str(bare / "tree" / name),
+            "-b",
+            name,
+        )
+
+    leased = lease_for(bare / "tree" / "mine")
+
+    assert bare / "tree" / "mine" not in leased.writable
+    assert bare / "tree" / "other" not in leased.writable
+    assert leased.writable_at(bare / "tree" / "mine")
+    assert leased.writable_at(bare / "tree" / "other")
 
 
 def test_a_lease_makes_its_own_worktree_writable(repository: Path) -> None:
@@ -163,21 +200,19 @@ def test_the_shared_directory_is_writable_with_only_config_held_back(
 ) -> None:
     """Every administrative entry writable to remove a worktree, and `config` not.
 
-    Two modes rather than three nested ones. A sibling's administrative entry
-    used to be punched read-only back over the shared directory, which kept
-    it present and unwritable -- and made `git worktree remove` impossible
-    from inside, since removing a worktree unlinks exactly that entry.
+    Two modes rather than three nested ones. Punching a sibling's
+    administrative entry read-only back over the shared directory keeps it
+    present and unwritable -- and makes `git worktree remove` impossible from
+    inside, since removing a worktree unlinks exactly that entry.
     `config` is the one hole left, and it costs a session nothing: its keys
     name programs the host runs, and no step of the workflow writes them.
     """
     layout = repository_layout(repository / "mine")
     leased = lease_for(repository / "mine")
-    assert layout.common in leased.writable
-    assert layout.common not in leased.read_only
-    assert layout.common / "worktrees" / "other" not in leased.read_only
-    assert layout.common / "config" in leased.read_only
-    assert layout.common / "config" not in leased.writable
-    assert layout.private in leased.writable
+    assert leased.writable_at(layout.common)
+    assert leased.writable_at(layout.common / "worktrees" / "other")
+    assert leased.writable_at(layout.private)
+    assert not leased.writable_at(layout.common / "config")
 
 
 def test_a_commit_survives_everything_the_lease_leaves_unwritable(
@@ -286,7 +321,7 @@ def test_a_new_worktree_can_be_cut_under_everything_the_lease_withholds(
 def test_a_sibling_worktree_can_be_removed_under_the_lease(
     repository: Path,
 ) -> None:
-    """The other half of the workflow, and the one the old arrangement refused.
+    """The other half of the workflow, and the one a nested lease refuses.
 
     `git worktree remove` deletes the checkout and unlinks its administrative
     entry, so a lease holding either read-only refuses it -- and refuses it
@@ -324,7 +359,7 @@ def test_a_plain_checkout_leases_its_own_git_directory(tmp_path: Path) -> None:
     git("-C", str(tmp_path), "init", "-q", "-b", "main")
     layout = repository_layout(tmp_path)
     assert not layout.linked()
-    assert layout.common in lease_for(tmp_path).writable
+    assert lease_for(tmp_path).writable_at(layout.common)
 
 
 def test_a_plain_checkout_holds_its_config_back_too(tmp_path: Path) -> None:
@@ -365,8 +400,10 @@ def test_a_leased_config_reaches_a_session_read_only_inside_its_writable_share(
         state_volume="lup-cfg-x",
         config_home_env="CLAUDE_CONFIG_DIR",
     )
-    base = f"{layout.common}:{layout.common}:rw"
-    hole = f"{layout.common / 'config'}:{layout.common / 'config'}:ro"
+    held = layout.common / "config"
+    carrier = leased.answers_from(layout.common)
+    base = f"{carrier}:{carrier}:rw"
+    hole = f"{held}:{held}:ro"
     assert started.index(base) < started.index(hole)
 
 
@@ -459,11 +496,11 @@ def test_a_declared_root_is_leased_with_the_repository_behind_it(
     leased = fleet_lease(repository / "mine", accessible=[AccessibleRoot(path=side)])
     layout = repository_layout(side)
 
-    assert side in leased.writable
-    assert layout.common in leased.writable
-    assert layout.private in leased.writable
-    assert other_repository in leased.writable
-    assert repository / "mine" in leased.writable
+    assert leased.writable_at(side)
+    assert leased.writable_at(layout.common)
+    assert leased.writable_at(layout.private)
+    assert leased.writable_at(other_repository)
+    assert leased.writable_at(repository / "mine")
 
 
 def test_a_commit_lands_in_a_declared_root_under_the_lease_it_gets(
@@ -515,8 +552,9 @@ def test_a_root_declared_read_only_has_nothing_writable_under_it(
         accessible=[AccessibleRoot(path=other_repository, writable=False)],
     )
 
-    assert other_repository in leased.read_only
-    assert repository_layout(other_repository).common in leased.read_only
+    assert not leased.writable_at(other_repository)
+    assert not leased.writable_at(repository_layout(other_repository).common)
+    assert leased.covers(other_repository)
     assert not any(
         other_repository == root or other_repository in root.parents
         for root in leased.writable
@@ -633,10 +671,9 @@ def test_a_worker_lease_holds_each_sibling_entry_read_only_inside_a_writable_sha
     """
     layout = repository_layout(repository / "mine")
     leased = worker_lease(repository / "mine")
-    assert layout.common in leased.writable
-    assert layout.common / "worktrees" / "other" in leased.read_only
-    assert layout.private in leased.writable
-    assert layout.private not in leased.read_only
+    assert leased.writable_at(layout.common)
+    assert not leased.writable_at(layout.common / "worktrees" / "other")
+    assert leased.writable_at(layout.private)
 
 
 def test_a_worker_lease_holds_the_shared_config_read_only(

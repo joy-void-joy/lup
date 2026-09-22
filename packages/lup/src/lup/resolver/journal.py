@@ -24,6 +24,7 @@ from pydantic import BaseModel, TypeAdapter
 from lup.coordination.mail import MessageOutstandingEvent, MessagePostedEvent
 from lup.coordination.questions import QuestionAnswer
 from lup.coordination.refs import ActorRef
+from lup.coordination.sessions import ActorRecord
 from lup.channels.models import utc_now
 from lup.observability.journal import Journal as SharedJournal
 from lup.observability.journal import JournalRecord
@@ -206,6 +207,17 @@ class RecheckRepeatedEvent(BaseModel, frozen=True):
     criteria: list[str]
 
 
+class RecheckChangedEvent(BaseModel, frozen=True):
+    """A recorded finding and a later verdict disagree about lost criteria."""
+
+    type: Literal["recheck_changed"] = "recheck_changed"
+    concern_id: str
+    occasion: str
+    commit: str
+    previous_question: MaterialQuestion
+    criteria: list[str]
+
+
 class BaseRefreshedEvent(BaseModel, frozen=True):
     """A lease made from here starts from the branch as it stands now.
 
@@ -259,10 +271,30 @@ class LeaseDriftEvent(BaseModel, frozen=True):
     found: str
 
 
+class IntegrationRecoveredEvent(BaseModel, frozen=True):
+    """An explicit integration move with its preserved recovery evidence."""
+
+    type: Literal["integration_recovered"] = "integration_recovered"
+    mode: Literal["restore-recorded", "adopt-head"]
+    recorded: str
+    before: str
+    after: str
+    evidence: str
+    retired_questions: list[str] = []
+
+
 class RunFailedEvent(BaseModel, frozen=True):
     """The run reached a terminal failure."""
 
     type: Literal["run_failed"] = "run_failed"
+    reason: str
+
+
+class ActorBindingRetiredEvent(BaseModel, frozen=True):
+    """An operator authorized replacing this binding with a fresh conversation."""
+
+    type: Literal["actor_binding_retired"] = "actor_binding_retired"
+    previous: ActorRecord
     reason: str
 
 
@@ -283,10 +315,13 @@ type RunEvent = (
     | ForeignCriteriaEvent
     | VerificationFailedEvent
     | RecheckRepeatedEvent
+    | RecheckChangedEvent
     | BaseRefreshedEvent
     | LeaseRefreshedEvent
     | LeaseDriftEvent
+    | IntegrationRecoveredEvent
     | RunFailedEvent
+    | ActorBindingRetiredEvent
 )
 """What the run did, as opposed to what one actor's session did.
 

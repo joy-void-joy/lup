@@ -5,6 +5,7 @@ import logging
 from collections.abc import Iterable, Iterator, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Literal
+from urllib.parse import urlsplit
 
 import sh
 import typer
@@ -46,14 +47,25 @@ def repository_segments(value: str) -> list[str]:
     whatever the forge's paths look like.
     """
     trimmed = value.removesuffix(".git")
-    # The scp form has no parser in the standard library: `git@host:owner/name`
-    # is not a URL, and its colon separates an authority from a path rather
-    # than a host from a port. So the two separators are read here, in the one
-    # order that tells them apart — scheme first, then whatever colon is left.
+    if "://" in trimmed:
+        parsed = urlsplit(trimmed)
+        return [
+            parsed.netloc,
+            *(part for part in PurePosixPath(parsed.path).parts if part != "/"),
+        ]
+    parts = list(PurePosixPath(trimmed).parts)
+    if len(parts) == 3:
+        try:
+            authority = urlsplit(f"//{parts[0]}")
+            port = authority.port
+        except ValueError:
+            port = None
+        else:
+            if port is not None and authority.username is None:
+                return parts
+    # The scp form's colon separates the authority from its repository path.
     # lup: ignore[string-split] — no parser reads the scp form
-    addressed = trimmed.partition("://")
-    # lup: ignore[string-split] — no parser reads the scp form
-    located = (addressed[2] or addressed[0]).partition(":")
+    located = trimmed.partition(":")
     return [
         part
         for half in (located[0], located[2])
@@ -124,8 +136,8 @@ def slug_from_remote(url: str) -> str:
     """The ``owner/name`` a remote names, empty when it names none.
 
     The pair alone, taken from the fuller reading
-    :func:`lup.policy.kernel.words.repository_reference` gives, because the
-    pair is what `gh --repo` takes and what this project passes it.
+    :func:`lup.devtools.utils.repository_reference` gives, because the pair is
+    what `gh --repo` takes and what this project passes it.
 
     Read there rather than here so one parser answers for every shape a
     remote is written in — the scp-like ``git@host:owner/name`` among them,

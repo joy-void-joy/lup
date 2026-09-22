@@ -1,5 +1,31 @@
 {
   "$defs": {
+    "ActorBindingRetiredEvent": {
+      "additionalProperties": false,
+      "description": "An operator authorized replacing this binding with a fresh conversation.",
+      "properties": {
+        "previous": {
+          "$ref": "#/$defs/ActorRecord"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "type": {
+          "const": "actor_binding_retired",
+          "default": "actor_binding_retired",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "previous",
+        "reason"
+      ],
+      "title": "ActorBindingRetiredEvent",
+      "type": "object"
+    },
     "ActorIndex": {
       "additionalProperties": false,
       "description": "Every actor a run's record names, which is every trace it can open.",
@@ -16,6 +42,41 @@
         "actors"
       ],
       "title": "ActorIndex",
+      "type": "object"
+    },
+    "ActorRecord": {
+      "additionalProperties": false,
+      "description": "What one actor needs to be reattached after a park.\n\nThe digest is recorded here rather than pushed into the runtime because\nonly this side knows both halves of the comparison. A provider that\nrestores a resumed thread's tools from its own metadata never says what\nit restored, so the answerable question is whether *we* expect the same\nschema now that we expected before the park.",
+      "properties": {
+        "actor": {
+          "$ref": "#/$defs/ActorRef"
+        },
+        "schema_digests": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "title": "Schema Digests",
+          "type": "object"
+        },
+        "session": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "actor",
+        "session",
+        "schema_digests"
+      ],
+      "title": "ActorRecord",
       "type": "object"
     },
     "ActorRef": {
@@ -114,6 +175,7 @@
     "AnyTurnBlock": {
       "discriminator": {
         "mapping": {
+          "native_activity": "#/$defs/TurnNativeActivityBlock",
           "text": "#/$defs/TurnTextBlock",
           "thinking": "#/$defs/TurnThinkingBlock",
           "tool_call": "#/$defs/TurnToolCallBlock",
@@ -133,6 +195,9 @@
         },
         {
           "$ref": "#/$defs/TurnToolResultBlock"
+        },
+        {
+          "$ref": "#/$defs/TurnNativeActivityBlock"
         }
       ]
     },
@@ -627,6 +692,61 @@
       "title": "GraphView",
       "type": "object"
     },
+    "IntegrationRecoveredEvent": {
+      "additionalProperties": false,
+      "description": "An explicit integration move with its preserved recovery evidence.",
+      "properties": {
+        "after": {
+          "title": "After",
+          "type": "string"
+        },
+        "before": {
+          "title": "Before",
+          "type": "string"
+        },
+        "evidence": {
+          "title": "Evidence",
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "restore-recorded",
+            "adopt-head"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "recorded": {
+          "title": "Recorded",
+          "type": "string"
+        },
+        "retired_questions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Retired Questions",
+          "type": "array"
+        },
+        "type": {
+          "const": "integration_recovered",
+          "default": "integration_recovered",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "mode",
+        "recorded",
+        "before",
+        "after",
+        "evidence",
+        "retired_questions"
+      ],
+      "title": "IntegrationRecoveredEvent",
+      "type": "object"
+    },
     "JoinAuditEvent": {
       "additionalProperties": false,
       "description": "The finished tree was re-checked against every parent that built it.",
@@ -1035,6 +1155,18 @@
           "title": "Prompt",
           "type": "string"
         },
+        "recheck_commit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Recheck Commit"
+        },
         "recommendation": {
           "anyOf": [
             {
@@ -1056,7 +1188,8 @@
         "closed_choices",
         "concern_id",
         "allowances",
-        "criteria"
+        "criteria",
+        "recheck_commit"
       ],
       "title": "MaterialQuestion",
       "type": "object"
@@ -1452,6 +1585,50 @@
       "title": "QuestionAskedEvent",
       "type": "object"
     },
+    "RecheckChangedEvent": {
+      "additionalProperties": false,
+      "description": "A recorded finding and a later verdict disagree about lost criteria.",
+      "properties": {
+        "commit": {
+          "title": "Commit",
+          "type": "string"
+        },
+        "concern_id": {
+          "title": "Concern Id",
+          "type": "string"
+        },
+        "criteria": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Criteria",
+          "type": "array"
+        },
+        "occasion": {
+          "title": "Occasion",
+          "type": "string"
+        },
+        "previous_question": {
+          "$ref": "#/$defs/MaterialQuestion"
+        },
+        "type": {
+          "const": "recheck_changed",
+          "default": "recheck_changed",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "concern_id",
+        "occasion",
+        "commit",
+        "previous_question",
+        "criteria"
+      ],
+      "title": "RecheckChangedEvent",
+      "type": "object"
+    },
     "RecheckRepeatedEvent": {
       "additionalProperties": false,
       "description": "A re-check reproduced a standing finding already put to the humans.\n\nThe same lost-criteria set for the same concern asks once; a later join\nthat reproduces it is recorded here instead of re-raising an identical\nquestion per join.",
@@ -1748,6 +1925,9 @@
           "$ref": "#/$defs/RecheckRepeatedEvent"
         },
         {
+          "$ref": "#/$defs/RecheckChangedEvent"
+        },
+        {
           "$ref": "#/$defs/BaseRefreshedEvent"
         },
         {
@@ -1757,7 +1937,13 @@
           "$ref": "#/$defs/LeaseDriftEvent"
         },
         {
+          "$ref": "#/$defs/IntegrationRecoveredEvent"
+        },
+        {
           "$ref": "#/$defs/RunFailedEvent"
+        },
+        {
+          "$ref": "#/$defs/ActorBindingRetiredEvent"
         }
       ]
     },
@@ -2370,6 +2556,17 @@
           "description": "Model the provider reports for this message, when it does",
           "title": "Model"
         },
+        "native": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JsonObject"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "parent_tool_call_id": {
           "anyOf": [
             {
@@ -2397,11 +2594,43 @@
       "required": [
         "role",
         "blocks",
+        "native",
         "parent_tool_call_id",
         "model",
         "message_id"
       ],
       "title": "TurnMessage",
+      "type": "object"
+    },
+    "TurnNativeActivityBlock": {
+      "additionalProperties": false,
+      "description": "Complete provider evidence with no equivalent portable content shape.",
+      "properties": {
+        "activity": {
+          "title": "Activity",
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/JsonObject"
+        },
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "type": {
+          "const": "native_activity",
+          "default": "native_activity",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "provider",
+        "activity",
+        "payload"
+      ],
+      "title": "TurnNativeActivityBlock",
       "type": "object"
     },
     "TurnStartedEvent": {

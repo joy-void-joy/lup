@@ -23,25 +23,24 @@ CLAUDE_DELIVERY: list[DeliveryFact] = [
         guarantee="ask_survives_auto_mode",
         provider="claude",
         mechanism=(
-            "a PreToolUse hook returning permissionDecision=ask forces the native"
-            " prompt in every mode, acceptEdits and bypassPermissions included"
+            "the generated PreToolUse hook refuses unresolved asks and requires"
+            " an explicit recorded reviewer answer before allowing one exact retry"
         ),
-        standing="documented",
+        standing="measured",
         fallback=(
-            "if a mode ever answered a hook ask, the relay would still hold the"
-            " question and the audit would show an execution against a pending"
-            " record — which is the shape to look for rather than a silence"
+            "generated-dispatcher fixtures verify the receipt gate; native ask"
+            " is not a human receipt, and unexpected execution is diagnosed as"
+            " in_doubt without granting future authority"
         ),
     ),
     DeliveryFact(
         guarantee="exact_call_resumes",
         provider="claude",
         mechanism=(
-            "approval resumes the exact call the hook judged; headless, a"
-            " pre-tool defer exits with the call preserved for the launcher to"
-            " resume, and the SDK's canUseTool callback awaits indefinitely"
+            "an operator answer releases one retry with the same session,"
+            " directory, payload, policy reason and edited file preimages"
         ),
-        standing="documented",
+        standing="measured",
         fallback=(
             "the fingerprint is revalidated before dispatch either way, so a"
             " resumption that reconstructed a different call is refused as a"
@@ -89,12 +88,11 @@ CLAUDE_DELIVERY: list[DeliveryFact] = [
     DeliveryFact(
         guarantee="rejection_receipt",
         provider="claude",
-        mechanism="",
-        standing="absent",
+        mechanism="an explicit rejection is recorded by the review queue",
+        standing="measured",
         fallback=(
-            "no event reports a native rejection, so it is inferred from the"
-            " exact call not executing and recorded as inferred — writing it"
-            " down as reported would record something no provider sent"
+            "absence of native execution supplies no answer; pending questions"
+            " remain pending until an explicit answer or execution observation"
         ),
     ),
     DeliveryFact(

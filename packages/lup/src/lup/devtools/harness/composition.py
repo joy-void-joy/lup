@@ -35,11 +35,13 @@ from lup.providers.codex.harness_runtime import (
     CodexCliEvidence,
     codex_capability_probes,
 )
+from lup.devtools.harness.drift import refuse_generation
 from lup.devtools.harness.generate import (
     NativeHarnessComposition,
     ProjectContent,
     claude_generation_recipe,
     codex_generation_recipe,
+    obstruction_at,
 )
 from lup.harness.evidence import WireContract
 from lup.harness.models import CapabilityEvidence, PromptDocument
@@ -223,11 +225,28 @@ class NativeTargets(BaseModel, frozen=True, arbitrary_types_allowed=True):
         return self.builders.get(name)
 
     def resolve(self, value: str, root: Path) -> list[NativeHarnessComposition]:
-        """Parse a generic CLI selector into already concrete compositions."""
+        """Parse a generic CLI selector into already concrete compositions.
+
+        The one boundary every command reaches a declaration through, so a
+        declaration that will not compile is refused here, in the words it
+        refused with, rather than travelling out as whatever its reader
+        happened to raise: a missing passage file as an interpreter traceback,
+        an invocation naming no skill as a hundred lines of pydantic field
+        context. Both are declaration errors with a fix in the declaration,
+        and this is where they are turned back into one.
+        """
+
+        def compiled(name: str, build: "TargetBuilder") -> NativeHarnessComposition:
+            """One target's whole composition, or a refusal naming what stopped it."""
+            try:
+                return build(root)
+            except Exception as refusal:
+                refuse_generation(obstruction_at(name, refusal))
+
         if value == self.every:
-            return [build(root) for build in self.builders.values()]
+            return [compiled(name, build) for name, build in self.builders.items()]
         build = self.builder(value)
         if build is not None:
-            return [build(root)]
+            return [compiled(value, build)]
         named = ", ".join([*self.builders, self.every])
         raise typer.BadParameter(f"target must be one of: {named}")

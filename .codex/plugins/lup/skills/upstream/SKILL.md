@@ -42,9 +42,14 @@ not here:
 uv run --directory refs/lup/tree/<branch> lup-devtools git worktree create fix-<name>
 ```
 
-If `refs/lup` does not resolve, the project is tracked for review and not for
-writing. `uv run lup-devtools sync setup lup <path> --mount rw` widens that,
-and it is a protected edit: put it to the user rather than writing it.
+If `refs/lup` does not resolve, this machine has not answered the requirement
+`sync.json` declares. `uv run lup-devtools sync status` names what is missing
+and the command for it: `sync remote lup <url>` for the URL this machine
+fetches from, `sync setup lup /path/to/repo` for a checkout it already has,
+then `sync fetch lup`. Both write `sync.json.local`, which is a protected
+edit: put it to the user rather than writing it. A registration the tracked
+file does not mount is tracked for review and not for writing, and widening
+that is a tracked edit and the user's too.
 
 ## 3. Make the change under lup's gate
 
@@ -54,9 +59,26 @@ Edit in that worktree, and run **lup's** gate there rather than this project's:
 uv run --directory refs/lup/tree/fix-<name> lup-devtools dev check
 ```
 
-This session's hooks enforce *this* project's policy, which is not the policy
-those files are held to. A change that passes here and fails there is a change
-that cannot land upstream.
+An explicitly granted destination worktree is judged by its own generated
+policy, while this session retains its measured boundary and approval channel.
+The launch records the accepted evaluator bytes; a writable parent directory
+or a `refs/` symlink alone supplies no repository policy grant.
+
+Generate both native trees in a newly created worktree before editing it.
+When the launch explicitly mounted the writable bare lup repository, an
+operator can accept that worktree's policy without restarting this session.
+From the adopter checkout, the operator runs:
+
+```bash
+uv run lup-devtools harness policy-refresh --nonce <launch-nonce> --repository <canonical-worktree-path>
+```
+
+This accepts only a worktree inside the original mount and belonging to that
+same Git repository. It is also the recovery after accepted generated policy
+changes: regenerate there, then have the operator refresh its snapshot. The
+requesting agent cannot approve replacement policy itself. A worktree outside
+the original mount needs a launch granting that path. Run the upstream gate
+even when its hook allows an edit; its checks also cover the completed branch.
 
 Two conventions of lup's that are easy to miss from outside it:
 

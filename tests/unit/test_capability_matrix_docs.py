@@ -36,10 +36,10 @@ def test_each_kind_of_fact_reaches_the_table_as_the_matrix_shows_it() -> None:
     assert table.headers == [
         "Capability",
         "claude-sdk-0.2.152",
-        "codex-app-server-0.144.4",
+        "codex-app-server-0.155.1",
     ]
     assert rows["steer"] == ["—", "✅"]
-    assert rows["resume"] == ["✅", "without a fresh dynamic tool"]
+    assert rows["resume"] == ["✅", "✅"]
 
 
 def test_probed_matrix_is_consistent() -> None:
@@ -48,7 +48,7 @@ def test_probed_matrix_is_consistent() -> None:
 
     assert [entry.name for entry in matrix] == [
         "claude-sdk-0.2.152",
-        "codex-app-server-0.144.4",
+        "codex-app-server-0.155.1",
     ]
     rows = [cell.capability for cell in matrix[0].cells]
     for entry in matrix:
@@ -59,7 +59,7 @@ def test_probed_matrix_is_consistent() -> None:
         for entry in matrix
     }
     assert by_name["claude-sdk-0.2.152"]["live_events"] is True
-    assert by_name["codex-app-server-0.144.4"]["live_events"] is True
+    assert by_name["codex-app-server-0.155.1"]["live_events"] is True
     assert by_name["claude-sdk-0.2.152"]["interrupt"] is True
-    assert by_name["codex-app-server-0.144.4"]["fork"] is True
+    assert by_name["codex-app-server-0.155.1"]["fork"] is True
     assert by_name["claude-sdk-0.2.152"]["fork"] is True

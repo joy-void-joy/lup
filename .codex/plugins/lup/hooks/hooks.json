@@ -37,6 +37,16 @@
           }
         ],
         "matcher": "Bash|web_fetch|apply_patch|collaborationspawn_agent|Artifact|Skill|EnterWorktree"
+      },
+      {
+        "hooks": [
+          {
+            "command": "sh \"$PLUGIN_ROOT/hooks/scripts/coordination_delivery.sh\" || exit 0",
+            "timeout": 10,
+            "type": "command"
+          }
+        ],
+        "matcher": ""
       }
     ],
     "SessionEnd": [
@@ -44,6 +54,17 @@
         "hooks": [
           {
             "command": "sh \"$PLUGIN_ROOT/hooks/scripts/coordination_departure.sh\" || exit 0",
+            "timeout": 10,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "sh \"$PLUGIN_ROOT/hooks/scripts/coordination_arrival.sh\" || exit 0",
             "timeout": 10,
             "type": "command"
           }
@@ -62,6 +83,15 @@
       }
     ],
     "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "sh \"$PLUGIN_ROOT/hooks/scripts/coordination_arrival.sh\" || exit 0",
+            "timeout": 10,
+            "type": "command"
+          }
+        ]
+      },
       {
         "hooks": [
           {

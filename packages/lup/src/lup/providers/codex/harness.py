@@ -10,11 +10,13 @@ import tomlkit
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.subagents import CodexModelTiers
 from lup.providers.drift_prompt import drift_hook
+from lup.providers.peer_delivery import delivery_artifacts, delivery_command
 from lup.providers.roster_prompt import (
     departure_hook,
     folded,
     prompt_hook,
     store_artifacts,
+    wake_hook,
 )
 from lup.providers.subagent_cleanup import cleanup_hooks
 from lup.types import ModelTier
@@ -70,6 +72,7 @@ from lup.policy.bundle import (
 from lup.policy.dispatcher import (
     DispatcherDeclaration,
     compile_dispatcher,
+    edit_evaluator_artifact,
     dispatcher_banner,
     guarded_hook_command,
     hook_guard_artifact,
@@ -822,12 +825,32 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                 "hooks": [policy_hook],
             }
         ]
+        delivery = [
+            {
+                "matcher": "",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": delivery_command("PLUGIN_ROOT"),
+                        "timeout": 10,
+                    }
+                ],
+            }
+        ]
         # Two folds under the one event, kept side by side rather than merged:
         # who else is here, and whether what this project is built on still
         # stands at one commit. Both are context and neither can refuse, so
         # the runtime runs whichever of them the project declared.
         roster = folded(
             [
+                wake_hook(
+                    Path(f".codex/plugins/{self.plugin_name}"),
+                    "PLUGIN_ROOT",
+                    source,
+                    "codex",
+                    ("SessionStart", CODEX_PROMPT_EVENT),
+                    CODEX_LOGIN.config_home_env,
+                ),
                 prompt_hook(
                     Path(f".codex/plugins/{self.plugin_name}"),
                     "PLUGIN_ROOT",
@@ -866,6 +889,8 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                     event: (
                         observed
                         if event == CODEX_DISPATCHER.observation_event
+                        else [*decided, *delivery]
+                        if event == "PreToolUse"
                         else decided
                     )
                     for event in CODEX_DISPATCHER.hook_events
@@ -878,7 +903,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
         evidence = {
             "schemaVersion": 1,
             "policyIds": source.policy_ids,
-            "askApproximation": "asks defer only on PermissionRequest; PreToolUse fails closed",
+            "askApproximation": "asks require explicit exact review receipts at PreToolUse and PermissionRequest",
         }
         return ArtifactTree(
             artifacts=[
@@ -909,7 +934,15 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                 hook_guard_artifact(
                     Path(f".codex/plugins/{self.plugin_name}"), source.id
                 ),
+                edit_evaluator_artifact(
+                    Path(f".codex/plugins/{self.plugin_name}"),
+                    CODEX_DISPATCHER,
+                    source.id,
+                ),
                 *roster.artifacts,
+                *delivery_artifacts(
+                    Path(f".codex/plugins/{self.plugin_name}"), source.id
+                ),
                 *departure.artifacts,
                 *cleanup.artifacts,
                 *store_artifacts(Path(f".codex/plugins/{self.plugin_name}"), source.id),

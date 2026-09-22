@@ -38,8 +38,8 @@ def test_the_offered_defaults_produce_an_agent_that_can_read() -> None:
     # Generosity for reads is not generosity for losses.
     assert verdict("rm notes.md", rules).effect == "ask"
     assert verdict("sudo apt install x", rules).effect == "ask"
-    # And an empty table is the verdict the library used to ship by default:
-    # a prompt on every command, which is a working agent nobody can stand
+    # And an empty table is what a library shipping no vocabulary gives: a
+    # prompt on every command, which is a working agent nobody can stand
     # rather than one that cannot run.
     assert verdict("ls -la", []).effect == "ask"
 

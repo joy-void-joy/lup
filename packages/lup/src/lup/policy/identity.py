@@ -23,6 +23,10 @@ from lup.types import EnvVars
 AGENT_IDENTITY_ENV = "LUP_AGENT_IDENTITY"
 """Environment variable naming the declared identity of a launched session."""
 
+# lup: ignore[constant-declaration] — a cross-process context key, not a policy preference
+POLICY_ROOT_ENV = "LUP_POLICY_ROOT"
+"""Application environment for operator review commands, separate from native cwd."""
+
 
 class ConcernAllowance(StrEnum):
     """One edit gate a concern needs, which only a human can grant it.

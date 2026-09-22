@@ -73,6 +73,7 @@ from lup.harness.codescan.boundaries import (
     SEAM_RULE,
 )
 from lup.harness.codescan.capabilities import ABSTRACT_DECLARATION_RULE, CAPABILITY_RULE
+from lup.harness.codescan.references import STALE_REFERENCE_RULE
 from lup.harness.codescan.dispatch import DISPATCH_RULE
 from lup.harness.codescan.narrowing import CHAIN_RULE
 from lup.harness.codescan.portable import PORTABLE_RULE, CompositionRule
@@ -93,6 +94,8 @@ from lup.harness.codescan.common import (
 )
 from lup.harness.contracts import Spelling, Unsupported
 from lup.policy.kernel.edit import (
+    HISTORICAL_VOICE_RE,
+    historical_voice_sites,
     namedtuple_sites,
     noqa_sites,
     pyright_ignore_sites,
@@ -269,6 +272,55 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         ],
         message="Never use # noqa — fix the lint issue properly",
         context="comment",
+    ),
+    AntiPattern(
+        id="historical-voice",
+        pattern=HISTORICAL_VOICE_RE,
+        matcher=Matcher(select=historical_voice_sites),
+        examples=[
+            RuleExample(
+                code="# the home a launch selects, previously read from the environment",
+                verdict="flagged",
+            ),
+            RuleExample(
+                code="# the receipt this replaced is gone; see #436 for why",
+                verdict="flagged",
+            ),
+            RuleExample(
+                code="# it used to filter, and the integration branch lost",
+                verdict="flagged",
+            ),
+            RuleExample(
+                code="# the old fallback wrote nothing and said nothing",
+                verdict="flagged",
+            ),
+            RuleExample(
+                code="# kept public during the capability migration",
+                verdict="flagged",
+            ),
+            RuleExample(
+                code="# the home a launch selects",
+                verdict="cleared",
+            ),
+            RuleExample(
+                code='colour = "#264F78"  # the terminal selection background',
+                verdict="cleared",
+            ),
+            RuleExample(
+                code="# the key used to select a home",
+                verdict="cleared",
+            ),
+        ],
+        message=(
+            "A comment or docstring says what the code is, not how it came to "
+            "be: a phrase about a prior state, or an issue number standing in "
+            "for the reason, dates the moment it is read rather than the "
+            "moment it was written. Say what holds now; the change belongs in "
+            "the commit message, and a decision worth keeping belongs where it "
+            "is looked up. Where an external tracker's number is the reason a "
+            "workaround exists, `# lup: ignore[historical-voice]` carries it"
+        ),
+        context="prose",
     ),
     AntiPattern(
         id="generic-base",
@@ -1512,6 +1564,7 @@ PROJECT_RULES: list[ProjectRule] = [
     KERNEL_IMPORTS_RULE,
     LIBRARY_DEFAULT_RULE,
     CONSTANT_DECLARATION_RULE,
+    STALE_REFERENCE_RULE,
 ]
 """Every rule this library reads off the whole project.
 

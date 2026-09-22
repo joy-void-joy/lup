@@ -31,12 +31,13 @@ from pathlib import Path
 
 import sh
 import typer
+from lup.policy.identity import POLICY_ROOT_ENV
 from pydantic import BaseModel, Field
 from rich.console import Console
 from rich.live import Live
 from rich.text import Text
 
-from lup.devtools.harness.preflight import LaunchSentinels
+from lup.devtools.harness.preflight import LaunchSentinels, ROOT_VARIABLE
 from lup.harness.credential import committer, fleet_rewrites
 from lup.harness.devices import (
     Device,
@@ -55,7 +56,7 @@ from lup.harness.notice import Banner, Notice
 from lup.harness.releases import resolved_agent_clis
 from lup.harness.requirements import Manifest
 from lup.harness.terminal import host_timezone
-from lup.providers.login import ProviderLogin
+from lup.providers.login import NativeHomeScope, ProviderLogin
 from lup.sandbox.attribution import WRITE_REFUSAL_MARKERS
 from lup.sandbox.rail import (
     AccessibleRoot,
@@ -104,7 +105,7 @@ def checkout_tag(root: Path) -> str:
     return f"lup-agent:{root.name}"
 
 
-def state_volume_name(root: Path) -> str:
+def state_volume_name(root: Path, scope: NativeHomeScope | None = None) -> str:
     """The volume carrying this project's container-side config home.
 
     Per repository, and keyed on the shared git directory because that is the
@@ -119,12 +120,14 @@ def state_volume_name(root: Path) -> str:
     artifacts: the trust a fresh config home would otherwise discard, the
     session state a ``--continue`` reopens, and the stored login.
 
-    What it costs is that worktrees of one repository share a config home,
-    so trust and session history are visible across them. That is the
-    arrangement a host home already has, and it is the trade the name makes
-    plain.
+    An explicit scope partitions this state by the selected settings. Sessions
+    with different base settings then cannot rewrite one another's home;
+    sessions with the same scope retain their native login and history.
     """
-    return f"lup-cfg-{repository_layout(root).name()}"
+    repository_volume = f"lup-cfg-{repository_layout(root).name()}"
+    return (
+        scope.volume_name(repository_volume) if scope is not None else repository_volume
+    )
 
 
 def environment_directory(root: Path, cache: Path | None = None) -> Path:
@@ -1573,6 +1576,7 @@ def contained_argv(
     accessible: list[AccessibleRoot] = [],
     lease: Lease | None = None,
     devices: list[Device] = [],
+    state_scope: NativeHomeScope | None = None,
 ) -> list[str]:
     """The argv that opens a session in this project's container.
 
@@ -1650,7 +1654,8 @@ def contained_argv(
     name_for_checkout(tag, checkout_tag(root), client)
     reached_at = start_egress(image.egress, root.name, client, root)
     said.add(image.egress.notice(root.name))
-    said.add(superseded_volume_notice(root, client, existing_volumes(client)))
+    if state_scope is None:
+        said.add(superseded_volume_notice(root, client, existing_volumes(client)))
     # Started before the container rather than beside it, because a pipe with
     # no reader blocks its writer: a sign-in that raced the listener would
     # hang on the one step the whole bridge exists to unblock.
@@ -1742,7 +1747,7 @@ def contained_argv(
         gid=root.stat().st_gid,
         writable=lease.writable,
         read_only=lease.read_only,
-        state_volume=state_volume_name(root),
+        state_volume=state_volume_name(root, state_scope),
         config_home_env=login.config_home_env,
         credential_file=login.credentials_file,
         credential_renewable=login.renewable,
@@ -1760,7 +1765,7 @@ def contained_argv(
         terminal=terminal.environment,
         streams=streams,
         proxy_address=reached_at,
-        boundary=sentinels.within(),
+        boundary={**sentinels.within(), ROOT_VARIABLE: str(root.resolve())},
         inherited_environment=inherited_environment,
         environments=held_environments(root, accessible, image.project_environment),
         devices=granted_devices.granted,
@@ -1834,6 +1839,69 @@ def written_wrapper(path: Path, argv: list[str], program: str) -> Path:
     return path
 
 
+def contained_cli(
+    wrapper: Path,
+    image: Image,
+    manifest: Manifest,
+    root: Path,
+    program: str,
+    login: ProviderLogin,
+    lease: Lease | None = None,
+    credential: Path | None = None,
+    editor_rendezvous: Path | None = None,
+    sentinels: LaunchSentinels = LaunchSentinels(),
+    accessible: list[AccessibleRoot] = [],
+    devices: list[Device] = [],
+) -> Path:
+    """The program a session is started as, so it opens inside a container.
+
+    What a :class:`~lup.providers.selection.SessionRequest` asking for
+    ``outer`` containment names in ``contained_program``. The seam is the
+    program on both runtimes -- Claude's SDK spawns whatever ``cli_path``
+    names and hands it the arguments it would have handed ``claude``, Codex
+    takes the same question as ``executable`` -- so a session is contained by
+    pointing that field here, and neither adapter learns anything about
+    containers.
+
+    ``program`` is required rather than defaulted because a CLI's own name is
+    that provider's vocabulary and this builder is neutral between them. The
+    caller naming it is already the composition root that picked the adapter.
+
+    ``lease`` defaults to the mounts that confine this session to the tree it
+    was given, which is what a session opened by a program rather than by a
+    person is almost always for. A session meant to reach every checkout the
+    way a launched one does passes :func:`~lup.sandbox.rail.lease_for`
+    instead, and one that may write nothing passes the lease it would have
+    had through :func:`~lup.sandbox.rail.demoted`.
+
+    The streams are fixed at ``piped`` rather than offered. A session opened
+    through the SDK speaks a protocol over stdin and has nobody at a
+    terminal, so either other state would leave its runtime talking to a
+    stream nothing reads.
+    """
+    root = root.resolve()
+    opening = contained_argv(
+        image,
+        manifest,
+        root,
+        editor_rendezvous,
+        credential,
+        login,
+        streams="piped",
+        sentinels=sentinels,
+        accessible=accessible,
+        lease=worker_lease(root) if lease is None else lease,
+        devices=devices,
+    )
+    # Bind recovery to the same source used for home preparation, regardless
+    # of the caller's later working directory or inherited policy provenance.
+    opening.extend(["env", f"{POLICY_ROOT_ENV}={root}"])
+    if login.home_preparation is not None:
+        preparation = login.home_preparation.command(root, Path(image.config_home))
+        typer.echo(str(sh.Command(opening[0])(*opening[1:], *preparation)), nl=False)
+    return written_wrapper(wrapper, opening, program)
+
+
 def worker_cli(
     wrapper: Path,
     image: Image,
@@ -1850,28 +1918,16 @@ def worker_cli(
 ) -> Path:
     """The program to start one resolver actor as, so it runs in its own container.
 
-    :mod:`lup.sandbox.rail` argues that confinement has to be a mount fact
-    rather than a judgement, because deciding from a command's text where it
-    will act is undecidable and ``cd ../other && git commit`` walks past any
-    policy that tries. That argument is right and was being applied to the
-    wrong population: a table computed when a *session* starts covers the
-    checkouts existing at that instant, which is every branch an operator is
-    landing and no worktree a run leases, since those are cut afterwards. The
-    concurrency the rail was built for is between actors, and this is where
-    their boundary is taken.
-
-    The seam is the program, on both runtimes. Claude's SDK spawns whatever
-    ``cli_path`` names and hands it the arguments it would have handed
-    ``claude``; Codex takes the same question as ``executable``. So an actor is
-    opened by pointing that field at the wrapper this writes, and neither
-    adapter learns anything about containers -- from where they stand a program
-    was named and started.
-
-    ``program`` is required rather than defaulted because a CLI's own name is
-    that provider's vocabulary, and this builder is neutral between them. The
-    caller naming it is already the composition root that picked the adapter,
-    so the name is spelled where the runtime is chosen instead of a second
-    place that would have to be kept agreeing with it.
+    :func:`contained_cli` with the lease an actor gets, which is the whole of
+    what this adds. :mod:`lup.sandbox.rail` argues that confinement has to be
+    a mount fact rather than a judgement, because deciding from a command's
+    text where it will act is undecidable and ``cd ../other && git commit``
+    walks past any policy that tries. That argument is right and was being
+    applied to the wrong population: a table computed when a *session* starts
+    covers the checkouts existing at that instant, which is every branch an
+    operator is landing and no worktree a run leases, since those are cut
+    afterwards. The concurrency the rail was built for is between actors, and
+    this is where their boundary is taken.
 
     ``lease_root`` is both the tree this actor was given and the checkout its
     container opens on, which is not two decisions that happen to agree: every
@@ -1882,32 +1938,21 @@ def worker_cli(
     ``read_only`` is what a reviewer sets, and its lease is the worker's with
     nothing writable rather than a table of its own -- built from the same
     call, the two cannot come to hold different ideas of which checkouts exist.
-
-    Everything but the mount table is the session's: :func:`contained_argv`
-    resolves the image and its shared layers, the egress network, the
-    credential, the git identity and remote rewrites, and the same-path
-    mounting the rail depends on. The streams are fixed at ``piped`` rather
-    than offered, because an actor has no terminal and does not capture -- it
-    speaks a protocol over stdin, and either other state would leave its
-    runtime talking to a stream nothing reads.
     """
     lease = worker_lease(lease_root)
-    return written_wrapper(
+    return contained_cli(
         wrapper,
-        contained_argv(
-            image,
-            manifest,
-            lease_root,
-            editor_rendezvous,
-            credential,
-            login,
-            streams="piped",
-            sentinels=sentinels,
-            accessible=accessible,
-            lease=demoted(lease) if read_only else lease,
-            devices=devices,
-        ),
+        image,
+        manifest,
+        lease_root,
         program,
+        login,
+        lease=demoted(lease) if read_only else lease,
+        credential=credential,
+        editor_rendezvous=editor_rendezvous,
+        sentinels=sentinels,
+        accessible=accessible,
+        devices=devices,
     )
 
 

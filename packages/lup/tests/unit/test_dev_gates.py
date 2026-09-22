@@ -197,7 +197,7 @@ def worked_on(root: Path, branch: str, carries: str = "work.txt") -> None:
 def test_a_branch_deleted_after_it_landed_fires_from_what_was_recorded(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The branch this gate used to be silent about forever.
+    """The branch a gate reading only live refs is silent about forever.
 
     Landing and deleting in one sweep, with no check in between, left nothing
     to read: containment lives on the ref, the deletion takes the ref, and

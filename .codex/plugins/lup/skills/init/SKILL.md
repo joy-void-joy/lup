@@ -285,16 +285,19 @@ runtime is a later removal somebody decides on its own terms.
 
 #### 3. Initialize upstream sync
 
-Baseline the upstream checkpoint at *the recorded commit*, not at whatever the
-remote's default branch points to. `--synced` reads the checkpoint from the
-named checkout's HEAD, so that checkout has to be standing at the recorded
-commit when this runs:
+Baseline the upstream checkpoint at *the recorded commit*. Register the
+selected branch, fetch it, and record the exact commit already consumed:
 
 ```
-uv run lup-devtools sync setup lup <lup-checkout> --branch <branch> --synced
+uv run lup-devtools sync setup lup <lup-checkout> --branch <branch>
+uv run lup-devtools sync fetch lup
+uv run lup-devtools sync mark-synced lup --at <commit>
 ```
 
-`setup` records that checkout, the branch settled on above, and its HEAD as the checkpoint, so `$lup:update` only shows commits that land afterward. Plain `sync mark-synced lup` is wrong here: the shipped `sync.json` entry carries a URL and no branch, so it clones the remote's default branch and checkpoints *that* HEAD — so every commit the project already carries comes back as unported work once the branch merges.
+`setup` records the checkout and branch. Review reads the fetched upstream
+ref, preserving any work in the checkout. The checkpoint is shared by all
+worktrees of this consuming repository. `--synced` is appropriate only when
+the selected review ref itself is exactly the commit already consumed.
 
 A project that already consumed the library, and knows which commit it took, names it rather than moving a checkout to stand on it:
 
@@ -303,7 +306,6 @@ uv run lup-devtools sync mark-synced lup --at <commit>
 ```
 
 That is the case an adoption mid-stream is always in — the code is already here, and what is missing is only the record of how far it reached. Without the commit, marking synced claims every commit that landed afterward as reviewed, which is the one thing the checkpoint exists to prevent.
-
 That checkout is one you provide: clone the library beside the project, then
 `git switch --detach <commit>` it to the recorded commit. Not this project's
 own checkout — it stands at that commit too, and naming it makes the review
@@ -495,7 +497,22 @@ Open `uv run lup-devtools dev check` with `exec_command`, which holds a live PTY
 
 3. Run `uv run lup --help` to verify CLI
 4. Verify the feedback loop command references the right scripts
-5. Regenerate both harnesses and check that the rendered guidance accurately describes the domain
+5. Declare the domain's external programs in `harness/content/requirements.py`
+   using `Requirement`: name their purpose, execution location, smallest real
+   operation, failure consequence, and recovery. Run
+   `uv run lup-devtools harness requirements` to exercise host prerequisites,
+   including the disposable Python sandbox. A daemon answering is not proof
+   that an expression evaluates. For container sessions, also run
+   `uv run lup-devtools harness requirements --inside --launch-only`; full
+   `--inside` checks additionally exercise a native model turn and require its
+   configured login. Report any unexercised checks explicitly.
+6. Repair authorized local prerequisites and rerun their checks. Where the
+   report names an endpoint override, missing service, group membership, or
+   session restart, give that specific recovery; do not call setup complete
+   merely because the executable exists. Host administration and a fresh
+   login session remain actions for the operator when this session cannot
+   perform them.
+7. Regenerate both harnesses and check that the rendered guidance accurately describes the domain
 
 ## After Initialization
 

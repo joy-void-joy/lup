@@ -188,7 +188,9 @@ class JoinReport(BaseModel, frozen=True, extra="forbid"):
         description=(
             "Why you stopped with parents still on the table, when nothing "
             "asked you to. An incompletion with a cause is answerable; one "
-            "without a cause reads as an unexplained failure."
+            "without a cause reads as an unexplained failure. An unfinished join "
+            "with a blocker and no pending question opens a recovery question "
+            "containing this complete text."
         ),
     )
 
@@ -264,7 +266,7 @@ def create_join_tools(
     The lease is bound here rather than taken as an argument, so a merger
     structurally cannot land a parent into somebody else's tree.
     """
-    desk = JoinDesk(run_dir)
+    desk = JoinDesk(run_dir, concern_id)
     mailbox = QuestionMailbox(run_dir)
     process = launcher if launcher is not None else LocalProcessLauncher()
     worktrees = WorktreeOrchestrator(process, lease_root)

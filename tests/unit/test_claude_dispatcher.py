@@ -68,6 +68,17 @@ def edit_payload(path: str, old: str, new: str, replace_all: bool) -> JsonObject
     }
 
 
+@pytest.mark.parametrize(
+    "payload", [None, [], {}, {"tool_name": "Bash", "tool_input": {}}]
+)
+def test_malformed_payload_fails_closed(payload: object) -> None:
+    decision = decide(payload)
+    specific = decision["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    assert specific["permissionDecision"] == "deny"
+    assert "could not judge" in str(specific["permissionDecisionReason"])
+
+
 def test_a_replace_all_edit_is_judged_rather_than_refused() -> None:
     """Every occurrence is spliced, so the rules decide instead of erroring.
 
@@ -86,7 +97,7 @@ def test_a_preimage_that_is_absent_is_still_a_malformed_edit() -> None:
     decision = decide(edit_payload(MULTI_SITE, "no-such-text", "x", True))
     specific = decision["hookSpecificOutput"]
     assert isinstance(specific, dict)
-    assert specific["permissionDecision"] == "ask"
+    assert specific["permissionDecision"] == "deny"
     assert "does not occur" in str(specific["permissionDecisionReason"])
 
 
@@ -95,7 +106,7 @@ def test_an_ambiguous_single_edit_still_requires_an_unambiguous_preimage() -> No
     decision = decide(edit_payload(MULTI_SITE, "PathRoleRow", "RoleRow", False))
     specific = decision["hookSpecificOutput"]
     assert isinstance(specific, dict)
-    assert specific["permissionDecision"] == "ask"
+    assert specific["permissionDecision"] == "deny"
     assert "exactly once" in str(specific["permissionDecisionReason"])
 
 
@@ -136,7 +147,9 @@ def test_a_declared_test_root_is_not_judged_against_production_conventions() -> 
     assert "small safe edit" in str(guarded["permissionDecisionReason"])
 
 
-def test_an_overwide_suppression_is_placed_rather_than_left_to_the_author() -> None:
+def test_an_overwide_suppression_is_placed_rather_than_left_to_the_author(
+    tmp_path: Path,
+) -> None:
     """The gate rewrites the call instead of making the author budget columns.
 
     An inline directive whose reason outgrows the line is what pushes an agent
@@ -144,15 +157,17 @@ def test_an_overwide_suppression_is_placed_rather_than_left_to_the_author() -> N
     above, so the reason survives whole and nobody had to choose.
     """
     reason = "a justification long enough that keeping it inline outgrows the line"
-    decision = decide(
-        edit_payload(
-            "packages/lup/src/lup/devtools/dev/antipatterns.py",
+    payload = {
+        **edit_payload(
+            str(Path("packages/lup/src/lup/devtools/dev/antipatterns.py").resolve()),
             "from lup.devtools.utils import output_json",
             f"from typing import Any  # lup: ignore[any-type] — {reason}",
             False,
-        )
-    )
-
+        ),
+        "cwd": str(tmp_path),
+        "session_id": "requester",
+    }
+    decision = decide(payload)
     specific = decision["hookSpecificOutput"]
     assert isinstance(specific, dict)
     placed = specific["updatedInput"]
@@ -285,8 +300,28 @@ def foreign_verdict(path: Path, old: str, new: str, cwd: Path) -> tuple[str, str
     )
 
 
+def ownership_context(accessible: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Measure the file grant separately from the policy ownership under test."""
+    caller = accessible.parent / "caller"
+    initialized_repo(caller, accessible.parent / "caller-hooks")
+    ledger = caller / ".lup" / "preflight" / "ownership.json"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text(
+        json.dumps(
+            {
+                "writable_roots": [str(caller), str(accessible)],
+                "read_only_roots": [],
+                "destination_policies": [],
+            }
+        )
+    )
+    monkeypatch.setenv("LUP_BOUNDARY_NONCE", "ownership")
+    return caller
+
+
 def test_another_repositorys_file_is_not_judged_by_this_projects_conventions(
     other_repository: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The defect #206 and #188 describe, at the dispatcher a session runs.
 
@@ -300,7 +335,7 @@ def test_another_repositorys_file_is_not_judged_by_this_projects_conventions(
         other_repository / "src" / "theirs.py",
         "value = 1",
         "from typing import Any",
-        Path.cwd(),
+        ownership_context(other_repository, monkeypatch),
     )
 
     assert effect == "ask"
@@ -399,6 +434,7 @@ def unversioned_directory(tmp_path: Path) -> Path:
 
 def test_a_note_written_outside_every_repository_is_not_this_projects_feedback(
     unversioned_directory: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A `# lup:` marker is this project's review instrument, not a syntax.
 
@@ -408,7 +444,8 @@ def test_a_note_written_outside_every_repository_is_not_this_projects_feedback(
     means an agent cannot write down a probe *of* this policy anywhere the
     policy is not, which is the one place such a probe belongs.
     """
-    effect, reason = note_verdict(str(unversioned_directory / "scratch.py"), Path.cwd())
+    caller = ownership_context(unversioned_directory, monkeypatch)
+    effect, reason = note_verdict(str(unversioned_directory / "scratch.py"), caller)
 
     assert effect == "allow"
     assert "feedback" not in reason
@@ -670,7 +707,7 @@ def test_an_unreadable_target_asks_instead_of_letting_the_edit_through() -> None
 
     specific = decision["hookSpecificOutput"]
     assert isinstance(specific, dict)
-    assert specific["permissionDecision"] == "ask"
+    assert specific["permissionDecision"] == "deny"
 
 
 def test_a_remote_read_runs_where_the_boundary_already_grants_it() -> None:
@@ -1237,6 +1274,7 @@ def escalated_reason_under(
     payload = {
         **bash_payload("# lup: escalate[sandbox]: the host has it\nls"),
         "cwd": str(root),
+        "session_id": "requester",
     }
     specific = decide_from(payload, root)["hookSpecificOutput"]
     assert isinstance(specific, dict)
@@ -1301,7 +1339,9 @@ def test_a_write_announces_what_its_own_prompt_will_not_show() -> None:
     """
     carrying = "value: Any = 1  # lup: ignore[any-type]\n"
     decision = decide(created("src/lup_template/zz_probe.py", carrying))
-    announcement = decision["systemMessage"]
+    specific = decision["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    announcement = specific["permissionDecisionReason"]
 
     assert isinstance(announcement, str)
     assert "arrives carrying antipattern suppressions" in announcement
@@ -1325,3 +1365,33 @@ def test_a_shell_prompt_is_not_told_twice() -> None:
     decision = decide({"tool_name": "Bash", "tool_input": {"command": "rm -rf src"}})
 
     assert "systemMessage" not in decision
+
+
+@pytest.mark.parametrize(
+    ("prose", "refused"),
+    [
+        ('"""Reflection gate, previously a flag on the session."""', True),
+        ('"""Reflection gate, one verdict per output."""', False),
+        ("# previously a flag on the session", True),
+        ("# one verdict per output", False),
+    ],
+    ids=["docstring-prior-state", "docstring-clean", "comment-prior-state", "clean"],
+)
+def test_prose_narrating_a_change_is_refused_wherever_it_is_written(
+    prose: str, refused: bool
+) -> None:
+    """The gate reads a sentence wherever one is written.
+
+    A docstring carries no inline directive, so the whole-file audit skips it
+    and this gate is the only surface that reads it. Covered here rather than
+    by the rule's own examples, which both surfaces have to answer and one of
+    them structurally cannot.
+    """
+    anchor = "class ReflectionGate"
+    target = "packages/lup/src/lup/orchestration/reflection.py"
+    decision = decide(edit_payload(target, anchor, f"{prose}\n{anchor}", False))
+
+    specific = decision["hookSpecificOutput"]
+    assert isinstance(specific, dict)
+    reason = str(specific["permissionDecisionReason"])
+    assert ("historical-voice" in reason) is refused

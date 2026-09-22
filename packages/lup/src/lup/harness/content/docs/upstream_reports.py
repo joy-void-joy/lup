@@ -123,6 +123,7 @@ All three share the property that makes them expensive: **the command does not
 run, prints the failure on its own line, and returns what reads exactly like a
 successful run with no output.** A `grep` that matched nothing and a `grep`
 that never executed are indistinguishable to the caller.""",
+    filed="https://github.com/anthropics/claude-code/issues/95611",
 )
 """The shape-check over-match, and the sandbox failures found beside it.
 
@@ -285,6 +286,7 @@ control.
 in the self-description line, which is exactly the line a reader acts on: it
 states the name other sessions use to reach this one. Two such lines side by
 side read as one session listed twice.""",
+    filed="https://github.com/anthropics/claude-code/issues/95610",
 )
 """Two live sessions sharing a ref, and the four sends that bound the harm.
 

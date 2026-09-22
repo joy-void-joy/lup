@@ -1,8 +1,8 @@
 """Prose a content module authors as Markdown, in the file beside the module.
 
-Where a skill's words used to live: inside an ``r\"\"\"…\"\"\"`` in Python, with
-every path, count and description spliced in by f-string. Two things were
-wrong with that, and only one of them is about readability.
+Not an ``r\"\"\"…\"\"\"`` in Python with every path, count and description spliced
+in by f-string. Two things are wrong with that, and only one of them is about
+readability.
 
 The first is that an f-string has no choke point. A value entering prose that
 way arrives however it was spelled, and a backtick closes the code span it
@@ -29,7 +29,7 @@ Python saying which one is read — where it is typed and reviewed.
 
 import importlib.util
 from functools import cache
-from pathlib import Path
+from pathlib import Path, PurePath
 
 from jinja2 import Environment, StrictUndefined
 from markdown_it import MarkdownIt
@@ -84,6 +84,18 @@ class PassageMark(BaseModel, frozen=True):
     """The line after it, where the words this marker names begin."""
 
 
+def prose_beside(module_file: str) -> str:
+    """What the prose for one module file is called, in the same directory.
+
+    The naming rule on its own, one file name to another. :func:`passage_path`
+    resolves a module to its file and asks this; the scaffold's coherence
+    check walks another repository's extracted tree and asks the same question
+    of a path it has no way to import. One definition, so the two cannot come
+    to disagree about which files are the halves of one declaration.
+    """
+    return f"{PurePath(module_file).stem}{PASSAGE_SUFFIX}"
+
+
 def passage_path(module: str) -> Path:
     """Where this module's prose is authored.
 
@@ -94,7 +106,7 @@ def passage_path(module: str) -> Path:
     if spec is None or spec.origin is None:
         raise ValueError(f"no module {module} to read a passage beside")
     beside = Path(spec.origin)
-    return beside.parent / f"{beside.stem}{PASSAGE_SUFFIX}"
+    return beside.parent / prose_beside(beside.name)
 
 
 def section_named(content: str) -> str:

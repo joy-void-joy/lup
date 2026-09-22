@@ -33,6 +33,7 @@ import lup.devtools.dev.policy_explain as policy_explain
 import lup.devtools.dev.questions as questions_mod
 import lup.devtools.dev.reach as reach
 import lup.devtools.dev.scaffold as scaffold_mod
+import lup.devtools.dev.scaffold_fit as scaffold_fit
 import lup.devtools.dev.update as update_mod
 import lup.devtools.dev.migrations as migrations
 import lup.devtools.dev.preservation as preservation
@@ -398,6 +399,15 @@ def create_dev_app(
                 "the loop while a change is moving, not the bar a commit passes",
             ),
         ] = False,
+        base: Annotated[
+            str | None,
+            typer.Option(
+                "--base",
+                help="Judge removed capabilities from the merge base with this "
+                "ref instead of the one detection reaches, for a checkout whose "
+                "base it cannot work out",
+            ),
+        ] = None,
     ) -> None:
         """Run ruff format, ruff check, pyright, and pytest. Read-only by default."""
         declarations = declared()
@@ -442,6 +452,7 @@ def create_dev_app(
             ledger=ledger,
             scaffold_source=declarations.scaffold,
             spread=declarations.spread,
+            migration_base=check.named_gate_base(base) if base is not None else None,
         )
 
     # -- test command --
@@ -775,6 +786,12 @@ def create_dev_app(
 
     @app.command("undo")
     def undo_cmd(
+        repair: Annotated[
+            bool,
+            typer.Option(
+                "--repair", help="Quarantine empty undo refs that break Git fetch"
+            ),
+        ] = False,
         take: Annotated[
             str,
             typer.Option("--take", help="Snapshot the tree now, naming why"),
@@ -788,7 +805,7 @@ def create_dev_app(
             typer.Option("--keep", help="Keep at most this many snapshots"),
         ] = None,
     ) -> None:
-        """List the recoverable snapshots of this tree, or take and expire them.
+        """List, take, expire, or repair recoverable snapshots of this tree.
 
         Restoring is deliberately not offered here. Putting a snapshot back
         overwrites present work with past work -- the same class of act as
@@ -797,6 +814,22 @@ def create_dev_app(
         currently there.
         """
         root = project_root()
+        if repair:
+            try:
+                for path in undo.repair_refs(root):
+                    typer.echo(f"quarantined broken undo ref: {path}")
+            except OSError as error:
+                typer.echo(
+                    f"Undo repair stopped: {error}. Check active ref locks and directory permissions before retrying.",
+                    err=True,
+                )
+                raise typer.Exit(1) from error
+            return
+        for damaged in undo.damaged_refs(root):
+            typer.echo(
+                f"Broken undo ref {damaged.ref}; run `dev undo --repair` before fetching.",
+                err=True,
+            )
         if take:
             taken = undo.snapshot(root, take)
             typer.echo(
@@ -1061,8 +1094,11 @@ def create_dev_app(
     @library_app.command("git")
     def library_git_cmd(
         url: Annotated[
-            str, typer.Option("--url", help="Repository serving the lup package")
-        ] = library_mod.REPOSITORY_URL,
+            str | None,
+            typer.Option(
+                "--url", help="Repository URL, overriding the pin or sync registration"
+            ),
+        ] = None,
         branch: Annotated[
             str | None, typer.Option("--branch", help="Branch to resolve lup at")
         ] = None,
@@ -1077,8 +1113,11 @@ def create_dev_app(
         dry_run: DryRun = False,
     ) -> None:
         """Resolve lup from its repository, for use before a release is published."""
+        scaffold = declared().scaffold
+        project = scaffold.project if scaffold is not None else library_mod.DISTRIBUTION
+        source_url = library_mod.repository_url(project_root(), url, project)
         library_mod.git_library(
-            library_mod.git_source(url, branch=branch, tag=tag, rev=rev),
+            library_mod.git_source(source_url, branch=branch, tag=tag, rev=rev),
             keep_vendored,
             force,
             dry_run,
@@ -1130,7 +1169,9 @@ def create_dev_app(
         The pure function the update rests on, exposed so it can be looked at:
         what an update would merge, written to a directory rather than to a
         branch. `--decline` asks what a wider selection would produce without
-        declaring it first, which is how a project decides what to declare.
+        declaring it first, which is how a project decides what to declare —
+        including whether it is coherent, since a selection taking one half of
+        a declaration and declining the other is refused here.
         """
         declared_source = adopted_source()
         source = declared_source.model_copy(
@@ -1145,6 +1186,70 @@ def create_dev_app(
         )
         typer.echo(f"{out}: {len(built.files)} file(s) at {built.commit}")
 
+    @scaffold_app.command("fit")
+    def scaffold_fit_cmd(
+        base: Annotated[
+            str,
+            typer.Option(
+                "--base", help="Measure this one commit rather than searching"
+            ),
+        ] = "",
+        tip: Annotated[
+            str,
+            typer.Option(
+                "--tip", help="Search from this ref rather than from the library pin"
+            ),
+        ] = "",
+        depth: Annotated[
+            int,
+            typer.Option(
+                "--depth",
+                help="How many commits one round of the search measures",
+            ),
+        ] = scaffold_fit.CANDIDATE_DEPTH,
+    ) -> None:
+        """Measure which upstream commit this project's copied half corresponds to.
+
+        The question adoption turns on, answered by counting rather than by
+        remembering: the compiled scaffold is a pure function of upstream and
+        this checkout is right here, so each candidate is compiled and its
+        files compared byte for byte against the project's own. A copy
+        stamped from one commit and edited since reads highest at that commit
+        — which is the base `dev scaffold adopt` wants.
+
+        Every commit that changed the copied half is in range, read at
+        descending resolution: one round spreads `--depth` measurements over
+        the whole of it and the next takes the interval around the sample
+        that read highest, so a history of sixteen hundred commits answers in
+        seventy-odd compiles.
+        """
+        source = adopted_source()
+        package = declared().project.package
+        root = project_root()
+        repository = update_mod.upstream_checkout(source.project, typer.echo)
+        if base:
+            reading = scaffold_fit.measured(
+                root,
+                repository,
+                source,
+                package,
+                scaffold_fit.resolved(repository, base),
+            )
+            typer.echo(reading.reported())
+            return
+        survey = scaffold_fit.surveyed(
+            root,
+            repository,
+            source,
+            package,
+            scaffold_fit.resolved(repository, tip)
+            if tip
+            else scaffold_fit.searched_tip(root, repository),
+            depth,
+        )
+        for line in survey.lines():
+            typer.echo(line)
+
     @scaffold_app.command("adopt")
     def scaffold_adopt_cmd(
         base: Annotated[
@@ -1153,12 +1258,27 @@ def create_dev_app(
                 "--base", help="The upstream commit this project was stamped from"
             ),
         ],
+        accept_fit: Annotated[
+            int | None,
+            typer.Option(
+                "--accept-fit",
+                help="Root at a base the measurement argues against, restating "
+                "the identical-file count it read",
+            ),
+        ] = None,
     ) -> None:
         """Root the scaffold branch, once, at the commit this project came from.
 
         What gives git the ancestor it has been missing: after this, every
         update is a merge against the commit this project last took rather
         than against an unrelated history.
+
+        The base is measured against this checkout before anything is
+        written, because that one argument decides every later merge: rooting
+        at the commit the pin already resolves to leaves the first update
+        nothing to carry, and rooting behind the copy re-offers what somebody
+        already ported by hand. A refusal carries the reading, and restating
+        the reading is what overrules it.
         """
         update_mod.adopted(
             project_root(),
@@ -1166,6 +1286,7 @@ def create_dev_app(
             declared().project.package,
             base,
             typer.echo,
+            accept_fit,
         )
 
     @app.command("update")
@@ -1182,6 +1303,13 @@ def create_dev_app(
         under the library that just landed. A conflicted merge stops the run
         and says what to resolve, because everything after it is compiled from
         declarations the merge has not finished writing.
+
+        Run again over a resolved merge, it finishes that pass rather than
+        starting a new one: the pin stays where the interrupted pass put it,
+        the merge is concluded here, and the copied half is compiled again
+        against the declaration the resolution wrote — which is how a
+        resolution that widens what this project takes from upstream lands
+        what it widened.
         """
         update_mod.updated(
             project_root(),
@@ -1224,16 +1352,33 @@ def create_dev_app(
     ) -> None:
         """Print the relocation that repoints an importer across a range.
 
-        Derived from two surfaces rather than read from a record: every name
-        that survived somewhere else votes for the module pair it moved
-        between, so the map costs nothing to keep and cannot go stale.
+        Derived from two surfaces rather than read from a record, so the map
+        costs nothing to keep and cannot go stale: a module that declares
+        none of its own names any more, all of them now in one other module,
+        becomes a pair. A module still declaring some of them has not moved
+        however many of its names turn up elsewhere, and a pair for it would
+        be applied silently and break every import of a name that stayed — so
+        what cannot be spelled as a pair is spelled out instead, name by
+        name, for a reader to judge and repoint by hand.
         """
-        moves = surfaces_over(over).module_moves()
-        if not moves:
+        divergence = surfaces_over(over)
+        moves = divergence.module_moves()
+        unmapped = divergence.unmapped_modules()
+        if not moves and not unmapped:
             typer.echo(f"no module moved over {over}")
             return
-        pairs = " ".join(f"{old}={new}" for old, new in sorted(moves.items()))
-        typer.echo(f"uv run lup-devtools dev relocate {pairs}")
+        if moves:
+            pairs = " ".join(f"{old}={new}" for old, new in sorted(moves.items()))
+            typer.echo(f"uv run lup-devtools dev relocate {pairs}")
+        if unmapped:
+            typer.echo(
+                f"{len(unmapped)} module(s) no pair can repoint, since `dev "
+                f"relocate` respells a whole module path. Where their names "
+                f"resolve now — a name declared elsewhere may have moved there, "
+                f"or two modules may have chosen one word:"
+            )
+            for move in unmapped:
+                typer.echo(f"  {move.spelled()}")
 
     @migrate_app.command("pending")
     def migrate_pending_cmd(
@@ -1241,6 +1386,14 @@ def create_dev_app(
             str,
             typer.Argument(help="Where the project stands, as a commit of this one"),
         ],
+        repository: Annotated[
+            Path | None,
+            typer.Option(help="Upstream checkout holding the migration commits"),
+        ] = None,
+        as_json: Annotated[
+            bool,
+            typer.Option("--json", help="Render an installed-library report as JSON"),
+        ] = False,
     ) -> None:
         """What a project standing at that commit still owes, beyond the map.
 
@@ -1248,7 +1401,16 @@ def create_dev_app(
         that split. A project already past the commit that made the break has
         applied it, and is told nothing.
         """
-        owed = migrations.unapplied(migrations.DECLARED, revision)
+        owed = migrations.unapplied(
+            migrations.DECLARED, revision, repository or Path.cwd()
+        )
+        if as_json:
+            output_json(
+                migrations.RenderedMigrations(
+                    count=len(owed), lines=migrations.rendered(owed)
+                )
+            )
+            return
         if not owed:
             typer.echo(f"nothing declared since {revision}")
             return
@@ -1285,6 +1447,7 @@ def create_dev_app(
             is_level,
             next_version,
             published_version,
+            release_subject,
             released,
             with_version,
         )
@@ -1350,8 +1513,15 @@ def create_dev_app(
         manifest.write_text(with_version(manifest.read_text(), version))
         declared_source.write_text(cleared_declarations(declared_source.read_text()))
 
-        git.add(*(str(path) for path in (changelog_path, manifest, declared_source)))
-        git.commit("-m", f"release: {previous} → {version}")
+        # The version is a source a generated artifact compiles from, so
+        # writing it leaves the trees that embed it behind — and the commit
+        # guard refuses exactly that, which is how a release came to be the
+        # one commit this repository could not make. Regenerating here is
+        # what the guard is asking for, and everything it writes belongs in
+        # the same commit as the bump that caused it.
+        update_mod.regenerated(root, lambda line: typer.echo(line, err=True))
+        git.add("-A")
+        git.commit("-m", release_subject(previous, version))
         git.tag("-a", plan.tag, "-m", f"{spec.version_file} {version}")
 
         if as_json:
@@ -1404,7 +1574,9 @@ def create_dev_app(
         ],
         kind: Annotated[
             str,
-            typer.Option("--kind", help="What the inputs are: shell, fetch, or edit"),
+            typer.Option(
+                "--kind", help="Input: shell, fetch, edit path, or edit-batch JSON"
+            ),
         ] = "shell",
         sandbox: Annotated[
             bool | None,
@@ -1422,9 +1594,10 @@ def create_dev_app(
         as_json: Annotated[bool, typer.Option("--json", help="Emit JSON")] = False,
     ) -> None:
         """Show what the declared permission policy decides about an input, and why."""
-        if kind not in ("shell", "fetch", "edit"):
+        if kind not in ("shell", "fetch", "edit", "edit-batch"):
             typer.echo(
-                f"unknown kind {kind!r}: expected shell, fetch, or edit", err=True
+                f"unknown kind {kind!r}: expected shell, fetch, edit, or edit-batch",
+                err=True,
             )
             raise typer.Exit(2)
         # Every placement, not this session's. The guidance sends a reader here

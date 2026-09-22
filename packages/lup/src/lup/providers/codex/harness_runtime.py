@@ -3,21 +3,31 @@
 import fcntl
 import hashlib
 import json
-import os
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import sh
 import tomlkit
-from packaging.version import Version
+from semver import Version
 from pydantic import BaseModel, Field
 
 from lup.providers.codex.login import CODEX_LOGIN
+from lup.providers.codex.app_server import native_command, native_environment
 from lup.harness.contracts import CapabilityProbe
 from lup.harness.models import CapabilityEvidence
 from lup.types import EnvVars
+
+
+@contextmanager
+def codex_home_lock(home: Path) -> Iterator[None]:
+    """Serialize owned configuration writes with native plugin publication."""
+    home.mkdir(parents=True, exist_ok=True)
+    with (home / ".lup-plugin-install.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
 
 
 class CodexCliEvidence(BaseModel, frozen=True):
@@ -32,17 +42,50 @@ class PluginCacheConfig(BaseModel, frozen=True):
     # Required for explicit shared homes and for a stable installed-cache path.
     marketplace: str
     plugin: str = "lup"
-    # None derives an immutable cachebuster from deployable plugin content.
+    # None derives an immutable installation revision newer than retained caches.
     # An explicit value selects an already-versioned external fixture.
     version: str | None = None
 
+    def cache_root(self) -> Path:
+        """Every retained native revision for this plugin in the selected home."""
+        return self.codex_home / "plugins" / "cache" / self.marketplace / self.plugin
+
 
 class PluginCacheEvidence(BaseModel, frozen=True):
+    package_version: str = ""
     source_root: Path
     installed_root: Path
     source_digest: str
     installed_digest: str | None = None
     ready: bool
+
+
+class InstalledCodexPlugin(BaseModel, frozen=True, extra="ignore"):
+    """The fields a native plugin listing uses to identify an enabled revision."""
+
+    plugin_id: str = Field(alias="pluginId")
+    version: str
+    installed: bool
+    enabled: bool
+
+    def selects(self, selector: str, version: str) -> bool:
+        """Whether the runtime selected the exact revision being launched."""
+        return (
+            self.plugin_id == selector
+            and self.version == version
+            and self.installed
+            and self.enabled
+        )
+
+
+class CodexPluginListing(BaseModel, frozen=True, extra="ignore"):
+    """Installed plugins reported by the selected native runtime and home."""
+
+    installed: list[InstalledCodexPlugin] = []
+
+    def selects(self, selector: str, version: str) -> bool:
+        """Whether a native listing contains the requested enabled revision."""
+        return any(plugin.selects(selector, version) for plugin in self.installed)
 
 
 def digest_directory(root: Path, read_content: Callable[[Path], bytes]) -> str | None:
@@ -97,9 +140,64 @@ def plugin_manifest_version(source_root: Path) -> str:
 
 
 def cachebusted_plugin_version(source_root: Path, content_digest: str) -> str:
-    """Name an immutable Codex cache revision for this plugin content."""
-    base = Version(plugin_manifest_version(source_root)).public
+    """Name the initial content revision before a home retains older revisions."""
+    base = Version.parse(plugin_manifest_version(source_root)).replace(build=None)
     return f"{base}+codex.{content_digest}"
+
+
+def selected_plugin_version(
+    source_root: Path,
+    content_digest: str,
+    config: PluginCacheConfig,
+) -> str:
+    """Select immutable content with a strictly increasing native release.
+
+    Codex chooses the highest cached version, independent of marketplace
+    registration. Semantic release ordering is shared with the native loader;
+    build metadata ordering differs, so tied releases publish a higher patch.
+    Only a unique highest revision can be reused. The authored package version
+    remains in source; a staged manifest names this installation revision.
+    """
+    versions: dict[Path, Version] = {}
+    unparsed: list[Path] = []
+    cache = config.cache_root()
+    for path in cache.iterdir() if cache.is_dir() else []:
+        if not path.is_dir() or not all(
+            character.isascii() and (character.isalnum() or character in ".+_-")
+            for character in path.name
+        ):
+            continue
+        try:
+            versions[path] = Version.parse(path.name)
+        except ValueError:
+            unparsed.append(path)
+    base = Version.parse(plugin_manifest_version(source_root)).replace(build=None)
+    latest = max(versions.values(), default=base)
+    highest = [path for path, version in versions.items() if version == latest]
+    match config.version, highest:
+        case str(candidate), _:
+            requested = Version.parse(candidate)
+            if any(
+                version > requested or (version == requested and path.name != candidate)
+                for path, version in versions.items()
+            ):
+                raise RuntimeError(
+                    "Explicit Codex plugin revision is shadowed by retained cache versions. Use automatic installation revisions or select a clean Codex home; live caches are preserved."
+                )
+        case None, [path] if latest >= base and (
+            plugin_content_digest(path) == content_digest
+            or latest.build == f"codex.{content_digest}"
+        ):
+            candidate = path.name
+        case None, _:
+            release = max(base, latest.bump_patch()) if versions else base
+            candidate = str(release.replace(build=f"codex.{content_digest}"))
+    for path in unparsed:
+        if path.name == "local" or path.name > candidate:
+            raise RuntimeError(
+                f"Native Codex cache revision {path} overrides semantic revisions. Select a clean Codex home; live cache paths cannot be removed or overwritten."
+            )
+    return candidate
 
 
 def plugin_cache_evidence(
@@ -109,7 +207,7 @@ def plugin_cache_evidence(
     source = plugin_content_digest(source_root)
     if source is None:
         raise FileNotFoundError(f"Codex plugin source does not exist: {source_root}")
-    version = config.version or cachebusted_plugin_version(source_root, source)
+    version = selected_plugin_version(source_root, source, config)
     installed_root = (
         config.codex_home
         / "plugins"
@@ -120,6 +218,7 @@ def plugin_cache_evidence(
     )
     installed = plugin_content_digest(installed_root)
     return PluginCacheEvidence(
+        package_version=plugin_manifest_version(source_root),
         source_root=source_root,
         installed_root=installed_root,
         source_digest=source,
@@ -238,15 +337,17 @@ class CodexPluginInstaller:
         self,
         config: PluginCacheConfig,
         executable: Path = Path("codex"),
+        environment: EnvVars | None = None,
     ) -> None:
         self.config = config
         self.executable = executable
+        self.environment = dict(environment or {})
 
     def plugin_environment(self) -> EnvVars:
         """Environment shared by every Codex plugin lifecycle command."""
         self.config.codex_home.mkdir(parents=True, exist_ok=True)
         return {
-            **os.environ,  # lup: ignore[os-environ] — exact child-process inheritance
+            **native_environment(self.environment),
             **CODEX_LOGIN.environment(self.config.codex_home),
         }
 
@@ -254,9 +355,7 @@ class CodexPluginInstaller:
         self, source_root: Path, cwd: Path, force: bool = False
     ) -> PluginCacheEvidence:
         """Stage with the native CLI, then publish without pruning live revisions."""
-        self.config.codex_home.mkdir(parents=True, exist_ok=True)
-        with (self.config.codex_home / ".lup-plugin-install.lock").open("a") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
+        with codex_home_lock(self.config.codex_home):
             before = plugin_cache_evidence(source_root, self.config)
             if before.ready and self.registered(before) and not force:
                 return before
@@ -272,13 +371,16 @@ class CodexPluginInstaller:
                 prefix=".plugin-install-", dir=self.config.codex_home
             ) as temporary_text:
                 staged = self.config.model_copy(
-                    update={"codex_home": Path(temporary_text)}
+                    update={
+                        "codex_home": Path(temporary_text),
+                        "version": before.installed_root.name,
+                    }
                 )
                 environment = {
                     **self.plugin_environment(),
                     **CODEX_LOGIN.environment(staged.codex_home),
                 }
-                command = sh.Command(str(self.executable))
+                command = native_command(self.executable, environment)
                 command(
                     "plugin",
                     "marketplace",
@@ -326,6 +428,26 @@ class CodexPluginInstaller:
         except (KeyError, TypeError):
             return False
 
+    def verify(self, evidence: PluginCacheEvidence, cwd: Path) -> None:
+        """Refuse a cache the native runtime does not discover as enabled."""
+        environment = self.plugin_environment()
+        reported = native_command(self.executable, environment)(
+            "plugin",
+            "list",
+            "--json",
+            "--marketplace",
+            self.config.marketplace,
+            _cwd=str(cwd),
+            _env=environment,
+        )
+        listing = CodexPluginListing.model_validate_json(str(reported))
+        selector = f"{self.config.plugin}@{self.config.marketplace}"
+        if not listing.selects(selector, evidence.installed_root.name):
+            raise RuntimeError(
+                f"Codex does not discover {selector} at {evidence.installed_root} "
+                f"as installed and enabled in {self.config.codex_home}"
+            )
+
     def publish(self, source_root: Path, staged: PluginCacheConfig) -> None:
         """Retain every live path and merge only this native installation's state."""
         installed = plugin_cache_evidence(source_root, staged)
@@ -364,7 +486,7 @@ class CodexPluginInstaller:
         """Explicitly remove this plugin and its configured marketplace."""
         environment = self.plugin_environment()
         selector = f"{self.config.plugin}@{self.config.marketplace}"
-        sh.Command(str(self.executable))(
+        native_command(self.executable, environment)(
             "plugin",
             "remove",
             selector,
@@ -372,7 +494,7 @@ class CodexPluginInstaller:
             _env=environment,
             _ok_code=[0, 1],
         )
-        sh.Command(str(self.executable))(
+        native_command(self.executable, environment)(
             "plugin",
             "marketplace",
             "remove",

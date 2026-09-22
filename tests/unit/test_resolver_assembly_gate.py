@@ -1,10 +1,10 @@
 """The one gate on assembling a review branch.
 
 Integration is where every per-concern approval is cashed: twenty branches
-merged onto one, and the least reversible thing a run does. It used to
-follow the last worker automatically, in the same invocation, so the only
-way to stop it was to kill the process in the seconds between. These pin
-what the gate now says and what each answer does.
+merged onto one, and the least reversible thing a run does. Following the
+last worker automatically, in the same invocation, leaves killing the process
+in the seconds between as the only way to stop it. These pin what the gate
+says and what each answer does.
 """
 
 from lup.resolver.contracts import ResolverAssemblyDeferred

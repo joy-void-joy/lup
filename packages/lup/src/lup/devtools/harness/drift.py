@@ -12,7 +12,7 @@ commit hook, continuous integration, and ``dev check`` all ask
 so no tree can be stale to one of them and current to another.
 """
 
-from typing import Protocol, runtime_checkable
+from typing import NoReturn, Protocol, runtime_checkable
 from pathlib import Path
 
 import typer
@@ -20,11 +20,13 @@ from pydantic import BaseModel
 
 from lup.formats.banner import REGENERATE_COMMAND
 from lup.devtools.harness.generate import (
+    DeclarationObstruction,
     DriftReport,
     HarnessGenerationConflict,
     NativeHarnessComposition,
     generate as generate_target,
     inspect_generation,
+    obstruction_at,
 )
 
 
@@ -39,6 +41,23 @@ class RepositoryWriter(Protocol):
     """
 
     def __call__(self, root: Path | None = None, *, check: bool = False) -> Path: ...
+
+
+def refuse_generation(obstruction: DeclarationObstruction) -> NoReturn:
+    """Refuse the run over a declaration that would not compile, saying which.
+
+    Every path that compiles one refuses here rather than letting what raised
+    travel out as a traceback. The commit guard and ``dev update`` both reach
+    generation as a subprocess whose whole output is what their reader gets,
+    and an interpreter frame stack is not a fact about any declaration: it
+    names the reader that happened to open the file rather than the file that
+    was wrong. Nothing has been written when this refuses — the compile is
+    what failed, before any proposal existed to materialize.
+    """
+    for line in obstruction.described():
+        typer.echo(line, err=True)
+    typer.echo(f"Fix the declaration above, then run `{REGENERATE_COMMAND}`.", err=True)
+    raise typer.Exit(1)
 
 
 def report_generation(target: str, changed: list[Path], removed: list[Path]) -> None:
@@ -113,11 +132,19 @@ def generate_with_report(
 
 
 def repository_staleness(write: RepositoryWriter) -> list[str]:
-    """Why one generated file outside the native trees is behind, if it is."""
+    """Why one generated file outside the native trees is behind, if it is.
+
+    A writer says "behind" by raising ``RuntimeError``, which is a reading and
+    not a failure. Anything else it raises is a declaration it could not
+    compile, and that is refused rather than reported as staleness: an
+    artifact whose source will not compile is not one a regeneration settles.
+    """
     try:
         write(check=True)
     except RuntimeError as error:
         return [str(error)]
+    except Exception as refusal:
+        refuse_generation(obstruction_at("repository artifacts", refusal))
     return []
 
 
@@ -213,12 +240,20 @@ def generate_targets(
     nothing to write. The check is the whole of what a current one costs,
     which matters where the write is a toolchain run.
     """
+
+    def written(write: RepositoryWriter) -> Path:
+        """One artifact written, or a refusal naming the declaration behind it."""
+        try:
+            return write()
+        except Exception as refusal:
+            refuse_generation(obstruction_at("repository artifacts", refusal))
+
     for composition in compositions:
         generate_with_report(composition, in_passing)
     for write in repository_writers:
         if in_passing and not repository_staleness(write):
             continue
-        typer.echo(f"repository artifact ready: {write()}")
+        typer.echo(f"repository artifact ready: {written(write)}")
 
 
 def inspect_drift(

@@ -288,7 +288,7 @@ def test_claude_compatible_endpoint_owns_auth_and_aliases() -> None:
     assert "ANTHROPIC_BASE_URL" not in original.environment
 
 
-def test_codex_home_and_named_overlay_remain_distinct(tmp_path: Path) -> None:
+def test_codex_named_overlay_refusal_preserves_the_input_home(tmp_path: Path) -> None:
     resolver = CodexProfileResolver(
         CodexProfileRegistry(
             profiles={
@@ -301,10 +301,8 @@ def test_codex_home_and_named_overlay_remain_distinct(tmp_path: Path) -> None:
         )
     )
     original = CodexSessionConfig(model="gpt", cwd=tmp_path)
-    transformed = resolver.resolve(None).apply(original)
-
-    assert transformed.environment["CODEX_HOME"] == str(tmp_path / "account")
-    assert transformed.named_profile == "fast"
+    with pytest.raises(ValueError, match="app-server cannot select named profiles"):
+        resolver.resolve(None).apply(original)
     assert original.named_profile is None
     assert original.environment == {}
 

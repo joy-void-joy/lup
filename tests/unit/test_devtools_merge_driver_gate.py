@@ -83,7 +83,7 @@ def register(repo: Path) -> None:
 def test_a_registered_clone_is_not_asked_about_a_config_it_cannot_write(
     repo: Path, own_config_only: None, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The report that used to fire regardless, over a write already made."""
+    """A report firing regardless would name a write this clone already made."""
     register(repo)
     confine(repo)
 

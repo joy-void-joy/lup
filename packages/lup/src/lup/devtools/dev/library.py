@@ -40,17 +40,23 @@ import tomllib
 from enum import StrEnum
 from pathlib import Path
 from typing import Literal, TypedDict, get_args
+from urllib.parse import urlsplit
 
 import httpx
+import sh
 import tomlkit
 import tomlkit.items
 import typer
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 from importlib.metadata import version as installed_version
 from packaging.requirements import Requirement
 
 from lup.workspace.paths import project_root
 from lup.execution.shell import git
+from lup.devtools.sync import load_projects
+from lup.harness.credential import parse_remote, remote_url, resolved_host
+from lup.devtools.project import Tracker
+from lup.devtools.utils import decode_stderr, slug_from_remote
 from lup.providers.routing import Provider
 
 # The three below spell where the vendored copy sits, which is a fact about
@@ -62,14 +68,10 @@ VENDORED_SIBLINGS = {"src": VENDORED_SRC, "tests": f"{VENDORED_ROOT}/tests"}
 """Each plain search root and the vendored one that shadows it. A search path
 naming the plain root wants its vendored twin exactly while the package is
 there, and wants it gone the moment the package is not."""
-# lup: ignore[constant-declaration] — the name the library is published under
 DISTRIBUTION = "lup"
 # lup: ignore[constant-declaration] — the glob this repository's own uv workspace
 # is laid out as, which the manifest below already states
 WORKSPACE_MEMBERS = ["packages/*"]
-REPOSITORY_URL = "https://github.com/joy-void-joy/lup"
-"""Where the library is published as source. Overridable: a fork, a mirror, or
-a private host serves the same package from the same layout."""
 
 PACKAGE_SUBDIRECTORY = VENDORED_ROOT
 """Where the distribution sits inside that repository — a fixed fact about
@@ -77,7 +79,14 @@ lup's own layout, not a choice an adopter makes."""
 
 
 class ExecutionEnvironment(TypedDict):
-    """One pyright execution environment: a root and its extra search paths."""
+    """One pyright execution environment lup declares: a root and its paths.
+
+    Both keys, because an environment lup owns exists to put the generated
+    runtime on the search path. An environment the *project* declares is not
+    this shape — ``extraPaths`` is optional in pyright's schema, and the
+    diagnostic overrides an environment may carry are not lup's to restate —
+    so those move as the tables they were written as.
+    """
 
     root: str
     extraPaths: list[str]
@@ -93,8 +102,8 @@ Derived rather than listed: a search path exists for an adapter because lup
 ships one, so the answer is :data:`~lup.providers.routing.Provider`'s and a
 second spelling here is a list that would go on naming two after a third
 arrived."""
-VENDORED_EXECUTION_ENVIRONMENTS = [
-    ExecutionEnvironment(
+VENDORED_EXECUTION_ENVIRONMENTS = {
+    runtime: ExecutionEnvironment(
         root=f"{VENDORED_SRC}/lup/providers/{runtime}/assets",
         extraPaths=[
             f".{runtime}/plugins/lup/hooks/runtime",
@@ -102,7 +111,10 @@ VENDORED_EXECUTION_ENVIRONMENTS = [
         ],
     )
     for runtime in RUNTIMES
-]
+}
+"""The environment each runtime's vendored adapter needs, keyed by that
+runtime — so where one belongs among the project's own is read off the key
+rather than sniffed back out of its root."""
 
 
 class LibraryMode(StrEnum):
@@ -125,9 +137,38 @@ class GitSource(BaseModel, frozen=True):
     one, and a model that can hold two only moves the error later.
     """
 
-    url: str = REPOSITORY_URL
+    url: str = Field(min_length=1)
     ref_kind: GitRefKind = "branch"
     ref: str = "main"
+
+    def require_available_branch(self) -> None:
+        """Distinguish a deleted branch from a transport failure before relocking."""
+        if self.ref_kind != "branch":
+            return
+        try:
+            git.out(
+                "ls-remote",
+                "--exit-code",
+                "--heads",
+                self.url,
+                f"refs/heads/{self.ref}",
+            )
+        except sh.ErrorReturnCode as error:
+            if error.exit_code == 2:
+                raise typer.BadParameter(
+                    f"Pinned branch {self.ref!r} is absent at {self.url}. "
+                    "The existing lock remains usable. Inspect the remote branches "
+                    "and compare the locked commit with the intended replacement; "
+                    "then run `uv run --no-sync lup-devtools dev library git "
+                    "--branch <replacement>` and `uv run --no-sync lup-devtools "
+                    "dev update`, or `dev update --commit <reviewed-sha>`. "
+                    "No replacement branch was selected automatically."
+                ) from error
+            raise typer.BadParameter(
+                f"Could not verify pinned branch {self.ref!r} at {self.url}: "
+                f"{decode_stderr(error) or f'git exited {error.exit_code}'}. "
+                "Its absence is unconfirmed; restore remote access before updating."
+            ) from error
 
     def entry(self) -> tomlkit.items.InlineTable:
         """Render the ``[tool.uv.sources]`` value this source declares."""
@@ -215,6 +256,65 @@ def read_git_source(root: Path) -> GitSource | None:
             return GitSource(url=url)
         case _:
             return None
+
+
+def configured_repository(root: Path, project: str = DISTRIBUTION) -> str:
+    """The dependency's repository, from its pin or named sync registration."""
+    source = read_git_source(root)
+    if source is not None:
+        return source.url
+    registered = next(
+        (entry for entry in load_projects(root) if entry["name"] == project), None
+    )
+    if registered is None:
+        return ""
+    if url := registered.get("url"):
+        return url
+    # The machine's own transport, where nothing shared names the repository:
+    # a registration that only ever existed here has no other identity, and
+    # refusing over the absence of a key nobody wrote would leave the pin
+    # unconfigurable on a machine that has said where the repository is.
+    if reach := registered.get("remote"):
+        return reach
+    if path := registered.get("path"):
+        return remote_url((root / Path(path).expanduser()).resolve(), "origin")
+    return ""
+
+
+def repository_url(
+    root: Path, url: str | None = None, project: str = DISTRIBUTION
+) -> str:
+    """Require a declared dependency source, allowing an explicit override."""
+    found = url if url is not None else configured_repository(root, project)
+    if not found.strip():
+        raise typer.BadParameter(
+            f"No repository is configured for '{project}'. Pass --url <repository> "
+            "to dev library git, set its url in sync.json, or say how this "
+            f"machine reaches it: sync remote {project} <url>, or sync setup "
+            f"{project} /path/to/repo."
+        )
+    return found
+
+
+def library_trackers(root: Path, project: str = DISTRIBUTION) -> list[Tracker]:
+    """Route library defects to its configured forge, preserving the host."""
+    url = configured_repository(root, project)
+    address = parse_remote(url)
+    if address is None or not address.host:
+        return []
+    parsed = urlsplit(url) if "://" in url else None
+    host = address.host
+    if parsed is None or parsed.scheme == "ssh":
+        host = resolved_host(host)
+    if parsed is not None and parsed.scheme in {"http", "https"} and parsed.port:
+        host = f"{host}:{parsed.port}"
+    return [
+        Tracker(
+            repository=f"{host}/{slug_from_remote(url)}",
+            what="the framework this project is built on",
+            components=[DISTRIBUTION],
+        )
+    ]
 
 
 def requirement_for(entry: str, version: str | None) -> str:
@@ -316,27 +416,37 @@ def apply_search_path(
     return [f"{'.'.join([*table, key])}: {paths} -> {wanted}"]
 
 
-def runtime_of(root: str) -> str:
-    """Name the runtime whose tree an execution environment is rooted in."""
-    return next((runtime for runtime in RUNTIMES if runtime in root), RUNTIMES[0])
-
-
 def restored_beside_their_runtime(
-    kept: list[ExecutionEnvironment],
-) -> list[ExecutionEnvironment]:
-    """Group every environment under its own runtime, vendored one first.
+    kept: list[tomlkit.items.Table],
+) -> list[tomlkit.items.Table]:
+    """Put each vendored environment back ahead of its runtime's own tree.
 
     Order is reconstructed rather than remembered, so leaving the vendored
     mode and returning to it restores the list the project started with
-    instead of handing every adopter a reshuffled diff.
+    instead of handing every adopter a reshuffled diff. Reconstruction only
+    ever inserts: the environments the project kept stay in the order it wrote
+    them, including one whose root names no runtime at all and which therefore
+    anchors nothing.
     """
-    return [
-        entry
-        for runtime in RUNTIMES
-        for group in (VENDORED_EXECUTION_ENVIRONMENTS, kept)
-        for entry in group
-        if runtime_of(entry["root"]) == runtime
-    ]
+
+    def declared_table(declared: ExecutionEnvironment) -> tomlkit.items.Table:
+        """Render one environment lup owns as the table the file holds."""
+        entry = tomlkit.table()
+        entry.update(declared)
+        return entry
+
+    placed = list(kept)
+    for runtime, declared in VENDORED_EXECUTION_ENVIRONMENTS.items():
+        beside = next(
+            (
+                index
+                for index, entry in enumerate(placed)
+                if runtime in str(entry["root"])
+            ),
+            len(placed),
+        )
+        placed.insert(beside, declared_table(declared))
+    return placed
 
 
 def apply_execution_environments(
@@ -344,30 +454,30 @@ def apply_execution_environments(
 ) -> list[str]:
     """Keep pyright environments rooted in the package only while it is there.
 
-    Restored entries lead, which is the order the template ships and the only
-    one reconstructible without remembering where they sat. Environments match
-    on disjoint roots, so order carries no meaning to pyright — fixing it is
-    what makes leaving and re-entering the vendored mode churn-free.
+    A restored entry lands ahead of its own runtime's tree, which is the order
+    the template ships and the only one reconstructible without remembering
+    where it sat. Environments match on disjoint roots, so order carries no
+    meaning to pyright — fixing it is what makes leaving and re-entering the
+    vendored mode churn-free.
+
+    Every other environment is moved rather than rewritten: the table the
+    project wrote is the one that lands, so a missing ``extraPaths`` and a
+    diagnostic override beside the root both survive a mode change lup has no
+    reason to involve them in.
     """
+    if "pyright" not in document["tool"]:
+        return []
     pyright = document["tool"]["pyright"]
     key = "executionEnvironments"
     if key not in pyright:
         return []
-    current = [
-        ExecutionEnvironment(
-            root=str(item["root"]),
-            extraPaths=[str(path) for path in item["extraPaths"]],
-        )
-        for item in pyright[key]
-    ]
-    kept = [item for item in current if not item["root"].startswith(VENDORED_ROOT)]
+    current = list(pyright[key])
+    kept = [item for item in current if not str(item["root"]).startswith(VENDORED_ROOT)]
     desired = restored_beside_their_runtime(kept) if vendored else kept
     if desired == current:
         return []
     environments = tomlkit.aot()
-    for declared in desired:
-        entry = tomlkit.table()
-        entry.update(declared)
+    for entry in desired:
         environments.append(entry)
     pyright[key] = environments
     return [f"pyright environments: {len(current)} -> {len(desired)}"]

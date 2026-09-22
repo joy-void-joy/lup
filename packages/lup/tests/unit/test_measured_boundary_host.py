@@ -21,6 +21,7 @@ from lup.policy.assets.host import (
     contained,
     defers_unjudged,
     delivers,
+    execution_write_refusal,
     measured_boundary,
 )
 
@@ -43,12 +44,12 @@ def written(root: Path, nonce: str, ledger: dict[str, list[str]]) -> None:
 def test_an_inherited_variable_no_longer_grants_containment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The defect this replaced, stated as the case that must now fail.
+    """The reading a measured boundary refuses, stated as the case that fails.
 
     A launcher forwards its own environment, so an uncontained session started
-    from a shell exporting `LUP_CONTAINED=1` used to report a boundary with no
-    container under it — and place every operation by a wall that was not
-    there. Nothing consults that variable now, so the claim costs nothing.
+    from a shell exporting `LUP_CONTAINED=1` would report a boundary with no
+    container under it — and place every operation by a wall that is not
+    there. Nothing consults that variable, so the claim costs nothing.
     """
     monkeypatch.setenv("LUP_CONTAINED", "1")
     monkeypatch.delenv("LUP_BOUNDARY_NONCE", raising=False)
@@ -150,3 +151,48 @@ def test_a_ledger_carrying_something_other_than_strings_drops_it(
 
     assert measured["delivered"] == ["question_relay"]
     assert contained(measured)
+
+
+@pytest.mark.parametrize("location", ["subdirectory", "other-checkout", "absent"])
+def test_launch_ledger_stays_pinned_when_a_tool_runs_elsewhere(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, location: str
+) -> None:
+    launch = tmp_path / "launch"
+    other = tmp_path / "other"
+    readonly = other / "authored"
+    measured = {
+        **MEASURED,
+        "writable_roots": [str(launch), str(other)],
+        "read_only_roots": [str(readonly)],
+    }
+    written(launch, "launch", measured)
+    written(other, "launch", {"writable_roots": [str(other)]})
+    monkeypatch.setenv("LUP_BOUNDARY_NONCE", "launch")
+    monkeypatch.setenv("LUP_BOUNDARY_ROOT", str(launch))
+    cwd = {
+        "subdirectory": launch / "src",
+        "other-checkout": other,
+        "absent": None,
+    }[location]
+
+    assert measured_boundary(cwd) == measured
+    assert execution_write_refusal(str(readonly / "document.md"), cwd)
+    assert not execution_write_refusal(str(other / "ordinary.md"), cwd)
+
+
+@pytest.mark.parametrize("pinned", ["missing", "relative", "symlink"])
+def test_a_failed_pinned_ledger_never_uses_the_current_directory_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pinned: str
+) -> None:
+    written(tmp_path, "launch", MEASURED)
+    alias = tmp_path / "alias"
+    alias.symlink_to(tmp_path, target_is_directory=True)
+    monkeypatch.setenv("LUP_BOUNDARY_NONCE", "launch")
+    monkeypatch.setenv(
+        "LUP_BOUNDARY_ROOT",
+        {"missing": str(tmp_path / "missing"), "relative": ".", "symlink": str(alias)}[
+            pinned
+        ],
+    )
+
+    assert measured_boundary(tmp_path) == {}

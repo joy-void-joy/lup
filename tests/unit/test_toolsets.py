@@ -16,13 +16,16 @@ import pytest
 
 from lup.coordination.identity import MEMBER_ENV
 from lup.coordination.peer_tools import RosterPulse
+from lup.coordination.relay import InboxRelay
 from lup.orchestration.reflection import ReviewGate
 from lup.sandbox.container import Sandbox
+from lup.tools.policy import BaseToolPolicy
 from lup.tools.toolsets import (
     SessionNeeds,
     SessionToolset,
     assembled,
     named_only,
+    registered,
     served_names,
     startup_names,
 )
@@ -118,9 +121,11 @@ def test_the_coordination_server_beats_for_the_session_it_serves(
     monkeypatch.delenv(MEMBER_ENV, raising=False)
     toolset = build(tmp_path)
 
-    [companion] = toolset.companions["coordination"]
+    [companion, relay] = toolset.companions["coordination"]
 
     assert isinstance(companion, RosterPulse)
+    assert isinstance(relay, InboxRelay)
+    assert relay.member_id == "toolset-test"
     assert companion.member_id == "toolset-test"
     assert set(toolset.companions) == {"coordination"}
 
@@ -140,3 +145,11 @@ def test_submit_output_is_owned_by_the_turn_runtime(tmp_path: Path) -> None:
     toolset = build(tmp_path)
 
     assert "submit_output" not in {tool.name for tool in toolset.groups["notes"]}
+
+
+def test_in_process_registration_does_not_claim_a_receiver_lifecycle(
+    tmp_path: Path,
+) -> None:
+    servers = registered(build(tmp_path), declared_tool_groups(), BaseToolPolicy())
+    [coordination] = [server for server in servers if server.name == "coordination"]
+    assert coordination.companions == []

@@ -30,7 +30,12 @@ from lup.resolver.models import (
     ResolvePhase,
     ResolveState,
 )
-from lup.resolver.state import PHASE_ORDER, ResolverStateRepository
+from lup.resolver.state import (
+    PHASE_ORDER,
+    ResolverStateRepository,
+    preserve_retirements,
+)
+from lup.resolver.contracts import ResolverConcernRetired
 
 
 class ResolverInvariantError(RuntimeError):
@@ -59,7 +64,14 @@ class ResolveRun:
         """The state, or a failure naming the invariant that was broken."""
         if self.state is None:
             raise ResolverInvariantError("resolver state is not initialized")
+        if self.repository.exists():
+            self.state = preserve_retirements(self.repository.load(), self.state)
         return self.state
+
+    def require_active(self, concern_id: str) -> None:
+        """Stop retired work at an owned boundary, retaining its tree as evidence."""
+        if any(item.concern_id == concern_id for item in self.require().retirements):
+            raise ResolverConcernRetired(f"concern {concern_id!r} was retired")
 
     def persist(self, state: ResolveState) -> None:
         """Persist while keeping the phase a monotonic high-water mark."""
@@ -75,7 +87,7 @@ class ResolveRun:
         # phase to resume from, so a poisoned copy makes persisting the
         # failure fail the same way the failure did — and the run reports the
         # second raise, from inside its own handler, instead of the first.
-        self.repository.save(state)
+        state = self.repository.save(state)
         self.state = state
         self.emit_transitions(current, state)
 
@@ -149,6 +161,7 @@ class ResolveRun:
     ) -> None:
         """Persist one concern transition without losing parallel sibling updates."""
         async with self.lock:
+            self.require_active(concern_id)
             state = self.require()
             self.persist(self.progress_state(state, [concern_id], status, reason))
 
@@ -169,6 +182,7 @@ class ResolveRun:
         record rather than shadow it with a second one.
         """
         async with self.lock:
+            self.require_active(outcome.concern_id)
             state = self.require()
             kept = [
                 item for item in state.outcomes if item.concern_id != outcome.concern_id

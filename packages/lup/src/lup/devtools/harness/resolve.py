@@ -8,6 +8,7 @@ it with work discovered while it ran.
 
 import asyncio
 import os
+from functools import partial
 from collections.abc import AsyncGenerator, Iterator
 from contextlib import asynccontextmanager
 import sys
@@ -32,6 +33,7 @@ from lup.tools.mcp import (
     create_mcp_server,
     serve_stdio,
 )
+from lup.tools.native import NativeToolGroup
 from lup.policy.grants import LeaseGrants, allowance_grants_environment
 from lup.policy.identity import agent_identity_environment
 from lup.harness.environment import non_interactive_environment
@@ -48,10 +50,12 @@ from lup.resolver.contracts import (
 )
 from lup.resolver.core import ASSEMBLY_QUESTION_ID, ResolverCore
 from lup.resolver.journal import Journal
+from lup.resolver.lifecycle import HostWait, drive_with_host_retries
 from lup.resolver.orchestrator import WorktreeOrchestrator
 from lup.resolver.rebase import BaseRefresher
 from lup.resolver.run import ResolveRun
-from lup.resolver.state import ResolverStateRepository
+from lup.resolver.state import ResolverStateRepository, StateTransitionError
+from lup.resolver.admissions import AdmissionMailbox
 from lup.resolver.status import tally_bar, unfinished_runs
 from lup.resolver.models import (
     AdmissionRequest,
@@ -719,10 +723,11 @@ def report_environment_fault(
         typer.echo(f"  interrupted: {', '.join(fault.concerns)}")
     typer.echo("No concern was failed and no outcome was recorded.")
     typer.echo(
-        "It came back for this one until its retries ran out, so the host is "
-        "either still refusing or wants a person."
+        "For authentication or account allowance failures, re-login or switch "
+        "account; a reported reset time is not a required wait. For a transient "
+        "host failure, restore service before resuming."
     )
-    typer.echo("Fix the host, then continue with:")
+    typer.echo("Once the selected account and host are ready, continue with:")
     typer.echo(
         f"  uv run lup-devtools resolve --adapter {adapter} "
         f"--run-id {run_id} --adopt-config"
@@ -1134,24 +1139,25 @@ def detach_resolve(detached: DetachedRun) -> None:
     # naming nothing actionable or an issue number naming nothing open, and
     # it meets it after this command has already reported a run started.
     admission_request(detached.admitted)
+    repository = ResolverStateRepository(root / ".lup/resolve", resolved)
+    if repository.held():
+        raise typer.BadParameter(f"resolver run {resolved!r} is already active")
     log = detached_log(root, resolved)
     arguments = detached.arguments()
     # One stream, not one path opened twice: sh opens `_out` and `_err`
     # separately, so naming the same file for both leaves two handles
     # truncating at offset zero and overwriting each other — losing exactly
     # the refusal this file exists to keep.
-    sh.Command(arguments[0])(
-        *arguments[1:],
-        _cwd=str(root),
-        _bg=True,
-        _bg_exc=False,
-        _new_session=True,
-        # Discarding both streams made a detached run that refused on its
-        # first step indistinguishable from one working quietly: the refusal
-        # went nowhere, and the run directory held no trace of it either.
-        _out=str(log),
-        _err_to_out=True,
-    )
+    with log.open("ab") as output:
+        sh.Command(arguments[0])(
+            *arguments[1:],
+            _cwd=str(root),
+            _bg=True,
+            _bg_exc=False,
+            _new_session=True,
+            _out=output,
+            _err_to_out=True,
+        )
     typer.echo(f"Run {resolved} started detached.")
     typer.echo(f"Its output: {log}")
     typer.echo(
@@ -1193,6 +1199,75 @@ def admission_request(flags: AdmissionFlags) -> AdmissionRequest | None:
         statements=flags.statements,
         issues=admitted_issues(flags.issues),
     )
+
+
+def queue_existing_admission(
+    flags: AdmissionFlags, run_id: str | None, answers: list[str], start_new: bool
+) -> bool:
+    """Route evidence to an existing run before a detached child can be opened."""
+    if not flags.named_anything() or (start_new and run_id is None):
+        return False
+    root = project_root()
+    state_root = root / ".lup" / "resolve"
+    selected = run_id or chosen_run(
+        state_root,
+        "resolve-"
+        + resolver_git(
+            LocalProcessLauncher(), root, ["rev-parse", "--short=12", "HEAD"]
+        ),
+        start_new=False,
+        ending=False,
+    )
+    repository = ResolverStateRepository(state_root, selected)
+    if not repository.exists():
+        if (refusal := missing_run_refusal(run_id, selected)) is not None:
+            raise typer.BadParameter(refusal)
+        return False
+    request = admission_request(flags)
+    if request is None:
+        return False
+    offer_flag_answers(
+        QuestionMailbox(repository.root), selected, parse_answer_flags(answers)
+    )
+    try:
+        receipt = repository.queue_admission(request)
+    except StateTransitionError as error:
+        raise typer.BadParameter(str(error)) from error
+    typer.echo(f"Admission {receipt.id} queued for run {selected}.")
+    typer.echo(
+        "Evidence is durable; the run plans it at its next scheduling boundary. Resume the run if it is idle."
+    )
+    typer.echo(f"Inspect: uv run lup-devtools resolve admissions --run-id {selected}")
+    return True
+
+
+def list_admissions(
+    run_id: str = typer.Option(
+        ..., "--run-id", help="Run whose admission receipts to read"
+    ),
+    json_output: bool = typer.Option(
+        False, "--json", help="Print each complete receipt as JSON"
+    ),
+) -> None:
+    """Inspect accepted evidence and its pending, applied, or rejected result."""
+    repository = ResolverStateRepository(project_root() / ".lup" / "resolve", run_id)
+    if not repository.exists():
+        raise typer.BadParameter(f"no resolver run {run_id!r}")
+    receipts = AdmissionMailbox(repository.root).receipts()
+    if not receipts:
+        typer.echo("No admission requests.")
+    for receipt in receipts:
+        if json_output:
+            typer.echo(receipt.model_dump_json())
+        else:
+            typer.echo(f"{receipt.id}: {receipt.status}")
+            if receipt.error:
+                typer.echo(receipt.error)
+            if receipt.result is not None:
+                typer.echo(
+                    "Concerns: "
+                    + ", ".join(item.id for item in receipt.result.concerns)
+                )
 
 
 def missing_run_refusal(run_id: str | None, resolved_run_id: str) -> str | None:
@@ -1526,10 +1601,7 @@ def run_resolve(
             merge_hooks,
         )
 
-        from lup.providers.codex.harness_runtime import (
-            CodexPluginInstaller,
-            PluginCacheConfig,
-        )
+        from lup.providers.codex.install import install_codex_plugin
 
         from lup.providers.codex.home import CodexWorktreeHomeStore, select_codex_home
 
@@ -1554,10 +1626,8 @@ def run_resolve(
             home = select_codex_home(
                 None, environment, root, account.name, CodexWorktreeHomeStore()
             )
-            cache = CodexPluginInstaller(
-                PluginCacheConfig(codex_home=home.path, marketplace=plugin.marketplace)
-            ).ensure(root / ".codex" / "plugins" / plugin.name, root)
-            typer.echo(f"Verified installed Codex plugin: {cache.installed_root}")
+            if not resolver_spec.contain_actors:
+                install_codex_plugin(root, home.path, trusted=home.isolated)
             return {"CODEX_HOME": str(home.path)}
 
         session_environment = account.exported(
@@ -1694,7 +1764,7 @@ def run_resolve(
             if not contained_actors:
                 return None
             login = CLAUDE_LOGIN if adapter == "claude" else CODEX_LOGIN
-            config_home = selected_config_home(environment).directory
+            config_home = login.selected_home(environment)
             credential = login.credentials_path(config_home)
             return worker_cli(
                 worker_wrapper_path(state_root / resolved_run_id, concern_id, actor),
@@ -1827,6 +1897,7 @@ def run_resolve(
                     ClaudeSessionConfig(
                         model=session_model,
                         system_prompt="Execute the persisted Lup resolver assignment.",
+                        native_tools=[NativeToolGroup.ALL],
                         cwd=cwd,
                         add_dirs=[cwd, *toolchain_writable_paths()],
                         plugin_dirs=[lease_plugin_dir(cwd, plugin.name)],
@@ -1890,11 +1961,13 @@ def run_resolve(
             return create_codex(
                 CodexSessionConfig(
                     model=session_model,
+                    native_tools=[NativeToolGroup.ALL],
                     developer_instructions=(
                         "Execute the persisted Lup resolver assignment."
                     ),
                     cwd=cwd,
                     sandbox="workspace-write",
+                    containment="outer" if contained_actors else "none",
                     # Falls back to the program's own name, which is what this
                     # field already defaults to. Claude's seam takes ``None``
                     # for the same case instead, because its SDK searches for a
@@ -1961,9 +2034,9 @@ def run_resolve(
                         system_prompt=(
                             "Independently review the persisted resolver change."
                         ),
+                        native_tools=[NativeToolGroup.READ, NativeToolGroup.SHELL],
                         cwd=cwd,
                         add_dirs=[cwd],
-                        plugin_dirs=[lease_plugin_dir(cwd, plugin.name)],
                         environment=reviewer_environment_for,
                         # A reviewer is read-only by design, so its lease is
                         # the worker's with nothing writable rather than a
@@ -1984,6 +2057,7 @@ def run_resolve(
             return create_codex(
                 CodexSessionConfig(
                     model=session_model,
+                    native_tools=[NativeToolGroup.WEB, NativeToolGroup.SHELL],
                     approval_policy="on-request",
                     hooks=merge_hooks(
                         create_permission_hooks([], [cwd]), context.hooks
@@ -1993,6 +2067,7 @@ def run_resolve(
                     ),
                     cwd=cwd,
                     sandbox="read-only",
+                    containment="outer" if contained_actors else "none",
                     executable=actor_cli(
                         cwd,
                         reviewing,
@@ -2096,7 +2171,7 @@ def run_resolve(
                 )
             try:
                 if core.repository.exists():
-                    manifest = await core.resume()
+                    manifest = await core.resume_exclusive()
                 else:
                     intake = scanned_intake(root)
                     for carried in intake.carried:
@@ -2124,7 +2199,9 @@ def run_resolve(
                             '--admit "<the work, in your own words>".'
                         )
                         return
-                    manifest = await core.run(seeded)
+                    manifest = await core.run_exclusive(
+                        await seeded.inventory(core.plan_inventory)
+                    )
             except ResolverDrained as drained:
                 # Exit zero: an operator asked for this and got it, which is
                 # the command succeeding rather than the run failing.
@@ -2154,59 +2231,35 @@ def run_resolve(
                 typer.echo(f"commented on #{number}")
             typer.echo(manifest.model_dump_json(indent=2))
 
-        async def drive_through_host_faults() -> None:
-            """Come back to a refusing host until it answers, as a human would.
-
-            Parking on an exhausted allowance is correct and costs nothing —
-            no concern fails and no outcome is recorded — but somebody has to
-            notice, and one run was stopped this way about twenty times over
-            several days, each time waiting on a person rather than on the
-            allowance. The waiting is the part a person adds nothing to.
-
-            A fault only a person can clear still parks, but one a sibling's
-            token refresh could have faked is probed once first: concurrent
-            sessions share a credential file, so a rotation denies everyone
-            still holding the previous token in the same words a dead
-            credential uses. A session opened afresh reads the rotated file
-            and tells the two apart, where handing it straight back stops a
-            run nobody has to do anything about.
-            """
-            probed: str | None = None
-            for attempt in range(host_retries + 1):
-                try:
-                    await drive()
-                    return
-                except ResolverEnvironmentFault as fault:
-                    if needs_a_person(fault.cause):
-                        if probed == fault.cause or not may_be_a_rotation(fault.cause):
-                            report_environment_fault(fault, adapter, resolved_run_id)
-                            raise typer.Exit(code=75) from fault
-                        # Only against the same words twice running. An
-                        # ordinary refusal in between means the run got
-                        # somewhere, so the next rotation is its own fault
-                        # rather than the one already ruled on.
-                        probed = fault.cause
-                        typer.echo(
-                            f"[resolve] the host refused ({fault.cause}); a sibling "
-                            f"may have rotated the credential — one probe in "
-                            f"{auth_probe_delay:.0f}s"
-                        )
-                        await asyncio.sleep(auth_probe_delay)
-                        continue
-                    probed = None
-                    delay = host_retry_delay(attempt, host_retries, host_backoff)
-                    if delay is None:
-                        report_environment_fault(fault, adapter, resolved_run_id)
-                        raise typer.Exit(code=75) from fault
-                    typer.echo(
-                        f"[resolve] the host refused ({fault.cause}); "
-                        f"coming back in {delay / 60:.0f} min"
-                    )
-                    await asyncio.sleep(delay)
+        def announce_host_wait(wait: HostWait) -> None:
+            typer.echo(
+                f"[resolve] the host refused ({wait.cause}); {wait.mode} "
+                f"at {wait.retry_at.isoformat()}. The run remains active."
+            )
 
         async with spawned_supervisor(
             supervisor or SupervisorSpawn(), resolved_run_id, adapter
         ):
-            await drive_through_host_faults()
+            try:
+                if abort_reason is not None or (
+                    admission is not None and core.repository.exists()
+                ):
+                    await drive()
+                else:
+                    await drive_with_host_retries(
+                        drive,
+                        core.repository,
+                        retries=host_retries,
+                        retry_delay=partial(
+                            host_retry_delay, retries=host_retries, backoff=host_backoff
+                        ),
+                        auth_probe_delay=auth_probe_delay,
+                        needs_a_person=needs_a_person,
+                        may_be_a_rotation=may_be_a_rotation,
+                        announce=announce_host_wait,
+                    )
+            except ResolverEnvironmentFault as fault:
+                report_environment_fault(fault, adapter, resolved_run_id)
+                raise typer.Exit(code=75) from fault
 
     asyncio.run(execute())

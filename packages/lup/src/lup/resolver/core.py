@@ -11,9 +11,16 @@ from pydantic import BaseModel
 from lup.harness.contracts import SkillInvocationRenderer
 from lup.harness.models import ResolveSpec
 from lup.harness.process import ProcessLauncher
+from lup.resolver.admissions import (
+    AdmissionMailbox,
+    AdmissionReceipt,
+    AdmissionStatus,
+    ResolverAdmissionsPending,
+)
 from lup.resolver.contracts import (
     ResolverAssemblyDeferred,
     ResolverAwaitingAnswers,
+    ResolverConcernRetired,
     ResolverDrained,
     ResolverEnvironmentFault,
     ResolverObserver,
@@ -50,7 +57,6 @@ from lup.resolver.models import (
     ConcernStatus,
     ConcernOutcome,
     IntegrationRecord,
-    JoinProgress,
     MaterialQuestion,
     QuestionBatch,
     RecheckRuling,
@@ -68,6 +74,7 @@ from lup.resolver.models import (
     WritableRootLease,
 )
 from lup.resolver.orchestrator import (
+    LeaseViolationError,
     DependencyBaseBuilder,
     WorktreeOrchestrator,
     WritableRootLeases,
@@ -75,7 +82,12 @@ from lup.resolver.orchestrator import (
 from lup.resolver.questions import QuestionBroker
 from lup.resolver.rebase import BaseRefresher
 from lup.resolver.run import ResolveRun, ResolverInvariantError
-from lup.resolver.state import PHASE_ORDER, ResolverStateRepository
+from lup.resolver.recovery import IntegrationRecoveryDesk
+from lup.resolver.state import (
+    PHASE_ORDER,
+    ResolverStateRepository,
+    StateTransitionError,
+)
 from lup.resolver.turns import (
     ReviewerFactoryRecipe,
     TurnRunner,
@@ -775,6 +787,17 @@ class ResolverCore:
         )
 
     async def advance_exclusive(self, state: ResolveState) -> ResolveManifest:
+        """Revisit admission gates whenever a wave receives durable evidence."""
+        while True:
+            await self.apply_admissions()
+            state = self.require_state()
+            try:
+                return await self.advance_round(state)
+            except ResolverAdmissionsPending:
+                self.leases.adopt(self.require_state().leases)
+                continue
+
+    async def advance_round(self, state: ResolveState) -> ResolveManifest:
         """Advance while a promoter is folding every door's answers in.
 
         Each stage asks what the current concern set still needs rather than
@@ -885,7 +908,11 @@ class ResolverCore:
             if lease.concern_id != "integration"
         }
         unleased = [
-            concern for concern in approved if concern.id not in lease_by_concern
+            concern
+            for concern in approved
+            if concern.id not in lease_by_concern
+            and concern.id
+            not in {item.concern_id for item in self.require_state().retirements}
         ]
         # A resume is when the branch has moved: the run parked, the fix that
         # unblocks it landed, and the base is what carries that fix to every
@@ -932,6 +959,14 @@ class ResolverCore:
         match state.integration:
             case None:
                 for batch in graph.topological_batches():
+                    if AdmissionMailbox(self.repository.root).pending():
+                        raise ResolverAdmissionsPending()
+                    state = self.require_state()
+                    retired = {item.concern_id for item in state.retirements}
+                    completed_ids.update(retired)
+                    commits.update(
+                        {identifier: state.root_base().commit for identifier in retired}
+                    )
                     selected = [
                         item
                         for item in batch
@@ -975,14 +1010,17 @@ class ResolverCore:
                     # door reads.
                     runnable_by_id = {concern.id: concern for concern in runnable}
 
-                    async def execute_for(opened: ActorRef) -> ConcernExecution:
+                    async def execute_for(opened: ActorRef) -> ConcernExecution | None:
                         """This address's concern, carried through its whole work."""
-                        return await self.executor.execute_concern(
-                            runnable_by_id[opened.id],
-                            lease_by_concern[opened.id],
-                            commits,
-                            builder,
-                        )
+                        try:
+                            return await self.executor.execute_concern(
+                                runnable_by_id[opened.id],
+                                lease_by_concern[opened.id],
+                                commits,
+                                builder,
+                            )
+                        except ResolverConcernRetired:
+                            return None
 
                     results = await self.actors.work_all(
                         execute_for,
@@ -999,7 +1037,7 @@ class ResolverCore:
                     executions = [
                         result
                         for result in results
-                        if not isinstance(result, BaseException)
+                        if isinstance(result, ConcernExecution)
                     ]
                     for execution in executions:
                         if (
@@ -1069,6 +1107,8 @@ class ResolverCore:
                         # settled keep their outcomes; what does not happen is
                         # the next batch being started.
                         raise ResolverDrained(request.reason, [])
+                    if AdmissionMailbox(self.repository.root).pending():
+                        raise ResolverAdmissionsPending()
 
                 state = self.require_state()
                 state = state.model_copy(
@@ -1116,19 +1156,12 @@ class ResolverCore:
         }
         for lease in self.leases.leases.values():
             if lease.concern_id == "integration":
-                # Three states, and each names the commit it expects rather
-                # than accepting whatever HEAD happens to hold. A finished
-                # integration expects its record; a partway one expects the
-                # last join it recorded, so the joins already built survive
-                # and only the interrupted merge and its index are discarded;
-                # one that never started expects the source commit.
-                match state.integration, state.join_progress:
-                    case IntegrationRecord(commit=str() as commit), _:
-                        self.restore_worktree(lease, commit, True)
-                    case _, JoinProgress(commit=commit):
-                        self.restore_worktree(lease, commit, True)
-                    case _:
-                        self.restore_worktree(lease, state.root_base().commit, False)
+                # The merger can publish its landing before the run process
+                # projects it. Recovery and resume read that same authority.
+                expected = IntegrationRecoveryDesk(self.repository).recorded_commit(
+                    state, lease
+                )
+                self.restore_worktree(lease, expected, True)
                 continue
             outcome = (
                 outcomes[lease.concern_id] if lease.concern_id in outcomes else None
@@ -1190,6 +1223,13 @@ class ResolverCore:
                 raise ResolverInvariantError(
                     f"persisted commit changed for {lease.concern_id}: expected "
                     f"{expected}, found {found}"
+                    + (
+                        "; stop the run and use resolve recover-integration "
+                        "restore-recorded or adopt-head --run-id "
+                        f"{self.config.run_id} after inspecting the worktree"
+                        if lease.concern_id == "integration"
+                        else ""
+                    )
                 )
             self.journal.record(
                 LeaseDriftEvent(
@@ -1335,7 +1375,12 @@ class ResolverCore:
         self, state: ResolveState, outcomes: list[ConcernOutcome]
     ) -> ResolveState:
         if state.integration is None:
-            verified = [outcome for outcome in outcomes if outcome.verified]
+            retired = {item.concern_id for item in self.require_state().retirements}
+            verified = [
+                outcome
+                for outcome in outcomes
+                if outcome.verified and outcome.concern_id not in retired
+            ]
             integration_lease = next(
                 (lease for lease in state.leases if lease.concern_id == "integration"),
                 None,
@@ -1490,20 +1535,53 @@ class ResolverCore:
         that would not be a unique-id, present-dependency, acyclic one.
         """
         with self.repository.exclusive():
-            state = self.repository.load()
-            self.state = state
-            if state.phase in {ResolvePhase.ABORTED, ResolvePhase.COMPLETE}:
-                raise ResolverInvariantError(f"run is already {state.phase}")
-            reached = (
-                state.resume_from or state.phase
-                if state.phase is ResolvePhase.FAILED
-                else state.phase
-            )
-            if PHASE_ORDER[reached] >= PHASE_ORDER[ResolvePhase.INTEGRATION]:
-                raise ResolverInvariantError(
-                    f"run has reached {reached}; a concern may only join a run "
-                    "before its review branch is assembled"
+            self.state = self.repository.load()
+            return await self.admit_owned(request)
+
+    async def apply_admissions(self) -> None:
+        """Consume each accepted request exactly once, under the run's ownership."""
+        mailbox = AdmissionMailbox(self.repository.root)
+        for receipt in mailbox.pending():
+            if receipt.id in self.require_state().admitted_requests:
+                mailbox.write(
+                    receipt.model_copy(update={"status": AdmissionStatus.APPLIED})
                 )
+                continue
+            try:
+                await self.admit_owned(receipt.request, receipt)
+            except (
+                ValueError,
+                ResolverInvariantError,
+                StateTransitionError,
+                LeaseViolationError,
+            ) as error:
+                mailbox.write(
+                    receipt.model_copy(
+                        update={"status": AdmissionStatus.REJECTED, "error": str(error)}
+                    )
+                )
+                self.actors.tell_user(f"Admission {receipt.id} rejected: {error}")
+
+    async def admit_owned(
+        self, request: AdmissionRequest, receipt: AdmissionReceipt | None = None
+    ) -> ConcernAdmission:
+        """Plan and insert evidence while the caller owns the resolver run."""
+        state = self.require_state()
+        if state.phase in {ResolvePhase.ABORTED, ResolvePhase.COMPLETE}:
+            raise ResolverInvariantError(f"run is already {state.phase}")
+        reached = (
+            state.resume_from or state.phase
+            if state.phase is ResolvePhase.FAILED
+            else state.phase
+        )
+        if PHASE_ORDER[reached] >= PHASE_ORDER[ResolvePhase.INTEGRATION]:
+            raise ResolverInvariantError(
+                f"run has reached {reached}; a concern may only join a run "
+                "before its review branch is assembled"
+            )
+        if receipt is not None and receipt.result is not None:
+            planned_concerns = receipt.result.concerns
+        else:
             planned = await self.plan_inventory(
                 ResolveRequest(
                     source=state.source,
@@ -1514,59 +1592,84 @@ class ResolverCore:
                 origin=ConcernOrigin.ADMITTED,
                 taken=[concern.id for concern in state.concerns],
             )
-            self.leases.adopt(state.leases)
-            for concern in planned.concerns:
-                self.leases.plan(concern.id, self.concern_branch(concern.id))
-            concerns = [*state.concerns, *planned.concerns]
-            ConcernGraph(concerns)
-            # An admitted concern's questions join the run's batch the way
-            # intake's do. Returning them without recording them left the
-            # concern admitted and unanswerable: no door could see a question
-            # that was never written, and the gate it names can never pass.
-            admitted = self.pending_questions(planned.concerns)
-            self.questions.queue_questions(admitted, "admission")
-            # An answer offered in the same invocation is offered before the
-            # question exists, so only promoting here can match the two. The
-            # run's own rerun recipe hands out `--answer` flags, which made
-            # combining them with `--admit` the obvious thing to try and
-            # silently discarded every one of them.
-            problems = self.questions.promote_offers()
-            widened = state.model_copy(
-                update={
-                    "concerns": concerns,
-                    "questions": QuestionBatch(
-                        run_id=state.run_id,
-                        questions=[
-                            *(state.questions.questions if state.questions else []),
-                            *admitted,
-                        ],
-                    ),
-                    "answers": AnswerBatch(
-                        run_id=state.run_id,
-                        answers=[record.answer for record in self.mailbox.answers()],
-                    ),
-                    "progress": [
-                        *state.progress,
-                        *[
-                            ConcernProgress(concern_id=concern.id)
-                            for concern in planned.concerns
-                        ],
+            planned_concerns = planned.concerns
+        state = self.require_state()
+        self.leases.adopt(state.leases)
+        for concern in planned_concerns:
+            self.leases.plan(concern.id, self.concern_branch(concern.id))
+        concerns = [*state.concerns, *planned_concerns]
+        ConcernGraph(concerns)
+        # An admitted concern's questions join the run's batch the way
+        # intake's do. Returning them without recording them left the
+        # concern admitted and unanswerable: no door could see a question
+        # that was never written, and the gate it names can never pass.
+        admitted = self.pending_questions(planned_concerns)
+        result = ConcernAdmission(
+            run_id=state.run_id,
+            phase=state.phase,
+            concerns=planned_concerns,
+            questions=admitted,
+        )
+        mailbox = AdmissionMailbox(self.repository.root)
+        if receipt is not None:
+            receipt = receipt.model_copy(
+                update={"status": AdmissionStatus.PLANNED, "result": result}
+            )
+            mailbox.write(receipt)
+        self.questions.queue_questions(admitted, "admission")
+        # An answer offered in the same invocation is offered before the
+        # question exists, so only promoting here can match the two. The
+        # run's own rerun recipe hands out `--answer` flags, which made
+        # combining them with `--admit` the obvious thing to try and
+        # silently discarded every one of them.
+        problems = self.questions.promote_offers()
+        widened = state.model_copy(
+            update={
+                "concerns": concerns,
+                "questions": QuestionBatch(
+                    run_id=state.run_id,
+                    questions=[
+                        *(state.questions.questions if state.questions else []),
+                        *admitted,
                     ],
-                }
-            )
-            self.persist(widened)
-            return ConcernAdmission(
-                run_id=state.run_id,
-                phase=self.require_state().phase,
-                concerns=planned.concerns,
-                questions=admitted,
-                outstanding=[
-                    question
-                    for question in admitted
-                    if question.id not in self.mailbox.answered_ids()
+                ),
+                "answers": AnswerBatch(
+                    run_id=state.run_id,
+                    answers=[record.answer for record in self.mailbox.answers()],
+                ),
+                "progress": [
+                    *state.progress,
+                    *[
+                        ConcernProgress(concern_id=concern.id)
+                        for concern in planned_concerns
+                    ],
                 ],
-                rejected=problems,
+                "admitted_requests": [
+                    *state.admitted_requests,
+                    *([receipt.id] if receipt is not None else []),
+                ],
+            }
+        )
+        self.persist(widened)
+        result = ConcernAdmission(
+            run_id=state.run_id,
+            phase=self.require_state().phase,
+            concerns=planned_concerns,
+            questions=admitted,
+            outstanding=[
+                question
+                for question in admitted
+                if question.id not in self.mailbox.answered_ids()
+            ],
+            rejected=problems,
+        )
+        if receipt is not None:
+            mailbox.write(
+                receipt.model_copy(
+                    update={"status": AdmissionStatus.APPLIED, "result": result}
+                )
             )
+        return result
 
     def concern_branch(self, concern_id: str) -> str:
         return f"resolve/{self.config.run_id}/{concern_id}"

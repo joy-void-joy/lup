@@ -9,8 +9,14 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from lup.channels.models import publish_atomic
+from lup.resolver.admissions import (
+    AdmissionMailbox,
+    AdmissionReceipt,
+    ResolverAdmissionsPending,
+)
 from lup.resolver.models import (
     AgentRound,
+    AdmissionRequest,
     AnswerBatch,
     BasesDocument,
     ConcernProgress,
@@ -30,6 +36,39 @@ from lup.resolver.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def preserve_retirements(
+    current: ResolveState, candidate: ResolveState
+) -> ResolveState:
+    """An operator's durable retirement outranks work computed before it."""
+    retired = {item.concern_id for item in current.retirements}
+    if not retired:
+        return candidate
+    progress = {item.concern_id: item for item in current.progress}
+    roots = {lease.root for lease in current.leases if lease.concern_id in retired}
+    return candidate.model_copy(
+        update={
+            "retirements": current.retirements,
+            "progress": [
+                progress[item.concern_id] if item.concern_id in retired else item
+                for item in candidate.progress
+            ],
+            "leases": [
+                lease.model_copy(update={"active": False})
+                if lease.concern_id in retired
+                else lease
+                for lease in candidate.leases
+            ],
+            "outcomes": [
+                item for item in candidate.outcomes if item.concern_id not in retired
+            ]
+            + [item for item in current.outcomes if item.concern_id in retired],
+            "cleanup": [item for item in candidate.cleanup if item.path not in roots]
+            + [item for item in current.cleanup if item.path in roots],
+        }
+    )
+
 
 PHASE_ORDER: dict[ResolvePhase, int] = {
     phase: index for index, phase in enumerate(ResolvePhase)
@@ -84,6 +123,7 @@ DECLARED_TRANSITIONS: dict[ConcernStatus, list[ConcernStatus]] = {
     ConcernStatus.INELIGIBLE: [],
     ConcernStatus.LEASED: [
         ConcernStatus.RUNNING,
+        ConcernStatus.WAITING_FOR_ANSWERS,
         ConcernStatus.ELIGIBLE,
         ConcernStatus.FAILED,
     ],
@@ -344,6 +384,11 @@ class ResolverStateRepository:
         return accepted
 
     def retire(self, retirement: ConcernRetirement) -> ResolveState:
+        """Retire atomically with respect to every scheduler save."""
+        with self.writing():
+            return self.retire_locked(retirement)
+
+    def retire_locked(self, retirement: ConcernRetirement) -> ResolveState:
         """Record that a human settled one concern somewhere other than here.
 
         Through its own door, like acceptance and adoption, and for the same
@@ -436,13 +481,38 @@ class ResolverStateRepository:
         self.write_model("state.json", adopted)
         return adopted
 
-    def save(self, state: ResolveState) -> None:
+    @contextmanager
+    def writing(self) -> Iterator[None]:
+        """Serialize short state transactions while a run keeps its long lease."""
+        self.root.mkdir(parents=True, exist_ok=True)
+        with (self.root / ".state.lock").open("a+", encoding="utf-8") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+    def save(self, state: ResolveState) -> ResolveState:
+        with self.writing():
+            return self.save_locked(state)
+
+    def save_locked(self, state: ResolveState) -> ResolveState:
         if state.run_id != self.root.name:
             raise StateTransitionError(
                 f"state run id {state.run_id!r} does not match {self.root.name!r}"
             )
         if self.exists():
             current = self.load()
+            state = preserve_retirements(current, state)
+            if (
+                current.phase != ResolvePhase.INTEGRATION
+                and state.phase == ResolvePhase.INTEGRATION
+                and any(
+                    item.id not in state.admitted_requests
+                    for item in AdmissionMailbox(self.root).pending()
+                )
+            ):
+                raise ResolverAdmissionsPending()
             if (
                 state.source != current.source
                 or state.spec != current.spec
@@ -493,6 +563,25 @@ class ResolverStateRepository:
         )
         self.write_model("leases.json", LeasesDocument(leases=state.leases))
         self.write_model("bases.json", BasesDocument(bases=state.bases))
+        return state
+
+    def queue_admission(self, request: AdmissionRequest) -> AdmissionReceipt:
+        """Accept evidence atomically with the run's integration cutoff."""
+        with self.writing():
+            state = self.load()
+            reached = (
+                state.resume_from or state.phase
+                if state.phase == ResolvePhase.FAILED
+                else state.phase
+            )
+            if (
+                state.phase in {ResolvePhase.ABORTED, ResolvePhase.COMPLETE}
+                or PHASE_ORDER[reached] >= PHASE_ORDER[ResolvePhase.INTEGRATION]
+            ):
+                raise StateTransitionError(
+                    f"run has reached {reached}; admission is available only before integration"
+                )
+            return AdmissionMailbox(self.root).submit(request)
 
     def write_agent_round(self, state: ResolveState) -> None:
         """Write each complete round independently for inspection and resumption."""

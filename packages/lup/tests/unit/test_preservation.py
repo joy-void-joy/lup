@@ -23,6 +23,7 @@ from lup.devtools.dev.preservation import (
 )
 from lup.devtools.project import DevProject
 from lup.execution.shell import git
+from tests.unit.test_ledger_placement import committed, repository
 
 
 def capture(*modules: ModuleSurface) -> SurfaceCapture:
@@ -234,3 +235,176 @@ def test_a_name_only_its_own_function_can_reach_is_not_a_surface() -> None:
     )
 
     assert walked[0].declares == ["create_app"]
+
+
+def test_a_module_that_kept_names_is_not_a_pair_however_many_left() -> None:
+    """The map's pair is a whole-module claim, and a split does not support one.
+
+    `dev relocate` respells every import of the old path, so a pair drawn for
+    a module still declaring names sends those names to a module that never
+    held them — applied silently, and met much later as an unresolved import.
+    """
+    before = capture(
+        ModuleSurface(
+            module="lup.harness.codescan.boundaries",
+            declares=["ApplicationRoots", "generated_tree_paths"],
+        )
+    )
+    after = capture(
+        ModuleSurface(
+            module="lup.harness.codescan.boundaries", declares=["generated_tree_paths"]
+        ),
+        ModuleSurface(
+            module="lup.harness.codescan.common", declares=["ApplicationRoots"]
+        ),
+    )
+
+    divergence = compare(before, after)
+
+    assert divergence.module_moves() == {}
+    assert [move.module for move in divergence.unmapped_modules()] == [
+        "lup.harness.codescan.boundaries"
+    ]
+    assert divergence.unmapped_modules()[0].retained == ["generated_tree_paths"]
+    assert [
+        (destination.module, destination.names)
+        for destination in divergence.unmapped_modules()[0].destinations
+    ] == [("lup.harness.codescan.common", ["ApplicationRoots"])]
+
+
+def test_names_that_went_to_two_modules_are_a_split_and_not_one_pair() -> None:
+    """A module emptied into two is no more repointable than one that stayed."""
+    before = capture(
+        ModuleSurface(module="lup.coordination.store", declares=["ROOT", "opened"])
+    )
+    after = capture(
+        ModuleSurface(module="lup.coordination.bare.store", declares=["ROOT"]),
+        ModuleSurface(module="lup.coordination.meeting", declares=["opened"]),
+    )
+
+    divergence = compare(before, after)
+
+    assert divergence.module_moves() == {}
+    assert [
+        (destination.module, destination.names)
+        for destination in divergence.unmapped_modules()[0].destinations
+    ] == [
+        ("lup.coordination.bare.store", ["ROOT"]),
+        ("lup.coordination.meeting", ["opened"]),
+    ]
+
+
+def test_a_split_spells_what_went_where_and_what_stayed() -> None:
+    """What the command prints where it can print no pair: the whole of it.
+
+    A reader told only that the map is shorter learns nothing about the
+    imports that will break; one told which names went where repoints them.
+    """
+    divergence = compare(
+        capture(
+            ModuleSurface(
+                module="lup.coordination.identity",
+                declares=["MEMBER_KIND", "session_member_id", "member_ref"],
+            )
+        ),
+        capture(
+            ModuleSurface(
+                module="lup.coordination.identity",
+                declares=["session_member_id", "member_ref"],
+            ),
+            ModuleSurface(
+                module="lup.coordination.bare.store", declares=["MEMBER_KIND"]
+            ),
+        ),
+    )
+
+    assert [move.spelled() for move in divergence.unmapped_modules()] == [
+        "lup.coordination.identity: MEMBER_KIND now in lup.coordination.bare.store; "
+        "still declares session_member_id, member_ref"
+    ]
+
+
+def test_a_whole_module_move_and_a_split_told_apart_out_of_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both shapes over one range, derived the way the command derives them.
+
+    Read out of two revisions rather than assembled here, because what the
+    map is worth rests on the walk agreeing with git about what each revision
+    declared.
+    """
+    root = repository(tmp_path / "upstream")
+    (root / "src/lup").mkdir(parents=True)
+    (root / "src/lup/shared.py").write_text(
+        "class Kept:\n    def here(self) -> None: ...\n\n\ndef taken() -> None: ...\n",
+        encoding="utf-8",
+    )
+    (root / "src/lup/whole.py").write_text(
+        "def carried() -> None: ...\n", encoding="utf-8"
+    )
+    committed(root, "base")
+    monkeypatch.chdir(root)
+    base = git.out("rev-parse", "HEAD")
+    (root / "src/lup/shared.py").write_text(
+        "class Kept:\n    def here(self) -> None: ...\n", encoding="utf-8"
+    )
+    (root / "src/lup/taker.py").write_text(
+        "def taken() -> None: ...\n", encoding="utf-8"
+    )
+    (root / "src/lup/whole.py").unlink()
+    (root / "src/lup/moved.py").write_text(
+        "def carried() -> None: ...\n", encoding="utf-8"
+    )
+    committed(root, "head")
+    head = git.out("rev-parse", "HEAD")
+
+    project = DevProject(package="lup")
+    divergence = compare(
+        preservation.surface_at(base, project), preservation.surface_at(head, project)
+    )
+
+    assert divergence.module_moves() == {"lup.whole": "lup.moved"}
+    assert [move.spelled() for move in divergence.unmapped_modules()] == [
+        "lup.shared: taken now in lup.taker; still declares Kept, Kept.here"
+    ]
+
+
+def test_two_modules_sharing_a_word_are_not_one_module_that_moved() -> None:
+    """A name resolving elsewhere is not evidence that anything went there.
+
+    ``lup.providers.roster_prompt`` kept every hook it declares while a new
+    and unrelated module about carrier drift was written beside it, spelling
+    two of its constants the same way — enough for a vote per name to call
+    the whole module moved, and enough to rewrite the imports of everything
+    that stayed. What separates coincidence from a move is not how many
+    names agree but whether the module still declares any of its own.
+    """
+    before = capture(
+        ModuleSurface(
+            module="lup.providers.roster_prompt",
+            declares=[
+                "RUNTIME_SOURCE",
+                "runtime_source",
+                "GUARD_SCRIPT",
+                "prompt_hook",
+            ],
+        )
+    )
+    after = capture(
+        ModuleSurface(
+            module="lup.providers.roster_prompt",
+            declares=["GUARD_SCRIPT", "prompt_hook", "departure_hook"],
+        ),
+        ModuleSurface(
+            module="lup.providers.drift_prompt",
+            declares=["RUNTIME_SOURCE", "runtime_source", "GUARD_SCRIPT"],
+        ),
+    )
+
+    divergence = compare(before, after)
+
+    assert divergence.module_moves() == {}
+    assert [move.spelled() for move in divergence.unmapped_modules()] == [
+        "lup.providers.roster_prompt: RUNTIME_SOURCE, runtime_source now in "
+        "lup.providers.drift_prompt; still declares GUARD_SCRIPT, prompt_hook"
+    ]

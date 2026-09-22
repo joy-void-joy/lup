@@ -5,6 +5,7 @@ from typing import assert_never
 from pydantic import BaseModel
 
 from lup.types import JsonObject, ModelTier, SubagentSpec
+from lup.sessions.errors import UnsupportedCapability
 
 
 class CodexModelTiers(BaseModel, frozen=True):
@@ -62,7 +63,7 @@ class CodexSubagentTools(BaseModel, frozen=True):
 def subagent_tools(spec: SubagentSpec) -> CodexSubagentTools:
     """Reject exact grants that app-server cannot enforce without widening."""
     if spec.tools:
-        raise ValueError(
+        raise UnsupportedCapability(
             "Codex app-server cannot enforce exact delegated tool grants: "
             + ", ".join(spec.tools)
             + ". Declare workspace-read or web-search capabilities when those "

@@ -1,6 +1,6 @@
 [project]
 name = "lup"
-version = "0.3.0"
+version = "0.4.0"
 description = "Agent development library for Claude and Codex agent SDKs"
 readme = "README.md"
 license = "MIT"
@@ -52,11 +52,8 @@ conversation = [
     "playwright>=1.62.0",
 ]
 
-[project.urls]
-Homepage = "https://github.com/joy-void-joy/lup"
-Repository = "https://github.com/joy-void-joy/lup"
-Issues = "https://github.com/joy-void-joy/lup/issues"
-
+[project.scripts]
+lup-codex-plugin = "lup.providers.codex.install:app"
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
@@ -100,6 +97,10 @@ pythonVersion = "3.14"
 # workspace-root config names, reached from this directory. `host` is the half
 # the compiler links in rather than ships, so an asset resolves it against the
 # canonical module both scripts are compiled from.
+[[tool.pyright.executionEnvironments]]
+root = "src/lup/providers/assets"
+extraPaths = ["../../.claude/plugins/lup/hooks/runtime", "../../.codex/plugins/lup/hooks/runtime"]
+
 [[tool.pyright.executionEnvironments]]
 root = "src/lup/providers/claude/assets"
 extraPaths = ["../../.claude/plugins/lup/hooks/runtime", "src/lup/policy/assets"]

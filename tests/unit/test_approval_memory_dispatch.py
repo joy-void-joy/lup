@@ -1,10 +1,4 @@
-"""Both compiled dispatchers remember a question answered yes, the same way.
-
-The runtime's prompt exposes its answer to no hook, so each dispatcher reads
-it off the two events it does see: PreToolUse asked, PostToolUse ran. Driven
-through the generated scripts rather than the modules they are compiled from,
-because the script is the only thing a live session runs.
-"""
+"""Both compiled dispatchers require explicit receipts and never infer approval."""
 
 import json
 import os
@@ -14,6 +8,8 @@ import pytest
 import sh
 
 from lup.policy.assets.host import approvals_log
+from lup.policy.relay import QuestionRelay
+from tests.unit.native import codex_effect
 from tests.unit.repos import commit_file, initialized_repo
 
 CLAUDE = Path(".claude/plugins/lup/hooks/scripts/policy.py")
@@ -73,14 +69,16 @@ def decision(answered: dict[str, object]) -> dict[str, object]:
     return specific
 
 
-def test_claude_remembers_a_question_answered_yes(repo: Path) -> None:
-    assert decision(claude("PreToolUse", repo))["permissionDecision"] == "ask"
+def refused(result: sh.RunningCommand) -> bool:
+    return codex_effect(result) == "deny"
 
-    assert claude("PostToolUse", repo) == {}
 
-    again = decision(claude("PreToolUse", repo))
-    assert again["permissionDecision"] == "allow"
-    assert str(again["permissionDecisionReason"]).startswith("approved ")
+def test_claude_renders_the_question_rather_than_parking_it(repo: Path) -> None:
+    """The verdict goes out as an ask, carrying the reason that earned it."""
+    asked = decision(claude("PreToolUse", repo))
+    assert asked["permissionDecision"] == "ask"
+    assert "removing a remote ref" in str(asked["permissionDecisionReason"])
+    assert QuestionRelay(repo / ".lup/questions.jsonl").pending() == []
 
 
 def test_a_call_that_ran_without_asking_leaves_no_memory(repo: Path) -> None:
@@ -93,17 +91,35 @@ def test_a_call_that_ran_without_asking_leaves_no_memory(repo: Path) -> None:
 
 
 def test_a_call_changed_on_the_way_through_approves_nothing(repo: Path) -> None:
-    """The memory is keyed on what ran, not on what was judged."""
-    assert decision(claude("PreToolUse", repo))["permissionDecision"] == "ask"
-    claude("PostToolUse", repo, f"{COMMAND} --dry-run")
+    """An unmatched execution cannot answer the pending original proposal."""
+    assert refused(codex("PreToolUse", repo))
+    relay = QuestionRelay(repo / ".lup/questions.jsonl")
+    (question,) = relay.pending()
+    codex("PostToolUse", repo, f"{COMMAND} --dry-run")
 
-    assert decision(claude("PreToolUse", repo))["permissionDecision"] == "ask"
+    assert refused(codex("PreToolUse", repo))
+    assert relay.pending() == [question]
 
 
-def test_codex_remembers_the_same_way(repo: Path) -> None:
-    """Asked is a parked question and exit 2; remembered is exit 0."""
-    assert codex("PreToolUse", repo).exit_code == 2
+def test_codex_unexpected_execution_grants_no_authority(repo: Path) -> None:
+    """Observed execution is diagnosed and leaves a retry needing an answer."""
+    assert refused(codex("PreToolUse", repo))
+    relay = QuestionRelay(repo / ".lup/questions.jsonl")
+    (question,) = relay.pending()
 
+    observed = codex("PostToolUse", repo)
+    assert observed.exit_code == 2
+    assert "without a consumed approval receipt" in observed.stderr.decode()
+    uncertain = relay.find(question.id)
+    assert uncertain is not None and uncertain.state == "in_doubt"
+    assert refused(codex("PreToolUse", repo))
+
+
+def test_codex_spends_an_explicit_answer_once(repo: Path) -> None:
+    assert refused(codex("PreToolUse", repo))
+    relay = QuestionRelay(repo / ".lup/questions.jsonl")
+    (question,) = relay.pending()
+    relay.answer(question.id, "operator", True)
+    assert not refused(codex("PreToolUse", repo))
     assert codex("PostToolUse", repo).exit_code == 0
-
-    assert codex("PreToolUse", repo).exit_code == 0
+    assert refused(codex("PreToolUse", repo))

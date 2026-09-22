@@ -83,6 +83,20 @@ Fix any failure this branch introduced. A failure the base already carries is no
 
 ### 5. Push and open PR
 
+Prepare against the freshly fetched PR target before publishing:
+
+```bash
+git fetch origin
+uv run lup-devtools git pr prepare --base origin/<target> --json
+```
+
+This local command requires a clean checkout, merges the exact target commit,
+regenerates every harness from the combined sources, and commits the result.
+It pushes nothing. GitHub cannot run the clone's generated-file merge driver;
+including its target as an ancestor lets its ordinary merge preserve the
+regenerated proofs. Resolve any source conflicts with `{{ merge_skill }}`,
+regenerate, and complete the merge before continuing.
+
 Open the PR **now, before the history is rebuilt** -- never after. The force-push in step 9 lands in the PR timeline as a force-push event, so the PR carries both the history as it was actually worked and the cleaned sequence that replaced it. Creating it after the rebuild saves one body update and throws that whole trace away.
 
 ```bash
@@ -139,6 +153,11 @@ output is a file the rebuild dropped: find it in `git diff rebase-backup HEAD
 this -- the mark is the only copy of what the branch used to hold.
 
 ### 9. Force push and update PR
+
+Fetch and run `git pr prepare --base origin/<target> --json` again after the
+history rebuild. If the target advanced, review and check its resulting local
+merge commit before publishing. This preserves server mergeability after the
+rebuild and makes the target commit used explicit.
 
 ```bash
 uv run lup-devtools git pr push --force --json

@@ -39,9 +39,12 @@ reachable, on boundaries this seam does not answer, and a future that judges a
 file change on its text starts there rather than from the v2 request.
 """
 
+import asyncio
 import logging
+import re  # lup: ignore[import-re] — native hook matchers are explicitly regexes
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -51,10 +54,11 @@ from lup.providers.codex.native import (
     CodexShellOperation,
     CodexUnknownOperation,
 )
-from lup.policy.hooks import LupHookInput, LupHooksConfig
+from lup.policy.hooks import LupHookInput, LupHookOutput, LupHooksConfig
 from lup.policy.enforcement import NativeSemantics
 from lup.policy.models import SemanticTool
 from lup.types import JsonObject
+from lup.sessions.errors import UnsupportedCapability
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +70,33 @@ FILE_CHANGE_APPROVAL = "item/fileChange/requestApproval"
 
 APPROVAL_METHODS = (COMMAND_APPROVAL, FILE_CHANGE_APPROVAL)
 """Every server request this seam answers."""
+
+
+def codex_hook_approval_policy(
+    hooks: LupHooksConfig | None,
+) -> Literal["never", "on-request"]:
+    """Permit lifecycle observers and explicitly scoped native approval hooks.
+
+    An exact native method names the boundary its callback agrees to observe.
+    A wildcard or a portable tool name instead asks for coverage this channel
+    cannot provide. Inbox observers are a separate tagged delivery contract;
+    their neutral output never grants approval.
+    """
+    approvals = [] if hooks is None else hooks.pre_tool_use
+    declared = {*APPROVAL_METHODS, "|".join(APPROVAL_METHODS)}
+    policy: Literal["never", "on-request"] = "never"
+    for matcher in approvals:
+        if matcher.tag == "inbox" and matcher.matcher in {None, "", "*"}:
+            continue
+        if matcher.matcher not in declared:
+            raise UnsupportedCapability(
+                "Codex PreToolUse hooks require an explicit native approval scope: "
+                + ", ".join(APPROVAL_METHODS)
+                + ". Universal pre-execution interception requires the generated policy dispatcher."
+            )
+        policy = "on-request"
+    return policy
+
 
 ACCEPT = "accept"
 DECLINE = "decline"
@@ -138,6 +169,10 @@ for the source it was read from.
 """
 
 
+type ContextDelivery = Callable[[str], Awaitable[None]]
+"""Deliver text to the active turn, raising unless its transport accepted it."""
+
+
 class CodexApprovalResponder(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Answer app-server approval requests from portable hook registrations.
 
@@ -147,6 +182,8 @@ class CodexApprovalResponder(BaseModel, frozen=True, arbitrary_types_allowed=Tru
     """
 
     hooks: LupHooksConfig = Field(description="What this session declared")
+    deliver_context: ContextDelivery | None = None
+    delivery_lock: asyncio.Lock = Field(default_factory=asyncio.Lock)
 
     def handles(self, method: str) -> bool:
         """Whether an approval request is one this responder answers."""
@@ -166,7 +203,62 @@ class CodexApprovalResponder(BaseModel, frozen=True, arbitrary_types_allowed=Tru
             tool_path=str(approval.cwd) if approval and approval.cwd else "",
         )
 
+    def context(self, outputs: list[LupHookOutput]) -> str:
+        """The complete model-facing feedback from one batch of hooks."""
+        messages = [
+            text
+            for output in outputs
+            for text in (
+                output.reason if output.decision in {"deny", "block", "ask"} else "",
+                output.additional_context,
+                output.system_message or "",
+            )
+            if text
+        ]
+        return "\n\n".join(messages)
+
+    async def deliver(self, outputs: list[LupHookOutput]) -> bool:
+        messages = self.context(outputs)
+        if not messages:
+            return True
+        if self.deliver_context is None:
+            return False
+        try:
+            await self.deliver_context(messages)
+        except Exception:
+            logger.exception(
+                "Codex did not accept hook context; delivery stays pending"
+            )
+            return False
+        for output in outputs:
+            output.delivered()
+        return True
+
+    async def evaluate(self, event: LupHookInput) -> list[LupHookOutput]:
+        return [
+            await matcher.hook(event)
+            for matcher in self.hooks.for_event(event.event)
+            if event.event == "Stop"
+            or matcher.matcher in {None, "", "*"}
+            # lup: ignore[re-call] — native matcher language
+            or re.search(matcher.matcher or "", event.tool_name) is not None
+        ]
+
+    async def deliver_pending(self) -> None:
+        """Deliver actor mail at native activity that asks for no approval."""
+        async with self.delivery_lock:
+            outputs = [
+                await matcher.hook(LupHookInput(event="PreToolUse"))
+                for matcher in self.hooks.pre_tool_use
+                if matcher.tag == "inbox" and matcher.matcher in {None, "", "*"}
+            ]
+            await self.deliver(outputs)
+
     async def decide(self, method: str, params: JsonObject) -> str:
+        async with self.delivery_lock:
+            return await self.decide_exclusive(method, params)
+
+    async def decide_exclusive(self, method: str, params: JsonObject) -> str:
         """Run every registered PreToolUse hook and reply with one decision.
 
         An ``ask`` reaching here has nobody to ask: the app-server is a
@@ -175,16 +267,30 @@ class CodexApprovalResponder(BaseModel, frozen=True, arbitrary_types_allowed=Tru
         given. That is the same fail-closed reading the generated Codex
         dispatcher takes, reached the same way.
 
-        The approval reply schema is a bare decision, so the reasons cannot
-        ride it; they are logged instead, which is the one channel this path
-        has to whoever reads the session afterwards. Every refusing reason is
-        logged rather than the first, since each names the specific thing
-        that tripped it.
+        The approval reply carries only a decision. Context and refusal
+        reasons reach the active turn through its steering transport, and
+        durable inbox receipts advance only once that transport accepts them.
         """
-        outputs = [
-            await matcher.hook(self.hook_input(method, params))
+        if not self.handles(method):
+            return DECLINE
+        matchers = [
+            matcher
             for matcher in self.hooks.pre_tool_use
+            if matcher.matcher in {None, "", "*"}
+            # lup: ignore[re-call] — native matcher language
+            or re.search(matcher.matcher or "", method) is not None
         ]
+        outputs = [
+            await matcher.hook(self.hook_input(method, params)) for matcher in matchers
+        ]
+        if not outputs:
+            return DECLINE
+        for output in outputs:
+            if output.updated_input is not None:
+                output.decision = "deny"
+                output.reason = (output.reason + "\n" if output.reason else "") + (
+                    "Codex app-server approvals cannot rewrite tool input; the original call is declined."
+                )
         refused = [
             item for item in outputs if item.decision in ("deny", "block", "ask")
         ]
@@ -193,7 +299,12 @@ class CodexApprovalResponder(BaseModel, frozen=True, arbitrary_types_allowed=Tru
             # recovery that rode beside it belongs in the record too.
             told = [text for text in (item.reason, item.additional_context) if text]
             logger.info("declining %s: %s", method, "\n".join(told))
-        return DECLINE if refused else ACCEPT
+        delivered = await self.deliver(outputs)
+        authorized = any(
+            output.decision == "allow" and matcher.tag != "inbox"
+            for matcher, output in zip(matchers, outputs, strict=True)
+        )
+        return DECLINE if refused or not delivered or not authorized else ACCEPT
 
 
 type ApprovalHandler = Callable[[str, JsonObject], Awaitable[str]]

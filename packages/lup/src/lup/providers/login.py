@@ -13,9 +13,45 @@ so an application stores one the way it stores the runtime's name.
 
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from lup.types import EnvVars, StringMap
+
+
+class NativeHomeScope(BaseModel, frozen=True):
+    """Stable native state identity for sessions with the same personal settings."""
+
+    key: str = Field(pattern=r"^[a-z0-9-]+$")
+
+    def volume_name(self, repository_volume: str) -> str:
+        """Partition persistent state without changing shared dependency caches."""
+        return f"{repository_volume}-{self.key}"
+
+
+class HomePreparation(BaseModel, frozen=True):
+    """A shipped executable that prepares a runtime's private configuration home."""
+
+    executable: str
+
+    def command(
+        self, root: Path, home: Path, force: bool = False, settings: bool = False
+    ) -> list[str]:
+        """Run installed library code in the checkout's own Python environment."""
+        return [
+            "uv",
+            "run",
+            "--locked",
+            "--directory",
+            str(root),
+            self.executable,
+            "--root",
+            str(root),
+            "--home",
+            str(home),
+            "--trust-project",
+            *(["--force"] if force else []),
+            *(["--settings-stdin"] if settings else []),
+        ]
 
 
 class ProviderLogin(BaseModel, frozen=True):
@@ -23,6 +59,14 @@ class ProviderLogin(BaseModel, frozen=True):
 
     config_home_env: str
     """Environment variable pointing this runtime's CLI at a config home."""
+
+    home_preparation: HomePreparation | None = None
+    """Runtime-owned state required in a private home before its process starts.
+
+    Kept with the home declaration so a generic container builder cannot
+    select a runtime's home while forgetting the preparation that makes it usable.
+    A provider needing no private-home installation leaves this absent.
+    """
 
     credentials_file: str
     """What this runtime writes a completed login into, inside that home."""

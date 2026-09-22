@@ -12,6 +12,7 @@ import pytest
 
 from lup.coordination.identity import MEMBER_ENV
 from lup.coordination.peer_tools import RosterPulse
+from lup.coordination.relay import InboxRelay
 from lup.providers.claude.identity import CLAUDE_SESSION_ENV
 from lup.providers.identity import native_session_id
 from lup.workspace.context import SESSION_DIR_ENV
@@ -47,9 +48,11 @@ def test_a_native_server_joins_under_the_id_its_runtime_gave_the_process(
 
     toolset = serve.collect_session_toolset(context, identity="abc-123")
 
-    [pulse] = toolset.companions["coordination"] if toolset else []
+    [pulse, relay] = toolset.companions["coordination"] if toolset else []
     assert isinstance(pulse, RosterPulse)
     assert pulse.member_id == "abc-123"
+    assert isinstance(relay, InboxRelay)
+    assert relay.member_id == "abc-123"
 
 
 def test_a_native_server_with_no_identity_serves_no_coordination_verbs(
@@ -75,9 +78,11 @@ def test_the_launcher_s_id_outranks_the_runtime_s(
 
     toolset = serve.collect_session_toolset(context, identity="abc-123")
 
-    [pulse] = toolset.companions["coordination"] if toolset else []
+    [pulse, relay] = toolset.companions["coordination"] if toolset else []
     assert isinstance(pulse, RosterPulse)
     assert pulse.member_id == "launched1"
+    assert isinstance(relay, InboxRelay)
+    assert relay.member_id == "launched1"
 
 
 def test_serving_for_claude_lists_the_coordination_verbs_under_the_runtime_s_id(

@@ -18,14 +18,23 @@ by name without re-resolving cache paths.
 
 Two registry files declare what to track:
 
-- sync.json (committed): the template's registry default, shipping only the
-  lup entry so a fresh project can immediately pull template improvements.
-  It is template scaffold: agents must never modify it — every personal
-  registration belongs in sync.json.local, and the edit policy asks before
-  any change to the tracked file.
-- sync.json.local (gitignored): personal registrations — local paths, sync
-  state, overrides by project name, and local-only projects. Set
-  "ignore": true to skip a project (useful when you ARE the upstream).
+- sync.json (committed): what the project declares about the repositories it
+  tracks — the name each one is known by, which repository it is ("url"),
+  whether the project cannot work without it ("required") and what a session
+  may reach of it ("mount"). Every machine reads the same claims. It is
+  template scaffold: agents must never modify it, and the edit policy asks
+  before any change to it.
+- sync.json.local (gitignored): what this machine answers — where a checkout
+  actually is ("path"), the transport that reaches it from here ("remote"),
+  branch overrides, and local-only projects. Set "ignore": true to skip a
+  project's review (useful when you ARE the upstream). Most machines need no
+  entry at all: the clone's location is derived from the name.
+
+The split is by *who the fact belongs to*, not by which key it is. A path can
+genuinely differ between machines and a transport almost always does; which
+repository is meant, and whether a workflow here needs it, are the same
+answer everywhere and would be a decision re-made per machine if they lived
+in the gitignored half.
 
 The registry is direction-neutral: "sync" names the mechanism, not a
 direction. Seen from a project built on the template, the shipped lup entry
@@ -34,6 +43,9 @@ sync.json.local registers the downstream fleet whose commits /lup:update
 reviews. Same tooling, opposite seats.
 
 The script merges both: .local entries override sync.json entries by name.
+Review checkpoints live under the common Git directory and are shared by
+sibling worktrees. A legacy `last_synced_commit` remains a seed until a
+shared checkpoint is explicitly recorded with `mark-synced`.
 A project with a URL and no local path is materialized under
 ``~/.cache/lup/sync/`` in the layout a registration naming a local path
 already points at -- a bare repository with a worktree attached to it -- so a
@@ -46,8 +58,17 @@ An entry carrying a "mount" is also a declaration about *access*: a session
 can open that project, at the mode it names, wherever the project lives on
 this machine. Absent, nothing is mounted — which is the whole difference
 between a registry and a boundary, and the reason the key has to be written
-rather than defaulted. sync.json is committed scaffold, so a default here
-would decide what every project adopting this template opens.
+rather than defaulted. A tracked mount still opens nothing on its own: until
+this machine says where the project is, or a URL lets it be cloned, there is
+nothing to bind.
+
+An entry carrying "required": true says the project cannot work without that
+repository, which is a claim about *this* project rather than about the
+tracked one. It is what makes a fresh checkout materialize a repository
+instead of failing at the point of use, and what makes an absence reported
+rather than silent: `sync fetch` clones it, a launch clones what it also
+mounts, `sync log` clones on first use, and `sync status` names every
+requirement this machine has not answered and exits nonzero.
 
 Examples::
 
@@ -59,6 +80,7 @@ Examples::
     $ uv run lup-devtools sync mark-synced my-project --at 4c6293a6
     $ uv run lup-devtools sync setup my-project /path/to/repo --synced
     $ uv run lup-devtools sync setup my-project /path/to/repo --branch main
+    $ uv run lup-devtools sync remote my-project git@github.com:owner/repo.git
     $ uv run lup-devtools sync grant nvidia.com/gpu=all
     $ uv run lup-devtools sync revoke nvidia.com/gpu=all
 """
@@ -80,7 +102,9 @@ from pydantic import (
     with_config,
 )
 
-from lup.workspace.paths import project_root
+from lup.workspace.paths import is_template_scaffold, project_root
+from lup.devtools import sync_state
+from lup.harness.credential import remote_url, same_repository
 import lup.harness.content.docs.upstream_reports as upstream_reports
 from lup.devtools.harness.preflight import reopened
 from lup.devtools.subapps import subapp
@@ -153,19 +177,81 @@ class ProjectEntry(TypedDict, total=False):
     """
 
     name: Required[str]
+
     path: str
+    """Where this machine keeps the repository, when it is not the derived place.
+
+    An override, not the registration. A project with a URL and no path is
+    materialized at :func:`bare_path`, under the per-user cache, which is
+    derived from the name alone -- so the machine that keeps it there needs
+    no entry of its own, and the local half carries a path only where
+    somebody's checkout genuinely sits somewhere else. `sync setup` writes
+    one."""
+
     url: str
+    """Which repository this is, in the spelling every machine shares.
+
+    Identity rather than reach. A committed registration names the
+    repository the project means; how one machine gets to that same
+    repository is its own question, answered by ``remote``, and two
+    spellings of one repository are compared as one by
+    :func:`~lup.harness.credential.same_repository`. So an https
+    registration and an ssh clone of it agree, and two different
+    repositories under one name are still refused."""
+
+    remote: str
+    """The URL this machine fetches from, where it is not the one ``url`` names.
+
+    This machine's own fact, so it belongs in the gitignored half beside the
+    device grants: which transport reaches a forge from here is a question
+    about this machine's keys, proxy and ssh config, and the committed file
+    is scaffold every adopter runs from. `sync remote` writes it, and a
+    clone is made with it. Absent, ``url`` is both the identity and the
+    reach, which is what a registration with nothing special about its
+    transport looks like."""
+
     branch: str
+    review_from: Literal["remote", "local"]
     last_synced_commit: str
     ignore: bool
+
+    required: bool
+    """Whether this project cannot work without that repository present.
+
+    The one key here that is about *this* project rather than about the
+    registered one, and the reason it belongs in the committed half. Fixing a
+    defect in a dependency inside that dependency, deriving a relocation map
+    over its own range of history, reviewing its commits: each needs the
+    repository on disk, and a project whose workflows need it needs it on
+    every machine, not on the one where somebody once ran `setup`. What stays
+    per-machine is the answer -- a transport, a path -- and most machines owe
+    none, because the location is derived from the name.
+
+    Never a clone behind somebody's back. `sync fetch` materializes what is
+    required, a launch materializes what it is also going to mount, and the
+    first command that reads an upstream's commits clones on demand; each
+    says so as it goes. Required and absent is reported by `sync status`,
+    with the command that answers it, and exits nonzero -- an unmet
+    requirement is a result rather than a silence to be discovered at the
+    point of use."""
+
     mount: Literal["rw", "ro"]
     """Whether a session may open this project, and in which mode.
 
-    Written or absent, never defaulted. Tracking a project for review and
-    handing a session the keys to it are different claims, and the file that
-    makes the first one is committed scaffold shipped to every project built
-    on this template -- so a default would open a repository on machines
-    nobody here has seen.
+    Written or absent, never defaulted -- and written in either half. What a
+    session may reach is the project's decision and not the machine's:
+    read-write against read-only is part of the claim, and a project whose
+    own workflow commits in a dependency's checkout says that once, in the
+    file every machine reads, rather than being widened one machine at a
+    time by whoever meets the absence first. A default is still refused,
+    which is the difference: silence is the answer for every registration
+    that does not carry the key.
+
+    A tracked mount hands out nothing by itself. Nothing is mounted until
+    this machine says where the project is -- a path, a URL, or a clone the
+    derived location already holds -- so the committed claim and the
+    per-machine answer stay separate, and both files are protected edit roots
+    so neither is widened without the question being asked.
 
     A separate question from ``ignore``, which governs sync *review*: being
     the upstream of this repository is a reason not to read its commits back
@@ -313,10 +399,10 @@ def ensure_ref_symlink(name: str, target: str) -> None:
     logger.debug("refs/%s -> %s", name, target_path)
 
 
-def load_projects() -> list[ProjectEntry]:
+def load_projects(root: Path | None = None) -> list[ProjectEntry]:
     """Load and merge projects from sync.json + sync.json.local."""
-    base = load_json(sync_file())
-    local = load_json(local_file())
+    base = load_json(root / "sync.json" if root is not None else sync_file())
+    local = load_json(root / "sync.json.local" if root is not None else local_file())
 
     merged: dict[str, ProjectEntry] = {}  # lup: ignore[empty-collection] — merge fold
     for p in base.get("projects", []):
@@ -346,14 +432,9 @@ def find_project(name: str) -> ProjectEntry:
 class Upstream(BaseModel, frozen=True):
     """A registration located on disk, and the ref its commits are read from.
 
-    Two fields because the second is not ``HEAD`` for everything. A
-    registration naming a local path is somebody's own checkout and its HEAD
-    is what they have. A clone this module made is a checkout somebody may be
-    *working in*, whose HEAD is theirs rather than the upstream's -- so the
-    review reads the remote-tracking ref there, which a fetch moves and
-    nothing local does. That is what lets the refresh be a fetch and nothing
-    else: a hard reset that kept a review current would be the same reset
-    that takes a session's work with it.
+    The checkout locates Git objects and a place to browse files. Review
+    targets a fetched remote ref unless the registration explicitly asks for
+    local work or has no origin. Fetching never moves a worker's branch.
     """
 
     checkout: Path
@@ -401,15 +482,59 @@ def bare_repository(path: Path) -> bool:
 
 
 def clone_branch(proj: ProjectEntry, repository: Path) -> str:
-    """The branch a clone tracks: the registered one, or the clone's own HEAD.
+    """The declared/consumed branch, then remote HEAD, then the local branch.
 
     Empty where HEAD names no branch, which a detached checkout is and a
     review still has to answer for — the caller falls back to the remote's
     own default rather than failing over a state nobody asked about.
     """
-    return proj.get("branch", "") or git.out(
+    declared = review_branch(proj, repository)
+    if declared:
+        return declared
+    remote_head = git.out(
+        "-C",
+        str(repository),
+        "symbolic-ref",
+        "--short",
+        "refs/remotes/origin/HEAD",
+        _ok_code=[0, 1, 128],
+    )
+    if remote_head and proj.get("review_from", "remote") == "remote":
+        return remote_head.removeprefix("origin/")
+    return git.out(
         "-C", str(repository), "symbolic-ref", "--short", "HEAD", _ok_code=[0, 1]
     )
+
+
+def review_branch(proj: ProjectEntry, repository: Path) -> str:
+    """Honor an explicit branch and expose disagreements with the library pin."""
+    from lup.devtools.dev.library import read_git_source
+
+    declared = proj.get("branch", "")
+    manifest = project_root() / "pyproject.toml"
+    source = read_git_source(project_root()) if manifest.is_file() else None
+    if source is None or source.ref_kind != "branch":
+        return declared
+    registered_url = registered_repository(proj) or remote_url(repository, "origin")
+    if not registered_url or not same_repository(registered_url, source.url):
+        if proj["name"] == "lup":
+            logger.warning(
+                "Sync registration %s names %s while the library consumes %s",
+                proj["name"],
+                registered_url or repository,
+                source.url,
+            )
+        return declared
+    if declared and declared != source.ref:
+        logger.warning(
+            "Sync reviews branch %s while the library consumes %s; "
+            "set sync setup %s --branch %s to follow the consumed branch",
+            declared,
+            source.ref,
+            proj["name"],
+            source.ref,
+        )
+    return declared or source.ref
 
 
 def clone_upstream(proj: ProjectEntry, repository: Path) -> Upstream:
@@ -430,26 +555,76 @@ def clone_upstream(proj: ProjectEntry, repository: Path) -> Upstream:
     )
 
 
-def registered_upstream(proj: ProjectEntry, path: Path) -> Upstream:
-    """A registration naming a path: somebody's own checkout, read where they work.
+def registered_upstream(
+    proj: ProjectEntry, path: Path, report: Callable[[str], None] = typer.echo
+) -> Upstream:
+    """Read fetched upstream refs without moving a registered working tree.
 
-    A plain checkout is read at its HEAD, which is what they have. A bare
-    repository has no HEAD worth reading — it names whatever branch the
-    clone was made on, which for a clone kept beside its worktrees is the
-    default branch and not the one anybody links against — so it is read at
-    the branch the registration names, as that clone's *own* ref rather
-    than a remote-tracking one: the user's clone is the upstream here, and
-    what they committed on that branch is what a linked project builds on.
-    The commits are read from the worktree attached for the branch where
-    one is, and from the bare half otherwise.
+    ``review_from: local`` explicitly reviews unpublished local commits.
+    A repository without an origin is itself the upstream and stays local.
     """
-    if not bare_repository(path):
+    if not (path / ".git").exists() and not bare_repository(path):
         return Upstream(checkout=path)
+    require_registered_origin(proj, path, report)
     branch = clone_branch(proj, path)
     attached = path / "tree" / branch
+    remote = proj.get("review_from", "remote") == "remote" and bool(
+        remote_url(path, "origin")
+    )
+    prefix = "refs/remotes/origin" if remote else "refs/heads"
     return Upstream(
-        checkout=attached if branch and attached.is_dir() else path,
-        tip=f"refs/heads/{branch}" if branch else "HEAD",
+        checkout=attached
+        if bare_repository(path) and branch and attached.is_dir()
+        else path,
+        tip=f"{prefix}/{branch}"
+        if branch
+        else ("refs/remotes/origin/HEAD" if remote else "HEAD"),
+    )
+
+
+def checkpoint_identity(found: Upstream) -> sync_state.ReviewSource:
+    """A remote URL or local repository identity, paired with the reviewed ref."""
+    remote = (
+        remote_url(found.checkout, "origin")
+        if found.tip.startswith("refs/remotes/")
+        else ""
+    )
+    repository = remote or git_in(
+        str(found.checkout), "rev-parse", "--path-format=absolute", "--git-common-dir"
+    )
+    ref = found.tip
+    if ref == "HEAD":
+        ref = (
+            git.out("-C", str(found.checkout), "symbolic-ref", "HEAD", _ok_code=[0, 1])
+            or f"detached:{git_in(str(found.checkout), 'rev-parse', 'HEAD')}"
+        )
+    return sync_state.ReviewSource(repository=repository, ref=ref)
+
+
+def checkpoint(proj: ProjectEntry, found: Upstream) -> str:
+    """The shared checkpoint wins over stale worktree-local declarations."""
+    recorded = sync_state.read(project_root(), proj["name"])
+    if recorded is None:
+        return proj.get("last_synced_commit", "")
+    source = checkpoint_identity(found)
+    if recorded.source != source:
+        logger.warning(
+            "%s checkpoint belongs to %s at %s; %s at %s has not been reviewed",
+            proj["name"],
+            recorded.source.repository,
+            recorded.source.ref,
+            source.repository,
+            source.ref,
+        )
+        return ""
+    return recorded.commit
+
+
+def record_checkpoint(proj: ProjectEntry, found: Upstream, commit: str) -> None:
+    sync_state.write(
+        project_root(),
+        proj["name"],
+        sync_state.Checkpoint(source=checkpoint_identity(found), commit=commit),
     )
 
 
@@ -463,7 +638,154 @@ def existing_upstream(proj: ProjectEntry) -> Upstream | None:
     if path and Path(path).exists():
         return registered_upstream(proj, Path(path))
     repository = cached_clone(proj["name"])
-    return None if repository is None else clone_upstream(proj, repository)
+    if repository is None:
+        return None
+    require_registered_origin(proj, repository, typer.echo)
+    return clone_upstream(proj, repository)
+
+
+class MissingCheckout(BaseModel, frozen=True):
+    """A required registration this machine cannot locate, and what answers it.
+
+    A typed reading rather than a sentence assembled where it is printed,
+    because three readers ask for the same thing and must not describe it
+    differently: `sync status` puts it under its table and exits on it, a
+    launch reports the requirements it was going to mount, and a command that
+    needs the checkout says why it has none.
+    """
+
+    name: str
+
+    reason: str
+    """What is missing, in the registry's words rather than git's."""
+
+    remedy: list[str]
+    """What answers it — a command, or the edit and the file to make it in."""
+
+    required: bool = False
+    """Whether the registration said this project cannot work without it.
+
+    It changes what the message *is* rather than how it reads: an absence a
+    registration declared a need for is an unmet requirement, and one nobody
+    claimed to need is a project that cannot be located. Both want the same
+    reason and the same remedy, and only one of them is a failure.
+    """
+
+    def spelled(self) -> str:
+        """This absence as a reader meets it: what is missing, then the answer."""
+        opening = (
+            f"'{self.name}' is required by this project and {self.reason}"
+            if self.required
+            else f"'{self.name}' could not be located: {self.reason}"
+        )
+        return "\n".join([opening, *(f"  {step}" for step in self.remedy)])
+
+
+def missing_checkout(proj: ProjectEntry) -> MissingCheckout:
+    """Why a registration could not be located, and what would answer it.
+
+    Asked once the caller has already failed to locate it, so nothing here
+    clones, fetches or touches the network: this reads the registration and
+    says what it was missing. The three answers are the three states one can
+    be in — nobody said where it is, the path somebody named is gone, and a
+    URL is known but nothing is cloned from it yet — and each names the
+    command that ends it.
+    """
+    name = proj["name"]
+    needed = bool(proj.get("required"))
+    match (transport_url(proj), proj.get("path", "")):
+        case ("", ""):
+            return MissingCheckout(
+                name=name,
+                required=needed,
+                reason=(
+                    "nothing on this machine says where it is: no url in "
+                    f"{sync_file().name}, and no remote or path in "
+                    f"{local_file().name}"
+                ),
+                remedy=[
+                    f"uv run lup-devtools sync remote {name} <url>"
+                    "   (the URL this machine fetches it from)",
+                    f"uv run lup-devtools sync setup {name} /path/to/repo"
+                    "   (a checkout this machine already has)",
+                ],
+            )
+        case ("", registered):
+            return MissingCheckout(
+                name=name,
+                required=needed,
+                reason=f"the path registered for it, {registered}, is not there",
+                remedy=[
+                    f"uv run lup-devtools sync setup {name} /path/to/repo"
+                    "   (where the checkout is now)",
+                    f"uv run lup-devtools sync remote {name} <url>"
+                    "   (to clone it at the derived location instead)",
+                ],
+            )
+        case (url, _):
+            return MissingCheckout(
+                name=name,
+                required=needed,
+                reason=f"nothing is cloned from {url} yet",
+                remedy=[f"uv run lup-devtools sync fetch {name}"],
+            )
+
+
+def owed_here(proj: ProjectEntry) -> bool:
+    """Whether this checkout owes a required registration a repository at all.
+
+    Two requirements are not this checkout's to meet, and both are the same
+    shape: the registration names something this repository already is.
+
+    One names it outright — a project registered at the URL this checkout's
+    own origin points at, which is what a repository tracking itself looks
+    like. Read off origin rather than off a key somebody has to remember to
+    write, so a repository never has to declare that it is itself, and a fork
+    tracking its parent is still owed one, because a fork is a different
+    repository.
+
+    The other is a committed requirement read inside the template scaffold.
+    `sync.json` there is the file an adopting project receives, and the
+    scaffold is the upstream of every registration it ships: the requirement
+    is the adopter's to answer, and the tree that wrote it has nothing to
+    clone. A requirement in the machine's own local file is that machine's
+    and is owed here like any other.
+    """
+    declared = registered_repository(proj)
+    own = remote_url(project_root(), "origin")
+    if declared and own and same_repository(declared, own):
+        return False
+    tracked = load_json(sync_file()).get("projects", [])
+    shipped = any(
+        entry["name"] == proj["name"] and entry.get("required") for entry in tracked
+    )
+    return not (shipped and is_template_scaffold(project_root()))
+
+
+class LocatedProject(BaseModel, frozen=True):
+    """One registration and where this machine found it, or that it did not.
+
+    Paired, because locating a registration is several git commands and two
+    readings want that one answer: the table says where each project is, and
+    the requirements under it say which of the absences somebody declared a
+    need for.
+    """
+
+    entry: ProjectEntry
+    found: Upstream | None = None
+
+
+def unmet_requirements(located: list[LocatedProject]) -> list[MissingCheckout]:
+    """Every requirement this machine has not answered, from one pass of locating.
+
+    Reads what the caller already resolved rather than resolving again, and
+    leaves out the requirements nobody here owes -- see :func:`owed_here`.
+    """
+    return [
+        missing_checkout(one.entry)
+        for one in located
+        if one.entry.get("required") and one.found is None and owed_here(one.entry)
+    ]
 
 
 def openable(
@@ -496,8 +818,10 @@ def accessible_roots(
     tooling may read its commits; nothing about it says a session may open
     it, and the two live in the same file only because the file is where a
     project is named. Silence here is the answer for every registration that
-    does not carry the key, and for the lup entry the committed scaffold
-    ships to every adopter.
+    does not carry the key, and for every one this checkout does not owe a
+    repository -- see :func:`owed_here`. The scaffold's own lup entry is the
+    second kind: it is mounted read-write in the repositories that adopt it,
+    and in the repository that ships it the checkout it names is this one.
 
     Read from the registry rather than from `refs/`, and that difference is
     the whole of why this exists. `refs/` is a directory of symlinks built
@@ -524,15 +848,17 @@ def accessible_roots(
     and skipped -- whether it named neither a path nor a URL, or its
     materialization failed. That is a note somebody did not finish, in a
     gitignored file, or a forge that did not answer; failing a launch over
-    one would turn either into a session that will not open.
+    one would turn either into a session that will not open. A *required* one
+    is reported as the requirement it is, with the command that answers it,
+    because the session about to open is the one that will meet its absence.
     """
 
     def located(project: ProjectEntry) -> AccessibleRoot | None:
         """Where one registration is on disk, materializing it if it is not."""
-        if "mount" not in project:
+        if "mount" not in project or not owed_here(project):
             return None
-        found = existing_upstream(project)
         try:
+            found = existing_upstream(project)
             if found is None:
                 found = ensure_local(project, report)
             opened = openable(project, found, report)
@@ -540,6 +866,8 @@ def accessible_roots(
             report(
                 f"'{project['name']}' could not be materialized, so it stays out of reach"
             )
+            if project.get("required"):
+                report(missing_checkout(project).spelled())
             return None
         return AccessibleRoot(path=opened.resolve(), writable=project["mount"] == "rw")
 
@@ -670,6 +998,7 @@ def refresh(name: str, repository: Path, report: Callable[[str], None]) -> None:
             )
     except sh.ErrorReturnCode as error:
         report(f"Warning: fetch failed: {decode_stderr(error)}")
+        raise typer.Exit(1) from error
 
 
 def attach_worktree(
@@ -700,21 +1029,110 @@ def attach_worktree(
     return checkout
 
 
+def transport_url(proj: ProjectEntry) -> str:
+    """The URL this machine fetches from: its own transport, else the shared one.
+
+    A clone is made with what reaches the forge from here, which is the
+    machine's ``remote`` where it wrote one and the registered ``url``
+    otherwise. Identity is a separate question and is never read from this:
+    see :func:`registered_repository`.
+    """
+    return proj.get("remote", "") or proj.get("url", "")
+
+
+def registered_repository(proj: ProjectEntry) -> str:
+    """Which repository this registration means, in the spelling that says so.
+
+    The shared ``url`` where the project named one, because that is the claim
+    every machine reads. Only where none was named does this machine's own
+    transport stand in as the identity, which is what a registration that
+    exists on one machine alone looks like.
+    """
+    return proj.get("url", "") or proj.get("remote", "")
+
+
 def registered_elsewhere(repository: Path, url: str) -> str:
-    """The origin this clone actually points at, when it is not the declared one.
+    """The origin this clone reaches, when that is not the repository registered.
 
     The cache is per user and keyed by the registered name, so two projects
     on this machine registering different repositories under one name would
     otherwise share a clone — and the second would review, mount and commit
     into the first one's history under its own name. Empty where they agree,
     or where either side has nothing to compare.
+
+    Agreement is about which repository, never about the spelling: a machine
+    cloning over ssh from a registration that names an https URL has the
+    right history, and reporting that as a conflict would refuse the ordinary
+    arrangement of a forge with two transports.
     """
     if not url:
         return ""
     found = git.out(
         "-C", str(repository), "remote", "get-url", "origin", _ok_code=[0, 1]
     )
-    return "" if not found or found == url else found
+    return "" if not found or same_repository(found, url) else found
+
+
+def declaring_file(name: str, key: str) -> Path:
+    """Which of the two registry files carries one key of one registration.
+
+    So a refusal can name the file to edit rather than the pair. The tracked
+    file wins when it holds the key, because that is the half the merge takes
+    it from; anything else is answered by the local one, including a key
+    nobody has written yet, which is where it would go.
+    """
+    tracked = next(
+        (p for p in load_json(sync_file()).get("projects", []) if p["name"] == name),
+        None,
+    )
+    return sync_file() if tracked is not None and key in tracked else local_file()
+
+
+def require_registered_origin(
+    proj: ProjectEntry, repository: Path, report: Callable[[str], None]
+) -> None:
+    """Refuse a checkout that holds a different repository from the registered one.
+
+    Which repository, not which spelling. This machine reaching a forge over
+    ssh while the shared registration names its https URL is the ordinary
+    case and is accepted, so a refusal here means what it says: two
+    repositories are registered under one name, and a review, a mount or a
+    commit would land in the wrong history.
+
+    The refusal names the file each half of the answer lives in and the exact
+    edit, because "correct the registration" is not actionable when the
+    registration is two files and the reader cannot tell which of them is
+    wrong.
+    """
+    declared = registered_repository(proj)
+    pointing = registered_elsewhere(repository, declared)
+    if not pointing:
+        return
+    name = proj["name"]
+    registered_path = proj.get("path", "")
+    at_registered_path = bool(registered_path) and (
+        Path(registered_path).resolve() == repository.resolve()
+    )
+    theirs = (
+        f'point that entry\'s "path" at a checkout of it: '
+        f"uv run lup-devtools sync setup {name} /path/to/repo"
+        if at_registered_path
+        else f"remove {repository} so the next fetch clones it again"
+    )
+    report(
+        f"The checkout at {repository} is a clone of {pointing}, while "
+        f"'{name}' is registered as {declared} in "
+        f"{declaring_file(name, 'url').name}. Two repositories under one "
+        "name, so a review, a mount or a commit would land in the wrong "
+        "history; nothing was read from it. Write whichever is true:\n"
+        f'  - {pointing} is the repository meant: set "url" on the '
+        f"'{name}' entry in {declaring_file(name, 'url').name} to it.\n"
+        f"  - {declared} is: {theirs}. Where this machine reaches it at "
+        f"another URL, say so with: uv run lup-devtools sync remote {name} "
+        "<url>\n"
+        "  - both are tracked here: register them under two names."
+    )
+    raise typer.Exit(1)
 
 
 def ensure_local(
@@ -726,9 +1144,9 @@ def ensure_local(
     Reviewing upstream commits (``log``/``diff``) means reading the upstream's
     actual git history, which only exists locally — so before any such command
     can run, the project must be present and current on disk. This is that
-    guarantee: it clones a project that has only a URL, fetches one already
-    cached so the review sees the latest commits rather than a stale snapshot,
-    and leaves a user-provided local path as-is. In every case it (re)points
+    guarantee: it clones a project that has only a URL and fetches cached or
+    registered repositories while preserving their branches and working trees.
+    In every case it (re)points
     ``refs/<name>`` at the result and hands back where the caller runs git.
     ``status`` deliberately does *not* call this (it uses
     :func:`existing_upstream` instead) so a status check never clones,
@@ -746,32 +1164,24 @@ def ensure_local(
     path = proj.get("path", "")
     name = proj["name"]
     if path and Path(path).exists():
+        found = registered_upstream(proj, Path(path), report)
+        if proj.get("review_from", "remote") == "remote" and remote_url(
+            Path(path), "origin"
+        ):
+            refresh(name, Path(path), report)
         ensure_ref_symlink(name, path)
-        return registered_upstream(proj, Path(path))
+        return found
 
-    url = proj.get("url", "")
+    url = transport_url(proj)
     repository = cached_clone(name)
     if repository is None:
         if not url:
-            report(
-                f"Project '{name}' has no local path or URL configured.\n"
-                "Either:\n"
-                "  1. Add a URL for it in sync.json.local\n"
-                f"  2. Run: uv run lup-devtools sync setup {name} /path/to/repo"
-            )
+            report(missing_checkout(proj).spelled())
             raise typer.Exit(1)
         repository = bare_path(name)
         clone_bare(url, repository, report)
     else:
-        pointing = registered_elsewhere(repository, url)
-        if pointing:
-            report(
-                f"The clone at {repository} points at {pointing}, and '{name}' "
-                f"is registered as {url}. Two projects on this machine are "
-                "registering different repositories under one name; rename one "
-                "registration, or remove that directory to re-clone."
-            )
-            raise typer.Exit(1)
+        require_registered_origin(proj, repository, report)
         refresh(name, repository, report)
 
     branch = clone_branch(proj, repository)
@@ -866,18 +1276,25 @@ def status_cmd() -> None:
         """
         return p["mount"] if "mount" in p else "—"
 
-    def project_row(p: ProjectEntry) -> list[str]:
+    def project_row(p: ProjectEntry, resolved: Upstream | None) -> list[str]:
         synced = p.get("last_synced_commit", "")
         synced_short = short_sha(synced) if synced else "never"
 
         if p.get("ignore"):
-            return [p["name"], "—", "ignored", reach(p), "(skipped)"]
+            where = f"{resolved.checkout}" if resolved is not None else "(skipped)"
+            return [p["name"], "—", "ignored", reach(p), where]
 
-        resolved = existing_upstream(p)
         if resolved is None:
-            has_url = bool(p.get("url"))
-            note = "not cloned (run: sync fetch)" if has_url else "no path/url"
+            required = "required, " if p.get("required") else ""
+            note = (
+                f"{required}not cloned (run: sync fetch)"
+                if transport_url(p)
+                else f"{required}nowhere to read it from"
+            )
             return [p["name"], "—", synced_short, reach(p), note]
+
+        synced = checkpoint(p, resolved)
+        synced_short = short_sha(synced) if synced else "never"
 
         try:
             behind: int | str = commit_count(
@@ -885,17 +1302,48 @@ def status_cmd() -> None:
             )
         except (sh.ErrorReturnCode, ValueError):
             behind = "?"
-        branch = p.get("branch", "")
-        source = f"{resolved.checkout}" + (f" ({branch})" if branch else "")
+        source = f"{resolved.checkout} ({resolved.tip})"
         return [p["name"], str(behind), synced_short, reach(p), source]
 
-    rows = [project_row(p) for p in projects]
+    def worth_locating(p: ProjectEntry) -> bool:
+        """Whether status asks where this project is, which costs git calls.
+
+        A registration ignored for review is not located, because nothing
+        below reads the answer -- unless the project declared it needs the
+        repository present or reachable, which `ignore` says nothing about:
+        being the upstream of this repository is a reason not to read its
+        commits back and no reason at all to be out of reach.
+        """
+        return not p.get("ignore") or bool(p.get("required")) or "mount" in p
+
+    # Located once and read twice: the table says where each project is, and
+    # the requirements beneath it say which of the absences somebody declared
+    # a need for. Locating runs several git commands per registration, so the
+    # two readings share one pass rather than each making their own.
+    located = [
+        LocatedProject(
+            entry=p, found=existing_upstream(p) if worth_locating(p) else None
+        )
+        for p in projects
+    ]
+    rows = [project_row(one.entry, one.found) for one in located]
 
     typer.echo()
     typer.echo(
         format_table(("Project", "Behind", "Last Synced", "Mount", "Source"), rows)
     )
     typer.echo()
+
+    unmet = unmet_requirements(located)
+    for requirement in unmet:
+        typer.echo(requirement.spelled())
+    if unmet:
+        # Nonzero, because a requirement this machine has not answered is a
+        # result and not a remark: every command that needs the checkout is
+        # going to fail at the point of use, and a status that reported it and
+        # exited clean is what let a fresh checkout look finished.
+        typer.echo()
+        raise typer.Exit(1)
 
 
 @app.command("fetch")
@@ -910,19 +1358,28 @@ def fetch_cmd(
     A fetch and nothing else: no branch a session may be working on is moved,
     and no working tree is reset. What keeps the review current is that it
     reads the remote-tracking ref this refreshes.
+
+    This is where a fresh checkout materializes what the project declared it
+    requires, including a registration whose *review* is ignored: `ignore`
+    says the commits are not read back, and a project that needs the
+    repository present needs it whether or not anybody reviews it.
     """
     projects = load_projects()
     targets = (
         [find_project(project)]
         if project
-        else [p for p in projects if not p.get("ignore")]
+        else [p for p in projects if not p.get("ignore") or p.get("required")]
     )
+    failed = False
     for p in targets:
         try:
             resolved = ensure_local(p)
             typer.echo(f"{p['name']}: ready at {resolved.checkout}")
         except (typer.Exit, sh.ErrorReturnCode):
+            failed = True
             typer.echo(f"{p['name']}: could not materialize", err=True)
+    if failed:
+        raise typer.Exit(1)
 
 
 @app.command("log")
@@ -941,7 +1398,7 @@ def show_log(
     proj = find_project(project)
     found = ensure_local(proj)
 
-    synced = proj.get("last_synced_commit", "")
+    synced = checkpoint(proj, found)
     range_spec = f"{synced}..{found.tip}" if synced else found.tip
 
     args = ["log", "--oneline"]
@@ -978,14 +1435,15 @@ def mark_synced(
         ),
     ] = "",
 ) -> None:
-    """Advance the sync checkpoint to where the upstream now stands.
+    """Share the reviewed checkpoint across this repository's worktrees.
 
     Run once a review is finished: it records that every commit up to the
-    upstream's tip has been considered, so the next ``sync log`` / ``status``
+    selected fetched tip has been considered, so the next ``sync log`` / ``status``
     only surfaces commits that land afterward. Marking synced even when nothing
     was ported is correct — it means "reviewed, decided to port none."
 
-    ``--at`` records a commit the project already consumed rather than the
+    This command does not fetch an already materialized upstream; ``--at``
+    names the immutable tip actually reviewed. It also records a commit the project already consumed rather than the
     one the upstream is on now. A project adopting a library mid-stream knows
     which commit it took and has, without this, no way to say so: marking
     synced would silently claim every commit that landed afterward as
@@ -994,28 +1452,11 @@ def mark_synced(
     commit that is not there is refused rather than written.
     """
     proj = find_project(project)
-    found = ensure_local(proj)
+    found = existing_upstream(proj) or ensure_local(proj)
 
     head = resolved_checkpoint(str(found.checkout), at, found.tip)
 
-    local_data = load_json(local_file())
-    local_projects = local_data.get("projects", [])
-
-    entry = next((p for p in local_projects if p["name"] == project), None)
-    if entry:
-        entry["last_synced_commit"] = head
-    else:
-        # The checkpoint alone, with no path recorded beside it.
-        # A registration that names only a URL is materialized in the cache,
-        # and writing that location back as its `path` turns it into a
-        # registration naming a local checkout -- one whose commits are then
-        # read from whatever branch a session left it on rather than from the
-        # upstream. Nothing needs the path recorded: it is derived from the
-        # name every time it is wanted.
-        local_projects.append({"name": project, "last_synced_commit": head})
-        local_data["projects"] = local_projects
-
-    save_local(local_data)
+    record_checkpoint(proj, found, head)
     typer.echo(f"Marked '{project}' as synced at {short_sha(head)}.")
 
 
@@ -1040,6 +1481,13 @@ def setup_project(
             ),
         ),
     ] = "",
+    review_from: Annotated[
+        Literal["", "remote", "local"],
+        typer.Option(
+            "--review-from",
+            help="Review fetched remote commits or local unpublished work",
+        ),
+    ] = "",
 ) -> None:
     """Set the local path for a project (writes to sync.json.local).
 
@@ -1056,7 +1504,7 @@ def setup_project(
         typer.echo(f"Path does not exist: {resolved}")
         raise typer.Exit(1)
 
-    repository = (resolved / ".git").exists() or (resolved / ".git").is_file()
+    repository = (resolved / ".git").exists() or bare_repository(resolved)
     # A directory that is not a checkout can still be worth reaching -- a
     # corpus, a set of reference material -- and the lease mounts one as a
     # plain bind. What it cannot do is be *reviewed*, which is what the rest
@@ -1083,13 +1531,18 @@ def setup_project(
 
     if branch:
         entry["branch"] = branch
+    if review_from:
+        entry["review_from"] = review_from
 
     if mount:
         entry["mount"] = "rw" if mount == "rw" else "ro"
 
-    head = current_head(str(resolved)) if synced else ""
+    inherited = next((p for p in load_projects() if p["name"] == name), {})
+    effective = PROJECT_ENTRY_ADAPTER.validate_python({**inherited, **entry})
+    found = registered_upstream(effective, resolved)
+    head = resolved_checkpoint(str(found.checkout), "", found.tip) if synced else ""
     if synced:
-        entry["last_synced_commit"] = head
+        record_checkpoint(effective, found, head)
 
     save_local(local_data)
     ensure_ref_symlink(name, str(resolved))
@@ -1110,6 +1563,69 @@ def setup_project(
             typer.echo(f"  Reopen this conversation to mount it: {spelled}")
     if synced:
         typer.echo(f"  Marked as synced at {short_sha(head)}")
+
+
+@app.command("remote")
+def set_remote(
+    name: Annotated[str, typer.Argument(help="Project name")],
+    url: Annotated[
+        str,
+        typer.Argument(help="The URL this machine fetches that repository from"),
+    ],
+) -> None:
+    """Record how this machine reaches a repository (writes to sync.json.local).
+
+    The machine's half of a registration, and the reason the committed half
+    can hold a canonical URL at all. A forge serves one repository over two
+    transports: a shared declaration names the https URL, and a machine whose
+    keys are ssh reaches the same history at `git@host:owner/repo.git`. That
+    is not a disagreement, and it has to be sayable without overwriting what
+    every other machine reads.
+
+    Checked against the shared declaration as it is written, the way `sync
+    grant` exercises a device before recording it: a URL that names a
+    *different* repository is refused here, where somebody is making the
+    claim and can still fix it, rather than at the next fetch — or, worse,
+    silently, by a clone of the wrong history being reviewed under this name.
+
+    Where nothing shared names the repository, this is the whole registration:
+    a project declared in the committed half by name alone is materialized
+    from what this writes.
+    """
+    proj = find_project(name)
+    declared = proj.get("url", "")
+    if declared and not same_repository(url, declared):
+        typer.echo(
+            f"{url} does not name the repository '{name}' is registered as, "
+            f"{declared} in {declaring_file(name, 'url').name}. A transport "
+            "this machine reaches it over is expected here; a different "
+            "repository under the same name would be reviewed, mounted and "
+            "committed into as this one.\n"
+            f"  - to reach {declared} from here, pass the URL that does.\n"
+            f"  - to track {url} as well, register it under its own name.\n"
+            f"  - to change which repository '{name}' means, set \"url\" on "
+            f"its entry in {declaring_file(name, 'url').name}."
+        )
+        raise typer.Exit(1)
+
+    local_data = load_json(local_file())
+    local_projects = local_data.get("projects", [])
+    entry = next((p for p in local_projects if p["name"] == name), None)
+    if entry:
+        entry["remote"] = url
+    else:
+        local_projects.append(ProjectEntry(name=name, remote=url))
+        local_data["projects"] = local_projects
+    save_local(local_data)
+
+    typer.echo(f"'{name}' is fetched from {url} on this machine")
+    if not declared:
+        typer.echo(
+            f"  Nothing in {sync_file().name} names the repository, so this is "
+            "what identifies it here"
+        )
+    if proj.get("required") and cached_clone(name) is None:
+        typer.echo(f"  Run: uv run lup-devtools sync fetch {name}")
 
 
 @app.command("grant")

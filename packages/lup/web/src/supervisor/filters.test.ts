@@ -27,6 +27,7 @@ const record: JournalEntry[] = [
     message: {
       blocks: [{ type: "tool_result", content: "boom", is_error: true, tool_call_id: "c" }],
       message_id: null,
+      native: null,
       model: null,
       parent_tool_call_id: null,
       role: "assistant",

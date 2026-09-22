@@ -114,8 +114,8 @@ def test_forcing_does_not_lift_a_lock(
     assert "feature" in branch_names(repo)
 
     # Refused before the removal rather than by git during it: forcing past
-    # the dirt used to carry the run as far as the destructive step, where
-    # the lock stopped it with the branch half-judged.
+    # the dirt carries the run as far as the destructive step, where the lock
+    # stops it with the branch half-judged.
     err = capsys.readouterr().err
     assert "Refusing to delete feature" in err
     assert "worktree removal failed" not in err
@@ -198,6 +198,57 @@ def test_dry_run_reports_an_unmerged_branch_as_blocked(
 
     assert "blocked: branch is unmerged" in capsys.readouterr().out
     assert "solo" in branch_names(work)
+
+
+def test_a_branch_whose_commits_were_cherry_picked_deletes_without_force(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The reading a sweep needs, which ancestry answers wrongly.
+
+    Work that landed through a rebase or a cherry-pick is in the integration
+    branch by content and reachable from it by no commit, so
+    `merge-base --is-ancestor` calls the branch unmerged and a plain delete
+    refused every branch a sweep had just landed. Containment is patch-id
+    here, as it is everywhere else this module decides the same question.
+    """
+    work = tmp_path / "repo"
+    git = initialized_repo(work, tmp_path / "no-hooks")
+    commit_file(git, work, "file.txt", "base\n", "chore: base")
+    git("checkout", "-q", "-b", "rebased")
+    commit_file(git, work, "extra.txt", "extra\n", "feat: extra")
+    git("checkout", "-q", "main")
+    git("cherry-pick", "rebased")
+    monkeypatch.chdir(work)
+
+    branches.delete_branch("rebased", dry_run=False, force=False)
+
+    assert "rebased" not in branch_names(work)
+
+
+def test_a_refused_delete_names_the_commits_that_look_rewritten(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """What the reader needs next, at the moment the refusal is read.
+
+    A subject the integration branch also carries is the trace a rebase
+    leaves, and it is a signal rather than proof — so the refusal names how
+    many there are and the command that settles it, and goes on refusing.
+    """
+    work = tmp_path / "repo"
+    git = initialized_repo(work, tmp_path / "no-hooks")
+    commit_file(git, work, "file.txt", "base\n", "chore: base")
+    git("checkout", "-q", "-b", "reworded")
+    commit_file(git, work, "extra.txt", "extra\n", "feat: extra")
+    git("checkout", "-q", "main")
+    commit_file(git, work, "extra.txt", "different\n", "feat: extra")
+    monkeypatch.chdir(work)
+
+    branches.delete_branch("reworded", dry_run=True, force=False)
+
+    said = capsys.readouterr().out
+    assert "1 of 1 unique commit(s) share a subject with main" in said
+    assert "git cherry -v main reworded" in said
+    assert "reworded" in branch_names(work)
 
 
 def test_a_merged_branch_takes_origin_s_copy_with_it(
@@ -490,12 +541,12 @@ def test_an_unmerged_remote_only_branch_is_blocked_on_what_it_holds(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """The check the old refusal claimed to have run, run against the ref that exists.
+    """The containment check run against the ref that exists, not one that does not.
 
     Origin's copy is the only copy, so the containment question is asked of
-    it. Answering from a local branch that was never there made the refusal
-    say `--force` would discard unmerged work in the one case where nothing
-    was at stake, and stay silent in the case where everything was.
+    it. Answering from a local branch that is not there makes the refusal say
+    `--force` would discard unmerged work in the one case where nothing is at
+    stake, and stay silent in the case where everything is.
     """
     monkeypatch.chdir(remote_only)
 

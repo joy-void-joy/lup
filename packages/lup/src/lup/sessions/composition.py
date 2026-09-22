@@ -151,6 +151,7 @@ class ComposedTurn[T: BaseModel | None](Turn[T]):
                     TurnFailure(
                         message="session closed before the turn completed",
                         blocks=completed.blocks,
+                        messages=completed.messages,
                         usage=completed.usage,
                         duration=completed.duration,
                         identifiers=self.accepted.identifiers,
@@ -173,6 +174,7 @@ class ComposedTurn[T: BaseModel | None](Turn[T]):
                                 else f"{self.submission_tool} was refused: {refused}"
                             ),
                             blocks=completed.blocks,
+                            messages=completed.messages,
                             usage=completed.usage,
                             duration=completed.duration,
                             identifiers=self.accepted.identifiers,
@@ -201,6 +203,7 @@ class ComposedTurn[T: BaseModel | None](Turn[T]):
                     else str(error)
                 ),
                 blocks=completed.blocks if completed is not None else [],
+                messages=completed.messages if completed is not None else [],
                 usage=completed.usage if completed is not None else Usage(),
                 duration=completed.duration if completed is not None else timedelta(),
                 identifiers=self.accepted.identifiers,

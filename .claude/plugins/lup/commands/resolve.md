@@ -39,9 +39,9 @@ Read the verdict rather than the quiet. A held lock is the fact and the last-eve
 
 `resolve supervise` serves the same projection as a live page for a human to sit in front of, and takes answers. It is server-sent events to a browser, so it is the human's surface and not the one to reach for when what you need is a signal you can act on.
 
-## Work discovered while a run is parked
+## Work discovered during a run
 
-A parked run is when the most is known about what else needs doing. Admit that work into the run that found it: hand the run the new evidence and only that evidence is planned, so the run keeps its id, every answer already recorded, and every concern already completed. The admitted concern then passes the same approval and material-question gates as one from intake, and may depend on a concern this run has already finished.
+Admit work into the run that found it: hand the run the new evidence and only that evidence is planned, so the run keeps its id, every answer already recorded, and every concern already completed. An existing run returns a durable queued receipt, even with `--detach`; inspect it with `resolve admissions --run-id <id> --json`. Queued means evidence accepted, not planned or approved. A live run applies it between worker waves; resume a parked run to apply it. The admitted concern passes the same approval and material-question gates as one from intake, and may depend on a concern this run has already finished.
 
 The evidence is a `# lup:` note you write in the file it concerns, which keeps the concern traceable to code; an open issue by number, which keeps it traceable to what was filed; or the human's own words when neither carries them. The run records which, so a statement-grounded concern is distinguishable in review. Admission is accepted at any phase before integration — past that the review branch is assembled, and a fresh run is the honest answer.
 

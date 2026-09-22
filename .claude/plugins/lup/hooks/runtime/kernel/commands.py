@@ -42,6 +42,7 @@ from .effects import (
 from .words import (
     INTERPRETERS,
     carried_setting,
+    command_words,
     destination_form,
     flag_matches,
     flag_write_targets,
@@ -53,6 +54,7 @@ from .words import (
     sed_invocation,
     unread_over_tracked,
     unread_question,
+    uv_command_words,
     uv_run_module_root,
     uv_run_words,
     write_checkpoint,
@@ -970,6 +972,8 @@ def rewrite_verdict(
     The word is still what the reason names, because that is what the writer
     typed and what they would have to change.
     """
+    if "decision" in document:
+        return document["decision"]
     suffix = posixpath.splitext(document["path"])[1].lower()
     verdict = decide_edit(
         document["path"],
@@ -1436,7 +1440,6 @@ def declared_target_decision(
     )
 
 
-# lup: solved: Re-installing lup still asks. `uv cache clean` and `uv lock` moved below the install line and are allowed, but `uv sync --all-extras` is judged as an install that fetches and runs build code — so the refresh line still puts a question for a dependency the project already declares, without an escalate marker now rather than with one. `decide_uv` argues that half deliberately: the verb that reaches the network to install is a question, every time. A disagreement to settle rather than an oversight to fix.
 def decide_uv(
     words: list[str],
     runner_targets: list[RunnerTargetRow],
@@ -1478,14 +1481,17 @@ def decide_uv(
 
     A flag naming where packages come from, or dropping the isolation build
     code runs in, is not the verb it rides on: it is a source nobody
-    declared, and it asks even where the bare verb would not — and it is
-    asked *before* the target is looked at, for the same reason. Placed after,
-    it was unreachable for exactly the spelling that matters:
-    ``uv run --with X ruff check .`` asked and
-    ``uv run --with X python script.py`` was allowed, because the interpreter
-    branch answered and returned first. Order was the whole of that defect.
+    declared, and it asks even where the bare verb would not. Inline-code
+    refusals and operator-only prohibitions answer first; approving a package
+    source cannot authorize an operation the requester may never perform.
     """
     measured = no_write_facts() if facts is None else facts
+    normalized = uv_command_words(words)
+    if normalized is None:
+        return KernelDecision(
+            "deny", "uv global options do not identify a literal command to judge"
+        )
+    words = normalized
     subcommand = words[1]
     if subcommand == "sync" and uv_package_source(words[2:]) is None:
         pinned = frozen_restore(words[2:], list(frozen), list(UV_FOREIGN_SOURCE_FLAGS))
@@ -1576,18 +1582,21 @@ def decide_uv(
                 " fed, and leaves nothing behind to review",
                 recovery="Name a script file.",
             )
-        # Between the refusal above and the target's own verdict below, which
-        # is where the lattice would put it anyway: a deny outranks an ask,
-        # and an ask outranks whatever the target says about itself. These
-        # flags are not a property of the target at all -- they name a source
-        # nobody declared and install from it before the target runs -- so
-        # they cannot sit under the target's answer. Measured sitting under
-        # it: `uv run --with X ruff check .` asked while
-        # `uv run --with X python script.py` was allowed, because the
-        # interpreter branch answered and returned first. Then measured
-        # sitting above the refusal, which was worse:
-        # `uv run --with X python -c 'code'` softened from deny to ask.
-        risky = ["--with", "--with-editable", "--with-requirements", "--env-file"]
+        # Transparent wrappers and nested runners cannot hide an operator-only
+        # operation. Only its hard prohibition propagates: recognizing a target
+        # here grants neither its wrapper nor an executable selected by path.
+        guarded_words = command_words(run_words)
+        if guarded_words:
+            guarded = decide_command_rows(guarded_words, target_tables or [], measured)
+            if guarded.hard:
+                return guarded
+            if posixpath.basename(guarded_words[0]) == "uv":
+                nested = decide_uv(
+                    guarded_words, runner_targets, target_tables, measured, frozen
+                )
+                if nested.hard:
+                    return nested
+        risky = ["-w", "--with", "--with-editable", "--with-requirements", "--env-file"]
         # Named in the question, because what is being installed is the whole
         # of what an approver weighs: "external code" told them a source was
         # involved and nothing about which one.
@@ -1599,9 +1608,21 @@ def decide_uv(
                 "value"
             ]
         ]
+        fetched.extend(
+            f"--with {word[2:]}"
+            for word in words[2:]
+            if word.startswith("-w") and word != "-w"
+        )
         if fetched:
             return KernelDecision(
                 "ask", f"uv run fetches and runs external code: {' '.join(fetched)}"
+            )
+        redirect = uv_package_source(words[2 : len(words) - len(run_words)])
+        if redirect is not None:
+            return KernelDecision(
+                "ask",
+                f"{redirect} takes packages from somewhere this project does not"
+                " declare",
             )
         # Above the interpreter's own allow, because `python -m examples.x`
         # reaches both and the module root is the more specific statement:

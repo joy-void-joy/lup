@@ -25,19 +25,10 @@ def codex_session_id() -> str:
 
 
 def codex_wake(cli_name: str) -> WakePath:
-    """Blank: nothing hands this session the thread `codex queue` takes.
+    """Blank until the native arrival hook binds the session's thread id.
 
-    The verb exists and reaches a session from any process, which is the half
-    Claude Code lacks -- but ``codex queue --thread`` takes a thread id or a
-    session name, and neither reaches a server Codex starts: the launch has
-    no flag that names a session, so there is nothing for a launcher to pass
-    on, and the session id that would stand in for one is the same one
-    :func:`codex_session_id` cannot read.
-
-    *cli_name* is accepted and unused, because what the launcher calls a
-    session is a fact about lup's roster here and not about anything Codex
-    would resolve -- passing the roster's name to ``--thread`` would name a
-    thread that does not exist. Declaring blank is what makes a sender told
-    that nothing will wake this peer rather than told a wake was attempted.
+    The root SessionStart or UserPromptSubmit hook writes the authoritative
+    session_id onto the existing launcher-owned member. The roster's name
+    is not a Codex queue target, so *cli_name* is never substituted for it.
     """
     return WakePath()

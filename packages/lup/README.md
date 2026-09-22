@@ -62,9 +62,9 @@ Other modules provide independently composable runtime decorators, semantic
 policy, deterministic harness generation/reconciliation, the persisted
 resolver, MCP helpers, workspace/history support, scheduling, telemetry, and
 sandboxing. See the repository's
-[library guide](https://github.com/joy-void-joy/lup/blob/main/docs/library.md)
+[library guide](../../docs/library.md)
 and
-[architecture guide](https://github.com/joy-void-joy/lup/blob/main/docs/architecture.md).
+[architecture guide](../../docs/architecture.md).
 Runnable factory, wrapper, background, profile, endpoint, route, and policy
 compositions live in the repository
-[examples](https://github.com/joy-void-joy/lup/tree/main/examples).
+[examples](../../examples).

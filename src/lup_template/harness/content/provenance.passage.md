@@ -54,16 +54,19 @@ session API. Name them in the requirement (`lup[claude,codex,docker]`).
 
 
 <!-- passage: upstream-checkpoint -->
-Baseline the upstream checkpoint at *the recorded commit*, not at whatever the
-remote's default branch points to. `--synced` reads the checkpoint from the
-named checkout's HEAD, so that checkout has to be standing at the recorded
-commit when this runs:
+Baseline the upstream checkpoint at *the recorded commit*. Register the
+selected branch, fetch it, and record the exact commit already consumed:
 
 ```
-{{ project_devtools }} sync setup lup {{ library_checkout }} --branch <branch> --synced
+{{ project_devtools }} sync setup lup {{ library_checkout }} --branch <branch>
+{{ project_devtools }} sync fetch lup
+{{ project_devtools }} sync mark-synced lup --at <commit>
 ```
 
-`setup` records that checkout, the branch settled on above, and its HEAD as the checkpoint, so `{{ update_skill }}` only shows commits that land afterward. Plain `sync mark-synced lup` is wrong here: the shipped `sync.json` entry carries a URL and no branch, so it clones the remote's default branch and checkpoints *that* HEAD — so every commit the project already carries comes back as unported work once the branch merges.
+`setup` records the checkout and branch. Review reads the fetched upstream
+ref, preserving any work in the checkout. The checkpoint is shared by all
+worktrees of this consuming repository. `--synced` is appropriate only when
+the selected review ref itself is exactly the commit already consumed.
 
 A project that already consumed the library, and knows which commit it took, names it rather than moving a checkout to stand on it:
 
@@ -72,4 +75,3 @@ A project that already consumed the library, and knows which commit it took, nam
 ```
 
 That is the case an adoption mid-stream is always in — the code is already here, and what is missing is only the record of how far it reached. Without the commit, marking synced claims every commit that landed afterward as reviewed, which is the one thing the checkpoint exists to prevent.
-

@@ -196,11 +196,9 @@ def container_requirement(
     runtime inside its image is overruling a security property and should
     have to say so.
 
-    What this does *not* prove is that an expression evaluates inside a
-    container -- a daemon that answers can still be one whose image cannot
-    import the project. Exercising that far would mean pulling and starting a
-    container on every launch, which is a cost no preflight should impose, so
-    the gap is stated rather than closed.
+    Container creation and expression evaluation are exercised separately by
+    ``sandbox_requirement`` at setup. This cheap daemon check runs at launch;
+    its success alone establishes nothing about the sandbox's Python REPL.
     """
     return Requirement(
         capability="container runtime",
@@ -221,6 +219,36 @@ def container_requirement(
             SupplementaryGroup(group=socket_group),
         ],
         install=install,
+    )
+
+
+def sandbox_requirement(image: str = "") -> Requirement:
+    """A setup exercise of container creation and the sandbox's Python REPL."""
+    return Requirement(
+        capability="Python sandbox",
+        purpose="evaluating Python through the sandbox execution transport",
+        checked="setup",
+        exercise=Run(
+            command=[
+                "uv",
+                "run",
+                "lup-devtools",
+                "harness",
+                "sandbox-check",
+                *(["--image", image] if image else []),
+            ]
+        ),
+        absence=LostCapability(capability="sandbox Python execution"),
+        recovery=(
+            "Rerun `uv run lup-devtools harness sandbox-check` after repairing the "
+            "reported startup or evaluation failure. A reachable daemon still needs "
+            "permission to create containers and an image with a working Python. "
+            "The probe disables network access and installs no packages."
+        ),
+        diagnoses=[
+            EnvironmentRedirect(variable="DOCKER_HOST"),
+            SupplementaryGroup(group="docker"),
+        ],
     )
 
 
@@ -1243,6 +1271,7 @@ def default_manifest() -> Manifest:
             git_requirement(),
             uv_requirement(),
             container_requirement(),
+            sandbox_requirement(),
             github_requirement(),
             clipboard_requirement(),
         ]

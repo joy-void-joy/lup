@@ -124,7 +124,7 @@ class TestATrackerThatDidNotAnswer:
     """A refused credential and a clean tracker are not the same reading.
 
     Measured with an expired token: `dev issues` printed "0 open issue(s) in
-    joy-void-joy/lup" and exited zero, which is exactly what a repository
+    upstream/framework" and exited zero, which is exactly what a repository
     with nothing open prints. Anything acting on that plans from an
     emptiness nobody established.
     """

@@ -25,9 +25,10 @@ import asyncio
 from collections.abc import AsyncGenerator, Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from uuid import uuid4
 
 from lup.channels.models import utc_now
-from lup.resolver.contracts import ResolverDrained
+from lup.resolver.contracts import ResolverAwaitingAnswers, ResolverDrained
 from lup.resolver.dag import ConcernGraph
 from lup.resolver.journal import (
     JoinAuditEvent,
@@ -37,8 +38,14 @@ from lup.resolver.journal import (
     Journal,
     RecheckRepeatedEvent,
     RecheckReusedEvent,
+    RecheckChangedEvent,
 )
-from lup.resolver.recheck_desk import RecheckDesk, RecheckRecord
+from lup.resolver.recheck_desk import (
+    RecheckDesk,
+    RecheckIdentity,
+    RecheckRecord,
+    RecheckVerdict,
+)
 from lup.resolver.join_desk import (
     JoinDesk,
     JoinPlan,
@@ -159,7 +166,7 @@ class Joiner:
         riding = {item.commit: item.inside for item in carried}
         tips = [parent for parent in ordered if parent not in riding]
         self.journal.record(JoinPlannedEvent(tips=tips, carried=carried))
-        desk = JoinDesk(self.run.repository.root)
+        desk = JoinDesk(self.run.repository.root, lease.concern_id)
         desk.write_plan(
             JoinPlan(
                 concern_id=lease.concern_id,
@@ -176,12 +183,13 @@ class Joiner:
         blocked = await self.drive_join(lease, desk, purpose)
         progress = desk.progress()
         current = progress.commit or self.worktrees.head(lease)
-        self.record_join_progress(progress.joined, current, tips)
+        if lease.concern_id == "integration":
+            self.record_join_progress(progress.joined, current, tips)
         outstanding = [tip for tip in tips if tip not in progress.joined]
         if outstanding:
-            # A drain is the one way to leave parents on the table, and it is
-            # observed at a landing, so what is recorded is a tree that
-            # exists and a resume re-enters at the next parent.
+            pending = await self.questions.unanswered_for(lease.concern_id)
+            if pending:
+                raise ResolverAwaitingAnswers(pending, [])
             drain = self.questions.draining()
             if drain is None:
                 raise ResolverInvariantError(
@@ -259,6 +267,25 @@ class Joiner:
             blocked = report.blocked
             progress = desk.progress()
             self.record_landings(before, progress)
+            pending = await self.questions.unanswered_for(lease.concern_id)
+            if (
+                blocked
+                and not pending
+                and len(progress.joined) < len(plan.tips)
+                and self.questions.draining() is None
+            ):
+                question = MaterialQuestion(
+                    id=f"join-blocked-{uuid4().hex}",
+                    concern_id=lease.concern_id,
+                    prompt=(
+                        f"How should the join for {lease.concern_id} proceed? "
+                        f"The merger reported this blocker for {purpose}:\n\n{blocked}"
+                    ),
+                )
+                self.questions.queue_questions([question], lease.concern_id)
+                pending = await self.questions.unanswered_for(lease.concern_id)
+            if pending:
+                raise ResolverAwaitingAnswers(pending, [])
             await self.recheck_landed(lease, plan, before, progress)
             # Every parent landed, nothing landed this turn, or the run was
             # asked to stop. The last is checked here as well as inside the
@@ -559,6 +586,7 @@ class Joiner:
                 ),
                 occasion=f"join-{parent[:12]}",
                 lost_because=f"once {parent[:12]} was joined into the same tree",
+                commit=self.worktrees.head(lease),
             )
 
     async def recheck_criteria(
@@ -713,6 +741,7 @@ class Joiner:
             ),
             occasion="integrated",
             lost_because="once every sibling is integrated",
+            commit=integration.commit,
         )
 
     async def settle_rechecks(
@@ -746,6 +775,7 @@ class Joiner:
         situation: str,
         occasion: str,
         lost_because: str,
+        commit: str | None = None,
     ) -> MaterialQuestion | None:
         """Ask one concern's reviewer whether its criteria still hold here.
 
@@ -756,6 +786,18 @@ class Joiner:
         twice rather than colliding on one id — the second failure is its own
         fact, and it names a different join.
         """
+        identity = RecheckIdentity(
+            concern=concern, occasion=occasion, commit=commit or ""
+        )
+        desk = RecheckDesk(self.questions.mailbox.root)
+        cached = desk.verdict(identity) if commit else None
+        if cached is not None:
+            self.journal.record(
+                RecheckReusedEvent(concerns=[concern.id], commit=commit or "")
+            )
+            if cached.question is not None:
+                self.questions.queue_questions([cached.question], concern.id)
+            return cached.question
         reviewer = ActorRef(kind="reviewer", id=concern.id)
         declared = {criterion.id: True for criterion in concern.criteria}
         # The reviewer session may be fresh — a resumed run, a parked actor —
@@ -792,17 +834,46 @@ class Joiner:
         lost = [
             criterion.id for criterion in concern.criteria if criterion.id not in met
         ]
+        for previous in self.questions.mailbox.questions():
+            if (
+                previous.question.concern_id == concern.id
+                and previous.question.criteria
+                and sorted(previous.question.criteria) != sorted(lost)
+            ):
+                self.journal.record(
+                    RecheckChangedEvent(
+                        concern_id=concern.id,
+                        occasion=occasion,
+                        commit=commit or "",
+                        previous_question=previous.question,
+                        criteria=sorted(lost),
+                    )
+                )
         if not lost:
+            if commit:
+                desk.preserve(
+                    RecheckVerdict(
+                        identity=identity, report=result.output, question=None
+                    )
+                )
             return None
-        if self.standing_ruling_exists(concern.id, lost):
+        if self.standing_ruling_exists(
+            concern.id, lost, commit=commit if occasion == "integrated" else None
+        ):
             self.journal.record(
                 RecheckRepeatedEvent(
                     concern_id=concern.id, occasion=occasion, criteria=sorted(lost)
                 )
             )
+            if commit:
+                desk.preserve(
+                    RecheckVerdict(
+                        identity=identity, report=result.output, question=None
+                    )
+                )
             return None
         question = MaterialQuestion(
-            id=f"{concern.id}-superseded-{occasion}",
+            id=identity.question_id(lost),
             concern_id=concern.id,
             prompt=(
                 f"{concern.id} no longer meets {', '.join(lost)} "
@@ -813,11 +884,20 @@ class Joiner:
             choices=SupersessionRuling.choices(),
             closed_choices=True,
             criteria=sorted(lost),
+            recheck_commit=commit,
         )
+        if commit:
+            desk.preserve(
+                RecheckVerdict(
+                    identity=identity, report=result.output, question=question
+                )
+            )
         self.questions.queue_questions([question], concern.id)
         return question
 
-    def standing_ruling_exists(self, concern_id: str, lost: list[str]) -> bool:
+    def standing_ruling_exists(
+        self, concern_id: str, lost: list[str], *, commit: str | None = None
+    ) -> bool:
         """Whether this lost-criteria set was already put to the humans.
 
         The same standing finding reproduced by join after join asked five
@@ -835,7 +915,14 @@ class Joiner:
             for answer in (state.answers.answers if state.answers else [])
         }
         for question in state.questions.questions:
+            if question.id in state.retired_questions:
+                continue
             if question.concern_id != concern_id or not question.criteria:
+                continue
+            if commit is not None and (
+                question.recheck_commit not in (None, commit)
+                or question.id == f"{concern_id}-superseded-integrated"
+            ):
                 continue
             if {identifier: True for identifier in question.criteria} != lost_map:
                 continue

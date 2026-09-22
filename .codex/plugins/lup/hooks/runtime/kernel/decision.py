@@ -41,9 +41,8 @@ An approval question over local loss exists because the loss is permanent.
 Naming the capture that makes it impermanent is naming the condition under
 which the question stops being worth a person's attention — and, proven,
 settles the operation to ``allow`` rather than merely to the provider's own
-gate. Proof is the whole of it: a snapshot reference is not evidence, and
-:class:`~lup.policy.kernel.findings.CheckpointEvidence` is what a rule's
-requirement is discharged against.
+gate. Proof is the whole of it: a snapshot reference is not evidence, and a
+rule's requirement is discharged against a capture somebody recorded.
 
 * ``targeted`` — every path this operation can affect resolves statically, so
   a capture of exactly those paths covers the whole loss. ``rm build/out``,

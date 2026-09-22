@@ -7,6 +7,7 @@ import sh
 from lup.devtools.dev.git_guards import (
     DECLARED_GUARDS,
     DRIFT_COMMAND,
+    MERGE_STANDDOWN,
     GitGuard,
     hooks_directory,
     install_guards,
@@ -23,8 +24,11 @@ from lup.devtools.gitguard import (
     repository_state,
     watched_config,
 )
+from lup.execution.shell import git
 from lup.harness.toolchain import preflight_namespace
 from lup.policy.assets.host import undo_namespace
+from tests.unit.test_ledger_placement import committed, repository
+from tests.unit.test_scaffold import wrote
 
 
 def test_every_installed_hook_scrubs_the_environment_before_its_check() -> None:
@@ -41,6 +45,72 @@ def test_every_installed_hook_scrubs_the_environment_before_its_check() -> None:
         assert guard.environment == GIT_ENVIRONMENT
         assert f"unset {' '.join(guard.environment)}" in check
         assert check.index("unset ") < check.index(f"exec {guard.command}")
+
+
+def test_the_declared_commit_guard_reads_the_merge_before_it_checks() -> None:
+    """The standdown goes after the scrub and before the check, in that order.
+
+    After, because the scrub is what makes `git rev-parse` resolve the
+    repository the hook is running in rather than the one a name in the
+    environment points at. Before, because a check that has already started
+    cannot be stood down.
+    """
+    for guard in (one for one in DECLARED_GUARDS if one.hook == "pre-commit"):
+        check = guard.check()
+
+        assert guard.standdown == MERGE_STANDDOWN
+        assert (
+            check.index("unset ")
+            < check.index("MERGE_HEAD")
+            < check.index(f"exec {guard.command}")
+        )
+
+
+def test_the_commit_guard_stands_down_for_a_merge_and_not_for_what_follows(
+    tmp_path: Path,
+) -> None:
+    """Where a generated tree cannot be judged yet, and where it can again.
+
+    A commit concluding a merge is mid-transaction: the trees are compiled
+    from declarations the resolution has just rewritten, and the regeneration
+    that settles them comes after. Git draws that line itself for the merge it
+    completes on its own, which runs `pre-merge-commit` — a moment nothing
+    here declares — so this guard was refusing exactly the merges somebody had
+    to resolve by hand, and only those. It stands down for one merge commit
+    and for nothing else, which is what the commit after it has to show.
+    """
+    root = repository(tmp_path / "checkout")
+    wrote(root, "a.txt", "base\n")
+    committed(root, "base")
+    git("-C", str(root), "checkout", "-q", "-b", "other")
+    wrote(root, "a.txt", "other's\n")
+    committed(root, "other's own")
+    git("-C", str(root), "checkout", "-q", "main")
+    wrote(root, "a.txt", "main's\n")
+    committed(root, "main's own")
+    install_guards([GitGuard(command="exit 1", standdown=MERGE_STANDDOWN)], root)
+    git("-C", str(root), "merge", "--no-edit", "other", _ok_code=[0, 1])
+    wrote(root, "a.txt", "both\n")
+    git("-C", str(root), "add", "a.txt")
+
+    git("-C", str(root), "commit", "--no-edit", "-q")
+    merge = git.out("-C", str(root), "rev-parse", "HEAD")
+    wrote(root, "b.txt", "after the merge\n")
+    git("-C", str(root), "add", "b.txt")
+    git("-C", str(root), "commit", "-q", "-m", "after", _ok_code=[0, 1])
+
+    second_parent = git.out(
+        "-C",
+        str(root),
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        f"{merge}^2",
+        _ok_code=[0, 1],
+    )
+    assert second_parent
+    assert git.out("-C", str(root), "rev-parse", "HEAD") == merge
+    assert git.lines("-C", str(root), "diff", "--name-only", "--cached") == ["b.txt"]
 
 
 def test_a_guard_that_wants_nothing_dropped_writes_no_scrub() -> None:
@@ -348,11 +418,11 @@ def test_a_watch_lays_a_change_at_the_door_of_the_test_that_saw_it(
 def test_the_report_names_the_reading_the_refs_cannot_rule_out() -> None:
     """A commit made here mid-run and a stray fixture are the same event to a ref.
 
-    The report used to assert the fixture, on the reasoning that a developer
-    can rule out having moved a branch themselves. Where several sessions
-    share a clone that stops holding, and a reader handed only that reading
-    spends the length of a gate hunting a fixture that is not there — measured
-    on this repository, twice in one session.
+    Asserting the fixture reasons that a developer can rule out having moved
+    a branch themselves. Where several sessions share a clone that stops
+    holding, and a reader handed only that reading spends the length of a
+    gate hunting a fixture that is not there — measured on this repository,
+    twice in one session.
     """
     said = guard_report(
         {"refs/heads/feat-a": "1111111"}, {"refs/heads/feat-a": "2222222"}

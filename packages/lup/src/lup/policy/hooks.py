@@ -1,5 +1,5 @@
 # lup: ignore[native-spelling]
-# Legacy low-level SDK interop remains public during the capability migration.
+# The seam names the native hook events it normalizes, spelled as they land.
 """SDK-agnostic hook utilities — the normalized hook seam and its factories.
 
 SDK-agnostic hook models and factories: permission hooks, tool allowlists,
@@ -67,6 +67,7 @@ from pathlib import Path
 from typing import Literal, TypedDict
 
 from pydantic import BaseModel, Field
+from pydantic.json_schema import SkipJsonSchema
 
 from lup.policy.kernel.decision import SandboxPlacement
 from lup.workspace.paths import path_is_under
@@ -129,6 +130,9 @@ class LupHookOutput(BaseModel):
     spells the placement in its own words, and one whose runtime cannot
     renders the decision alone rather than a placement nothing honours."""
     system_message: str | None = None
+    delivery_receipt: SkipJsonSchema[Callable[[], None] | None] = Field(
+        default=None, exclude=True, repr=False
+    )
     updated_input: JsonObject | None = Field(
         default=None,
         description=(
@@ -149,6 +153,12 @@ class LupHookOutput(BaseModel):
             "it."
         ),
     )
+
+    def delivered(self) -> None:
+        """Acknowledge context only after its native transport accepted it."""
+        if self.delivery_receipt is not None:
+            self.delivery_receipt()
+            self.delivery_receipt = None
 
 
 type LupHookFn = Callable[[LupHookInput], Awaitable[LupHookOutput]]
@@ -356,7 +366,8 @@ def create_git_inspection_hook() -> LupHooksConfig:
         match event.tool_input:
             case {"command": str(command)}:
                 from lup.policy.kernel.shell import ESCALATE_RE
-                from lup.policy.rules import command_words, parse_shell_segments
+                from lup.policy.kernel.words import command_words
+                from lup.policy.rules import parse_shell_segments
 
                 escalation = ESCALATE_RE.match(command)
                 if escalation is not None and escalation.group("why").strip():

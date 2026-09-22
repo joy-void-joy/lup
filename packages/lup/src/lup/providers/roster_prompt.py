@@ -34,6 +34,7 @@ leaving a script that reads a path nobody writes.
 
 from importlib import resources
 from pathlib import Path
+import shlex
 
 from lup.coordination import bare
 from lup.coordination.bare.store import COORDINATION_DIR, MEMBERS_DIR, STORE_DIR
@@ -59,6 +60,11 @@ DEPARTURE_ENTRY = "coordination_departure.py"
 DEPARTURE_SCRIPT = "coordination_departure.sh"
 """The same three under the runtime's ending event, reaching the one writer
 that finishes this session's row on a clean exit."""
+
+ARRIVAL_MODULE = "arrival"
+ARRIVAL_ENTRY = "coordination_arrival.py"
+ARRIVAL_SCRIPT = "coordination_arrival.sh"
+"""The native session identity binder and its two entry artifacts."""
 
 STORE_ORIGIN = bare.__name__
 """Where the shipped package is copied from, for the banner each file carries."""
@@ -128,7 +134,9 @@ main()
 '''
 
 
-def guard_body(event: str, entry: str) -> str:
+def guard_body(
+    event: str, entry: str, home_env: str = "", events: tuple[str, ...] = ()
+) -> str:
     """A store-existence check that answers "nobody coordinates here" without Python.
 
     The store's members directory is the whole test: a repository whose
@@ -152,6 +160,8 @@ def guard_body(event: str, entry: str) -> str:
     hands the hook; the environment variable's name stays the identity
     module's and the event's name stays the adapter's.
     """
+    home_argument = f' "${{{home_env}:-}}"' if home_env else (' ""' if events else "")
+    event_arguments = f" {shlex.join(events)}" if events else ""
     return f"""#!/bin/sh
 command -v python3 >/dev/null 2>&1 || exit 0
 shared=$(git rev-parse --git-common-dir 2>/dev/null) || exit 0
@@ -161,7 +171,7 @@ case "$shared" in
 esac
 root="$shared/{STORE_DIR}/{COORDINATION_DIR}"
 [ -d "$root/{MEMBERS_DIR}" ] || exit 0
-exec python3 "${{0%/*}}/../runtime/{entry}" "$root" "${MEMBER_ENV}" "{event}"
+exec python3 "${{0%/*}}/../runtime/{entry}" "$root" "${MEMBER_ENV}" "{event}"{home_argument}{event_arguments}
 """
 
 
@@ -277,12 +287,14 @@ def hook_artifacts(
     guard_script: str,
     entry: str,
     module: str,
+    home_env: str = "",
+    events: tuple[str, ...] = (),
 ) -> list[Artifact]:
     """One event's guard and the entry it runs, beside the shipped package."""
     return [
         Artifact.generated(
             path=plugin_root / "hooks" / "scripts" / guard_script,
-            body=guard_body(event, entry),
+            body=guard_body(event, entry, home_env, events),
             semantic_id=semantic_id,
             banner=GeneratedBanner(source=__name__, command=REGENERATE_COMMAND),
             executable=True,
@@ -294,3 +306,32 @@ def hook_artifacts(
             banner=GeneratedBanner(source=__name__, command=REGENERATE_COMMAND),
         ),
     ]
+
+
+def wake_hook(
+    plugin_root: Path,
+    plugin_root_env: str,
+    source: HookSet,
+    runtime: str,
+    events: tuple[str, ...],
+    home_env: str,
+) -> PromptHook:
+    """Bind a root native session after startup or a delayed roster join."""
+    if source.peer_policy is None:
+        return PromptHook(registered={}, artifacts=[])
+    return PromptHook(
+        registered={
+            event: [{"hooks": [hook_entry(plugin_root_env, ARRIVAL_SCRIPT)]}]
+            for event in events
+        },
+        artifacts=hook_artifacts(
+            plugin_root,
+            source.id,
+            runtime,
+            ARRIVAL_SCRIPT,
+            ARRIVAL_ENTRY,
+            ARRIVAL_MODULE,
+            home_env,
+            events,
+        ),
+    )

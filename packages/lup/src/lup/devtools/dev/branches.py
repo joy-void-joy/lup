@@ -923,15 +923,20 @@ def unlanded_siblings(
 class BaseCandidate(BaseModel):
     """A candidate base branch, measured against the branch under test.
 
-    ``source`` states whether the name came from the base recorded at
-    worktree creation or from topological guessing.
+    ``source`` states where the name came from, and the three are ordered by
+    how much weight they carry. ``recorded`` is the base lup wrote at worktree
+    creation: somebody's statement of intent. ``created`` is the cut git
+    logged in the branch's own reflog: a byproduct, and evidence rather than
+    authority — :func:`created_from` says what it cannot answer for.
+    ``guessed`` is topology, which cannot recover a creation point at all and
+    is the one a caller has to confirm before acting on it.
     """
 
     name: str
     distance: int
     merge_base: str
     is_ancestor: bool
-    source: Literal["recorded", "guessed"] = "guessed"
+    source: Literal["recorded", "created", "guessed"] = "guessed"
 
 
 def recorded_base(branch: str) -> str | None:
@@ -941,6 +946,71 @@ def recorded_base(branch: str) -> str | None:
     a record exists at all and an empty string is a name nothing carries.
     """
     return records.recorded_base(branch) or None
+
+
+# lup: ignore[constant-declaration] — git's own reflog wording, which `git
+# branch`, `git switch -c` and `git worktree add -b` all write, and not a
+# spelling anything here chooses
+CREATION_ENTRY = "branch: Created from "
+
+
+def created_from(branch: str) -> str:
+    """The branch git logged this one as cut from, empty where it logged none.
+
+    `branch: Created from <ref>` is the first reflog entry git writes for a
+    new branch, and `git branch`, `git switch -c` and `git worktree add -b`
+    all write it — measured on git 2.55, all three. So a branch made with
+    plain git answers here, where lup's own record answers only for a branch
+    made by lup's own command. That is the whole point of asking: a base
+    should not depend on which command happened to cut the branch.
+
+    **Evidence, not authority, and empty is unremarkable.** Four ways it says
+    nothing, none of them a fault worth reporting:
+
+    - A bare clone does not log ref updates: `core.logAllRefUpdates` defaults
+      to false without a working tree, so a branch cut by running git against
+      the git directory itself carries no entry, while the same command run
+      from one of its worktrees does. A repository kept as a git directory
+      with worktrees beside it — which is how a machine holds several
+      checkouts of one project — is in that case by default.
+    - Reflogs expire, at 90 days for a reachable entry, and the creation is
+      the oldest entry a branch has.
+    - They are per-clone and never fetched, so nobody else's clone can answer
+      about a branch this one cut.
+    - The entry names whatever ref the command was given, which may be `HEAD`
+      or a bare commit rather than a branch.
+
+    So this ranks below the written record, which is a deliberate statement,
+    and a caller reads its absence as "ask topology" rather than as anything
+    being wrong.
+
+    A branch name is the only answer taken. `HEAD` names wherever the creating
+    checkout stood and leaves a later reader nothing to measure, a
+    remote-tracking ref answers as the local branch it tracks, and a bare
+    commit is a base no `pr sync-base` could fetch.
+    """
+    from lup.devtools.dev.worktree import branch_exists
+
+    logged = git.lines("reflog", "show", "--format=%gs", f"refs/heads/{branch}")
+    cut = next(
+        (
+            entry.removeprefix(CREATION_ENTRY)
+            for entry in reversed(logged)
+            if entry.startswith(CREATION_ENTRY)
+        ),
+        "",
+    )
+    if branch_exists(cut):
+        return cut
+    # A remote's own prefix, stripped from the list of remotes rather than at
+    # the first slash: `feat/x` is one branch name and `origin/dev` is two
+    # things, and only the second is somebody else's copy of a local branch.
+    tracked = (
+        stripped
+        for remote in git.lines("remote")
+        if (stripped := cut.removeprefix(f"{remote}/")) != cut
+    )
+    return next((name for name in tracked if branch_exists(name)), "")
 
 
 def decayed_base_complaint(branch: str, recorded: str, *, present: bool) -> str:
@@ -965,9 +1035,10 @@ def decayed_base_complaint(branch: str, recorded: str, *, present: bool) -> str:
     )
     return (
         f"{branch} records {recorded} as its base, {cause}. "
-        "Guessing from topology instead, which is what a branch carrying no "
-        "record does — so whatever reads this cannot tell the two apart, and "
-        "a command that refuses a guessed base will refuse this one.\n"
+        "Falling back to the cut git logged, and to topology where it logged "
+        "none — so whatever reads this cannot tell a record that decayed from "
+        "a branch that never carried one, and a command that refuses a "
+        "guessed base will refuse this one.\n"
         f"Name the base with --base <branch> to settle it, or write "
         f'{{"base": "<branch>"}} into {records.record_location(branch)}, '
         "beneath the git directory every worktree of this repository shares."
@@ -979,10 +1050,14 @@ def detect_base_branch(branch: str | None = None) -> BaseCandidate:
 
     A base recorded at worktree creation (:mod:`lup.devtools.dev.records`) wins
     outright — topology cannot recover the creation point once the parent
-    has merged on. Without a record, prefers ancestor branches (the natural
-    parent in a two-tier model) over siblings. Among ancestors, picks the
-    one with the fewest commits ahead (``distance``). Falls back to
-    non-ancestors when no ancestor exists.
+    has merged on. The cut git logged comes next, which is what lets a branch
+    made with plain ``git worktree add -b`` answer at all, and which
+    :func:`created_from` leaves empty often enough that its absence is
+    ordinary. Without either, every local branch is measured by its merge-base
+    distance and the nearest wins, with ancestry breaking a tie between equals
+    and disqualifying nobody: an integration branch that has taken a commit
+    since the cut is not an ancestor, and that is the ordinary state of one
+    rather than a reason to rule it out.
 
     A record whose branch has since been deleted is the one case where
     winning outright and having nothing to say are the same code path, so it
@@ -1024,28 +1099,73 @@ def detect_base_branch(branch: str | None = None) -> BaseCandidate:
             decayed_base_complaint(effective, recorded, present=present), err=True
         )
 
-    measured = [m for c in local_branches if (m := measure(c)) is not None]
-    ancestors = [m for m in measured if m.is_ancestor]
+    # What git logged when the branch was cut: a fact about this branch rather
+    # than a reading of the shape around it, so it is taken ahead of topology
+    # and behind the record, which is somebody saying what they meant. Its
+    # absence is the ordinary case for half the ways a branch is made, and is
+    # passed over without a word.
+    cut = created_from(effective)
+    logged = measure(cut) if cut in local_branches else None
+    if logged is not None:
+        return logged.model_copy(update={"source": "created"})
 
-    # Prefer ancestors — they are the natural base. With none, every measured
-    # candidate is a non-ancestor, so `measured` IS the sibling fallback.
-    candidates = ancestors or measured
+    candidates = [m for c in local_branches if (m := measure(c)) is not None]
 
     if not candidates:
         typer.echo("Could not determine base branch.", err=True)
         raise typer.Exit(1)
 
-    ranked = sorted(candidates, key=lambda c: c.distance)
+    # Every measured candidate is ranked, and ancestry only breaks a tie among
+    # equals. Ancestry disqualifies nobody, because a branch fails it for the
+    # most ordinary reason there is — the integration branch moved on. A
+    # feature branch whose `dev` has taken one commit since the cut has no
+    # ancestor in `dev` at all, so filtering on ancestry drops `dev` and hands
+    # the answer to whichever stale sibling happens to sit in the branch's
+    # history, however far away. Measured against a branch whose real base was
+    # 0 symbols off: the sibling that won sat 747 commits away, and the gate
+    # reported 137 capabilities gone that nothing had touched.
+    #
+    # Distance is the merge-base distance, which needs no ancestry to be
+    # meaningful and is what makes a moved-on integration branch comparable
+    # again. Ancestry survives as a tiebreaker because a candidate sitting
+    # inside this branch's history is the likelier parent of two equals, which
+    # is all the evidence it ever was.
+    ranked = sorted(candidates, key=lambda c: (c.distance, not c.is_ancestor))
     best = ranked[0]
 
-    tied = [c for c in ranked[1:] if c.distance == best.distance]
-    if tied:
-        typer.echo("Ambiguous base branch. Candidates:", err=True)
-        for c in [best, *tied]:
-            typer.echo(f"  {c.name} ({c.distance} commits ahead)", err=True)
-        raise typer.Exit(1)
+    # Equal on both keys, not on distance alone: a candidate the tiebreaker
+    # already settled is an answer, and reporting it as ambiguous would put
+    # the ranking's own decision back to the caller.
+    tied = [
+        c
+        for c in ranked[1:]
+        if (c.distance, c.is_ancestor) == (best.distance, best.is_ancestor)
+    ]
+    if not tied:
+        return best
 
-    return best
+    # A tie is two answers, not none, and exiting over it stopped every caller
+    # rather than the one that could not proceed on a guess — which is how a
+    # clone with two siblings at one distance had its quality gate refuse to
+    # run at all, on a branch with nothing wrong with it.
+    #
+    # The integration branch settles it where it is among the candidates,
+    # since that is where work lands and what a branch nobody recorded was
+    # most likely cut from; otherwise the ranking's own first answer stands,
+    # which is stable because the candidate order is git's, by name. Either
+    # way the tie is named and the answer is reported as `guessed`, so a
+    # caller that must not act on one — `pr sync-base` declines to merge —
+    # still declines.
+    integration = get_integration_branch()
+    settled = next((c for c in [best, *tied] if c.name == integration), best)
+    typer.echo(
+        "Ambiguous base branch, equally close to "
+        + ", ".join(f"{c.name} ({c.distance} commits ahead)" for c in [best, *tied])
+        + f".\nTaking {settled.name}. Name the base with --base <branch> where "
+        "that is wrong, or record it once so nothing has to be guessed again.",
+        err=True,
+    )
+    return settled
 
 
 class RemoteMeasure(BaseModel, ABC, frozen=True):
@@ -2070,6 +2190,8 @@ def outgrew_upstream(name: str) -> bool:
 
 def plan_worktree_step(path: str, stranded: bool, force: bool) -> PlannedAction:
     """Judge the worktree removal — the one irreversible step."""
+    from lup.devtools.dev.worktree import live_worktree_owners
+
     if stranded:
         return PlannedAction(
             description=f"Prune stranded worktree: {path}",
@@ -2077,6 +2199,12 @@ def plan_worktree_step(path: str, stranded: bool, force: bool) -> PlannedAction:
         )
 
     description = f"Remove worktree: {path}"
+    if owners := live_worktree_owners(Path(path)):
+        return PlannedAction(
+            description=description,
+            verdict="refused",
+            detail=f"live sessions {', '.join(owners)} use this checkout; wait for their departure",
+        )
     lock = locked_worktrees().get(path)
     if lock is not None:
         return PlannedAction(
@@ -2119,10 +2247,27 @@ def plan_branch_step(name: str, force: bool) -> PlannedAction:
     one whose every commit is already in the integration branch is still
     refused while its remote copy sits behind. Reporting that as forced
     rather than blocked is the honest reading: nothing is discarded.
+
+    Containment is the reading :func:`disposition_for` uses, not ancestry.
+    They disagree over exactly the branches a sweep is for: work that landed
+    through a rebase or a squash is in the integration branch by content and
+    behind it by no commit, while `merge-base --is-ancestor` says no because
+    the tip is not reachable. Asking the stricter question at the destructive
+    gate meant every branch a sweep had just landed demanded `--force`, which
+    is the answer for discarding work and was being given for cleaning up
+    after it.
+
+    Where the branch really does hold something, the refusal says what it
+    found rather than only that it found it. A rebase leaves the subjects
+    intact, so counting the unique commits already naming one in the
+    integration branch is what tells a reader whether to go and compare —
+    and it is a signal, never a verdict, which is why it is spoken here and
+    not read above.
     """
     description = f"Delete local branch: {name}"
     integration = get_integration_branch()
-    if is_ancestor(name, integration):
+    unique = count_unique_commits(name, integration)
+    if is_ancestor(name, integration) or unique == 0:
         if outgrew_upstream(name):
             return PlannedAction(
                 description=description,
@@ -2130,14 +2275,24 @@ def plan_branch_step(name: str, force: bool) -> PlannedAction:
                 detail=f"ahead of origin/{name}, which {integration} already contains",
             )
         return PlannedAction(description=description)
+    suspects = rewrite_suspects(name, integration)
+    trail = (
+        f"; {len(suspects)} of {unique} unique commit(s) share a subject with "
+        f"{integration}, which is the trace a rebase leaves — "
+        f"`git cherry -v {integration} {name}` says which"
+        if suspects
+        else ""
+    )
     if force:
         return PlannedAction(
-            description=description, verdict="forced", detail="branch is unmerged"
+            description=description,
+            verdict="forced",
+            detail=f"branch is unmerged{trail}",
         )
     return PlannedAction(
         description=description,
         verdict="blocked",
-        detail="branch is unmerged; --force deletes it anyway",
+        detail=f"branch is unmerged{trail}; --force deletes it anyway",
     )
 
 
@@ -2394,6 +2549,8 @@ def worktree_left_as_mount_point(path: str) -> bool:
 
 def run_deletion(plan: DeletionPlan, force: bool) -> None:
     """Carry out a plan whose preflight passed, reporting what actually ran."""
+    from lup.devtools.dev.worktree import refuse_live_worktree_removal
+
     completed: list[str] = []
 
     match plan:
@@ -2407,6 +2564,7 @@ def run_deletion(plan: DeletionPlan, force: bool) -> None:
                     plan, completed, f"prune failed: {attributed_stderr(error)}"
                 )
         case DeletionPlan(worktree=str() as worktree):
+            refuse_live_worktree_removal(Path(worktree))
             try:
                 git("worktree", "remove", *(["--force"] if force else []), worktree)
                 typer.echo(f"Removed worktree: {worktree}")

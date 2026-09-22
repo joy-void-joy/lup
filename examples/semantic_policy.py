@@ -56,6 +56,7 @@ def session_config() -> ClaudeSessionConfig:
     """Carry the enforcing hooks into the session the factory will open."""
     return ClaudeSessionConfig(
         model="claude-opus-5",
+        native_tools=["WebFetch"],
         system_prompt="Fetch what you are asked for and report what happened.",
         hooks=policy_hooks(),
     )

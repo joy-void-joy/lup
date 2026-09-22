@@ -201,6 +201,8 @@ async def test_the_hook_and_the_next_turn_never_deliver_the_same_message(
     mid_turn = await hook(LupHookInput(event="PreToolUse", tool_name="Read"))
 
     assert mid_turn.additional_context == "[message by agent] read this now"
+    assert len(inbox.waiting().messages) == 1
+    mid_turn.delivered()
     assert inbox.waiting().messages == []
 
 

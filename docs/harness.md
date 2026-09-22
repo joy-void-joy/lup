@@ -55,6 +55,15 @@ including tools for sessions running on the host. Add `--inside` to check
 the container, or `--inside --launch-only` to run just its startup checks.
 Full container checks include a test model turn.
 
+Host setup checks include `harness sandbox-check`: a disposable, network-disabled
+Python sandbox evaluates `1 + 1` through the persistent REPL and is removed
+afterward. This verifies container creation and code execution beyond the
+daemon-info check. It installs no packages; unavailable images, denied container
+creation, broken Python, or failed cleanup produce a failed requirement with
+the original diagnostic. Use `harness sandbox-check --image <image>` to exercise
+a project's alternate sandbox image. Init and install run these declared
+checks and report repairs that require host administration or a fresh session.
+
 A host device — a GPU — is never in the manifest, because a manifest is
 committed and which GPU a machine holds is that machine's fact. `sync grant
 <name>` records it in the machine's `sync.json.local`, and the host checks
@@ -131,7 +140,7 @@ Canonical sources live in `lup.harness.content`
 (adapter renderers and the policy bundle).
 
 Three things that map states and the reason for each. The
-24 modules under `hooks/runtime/kernel/` are a verbatim
+26 modules under `hooks/runtime/kernel/` are a verbatim
 copy of `lup/policy/kernel/`, kept byte-identical so it can be diffed against
 the canonical package. The ownership manifests are written by
 `lup.harness.ownership` from the generation result rather than compiled from a
@@ -247,6 +256,7 @@ owns the subject, then regenerate.
 - /lup:meta — Review and modify the generated harness trees, brainstorm improvements interactively
 - /lup:modify-command — Modify an existing slash command based on a description or delta
 - /lup:principle — Propagate a general principle across the entire repo
+- /lup:profile — Read, select, and switch the account a session runs as
 - /lup:rebase — Clean up commit history on the feature branch and open/update a PR
 - /lup:refactor — Rewrite a file or folder from scratch while respecting coding conventions
 - /lup:refactor-tools — Audit SDK agent tools and subagents — find gaps, overlaps, and refactoring opportunities

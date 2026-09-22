@@ -13,9 +13,11 @@ every reason to keep this.
 """
 
 from lup.harness.content.modules.specs import SETUP
+from lup.harness.content.skills.profile import SKILL as SKILL_PROFILE
+from lup.harness.models import ContentRoster
 from lup.harness.modules import Module
 
 
 def module() -> Module:
     """Interactive configuration as one value."""
-    return Module(spec=SETUP)
+    return Module(spec=SETUP, content=ContentRoster(skills=[SKILL_PROFILE]))

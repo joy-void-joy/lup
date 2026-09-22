@@ -36,7 +36,7 @@ from pydantic import BaseModel, Field
 
 from lup.providers.codex.app_server import CodexAppServer
 from lup.providers.codex.login import CODEX_HOME
-from lup.types import JsonObject
+from lup.types import EnvVars, JsonObject
 
 # lup: ignore[constant-declaration] — the app-server method Codex answers to
 HOOKS_LIST = "hooks/list"
@@ -59,7 +59,7 @@ class CodexHook(BaseModel, frozen=True):
     """The name the home records trust under, spelled by whoever reads it."""
 
     event_name: str = Field(alias="eventName")
-    plugin_id: str = Field(alias="pluginId", default="")
+    plugin_id: str | None = Field(alias="pluginId", default=None)
     source: str
     enabled: bool
     is_managed: bool = Field(alias="isManaged")
@@ -103,11 +103,15 @@ class CodexHookReport(BaseModel, frozen=True):
         would not parse and a plugin whose cache is gone both arrive here as
         a directory with no hooks in it.
         """
-        return [
-            said
-            for listing in self.data
-            for said in [*listing.warnings, *(str(error) for error in listing.errors)]
-        ]
+        return [*self.warnings(), *(str(error) for error in self.failures())]
+
+    def warnings(self) -> list[str]:
+        """Native adjustments that do not themselves report failed loading."""
+        return [warning for listing in self.data for warning in listing.warnings]
+
+    def failures(self) -> list[JsonObject]:
+        """Native errors leave hook discovery incomplete."""
+        return [error for listing in self.data for error in listing.errors]
 
 
 async def read_hooks(
@@ -116,6 +120,7 @@ async def read_hooks(
     executable: Path = Path("codex"),
     arguments: list[str] | None = None,
     timeout_seconds: float = 120.0,
+    environment: EnvVars | None = None,
 ) -> CodexHookReport:
     """Ask one home which hooks it would run for one working directory.
 
@@ -125,7 +130,9 @@ async def read_hooks(
     could have read.
     """
     server = CodexAppServer(
-        executable, arguments=arguments, environment={CODEX_HOME: str(home)}
+        executable,
+        arguments=arguments,
+        environment={**(environment or {}), CODEX_HOME: str(home)},
     )
     try:
         async with asyncio.timeout(timeout_seconds):

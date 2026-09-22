@@ -2,9 +2,13 @@
 
 import pytest
 
-from lup.devtools.harness.resolve import host_retry_delay, report_awaiting
+from lup.devtools.harness.resolve import (
+    host_retry_delay,
+    report_awaiting,
+    report_environment_fault,
+)
 from lup.devtools.supervisor.projection import PendingQuestionView
-from lup.resolver.contracts import ResolverAwaitingAnswers
+from lup.resolver.contracts import ResolverAwaitingAnswers, ResolverEnvironmentFault
 from lup.resolver.models import MaterialQuestion
 
 
@@ -117,3 +121,19 @@ def test_a_run_out_of_retries_stops_asking() -> None:
     """None is what parks the run, so the budget has to be reachable."""
     assert host_retry_delay(20, 20, 60.0) is None
     assert host_retry_delay(0, 0, 60.0) is None
+
+
+def test_allowance_recovery_names_account_action_instead_of_a_required_wait(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    report_environment_fault(
+        ResolverEnvironmentFault(
+            "Claude account allowance exhausted until tomorrow", ["alpha"]
+        ),
+        "claude",
+        "run-1",
+    )
+    printed = capsys.readouterr().out
+    assert "re-login or switch account" in printed
+    assert "not a required wait" in printed
+    assert "No concern was failed" in printed

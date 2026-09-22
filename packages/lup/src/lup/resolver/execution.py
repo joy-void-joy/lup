@@ -25,6 +25,7 @@ from collections.abc import Callable
 from lup.coordination.refs import ActorRef
 from lup.resolver.contracts import (
     ResolverAwaitingAnswers,
+    ResolverConcernRetired,
     ResolverDrained,
     ResolverEnvironmentFault,
 )
@@ -148,6 +149,9 @@ class ConcernExecutor:
                 error=execution.outcome.failure or "",
             )
             return execution
+        except ResolverConcernRetired:
+            await self.settled_actors(concern.id, summary="retired by the operator")
+            raise
         except ResolverAwaitingAnswers:
             await self.run.transition_concern(
                 concern.id,
@@ -266,6 +270,7 @@ class ConcernExecutor:
         builder: DependencyBaseBuilder,
     ) -> ConcernExecution:
         """Build dependencies, run bounded revisions, and verify one concern."""
+        self.run.require_active(concern.id)
         parent_commits = [commits[parent] for parent in concern.dependencies]
         if len(parent_commits) > 1:
             joined = await self.joiner.join_commits(
@@ -353,6 +358,7 @@ class ConcernExecutor:
             worker = await self.runner.worker_turn(
                 assignment, feedback, round_number, round_base != base.commit
             )
+            self.run.require_active(concern.id)
             outstanding = await self.questions.unanswered_for(concern.id)
             if outstanding:
                 raise ResolverAwaitingAnswers(outstanding, [])

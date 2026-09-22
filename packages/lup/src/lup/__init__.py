@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING
 
 from lup.providers.routing import PROVIDER_ROUTES, Provider, ProviderRoute, provider_for
 from lup.sessions.client import Client
+from lup.tools.native import NativeToolGroup as NativeToolGroup, NativeTools
 from lup.sessions.events import (
     SessionHandle,
     SessionId,
@@ -41,6 +42,7 @@ from lup.sessions.events import (
 )
 
 if TYPE_CHECKING:
+    from lup.tools.mcp import LupMcpTool
     from lup.providers.claude.runtime import create_claude
     from lup.providers.codex.runtime import create_codex
 
@@ -82,6 +84,8 @@ def create_client(
     cwd: Path | None = None,
     base_url: str | None = None,
     api_key: str | None = None,
+    native_tools: NativeTools = None,
+    tools: Sequence["LupMcpTool"] | None = None,
     routes: Sequence[ProviderRoute] = PROVIDER_ROUTES,
 ) -> Client:
     """Open a session with whichever provider serves this model.
@@ -134,6 +138,8 @@ def create_client(
         cwd=cwd,
         base_url=base_url,
         api_key=api_key,
+        native_tools=native_tools,
+        tools=tools,
     )
 
 

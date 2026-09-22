@@ -1,15 +1,27 @@
 """Codex as one selectable runtime.
 
-Codex decides autonomy with a sandbox rather than a permission mode over
-tools: this adapter drives the app-server, whose approval channel it does not
-implement, so a request is honoured by bounding what a session may reach
-instead of by asking. Four fields have no Codex spelling and are refused
-rather than dropped — ``tools``, ``allowed_tools`` and ``disallowed_tools``,
-which have no app-server equivalent, and ``hooks``, which Codex governs
-through the policy dispatcher its harness tree installs rather than per
-session. A caller that set one asked for something this runtime cannot do,
-and silence there would be a session running with less governance than it
-requested.
+Codex decides autonomy with a sandbox, and native authority is compiled
+independently of it: ``native_tools`` names the built-in facilities a session
+may reach, and an unsupported exact grant fails before launch rather than
+being approximated. Declared application tools keep their Python handlers
+through the thread's dynamic tools, while explicitly external servers keep
+their subprocess transport. Session-level ``allowed_tools`` and
+``disallowed_tools`` have no app-server equivalent and are refused rather
+than dropped.
+
+Typed output rides ``outputSchema`` on each ``turn/start``, so a schema may
+change or disappear between turns without disturbing the thread. The
+dynamic-tool channel is thread-scoped and therefore carries application tools
+alone; changing those still requires a fresh session.
+
+Portable PostToolUse and Stop hooks run on native lifecycle events. Tagged
+inbox observers also deliver on native activity without changing approvals.
+Other PreToolUse hooks must explicitly name one of the native approval
+methods, or the exact joined methods in
+:data:`lup.providers.codex.hooks.APPROVAL_METHODS`; only those
+registrations enable approval requests. The app-server does not ask before
+every tool call, so broader pre-execution hooks are refused. The generated
+policy dispatcher enforces policy at the native PreToolUse boundary.
 
 ``disallowed_tools`` is refused despite the dispatcher being able to deny a
 tool it can match, because that dispatcher is installed once per harness tree
@@ -28,23 +40,29 @@ wanted; asking for governance it has no way to apply is not.
 from pathlib import Path
 from typing import Literal
 
+from lup.providers.codex.hooks import codex_hook_approval_policy
 from lup.providers.codex.home import select_codex_home
 from lup.providers.codex.login import CODEX_LOGIN
+from lup.providers.codex.native_tools import CodexNativeTools
 from lup.providers.codex.runtime import (
+    CODEX_PROGRAM,
     CodexEffort,
     CodexMcpServerConfig,
     CodexSessionConfig,
     create_codex,
 )
-from lup.tools.mcp import McpServerEntry, RawStdioServerConfig
+from lup.tools.mcp import LupMcpServerConfig, McpServerEntry, RawStdioServerConfig
 from lup.sessions.client import Client
+from lup.sessions.errors import UnsupportedCapability
 from lup.providers.selection import (
     Runtime,
     SessionAutonomy,
+    SessionContainment,
     SessionEffort,
     SessionRequest,
 )
 from lup.types import EnvVars
+from lup.workspace.paths import project_root
 
 type CodexSandbox = Literal["read-only", "workspace-write", "danger-full-access"]
 
@@ -108,6 +126,65 @@ def codex_mcp_server(name: str, server: McpServerEntry) -> CodexMcpServerConfig:
             )
 
 
+# lup: ignore[constant-declaration] — each value is Codex's own sandbox name for
+# the wall beside it, over a vocabulary this library closes
+CODEX_CONTAINMENT: dict[SessionContainment, CodexSandbox | None] = {
+    "outer": "danger-full-access",
+    "inner": "workspace-write",
+    "none": None,
+}
+"""What Codex's one sandbox field is asked for behind each wall.
+
+``outer`` is the word
+:data:`~lup.providers.codex.confinement.CODEX_CONFINEMENT` already sends a
+launched CLI, for the same reason: Codex confines with the kernel's own
+facilities, which an unprivileged container does not hand a nested caller,
+so inside one the honest posture is the container alone.
+
+``none`` names no mode at all. The wall was not asked for, so the field is
+left to whatever the autonomy implies — which is what every request meant
+before this axis existed.
+"""
+
+# lup: ignore[constant-declaration] — Codex's own sandbox names, narrowest first
+CODEX_SANDBOX_WIDTH: list[CodexSandbox] = [
+    "read-only",
+    "workspace-write",
+    "danger-full-access",
+]
+"""Codex's sandbox modes, ordered by how much they let a session reach."""
+
+
+def codex_sandbox(request: SessionRequest) -> CodexSandbox | None:
+    """The one field Codex says both how much and how far with.
+
+    Claude holds a permission mode and a sandbox and decides them apart.
+    Codex has neither word: it states what a session may do by stating what
+    it may reach, so a request naming an autonomy and a wall has named one
+    field twice.
+
+    The narrower of the two wins. That is not a precedence rule to remember
+    but the refusal of one: neither axis may widen what the other narrowed,
+    so an unattended session behind the inner wall reaches
+    ``workspace-write``, and a planning one stays ``read-only``.
+
+    ``outer`` takes the field outright instead. The container is the wall by
+    then, and narrowing this field would arm a second boundary inside it —
+    the one that cannot start there, which is what standing it down was for.
+    """
+    if request.containment == "outer":
+        return CODEX_CONTAINMENT["outer"]
+    asked: list[CodexSandbox] = [
+        mode
+        for mode in (
+            CODEX_CONTAINMENT[request.containment],
+            None if request.autonomy is None else CODEX_AUTONOMY[request.autonomy],
+        )
+        if mode is not None
+    ]
+    return min(asked, key=CODEX_SANDBOX_WIDTH.index, default=None)
+
+
 def codex_config(request: SessionRequest) -> CodexSessionConfig:
     """Render a portable request into Codex's own session configuration.
 
@@ -118,39 +195,79 @@ def codex_config(request: SessionRequest) -> CodexSessionConfig:
     ``cwd`` is required rather than defaulted: Codex sandboxes a session
     against its working directory, so inferring one would decide what the
     session may write from wherever the process happened to start.
+
+    ``containment`` and ``autonomy`` both land on the sandbox, which is the
+    only field Codex has for either; :func:`codex_sandbox` states how the
+    two are reconciled. An ``outer`` request is also started as the program
+    that enters its container, the same seam Claude spells ``cli_path``.
     """
     refused = [
         name
         for name, asked in (
-            ("tools", request.tools is not None),
             ("allowed_tools", bool(request.allowed_tools)),
             ("disallowed_tools", bool(request.disallowed_tools)),
-            ("hooks", request.hooks is not None),
         )
         if asked
     ]
     if refused:
-        raise ValueError(
+        raise UnsupportedCapability(
             f"Codex has no session-level {', '.join(refused)}; govern this "
             "session through the policy dispatcher in its harness tree"
         )
+    limits = [
+        name
+        for name, value in (
+            ("max_turns", request.max_turns),
+            ("max_thinking_tokens", request.max_thinking_tokens),
+        )
+        if value is not None
+    ]
+    if limits:
+        raise UnsupportedCapability(
+            f"Codex cannot enforce {', '.join(limits)}; omit these limits and use "
+            "effort for reasoning, or client timeout/budget middleware for a whole turn"
+        )
     if request.cwd is None:
         raise ValueError("Codex sandboxes a session against a cwd; none was given")
+    application_tools = [
+        (f"lup_app_{name}__{tool.name}", tool)
+        for name, server in request.tool_servers.items()
+        if isinstance(server, LupMcpServerConfig)
+        for tool in server.tools
+    ]
+    if len({name for name, _tool in application_tools}) != len(application_tools):
+        raise ValueError(
+            "hosted server/tool names collide in Codex; rename the ambiguous server or tool"
+        )
     return CodexSessionConfig(
         model=request.model,
         developer_instructions=request.instructions,
         cwd=request.cwd,
-        sandbox=(
-            None if request.autonomy is None else CODEX_AUTONOMY[request.autonomy]
-        ),
-        approval_policy="never",
+        policy_root=project_root(),
+        sandbox=codex_sandbox(request),
+        executable=request.contained_program or CODEX_PROGRAM,
+        containment=request.containment,
+        approval_policy=codex_hook_approval_policy(request.hooks),
+        hooks=request.hooks,
         effort=(None if request.effort is None else CODEX_EFFORT[request.effort]),
         environment=request.environment,
+        native_tools=request.native_tools,
         mcp_servers={
             name: codex_mcp_server(name, server)
             for name, server in request.tool_servers.items()
+            if not isinstance(server, LupMcpServerConfig)
         },
-        writable_roots=[request.cwd],
+        application_tools=dict(application_tools),
+        companions=[
+            companion
+            for server in request.tool_servers.values()
+            if isinstance(server, LupMcpServerConfig)
+            for companion in server.companions
+        ],
+        writable_roots=[request.cwd]
+        if CodexNativeTools.compile(request.native_tools).write
+        or CodexNativeTools.compile(request.native_tools).shell
+        else [],
         submission_gate_resolver=request.submission_gate,
     )
 

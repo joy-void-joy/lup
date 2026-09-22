@@ -14,10 +14,13 @@ parents is a different question and every concern is examined again.
 """
 
 from pathlib import Path
+from hashlib import sha256
+import json
 
 from pydantic import BaseModel
 
-from lup.channels.models import utc_now
+from lup.channels.models import publish_atomic, utc_now
+from lup.resolver.models import Concern, MaterialQuestion, ReviewReport
 
 RECHECK_DIR = Path("rechecks")
 """Where under a run directory the finished re-checks are recorded."""
@@ -47,6 +50,31 @@ class RecheckRecord(BaseModel, frozen=True):
     """
 
 
+class RecheckIdentity(BaseModel, frozen=True):
+    """The declared question and exact tree a reviewer examined."""
+
+    concern: Concern
+    occasion: str
+    commit: str
+
+    def digest(self) -> str:
+        return sha256(self.model_dump_json().encode()).hexdigest()
+
+    def question_id(self, lost: list[str]) -> str:
+        domain = json.dumps(
+            {"examined": self.model_dump(mode="json"), "lost": sorted(lost)}
+        )
+        return f"recheck-{sha256(domain.encode()).hexdigest()}"
+
+
+class RecheckVerdict(BaseModel, frozen=True):
+    """A completed model verdict, durable before its question is published."""
+
+    identity: RecheckIdentity
+    report: ReviewReport
+    question: MaterialQuestion | None
+
+
 class RecheckDesk:
     """The run directory's record of which re-checks have already run."""
 
@@ -55,6 +83,18 @@ class RecheckDesk:
 
     def path(self, concern_id: str) -> Path:
         return self.root / f"{concern_id}.json"
+
+    def verdict(self, identity: RecheckIdentity) -> RecheckVerdict | None:
+        path = self.root / "verdicts" / f"{identity.digest()}.json"
+        if not path.exists():
+            return None
+        return RecheckVerdict.model_validate_json(path.read_text("utf-8"))
+
+    def preserve(self, verdict: RecheckVerdict) -> None:
+        """Publish the whole verdict atomically before any mailbox side effect."""
+        publish_atomic(
+            self.root / "verdicts" / f"{verdict.identity.digest()}.json", verdict
+        )
 
     def record(self, record: RecheckRecord) -> None:
         """Keep one finished re-check, written as it finishes.

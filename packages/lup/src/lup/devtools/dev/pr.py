@@ -161,12 +161,30 @@ class GhReview(BaseModel):
 
 class GhCheck(BaseModel):
     """One `statusCheckRollup` element: check runs carry `name`/`status`/
-    `conclusion`; legacy status contexts only `context`."""
+    `conclusion`; legacy status contexts carry `context`/`state`."""
 
     name: str = ""
     context: str = ""
     status: str = ""
-    conclusion: str = ""
+    conclusion: str | None = ""
+    state: str = ""
+
+    def as_check(self) -> CheckInfo:
+        """Normalize GitHub's two check payloads before computing the rollup."""
+        status, conclusion = self.status, self.conclusion or ""
+        if not status:
+            match self.state.upper():
+                case "SUCCESS":
+                    status, conclusion = "COMPLETED", "SUCCESS"
+                case "ERROR" | "FAILURE":
+                    status, conclusion = "COMPLETED", "FAILURE"
+                case _:
+                    status, conclusion = "PENDING", ""
+        return CheckInfo(
+            name=self.name or self.context or "unknown",
+            status=status,
+            conclusion=conclusion,
+        )
 
 
 class GhPrDetail(BaseModel):
@@ -193,6 +211,7 @@ class PRInfo(BaseModel):
     number: int
     title: str
     url: str
+    base_ref: str = ""
     review_decision: str
     mergeable: str
     checks_state: ChecksState
@@ -267,7 +286,13 @@ class MergeResult(PRResult):
 class SyncBaseResult(PRResult):
     feature_branch: str
     base_branch: str
-    base_source: Literal["explicit", "recorded", "guessed"]
+    base_source: Literal["explicit", "created", "recorded", "guessed"]
+    """Where the base came from, which decides whether anything was merged.
+
+    Reaches a caller reading the JSON as well as one reading the terminal,
+    since it is the difference between a merge that did not happen and one
+    that was not needed.
+    """
     merged: bool
     conflicts: list[str]
 
@@ -340,19 +365,32 @@ def output_result(result: PRResult, as_json: bool) -> None:
 
 
 class DetectedBase(BaseModel):
-    """The auto-detected base branch and how its name was determined."""
+    """The auto-detected base branch and how its name was determined.
+
+    ``created`` sits with ``recorded`` rather than with ``guessed``, which is
+    what decides whether :func:`sync_base` merges. Both name a base somebody
+    or something wrote down at the moment of the cut; topology names one
+    read off the shape of the graph afterwards, and only that reading is
+    unsafe to merge onto without a caller confirming it.
+    """
 
     name: str
-    source: Literal["recorded", "guessed"]
+    source: Literal["recorded", "created", "guessed"]
 
 
 def find_base_branch() -> DetectedBase:
-    """Auto-detect the base branch, preferring the recorded creation base."""
-    try:
-        candidate = detect_base_branch()
-        return DetectedBase(name=candidate.name, source=candidate.source)
-    except (typer.Exit, SystemExit):
-        return DetectedBase(name=get_integration_branch(), source="guessed")
+    """Auto-detect the base branch, preferring the recorded creation base.
+
+    A refusal from detection reaches the caller rather than being answered
+    with the integration branch. Detection refuses over two things — a
+    checkout holding no other local branch, and one whose branches share no
+    history — and in both the integration branch is not a guess but a name
+    that is absent or unrelated, so substituting it hands back something
+    worse than the refusal. A tie between bases is not one of the two: it is
+    an answer, and is taken.
+    """
+    candidate = detect_base_branch()
+    return DetectedBase(name=candidate.name, source=candidate.source)
 
 
 def status(
@@ -399,7 +437,7 @@ def status(
                 str(pr_number),
                 *repository_arguments(),
                 "--json",
-                "reviews,statusCheckRollup,mergeable,mergeStateStatus,reviewDecision",
+                "reviews,statusCheckRollup,mergeable,mergeStateStatus,reviewDecision,baseRefName",
             )
         )
     except sh.ErrorReturnCode as e:
@@ -417,19 +455,13 @@ def status(
         for r in detail.reviews
     ]
 
-    checks = [
-        CheckInfo(
-            name=c.name or c.context or "unknown",
-            status=c.status,
-            conclusion=c.conclusion,
-        )
-        for c in detail.checks
-    ]
+    checks = [check.as_check() for check in detail.checks]
 
     pr_info = PRInfo(
         number=pr_number,
         title=pr_data.title,
         url=pr_data.url,
+        base_ref=detail.base_ref,
         review_decision=detail.review_decision,
         mergeable=detail.mergeable,
         checks_state=rollup_state(checks),
@@ -650,7 +682,7 @@ def sync_base(
     because a warning on stderr does not reach one reading the JSON.
     """
     feature = current_branch()
-    base_source: Literal["explicit", "recorded", "guessed"] = "explicit"
+    base_source: Literal["explicit", "created", "recorded", "guessed"] = "explicit"
     if base:
         base_branch = base
     else:
@@ -758,14 +790,16 @@ def push(
     destination = f"refs/heads/{branch_name}:refs/heads/{branch_name}"
 
     complaint = ""
+    pushed = False
     try:
         forced = ["--force"] if force else []
         git("push", *forced, "origin", destination)
+        pushed = True
         records.remember(
             branch_name, records.BranchRecord(upstream=f"origin/{branch_name}")
         )
     except sh.ErrorReturnCode as e:
-        complaint = decode_stderr(e)
+        complaint = decode_stderr(e) or f"git push exited with status {e.exit_code}"
         typer.echo(f"Push failed: {complaint}", err=True)
 
     existing_pr = None
@@ -790,14 +824,14 @@ def push(
 
     result = PushResult(
         branch=branch_name,
-        pushed=not complaint,
+        pushed=pushed,
         force=force,
         existing_pr=existing_pr,
         push_complaint=complaint,
         upstream=records.recorded_upstream(branch_name),
     )
     output_result(result, as_json)
-    if complaint:
+    if not pushed:
         raise typer.Exit(1)
 
 

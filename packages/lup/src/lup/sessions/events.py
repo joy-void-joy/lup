@@ -20,6 +20,7 @@ from lup.sessions.capabilities import (
 from lup.types import (
     JsonObject,
     LupContentBlock,
+    LupNativeActivityBlock,
     LupTextBlock,
     LupThinkingBlock,
     LupToolResultBlock,
@@ -232,8 +233,27 @@ class TurnToolResultBlock(TurnBlock, frozen=True):
         return LupToolResultBlock(tool_use_id=self.tool_call_id, content=rendered)
 
 
+class TurnNativeActivityBlock(TurnBlock, frozen=True):
+    """Complete provider evidence with no equivalent portable content shape."""
+
+    type: Literal["native_activity"] = "native_activity"
+    provider: str
+    activity: str
+    payload: JsonObject
+
+    @property
+    def telemetry_block(self) -> LupContentBlock:
+        return LupNativeActivityBlock(
+            provider=self.provider, activity=self.activity, payload=self.payload
+        )
+
+
 type AnyTurnBlock = Annotated[
-    TurnTextBlock | TurnThinkingBlock | TurnToolCallBlock | TurnToolResultBlock,
+    TurnTextBlock
+    | TurnThinkingBlock
+    | TurnToolCallBlock
+    | TurnToolResultBlock
+    | TurnNativeActivityBlock,
     Discriminator("type"),
 ]
 """One block as a pydantic *field* validates it: the closed set, discriminated.
@@ -249,6 +269,8 @@ class TurnMessage(BaseModel, frozen=True):
 
     role: Literal["user", "assistant", "tool", "system"]
     blocks: list[AnyTurnBlock]
+    native: JsonObject | None = None
+    """Complete provider message payload retained beside normalized blocks."""
     parent_tool_call_id: str | None = Field(
         default=None,
         description=(

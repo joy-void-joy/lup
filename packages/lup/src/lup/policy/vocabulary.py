@@ -669,21 +669,57 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
 
 
 def review_queue_rules() -> list[ShellSubcommandRule]:
-    """Queue decisions are operator actions; reading and cancelling stay available."""
+    """Accepting review decisions or replacement policy is an operator action."""
     return [
         ShellSubcommandRule(
             name="dev",
             operations=[
+                *[
+                    ShellOperationRule(
+                        name=action,
+                        parents=["questions"],
+                        operator_only=True,
+                        reason="a requesting agent cannot approve or reject review-queue operations",
+                        recovery="The operator must answer from a terminal outside the agent session.",
+                    )
+                    for action in ("answer", "reject")
+                ],
+                # Retiring deletes the note and the words it was written in,
+                # which is the one step of the verify-solved pass nothing can
+                # undo: a claim wrongly retired takes the concern with it,
+                # while a claim wrongly restored costs one more pass. The
+                # reader deciding that is the person the note was written for,
+                # so the judgement is theirs to confirm rather than the
+                # session's to record. `--restore` is left alone -- it keeps
+                # the original words and only reopens the question.
                 ShellOperationRule(
-                    name=action,
-                    parents=["questions"],
-                    operator_only=True,
-                    reason="a requesting agent cannot approve or reject review-queue operations",
-                    recovery="The operator must answer from a terminal outside the agent session.",
-                )
-                for action in ("answer", "reject")
+                    name="comments",
+                    ask_flags=["--retire"],
+                    reason=(
+                        "retiring a claimed-resolved note deletes what was asked, "
+                        "and only a reader who checked the code can say it was met"
+                    ),
+                    recovery=(
+                        "Read the claim against the code first — "
+                        "`uv run lup-devtools dev comments` prints each with its "
+                        "original words. Where it is not met, `--restore` reopens "
+                        "it with those words intact, and `--narrow` reopens the "
+                        "part still outstanding."
+                    ),
+                ),
             ],
-        )
+        ),
+        ShellSubcommandRule(
+            name="harness",
+            operations=[
+                ShellOperationRule(
+                    name="policy-refresh",
+                    operator_only=True,
+                    reason="a requesting agent cannot accept replacement destination policy",
+                    recovery="The operator must refresh from a terminal outside the agent session.",
+                )
+            ],
+        ),
     ]
 
 

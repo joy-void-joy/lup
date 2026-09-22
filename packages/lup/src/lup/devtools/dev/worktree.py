@@ -10,6 +10,7 @@ import typer
 from pydantic import BaseModel
 
 import lup.devtools.dev.records as records
+from lup.coordination.repository import RepositoryPeers
 from lup.devtools.dev.git_guards import (
     DECLARED_GUARDS,
     GitGuard,
@@ -336,22 +337,52 @@ class ArmedGitGuards(SetupStep, frozen=True):
         return not arming_is_refused(hooks_directory(self.worktree))
 
 
+def commits_ahead(branch: str, other: str) -> int:
+    """How many commits ``branch`` carries that ``other`` lacks.
+
+    Zero says the two sit on one line, whichever of them is further along,
+    and zero is also the answer for no branch at all: a detached HEAD names
+    nothing to compare, and its caller is refused for that reason rather than
+    told two bases differ.
+
+    Unrelated histories count as the whole of ``branch``, since ``other..branch``
+    is ``branch ^other`` and needs no merge base — two trees sharing nothing
+    read as maximally apart, which is what they are.
+    """
+    if not branch:
+        return 0
+    try:
+        return int(git.out("rev-list", "--count", f"{other}..{branch}"))
+    except sh.ErrorReturnCode:
+        return 0
+
+
 class BranchBase(BaseModel, frozen=True):
     """What a worktree's branch is cut from, and what is recorded as its base.
 
-    A worktree is routinely created from another worktree, which stands on a
-    branch holding nothing but its own work. Reading the base off that
-    checkout gave the new branch commits its own pull request never asked
-    for — the request opens conflicting against the integration branch, no
-    CI runs on it, and the repair is a rebase and a force-push after the
-    fact, on work that was correct.
+    Two intents reach this command through identical arguments. One is new
+    work, which belongs on the integration branch: cut from the feature
+    checkout the command happened to run in, it carries commits its own pull
+    request never asked for — the request opens conflicting, no CI runs on
+    it, and the repair is a rebase and a force-push on work that was correct.
+    The other is the continuation of the checkout's own work, which belongs
+    on that branch: cut from the integration branch instead, it lacks the
+    code it was written against, and the repair is a reset onto the branch it
+    should have started at, plus the base record that went with it.
 
-    So a branch being cut takes the integration branch, which is the one
-    answer that holds however many worktrees deep the caller is. Stacking on
-    the checkout they are standing in is a real intent and stays available as
-    ``--base``, said out loud by :meth:`notice` in exactly the case where the
-    two differ, because a default that overrides an intent silently strands
-    work as surely as one that inherits it silently.
+    Nothing in the arguments separates them, so neither default is right and
+    the cost is in guessing rather than in which way one guesses. Where the
+    two answers differ, :meth:`refusal` says so before anything is created
+    and names both spellings; advice printed after the branch exists is
+    advice nobody can act on without an undo.
+
+    They differ only where the checkout's branch carries commits the
+    integration branch lacks. Standing on the integration branch, on a
+    workspace nobody has committed to, or on work that has already landed,
+    ``ahead`` is zero, both answers lie on one line, and the integration
+    branch is simply the later point on it — so that is taken, silently,
+    which is the ordinary case for a session cutting a sibling of the
+    worktree it just made.
 
     A branch that already exists is not cut at all: ``worktree add <path>
     <branch>`` takes it where it stands, and a base could only reach it by
@@ -359,10 +390,13 @@ class BranchBase(BaseModel, frozen=True):
     stays what a caller named or what the checkout says.
     """
 
+    branch: str
     named: str | None
     current: str
     integration: str
     fresh: bool
+    ahead: int = 0
+    """Commits the invoking checkout's branch carries that the integration lacks."""
 
     def cut_from(self) -> str | None:
         """The ref the branch starts at; ``None`` starts it where HEAD is."""
@@ -376,15 +410,22 @@ class BranchBase(BaseModel, frozen=True):
         """The name written as this branch's base, empty where nobody can say."""
         return self.cut_from() or self.current
 
-    def notice(self) -> str:
-        """What to tell a caller whose checkout is not what the branch was cut from."""
-        if self.named or not self.fresh or self.current in ("", self.integration):
+    def refusal(self) -> str:
+        """Why this base cannot be guessed, empty where it can.
+
+        Read before the worktree is registered, so whichever of the two the
+        caller meant costs them one re-run rather than an undo.
+        """
+        if self.named or not self.fresh or not self.ahead:
             return ""
         return (
-            f"Cut from {self.integration}, not from {self.current}, which this ran "
-            f"in: work lands on {self.integration}, and a branch cut anywhere else "
-            f"carries commits its own pull request never asked for. --base "
-            f"{self.current} stacks it on this checkout instead."
+            f"Cannot tell what {self.branch} should be cut from: this ran in a "
+            f"checkout on {self.current}, which carries {self.ahead} commit(s) "
+            f"{self.integration} does not, so the two bases give different "
+            "trees and nothing here says which one is meant.\n"
+            f"Re-run naming it: --base {self.current} continues that work by "
+            f"stacking on this checkout, --base {self.integration} starts fresh "
+            "from where work lands."
         )
 
 
@@ -662,18 +703,27 @@ def create(
     from lup.devtools.dev.branches import get_integration_branch
 
     # What the branch comes from and what is recorded of it, settled before
-    # anything is created. Neither answers on a detached HEAD that is
-    # re-attaching a branch: there is no current branch to read, the record is
-    # skipped, and nothing says so — which is why `sync base` reports "Base
-    # guessed" long afterwards, on a topology that has since moved. A base
-    # nobody can name is refused here instead, where the answer is a flag
-    # rather than archaeology.
+    # anything is created — both refusals here, because a base named after
+    # the branch exists is a correction and not an answer. Neither question
+    # answers on a detached HEAD that is re-attaching a branch: there is no
+    # current branch to read, the record is skipped, and nothing says so —
+    # which is why `sync base` reports "Base guessed" long afterwards, on a
+    # topology that has since moved. A base nobody can name is refused here
+    # instead, where the answer is a flag rather than archaeology.
+    current = git.out("branch", "--show-current")
+    integration = get_integration_branch()
     base = BranchBase(
+        branch=name,
         named=base_branch,
-        current=git.out("branch", "--show-current"),
-        integration=get_integration_branch(),
+        current=current,
+        integration=integration,
         fresh=not branch_exists(name),
+        ahead=commits_ahead(current, integration),
     )
+    contested = base.refusal()
+    if contested:
+        typer.echo(contested, err=True)
+        raise typer.Exit(1)
     recorded = RecordedBase(branch=name, origin=base.recorded(), cut_fresh=base.fresh)
     if not recorded.origin and not no_record and not recorded.already_recorded():
         typer.echo(
@@ -699,9 +749,6 @@ def create(
 
     if not resuming:
         register_worktree(name, worktree_path, base.cut_from())
-        elsewhere = base.notice()
-        if elsewhere:
-            typer.echo(elsewhere)
 
     def setup() -> Iterator[SetupStep]:
         """Everything that has to hold before this worktree can be used."""
@@ -825,6 +872,28 @@ def list_worktrees() -> None:
     )
 
 
+def live_worktree_owners(path: Path) -> list[str]:
+    """Live launched sessions using a checkout, including one that is clean."""
+    return [
+        member.cli_name or member.actor.label()
+        for member in RepositoryPeers(path).present()
+        if member.running
+        and member.worktree
+        and Path(member.worktree).resolve() == path.resolve()
+    ]
+
+
+def refuse_live_worktree_removal(path: Path) -> None:
+    """Recheck ownership immediately before the irreversible removal."""
+    if owners := live_worktree_owners(path):
+        typer.echo(
+            f"Refusing to remove {path}: live sessions {', '.join(owners)} use it. "
+            "Wait for their departure; --force does not override live ownership.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+
 def remove(name: str, force: bool) -> None:
     """Remove a git worktree.
 
@@ -847,6 +916,7 @@ def remove(name: str, force: bool) -> None:
         raise typer.Exit(1)
 
     try:
+        refuse_live_worktree_removal(path)
         args = ["worktree", "remove", str(path)]
         if force:
             args.append("--force")

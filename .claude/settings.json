@@ -76,7 +76,8 @@
     ],
     "filesystem": {
       "allowWrite": [
-        "~/.cache/uv"
+        "~/.cache/uv",
+        "/tmp"
       ]
     },
     "network": {

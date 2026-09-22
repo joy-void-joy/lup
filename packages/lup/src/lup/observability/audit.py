@@ -38,7 +38,7 @@ from lup.channels.stream import Stream
 from lup.observability.journal import ChainedWriter, Journal, JournalRecord, last_record
 from lup.sessions.composition import is_output_model
 from lup.sessions.capabilities import EventStream, Session, Turn
-from lup.sessions.errors import TurnError
+from lup.sessions.errors import DeltaStreamingDisabled, TurnError
 from lup.sessions.client import Client
 from lup.sessions.events import (
     BlockCompletedEvent,
@@ -112,6 +112,7 @@ type ObservableEventKind = Literal[
     "block_start",
     "block_delta",
     "message",
+    "native_activity",
     "reasoning",
     "tool_call",
     "tool_result",
@@ -570,6 +571,8 @@ def block_event_kind(block_type: str) -> ObservableEventKind:
             return "tool_call"
         case "tool_result":
             return "tool_result"
+        case "native_activity":
+            return "native_activity"
         case _:
             return "message"
 
@@ -656,6 +659,18 @@ class TurnRecorder:
         granularity would double every line of the transcript.
         """
         call_id = message.parent_tool_call_id
+        if message.native is not None:
+            target = (
+                self.journal
+                if call_id is None
+                else self.child_for(call_id, message.model)
+            )
+            target.emit(
+                "native_activity",
+                {"message": message.model_dump(mode="json")},
+                session_id=session_id,
+                turn_id=turn_id,
+            )
         if call_id is None:
             return
         child = self.child_for(call_id, message.model)
@@ -702,18 +717,31 @@ class JournalEventStream(EventStream):
         self.journal = journal
         self.queue = mirrored
         self.consumed = False
+        self.deltas: asyncio.Future[bool] = asyncio.get_running_loop().create_future()
         self.drain = asyncio.create_task(self.drain_inner())
 
     async def drain_inner(self) -> None:
         """Record and mirror the complete source stream exactly once."""
         try:
-            async for event in self.inner.live():
-                self.recorder.record(event)
-                self.queue.put_nowait(event)
+            try:
+                async for event in self.inner.live():
+                    if not self.deltas.done():
+                        self.deltas.set_result(True)
+                    self.recorder.record(event)
+                    self.queue.put_nowait(event)
+            except DeltaStreamingDisabled:
+                if self.deltas.done():
+                    raise
+                self.deltas.set_result(False)
+                async for event in self.inner.events():
+                    self.recorder.record(event)
+                    self.queue.put_nowait(event)
         except Exception as error:
             self.journal.emit("error", {"message": str(error)})
             raise
         finally:
+            if not self.deltas.done():
+                self.deltas.set_result(True)
             self.queue.put_nowait(None)
 
     async def wait(self) -> None:
@@ -735,8 +763,13 @@ class JournalEventStream(EventStream):
     def events(self) -> AsyncIterator[TurnEvent]:
         return self.durable()
 
-    def live(self) -> AsyncIterator[LiveTurnEvent]:
-        return self.iterate()
+    async def live(self) -> AsyncIterator[LiveTurnEvent]:
+        if not await self.deltas:
+            raise DeltaStreamingDisabled(
+                "this journaled session does not stream deltas"
+            )
+        async for event in self.iterate():
+            yield event
 
 
 class JournalTurn[T: BaseModel | None](Turn[T]):
@@ -766,6 +799,9 @@ class JournalTurn[T: BaseModel | None](Turn[T]):
                     "message": failure.message,
                     "blocks": [
                         block.model_dump(mode="json") for block in failure.blocks
+                    ],
+                    "messages": [
+                        message.model_dump(mode="json") for message in failure.messages
                     ],
                     "usage": failure.usage.model_dump(mode="json"),
                 },

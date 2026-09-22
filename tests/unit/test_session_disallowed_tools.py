@@ -1,7 +1,7 @@
 """Refusing a tool per session, asked for portably and rendered by each runtime.
 
 Three fields on a request read alike and do different things, which is the
-whole reason this one is worth pinning. ``tools`` is the roster a session is
+whole reason this one is worth pinning. ``native_tools`` is the roster a session is
 given and bounds built-ins only; ``allowed_tools`` is auto-approval within
 that roster and its own SDK docs say it restricts nothing; ``disallowed_tools``
 is the one the SDK documents as removal — "removed from the model's context
@@ -52,11 +52,13 @@ def test_a_refusal_reaches_the_provider_call() -> None:
 def test_a_refusal_names_a_tool_no_roster_mentions() -> None:
     """The point of a block list is naming what a roster never enumerated."""
     request = SessionRequest(
-        cwd=Path("."), tools=["Read"], disallowed_tools=["mcp__research__research"]
+        cwd=Path("."),
+        native_tools=["Read"],
+        disallowed_tools=["mcp__research__research"],
     )
     config = claude_config(request)
 
-    assert config.tools == ["Read"]
+    assert config.native_tools == ["Read"]
     assert config.disallowed_tools == ["mcp__research__research"]
 
 
@@ -65,13 +67,13 @@ def test_the_three_tool_fields_stay_independent() -> None:
     config = claude_config(
         SessionRequest(
             cwd=Path("."),
-            tools=["Read", "Bash"],
+            native_tools=["Read", "Bash"],
             allowed_tools=["Read"],
             disallowed_tools=["Bash"],
         )
     )
 
-    assert config.tools == ["Read", "Bash"]
+    assert config.native_tools == ["Read", "Bash"]
     assert config.allowed_tools == ["Read"]
     assert config.disallowed_tools == ["Bash"]
 
@@ -93,7 +95,7 @@ def test_codex_names_every_field_it_refuses_at_once() -> None:
     """One message per session, or a caller fixes four fields in four attempts."""
     request = SessionRequest(
         cwd=Path("."),
-        tools=["Read"],
+        native_tools=["Read"],
         allowed_tools=["Read"],
         disallowed_tools=["Bash"],
     )
@@ -101,5 +103,5 @@ def test_codex_names_every_field_it_refuses_at_once() -> None:
     with pytest.raises(ValueError) as refusal:
         codex_config(request)
 
-    for field in ("tools", "allowed_tools", "disallowed_tools"):
+    for field in ("allowed_tools", "disallowed_tools"):
         assert field in str(refusal.value)

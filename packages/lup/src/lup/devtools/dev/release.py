@@ -82,6 +82,27 @@ class ReleaseSpec(BaseModel, frozen=True):
     """
 
 
+# lup: ignore[constant-declaration] — `release` is this repository's own commit
+# type, one row of the table `docs/contributing.md` publishes, and `dev release`
+# writes it. A project choosing another subject would be choosing a type that
+# table does not have.
+RELEASE_SUBJECT_PREFIX = "release: "
+"""How a release commit names itself, written once and read by two.
+
+`dev release` writes the subject and the migrations gate finds it, which is
+one fact with two readers rather than two literals that agree until somebody
+edits one. The gate looks for the commit rather than the tag because the two
+travel differently: a tag is pushed last, deliberately, so the branch reaches
+a reviewer carrying the release and not yet its tag — and a gate reading the
+tag calls every break that release shipped undeclared for exactly that long.
+"""
+
+
+def release_subject(previous: str, version: str) -> str:
+    """The subject line a release commit carries."""
+    return f"{RELEASE_SUBJECT_PREFIX}{previous} → {version}"
+
+
 class ReleasePlan(BaseModel, frozen=True):
     """What a release would do, as the facts a reader checks before it runs."""
 
@@ -161,6 +182,23 @@ def with_version(text: str, version: str) -> str:
     return tomlkit.dumps(document)
 
 
+def declares_the_list(node: ast.stmt) -> bool:
+    """Whether this statement is the ``DECLARED`` assignment, either spelling.
+
+    ``DECLARED = [...]`` is an ``Assign`` and ``DECLARED: list[Migration] =
+    [...]`` an ``AnnAssign``, which are different nodes carrying the same
+    declaration — and the emptied form this module writes is the annotated
+    one, so a reader that knew only the bare shape could not find its own
+    output.
+    """
+    if isinstance(node, ast.AnnAssign):
+        return isinstance(node.target, ast.Name) and node.target.id == "DECLARED"
+    return isinstance(node, ast.Assign) and any(
+        isinstance(target, ast.Name) and target.id == "DECLARED"
+        for target in node.targets
+    )
+
+
 def cleared_declarations(text: str) -> str:
     """That module's text with its ``DECLARED`` list emptied.
 
@@ -173,17 +211,18 @@ def cleared_declarations(text: str) -> str:
     Everything else in the file stays, the docstring above the list included:
     what is emptied is the window of breaks not yet in a release, and the
     module explaining what such a window is for outlives every release.
+
+    Both assignment forms are read, because this writes the annotated one and
+    a reader that took only the bare form could not find what it had just
+    produced. The first release after one that emptied the list crashed on
+    its own output — every release is the one that annotates it, so the
+    failure arrives exactly once and always at the next release.
     """
     tree = ast.parse(text)
     spans = [
         node
         for node in tree.body
-        if isinstance(node, ast.Assign)
-        and any(
-            isinstance(target, ast.Name) and target.id == "DECLARED"
-            for target in node.targets
-        )
-        and node.end_lineno is not None
+        if declares_the_list(node) and node.end_lineno is not None
     ]
     if not spans:
         raise KeyError("no DECLARED assignment to empty")

@@ -186,6 +186,51 @@ async def test_notifications_reach_the_installed_handler_in_order() -> None:
         await reader
 
 
+async def test_close_cancels_and_awaits_connection_owned_handlers() -> None:
+    server = CodexAppServer(Path("codex"))
+    entered = asyncio.Event()
+    canceled = asyncio.Event()
+
+    async def pending() -> None:
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            canceled.set()
+
+    server.spawn_handler(pending())
+    await entered.wait()
+    assert len(server.handlers) == 1
+    await server.close()
+    assert canceled.is_set()
+    assert not server.handlers
+
+
+async def test_owned_notification_failure_fails_the_active_connection() -> None:
+    server = CodexAppServer(Path("codex"))
+    failures: list[Exception] = []
+    server.disconnect_handler = failures.append
+
+    async def failing() -> None:
+        raise RuntimeError("context delivery refused")
+
+    server.spawn_handler(failing())
+    await asyncio.gather(*server.handlers)
+    assert [str(error) for error in failures] == ["context delivery refused"]
+    with pytest.raises(RuntimeError, match="context delivery refused"):
+        await server.request("turn/start", {})
+    await server.close()
+
+
+async def test_response_to_a_canceled_request_does_not_kill_the_connection() -> None:
+    server = CodexAppServer(Path("codex"))
+    pending = asyncio.get_running_loop().create_future()
+    server.pending[3] = pending
+    pending.cancel()
+    await server.resolve_response(RpcMessage(id=3, result={}))
+    assert server.pending == {}
+
+
 async def test_disconnect_fails_pending_requests_and_notifies_the_handler() -> None:
     server = CodexAppServer(Path("codex"))
     disconnects: list[Exception] = []

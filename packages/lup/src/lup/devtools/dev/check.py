@@ -4,6 +4,8 @@ import json
 import os
 import tomllib
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
+from tempfile import gettempdir
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
@@ -468,6 +470,24 @@ class TestRoot(BaseModel):
             ],
         )
 
+    def basetemp(self) -> Path:
+        """The temporary root this suite holds alone, named for where it runs.
+
+        The gate runs the roots at once, and pytest picks its own by scanning
+        `pytest-of-<user>` for the next free `pytest-N` — a read and a create
+        with a gap between them, so two runners starting together take the
+        same number and hand two suites one tree. What that looks like from
+        inside is a fixture meeting a path some other suite's test made:
+        `destination path 'origin.git' already exists`, raised by a clone that
+        runs once.
+
+        Derived from the directory rather than from the name, so two checkouts
+        of this repository running their gates at the same time stay apart
+        too — the name is the same in both and the path is not.
+        """
+        stamp = sha256(str(self.directory.resolve()).encode("utf-8")).hexdigest()
+        return Path(gettempdir()) / f"lup-pytest-{stamp[:16]}"
+
     def run(
         self,
         paths: list[str],
@@ -488,6 +508,7 @@ class TestRoot(BaseModel):
             "run",
             "pytest",
             *paths,
+            f"--basetemp={self.basetemp()}",
             *parallel_arguments(workers),
             *ignored_arguments(excluded_roots),
             _cwd=str(self.directory),
@@ -882,6 +903,29 @@ def changed_paths(since: str) -> list[str]:
     return [line for line in named if line]
 
 
+def named_gate_base(named: str) -> str:
+    """The commit a caller's own ``--base`` names, for judging removed capabilities.
+
+    The merge base rather than the tip. What a branch took away is judged from
+    where it started, and a base that has moved on since carries changes this
+    branch never made — read against the tip they come back as capabilities
+    this branch removed, which is how naming `dev` directly reported 504 gone
+    on a branch that had removed none.
+
+    A ref nothing resolves refuses the run. Answering nothing instead would be
+    indistinguishable from a branch that removed nothing, which is the reading
+    a mistyped ref most wants to be mistaken for.
+    """
+    try:
+        found = git.out("merge-base", named, "HEAD", _ok_code=[0])
+    except sh.ErrorReturnCode as error:
+        raise typer.BadParameter(
+            f"--base {named!r} shares no history with this checkout, so there "
+            f"is nothing to judge a surface from: {decode_stderr(error)}"
+        ) from error
+    return found
+
+
 def changed_python_files(since: str) -> list[str]:
     """Every Python file this tree changed since a ref, untracked ones included.
 
@@ -932,8 +976,13 @@ def scan_reports(
     command_surface: Callable[[], CommandSurface] | None = None,
     scaffold_source: ScaffoldSource | None = None,
     spread: Spread | None = None,
+    migration_base: str | None = None,
 ) -> list[CheckReport]:
-    """Every check the gate answers itself, in the order it reports them."""
+    """Every check the gate answers itself, in the order it reports them.
+
+    ``migration_base`` is the commit a caller named to judge removed
+    capabilities from, in place of the one detection reaches on its own.
+    """
 
     def reported() -> Iterator[CheckReport]:
         # advisory — a note asks somebody for something, and a tree is expected
@@ -1204,7 +1253,15 @@ def scan_reports(
         # Gating rather than advisory — the commit that takes a capability is
         # the one place that knows why, and a break landing without that leaves
         # an adopter an unresolvable import and nothing to read.
-        base = gate_base(get_integration_branch()) if spread is not None else None
+        # A caller's own `--base` stands in for detection here and nowhere
+        # else: this is the one check that judges against a base at all, so an
+        # override that reached further would be claiming to scope checks it
+        # has nothing to do with.
+        base = (
+            (migration_base or gate_base(get_integration_branch()))
+            if spread is not None
+            else None
+        )
         owed = undeclared_breaks(project, base) if base is not None else []
         match (spread, base):
             case (None, _):
@@ -1335,12 +1392,15 @@ def run_checks(
     ledger: LedgerLayout = LedgerLayout(),
     scaffold_source: ScaffoldSource | None = None,
     spread: Spread | None = None,
+    migration_base: str | None = None,
+    release_tag_prefix: str = "v",
 ) -> None:
     """Run ruff format, ruff check, pyright, pytest, and this gate's own sweeps.
 
     Read-only by default (reports issues without modifying files).
     Pass *fix* to auto-fix formatting and lint issues. ``scope`` narrows the
-    note and anti-pattern gates to paths this tree is answerable for.
+    note and anti-pattern gates to paths this tree is answerable for, and
+    ``migration_base`` names the commit removed capabilities are judged from.
     """
     started = perf_counter()
     excluded_roots = non_code_roots(project)
@@ -1374,6 +1434,7 @@ def run_checks(
             command_surface=command_surface,
             scaffold_source=scaffold_source,
             spread=spread,
+            migration_base=migration_base,
         )
 
         if fix:

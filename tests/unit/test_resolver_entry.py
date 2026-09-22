@@ -5,6 +5,9 @@ from pathlib import Path
 
 import pytest
 import typer
+from typer.testing import CliRunner
+import lup.devtools.harness.resolve as resolve_entry
+from lup.resolver.admissions import AdmissionMailbox, AdmissionStatus
 
 from lup.harness.codescan.markers import NoteKind
 from lup.channels.models import utc_now
@@ -67,6 +70,41 @@ from typer.main import get_group
 
 from lup_template.devtools.main import app
 from tests.unit.repos import commit_file, initialized_repo
+
+
+@pytest.mark.parametrize("adapter", ["claude", "codex"])
+@pytest.mark.parametrize("detach", [False, True])
+def test_existing_run_admission_queues_before_launching_or_touching_its_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, adapter: str, detach: bool
+) -> None:
+    monkeypatch.setattr(resolve_entry, "project_root", lambda: tmp_path)
+    state_root = tmp_path / ".lup" / "resolve"
+    persisted_run(state_root, "live", ResolvePhase.WORKERS)
+    repository = ResolverStateRepository(state_root, "live")
+    log = repository.root / "detached.log"
+    log.write_text("original live evidence\n", encoding="utf-8")
+    with repository.exclusive():
+        result = CliRunner().invoke(
+            app,
+            [
+                "resolve",
+                "--adapter",
+                adapter,
+                "--run-id",
+                "live",
+                "--admit",
+                "new material evidence",
+                *(["--detach"] if detach else []),
+            ],
+        )
+    assert result.exit_code == 0, result.output
+    assert "queued" in result.output
+    assert "started detached" not in result.output
+    assert log.read_text() == "original live evidence\n"
+    receipts = AdmissionMailbox(repository.root).receipts()
+    assert len(receipts) == 1
+    assert receipts[0].status == AdmissionStatus.QUEUED
+    assert receipts[0].request.statements == ["new material evidence"]
 
 
 def material_question(
@@ -696,7 +734,7 @@ def test_the_preview_names_every_bucket_at_its_own_file_and_line(
 def test_the_preview_starts_no_run_and_leases_nothing(
     intake_tree: Path, tmp_path: Path
 ) -> None:
-    """Seeing an inventory used to mean committing to a worktree per concern."""
+    """Seeing an inventory commits to nothing — no run, no worktree, no lease."""
     beside = sorted(path.name for path in tmp_path.iterdir())
 
     scanned_intake(intake_tree).describe()
