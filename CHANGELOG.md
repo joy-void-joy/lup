@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 — 2026-09-22
 
 ### Native execution carries no reusable approval authority
 
@@ -238,6 +238,53 @@ refuses a base equal to the pin, and one a candidate reads a tenth of the
 copied half above; both refusals carry the reading, and restating it as
 `--accept-fit <identical>` is what roots the branch there anyway.
 
+
+### What this release asks of a caller
+
+- command_words — lup.policy.rules.command_words passed its argument to the kernel's own command_words and returned the result, so one reading of a command line had two spellings and the rules module renamed the kernel's on import to make room for its copy
+-   Import command_words from lup.policy.kernel.words, which is where every other caller already reads it and where the behaviour has always lived. Nothing about what it returns changes.
+- remembered_approval, remembered_or_asked — Native execution is observation, not reusable approval authority; both native dispatchers require explicit single-use review receipts.
+-   Remove approval-memory lookups from policy adapters. Keep explicit reusable grants in their declared policy scope; historical approvals.jsonl records have no such receipt and grant no authority. note_ran records observed execution only.
+-   Regenerate both plugins. For unresolved native asks, inspect the named review with dev questions show and answer or reject it from an operator terminal. A recorded answer releases one exact retry; native auto-mode and execution cannot answer it. dev hooks approvals and forget inspect or retire observations without changing authorization.
+- JoinDesk, JoinDesk.__init__ — Concurrent resolver joins require concern-owned checkpoint directories.
+-   Construct JoinDesk(run_dir, concern_id). With the run stopped, move any join/plan.json and join/progress.json into join/<concern_id>/, using the identity recorded in the plan. Dependency checkpoints no longer populate the integration-only ResolveState.join_progress field.
+- ProjectEntry.review_from, ProjectEntry.last_synced_commit — path registrations review fetched origin commits by default and review checkpoints are shared across sibling worktrees, bound to the repository and ref reviewed
+-   For unpublished local work, set review_from to local in sync.json.local, or run sync setup NAME /path/to/repo --review-from local. A repository with no origin remains local. Remote review fetches without moving the checkout.
+-   Check sync status for the selected review ref. A branchless registration matching the library Git source follows its consumed branch; resolve any reported source/branch mismatch before reviewing commits.
+-   After review, run sync mark-synced NAME --at REVIEWED_SHA with the immutable commit actually reviewed. This records the checkpoint under the common Git directory for all worktrees, without fetching an existing upstream. An older last_synced_commit remains the seed until that shared checkpoint is recorded; changing the repository or ref requires reviewing and recording a checkpoint for that source.
+- ClaudeProfileStore, ClaudeProfileStore.homes_root, ClaudeProfileStore.load_registry, ClaudeProfileStore.save_registry, ClaudeProfileStore.resolver_registry, ClaudeProfileStore.resolve_config_dir, ClaudeProfileStore.names, ClaudeProfileStore.config_dir_for, ClaudeProfileStore.active_profile, ClaudeProfileStore.add_profile, ClaudeProfileStore.set_active, ClaudeProfileStore.remove_profile — personal Claude profile storage, reading names, and curating accounts are separate collaborators; the registry file format is unchanged
+-   Import AccountFile, ClaudeProfileNames, and ClaudeProfileRegistrar from lup.providers.claude.profile_store. Construct accounts = AccountFile(registry_path), then pass the same accounts to ClaudeProfileNames(accounts) and ClaudeProfileRegistrar(accounts). Keep homes_root, load_registry, save_registry, resolver_registry, and resolve_config_dir calls on accounts; call names, config_dir_for, and active_profile on the names reader; call add_profile, set_active, and remove_profile on the registrar.
+-   For CLI profile selection, compose ProfileDirectory(names, registrar, CLAUDE_LOGIN) from lup.providers.profiles and lup.providers.claude.login. Preserve the existing registry path and account homes; no credential or data migration is needed.
+- CLAUDE_CONFIG_DIR — the Claude configuration-home declaration belongs to its login adapter
+-   Import CLAUDE_CONFIG_DIR from lup.providers.claude.login instead of the former lup.adapters.claude.config module. When building a launch environment, prefer CLAUDE_LOGIN.environment(config_home) from the same module.
+- CODEX_COMMAND — Codex queue delivery must select the target's verified home and execution scope.
+-   Call wake(WakePath(...), message) rather than the raw CODEX_COMMAND. Retain the native arrival hook's home and scope when persisting a wake path. queued now takes that WakePath, not a thread string; missing or foreign scope leaves durable mail pending.
+- dynamic_tool, SUBMISSION_TOOL — Codex typed output uses a per-turn native schema and portable validation, so submission no longer installs a thread-lifetime dynamic tool. The dynamic-tool channel carries declared application tools only.
+-   Pass the output model and submission gate through TurnRequest. Remove direct dynamic_tool use for submission; declare application tools in CodexSessionConfig.application_tools, which DynamicToolCall still carries. Untyped turns and changed output schemas need no fresh thread, so CodexSchemaRebindingError now reports application-tool drift alone.
+-   Configure correction on CodexSessionConfig to bound validation retries. Handle StructuredOutputError for exhausted output validation, and UnsupportedCapability for native controls that cannot be enforced.
+- runtime_of — Vendored execution environments are declared under the runtime they belong to, so nothing has to read a runtime back out of a path.
+-   Read the runtime from the key it is declared under: VENDORED_EXECUTION_ENVIRONMENTS maps each runtime to its environment. A caller that sniffed one out of a root string was answering a question the declaration now states, and its first entry is no longer the fallback for a root naming no runtime.
+- shell_patch, patch_review — Native hook reviews bind captured documents and policy bytes; Codex approvals remain single-use.
+-   Regenerate both native plugins. Replace direct shell_patch callers with lup.policy.kernel.review.literal_input(command, 'apply_patch'). Pass captured preconditions and the shell flag to patch_review; never re-read the working tree for a parked review.
+- SessionRequest.tools, ClaudeSessionConfig.tools, create_client, create_claude, create_codex, SessionRequest, ClaudeSessionConfig, CodexSessionConfig — Native tool authority is explicit. The native_tools default None grants no built-in or inherited tools on either provider; an application tool declaration remains independent of that authority.
+-   Rename SessionRequest.tools and ClaudeSessionConfig.tools to native_tools. Audit create_client, create_claude, create_codex and direct session configs that relied on ambient tools: pass an explicit sequence of NativeToolGroup values or exact supported provider tool names. Use NativeToolGroup.ALL only where broad built-in authority is intended; None and [] both grant nothing.
+-   Keep @lup_tool handlers in the factory tools=[...] argument and explicit MCP servers in tool_servers. Neither requires native_tools. allowed_tools selects automatic approval within declared authority and cannot grant a missing tool. Remove inherited setting sources and provider overrides that could widen authority. Codex rejects READ and exact Read, Write or WebFetch grants; use its supported facilities only when their broader semantics are intended.
+-   Resume a Codex thread only with the same application tools and compatible native authority; native grants may narrow on resume. Start a fresh session when application tools change: the native resume protocol cannot replace dynamic tools. Output schemas ride each turn and need no fresh thread. Codex requires an explicit or inherited model present in its native catalog to bound model tool metadata.
+- REPOSITORY_URL, GitSource.url — Repository identity is configured by each consumer; the library carries no hosting account or implicit upstream URL.
+-   Pass url when constructing GitSource. Replace imports of REPOSITORY_URL with repository_url(root), or supply your own URL. For CLI use, pass dev library git --url <repository>, keep an existing Git dependency pin, or configure the scaffold's named project in sync.json.local with its url or checkout path.
+-   Declare publication URLs in your package metadata when needed. Dependency tracker routing follows the configured library source; project issue routing continues to use its own origin.
+- sync.json, ProjectEntry.url, ProjectEntry.mount — a tracked registration declares what the project needs -- which repository a name means, whether the project can work without it, and what a session may reach of it -- while the machine's file answers where it is and which transport gets there. The scaffold's `lup` entry is required and mounted, because the workflows that fix a defect upstream and derive a relocation map over its history cannot start without that checkout
+-   Say where lup is on this machine, once: `sync remote lup <url>` for the URL this machine fetches it from, or `sync setup lup /path/to/repo` for a checkout it already has. `sync fetch` then materializes it, and a launch materializes what it also mounts. Until one of them is done, `sync status` names the requirement and exits nonzero rather than reporting `not cloned` in a column.
+    uv run lup-devtools sync status
+-   Move a machine-specific clone URL out of a local `url` override and into `remote`, which is what a transport is now called: `sync remote <name> <url>`. A tracked `url` is the repository's identity, compared on the host and path it names, so an ssh clone of an https registration is one repository and no longer a refusal; two repositories under one name still are, and the refusal names the file and the edit.
+-   Declare a repository the project cannot work without on the tracked entry, with `"required": true`, and the mode a session may open it at beside it. Both keys stay written or absent, never defaulted; a tracked mount binds nothing until this machine says where the project is. A repository registered at this checkout's own origin, and a committed requirement read inside the template scaffold, are owed by nobody here.
+- Runtime.contained — `contained` named the configuration home a workspace's sessions are pointed at, while everywhere else in this library it names a container — and a session can now ask for one. The method takes the word for what it does, `homed`, and the boundary keeps the other
+-   Call `Runtime.homed(request)` where you called `Runtime.contained(request)`; nothing else about it moved. A caller reaching it through `Runtime.session_factory` was never naming it and has nothing to change.
+    uv run lup-devtools dev py text \.contained\(
+- BranchBase.notice — `notice` narrated the base a worktree had already been cut from, which is advice nobody can act on without an undo. A base the command cannot guess is settled before the branch exists now, and `refusal` is what says so: a message the command exits on rather than one trailing a worktree that is already there
+-   Read `BranchBase.refusal()` where you read `BranchBase.notice()`, and exit on it: it is empty wherever the base is settled, and where it is not it names both spellings of `--base` for the caller to re-run with.
+    uv run lup-devtools dev py text \.notice\(
+-   Pass `branch` when you construct a `BranchBase`, which the refusal names the contested branch by, and `ahead` from `commits_ahead(current, integration)`, which is the measurement deciding whether the two bases differ at all.
 ## 0.3.0 — 2026-09-19
 
 Breaking reorganisation of the library's top level. Thirty-four entries became
