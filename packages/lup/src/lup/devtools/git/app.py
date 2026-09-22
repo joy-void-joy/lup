@@ -73,7 +73,8 @@ def create_git_app(declared: Callable[[], DevDeclarations]) -> typer.Typer:
             typer.Option(
                 "--base",
                 "-b",
-                help="Branch to cut from (default: the integration branch)",
+                help="Branch to cut from (default: the integration branch, "
+                "asked for where this checkout is ahead of it)",
             ),
         ] = None,
         force: Annotated[
