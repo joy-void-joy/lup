@@ -362,8 +362,57 @@ A wake is always *on top of* the mail and never instead of it, so the record
 is identical on both and only the latency differs. The agent never touches the
 channel: `coordination_send` remains the one habit.
 
+### Two rules read prose, where seventy-four read shapes
+
+A comment could date the code beside it and a docstring could name a symbol
+that resolves to nothing, and every gate stayed green. Both are claims a
+machine can settle, so both are refused.
+
+`historical-voice` refuses a phrase that can only be about a prior state —
+`previously`, `formerly`, `renamed from`, `used to be`, a design named as the
+one before this one, a migration something is *during*, an audience described
+as needing compatibility — and a bare issue number, which stands in for a
+reason the reader cannot follow. Bare `used to` and `no longer` are
+deliberately absent: both are overwhelmingly present tense, and what
+separates the real ones is the subject. `used to` after a pronoun can only be
+past habitual, because the present reading needs an auxiliary the pronoun
+form has nowhere to put — so *it used to filter* is refused and *a key used
+to select a home* is not.
+
+`stale-reference` resolves every fully-qualified symbol a docstring names and
+refuses the ones reaching nothing. It is a project rule rather than an edit
+rule because deciding it means importing, which the hermetic kernel cannot
+do. Scoped to what resolves without context: a bare name is answered by the
+module it sits in, and an attribute of a class is as often an annotation as a
+binding, so reading only what is bound would report a declaration missing.
+
+Prose is a third scan surface beside the comment and code ones, so a
+docstring is read as sentences rather than blanked with every other string.
+An adopter's own tree meets both rules at its next `dev check`; either is
+suppressed at the site with `# lup: ignore[<rule>]` and a standing reason.
+
 ### The rest
 
+- A contained session binds a checkout once. Where a repository keeps its
+  worktrees beneath its own Git directory, that directory's mount already
+  reaches every one of them at the same path and in the same mode, and the
+  second bind cost what no session could undo: a mount point is not removable
+  from inside its own namespace, so `git worktree remove` emptied the checkout
+  and left the directory standing. One collected per landed branch. A mount
+  whose deepest enclosing mount carries it the same way is dropped, which
+  leaves a read-only `config` inside a writable share exactly where it was.
+- `git delete` reads containment by patch-id, the way the sweep that asks for
+  it does. Ancestry called a branch unmerged whenever its work landed rebased
+  or squashed — which is most of what a sweep clears — so cleaning up after a
+  landing demanded `--force`, the flag for discarding work. Where a branch
+  does hold something, the refusal counts the commits sharing a subject with
+  the integration branch and names `git cherry -v`, since that is the trace a
+  rebase leaves and it is a signal rather than a verdict.
+- A `# lup: ignore` inside a code span is prose about the convention and
+  silences nothing. Documenting the escape declared one, of a rule named after
+  whatever the example used as a placeholder, and put an approval in front of
+  the sentence explaining it. The same reading the note scanner already
+  applied to a marker now answers for a directive, in every language.
 - `ledger migrate` copies a kind's journal lines and blobs into the placement
   its mapping now declares, for a kind moved after records already exist. The
   source lines stay: the committed journal is merged by git's union driver, so
