@@ -77,25 +77,35 @@ def resuming(monkeypatch: pytest.MonkeyPatch, upstream: Path) -> list[Path]:
     """Stand in for the three things a resumption reaches outside this checkout.
 
     The regeneration answers with the roots it was asked to write, so a test
-    can assert that it ran at all — which is the half of the deadlock that
-    used to be unreachable.
+    can assert that it ran at all.
 
-    `uv` refuses to be called. A resumption finishes the pass an earlier one
-    started, at the commit the standing merge already carries; re-resolving
+    `uv` refuses to move a carrier. A resumption finishes the pass an earlier
+    one started, at the commit the standing merge already carries; resolving
     the pin there would move the carriers out from under a merge that is only
-    part-way applied, so the strongest statement available is that nothing
-    asked `uv` anything.
+    part-way applied. Reading is a different act and is allowed: the pass
+    reports what migrations are owed, and asks for that with `--no-sync`,
+    which says in the invocation that it changes nothing.
     """
     regenerated: list[Path] = []
 
-    def refuse(*words: str, **named: str) -> None:
-        raise AssertionError(f"a resumption reached uv: {words}")
+    class Standing:
+        """`uv` as a resumption may use it: a read answers, a move refuses."""
+
+        def __call__(self, *words: str, **named: str) -> str:
+            return self.out(*words, **named)
+
+        def out(self, *words: str, **named: str) -> str:
+            if words and words[0] in ("lock", "sync", "add", "remove"):
+                raise AssertionError(f"a resumption moved a carrier: {words}")
+            # The one read a resumption makes is the owed-migration report,
+            # whose caller parses it, so the stand-in answers in its shape.
+            return '{"count": 0, "lines": []}'
 
     monkeypatch.setattr(update, "upstream_checkout", lambda project, report: upstream)
     monkeypatch.setattr(
         update, "regenerated", lambda root, report: regenerated.append(root)
     )
-    monkeypatch.setattr(update, "uv", refuse)
+    monkeypatch.setattr(update, "uv", Standing())
     return regenerated
 
 

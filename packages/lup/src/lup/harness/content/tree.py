@@ -169,8 +169,8 @@ def annotated_tree(
         the checkout is visible here — and a diagram of what a reader would
         import has no room for any of it. A dotted entry is skipped because
         Python cannot import one; a directory holding no source anywhere
-        beneath it is skipped because the package it used to be has moved,
-        leaving orphaned bytecode where the modules were.
+        beneath it is skipped because what sits there is bytecode rather than
+        modules, and nothing a reader imports.
         """
         if entry.name.startswith("."):
             return False

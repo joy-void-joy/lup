@@ -301,6 +301,21 @@ DECLARED: list[Migration] = [
         ],
     ),
     Migration(
+        subjects=["runtime_of"],
+        reason="Vendored execution environments are declared under the runtime "
+        "they belong to, so nothing has to read a runtime back out of a path.",
+        steps=[
+            MigrationStep(
+                instruction="Read the runtime from the key it is declared "
+                "under: VENDORED_EXECUTION_ENVIRONMENTS maps each runtime to "
+                "its environment. A caller that sniffed one out of a root "
+                "string was answering a question the declaration now states, "
+                "and its first entry is no longer the fallback for a root "
+                "naming no runtime."
+            ),
+        ],
+    ),
+    Migration(
         subjects=["shell_patch", "patch_review"],
         reason="Native hook reviews bind captured documents and policy bytes; "
         "Codex approvals remain single-use.",

@@ -223,7 +223,7 @@ def settled(
         return None
     outcome = scaffold.merged(root, source)
     report(f"Copied half: {outcome.spelled()}.")
-    for line in owed_since(already, repository, report):
+    for line in owed_since(already, repository, report, root):
         report(line)
     for path in outcome.conflicted:
         report(f"  conflicted  {path}")
@@ -308,10 +308,16 @@ def updated(
     commit was decided there, and re-resolving the pin now would move the
     carriers out from under a merge that is only part-way applied.
     """
-    repository = upstream_checkout(source.project, report)
     standing = scaffold.merging(root)
     if standing:
-        return resumed(root, repository, source, package, standing, report)
+        return resumed(
+            root,
+            upstream_checkout(source.project, report),
+            source,
+            package,
+            standing,
+            report,
+        )
     resolved = resolved_pin(root, distribution, commit, report, source.project)
     if not resolved:
         report(
@@ -320,6 +326,11 @@ def updated(
             f"(`dev library git --branch <branch>`) to update both halves."
         )
         return None
+    # Only once the pin answers, because materializing the upstream clone for
+    # a pin that resolves to nothing reports the clone's failure over the
+    # pin's. Reading for a standing merge above it costs nothing: that read is
+    # local and moves no carrier.
+    repository = upstream_checkout(source.project, report)
     report(f"Library at {short_sha(resolved)}; syncing the environment...")
     uv("sync", _cwd=str(root))
     already = scaffold.merged_at(root, source.branch)

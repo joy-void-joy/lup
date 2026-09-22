@@ -642,6 +642,11 @@ def merging(root: Path) -> str:
     it when the merge commit lands, so this is what says a merge is still
     open — and whose commit it is open on, which is how an update tells its
     own interrupted pass from a merge somebody else started.
+
+    A directory that is no repository answers the same as one holding no
+    merge, which is git's 128 beside its 1: nothing is standing there either
+    way, and this is asked before anything has established that the root is a
+    checkout at all.
     """
     return git.out(
         "-C",
@@ -650,7 +655,7 @@ def merging(root: Path) -> str:
         "--verify",
         "--quiet",
         "MERGE_HEAD",
-        _ok_code=[0, 1],
+        _ok_code=[0, 1, 128],
     )
 
 

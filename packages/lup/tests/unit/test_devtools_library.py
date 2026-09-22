@@ -134,7 +134,11 @@ def test_publishing_keeps_the_generated_tree_environments(project: Path) -> None
 
 def test_an_environment_the_project_owns_survives_whole(project: Path) -> None:
     """`extraPaths` is optional, and the rest of the table is not lup's to touch."""
-    library.set_mode(project, library.LibraryMode.GIT, git=library.GitSource(ref="dev"))
+    library.set_mode(
+        project,
+        library.LibraryMode.GIT,
+        git=library.GitSource(url="https://github.com/upstream/framework", ref="dev"),
+    )
 
     environments = at(project, "tool", "pyright", "executionEnvironments")
     assert isinstance(environments, list)
