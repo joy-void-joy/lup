@@ -1,5 +1,5 @@
 # lup: ignore[native-spelling]
-# Legacy low-level SDK interop remains public during the capability migration.
+# The seam names the native hook events it normalizes, spelled as they land.
 """SDK-agnostic hook utilities — the normalized hook seam and its factories.
 
 SDK-agnostic hook models and factories: permission hooks, tool allowlists,
@@ -366,7 +366,8 @@ def create_git_inspection_hook() -> LupHooksConfig:
         match event.tool_input:
             case {"command": str(command)}:
                 from lup.policy.kernel.shell import ESCALATE_RE
-                from lup.policy.rules import command_words, parse_shell_segments
+                from lup.policy.kernel.words import command_words
+                from lup.policy.rules import parse_shell_segments
 
                 escalation = ESCALATE_RE.match(command)
                 if escalation is not None and escalation.group("why").strip():

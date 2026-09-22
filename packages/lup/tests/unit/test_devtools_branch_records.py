@@ -9,7 +9,7 @@ edition record.
 
 What has to hold across that move: a record written in one worktree answers
 from every other, a fact written later does not erase one written earlier, a
-clone that still carries the old keys behaves exactly as it did, and a branch
+clone still carrying the retired keys is answered from them, and a branch
 recorded in neither place is still a branch nobody recorded.
 """
 

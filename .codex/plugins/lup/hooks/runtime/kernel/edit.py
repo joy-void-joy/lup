@@ -2020,20 +2020,35 @@ NOQA_DIRECTIVE_RE = re.compile(r"#\s*noqa\b")
 
 HISTORICAL_VOICE_RE = re.compile(
     r"\bused to be\b|\bpreviously\b|\bformerly\b|\brenamed from\b"
-    r"|\bin the past\b|\bbefore this change\b|(?<!&)#\d{2,5}(?![0-9A-Fa-f;])",
+    r"|\bin the past\b|\bbefore this change\b"
+    r"|\b(?:it|this|that|they|we|which|one|there) used to\b"
+    r"|\bthe old (?:rule|refusal|comparison|arrangement|fallback"
+    r"|behaviour|behavior|design|version)\b"
+    r"|\bduring the \w+ migration\b|\bfor compatibility (?:consumers|reasons)\b"
+    r"|(?<!&)#\d{2,5}(?![0-9A-Fa-f;])",
     re.IGNORECASE,
 )
 """The spellings that record a change rather than state what is.
 
 Deliberately narrow, because a rule that cries wolf is read as noise and then
-as nothing. `used to` is not here and neither is `no longer`: both are
+as nothing. Bare `used to` is not here and neither is `no longer`: both are
 overwhelmingly present tense in this tree — a key *used to select* a home, a
 record that *no longer grants* authority — so flagging them would bury the
 handful of real ones under readings that were never about history at all.
-What is left is unambiguous: a phrase that can only be about a prior state,
-and a bare issue number, which narrates the change that produced the code
-instead of the code. An entity (`&#124;`) and a colour (`#264F78`) are
-excluded by shape rather than by hoping they stay out of prose.
+
+What decides it is the subject. `used to` after a pronoun can only be past
+habitual, because the present reading needs an auxiliary the pronoun form has
+nowhere to put: *it used to filter* is history and *a key used to select* is
+not, and no noun tells the two apart. So the pronouns are refused and the
+nouns are left, which loses a reading the rule cannot have without also
+losing the ones it is for.
+
+The rest is unambiguous: a phrase that can only be about a prior state, a
+design named as the one before this one, a migration something is *during*,
+an audience described as needing compatibility, and a bare issue number,
+which narrates the change that produced the code instead of the code. An
+entity (`&#124;`) and a colour (`#264F78`) are excluded by shape rather than
+by hoping they stay out of prose.
 """
 
 

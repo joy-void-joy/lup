@@ -386,12 +386,12 @@ def test_the_tmux_questions_this_session_cannot_answer_are_refused_by_name(
 ) -> None:
     """Refused rather than answered, because the server really is out of reach.
 
-    The alternative was a silent success, and it is the shape this bridge's
-    header argues against everywhere else: a runtime asking which panes exist
-    would get agreement and no panes, and read the emptiness as the answer.
-    What it gets instead names where tmux actually is, which is more than the
-    `command not found` this replaces -- that one contradicts the `TMUX` the
-    same session was handed.
+    The alternative is a silent success, and it is the shape this bridge's
+        header argues against everywhere else: a runtime asking which panes exist
+        would get agreement and no panes, and read the emptiness as the answer.
+        What it gets instead names where tmux actually is, which is more than a
+        `command not found` -- that one contradicts the `TMUX` the same session
+        was handed.
     """
     import sh
 

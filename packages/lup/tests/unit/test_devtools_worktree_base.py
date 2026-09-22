@@ -169,8 +169,8 @@ def cutting(
 def test_two_bases_that_differ_are_asked_about_rather_than_guessed() -> None:
     """Both spellings, so whichever the caller meant is a paste.
 
-    The refusal replaces advice that used to be printed after the branch had
-    been cut, which no reader could act on without an undo.
+    A refusal rather than advice printed after the branch is cut, which no
+    reader can act on without an undo.
     """
     asked = cutting().refusal()
 

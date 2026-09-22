@@ -200,11 +200,11 @@ def test_the_launch_names_what_fails_outside_the_proxys_vocabulary() -> None:
     DNS's vocabulary -- naming neither the proxy nor the boundary -- so before
     it happens is the only time it can be said.
 
-    The claim this used to make was that such a component hangs. Measured
-    inside a session, it does not: the network is created `--disable-dns`, so
-    `ssh` fails at name resolution in milliseconds and never opens a socket
-    to wait on. A warning about a wait nobody will ever see is a warning that
-    teaches the reader to expect the wrong symptom.
+    What it must not claim is that such a component hangs. Measured inside a
+    session, it does not: the network is created `--disable-dns`, so `ssh`
+    fails at name resolution in milliseconds and never opens a socket to wait
+    on. A warning about a wait nobody will ever see is a warning that teaches
+    the reader to expect the wrong symptom.
     """
     lines = "\n".join(item.text for item in SessionEgress().notice("feat"))
     assert "ssh" in lines
@@ -275,7 +275,7 @@ def test_a_running_proxy_off_the_network_is_repaired_rather_than_believed(
         # The network is there, the proxy is up and carries the declaration in
         # force — and it is on the engine's default bridge and nothing else,
         # which is exactly the state that reads as healthy from every cheaper
-        # question this launcher used to ask.
+        # question a launcher could ask instead.
         networks="bridge ",
     )
     contained.start_egress(SessionEgress(), "feat", Docker(), tmp_path)

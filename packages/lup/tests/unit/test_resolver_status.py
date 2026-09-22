@@ -885,8 +885,8 @@ def test_the_header_carries_progress_losses_and_who_is_held_up() -> None:
     """Three facts and no fourth: how far, what was lost, who is waiting.
 
     A per-status breakdown is progress rather than attention — nobody acts
-    on "9 retired" — and finding what needs you among nine figures that do
-    not is the reading this replaces.
+    on "9 retired" — and a header carrying one asks a reader to find what
+    needs them among nine figures that do not.
     """
     counts = [
         StatusCount(status=ConcernStatus.VERIFIED, concerns=21),

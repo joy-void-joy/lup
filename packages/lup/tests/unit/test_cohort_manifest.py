@@ -82,12 +82,12 @@ def test_the_person_is_a_member_the_same_verbs_reach(tmp_path: Path) -> None:
 
 
 def test_a_process_that_opened_nothing_reaches_the_person(tmp_path: Path) -> None:
-    """The failure this replaces: an address that resolved only where it was minted.
+    """The failure this refuses: an address that resolves only where it was minted.
 
-    A console attaching to a directory some other process wrote used to have
-    the human's address supplied to it as a constructor argument, so a caller
-    that spelled it differently — or did not spell it — read one inbox while
-    the run wrote another.
+    Supplying the human's address to a console as a constructor argument
+    leaves a caller attaching to a directory some other process wrote free to
+    spell it differently — or not at all — and read one inbox while the run
+    writes another. The directory answers instead.
     """
     ActorCohort(tmp_path).tell_user("the environment is broken")
 

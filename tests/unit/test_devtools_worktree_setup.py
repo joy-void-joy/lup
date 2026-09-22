@@ -146,7 +146,7 @@ def test_a_half_made_worktree_is_finished_by_re_running(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """The failure the success message used to hide: setup that never ran.
+    """The failure a bare success message hides: setup that never ran.
 
     The base is the observable half — `uv sync` is not run in tests — and it
     is the record an interruption between `worktree add` and the rest of
@@ -501,9 +501,9 @@ def test_a_base_nobody_can_name_is_refused_before_the_worktree_exists(
 ) -> None:
     """A detached HEAD has no branch to read, so there is nothing to record.
 
-    The old fallback wrote nothing and said nothing, and the loss surfaced
-    much later as a base guessed from a topology that had moved. Refused at
-    creation, where naming the base is one flag.
+    A fallback that writes nothing and says nothing surfaces the loss much
+    later, as a base guessed from a topology that has moved. Refused at
+    creation instead, where naming the base is one flag.
     """
     repo_git(repo)("checkout", "--detach")
     monkeypatch.chdir(repo)

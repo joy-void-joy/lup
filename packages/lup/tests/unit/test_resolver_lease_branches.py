@@ -403,8 +403,8 @@ def test_work_landed_by_fast_forward_is_not_a_reserved_workspace(
     """The landing no topological question can see, and the whole reason for a record.
 
     A branch whose work landed through a merge sits on the side parent, off
-    the integration branch's first-parent history, which is what a tip
-    comparison used to read. Rebased and fast-forwarded, the same work leaves
+    the integration branch's first-parent history, which is all a tip
+    comparison reads. Rebased and fast-forwarded, the same work leaves
     the branch pointing at the integration branch's own tip — where an
     untouched workspace points too. The two states are then the same graph,
     so the branch is spent and only something written before the work

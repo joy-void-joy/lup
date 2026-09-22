@@ -1186,7 +1186,7 @@ SHELL_POLICY_CASES = [
     # Fetching somebody else's code into the tree asks on the trust row,
     # wherever it arrives from: a clone, a release asset, a workflow artifact
     # and a pull request head are one act with one answer. `git clone` always
-    # asked, so this is the spelling that used to disagree with it.
+    # asks, so this is the spelling that would otherwise disagree with it.
     DecisionCase(input="gh pr checkout 123", effect="ask"),
     DecisionCase(input="gh repo clone owner/name", effect="ask"),
     DecisionCase(input="gh gist clone abc123", effect="ask"),
@@ -2241,9 +2241,9 @@ def test_the_decision_effect_stays_closed_at_four_members() -> None:
 
     A member per placement would need an ask-plus-elsewhere next and then
     a deny-plus-elsewhere, so the two questions stay two fields. Three
-    placements rather than four: what a rule used to spell ``escalable``
-    is a request the agent writes and a reviewer answers, which is not a
-    place an operation can be.
+    placements rather than four: what a fourth would spell ``escalable`` is
+    a request the agent writes and a reviewer answers, which is not a place
+    an operation can be.
     """
     assert sorted(get_args(DecisionEffect.__value__)) == [
         "allow",
@@ -3590,8 +3590,8 @@ def test_dropping_one_rule_from_a_suppression_needs_no_approval() -> None:
     """Shrinking a directive is what the audit asks for when it calls one spurious.
 
     Reading the added line alone cannot tell this from a suppression appearing
-    out of nowhere, so the gate used to ask — and the audit was already
-    demanding the very edit it asked to approve.
+    out of nowhere, so a gate that reads only that asks — while the audit is
+    already demanding the very edit it would ask to approve.
     """
     policy = EditPolicy(protected=[])
     narrowed = EditBatch(
@@ -4725,7 +4725,7 @@ def test_an_in_place_rewrite_is_judged_as_the_edit_it_performs(
 ) -> None:
     """A rewrite meets the gates an edit meets, over the file it would produce.
 
-    Recoverability used to answer this, and it answered a different question.
+    Recoverability answers a different question.
     *Being wrong is repairable* is true of a clean tracked file and says
     nothing about whether the content may be written; the anti-pattern table,
     the review-note gate and the size gate are the rules that do, and a grant

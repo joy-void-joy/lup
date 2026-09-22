@@ -119,7 +119,7 @@ def test_the_logged_cut_resolves_what_topology_could_not(
 def test_a_topology_tie_takes_the_integration_branch_and_says_it_did(
     repo: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A tie with nothing logged is two answers, and it used to be fatal.
+    """A tie with nothing logged is two answers, not a reason to refuse.
 
     `core.logAllRefUpdates` is off for the creation alone, which is the
     condition a bare clone is in by default — so the creation goes unlogged

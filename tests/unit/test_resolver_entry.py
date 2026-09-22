@@ -734,7 +734,7 @@ def test_the_preview_names_every_bucket_at_its_own_file_and_line(
 def test_the_preview_starts_no_run_and_leases_nothing(
     intake_tree: Path, tmp_path: Path
 ) -> None:
-    """Seeing an inventory used to mean committing to a worktree per concern."""
+    """Seeing an inventory commits to nothing — no run, no worktree, no lease."""
     beside = sorted(path.name for path in tmp_path.iterdir())
 
     scanned_intake(intake_tree).describe()

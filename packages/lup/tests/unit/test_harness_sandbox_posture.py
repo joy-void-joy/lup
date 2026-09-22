@@ -184,9 +184,9 @@ def test_a_launch_choosing_no_sandbox_stands_both_walls_down_and_vouches_nothing
 
     Both runtimes spell their own sandbox off, exactly as a contained launch
     does, and neither exports LUP_SANDBOX_ACTIVE -- so the deny lattice stays
-    standing and every unjudged command keeps its escalation recipe. What
-    used to be reachable only as a broken inner sandbox is a choice with a
-    name, and the name buys the strict judgment on purpose.
+    standing and every unjudged command keeps its escalation recipe. A
+    posture otherwise reachable only as a broken inner sandbox is a choice
+    with a name, and the name buys the strict judgment on purpose.
     """
     environment: EnvVars = {}
 

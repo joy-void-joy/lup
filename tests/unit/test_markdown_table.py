@@ -1,7 +1,7 @@
 """A generated table escapes what it holds, wherever the value came from.
 
-Escaping used to be the caller's to remember, so the interesting cases are the
-ones a caller would have had to think about: a pipe, which ends a cell early;
+Escaping is nobody's to remember, so the interesting cases are the ones a
+caller would otherwise have to think about: a pipe, which ends a cell early;
 either line ending, which ends the row; and markup, which a reader would
 otherwise see interpreted rather than quoted. A link's destination is checked
 too, since it is the one value a cell does not otherwise escape. None of them

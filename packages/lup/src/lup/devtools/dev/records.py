@@ -78,7 +78,7 @@ class BranchRecord(BaseModel, frozen=True):
 
 
 class LegacyFact(StrEnum):
-    """One fact lup used to write into ``config``, by the suffix it wrote it under.
+    """One fact a clone's ``config`` may carry, by the suffix it is written under.
 
     A closed set rather than two loose names, because the spelling is needed
     at both ends of one operation — the pattern that finds a key still in

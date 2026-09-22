@@ -278,10 +278,10 @@ def test_a_hook_armed_under_the_previous_marker_is_still_recognized(
 ) -> None:
     """An upgraded checkout is re-armed, not reported as somebody else's.
 
-    The marker is how an installed hook says it is this command's to
-    rewrite, and it was renamed when the second hook arrived. Reading only
-    the current spelling would turn every clone armed by an earlier version
-    into one needing `--force` to touch.
+    The marker is how an installed hook says it is this command's to rewrite,
+    and it carries more than one spelling across the versions that wrote it.
+    Reading only the current one turns every clone armed by an earlier
+    version into one needing `--force` to touch.
     """
     work = tmp_path / "repo"
     hooks = tmp_path / "hooks"

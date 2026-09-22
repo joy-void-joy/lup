@@ -44,12 +44,12 @@ def written(root: Path, nonce: str, ledger: dict[str, list[str]]) -> None:
 def test_an_inherited_variable_no_longer_grants_containment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The defect this replaced, stated as the case that must now fail.
+    """The reading a measured boundary refuses, stated as the case that fails.
 
     A launcher forwards its own environment, so an uncontained session started
-    from a shell exporting `LUP_CONTAINED=1` used to report a boundary with no
-    container under it — and place every operation by a wall that was not
-    there. Nothing consults that variable now, so the claim costs nothing.
+    from a shell exporting `LUP_CONTAINED=1` would report a boundary with no
+    container under it — and place every operation by a wall that is not
+    there. Nothing consults that variable, so the claim costs nothing.
     """
     monkeypatch.setenv("LUP_CONTAINED", "1")
     monkeypatch.delenv("LUP_BOUNDARY_NONCE", raising=False)

@@ -232,7 +232,7 @@ def test_a_materialized_clone_carries_the_whole_history_and_every_branch(
 
     A shallow single-branch clone is a review window that quietly ends and a
     checkout that can be cut no other branch, which is two of the three
-    reasons a URL registration used to be worth less than a path one.
+    reasons a URL registration would be worth less than a path one.
     """
     registered(registry_root, {"name": "up", "url": str(remote)})
     materialize()
@@ -251,10 +251,10 @@ def test_refreshing_a_clone_leaves_work_in_it_exactly_where_it_stands(
 ) -> None:
     """The third reason, and the one that lost work rather than opportunity.
 
-    The refresh used to be a fetch followed by a hard reset onto the
-    upstream, so a branch cut in the clone, a commit made on it and every
-    uncommitted file beside it went with the next review — silently, because
-    a reset says nothing about what it wrote over.
+    A refresh made of a fetch and a hard reset onto the upstream takes a
+    branch cut in the clone, a commit made on it and every uncommitted file
+    beside it with the next review — silently, because a reset says nothing
+    about what it wrote over.
     """
     registered(registry_root, {"name": "up", "url": str(remote)})
     checkout = materialize().checkout
@@ -375,12 +375,11 @@ def test_a_clone_registered_under_one_name_at_two_urls_is_refused(
 def test_a_clone_at_the_old_location_is_used_where_it_stands(
     registry_root: Path, cache: Path, remote: Path
 ) -> None:
-    """Moving the cache must not abandon what was left in the old one.
+    """Moving the cache must not abandon what a clone at the other path holds.
 
-    A clone under the project root was writable with the checkout, so a
-    session could commit in one — and re-cloning beside it would leave that
-    work where nothing looks again, which is the failure this whole change
-    is about.
+    A clone under the project root is writable with the checkout, so a
+    session can commit in one — and re-cloning beside it leaves that work
+    where nothing looks again.
     """
     legacy = registry_root / ".cache" / "sync" / "up"
     legacy.parent.mkdir(parents=True)
@@ -543,7 +542,7 @@ def test_the_mount_table_carries_a_project_the_tracked_half_declares(
 def test_an_ssh_clone_of_an_https_registration_is_one_repository(
     registry_root: Path, cache: Path, remote: Path
 ) -> None:
-    """The ordinary arrangement, which the old comparison read as a conflict.
+    """The ordinary arrangement, which a URL comparison reads as a conflict.
 
     The tracked file holds the canonical https URL because that is what every
     machine shares; this machine's keys are ssh, so its clone reaches the

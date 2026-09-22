@@ -3,7 +3,7 @@
 Pins the load-bearing rule that distinguishes a real note from code: in
 Python a `# lup:` counts only inside a comment or docstring, never inside
 an ordinary string literal. The scanner's own "no notes" echo strings are the
-canonical false positive that line-scanning used to report. The same scan,
+canonical false positive a line scan reports. The same scan,
 parameterized over the marker regex, backs the `TEMPLATE:` customization
 todos that `dev todos` gathers for `/lup:init`.
 """
@@ -164,9 +164,9 @@ def test_template_marker_inside_ordinary_string_is_code() -> None:
     assert todo_texts(source, ScanMode.PYTHON) == []
 
 
-def test_bare_template_keyword_is_no_longer_a_todo() -> None:
-    # The standalone `TEMPLATE:` convention is gone: a customization point is
-    # a `# lup:` note whose head says so, so the old spelling scans as nothing.
+def test_a_bare_template_keyword_is_not_a_todo() -> None:
+    # A customization point is a `# lup:` note whose head says so, and there
+    # is no standalone convention beside it, so this scans as nothing.
     source = "# TEMPLATE: replace these fields for your domain\n"
     assert todo_texts(source, ScanMode.PYTHON) == []
     assert find_feedback(source, ScanMode.PYTHON) == []
@@ -558,8 +558,8 @@ def test_marker_comment_rejects_incoherent_kind_condition_pairs() -> None:
 
 
 def test_fstring_contents_are_code_not_notes() -> None:
-    # Since 3.12 an f-string lexes as start/middle/end tokens; only STRING
-    # used to be masked, so marker text inside an f-string read as a comment.
+    # Since 3.12 an f-string lexes as start/middle/end tokens, so masking
+    # only STRING lets marker text inside one read as a comment.
     source = 'message = f"# lup: not feedback {value}"\n'
     assert find_feedback(source, ScanMode.PYTHON) == []
 
