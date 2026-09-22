@@ -2250,10 +2250,27 @@ def plan_branch_step(name: str, force: bool) -> PlannedAction:
     one whose every commit is already in the integration branch is still
     refused while its remote copy sits behind. Reporting that as forced
     rather than blocked is the honest reading: nothing is discarded.
+
+    Containment is the reading :func:`disposition_for` uses, not ancestry.
+    They disagree over exactly the branches a sweep is for: work that landed
+    through a rebase or a squash is in the integration branch by content and
+    behind it by no commit, while `merge-base --is-ancestor` says no because
+    the tip is not reachable. Asking the stricter question at the destructive
+    gate meant every branch a sweep had just landed demanded `--force`, which
+    is the answer for discarding work and was being given for cleaning up
+    after it.
+
+    Where the branch really does hold something, the refusal says what it
+    found rather than only that it found it. A rebase leaves the subjects
+    intact, so counting the unique commits already naming one in the
+    integration branch is what tells a reader whether to go and compare —
+    and it is a signal, never a verdict, which is why it is spoken here and
+    not read above.
     """
     description = f"Delete local branch: {name}"
     integration = get_integration_branch()
-    if is_ancestor(name, integration):
+    unique = count_unique_commits(name, integration)
+    if is_ancestor(name, integration) or unique == 0:
         if outgrew_upstream(name):
             return PlannedAction(
                 description=description,
@@ -2261,14 +2278,24 @@ def plan_branch_step(name: str, force: bool) -> PlannedAction:
                 detail=f"ahead of origin/{name}, which {integration} already contains",
             )
         return PlannedAction(description=description)
+    suspects = rewrite_suspects(name, integration)
+    trail = (
+        f"; {len(suspects)} of {unique} unique commit(s) share a subject with "
+        f"{integration}, which is the trace a rebase leaves — "
+        f"`git cherry -v {integration} {name}` says which"
+        if suspects
+        else ""
+    )
     if force:
         return PlannedAction(
-            description=description, verdict="forced", detail="branch is unmerged"
+            description=description,
+            verdict="forced",
+            detail=f"branch is unmerged{trail}",
         )
     return PlannedAction(
         description=description,
         verdict="blocked",
-        detail="branch is unmerged; --force deletes it anyway",
+        detail=f"branch is unmerged{trail}; --force deletes it anyway",
     )
 
 
