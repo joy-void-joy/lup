@@ -62,6 +62,13 @@ def test_a_release_cut_and_not_yet_landed_is_judged_from_its_commit(
     assert gate_base("dev") == cut
     assert gate_base("dev") != out(repo, "rev-parse", "main")
 
+    # A pull request's checkout stands on no branch, which is the other half
+    # of the same window: the push build read the cut and the request build
+    # beside it did not, and reported every break the release had shipped.
+    sh.Command("git")("-C", str(repo), "checkout", "-q", "--detach", _tty_out=False)
+
+    assert gate_base("dev") == cut
+
 
 def test_a_commit_that_is_not_a_release_is_not_read_as_one(repo: Path) -> None:
     """The subject is the mark, so an ordinary commit mentioning one is not it."""

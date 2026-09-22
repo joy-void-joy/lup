@@ -250,7 +250,12 @@ def gate_base(integration: str, release: str = "main") -> str | None:
     ]
     if current and current != integration and siblings:
         return detect_base_branch(current).merge_base
-    if current == integration and (cut := last_release_commit()):
+    # Read off HEAD's history rather than off which branch is checked out,
+    # because a pull request's checkout stands on no branch at all: gated on
+    # standing *on* the integration branch, this answered for the push build
+    # and not for the request build beside it, and one of the two reported
+    # every break the release had shipped.
+    if cut := last_release_commit():
         return cut
     named = release if current == integration else integration
     for ref in (named, f"origin/{named}"):
