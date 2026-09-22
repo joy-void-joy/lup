@@ -175,7 +175,11 @@ def test_deduplication_is_atomic_when_a_retired_ref_is_locked(checkout: Path) ->
 def test_broken_undo_refs_are_quarantined_and_fetch_recovers(
     checkout: Path, contents: bytes
 ) -> None:
-    origin = checkout.parent / "origin.git"
+    # Beside the checkout rather than inside it, and named for it: the
+    # `checkout` fixture *is* `tmp_path`, so its parent is the runner's own
+    # root and a bare `origin.git` there is a path every case in this worker
+    # would clone to. The second one met `destination path already exists`.
+    origin = checkout.parent / f"{checkout.name}-origin.git"
     git("clone", "--bare", str(checkout), str(origin))
     git("-C", str(checkout), "remote", "add", "origin", str(origin))
     first = undo_snapshot(checkout, "good state")

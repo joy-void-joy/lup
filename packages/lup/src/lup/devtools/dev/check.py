@@ -4,6 +4,8 @@ import json
 import os
 import tomllib
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
+from tempfile import gettempdir
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
@@ -468,6 +470,24 @@ class TestRoot(BaseModel):
             ],
         )
 
+    def basetemp(self) -> Path:
+        """The temporary root this suite holds alone, named for where it runs.
+
+        The gate runs the roots at once, and pytest picks its own by scanning
+        `pytest-of-<user>` for the next free `pytest-N` — a read and a create
+        with a gap between them, so two runners starting together take the
+        same number and hand two suites one tree. What that looks like from
+        inside is a fixture meeting a path some other suite's test made:
+        `destination path 'origin.git' already exists`, raised by a clone that
+        runs once.
+
+        Derived from the directory rather than from the name, so two checkouts
+        of this repository running their gates at the same time stay apart
+        too — the name is the same in both and the path is not.
+        """
+        stamp = sha256(str(self.directory.resolve()).encode("utf-8")).hexdigest()
+        return Path(gettempdir()) / f"lup-pytest-{stamp[:16]}"
+
     def run(
         self,
         paths: list[str],
@@ -488,6 +508,7 @@ class TestRoot(BaseModel):
             "run",
             "pytest",
             *paths,
+            f"--basetemp={self.basetemp()}",
             *parallel_arguments(workers),
             *ignored_arguments(excluded_roots),
             _cwd=str(self.directory),
