@@ -270,6 +270,12 @@ def configured_repository(root: Path, project: str = DISTRIBUTION) -> str:
         return ""
     if url := registered.get("url"):
         return url
+    # The machine's own transport, where nothing shared names the repository:
+    # a registration that only ever existed here has no other identity, and
+    # refusing over the absence of a key nobody wrote would leave the pin
+    # unconfigurable on a machine that has said where the repository is.
+    if reach := registered.get("remote"):
+        return reach
     if path := registered.get("path"):
         return remote_url((root / Path(path).expanduser()).resolve(), "origin")
     return ""
@@ -283,7 +289,9 @@ def repository_url(
     if not found.strip():
         raise typer.BadParameter(
             f"No repository is configured for '{project}'. Pass --url <repository> "
-            "to dev library git, or set its url/path in sync.json.local."
+            "to dev library git, set its url in sync.json, or say how this "
+            f"machine reaches it: sync remote {project} <url>, or sync setup "
+            f"{project} /path/to/repo."
         )
     return found
 

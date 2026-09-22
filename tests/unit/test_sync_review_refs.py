@@ -198,6 +198,13 @@ def test_local_reviews_of_distinct_clones_have_distinct_checkpoint_sources(
 def test_a_registration_cannot_fetch_a_checkout_for_another_remote(
     registry: Path, tmp_path: Path
 ) -> None:
+    """And the refusal names the entry's own key and the command that repoints it.
+
+    The checkout is the one the registration named, so what is wrong is the
+    path rather than a clone in the cache — and the reader is told to point
+    that key somewhere else rather than to correct "the registration",
+    which is two files.
+    """
     clone = tmp_path / "clone"
     git = initialized_repo(clone, tmp_path / "hooks")
     commit_file(git, clone, "file", "base", "base")
@@ -210,7 +217,10 @@ def test_a_registration_cannot_fetch_a_checkout_for_another_remote(
             messages.append,
         )
 
-    assert "Correct the registration" in "\n".join(messages)
+    said = "\n".join(messages)
+    assert "two names" in said
+    assert 'point that entry\'s "path" at a checkout of it' in said
+    assert "uv run lup-devtools sync setup source /path/to/repo" in said
 
 
 def test_setup_checkpoint_honors_the_committed_branch(

@@ -240,23 +240,53 @@ resolver's supervisor page; see [supervisor.md](supervisor.md).
 improvements with and reviews their commits since the last sync. The /lup:update and /lup:import skills are built on it. Two files declare
 what to track.
 
+The split between them is by whose fact each key is, not by which key it is.
+What the *project* declares — which repository a name means, whether the
+project can work without it, and what a session may reach of it — is the same
+answer on every machine and belongs in the committed half. What *this machine*
+answers — where the checkout is, and which transport gets there — belongs in
+the gitignored one, and most machines answer only the second.
+
 **`sync.json` (committed)** declares the upstream's name without choosing
-a hosting account. Configure its URL or checkout path in `sync.json.local`
-before fetching template improvements:
+a hosting account, and says what this project needs of it:
 
 ```json
 {
   "projects": [
     {
-      "name": "lup"
+      "name": "lup",
+      "required": true,
+      "mount": "rw"
     }
   ]
 }
 ```
 
-For example, a local registration can supply
-`{"projects": [{"name": "lup", "url": "https://github.com/example/framework"}]}`.
-A checkout can be registered with `uv run lup-devtools sync setup lup /path/to/repo`.
+`"required": true` says the project cannot work without that repository
+present: the workflows that fix a defect upstream, derive a relocation map
+over upstream's own history, or review its commits all open that checkout.
+Nothing clones behind anybody's back — `sync fetch` materializes every
+requirement, a launch materializes what it is also going to mount, and `sync
+log` clones on first use, each saying so as it goes. A requirement this
+machine has not answered is named by `sync status`, with the command that
+answers it, and makes it exit nonzero; the absence is a result rather than
+something the next command discovers.
+
+Two requirements are owed by nobody: one naming the repository this checkout
+already is, read off its own origin, and a committed one read inside the
+template scaffold, whose `sync.json` is the file an adopter receives.
+
+Configure where lup is, once per machine:
+
+```bash
+uv run lup-devtools sync remote lup git@github.com:example/framework.git
+uv run lup-devtools sync setup lup /path/to/repo
+```
+
+The first records the URL this machine fetches from, the second a checkout it
+already has. A registration with neither is materialized at
+`~/.cache/lup/sync/<name>.git`, derived from the name, so a machine that keeps
+its clone there needs no local entry at all.
 
 Repository identity is configured independently from the adopting project's
 own Git origin. `uv run lup-devtools dev library git --url <repository>` selects the dependency's
@@ -269,11 +299,13 @@ template supplies no account-specific URLs.
 
 It is scaffold, not personal state. **Agents must never modify the tracked
 `sync.json`**, and neither should routine project work; the edit policy
-enforces this by treating it as a protected path. Every personal registration
-belongs in the gitignored **`sync.json.local`**: local paths,
-branch overrides, `"ignore": true` opt-outs, and
-additional projects. Entries there override tracked entries by name or add
-local-only ones. `sync setup` writes that registration. `sync mark-synced`
+enforces this by treating it as a protected path, which is also what keeps a
+`"mount"` there from being widened without the question being asked. Every
+per-machine registration belongs in the gitignored **`sync.json.local`**:
+checkout paths, the `"remote"` this machine fetches through, branch
+overrides, `"ignore": true` opt-outs, and additional projects. Entries there
+override tracked entries by name or add local-only ones. `sync setup` and
+`sync remote` write that registration. `sync mark-synced`
 stores a checkpoint under the repository's common Git directory, so every
 sibling worktree reads the same review progress. Existing `last_synced_commit`
 values are used until a shared checkpoint is recorded; the shared record wins
@@ -282,8 +314,12 @@ origin URL for fetched reviews, or the local Git repository for unpublished
 work. Two independent local clones keep separate unpublished checkpoints.
 
 `sync fetch` refreshes remote-tracking refs without moving a local branch or
-touching work in an attached checkout. `sync status` names the exact ref it
-reads. Registrations with an origin review `refs/remotes/origin/<branch>`;
+touching work in an attached checkout, and materializes a required
+registration even where `"ignore": true` withholds its review: being the
+upstream of this project is a reason not to read its commits back and no
+reason for a workflow that opens the checkout to find nothing there. `sync
+status` names the exact ref it reads. Registrations with an origin review
+`refs/remotes/origin/<branch>`;
 use `sync setup <name> <path> --review-from local` to review unpublished local
 work. A repository without an origin is itself the upstream. An unbranched
 `lup` registration follows the Git dependency's branch when their URLs agree;
@@ -300,8 +336,21 @@ declaration about *access* rather than about review: a session opens that
 project at its own path, inside the container as well as outside it, and
 `refs/<name>` resolves there rather than dangling. Written or absent, never
 defaulted — tracking a project and handing a session the keys to it are
-different claims, and `sync.json` is committed scaffold that would otherwise
-make the second one on every adopter's behalf.
+different claims. Either file may carry it, because which repositories a
+project's own workflows write in is the project's decision and read-write
+against read-only is part of it, rather than something each machine settles
+for itself when it first meets the absence. A tracked mount binds nothing on
+its own: until this machine says where the project is, there is nothing to
+bind, so the committed claim and the per-machine answer stay separate.
+
+`"url"` is which repository the entry means, and `"remote"` is the URL this
+machine fetches it from. They are compared on what each one names — the host
+and the path — so an ssh clone of an https registration is one repository and
+not a disagreement, and the committed file keeps naming the repository every
+machine shares. Two registrations that genuinely name different repositories
+are still refused, in a message naming the file each half sits in and the
+exact edit, because a clone of somebody else's history under this name would
+be reviewed, mounted and committed into as this one.
 
 The same file grants host devices, for the same reason: `sync grant
 nvidia.com/gpu=all` writes the CDI name into a top-level `"devices"` list

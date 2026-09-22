@@ -57,7 +57,7 @@ command that starts the container.
 """
 
 from collections.abc import Iterator
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
@@ -80,20 +80,27 @@ from lup.types import EnvVars
 class RemoteAddress(BaseModel, frozen=True):
     """One remote URL taken apart the way git's own grammar takes it apart.
 
-    Three fields, because three different questions get asked of a remote and
+    Four fields, because four different questions get asked of a remote and
     matching on its spelling answers none of them reliably. ``prefix`` is what
     an ``insteadOf`` rewrite has to match, character for character. ``host`` is
     what the URL *names*, which may be an ssh config alias rather than a
     hostname. ``proxied`` is whether the transport survives an HTTP proxy as
     written -- which is the question that decides whether a filtered
     container can reach it at all, since such a container's only way out
-    speaks HTTP and HTTPS and nothing else.
+    speaks HTTP and HTTPS and nothing else. ``repository`` is which repository
+    the URL names, which is the one question whose answer must not change
+    when the transport does: the same repository is reached over https here
+    and over ssh there, and a comparison made on the spelling calls those two
+    different.
     """
 
     prefix: str = Field(description="What an insteadOf rewrite must match")
     host: str = Field(description="What the URL names, possibly an ssh alias")
     proxied: bool = Field(
         description="Whether this transport can cross an HTTP proxy as written"
+    )
+    repository: str = Field(
+        description="Which repository the URL names, without its `.git` suffix"
     )
 
 
@@ -375,6 +382,20 @@ def parse_remote(url: str) -> RemoteAddress | None:
     rewrite, and a checkout whose remote is a directory keeps working
     unchanged inside the container as long as that directory is mounted.
     """
+
+    def named(path: str) -> str:
+        """The repository one remote's path names, however that path is spelled.
+
+        Through ``PurePosixPath`` rather than by trimming characters: a
+        leading slash, a trailing one and a doubled separator are all the
+        same path to git, and the suffix is optional on every forge that
+        serves one, so ``/owner/repo.git`` and ``owner/repo`` name the same
+        repository and have to compare equal.
+        """
+        posix = PurePosixPath(path)
+        relative = posix.relative_to("/") if posix.is_absolute() else posix
+        return str(relative).removesuffix(".git")
+
     if "://" in url:
         split = urlsplit(url)
         return RemoteAddress(
@@ -383,6 +404,7 @@ def parse_remote(url: str) -> RemoteAddress | None:
             # what ssh resolves and what a forge is compared against.
             host=split.hostname or "",
             proxied=split.scheme == "https",
+            repository=named(split.path),
         )
     colon = url.find(":")
     slash = url.find("/")
@@ -392,11 +414,16 @@ def parse_remote(url: str) -> RemoteAddress | None:
     # lup: ignore[string-split] — git's scp-like remote syntax, which no
     # parser in the standard library reads and which `urlsplit` actively
     # misreads; both measurements are in this function's docstring
-    authority, _, _path = url.partition(":")
+    authority, _, path = url.partition(":")
     # lup: ignore[string-split] — the same syntax one field further in: an
     # optional user sits before an `@`, which a hostname may not contain
-    _user, _, named = authority.rpartition("@")
-    return RemoteAddress(prefix=f"{authority}:", host=named or authority, proxied=False)
+    _user, _, hostname = authority.rpartition("@")
+    return RemoteAddress(
+        prefix=f"{authority}:",
+        host=hostname or authority,
+        proxied=False,
+        repository=named(path),
+    )
 
 
 def resolved_host(alias: str) -> str:
@@ -426,6 +453,52 @@ def resolved_host(alias: str) -> str:
         if line.startswith("hostname "):
             return line.removeprefix("hostname ").strip() or alias
     return alias
+
+
+def same_repository(left: str, right: str) -> bool:
+    """Whether two remote URLs name one repository, over whatever transport each takes.
+
+    Separating the two questions a URL answers. *Which repository* is what a
+    registration means and what two of them have to agree on; *how this
+    machine reaches it* is a fact about keys, a proxy and an ssh config, and
+    it differs between two checkouts of the same repository as a matter of
+    course. A committed registration naming the https URL while this machine
+    clones over ssh is therefore the ordinary case and not a disagreement, so
+    the comparison reads what each URL names -- the host, and the path with
+    its optional `.git` gone -- and never the spelling that reaches it.
+
+    Hosts compare case-insensitively because DNS does, and paths do not,
+    because a git server's paths are a filesystem's. An ssh config alias is
+    resolved before two hosts are called different, which is the one case
+    where the host as written is not the host: `forge:owner/repo` reaches
+    github.com because `~/.ssh/config` says so, and nothing in the URL
+    records it. Resolved only once the two disagree as written, so an
+    ordinary comparison spends no subprocess.
+
+    A spelling neither side parses as a remote is a local path, and two
+    spellings of one directory are one repository -- which is what a test
+    fixture, a mirror on a workstation and a bare clone beside its worktrees
+    all look like. A local path against a URL is not the same repository:
+    there is nothing in either to say the directory was cloned from the forge.
+    """
+
+    def directory(spelling: str) -> Path:
+        """One local spelling as the single directory it names."""
+        return Path(spelling).expanduser().resolve()
+
+    def reaches(first: RemoteAddress, second: RemoteAddress) -> bool:
+        """Whether two addresses name one host, resolving an alias if they differ."""
+        if first.host.lower() == second.host.lower():
+            return True
+        return resolved_host(first.host).lower() == resolved_host(second.host).lower()
+
+    match (parse_remote(left), parse_remote(right)):
+        case (None, None):
+            return directory(left) == directory(right)
+        case (RemoteAddress() as first, RemoteAddress() as second):
+            return first.repository == second.repository and reaches(first, second)
+        case _:
+            return False
 
 
 def remote_url(root: Path, name: str) -> str:

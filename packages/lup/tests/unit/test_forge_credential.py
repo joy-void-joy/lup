@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 import sh
 
+import lup.harness.credential as credential
 from lup.execution.shell import git
 from lup.harness.credential import (
     AgentKey,
@@ -30,6 +31,7 @@ from lup.harness.credential import (
     parse_remote,
     remote_rewrites,
     resolved_host,
+    same_repository,
 )
 from lup.harness.environment import NON_INTERACTIVE_SHELL_ENV
 from lup.harness.image import Image
@@ -534,6 +536,66 @@ def test_a_local_path_names_no_transport_and_is_declined() -> None:
 def test_an_unresolvable_name_falls_back_to_itself() -> None:
     """The safe direction: no match against the forge, so no rewrite at all."""
     assert resolved_host("lup-no-such-alias-anywhere") == "lup-no-such-alias-anywhere"
+
+
+def test_one_repository_reached_two_ways_is_one_repository() -> None:
+    """Which repository and how to reach it are two questions, not one.
+
+    A registration shared by every machine names the https URL; a machine
+    whose keys are ssh reaches the same history at `git@...`, with or without
+    the optional suffix, through a scheme URL, or on a port. Comparing the
+    spelling calls each of those a different repository, which is a refusal
+    aimed at the ordinary arrangement of a forge that serves two transports.
+    """
+    canonical = "https://github.com/owner/repo"
+
+    assert same_repository(canonical, "git@github.com:owner/repo.git")
+    assert same_repository(canonical, "ssh://git@github.com:2222/owner/repo.git")
+    assert same_repository(canonical, "https://github.com/owner/repo.git")
+    assert same_repository(canonical, "https://GitHub.com/owner/repo")
+
+
+def test_two_repositories_are_still_two_however_they_are_spelled() -> None:
+    """The check this exists to keep: a name means one repository.
+
+    Same owner on another forge, another owner on the same one, and a path
+    that differs only in case are three ways to land a review, a mount and a
+    commit in the wrong history.
+    """
+    canonical = "https://github.com/owner/repo"
+
+    assert not same_repository(canonical, "https://gitlab.com/owner/repo")
+    assert not same_repository(canonical, "git@github.com:someone-else/repo.git")
+    assert not same_repository(canonical, "https://github.com/owner/Repo")
+    assert not same_repository(canonical, "/srv/mirrors/repo.git")
+
+
+def test_a_local_mirror_is_compared_as_the_directory_it_is(tmp_path: Path) -> None:
+    """Two spellings of one directory are one repository, as git reads them."""
+    inside = tmp_path / "mirrors" / "repo.git"
+
+    assert same_repository(str(inside), f"{tmp_path}/mirrors/./repo.git")
+    assert not same_repository(str(inside), str(tmp_path / "mirrors" / "other.git"))
+
+
+def test_an_ssh_alias_is_resolved_before_two_hosts_are_called_different(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The one case where the host as written is not the host.
+
+    `forge:owner/repo` reaches github.com because `~/.ssh/config` says so,
+    and nothing in the URL records it. Resolution is asked of ssh, and only
+    once the two disagree as written, so the ordinary comparison spends no
+    subprocess.
+    """
+    monkeypatch.setattr(
+        credential,
+        "resolved_host",
+        lambda alias: "github.com" if alias == "forge" else alias,
+    )
+
+    assert same_repository("https://github.com/owner/repo", "forge:owner/repo.git")
+    assert not same_repository("https://gitlab.com/owner/repo", "forge:owner/repo.git")
 
 
 def test_this_checkouts_own_remotes_resolve_without_error() -> None:
