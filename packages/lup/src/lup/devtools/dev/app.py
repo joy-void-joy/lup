@@ -1512,7 +1512,14 @@ def create_dev_app(
         manifest.write_text(with_version(manifest.read_text(), version))
         declared_source.write_text(cleared_declarations(declared_source.read_text()))
 
-        git.add(*(str(path) for path in (changelog_path, manifest, declared_source)))
+        # The version is a source a generated artifact compiles from, so
+        # writing it leaves the trees that embed it behind — and the commit
+        # guard refuses exactly that, which is how a release came to be the
+        # one commit this repository could not make. Regenerating here is
+        # what the guard is asking for, and everything it writes belongs in
+        # the same commit as the bump that caused it.
+        update_mod.regenerated(root, lambda line: typer.echo(line, err=True))
+        git.add("-A")
         git.commit("-m", f"release: {previous} → {version}")
         git.tag("-a", plan.tag, "-m", f"{spec.version_file} {version}")
 
