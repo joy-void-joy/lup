@@ -474,6 +474,16 @@ suppressed at the site with `# lup: ignore[<rule>]` and a standing reason.
 - `dev comments --retire` asks before deleting a claimed-resolved note. It is
   the one step of the verify-solved pass nothing undoes, and `/lup:release`
   runs that pass before cutting, so no claim reaches a version unverified.
+- The migrations gate measures from the release, which is the tag rather than
+  the release branch. The two part for as long as it takes a release to land,
+  and read from the branch in that window every break a release had just
+  shipped came back undeclared — against a list that is empty precisely then,
+  because emptying it is what the release did.
+- Each pytest root runs under a base temporary directory of its own. The gate
+  runs both at once and neither named one, so each scanned `pytest-of-<user>`
+  for the next free `pytest-N` and two runners starting together were handed
+  one tree. What that looked like was a fixture meeting a path another suite's
+  test had made, on a machine with too few cores to spread the runs apart.
 - `ledger migrate` copies a kind's journal lines and blobs into the placement
   its mapping now declares, for a kind moved after records already exist. The
   source lines stay: the committed journal is merged by git's union driver, so
