@@ -103,6 +103,28 @@ def test_the_emptied_module_still_parses() -> None:
     assert ast.parse(cleared_declarations(MODULE)) is not None
 
 
+def test_what_a_release_writes_is_what_the_next_one_can_empty() -> None:
+    """The round trip, which is the only thing that catches a self-inflicted break.
+
+    This writes the annotated spelling and read only the bare one, so the
+    release that emptied the list left behind a module the *next* release
+    could not read — a crash arriving exactly one release late, past every
+    test that fed it a hand-written fixture in the form it already knew.
+
+    Emptying twice is the property: a release's own output is a module the
+    release after it can empty again, whatever shape it happens to write.
+    """
+    once = cleared_declarations(MODULE)
+    refilled = once.replace(
+        "DECLARED: list[Migration] = []",
+        'DECLARED: list[Migration] = [\n    Migration(subjects=["later"], reason="x", steps=[]),\n]',
+    )
+
+    assert "DECLARED: list[Migration] = []" in cleared_declarations(refilled)
+    assert "later" not in cleared_declarations(refilled)
+    assert ast.parse(cleared_declarations(refilled)) is not None
+
+
 def test_a_module_with_no_declarations_says_so() -> None:
     with pytest.raises(KeyError):
         cleared_declarations("value = 1\n")
