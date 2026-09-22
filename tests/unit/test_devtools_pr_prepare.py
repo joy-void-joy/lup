@@ -45,7 +45,7 @@ def divergent(tmp_path: Path) -> Path:
 
 
 def test_prepared_head_merges_without_custom_drivers(divergent: Path) -> None:
-    git = sh.Command("git").bake("-C", str(divergent))
+    git = sh.Command("git").bake("-C", str(divergent), _tty_out=False)
     with pytest.raises(sh.ErrorReturnCode):
         git(
             "-c",
@@ -83,7 +83,7 @@ def test_preparation_refuses_pending_work_before_merging(divergent: Path) -> Non
 
 
 def test_generation_failure_keeps_uncommitted_merge_for_repair(divergent: Path) -> None:
-    git = sh.Command("git").bake("-C", str(divergent))
+    git = sh.Command("git").bake("-C", str(divergent), _tty_out=False)
     before = str(git("rev-parse", "HEAD"))
 
     def failed() -> None:
@@ -100,7 +100,7 @@ def test_generation_failure_keeps_uncommitted_merge_for_repair(divergent: Path) 
 def test_source_conflicts_remain_repairable_and_do_not_generate(
     divergent: Path,
 ) -> None:
-    git = sh.Command("git").bake("-C", str(divergent))
+    git = sh.Command("git").bake("-C", str(divergent), _tty_out=False)
     git("checkout", "main")
     (divergent / "feature.txt").write_text("conflicting base work")
     generated(divergent)
