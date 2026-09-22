@@ -44,7 +44,9 @@ What it does, in this order, and the order is the whole point:
 4. **Regenerates the native trees**, under the library that just landed.
 
 A conflicted merge stops it before the regeneration, deliberately: the trees
-are compiled from declarations the merge has not finished writing.
+are compiled from declarations the merge has not finished writing. Running it
+again after the resolution is what finishes the pass — that run concludes the
+merge itself.
 
 **If the pinned branch was deleted**, the update names it before relocking.
 Keep the existing lock while checking which surviving branch contains the
@@ -80,8 +82,11 @@ Two things are worth knowing before starting:
   `uv run lup-devtools harness generate all`, and let `harness check all`
   confirm it settled.
 
-Commit the merge, then run `dev update` again so the regeneration it skipped
-happens under the merged declarations.
+Resolve every conflict and `git add` the files, then run `dev update` again.
+That pass concludes the merge, compiles the copied half against the
+declaration your resolution wrote, and regenerates under it — so an upstream
+path this project stops declining arrives in the same pass, instead of waiting
+for one that could not start until the merge was committed.
 
 ## 4. Apply the migrations it lists
 

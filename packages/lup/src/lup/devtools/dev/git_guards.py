@@ -77,6 +77,30 @@ line rather than a migration note nobody reads.
 """
 
 
+# lup: ignore[constant-declaration] — git's own mid-merge marker read in shell,
+# not a judgement a project could hold differently; and as a field default it
+# would arm the push moment too, where an unfinished merge decides nothing
+MERGE_STANDDOWN = """\
+# A commit concluding a merge is mid-transaction, and the generated trees are
+# compiled from declarations that merge has not finished writing: a resolution
+# is where a project decides what of upstream it takes, so it is where those
+# declarations change. Git draws the same line itself — the merge it completes
+# on its own runs `pre-merge-commit`, not this moment — so the check below
+# would refuse exactly the merges somebody had to resolve by hand and no
+# other. `dev update` regenerates once the merge lands, and every commit that
+# concludes no merge is read here as always.
+if [ -e "$(git rev-parse --git-path MERGE_HEAD)" ]; then
+  exit 0
+fi
+"""
+"""What the commit guard reads before deciding a merge is its to judge.
+
+Beside :data:`DELETION_STANDDOWN` because both are a moment describing
+itself: one uploads no tree to judge, the other holds a tree that is half of
+two and matches neither declaration.
+"""
+
+
 # lup: ignore[constant-declaration] — git's own pre-push stdin protocol written
 # in shell, not a judgement a project could hold differently; and as a field
 # default it would arm the commit moment too, silently disarming that guard
@@ -189,7 +213,7 @@ class GitGuard(BaseModel, frozen=True):
         )
 
 
-DECLARED_GUARDS = [GitGuard()]
+DECLARED_GUARDS = [GitGuard(standdown=MERGE_STANDDOWN)]
 """The hooks lup arms, offered to a project as the set it usually wants.
 
 A default rather than a fixture: a project that runs its gate somewhere else,

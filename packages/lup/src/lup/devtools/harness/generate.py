@@ -12,7 +12,8 @@ import json
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
+from pydantic_core import ErrorDetails
 
 from lup.providers.harness import (
     claude_prompt_renderer,
@@ -151,6 +152,75 @@ class HarnessGenerationConflict(RuntimeError):
         detail = ", ".join(conflict.path.as_posix() for conflict in conflicts)
         super().__init__(f"harness generation has unresolved conflicts: {detail}")
         self.conflicts = conflicts
+
+
+class DeclarationObstruction(BaseModel, frozen=True):
+    """Why something generated would not compile, in its declaration's terms.
+
+    A generated artifact is compiled from a typed declaration, so a compile
+    that refuses is answered in that declaration and nowhere else — and the
+    two facts that takes are what refused and where it was declared. Both are
+    buried by what raises them: a pydantic ``ValidationError`` holds one line
+    per refused field under a repr a hundred lines long, and a missing file
+    arrives as an interpreter traceback through the frames of whichever reader
+    happened to open it. Neither is about the reader's next decision, and both
+    are the same decision.
+    """
+
+    target: str
+    """What was being compiled when the declaration refused."""
+
+    obstruction: list[str]
+    """What refused, in its own words, one line per refusal."""
+
+    declaration: str = ""
+    """Where it was declared: the model that validated it, or the file read.
+
+    Empty where what raised names neither, which is the honest answer — the
+    refusal's own words then carry everything there is to act on, and a line
+    naming the exception class in that slot would read as a declaration and
+    be none.
+    """
+
+    def described(self) -> list[str]:
+        """This obstruction as a refusal prints it, the declaration last."""
+        return [
+            f"{self.target}: nothing generated, the declaration was refused",
+            *(f"  {line}" for line in self.obstruction),
+            *([f"  declared in {self.declaration}"] if self.declaration else []),
+        ]
+
+
+def obstruction_at(target: str, refusal: Exception) -> DeclarationObstruction:
+    """Read whatever refused a compile into the facts a reader acts on.
+
+    Three shapes arrive here. A ``ValidationError`` already knows every field
+    it refused and which model refused them, and needs only to be asked. An
+    ``OSError`` knows a path and an errno and has no sentence at all. Anything
+    else has said what it means in its own message and names no declaration,
+    which is reported as naming none rather than as naming its own class.
+    """
+
+    def spelled(item: ErrorDetails) -> str:
+        """One refused field, its location in front of it where it has one."""
+        where = ".".join(str(part) for part in item["loc"])
+        return f"{where}: {item['msg']}" if where else item["msg"]
+
+    match refusal:
+        case ValidationError():
+            return DeclarationObstruction(
+                target=target,
+                obstruction=[spelled(item) for item in refusal.errors()],
+                declaration=refusal.title,
+            )
+        case OSError():
+            return DeclarationObstruction(
+                target=target,
+                obstruction=[refusal.strerror or str(refusal)],
+                declaration=str(refusal.filename or ""),
+            )
+        case _:
+            return DeclarationObstruction(target=target, obstruction=[str(refusal)])
 
 
 class GenerationReport(BaseModel, frozen=True):
