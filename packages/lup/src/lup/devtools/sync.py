@@ -818,8 +818,10 @@ def accessible_roots(
     tooling may read its commits; nothing about it says a session may open
     it, and the two live in the same file only because the file is where a
     project is named. Silence here is the answer for every registration that
-    does not carry the key, and for the lup entry the committed scaffold
-    ships to every adopter.
+    does not carry the key, and for every one this checkout does not owe a
+    repository -- see :func:`owed_here`. The scaffold's own lup entry is the
+    second kind: it is mounted read-write in the repositories that adopt it,
+    and in the repository that ships it the checkout it names is this one.
 
     Read from the registry rather than from `refs/`, and that difference is
     the whole of why this exists. `refs/` is a directory of symlinks built
@@ -853,7 +855,7 @@ def accessible_roots(
 
     def located(project: ProjectEntry) -> AccessibleRoot | None:
         """Where one registration is on disk, materializing it if it is not."""
-        if "mount" not in project:
+        if "mount" not in project or not owed_here(project):
             return None
         try:
             found = existing_upstream(project)

@@ -82,6 +82,28 @@ def test_a_mount_nobody_can_locate_is_reported_rather_than_raised(
     assert "gone" in "\n".join(said)
 
 
+def test_the_scaffolds_own_shipped_mount_is_not_owed_a_checkout_here(
+    registry_root: Path,
+) -> None:
+    """The entry an adopter mounts names, in the scaffold, this repository.
+
+    `sync.json` ships the lup registration required and mounted read-write,
+    so every repository built from the scaffold opens the checkout its
+    workflows read. The scaffold is the one repository that is it: a launch
+    here mounts nothing for it and says nothing about it, rather than
+    reporting the requirement with the command that would clone a copy of
+    the tree the session is already standing in.
+    """
+    (registry_root / "pyproject.toml").write_text(
+        "[tool.lup]\ntemplate = true\n", encoding="utf-8"
+    )
+    tracked(registry_root, {"name": "lup", "required": True, "mount": "rw"})
+    said: list[str] = []
+
+    assert sync.accessible_roots(said.append) == []
+    assert said == []
+
+
 def test_a_misspelled_mode_is_refused_by_the_registry_rather_than_ignored(
     registry_root: Path, tmp_path: Path
 ) -> None:
