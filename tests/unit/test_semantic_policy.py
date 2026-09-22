@@ -3283,6 +3283,32 @@ def test_declaring_a_suppression_still_asks() -> None:
     assert decision.reason.startswith("edit introduces an antipattern suppression")
 
 
+def test_a_backticked_directive_is_prose_about_one_and_declares_nothing() -> None:
+    """The sentence explaining the escape is not the escape.
+
+    Prose that documents the convention writes it in a code span — a
+    changelog entry saying a rule is silenced with a directive, a rule's own
+    message naming what it offers. Read off the raw line, that declared a
+    suppression of a rule literally named `<rule>` and put an approval in
+    front of the paragraph describing the mechanism.
+    """
+    policy = EditPolicy(protected=[])
+    documented = EditBatch(
+        changes=[
+            EditChange(
+                path=Path("CHANGELOG.md"),
+                before="Two rules read prose.",
+                after=(
+                    "Two rules read prose. Either is suppressed at the site\n"
+                    "with `# lup: ignore[<rule>]` and a standing reason.\n"
+                ),
+            )
+        ]
+    )
+
+    assert policy.decide(documented).effect == "allow"
+
+
 def test_a_suppression_that_silences_nothing_is_refused() -> None:
     """A marker that suppresses nothing is the cheap way past a gate.
 
