@@ -217,6 +217,27 @@ the autonomy implies, so neither can widen what the other narrowed.
 runtime, defaulting to the mounts that hold a session to the tree it was
 given.
 
+### The base an adoption is rooted at is measured
+
+`dev scaffold adopt --base` decides every merge after it and nothing checked
+it, so two wrong answers passed in silence. Rooting at the commit the library
+pin already resolves to leaves the merge base and the merge target one
+commit: the first `dev update` reports `0 fast-forwarded, 0 merged clean, 0
+conflicted` and every change nobody hand-ported stays untaken. Rooting at an
+initialization stamp a year back re-offers a year of already-applied changes
+in a layout the project has left.
+
+The compiled scaffold is a pure function of upstream and the checkout is
+right there, so the base is now *measured* rather than trusted: each
+candidate is compiled and its files compared byte for byte against the
+project's own, and a copy stamped from one commit reads highest at that
+commit. `dev scaffold fit` is that reading on its own — every commit that
+changed the copied half is in range, read at descending resolution, so
+sixteen hundred candidates answer in seventy-eight measurements. `adopt`
+refuses a base equal to the pin, and one a candidate reads a tenth of the
+copied half above; both refusals carry the reading, and restating it as
+`--accept-fit <identical>` is what roots the branch there anyway.
+
 ## 0.3.0 — 2026-09-19
 
 Breaking reorganisation of the library's top level. Thirty-four entries became

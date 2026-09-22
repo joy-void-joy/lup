@@ -33,6 +33,7 @@ import lup.devtools.dev.policy_explain as policy_explain
 import lup.devtools.dev.questions as questions_mod
 import lup.devtools.dev.reach as reach
 import lup.devtools.dev.scaffold as scaffold_mod
+import lup.devtools.dev.scaffold_fit as scaffold_fit
 import lup.devtools.dev.update as update_mod
 import lup.devtools.dev.migrations as migrations
 import lup.devtools.dev.preservation as preservation
@@ -1175,6 +1176,70 @@ def create_dev_app(
         )
         typer.echo(f"{out}: {len(built.files)} file(s) at {built.commit}")
 
+    @scaffold_app.command("fit")
+    def scaffold_fit_cmd(
+        base: Annotated[
+            str,
+            typer.Option(
+                "--base", help="Measure this one commit rather than searching"
+            ),
+        ] = "",
+        tip: Annotated[
+            str,
+            typer.Option(
+                "--tip", help="Search from this ref rather than from the library pin"
+            ),
+        ] = "",
+        depth: Annotated[
+            int,
+            typer.Option(
+                "--depth",
+                help="How many commits one round of the search measures",
+            ),
+        ] = scaffold_fit.CANDIDATE_DEPTH,
+    ) -> None:
+        """Measure which upstream commit this project's copied half corresponds to.
+
+        The question adoption turns on, answered by counting rather than by
+        remembering: the compiled scaffold is a pure function of upstream and
+        this checkout is right here, so each candidate is compiled and its
+        files compared byte for byte against the project's own. A copy
+        stamped from one commit and edited since reads highest at that commit
+        — which is the base `dev scaffold adopt` wants.
+
+        Every commit that changed the copied half is in range, read at
+        descending resolution: one round spreads `--depth` measurements over
+        the whole of it and the next takes the interval around the sample
+        that read highest, so a history of sixteen hundred commits answers in
+        seventy-odd compiles.
+        """
+        source = adopted_source()
+        package = declared().project.package
+        root = project_root()
+        repository = update_mod.upstream_checkout(source.project, typer.echo)
+        if base:
+            reading = scaffold_fit.measured(
+                root,
+                repository,
+                source,
+                package,
+                scaffold_fit.resolved(repository, base),
+            )
+            typer.echo(reading.reported())
+            return
+        survey = scaffold_fit.surveyed(
+            root,
+            repository,
+            source,
+            package,
+            scaffold_fit.resolved(repository, tip)
+            if tip
+            else scaffold_fit.searched_tip(root, repository),
+            depth,
+        )
+        for line in survey.lines():
+            typer.echo(line)
+
     @scaffold_app.command("adopt")
     def scaffold_adopt_cmd(
         base: Annotated[
@@ -1183,12 +1248,27 @@ def create_dev_app(
                 "--base", help="The upstream commit this project was stamped from"
             ),
         ],
+        accept_fit: Annotated[
+            int | None,
+            typer.Option(
+                "--accept-fit",
+                help="Root at a base the measurement argues against, restating "
+                "the identical-file count it read",
+            ),
+        ] = None,
     ) -> None:
         """Root the scaffold branch, once, at the commit this project came from.
 
         What gives git the ancestor it has been missing: after this, every
         update is a merge against the commit this project last took rather
         than against an unrelated history.
+
+        The base is measured against this checkout before anything is
+        written, because that one argument decides every later merge: rooting
+        at the commit the pin already resolves to leaves the first update
+        nothing to carry, and rooting behind the copy re-offers what somebody
+        already ported by hand. A refusal carries the reading, and restating
+        the reading is what overrules it.
         """
         update_mod.adopted(
             project_root(),
@@ -1196,6 +1276,7 @@ def create_dev_app(
             declared().project.package,
             base,
             typer.echo,
+            accept_fit,
         )
 
     @app.command("update")

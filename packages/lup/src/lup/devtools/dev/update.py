@@ -25,6 +25,7 @@ from pydantic import BaseModel
 import lup.devtools.dev.library as library
 import lup.devtools.dev.migrations as migrations
 import lup.devtools.dev.scaffold as scaffold
+import lup.devtools.dev.scaffold_fit as scaffold_fit
 from lup.devtools.sync import ensure_local, find_project
 from lup.devtools.utils import short_sha, uv
 
@@ -229,12 +230,15 @@ def adopted(
     package: str,
     base: str,
     report: Callable[[str], None],
+    accept_fit: int | None = None,
 ) -> str:
     """Root this project's scaffold branch, once, at the commit it was stamped from.
 
     Refused where the branch already stands, because rooting it twice is how a
     project ends up with two unrelated histories of the same tree and a merge
-    base older than either.
+    base older than either. Refused too where the checkout's own copy says
+    the base is wrong: the argument decides every later merge, and
+    :func:`scaffold_fit.checked_base` measures it rather than trusting it.
     """
     standing = scaffold.branch_head(root, source.branch)
     if standing:
@@ -244,9 +248,12 @@ def adopted(
             "happens once; `dev update` is every time after it."
         )
     repository = upstream_checkout(source.project, report)
-    rooted = scaffold.adopt(root, repository, source, package, base)
+    commit = scaffold_fit.checked_base(
+        root, repository, source, package, base, accept_fit, report
+    )
+    rooted = scaffold.adopt(root, repository, source, package, commit)
     report(
-        f"{source.branch} rooted at {short_sha(base)} ({short_sha(rooted)}), "
+        f"{source.branch} rooted at {short_sha(commit)} ({short_sha(rooted)}), "
         f"recorded as this project's merge base for every later update."
     )
     return rooted
