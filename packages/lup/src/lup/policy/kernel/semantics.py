@@ -4,8 +4,8 @@ One enum answering "how dangerous is this" collapses questions that have
 different answers and different answerers. A checkpoint does not consent to a
 release; an approval does not build a host channel; running inside the
 boundary does not discharge a code review; a familiar destination does not
-make a merge ordinary. So each fact is its own small vocabulary here, and
-:mod:`lup.policy.kernel.findings` composes them.
+make a merge ordinary. So each fact is its own small vocabulary here, and a
+verdict composes them.
 
 The provider-facing effect stays exactly four — allow, ask, deny, defer, in
 :mod:`lup.policy.kernel.decision` — because that is what a native runtime can
@@ -129,8 +129,7 @@ nothing and no boundary fact settling it. ``capability`` is the runtime
 unable to deliver a guarantee the operation requires.
 
 Only ``capability`` is unanswerable by anybody. The rest differ in whether
-*escalation* reaches them, which each rule states for itself through
-:attr:`~lup.policy.kernel.findings.KernelFinding.hard`.
+*escalation* reaches them, which each rule states for itself.
 """
 
 type Capability = Literal[

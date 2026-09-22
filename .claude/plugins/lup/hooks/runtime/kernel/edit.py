@@ -632,18 +632,43 @@ def python_code_lines(source: str) -> list[str]:
     return ["".join(line) for line in lines]
 
 
+def python_prose_lines(source: str) -> list[str]:
+    """Each line's sentences, with everything a reader does not read blanked.
+
+    A docstring stands whole and a comment stands from where it opens; code
+    goes, so an identifier or a colour literal never reads as something
+    somebody wrote in a sentence. Where the text does not tokenize every line
+    stands, which over-reports on a fragment rather than going quiet on it.
+    """
+    lines = source.splitlines()
+    columns = python_comment_columns(source)
+    if columns is None:
+        return lines
+    documented = docstring_lines(source)
+    kept: list[str] = []
+    for number, line in enumerate(lines, start=1):
+        if number in documented:
+            kept.append(line)
+            continue
+        opened = columns.get(number)
+        kept.append(" " * opened + line[opened:] if opened is not None else "")
+    return kept
+
+
 class MaskedSource(TypedDict):
     """One document's lines as each rule context reads them, and where comments open.
 
     ``commented`` blanks string text and keeps comments — the surface a
     "comment" rule scans; ``code`` blanks both — the surface a "code" rule
-    scans. ``comment_columns`` is where a real comment opens on each line,
-    and ``None`` where no grammar mapped the text, which is what puts every
-    rule back on the raw line.
+    scans; ``prose`` keeps what a person reads as a sentence, comment and
+    docstring alike, and blanks the rest. ``comment_columns`` is where a real
+    comment opens on each line, and ``None`` where no grammar mapped the
+    text, which is what puts every rule back on the raw line.
     """
 
     commented: list[str]
     code: list[str]
+    prose: list[str]
     comment_columns: dict[int, int] | None
 
 
@@ -662,16 +687,20 @@ def masked_source(
         return MaskedSource(
             commented=mask_python_string_literals(source),
             code=python_code_lines(source),
+            prose=python_prose_lines(source),
             comment_columns=python_comment_columns(source),
         )
     if typescript_source:
+        commented = masked_typescript_lines(source, comments=False)
         return MaskedSource(
-            commented=masked_typescript_lines(source, comments=False),
+            commented=commented,
             code=masked_typescript_lines(source, comments=True),
+            # The family has no docstring, so its prose is its comments.
+            prose=commented,
             comment_columns=typescript_comment_columns(source),
         )
     lines = source.splitlines()
-    return MaskedSource(commented=lines, code=lines, comment_columns=None)
+    return MaskedSource(commented=lines, code=lines, prose=lines, comment_columns=None)
 
 
 def quoted_example(line: str, position: int) -> bool:
@@ -1989,6 +2018,24 @@ TYPE_IGNORE_DIRECTIVE_RE = re.compile(r"#\s*type:\s*ignore\b")
 PYRIGHT_IGNORE_DIRECTIVE_RE = re.compile(r"#\s*pyright:\s*ignore\b")
 NOQA_DIRECTIVE_RE = re.compile(r"#\s*noqa\b")
 
+HISTORICAL_VOICE_RE = re.compile(
+    r"\bused to be\b|\bpreviously\b|\bformerly\b|\brenamed from\b"
+    r"|\bin the past\b|\bbefore this change\b|(?<!&)#\d{2,5}(?![0-9A-Fa-f;])",
+    re.IGNORECASE,
+)
+"""The spellings that record a change rather than state what is.
+
+Deliberately narrow, because a rule that cries wolf is read as noise and then
+as nothing. `used to` is not here and neither is `no longer`: both are
+overwhelmingly present tense in this tree — a key *used to select* a home, a
+record that *no longer grants* authority — so flagging them would bury the
+handful of real ones under readings that were never about history at all.
+What is left is unambiguous: a phrase that can only be about a prior state,
+and a bare issue number, which narrates the change that produced the code
+instead of the code. An entity (`&#124;`) and a colour (`#264F78`) are
+excluded by shape rather than by hoping they stay out of prose.
+"""
+
 
 def type_ignore_sites(source: str) -> list[MatchSite]:
     """Lines carrying a `# type: ignore` suppression.
@@ -2012,6 +2059,44 @@ def pyright_ignore_sites(source: str) -> list[MatchSite]:
 def noqa_sites(source: str) -> list[MatchSite]:
     """Lines carrying a `# noqa` suppression."""
     return sites_at(comment_directive_lines(source, NOQA_DIRECTIVE_RE))
+
+
+class ProseSpan(TypedDict):
+    """One line's prose: where it sits, and the text a reader reads."""
+
+    line: int
+    text: str
+
+
+def prose_spans(source: str) -> Iterator[ProseSpan]:
+    """Every span of this file a person reads as a sentence.
+
+    A docstring is prose whole; a comment is prose from where it opens, and
+    the code before it is not. Scanning the raw line instead reads an
+    identifier or a colour literal as though somebody had written it in a
+    sentence. Where the source does not tokenize the whole line is offered,
+    which over-reports rather than going quiet on the file being edited.
+    """
+    documented = docstring_lines(source)
+    columns = python_comment_columns(source)
+    for number, line in enumerate(source.splitlines(), start=1):
+        if number in documented or columns is None:
+            yield ProseSpan(line=number, text=line)
+            continue
+        opened = columns.get(number)
+        if opened is not None:
+            yield ProseSpan(line=number, text=line[opened:])
+
+
+def historical_voice_sites(source: str) -> list[MatchSite]:
+    """Prose recording how the code came to be rather than what it is."""
+    return sites_at(
+        {
+            span["line"]
+            for span in prose_spans(source)
+            if HISTORICAL_VOICE_RE.search(span["text"])
+        }
+    )
 
 
 # lup: ignore[library-default] — Python's own two spellings of a file rename; the kernel carries no config
@@ -2620,6 +2705,8 @@ def matcher_named(name: str) -> Callable[[str], list[MatchSite]] | None:
             return pyright_ignore_sites
         case "noqa_sites":
             return noqa_sites
+        case "historical_voice_sites":
+            return historical_voice_sites
     return None
 
 
@@ -2943,6 +3030,7 @@ def anti_pattern_hits(
     rows: list[AntiPatternRow],
     code_lines: list[str],
     scanned_lines: list[str],
+    prose_lines: list[str],
     exempt: dict[str, set[int]],
     tokenized: bool,
     matched: dict[str, set[int]] | None = None,
@@ -2972,7 +3060,13 @@ def anti_pattern_hits(
                 if number in selected[row["id"]]:
                     yield AntiPatternHit(line=number, row=row)
                 continue
-            stripped = code if tokenized and row["context"] == "code" else masked
+            stripped = masked
+            if tokenized:
+                match row["context"]:
+                    case "code":
+                        stripped = code
+                    case "prose":
+                        stripped = prose_lines[number - 1].strip()
             if not stripped:
                 continue
             if re.search(row["pattern"], stripped) is not None:
@@ -3038,6 +3132,7 @@ def awaits_resolution(
             rows,
             python_code_lines(after),
             mask_python_string_literals(after),
+            python_prose_lines(after),
             {},
             python_comment_columns(after) is not None,
             matched_lines(after, rows),
@@ -3155,6 +3250,7 @@ def antipattern_decision(
     original_lines = after.splitlines()
     masked = masked_source(after, python_source, typescript_source)
     scanned_lines = masked["commented"]
+    prose_lines = masked["prose"]
     code_lines = masked["code"]
     exempt: dict[str, set[int]] = {}
     matched = matched_lines(after, rows) if python_source else {}
@@ -3229,7 +3325,14 @@ def antipattern_decision(
     tokenized = comment_columns is not None
     hits = list(
         anti_pattern_hits(
-            added, rows, code_lines, scanned_lines, exempt, tokenized, matched
+            added,
+            rows,
+            code_lines,
+            scanned_lines,
+            prose_lines,
+            exempt,
+            tokenized,
+            matched,
         )
     )
 
@@ -3254,7 +3357,14 @@ def antipattern_decision(
         }
         return list(
             anti_pattern_hits(
-                guarded, rows, code_lines, scanned_lines, exempt, tokenized, matched
+                guarded,
+                rows,
+                code_lines,
+                scanned_lines,
+                prose_lines,
+                exempt,
+                tokenized,
+                matched,
             )
         )
 
@@ -3343,7 +3453,14 @@ def antipattern_decision(
     if withdrawn:
         everywhere = {number: True for number in range(1, len(original_lines) + 1)}
         for hit in anti_pattern_hits(
-            everywhere, rows, code_lines, scanned_lines, exempt, tokenized, matched
+            everywhere,
+            rows,
+            code_lines,
+            scanned_lines,
+            prose_lines,
+            exempt,
+            tokenized,
+            matched,
         ):
             number = hit["line"]
             rule_id = hit["row"]["id"]

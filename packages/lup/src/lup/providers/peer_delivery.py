@@ -15,8 +15,10 @@ name.
 Two artifacts answer that. A shell guard looks for a file in this member's
 inbox and exits without starting an interpreter where there is none, which is
 almost always. Only where something is waiting does it hand over to
-:mod:`lup.providers.assets.peer_delivery_runtime`, shipped verbatim
-beside the coordination package it reads the inbox through.
+``providers/assets/peer_delivery_runtime.py``, shipped verbatim beside the
+coordination package it reads the inbox through. Named as a path rather than
+a module because an asset is carried to its destination rather than imported
+from here, and `assets` is deliberately not a package.
 
 Every name the guard needs is interpolated from the definition that owns it
 rather than written twice: a store directory renamed in one place moves the

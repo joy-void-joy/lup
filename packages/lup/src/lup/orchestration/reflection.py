@@ -61,7 +61,7 @@ from lup.policy.hooks import LupHooksConfig, create_tool_gate
 class ReflectionGate:
     """Tracks whether the agent has reflected in the current cycle.
 
-    Used by :func:`~lup.policy.hooks.create_reflection_gate` to enforce
+    Used by :func:`~lup.orchestration.reflection.create_reflection_gate` to enforce
     "reflect before X" patterns. The reflection tool handler calls :meth:`mark_reflected`
     after saving reflection data. The orchestration layer calls
     :meth:`reset` when a new cycle begins (e.g., after each agent action
