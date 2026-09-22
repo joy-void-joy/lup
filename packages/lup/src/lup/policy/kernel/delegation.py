@@ -30,7 +30,7 @@ VERIFICATION_GATE = "`uv run lup-devtools dev check`"
 VERIFICATION_SCOPED = "`uv run lup-devtools dev check --changed`"
 VERIFICATION_RECORD = "your report"
 
-# lup: solved: an adopter that renames its devtools CLI gets lup's spellings
+# lup: an adopter that renames its devtools CLI gets lup's spellings
 # here, because the host half this notice is joined in ships verbatim and
 # carries no injected project values. Wiring it would mean compiling the
 # subagent asset the way the policy dispatcher is compiled, which is a change

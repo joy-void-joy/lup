@@ -2897,6 +2897,32 @@ def test_uv_source_options_cannot_soften_operator_only_commands(
         assert "a requesting agent cannot" in decision.reason
 
 
+@pytest.mark.parametrize(
+    ("arguments", "effect"),
+    [
+        ("dev comments --retire a.py:1", "ask"),
+        ("dev comments --restore a.py:1", "allow"),
+        ("dev comments --restore a.py:1 --narrow 'the half still open'", "allow"),
+        ("dev comments", "allow"),
+    ],
+)
+def test_retiring_a_claim_asks_and_reopening_one_does_not(
+    arguments: str, effect: str
+) -> None:
+    """The one step of the verify-solved pass that nothing can undo.
+
+    Retiring deletes the note and the words it was written in, so a claim
+    wrongly retired takes its concern with it while a claim wrongly restored
+    costs one more pass. Reading the list and reopening a claim keep the
+    words either way, so neither is worth a question.
+    """
+    policy = semantic_policy_for(declared_hook_set())
+
+    decision = policy.decide(ShellCommand(command=f"uv run lup-devtools {arguments}"))
+
+    assert decision.effect == effect
+
+
 def test_shell_policy_checks_every_segment_and_deny_wins() -> None:
     policy = ShellPolicy(SHELL_RULES, runner_targets=FIXTURE_RUNNER_TARGETS)
 

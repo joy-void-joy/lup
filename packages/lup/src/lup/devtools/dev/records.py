@@ -215,11 +215,6 @@ def record_landing(branch: str, integration: str, cwd: Path | None = None) -> No
     publish_atomic(record_path(branch, cwd), landing)
 
 
-# lup: solved: run `uv run lup-devtools git
-# worktree adopt-records` on the host, once for this clone, so this fallback
-# stops being what a branch's base is read through. Not before that branch
-# lands: a worktree still on older code reads the shared config alone, and
-# emptying it takes that worktree's base away with nothing underneath it.
 def legacy_value(branch: str, fact: LegacyFact, cwd: Path | None = None) -> str:
     """What ``config`` still holds for one fact, empty where it holds nothing.
 

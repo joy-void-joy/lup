@@ -225,7 +225,7 @@ def queued(
             error_type="UnboundNativeRoute",
         )
     if path.scope != execution_scope():
-        # lup: solved: Add an owned execution bridge before supporting Codex wake across container boundaries.
+        # lup: Add an owned execution bridge before supporting Codex wake across container boundaries.
         return Woken(
             reached=False,
             reason="Direct Codex wake cannot cross this execution boundary; durable mail remains pending for the peer's owned inbox relay or its next activity.",

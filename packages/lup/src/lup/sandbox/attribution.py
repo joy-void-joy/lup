@@ -165,10 +165,7 @@ def candidate_paths(failure: str, directory: str = "") -> list[str]:
     bare word, which under a read-only checkout would make every noun in the
     sentence a claim about the mount.
     """
-    # lup: solved: git names a path relative to the checkout -- "unable to
-    # unlink old 'README.md': Device or resource busy" -- which this filter
-    # never reaches; anchoring it needs the session's directory here and in the
-    # compiled twin in lup.policy.assets.host
+    # lup: the compiled twin in lup.policy.assets.host still takes only absolute candidates, so a git diagnostic naming a path relative to the checkout -- "unable to unlink old 'README.md': Device or resource busy" -- reaches nothing inside the dispatcher, which is where the refusal is met
     quoted = [
         stripped
         for word in failure.split()

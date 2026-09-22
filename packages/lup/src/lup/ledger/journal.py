@@ -291,9 +291,6 @@ class LedgerStore:
         which the platform does not interleave below the pipe buffer, so a
         concurrent writer produces a longer file rather than a torn line.
         """
-        # lup: solved: moving a kind between placements after records exist
-        # wants a `ledger migrate` command copying its lines and blobs across;
-        # the fold reads a record wherever it sits, so nothing here does it
         placement = self.layout.placement_of(record.deciding_kinds(self.kind_at))
         with self.journal(placement).open("a", encoding="utf-8") as log:
             log.write(record.model_dump_json() + "\n")
