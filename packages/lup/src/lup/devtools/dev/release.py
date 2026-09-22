@@ -82,6 +82,27 @@ class ReleaseSpec(BaseModel, frozen=True):
     """
 
 
+# lup: ignore[constant-declaration] — `release` is this repository's own commit
+# type, one row of the table `docs/contributing.md` publishes, and `dev release`
+# writes it. A project choosing another subject would be choosing a type that
+# table does not have.
+RELEASE_SUBJECT_PREFIX = "release: "
+"""How a release commit names itself, written once and read by two.
+
+`dev release` writes the subject and the migrations gate finds it, which is
+one fact with two readers rather than two literals that agree until somebody
+edits one. The gate looks for the commit rather than the tag because the two
+travel differently: a tag is pushed last, deliberately, so the branch reaches
+a reviewer carrying the release and not yet its tag — and a gate reading the
+tag calls every break that release shipped undeclared for exactly that long.
+"""
+
+
+def release_subject(previous: str, version: str) -> str:
+    """The subject line a release commit carries."""
+    return f"{RELEASE_SUBJECT_PREFIX}{previous} → {version}"
+
+
 class ReleasePlan(BaseModel, frozen=True):
     """What a release would do, as the facts a reader checks before it runs."""
 

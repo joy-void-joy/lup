@@ -7,6 +7,7 @@ import sh
 from pydantic import BaseModel
 
 from lup.devtools.dev.worktree import OWNERSHIP_MERGE_DRIVER
+from lup.devtools.utils import decode_stderr
 from lup.execution.shell import git
 
 
@@ -46,10 +47,18 @@ def prepare(base: str, root: Path, regenerate: Callable[[], None]) -> PreparedBr
             base_commit,
         )
     except sh.ErrorReturnCode as error:
+        # Git's own words, not only ours. A conflict and a merge that never
+        # started both arrive here, and they take opposite next moves —
+        # resolve the files, or fix why git refused — so a refusal saying only
+        # "needs repair" sends a reader to look for conflicts that a failed
+        # merge did not leave. What git printed is the half that tells them
+        # apart, and it read as an empty working tree until it was relayed.
+        spoken = decode_stderr(error).strip()
         raise RuntimeError(
             "Base merge needs repair. Run `git conflict status --json` through "
             "the installed lup-devtools launcher, resolve sources, regenerate "
             "all harnesses, and complete the merge. No branch was pushed."
+            + (f"\ngit said: {spoken}" if spoken else "")
         ) from error
     regenerate()
     merging = (

@@ -453,7 +453,6 @@ def create_dev_app(
             scaffold_source=declarations.scaffold,
             spread=declarations.spread,
             migration_base=check.named_gate_base(base) if base is not None else None,
-            release_tag_prefix=declarations.release.tag_prefix,
         )
 
     # -- test command --
@@ -1448,6 +1447,7 @@ def create_dev_app(
             is_level,
             next_version,
             published_version,
+            release_subject,
             released,
             with_version,
         )
@@ -1469,9 +1469,7 @@ def create_dev_app(
         declarations = declared()
         spec = declarations.release
         root = project_root()
-        base = migrations.gate_base(
-            get_integration_branch(), tag_prefix=spec.tag_prefix
-        )
+        base = migrations.gate_base(get_integration_branch())
         undeclared = (
             migrations.undeclared_breaks(declarations.project, base) if base else []
         )
@@ -1523,7 +1521,7 @@ def create_dev_app(
         # the same commit as the bump that caused it.
         update_mod.regenerated(root, lambda line: typer.echo(line, err=True))
         git.add("-A")
-        git.commit("-m", f"release: {previous} → {version}")
+        git.commit("-m", release_subject(previous, version))
         git.tag("-a", plan.tag, "-m", f"{spec.version_file} {version}")
 
         if as_json:
