@@ -111,9 +111,15 @@ def test_source_conflicts_remain_repairable_and_do_not_generate(
     def must_not_generate() -> None:
         pytest.fail("Unresolved source must not reach generation")
 
-    with pytest.raises(RuntimeError, match="Base merge needs repair"):
+    with pytest.raises(RuntimeError, match="Base merge needs repair") as refusal:
         prepare("main", divergent, must_not_generate)
-    assert str(git("diff", "--name-only", "--diff-filter=U")).strip() == "feature.txt"
+    # The refusal carries what git said, and this is where a reader needs it:
+    # a merge that conflicted and a merge that never started both reach the
+    # same exception, and only one of them leaves a file to repair. Asserting
+    # the empty list alone reported `assert '' == 'feature.txt'` and left
+    # nothing to act on.
+    unmerged = str(git("diff", "--name-only", "--diff-filter=U")).strip()
+    assert unmerged == "feature.txt", str(refusal.value)
     assert "<<<<<<<" in (divergent / "feature.txt").read_text()
     for runtime in (".claude", ".codex"):
         compile((divergent / runtime / "policy.py").read_text(), "policy.py", "exec")
