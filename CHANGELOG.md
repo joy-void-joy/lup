@@ -419,6 +419,11 @@ suppressed at the site with `# lup: ignore[<rule>]` and a standing reason.
   changelog and version already written — a failure that could only arrive one
   release late. The round trip is pinned now, since a release's own output is
   the next release's input.
+- `dev release` regenerates before it commits. The version is a source a
+  generated artifact compiles from, so bumping it leaves those trees behind
+  and the commit guard refuses — which made the release the one commit this
+  repository could not make. What the bump regenerates lands in the same
+  commit as the bump.
 - `dev comments --retire` asks before deleting a claimed-resolved note. It is
   the one step of the verify-solved pass nothing undoes, and `/lup:release`
   runs that pass before cutting, so no claim reaches a version unverified.
