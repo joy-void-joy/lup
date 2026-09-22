@@ -94,6 +94,7 @@ agent reading that debugs the filesystem instead of learning it holds a lease.
 A rail without attribution is worse than no rail.
 """
 
+import posixpath
 from pathlib import Path
 
 import sh
@@ -119,12 +120,31 @@ class Lease(BaseModel, frozen=True):
         description="Host paths this worker may read and must not write",
     )
 
+    def answers_from(self, path: Path) -> Path | None:
+        """The mount whose mode this path takes, or ``None`` where none does.
+
+        The deepest one containing it, which is how the boundary itself reads
+        the same table: ``execution_write_refusal`` in
+        :mod:`lup.policy.assets.host` collects every declared scope the path
+        sits under and takes the mode of the longest. A read-only hole inside
+        a writable share is exactly that reading, so asking it here rather
+        than testing membership means a mount left out for being redundant
+        answers the same as one spelled out.
+        """
+        enclosing = [
+            root
+            for root in [*self.writable, *self.read_only]
+            if path == root or root in path.parents
+        ]
+        return max(enclosing, key=lambda root: len(root.parts), default=None)
+
     def covers(self, path: Path) -> bool:
         """Whether this lease says anything at all about a path."""
-        return any(
-            path == root or root in path.parents
-            for root in [*self.writable, *self.read_only]
-        )
+        return self.answers_from(path) is not None
+
+    def writable_at(self, path: Path) -> bool:
+        """Whether this lease lets a path be written."""
+        return self.answers_from(path) in self.writable
 
 
 class AccessibleRoot(BaseModel, frozen=True):
@@ -145,8 +165,31 @@ class AccessibleRoot(BaseModel, frozen=True):
     )
 
 
+def reached_through(path: Path, inside: str, mounts: dict[Path, str]) -> Path | None:
+    """The deepest other mount that already lands this path where this one would.
+
+    A mount reaches a path when it encloses it on the host *and* carries it to
+    the same place inside, so the offset from root to path is equal on both
+    sides. Anything else is a different directory at a similar spelling, and
+    reading it as a substitute would move where the path resolves.
+
+    The deepest, because that is the one the boundary answers from:
+    ``execution_write_refusal`` in :mod:`lup.policy.assets.host` matches a
+    write against every declared scope containing it and takes the mode of
+    the longest. A reading that consulted any other enclosing mount would be
+    answering a question the boundary never asks.
+    """
+    reaching = [
+        root
+        for root, target in mounts.items()
+        if root in path.parents
+        and posixpath.join(target, path.relative_to(root).as_posix()) == inside
+    ]
+    return max(reaching, key=lambda root: len(root.parts), default=None)
+
+
 def resolved(writable: dict[Path, str], read_only: dict[Path, str]) -> Lease:
-    """One path, one mode, settled toward writable.
+    """One path, one mode, settled toward writable, and stated once.
 
     Two ways to arrive at the same collision, and neither is hypothetical.
     `git worktree list` reports the main worktree, and in a bare layout that
@@ -159,15 +202,36 @@ def resolved(writable: dict[Path, str], read_only: dict[Path, str]) -> Lease:
     Settled toward writable because the paths that reach here writable are
     the ones somebody named, and settled here rather than in the engine,
     where two mounts at one target resolve by whichever order they happen to
-    be applied in. Exact paths only: a read-only entry *inside* a writable
-    one is the nesting this whole arrangement rests on, and survives.
+    be applied in.
+
+    Then the same collision one directory further out. A mount whose deepest
+    enclosing mount already carries it in the same mode changes nothing about
+    what may be read or written, and costs something a lease cannot pay back:
+    a mount point cannot be removed from inside its own namespace, so a
+    checkout bound individually under a shared directory that is itself bound
+    outlives `git worktree remove` as an empty directory no session can
+    clear. One accumulated per landed branch.
+
+    Same mode is the whole of the relaxation, and it is the *deepest*
+    enclosing mount's mode that decides. A read-only entry inside a writable
+    share keeps its own mount, which is the nesting this whole arrangement
+    rests on; so does a writable checkout inside a read-only directory inside
+    a writable share, which stays writable because the mount between them is
+    the one that would otherwise answer for it.
     """
-    return Lease(
-        writable=writable,
-        read_only={
-            path: inside for path, inside in read_only.items() if path not in writable
-        },
-    )
+    settled = {
+        path: inside for path, inside in read_only.items() if path not in writable
+    }
+
+    def stated_once(mode: dict[Path, str]) -> dict[Path, str]:
+        """This mode's mounts, less the ones an enclosing mount already makes."""
+        return {
+            path: inside
+            for path, inside in mode.items()
+            if reached_through(path, inside, {**writable, **settled}) not in mode
+        }
+
+    return Lease(writable=stated_once(writable), read_only=stated_once(settled))
 
 
 def merged(leases: list[Lease]) -> Lease:
