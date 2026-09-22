@@ -35,6 +35,41 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def test_the_integration_branch_is_judged_from_the_release_branch(repo: Path) -> None:
+    """With no tag to read, the branch is where the last release got to."""
+    assert gate_base("dev") == out(repo, "rev-parse", "main")
+
+
+def test_a_release_cut_and_not_yet_landed_is_judged_from_its_tag(repo: Path) -> None:
+    """The window the release itself opens, between the tag and the branch.
+
+    Cutting a release tags the integration branch and empties the declared
+    breaks into the changelog; the release branch only moves once that lands.
+    Read from the branch in between, every break the release had just shipped
+    came back undeclared — against a list that is empty exactly then, by
+    design. The tag is the release, so the tag is what the window is measured
+    from.
+    """
+    sh.Command("git")(
+        "-C", str(repo), "tag", "-a", "v0.4.0", "-m", "0.4.0", _tty_out=False
+    )
+    commit_file(
+        initialized_repo(repo, repo.parent / "no-hooks"),
+        repo,
+        "after.txt",
+        "after\n",
+        "feat: after the release",
+    )
+
+    assert gate_base("dev") == out(repo, "rev-parse", "v0.4.0^{commit}")
+    assert gate_base("dev") != out(repo, "rev-parse", "main")
+
+
+def test_a_tag_that_is_not_a_release_is_not_read_as_one(repo: Path) -> None:
+    """The prefix is the project's, so another tagging convention is left alone."""
+    sh.Command("git")(
+        "-C", str(repo), "tag", "-a", "nightly-7", "-m", "nightly", _tty_out=False
+    )
+
     assert gate_base("dev") == out(repo, "rev-parse", "main")
 
 
