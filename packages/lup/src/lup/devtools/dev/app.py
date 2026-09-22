@@ -453,6 +453,7 @@ def create_dev_app(
             scaffold_source=declarations.scaffold,
             spread=declarations.spread,
             migration_base=check.named_gate_base(base) if base is not None else None,
+            release_tag_prefix=declarations.release.tag_prefix,
         )
 
     # -- test command --
@@ -1468,7 +1469,9 @@ def create_dev_app(
         declarations = declared()
         spec = declarations.release
         root = project_root()
-        base = migrations.gate_base(get_integration_branch())
+        base = migrations.gate_base(
+            get_integration_branch(), tag_prefix=spec.tag_prefix
+        )
         undeclared = (
             migrations.undeclared_breaks(declarations.project, base) if base else []
         )

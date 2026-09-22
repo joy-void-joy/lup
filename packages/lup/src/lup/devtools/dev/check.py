@@ -956,11 +956,16 @@ def scan_reports(
     scaffold_source: ScaffoldSource | None = None,
     spread: Spread | None = None,
     migration_base: str | None = None,
+    release_tag_prefix: str = "v",
 ) -> list[CheckReport]:
     """Every check the gate answers itself, in the order it reports them.
 
     ``migration_base`` is the commit a caller named to judge removed
     capabilities from, in place of the one detection reaches on its own.
+
+    ``release_tag_prefix`` is the project's own, so this gate and `dev
+    release` read one spelling of what a release tag looks like rather than
+    each defaulting to the same letter separately.
     """
 
     def reported() -> Iterator[CheckReport]:
@@ -1237,7 +1242,10 @@ def scan_reports(
         # override that reached further would be claiming to scope checks it
         # has nothing to do with.
         base = (
-            (migration_base or gate_base(get_integration_branch()))
+            (
+                migration_base
+                or gate_base(get_integration_branch(), tag_prefix=release_tag_prefix)
+            )
             if spread is not None
             else None
         )
@@ -1372,6 +1380,7 @@ def run_checks(
     scaffold_source: ScaffoldSource | None = None,
     spread: Spread | None = None,
     migration_base: str | None = None,
+    release_tag_prefix: str = "v",
 ) -> None:
     """Run ruff format, ruff check, pyright, pytest, and this gate's own sweeps.
 
@@ -1413,6 +1422,7 @@ def run_checks(
             scaffold_source=scaffold_source,
             spread=spread,
             migration_base=migration_base,
+            release_tag_prefix=release_tag_prefix,
         )
 
         if fix:

@@ -170,17 +170,48 @@ def unnamed(
     ]
 
 
-def gate_base(integration: str, release: str = "main") -> str | None:
+def last_release_tag(prefix: str = "v") -> str:
+    """The newest release tag this checkout can reach, or empty where none can.
+
+    A release is a tag, and the branch carrying it is where that tag has got
+    to. The two part for as long as it takes a release to land — the commit
+    exists, the tag is on it, and the release branch has not moved — so
+    reading the branch during that window says an adopter has not met breaks
+    that the release folded into its changelog minutes ago.
+
+    Reachability rather than recency across the repository, because a tag on
+    some other line of development is not this checkout's last release.
+    """
+    return git.out(
+        "describe",
+        "--tags",
+        "--abbrev=0",
+        f"--match={prefix}*",
+        "HEAD",
+        _ok_code=[0, 1, 128],
+    ).strip()
+
+
+def gate_base(
+    integration: str, release: str = "main", tag_prefix: str = "v"
+) -> str | None:
     """The commit this checkout's breaks are judged from, or ``None`` with none to read.
 
     A feature branch is judged from where it started, which creation recorded
-    and topology can otherwise guess among the local branches. The
-    integration branch is judged from the release branch: what it has taken
-    since the last release is what an adopter meets on their next update.
-    Where no local branch stands beside the current one -- a CI clone holds
-    the branch it checks out and nothing else, and a pull request's checkout
-    stands on no branch at all -- the remote's copy of the base is read
-    instead, which a full fetch carries.
+    and topology can otherwise guess among the local branches.
+
+    The integration branch is judged from its last release: what it has taken
+    since then is what an adopter meets on their next update. The *tag* is
+    that release, and the release branch is only where the tag has reached —
+    so a release that has been cut and not yet landed reported every break it
+    had just shipped as undeclared, which is the one moment the list it was
+    read against is empty by design.
+
+    The branch answers where no tag does: a repository before its first
+    release, or one whose tags a shallow clone did not fetch. Where no local
+    branch stands beside the current one either -- a CI clone holds the branch
+    it checks out and nothing else, and a pull request's checkout stands on no
+    branch at all -- the remote's copy is read, which a full fetch carries.
 
     No base at all is a reading, not a refusal. The base detector exits the
     process where it finds no other local branch, and for every push after
@@ -195,6 +226,8 @@ def gate_base(integration: str, release: str = "main") -> str | None:
     ]
     if current and current != integration and siblings:
         return detect_base_branch(current).merge_base
+    if current == integration and (tag := last_release_tag(tag_prefix)):
+        return git.out("rev-parse", f"{tag}^{{commit}}").strip()
     named = release if current == integration else integration
     for ref in (named, f"origin/{named}"):
         found = git.out("merge-base", ref, "HEAD", _ok_code=[0, 1, 128]).strip()
