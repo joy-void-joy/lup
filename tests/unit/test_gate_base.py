@@ -15,6 +15,7 @@ import pytest
 import sh
 
 from lup.devtools.dev.migrations import gate_base
+from lup.devtools.dev.release import release_subject
 from tests.unit.repos import commit_file, initialized_repo
 
 
@@ -35,39 +36,41 @@ def repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def test_the_integration_branch_is_judged_from_the_release_branch(repo: Path) -> None:
-    """With no tag to read, the branch is where the last release got to."""
+    """Before a first release there is no cut to read, so the branch answers."""
     assert gate_base("dev") == out(repo, "rev-parse", "main")
 
 
-def test_a_release_cut_and_not_yet_landed_is_judged_from_its_tag(repo: Path) -> None:
-    """The window the release itself opens, between the tag and the branch.
+def test_a_release_cut_and_not_yet_landed_is_judged_from_its_commit(
+    repo: Path,
+) -> None:
+    """The window a release opens between cutting it and landing it.
 
-    Cutting a release tags the integration branch and empties the declared
-    breaks into the changelog; the release branch only moves once that lands.
-    Read from the branch in between, every break the release had just shipped
-    came back undeclared — against a list that is empty exactly then, by
-    design. The tag is the release, so the tag is what the window is measured
-    from.
+    Cutting empties the declared breaks into the changelog; the release branch
+    only moves once the cut lands. Read from the branch in between, every
+    break the release had just shipped came back undeclared — against a list
+    that is empty exactly then, by design.
+
+    The commit rather than the tag, because the tag is pushed last on purpose:
+    the branch reaches CI and a reviewer carrying the cut and no tag, which is
+    the whole of the window.
     """
-    sh.Command("git")(
-        "-C", str(repo), "tag", "-a", "v0.4.0", "-m", "0.4.0", _tty_out=False
-    )
-    commit_file(
-        initialized_repo(repo, repo.parent / "no-hooks"),
-        repo,
-        "after.txt",
-        "after\n",
-        "feat: after the release",
-    )
+    git = initialized_repo(repo, repo.parent / "no-hooks")
+    commit_file(git, repo, "released.txt", "cut\n", release_subject("0.3.0", "0.4.0"))
+    cut = out(repo, "rev-parse", "HEAD")
+    commit_file(git, repo, "after.txt", "after\n", "feat: after the release")
 
-    assert gate_base("dev") == out(repo, "rev-parse", "v0.4.0^{commit}")
+    assert gate_base("dev") == cut
     assert gate_base("dev") != out(repo, "rev-parse", "main")
 
 
-def test_a_tag_that_is_not_a_release_is_not_read_as_one(repo: Path) -> None:
-    """The prefix is the project's, so another tagging convention is left alone."""
-    sh.Command("git")(
-        "-C", str(repo), "tag", "-a", "nightly-7", "-m", "nightly", _tty_out=False
+def test_a_commit_that_is_not_a_release_is_not_read_as_one(repo: Path) -> None:
+    """The subject is the mark, so an ordinary commit mentioning one is not it."""
+    commit_file(
+        initialized_repo(repo, repo.parent / "no-hooks"),
+        repo,
+        "notes.txt",
+        "notes\n",
+        "docs(changelog): what the release: 0.3.0 line means",
     )
 
     assert gate_base("dev") == out(repo, "rev-parse", "main")

@@ -30,6 +30,7 @@ import sh
 from pydantic import BaseModel
 
 from lup.devtools.dev.branches import detect_base_branch
+from lup.devtools.dev.release import RELEASE_SUBJECT_PREFIX
 from lup.devtools.dev.preservation import (
     Capability,
     compare,
@@ -135,7 +136,26 @@ class RenderedMigrations(BaseModel, frozen=True):
     lines: list[str]
 
 
-DECLARED: list[Migration] = []
+DECLARED: list[Migration] = [
+    Migration(
+        subjects=["last_release_tag"],
+        reason=(
+            "the migrations gate measures from the release commit rather than "
+            "the release tag, because a tag is pushed last on purpose and the "
+            "gate was blind for exactly the window a release is under review"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Call last_release_commit() from lup.devtools.dev.migrations, "
+                    "which answers with the commit `dev release` wrote rather than "
+                    "the tag it then created. A caller that wanted the tag itself "
+                    "reads it with `git describe --tags --abbrev=0`."
+                )
+            ),
+        ],
+    ),
+]
 """Every break this library has taken since its last release, and what to do.
 
 Empty is the state to keep it in: an entry is added by the commit that breaks
@@ -170,48 +190,52 @@ def unnamed(
     ]
 
 
-def last_release_tag(prefix: str = "v") -> str:
-    """The newest release tag this checkout can reach, or empty where none can.
+def last_release_commit() -> str:
+    """The newest release commit this checkout can reach, or empty where none can.
 
-    A release is a tag, and the branch carrying it is where that tag has got
-    to. The two part for as long as it takes a release to land — the commit
-    exists, the tag is on it, and the release branch has not moved — so
-    reading the branch during that window says an adopter has not met breaks
-    that the release folded into its changelog minutes ago.
+    A release moves the declared breaks out of ``DECLARED`` and into the
+    changelog, so what is owed afterwards is what the checkout has taken
+    *since that commit*. Read from the release branch instead, the answer
+    includes everything the release just shipped — against a list the release
+    emptied — and every break comes back undeclared.
 
-    Reachability rather than recency across the repository, because a tag on
-    some other line of development is not this checkout's last release.
+    The commit rather than the tag, though the tag is the more canonical mark
+    of a release: the tag is pushed last on purpose, so a branch reaches CI
+    and a reviewer carrying the release commit and no tag at all, and a gate
+    reading the tag is blind for exactly the window a release is under review.
+    The subject is :data:`RELEASE_SUBJECT_PREFIX`, which `dev release` writes
+    and this reads.
     """
     return git.out(
-        "describe",
-        "--tags",
-        "--abbrev=0",
-        f"--match={prefix}*",
+        "log",
+        f"--grep=^{RELEASE_SUBJECT_PREFIX}",
+        "--extended-regexp",
+        "--format=%H",
+        "--max-count=1",
         "HEAD",
         _ok_code=[0, 1, 128],
     ).strip()
 
 
-def gate_base(
-    integration: str, release: str = "main", tag_prefix: str = "v"
-) -> str | None:
+def gate_base(integration: str, release: str = "main") -> str | None:
     """The commit this checkout's breaks are judged from, or ``None`` with none to read.
 
     A feature branch is judged from where it started, which creation recorded
     and topology can otherwise guess among the local branches.
 
-    The integration branch is judged from its last release: what it has taken
-    since then is what an adopter meets on their next update. The *tag* is
-    that release, and the release branch is only where the tag has reached —
-    so a release that has been cut and not yet landed reported every break it
-    had just shipped as undeclared, which is the one moment the list it was
-    read against is empty by design.
+    The integration branch is judged from its last release commit: a release
+    moves the declared breaks out of ``DECLARED`` and into the changelog, so
+    what is owed afterwards is what the checkout has taken since then. Read
+    from the release branch instead, the answer covers everything the release
+    just shipped, against a list that release emptied — every break undeclared,
+    for as long as the release takes to land.
 
-    The branch answers where no tag does: a repository before its first
-    release, or one whose tags a shallow clone did not fetch. Where no local
-    branch stands beside the current one either -- a CI clone holds the branch
-    it checks out and nothing else, and a pull request's checkout stands on no
-    branch at all -- the remote's copy is read, which a full fetch carries.
+    The branch answers where no release commit does: a repository before its
+    first release, or one whose history a shallow clone truncated. Where no
+    local branch stands beside the current one either -- a CI clone holds the
+    branch it checks out and nothing else, and a pull request's checkout stands
+    on no branch at all -- the remote's copy is read, which a full fetch
+    carries.
 
     No base at all is a reading, not a refusal. The base detector exits the
     process where it finds no other local branch, and for every push after
@@ -226,8 +250,8 @@ def gate_base(
     ]
     if current and current != integration and siblings:
         return detect_base_branch(current).merge_base
-    if current == integration and (tag := last_release_tag(tag_prefix)):
-        return git.out("rev-parse", f"{tag}^{{commit}}").strip()
+    if current == integration and (cut := last_release_commit()):
+        return cut
     named = release if current == integration else integration
     for ref in (named, f"origin/{named}"):
         found = git.out("merge-base", ref, "HEAD", _ok_code=[0, 1, 128]).strip()
