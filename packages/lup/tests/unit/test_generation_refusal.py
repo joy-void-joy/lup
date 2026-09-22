@@ -2,9 +2,9 @@
 
 Generation is reached from two places whose entire user-facing output is what
 the command printed: the commit guard, and the regeneration `dev update` ends
-in. A declaration refused there used to arrive as whatever its reader happened
+in. A declaration refused there must not arrive as whatever its reader happens
 to raise — a missing passage file as a `FileNotFoundError` traceback, an
-invocation naming no skill as a hundred-line pydantic repr — and both are
+invocation naming no skill as a hundred-line pydantic repr — because both are
 declaration errors with a fix in the declaration. What is under test is that
 each comes back as the two facts that fix takes.
 """

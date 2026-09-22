@@ -145,10 +145,10 @@ def test_the_postures_that_really_do_fail_keep_the_colour() -> None:
     failed` in the middle of a commit whose key never crossed the boundary.
 
     A session with no credential at all belongs in this half rather than the
-    other one. It used to sit among the healthy postures on the reasoning
-    that plenty of work never touches a remote, which is true and is not the
-    test: `Action required` is for a blocker *or a degradation*, and a
-    session that can read and cannot push is the second one.
+    other one. Placing it among the healthy postures reasons that plenty of
+    work never touches a remote, which is true and is not the test:
+    `Action required` is for a blocker *or a degradation*, and a session that
+    can read and cannot push is the second one.
     """
     loud = [
         *GitAccess().notice(

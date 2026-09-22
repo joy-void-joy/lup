@@ -418,11 +418,11 @@ def test_a_watch_lays_a_change_at_the_door_of_the_test_that_saw_it(
 def test_the_report_names_the_reading_the_refs_cannot_rule_out() -> None:
     """A commit made here mid-run and a stray fixture are the same event to a ref.
 
-    The report used to assert the fixture, on the reasoning that a developer
-    can rule out having moved a branch themselves. Where several sessions
-    share a clone that stops holding, and a reader handed only that reading
-    spends the length of a gate hunting a fixture that is not there — measured
-    on this repository, twice in one session.
+    Asserting the fixture reasons that a developer can rule out having moved
+    a branch themselves. Where several sessions share a clone that stops
+    holding, and a reader handed only that reading spends the length of a
+    gate hunting a fixture that is not there — measured on this repository,
+    twice in one session.
     """
     said = guard_report(
         {"refs/heads/feat-a": "1111111"}, {"refs/heads/feat-a": "2222222"}

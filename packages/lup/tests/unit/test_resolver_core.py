@@ -1979,10 +1979,10 @@ def test_releasing_a_run_keeps_the_decision_a_retired_concern_carries(
     """Retiring settles the decision; it does not hand back the worktree.
 
     So a retired concern still holds its lease when cleanup arrives, and
-    cleanup used to move it on — into a status the transition table declares
-    unreachable, because retiring is a human's word and nothing overwrites it.
-    That crashed the run at its last step, with every concern integrated and
-    re-checked and 25 of 27 worktrees already removed.
+    cleanup moving it on lands it in a status the transition table declares
+    unreachable, because retiring is a human's word and nothing overwrites
+    it. That crashes the run at its last step, with every concern integrated
+    and re-checked and 25 of 27 worktrees already removed.
     """
     run_id = "acceptance"
     retired_lease = WritableRootLease(
@@ -3081,7 +3081,7 @@ async def test_unresolved_semantic_join_fails_the_dependent_concern(
 async def test_aborting_a_parked_run_frees_its_leases_and_refuses_resumption(
     tmp_path: Path,
 ) -> None:
-    """Cleanup used to be reachable only at acceptance, stranding leases."""
+    """Cleanup reachable only at acceptance strands every lease short of it."""
     launcher = LocalProcessLauncher()
     workspace = failure_leg_workspace(tmp_path, launcher)
 
@@ -4727,12 +4727,12 @@ def accepting_reviewer(_root: Path, output_name: str) -> JsonObject:
 async def test_a_concerns_notes_are_cleared_before_its_worker_runs(
     tmp_path: Path,
 ) -> None:
-    """The regression this whole change exists for.
+    """Who removes the marker, and how much of the file they may touch.
 
-    The worker used to be told to remove its own marker, which the edit
-    policy asks on unconditionally, so every concern parked. The
-    orchestrator now removes it first — and removes only what this concern
-    owns, leaving the sibling's note in the same file untouched.
+    A worker told to remove its own marker meets the edit policy, which asks
+    on that unconditionally, and every concern parks. The orchestrator
+    removes it first — and removes only what this concern owns, leaving the
+    sibling's note in the same file untouched.
     """
     launcher = LocalProcessLauncher()
     workspace = noted_workspace(tmp_path, launcher)
@@ -5389,7 +5389,7 @@ async def test_a_carried_residual_takes_the_acceptance_the_reviewer_wrote(
 
 @pytest.mark.asyncio
 async def test_accepted_review_residuals_reach_the_journal(tmp_path: Path) -> None:
-    """Observations beside an accepting verdict used to reach nobody."""
+    """Observations beside an accepting verdict reach the journal, not nobody."""
     launcher = LocalProcessLauncher()
     workspace = failure_leg_workspace(tmp_path, launcher)
 
@@ -5653,8 +5653,8 @@ async def test_a_round_that_commits_nothing_neither_charges_nor_reviews_an_empty
     )
 
     outcome = next(item for item in manifest.outcomes if item.concern_id == "a")
-    # With max_revision_rounds=1 the old rule failed here: the empty second
-    # round was charged even though it gave the reviewer nothing new.
+    # With max_revision_rounds=1 a rule charging every round fails here: the
+    # empty second round gives the reviewer nothing new and costs the budget.
     assert outcome.verified, outcome.failure
     empty = [prompt for prompt in reviewer_prompts if "Commits under review" in prompt]
     assert empty and not any(

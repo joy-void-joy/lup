@@ -208,8 +208,8 @@ def test_native_workflow_probes_even_when_strict_evidence_fails() -> None:
 def test_pull_request_workflow_runs_the_same_gate_a_checkout_runs() -> None:
     """The gate is one command, so what CI enforces cannot drift from it.
 
-    Every row this used to spell out is a row of that command, harness drift
-    included; naming them again here is what let the two lists disagree. The
+    Every row it could spell out is a row of that command, harness drift
+    included; naming them again here is what lets the two lists disagree. The
     drift step ahead of it is not a second list: it is the constant the commit
     hook installs, so a contributor who never armed the hook meets the same
     refusal here.

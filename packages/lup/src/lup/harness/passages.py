@@ -1,8 +1,8 @@
 """Prose a content module authors as Markdown, in the file beside the module.
 
-Where a skill's words used to live: inside an ``r\"\"\"…\"\"\"`` in Python, with
-every path, count and description spliced in by f-string. Two things were
-wrong with that, and only one of them is about readability.
+Not an ``r\"\"\"…\"\"\"`` in Python with every path, count and description spliced
+in by f-string. Two things are wrong with that, and only one of them is about
+readability.
 
 The first is that an f-string has no choke point. A value entering prose that
 way arrives however it was spelled, and a backtick closes the code span it

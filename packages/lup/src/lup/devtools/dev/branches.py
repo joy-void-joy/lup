@@ -1116,17 +1116,14 @@ def detect_base_branch(branch: str | None = None) -> BaseCandidate:
         raise typer.Exit(1)
 
     # Every measured candidate is ranked, and ancestry only breaks a tie among
-    # equals. It used to filter: ancestors were taken and, where any existed,
-    # every non-ancestor was dropped before distance was consulted at all.
-    #
-    # That disqualified the integration branch for the ordinary reason a
-    # branch is not an ancestor — it moved on. A feature branch whose `dev`
-    # has taken one commit since the cut has no ancestor in `dev` at all, so
-    # `dev` was excluded and whichever stale sibling happened to sit in the
-    # branch's history won however far away it was. Measured: a branch whose
-    # real base was 0 symbols away was judged against a sibling 747 commits
-    # off, and the gate reported 137 capabilities gone that nothing had
-    # touched.
+    # equals. Ancestry disqualifies nobody, because a branch fails it for the
+    # most ordinary reason there is — the integration branch moved on. A
+    # feature branch whose `dev` has taken one commit since the cut has no
+    # ancestor in `dev` at all, so filtering on ancestry drops `dev` and hands
+    # the answer to whichever stale sibling happens to sit in the branch's
+    # history, however far away. Measured against a branch whose real base was
+    # 0 symbols off: the sibling that won sat 747 commits away, and the gate
+    # reported 137 capabilities gone that nothing had touched.
     #
     # Distance is the merge-base distance, which needs no ancestry to be
     # meaningful and is what makes a moved-on integration branch comparable

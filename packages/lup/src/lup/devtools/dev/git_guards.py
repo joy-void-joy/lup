@@ -434,11 +434,11 @@ def orphaned_guards(guards: list[GitGuard], directory: Path) -> list[GuardState]
 
 
 def retire_guards(guards: list[GitGuard], root: Path) -> list[GuardState]:
-    """Clear every hook this wrote at a moment the declaration has dropped.
+    """Clear every hook on disk at a moment the declaration does not name.
 
     Run by the same install that arms the declared moments, because a
-    declaration that stops naming one is only half applied while the hook it
-    used to write is still on disk and still running.
+    declaration naming one fewer is only half applied while the hook standing
+    at the moment it dropped is still on disk and still running.
     """
 
     def retired(state: GuardState) -> GuardState:

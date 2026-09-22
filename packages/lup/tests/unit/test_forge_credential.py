@@ -239,10 +239,10 @@ def test_a_launcher_environment_is_inherited_by_name(tmp_path: Path) -> None:
 def test_each_credential_says_which_one_it_is_in_one_line() -> None:
     """The whole of what a healthy launch has to say about the forge.
 
-    What used to travel beside it -- how many spellings were rewritten, what
-    a token should be scoped to, who commits are authored as, that the agent
-    can read the token -- was true and was five paragraphs, in which the one
-    sentence that decides whether the session can work was indistinguishable
+    What could travel beside it -- how many spellings were rewritten, what a
+    token should be scoped to, who commits are authored as, that the agent
+    can read the token -- is true and is five paragraphs, in which the one
+    sentence that decides whether the session can work is indistinguishable
     from four that do not.
     """
     spoken = {

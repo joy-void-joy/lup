@@ -200,10 +200,10 @@ def test_the_shared_directory_is_writable_with_only_config_held_back(
 ) -> None:
     """Every administrative entry writable to remove a worktree, and `config` not.
 
-    Two modes rather than three nested ones. A sibling's administrative entry
-    used to be punched read-only back over the shared directory, which kept
-    it present and unwritable -- and made `git worktree remove` impossible
-    from inside, since removing a worktree unlinks exactly that entry.
+    Two modes rather than three nested ones. Punching a sibling's
+    administrative entry read-only back over the shared directory keeps it
+    present and unwritable -- and makes `git worktree remove` impossible from
+    inside, since removing a worktree unlinks exactly that entry.
     `config` is the one hole left, and it costs a session nothing: its keys
     name programs the host runs, and no step of the workflow writes them.
     """
@@ -321,7 +321,7 @@ def test_a_new_worktree_can_be_cut_under_everything_the_lease_withholds(
 def test_a_sibling_worktree_can_be_removed_under_the_lease(
     repository: Path,
 ) -> None:
-    """The other half of the workflow, and the one the old arrangement refused.
+    """The other half of the workflow, and the one a nested lease refuses.
 
     `git worktree remove` deletes the checkout and unlinks its administrative
     entry, so a lease holding either read-only refuses it -- and refuses it

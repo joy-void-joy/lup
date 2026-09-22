@@ -345,12 +345,12 @@ def test_a_subject_descending_from_the_family_keeps_its_finding(
 def test_keyword_arguments_are_a_mapping_and_keep_their_finding(
     tmp_path: Path,
 ) -> None:
-    """`**kwargs` is a `dict`, and the reference used to claim otherwise.
+    """`**kwargs` is a `dict`, and the reference says so.
 
-    It said the finding was refuted for resolving to nothing. The server
-    resolves it to `dict.get` in typeshed, so the finding stands — and a
-    contributor reading that a directive there would be reported spurious
-    was reading the opposite of what the gate does.
+    Calling the finding refuted for resolving to nothing is the reading to
+    refuse: the server resolves it to `dict.get` in typeshed, so the finding
+    stands — and a contributor reading that a directive there would be
+    reported spurious reads the opposite of what the gate does.
     """
     assert 'return kwargs.get("name")' not in resolved(tmp_path, RESOLVED_SUBJECTS)
 

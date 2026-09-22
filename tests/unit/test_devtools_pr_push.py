@@ -103,7 +103,7 @@ def test_the_branch_actually_lands_on_the_remote(published: Path) -> None:
 def test_the_recorded_remote_answers_where_git_tracks_nothing(
     published: Path,
 ) -> None:
-    """The reader that used to ask `branch.<name>.merge` and now asks the record.
+    """The reader that asks the record rather than `branch.<name>.merge`.
 
     Freshness is measured against the remote a branch answers to. Asked of
     git's tracking configuration alone, a branch published by a refspec

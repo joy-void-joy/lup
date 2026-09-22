@@ -146,10 +146,10 @@ def suppression_rows() -> list[AntiPatternRow]:
 def test_relocating_an_approved_marker_is_not_a_new_suppression() -> None:
     """Concern `suppression-placement-uniformity`, criterion spu-4, verbatim.
 
-    Adopting a placement policy necessarily rewrites the markers the old one
-    allowed. The gate demanded `antipattern-suppression` for the rewrite —
-    an allowance that would equally authorize genuinely new suppressions, so
-    a narrow, checkable action bought a wide, uncheckable permission.
+    Adopting a placement policy necessarily rewrites the markers the policy
+    before it allowed. Demanding `antipattern-suppression` for that rewrite
+    is an allowance that equally authorizes genuinely new suppressions, so a
+    narrow, checkable action would buy a wide, uncheckable permission.
     """
     before = (
         "class NativeSpellings:  # lup: ignore[any-type] — deliberately wider\n"

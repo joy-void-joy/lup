@@ -1,11 +1,11 @@
 """Where a `# lup: ignore` may sit, pinned identical across every rule family.
 
-Three rules used to answer this differently: one branching on our own model
-types declared the whole matched span, the capability rule declared its class
-header on top of the member line, and a line rule declared nothing at all and
-so was inline-only. The same marker was therefore valid against one rule and
-spurious against another — the reported failure being a directive that went
-spurious on its own line while the violation it meant to guard stayed missing.
+Left to each family, the answers diverge: a rule branching on our own model
+types would declare the whole matched span, a capability rule its class header
+on top of the member line, and a line rule nothing at all, which is inline-only.
+One marker is then valid against one rule and spurious against another — and
+what that reads like is a directive going spurious on its own line while the
+violation it meant to guard stays missing.
 
 Each case below is the same three placements against a different family: on
 the violation's own line, standing alone directly above it, and one line

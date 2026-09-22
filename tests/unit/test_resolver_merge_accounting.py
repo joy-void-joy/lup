@@ -291,9 +291,9 @@ def test_superseding_leaves_the_predecessor_in_the_record() -> None:
 def approval_repo(tmp_path: Path) -> Path:
     """A real repository: recoverability is Git's answer, not a fake's.
 
-    The launcher this used to take could only say whether a path was tracked,
-    which is the weaker question that let a modified file read as recoverable.
-    Asking Git itself is what makes the uncommitted-work case expressible.
+    A launcher can only say whether a path is tracked, which is the weaker
+    question and lets a modified file read as recoverable. Asking Git itself
+    is what makes the uncommitted-work case expressible.
     """
     work = tmp_path / "repo"
     (work / "src").mkdir(parents=True)

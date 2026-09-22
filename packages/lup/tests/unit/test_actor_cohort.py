@@ -256,9 +256,9 @@ def test_a_process_that_spawned_nothing_reaches_what_another_one_did(
 def test_the_user_is_an_address_its_agents_can_reach(tmp_path: Path) -> None:
     """A member's report goes to the person, and to no sibling.
 
-    Addressed to the humans by leaving the target blank, it used to match
-    every actor's own address list — so it was delivered into the siblings'
-    context, consumed there, and never seen by a person at all.
+    The humans are addressed by leaving the target blank, and a blank target
+    matched against every actor's own address list delivers the report into
+    the siblings' context, where it is consumed and no person ever sees it.
     """
     cohort = ActorCohort(tmp_path)
     sibling = cohort.actor("worker", "other-concern")

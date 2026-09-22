@@ -1,13 +1,13 @@
 """The library page's package roster is read from the package it describes.
 
-The roster used to promise "every remaining top-level entry" while omitting six
-of them — `actors` among them, four commits after it was added — because a prose
+An authored roster promising "every remaining top-level entry" omits six of
+them — `actors` among them, four commits after it is added — because a prose
 table is a claim about the tree that nothing reads the tree to check. Walking
-the tree fixed the *names*; everything said about them stayed authored, in a
-second file, and drifted anyway: the `channels` row named six consumers where
-the import graph counts eleven.
+the tree settles the *names*; anything said about them that stays authored, in
+a second file, drifts anyway: a hand-written `channels` row names six consumers
+where the import graph counts eleven.
 
-So the prose moved to each entry's own docstring and the row is derived from it.
+So the prose lives in each entry's own docstring and the row is derived from it.
 One description of one subject, beside the thing it describes. What that leaves
 worth pinning is a walk that reads the wrong tree, and an entry with nothing to
 say about itself.

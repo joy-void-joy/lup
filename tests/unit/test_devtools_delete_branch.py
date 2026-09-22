@@ -114,8 +114,8 @@ def test_forcing_does_not_lift_a_lock(
     assert "feature" in branch_names(repo)
 
     # Refused before the removal rather than by git during it: forcing past
-    # the dirt used to carry the run as far as the destructive step, where
-    # the lock stopped it with the branch half-judged.
+    # the dirt carries the run as far as the destructive step, where the lock
+    # stops it with the branch half-judged.
     err = capsys.readouterr().err
     assert "Refusing to delete feature" in err
     assert "worktree removal failed" not in err
@@ -541,12 +541,12 @@ def test_an_unmerged_remote_only_branch_is_blocked_on_what_it_holds(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """The check the old refusal claimed to have run, run against the ref that exists.
+    """The containment check run against the ref that exists, not one that does not.
 
     Origin's copy is the only copy, so the containment question is asked of
-    it. Answering from a local branch that was never there made the refusal
-    say `--force` would discard unmerged work in the one case where nothing
-    was at stake, and stay silent in the case where everything was.
+    it. Answering from a local branch that is not there makes the refusal say
+    `--force` would discard unmerged work in the one case where nothing is at
+    stake, and stay silent in the case where everything is.
     """
     monkeypatch.chdir(remote_only)
 
