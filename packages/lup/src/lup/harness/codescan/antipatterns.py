@@ -73,6 +73,7 @@ from lup.harness.codescan.boundaries import (
     SEAM_RULE,
 )
 from lup.harness.codescan.capabilities import ABSTRACT_DECLARATION_RULE, CAPABILITY_RULE
+from lup.harness.codescan.references import STALE_REFERENCE_RULE
 from lup.harness.codescan.dispatch import DISPATCH_RULE
 from lup.harness.codescan.narrowing import CHAIN_RULE
 from lup.harness.codescan.portable import PORTABLE_RULE, CompositionRule
@@ -1551,6 +1552,7 @@ PROJECT_RULES: list[ProjectRule] = [
     KERNEL_IMPORTS_RULE,
     LIBRARY_DEFAULT_RULE,
     CONSTANT_DECLARATION_RULE,
+    STALE_REFERENCE_RULE,
 ]
 """Every rule this library reads off the whole project.
 

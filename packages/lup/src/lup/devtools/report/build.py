@@ -62,10 +62,9 @@ def authored_headings(
     Read against the same roster the report renders from, so a topic added
     there is accounted for here by existing rather than by being remembered.
 
-    Parsed rather than scanned for lines opening with ``##``, for the reason
-    :func:`~lup.devtools.dev.guidance.guidance_sections` gives: a fenced code
-    block spells the same shape, and a report quoting one would read as
-    carrying prose it does not.
+    Parsed rather than scanned for lines opening with ``##``, because a
+    fenced code block spells the same shape, and a report quoting one would
+    read as carrying prose it does not.
     """
     declared = tuple(topic.title for topic in topics)
     tokens = parser.parse(written)

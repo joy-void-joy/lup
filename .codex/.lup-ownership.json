@@ -198,7 +198,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/decision.py",
       "category": "generated",
-      "sha256": "729e1e297646c2d6b558b58f0172c265c901e826555a66b54ca4103819136932",
+      "sha256": "34bb2170373ea9513429a9b8df6bd018a15caced4b06e7fef25576effcbfef82",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -289,7 +289,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/semantics.py",
       "category": "generated",
-      "sha256": "bb96e1ea30ffa8c4e2b42aceea399fe0df2fd726e770e6a4a8903910cee3806a",
+      "sha256": "8d734ca630f0c7e5721ae6f861fbf2bae6475204dc054850514836efd23af531",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

@@ -58,9 +58,9 @@ class ActorRef(BaseModel, frozen=True):
         here: it would make every actor's list match a message whose target
         was merely left blank — so a worker telling *the humans* something
         would tell its siblings, who consume it, while no surface a person
-        reads would ever show it. Reaching everyone is one message
-        (:data:`~lup.coordination.mail.EVERYONE`), addressed on purpose
-        rather than the value a caller arrives at by filling nothing in.
+        reads would ever show it. Reaching everyone is one message, addressed
+        on purpose rather than the value a caller arrives at by filling
+        nothing in.
         """
         return [
             self.id,

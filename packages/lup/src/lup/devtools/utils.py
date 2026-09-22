@@ -136,8 +136,8 @@ def slug_from_remote(url: str) -> str:
     """The ``owner/name`` a remote names, empty when it names none.
 
     The pair alone, taken from the fuller reading
-    :func:`lup.policy.kernel.words.repository_reference` gives, because the
-    pair is what `gh --repo` takes and what this project passes it.
+    :func:`lup.devtools.utils.repository_reference` gives, because the pair is
+    what `gh --repo` takes and what this project passes it.
 
     Read there rather than here so one parser answers for every shape a
     remote is written in — the scp-like ``git@host:owner/name`` among them,

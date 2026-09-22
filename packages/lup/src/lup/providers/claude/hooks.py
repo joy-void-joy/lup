@@ -193,7 +193,7 @@ def lup_hook_output_to_claude(
     permission channel reaches goes out on the context channel beside it, and
     on both the effects a placement survives — an approval question puts its
     reason to a human, which is no more the agent than a grant's record is.
-    :func:`~lup.policy.kernel.decision.escalation_offer` decides what that is.
+    The verdict's own offer decides what that is.
     """
     from claude_agent_sdk import types as claude_types
 
