@@ -4,7 +4,9 @@ The mode is a property of pyproject.toml, so every assertion here reads the
 rewritten file back rather than trusting the change log. What must hold is
 that un-vendoring removes every path that stops resolving once the package is
 gone, that vendoring restores exactly those, and that the round trip is the
-identity — a project can move between modes without accumulating drift.
+identity — a project can move between modes without accumulating drift. What
+the project declared for its own reasons is not part of any of that, so the
+fixture carries one such pyright environment and every rewrite leaves it whole.
 """
 
 import tomllib
@@ -54,6 +56,10 @@ extraPaths = [".codex/plugins/lup/hooks/runtime", "packages/lup/src/lup/policy/a
 [[tool.pyright.executionEnvironments]]
 root = ".codex/plugins/lup/hooks/scripts"
 extraPaths = [".codex/plugins/lup/hooks/runtime"]
+
+[[tool.pyright.executionEnvironments]]
+root = "src/demo/search/backends"
+reportMissingImports = "none"
 """
 
 
@@ -122,7 +128,19 @@ def test_publishing_keeps_the_generated_tree_environments(project: Path) -> None
     assert environment_roots(project) == [
         ".claude/plugins/lup/hooks/scripts",
         ".codex/plugins/lup/hooks/scripts",
+        "src/demo/search/backends",
     ]
+
+
+def test_an_environment_the_project_owns_survives_whole(project: Path) -> None:
+    """`extraPaths` is optional, and the rest of the table is not lup's to touch."""
+    library.set_mode(project, library.LibraryMode.GIT, git=library.GitSource(ref="dev"))
+
+    environments = at(project, "tool", "pyright", "executionEnvironments")
+    assert isinstance(environments, list)
+    assert {"root": "src/demo/search/backends", "reportMissingImports": "none"} in (
+        environments
+    )
 
 
 def test_un_vendoring_drops_the_tests_root_along_with_the_source_one(
@@ -159,6 +177,7 @@ def test_git_un_vendors_exactly_as_publishing_does(project: Path) -> None:
     assert environment_roots(project) == [
         ".claude/plugins/lup/hooks/scripts",
         ".codex/plugins/lup/hooks/scripts",
+        "src/demo/search/backends",
     ]
 
 
