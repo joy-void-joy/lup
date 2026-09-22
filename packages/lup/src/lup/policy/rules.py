@@ -66,7 +66,6 @@ from lup.policy.kernel.rows import (
     unproduced_cause,
 )
 from lup.policy.kernel.shell import decide_shell, decide_shell_segment, shell_context
-from lup.policy.kernel.words import command_words as kernel_command_words
 from lup.policy.edit_rules import EditRule, erase_edit_rules
 from lup.policy.imports import ImportBoundary
 from lup.policy.assets.host import worktree_path, worktree_root
@@ -162,13 +161,13 @@ class ShellSegment(BaseModel, frozen=True):
     words: list[str] = Field(min_length=1)
 
 
-def command_words(words: list[str]) -> list[str]:
-    """Expose effective-command parsing for compatibility consumers."""
-    return kernel_command_words(words)
-
-
 def parse_shell_segments(command: str) -> list[ShellSegment] | None:
-    """Expose validated segment models for compatibility consumers.
+    """The segments a gate deciding on argv alone may read, or ``None``.
+
+    What the resolver worker's shell gate takes, which is the one reading of
+    a command line that judges the words rather than the effects: it admits
+    `git status` and refuses `git commit`, and it has no facts about the
+    filesystem to decide a write with.
 
     ``None`` for a line the kernel would not read as plain segments: one that
     does not parse, runs nothing, or carries a redirection it would stop when
