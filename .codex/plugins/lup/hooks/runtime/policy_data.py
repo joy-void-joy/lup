@@ -624,7 +624,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
         },
         {
             "id": "historical-voice",
-            "pattern": "\\bused to be\\b|\\bpreviously\\b|\\bformerly\\b|\\brenamed from\\b|\\bin the past\\b|\\bbefore this change\\b|(?<!&)#\\d{2,5}(?![0-9A-Fa-f;])",
+            "pattern": "\\bused to be\\b|\\bpreviously\\b|\\bformerly\\b|\\brenamed from\\b|\\bin the past\\b|\\bbefore this change\\b|\\b(?:it|this|that|they|we|which|one|there) used to\\b|\\bthe old (?:rule|refusal|comparison|arrangement|fallback|behaviour|behavior|design|version)\\b|\\bduring the \\w+ migration\\b|\\bfor compatibility (?:consumers|reasons)\\b|(?<!&)#\\d{2,5}(?![0-9A-Fa-f;])",
             "message": "A comment or docstring says what the code is, not how it came to be: a phrase about a prior state, or an issue number standing in for the reason, dates the moment it is read rather than the moment it was written. Say what holds now; the change belongs in the commit message, and a decision worth keeping belongs where it is looked up. Where an external tracker's number is the reason a workaround exists, `# lup: ignore[historical-voice]` carries it",
             "context": "prose",
             "matcher": "historical_voice_sites",
@@ -1076,7 +1076,7 @@ ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {
         },
         {
             "id": "historical-voice",
-            "pattern": "\\bused to be\\b|\\bpreviously\\b|\\bformerly\\b|\\brenamed from\\b|\\bin the past\\b|\\bbefore this change\\b|(?<!&)#\\d{2,5}(?![0-9A-Fa-f;])",
+            "pattern": "\\bused to be\\b|\\bpreviously\\b|\\bformerly\\b|\\brenamed from\\b|\\bin the past\\b|\\bbefore this change\\b|\\b(?:it|this|that|they|we|which|one|there) used to\\b|\\bthe old (?:rule|refusal|comparison|arrangement|fallback|behaviour|behavior|design|version)\\b|\\bduring the \\w+ migration\\b|\\bfor compatibility (?:consumers|reasons)\\b|(?<!&)#\\d{2,5}(?![0-9A-Fa-f;])",
             "message": "A comment or docstring says what the code is, not how it came to be: a phrase about a prior state, or an issue number standing in for the reason, dates the moment it is read rather than the moment it was written. Say what holds now; the change belongs in the commit message, and a decision worth keeping belongs where it is looked up. Where an external tracker's number is the reason a workaround exists, `# lup: ignore[historical-voice]` carries it",
             "context": "prose",
             "matcher": "historical_voice_sites",

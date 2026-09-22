@@ -287,6 +287,18 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
                 verdict="flagged",
             ),
             RuleExample(
+                code="# it used to filter, and the integration branch lost",
+                verdict="flagged",
+            ),
+            RuleExample(
+                code="# the old fallback wrote nothing and said nothing",
+                verdict="flagged",
+            ),
+            RuleExample(
+                code="# kept public during the capability migration",
+                verdict="flagged",
+            ),
+            RuleExample(
                 code="# the home a launch selects",
                 verdict="cleared",
             ),
