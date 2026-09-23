@@ -120,7 +120,9 @@ class SpawnNameRow(TypedDict):
 
     ``reason`` is what a spawn without one is refused with; ``recovery`` says
     the shape a name takes, because a refusal an agent cannot act on becomes
-    a retry. ``misspelled`` is what a name outside that shape is refused with.
+    a retry, and the kernel opens it with the key the runtime reads the name
+    from, which the row cannot hold since one row serves every runtime.
+    ``misspelled`` is what a name outside that shape is refused with.
 
     ``punctuation`` is what a name may carry beside letters and digits, and
     ``limit`` how long it may be. Both are data rather than a check written

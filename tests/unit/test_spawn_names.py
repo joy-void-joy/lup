@@ -45,7 +45,13 @@ def spawn(
 
 
 def test_a_spawn_without_a_name_is_refused_with_the_shape_of_one() -> None:
-    """The refusal says what a name is for and what one looks like."""
+    """The refusal says what a name is for, which argument it is, and its shape.
+
+    Measured on Claude Code 2.1.280: the `Agent` schema shown to the model
+    lists no `name` and the runtime takes one regardless, so the refusal is
+    the only place the argument is spelled, and a recovery that leaves it out
+    sends the name into `description`.
+    """
     declared = portable_harness().declared_hooks.spawn_names
     assert declared is not None
 
@@ -56,7 +62,20 @@ def test_a_spawn_without_a_name_is_refused_with_the_shape_of_one() -> None:
     assert specific["permissionDecision"] == "deny"
     reason = str(specific["permissionDecisionReason"])
     assert declared.reason in reason
+    assert "pass the name as `name`" in reason
     assert declared.recovery in reason
+
+
+def test_the_recovery_names_the_key_each_runtime_reads() -> None:
+    """One declaration, two spellings: the dispatcher that read the key passes it."""
+    declared = portable_harness().declared_hooks.spawn_names
+    assert declared is not None
+
+    for field in ("name", "task_name"):
+        refused = decide_spawn("", [], declared.erased(), field)
+        assert refused.effect == "deny"
+        assert f"pass the name as `{field}`" in str(refused.recovery)
+        assert declared.recovery in str(refused.recovery)
 
 
 def test_a_blank_name_is_no_name() -> None:
@@ -120,8 +139,8 @@ def test_a_project_running_one_runtime_may_widen_what_a_name_carries() -> None:
     assert declared is not None
     widened = declared.model_copy(update={"punctuation": "-_"}).erased()
 
-    assert decide_spawn("leak-probe", [], widened).effect == "defer"
-    assert decide_spawn("leak.probe", [], widened).effect == "deny"
+    assert decide_spawn("leak-probe", [], widened, "name").effect == "defer"
+    assert decide_spawn("leak.probe", [], widened, "name").effect == "deny"
 
 
 def test_a_misspelled_name_escalates_the_way_a_missing_one_does() -> None:
@@ -133,6 +152,7 @@ def test_a_misspelled_name_escalates_the_way_a_missing_one_does() -> None:
         "leak-probe",
         ["# lup: escalate: the name is the runtime's to reject"],
         declared.erased(),
+        "name",
     )
 
     assert escalated.effect == "ask"
@@ -157,5 +177,5 @@ def test_an_escalated_spawn_becomes_the_question_the_caller_asked_for(
 
 
 def test_a_project_requiring_no_name_leaves_every_spawn_alone() -> None:
-    assert decide_spawn("", [], None).effect == "defer"
-    assert decide_spawn("leak-probe", [], None).effect == "defer"
+    assert decide_spawn("", [], None, "name").effect == "defer"
+    assert decide_spawn("leak-probe", [], None, "name").effect == "defer"

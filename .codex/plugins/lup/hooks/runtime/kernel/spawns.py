@@ -26,7 +26,7 @@ from .tools import TOOL_ESCALATE_HINT, escalated_reason
 
 
 def decide_spawn(
-    name: str, values: list[str], row: SpawnNameRow | None
+    name: str, values: list[str], row: SpawnNameRow | None, field: str
 ) -> KernelDecision:
     """The verdict on one spawn: refused without a name, deferred with one.
 
@@ -34,20 +34,32 @@ def decide_spawn(
     call to the runtime. An escalation marker among the call's inputs turns
     the refusal into the approval question the caller asked for, the way a
     refused tool's does.
+
+    ``field`` is the key the runtime reads the name from, passed by the host
+    half that read it, and the recovery opens with it: one declaration serves
+    every runtime and each spells the key its own way, and the schema a
+    runtime shows the model may not list it at all — Claude Code 2.1.280
+    shows an `Agent` tool with no `name` and takes one regardless — so a
+    recovery that only says "pass a name" leaves the caller to guess which
+    argument, and the guess it makes is the description.
     """
     if row is None:
         return KernelDecision("defer", "no spawn name is required here")
+
+    recovery = (
+        f"pass the name as `{field}` in the same call, beside the agent type"
+        " — the runtime takes that key whether or not the tool schema it showed"
+        f" lists it: {row['recovery']}"
+    )
 
     def refused(what: str) -> KernelDecision:
         """The denial, or the approval question an escalation marker asks for."""
         why = escalated_reason(values)
         if why:
             return KernelDecision(
-                "ask", f"escalated ({why}): {what}", recovery=row["recovery"]
+                "ask", f"escalated ({why}): {what}", recovery=recovery
             )
-        return KernelDecision(
-            "deny", what, recovery=f"{row['recovery']} {TOOL_ESCALATE_HINT}"
-        )
+        return KernelDecision("deny", what, recovery=f"{recovery} {TOOL_ESCALATE_HINT}")
 
     def alphanumeric(character: str) -> bool:
         """A letter or digit in ASCII, which is what both validators read.
