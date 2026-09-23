@@ -13,7 +13,7 @@ ever joining a row, and its departure writer finds no standing row to end.
 The launched case is covered: the launcher mints a member id and exports it,
 and every session this repository starts is launched. It reaches the tool
 server only because the server names it in ``env_vars`` —
-:data:`lup.harness.environment.TOOL_SERVER_ENV` — since Codex starts a stdio
+:func:`lup.harness.environment.tool_server_env` — since Codex starts a stdio
 server under a fixed base environment and forwards nothing else. The
 difference from Claude Code, whose runtime does set a session id in its
 servers' environment, is stated on the parity page rather than papered over

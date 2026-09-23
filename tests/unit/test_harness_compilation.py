@@ -64,7 +64,7 @@ from lup.formats.banner import (
     REGENERATE_COMMAND,
     GeneratedBanner,
 )
-from lup.harness.environment import TOOL_SERVER_ENV
+from lup.harness.environment import tool_server_env
 from lup.harness.generation import ArtifactValidationError
 from lup.harness.requirements import LostCapability, Requirement, Run
 from lup.harness.materialization import (
@@ -3501,7 +3501,7 @@ def test_every_tool_server_asks_for_what_its_launcher_exported() -> None:
     parsed = tomllib.loads(codex_project_config(portable_harness(), CodexSpellings()))
     assert {
         name: server.get("env_vars") for name, server in parsed["mcp_servers"].items()
-    } == {name: TOOL_SERVER_ENV for name in startup_names(declared_tool_groups())}
+    } == {name: tool_server_env() for name in startup_names(declared_tool_groups())}
 
 
 def test_both_runtimes_grant_the_declared_servers_the_same_way() -> None:

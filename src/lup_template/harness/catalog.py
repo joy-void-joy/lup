@@ -51,7 +51,7 @@ from lup.devtools.dev.workflow import FrontendSpec, PublishSpec, WorkflowSpec
 from lup.devtools.project import DevProject
 from lup.harness.contracts import NativeSpellings
 from lup.harness.enforcement import declared_role_rows
-from lup.harness.environment import TOOL_SERVER_ENV
+from lup.harness.environment import tool_server_env
 from lup.policy.boundary import depends_on
 from lup.coordination.policy import peer_policy
 from lup.policy.refused_tools import RefusedTool
@@ -258,7 +258,7 @@ def agent_tool_servers(startup_deadline_seconds: float = 60.0) -> list[McpServer
                 LiteralWord(text="--session"),
                 LiteralWord(text=HARNESS_SESSION),
             ],
-            env_vars=TOOL_SERVER_ENV,
+            env_vars=tool_server_env(),
             startup_timeout_seconds=startup_deadline_seconds,
         )
         # What a runtime starts when a session opens, read off the same
