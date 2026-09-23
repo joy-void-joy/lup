@@ -155,6 +155,23 @@ DECLARED: list[Migration] = [
             ),
         ],
     ),
+    Migration(
+        subjects=["RepositoryPeers.naming_settled"],
+        reason=(
+            "the lock a session's name is decided under is taken in the "
+            "coordination store, because a session's naming hook decides names "
+            "by the same rule as the typed rename and has to take the same lock"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Hold `lup.coordination.bare.store.roster_locked(peers.root)` "
+                    "where you held `peers.naming_settled()`: the same lock, "
+                    "taken and released the same way."
+                )
+            ),
+        ],
+    ),
 ]
 """Every break this library has taken since its last release, and what to do.
 

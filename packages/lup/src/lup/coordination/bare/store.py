@@ -57,8 +57,10 @@ a field a newer library adds must not make its file unreadable here.
 import fcntl
 import json
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from itertools import count
 from pathlib import Path
 from typing import TypedDict
 from uuid import uuid4
@@ -106,7 +108,8 @@ ROSTER_LOCK = "roster.lock"
 Both decide a name against every other member's, which is the one question a
 per-member lock cannot answer. Everything else a member writes is about itself
 and is taken under its own lock, so the store-wide lock is held for as long as
-it takes to read a directory and rename one file.
+it takes to read a directory and rename one file. :func:`roster_locked` is the
+one place it is taken, whichever process is deciding.
 """
 
 MEMBER_KIND = "session"
@@ -711,6 +714,75 @@ def naming(root: Path, now: datetime | None = None) -> list[Claiming]:
         ),
         key=lambda claiming: claiming["at"],
     )
+
+
+def names_taken(
+    root: Path, mine: str = "", window: float = STALE_AFTER_SECONDS, without: str = ""
+) -> dict[str, str]:  # lup: ignore[dict-str-payload] — a name to the id holding it
+    """Every name a live member other than *mine* currently answers to, to its id.
+
+    Keyed by the name a session answers to, whose value is the member id
+    holding it: two spellings of an identity rather than an open payload.
+
+    Current names rather than every name ever claimed: a name its holder has
+    renamed away from is free for somebody else to take, and goes on reaching
+    the old holder only until they do. A departed member's name is free for
+    the same reason — it is not there to be confused with. *without* leaves
+    one kind out of who is live, the way :func:`live_ids` does.
+    """
+    live = live_ids(root, window=window, without=without)
+    return {
+        name: member_id
+        for member_id, name in called(root).items()
+        if member_id != mine and member_id in live
+    }
+
+
+def unique_cli_name(wanted: str, taken: Collection[str]) -> str:
+    """*wanted* where nobody else answers to it, else the first free numbered form.
+
+    Numbered rather than refused, because the name is one nobody chose: two
+    sessions opened in one worktree are two peers and both are called after
+    it, and the second has to be reachable by a name that is not the first's;
+    a name a model proposed for a session's work is no more chosen than that.
+    A name somebody chose is refused instead, by the caller that knows it was
+    chosen.
+    """
+    if wanted not in taken:
+        return wanted
+    return next(
+        candidate
+        for candidate in (f"{wanted}-{ordinal}" for ordinal in count(2))
+        if candidate not in taken
+    )
+
+
+@contextmanager
+def roster_locked(root: Path) -> Iterator[None]:
+    """Hold the one lock a member cannot decide its own name without.
+
+    Every other write a member makes is about itself and is taken under its
+    own lock. A name is decided against every other member's, so two sessions
+    choosing at once would both read the same directory and both take the
+    same name — which is precisely the collision the numbered default exists
+    to rule out. A session's tool server and its naming hook are different
+    processes deciding names by the same rule, so this is the one place the
+    lock is taken for either.
+
+    Held for a read of the members directory and one rename, and released
+    whatever happens inside: a refused name must not leave the store's lock
+    standing for the next session to wait on. The one writer here that
+    raises, on a lock it could not take: a caller about to decide a name has
+    to know it holds the lock, and one that does not must not decide.
+    """
+    lock = root / ROSTER_LOCK
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    with lock.open("a", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def subject_of(path: str, prefix: bool) -> str:

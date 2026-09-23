@@ -30,9 +30,7 @@ store's roster lock for exactly that: long enough to read the directory and
 rename one file, and held for nothing else a member writes.
 """
 
-import fcntl
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from functools import cached_property
 from pathlib import Path
@@ -49,7 +47,6 @@ from lup.coordination.identity import (
     member_ref,
     mint_member_id,
     session_cli_name,
-    unique_cli_name,
 )
 from lup.coordination.mail import ActorDelivery
 from lup.coordination.meeting import coordination_root
@@ -210,29 +207,6 @@ class RepositoryPeers:
             description="every session working in this repository",
         )
 
-    @contextmanager
-    def naming_settled(self) -> Iterator[None]:
-        """Hold the one lock a member cannot decide its own name without.
-
-        Every other write a member makes is about itself and is taken under
-        its own lock. A name is decided against every other member's, so two
-        sessions choosing at once would both read the same directory and both
-        take the same name — which is precisely the collision the numbered
-        default exists to rule out.
-
-        Held for a read of the members directory and one rename, and released
-        whatever happens inside: a refused name must not leave the store's
-        lock standing for the next session to wait on.
-        """
-        lock = self.root / store.ROSTER_LOCK
-        lock.parent.mkdir(parents=True, exist_ok=True)
-        with lock.open("a", encoding="utf-8") as handle:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-
     def join(
         self,
         member_id: str,
@@ -269,7 +243,7 @@ class RepositoryPeers:
         two sessions starting together cannot read the same set of taken names
         and both take the free one.
         """
-        with self.naming_settled():
+        with store.roster_locked(self.root):
             current = self.standing_name(member_id)
             taken = self.names_taken(except_id=member_id)
             if cli_name and cli_name != current and cli_name in taken:
@@ -285,7 +259,7 @@ class RepositoryPeers:
             chosen = (
                 cli_name
                 or current
-                or unique_cli_name(
+                or store.unique_cli_name(
                     session_cli_name() or derived_cli_name(worktree), taken
                 )
             )
@@ -301,7 +275,7 @@ class RepositoryPeers:
         another one claims that name. A name a live session currently answers
         to is refused, because the roster would then print one address for two.
         """
-        with self.naming_settled():
+        with store.roster_locked(self.root):
             taken = self.names_taken(except_id=member_id)
             if cli_name in taken:
                 raise NameTakenError(cli_name, taken[cli_name])
@@ -313,17 +287,15 @@ class RepositoryPeers:
     def names_taken(self, except_id: str = "") -> dict[str, str]:
         """Every name a live session other than this one currently answers to.
 
-        Current names rather than every name ever claimed: a name its holder
-        has renamed away from is free for somebody else to take, and goes on
-        reaching the old holder only until they do. A departed session's name
-        is free for the same reason — it is not there to be confused with.
+        The store's own reading, over the kinds this layer counts as live, so
+        a name this layer refuses is one a session's naming hook numbers past.
         """
-        live = self.live_ids()
-        return {
-            name: member_id
-            for member_id, name in store.called(self.root).items()
-            if member_id != except_id and member_id in live
-        }
+        return store.names_taken(
+            self.root,
+            except_id,
+            window=self.pulse.stale_after_seconds,
+            without=USER_KIND,
+        )
 
     def record_name(self, member_id: str, cli_name: str) -> None:
         """Append one name to this member's own file, under that member's lock."""
@@ -658,5 +630,5 @@ def launched_member(root: Path) -> LaunchedMember:
     peers = RepositoryPeers(root)
     return LaunchedMember(
         member_id=mint_member_id(),
-        cli_name=unique_cli_name(derived_cli_name(root), peers.names_taken()),
+        cli_name=store.unique_cli_name(derived_cli_name(root), peers.names_taken()),
     )
