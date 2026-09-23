@@ -366,7 +366,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/session_naming.py",
       "category": "generated",
-      "sha256": "bb91209bfcf2b1ed22db99164e8bb02f36ebba723da8ef19eaec9098ce5a88f4",
+      "sha256": "0102003a274b8c7520d8aaa358ef00307dbf696b2a35917db5dbe09615751f3d",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

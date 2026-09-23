@@ -22,7 +22,9 @@ Measured on Codex 0.155.1:
   exit, and ``codex exec resume <name>`` reopened the thread by it. The live
   TUI's status line went on showing the title it already had.
 - Codex names a thread itself from its first prompt, and that is what the
-  session's own status line shows.
+  session's own status line shows. The two names race, and either order
+  settles on this one: a name set after Codex's title replaced it, and a
+  thread named before Codex's titler answered was left unnamed by it.
 - ``codex exec --ephemeral --skip-git-repo-check --ignore-user-config -C
   <scratch>`` with ``--output-schema`` answered a naming ask in 3.7 seconds
   with JSON meeting the schema, and ``-o`` wrote it to a file. With its shell
