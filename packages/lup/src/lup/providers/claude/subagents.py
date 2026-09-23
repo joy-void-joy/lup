@@ -3,7 +3,28 @@
 from collections.abc import Iterator
 from typing import Literal, assert_never
 
-from lup.types import ModelTier, SubagentSpec
+from lup.types import ModelTier, SessionEffort, SubagentSpec
+
+type ClaudeEffort = Literal["low", "medium", "high", "xhigh", "max"]
+"""Claude Code's own reasoning-effort ladder, which starts at ``low``.
+
+Beside the table translating a portable effort into it, where generation can
+compile a declared effort into a plugin without the agent SDK a session needs.
+"""
+
+# lup: ignore[constant-declaration] — each value is Claude Code's own effort for
+# the degree beside it, over a vocabulary this library closes
+CLAUDE_EFFORT: dict[SessionEffort, ClaudeEffort] = {
+    "minimal": "low",
+    "low": "low",
+    "medium": "medium",
+    "high": "high",
+    "xhigh": "xhigh",
+    "max": "max",
+}
+"""What Claude Code calls each degree of effort a caller can ask for.
+
+``minimal`` meets ``low`` because Claude's ladder has no rung beneath it."""
 
 
 def model_alias(tier: ModelTier) -> Literal["inherit", "opus", "sonnet", "haiku"]:

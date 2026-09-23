@@ -384,6 +384,17 @@ declaration that states a preference, because a role's tier and a delegated
 spec's tier are the same vocabulary: spelled twice, an adapter honouring one
 copy would silently ignore whichever tier the other copy grew."""
 
+type SessionEffort = Literal["minimal", "low", "medium", "high", "xhigh", "max"]
+"""How hard a session is asked to think before it answers.
+
+The four middle rungs are the words both runtimes already share; the two ends
+are each runtime's own limit, and the runtime without one renders it as the
+nearest it has. Codex's ``none`` is deliberately absent: Claude has no rung
+below ``low``, so admitting it here would turn "do not reason" into "reason a
+little" on one runtime without saying so. Beside the tier because the two are
+asked of a model together, by a session request and by a harness declaration
+alike."""
+
 type SubagentCapability = Literal["workspace-read", "web-search"]
 """A provider-neutral facility a delegated role may use."""
 

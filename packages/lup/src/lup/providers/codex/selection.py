@@ -46,11 +46,11 @@ from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.native_tools import CodexNativeTools
 from lup.providers.codex.runtime import (
     CODEX_PROGRAM,
-    CodexEffort,
     CodexMcpServerConfig,
     CodexSessionConfig,
     create_codex,
 )
+from lup.providers.codex.subagents import CODEX_EFFORT
 from lup.tools.mcp import LupMcpServerConfig, McpServerEntry, RawStdioServerConfig
 from lup.sessions.client import Client
 from lup.sessions.errors import UnsupportedCapability
@@ -58,7 +58,6 @@ from lup.providers.selection import (
     Runtime,
     SessionAutonomy,
     SessionContainment,
-    SessionEffort,
     SessionRequest,
 )
 from lup.types import EnvVars
@@ -76,20 +75,6 @@ CODEX_AUTONOMY: dict[SessionAutonomy, CodexSandbox] = {
     "unattended": "danger-full-access",
 }
 """What a session may reach, standing in for an approval it cannot raise."""
-
-# lup: ignore[constant-declaration] — each value is Codex's own effort for the
-# degree beside it, over a vocabulary this library closes
-CODEX_EFFORT: dict[SessionEffort, CodexEffort] = {
-    "minimal": "minimal",
-    "low": "low",
-    "medium": "medium",
-    "high": "high",
-    "xhigh": "xhigh",
-    "max": "xhigh",
-}
-"""What Codex calls each degree of effort a caller can ask for.
-
-``max`` meets ``xhigh`` because Codex's ladder has no rung above it."""
 
 
 def codex_mcp_server(name: str, server: McpServerEntry) -> CodexMcpServerConfig:

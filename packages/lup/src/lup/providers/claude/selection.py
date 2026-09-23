@@ -11,18 +11,17 @@ from lup.workspace.paths import project_root
 from lup.providers.claude.config_home import workspace_config_environment
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.providers.claude.runtime import (
-    ClaudeEffort,
     ClaudePermissionMode,
     ClaudeSandboxConfig,
     ClaudeSessionConfig,
     create_claude,
 )
+from lup.providers.claude.subagents import CLAUDE_EFFORT
 from lup.sessions.client import Client
 from lup.providers.selection import (
     Runtime,
     SessionAutonomy,
     SessionContainment,
-    SessionEffort,
     SessionRequest,
 )
 
@@ -35,20 +34,6 @@ CLAUDE_AUTONOMY: dict[SessionAutonomy, ClaudePermissionMode] = {
     "unattended": "bypassPermissions",
 }
 """What Claude Code calls each degree of autonomy a caller can ask for."""
-
-# lup: ignore[constant-declaration] — each value is Claude Code's own effort for
-# the degree beside it, over a vocabulary this library closes
-CLAUDE_EFFORT: dict[SessionEffort, ClaudeEffort] = {
-    "minimal": "low",
-    "low": "low",
-    "medium": "medium",
-    "high": "high",
-    "xhigh": "xhigh",
-    "max": "max",
-}
-"""What Claude Code calls each degree of effort a caller can ask for.
-
-``minimal`` meets ``low`` because Claude's ladder has no rung beneath it."""
 
 
 # lup: ignore[constant-declaration] — each value is Claude Code's own sandbox

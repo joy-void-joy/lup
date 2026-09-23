@@ -24,7 +24,7 @@ from lup.tools.native import NativeTools, native_grants
 from lup.sessions.client import Client
 from lup.providers.login import ProviderLogin
 from lup.sessions.events import SubmissionGateResolver
-from lup.types import EnvVars
+from lup.types import EnvVars, SessionEffort
 
 type SessionAutonomy = Literal["ask", "accept_edits", "plan", "unattended"]
 """How much a session may do before it stops to ask.
@@ -34,17 +34,6 @@ one spells this as a permission mode over tools, the other as a sandbox its
 approvals are decided against, and a caller wanting an unattended session
 should not have to know which.
 """
-
-type SessionEffort = Literal["minimal", "low", "medium", "high", "xhigh", "max"]
-"""How hard a session is asked to think before it answers.
-
-The four middle rungs are the words both runtimes already share; the two ends
-are each runtime's own limit, and the runtime without one renders it as the
-nearest it has. Codex's ``none`` is deliberately absent: Claude has no rung
-below ``low``, so admitting it here would turn "do not reason" into "reason a
-little" on one runtime without saying so.
-"""
-
 
 type SessionContainment = Literal["outer", "inner", "none"]
 """Which wall a session is opened behind.

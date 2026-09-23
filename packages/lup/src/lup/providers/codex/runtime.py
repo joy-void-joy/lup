@@ -31,7 +31,7 @@ from lup.providers.codex.home import CodexWorktreeHomeStore, install_declared_po
 from lup.providers.selection import SessionContainment
 from lup.providers.codex.login import CODEX_HOME, native_home
 from lup.providers.codex.output import CodexOutputContract, codex_output_contract
-from lup.providers.codex.subagents import CodexSubagentTools
+from lup.providers.codex.subagents import CodexEffort, CodexSubagentTools
 from lup.policy.hooks import LupHookInput, LupHookOutput, LupHooksConfig
 from lup.policy.identity import POLICY_ROOT_ENV
 from lup.providers.codex.native_tools import CodexNativeTools
@@ -82,23 +82,6 @@ from lup.sessions.recursion import (
 )
 from lup.sessions.transcript import fold_transcript
 from lup.types import EnvVars, JsonObject, JsonValue, Usage
-
-
-type CodexEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh"]
-"""How much reasoning a Codex turn is asked to spend, in Codex's own words.
-
-Declared beside the config that carries it rather than beside the table that
-translates a portable tier into it, because a model and its effort are one
-choice on the wire and this is where that choice is assembled.
-
-Not every model accepts every rung, and the ladder moves: a home written for a
-newer model here carried ``max``, which the API refused for an older one with
-"Supported values are: 'none', 'low', 'medium', 'high', and 'xhigh'" — a list
-that also omits the ``minimal`` this closes over. What follows from that is
-:meth:`CodexSessionConfig.model_selection`, not a narrower literal: which
-rungs a given model accepts is the vendor's to answer per model, and guessing
-it here would refuse configurations that work.
-"""
 
 
 CODEX_PROGRAM = Path("codex")

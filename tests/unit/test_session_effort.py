@@ -15,9 +15,12 @@ from pathlib import Path
 
 import pytest
 
-from lup.providers.claude.selection import CLAUDE_EFFORT, claude_config
-from lup.providers.codex.selection import CODEX_EFFORT, codex_config
-from lup.providers.selection import SessionEffort, SessionRequest
+from lup.providers.claude.selection import claude_config
+from lup.providers.claude.subagents import CLAUDE_EFFORT
+from lup.providers.codex.selection import codex_config
+from lup.providers.codex.subagents import CODEX_EFFORT
+from lup.providers.selection import SessionRequest
+from lup.types import SessionEffort
 
 EVERY_DEGREE: list[SessionEffort] = [
     "minimal",

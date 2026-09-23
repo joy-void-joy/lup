@@ -35,6 +35,7 @@ from lup.tools.mcp import (
 )
 from lup.tools.native import NativeTools, native_grants
 from lup.providers.claude.native_tools import claude_native_tools, claude_tool_allowed
+from lup.providers.claude.subagents import ClaudeEffort
 from lup.sessions.recursion import (
     child_recursive_agent_allowance,
     recursive_agent_scope,
@@ -140,10 +141,6 @@ type ClaudePermissionMode = Literal[
     "default", "acceptEdits", "plan", "bypassPermissions", "dontAsk", "auto"
 ]
 """Claude Code's own words for how much a session may do without asking."""
-
-
-type ClaudeEffort = Literal["low", "medium", "high", "xhigh", "max"]
-"""Claude Code's own reasoning-effort ladder, which starts at ``low``."""
 
 
 class ClaudeSessionConfig(
