@@ -825,6 +825,9 @@ class Image(BaseModel, frozen=True):
         seeding = (Path(__file__).parent / "assets" / "credential_seed.py").read_text(
             encoding="utf-8"
         )
+        trusting = (Path(__file__).parent / "assets" / "trust_seed.py").read_text(
+            encoding="utf-8"
+        )
         shim_names = " ".join(self.clipboard.shims)
         # Quoted, because `ENV name=value` takes whitespace as separating
         # *more* pairs: an unquoted `GIT_SSH_COMMAND=ssh -o BatchMode=yes`
@@ -896,9 +899,6 @@ if [ ! -w "$config" ]; then
   echo "lup: remove that volume and the next launch recreates it." >&2
   exit 1
 fi
-if [ ! -f "$config/.claude.json" ]; then
-  cp /opt/lup/trust-seed.json "$config/.claude.json"
-fi
 # The checkout this container was started against is the one the operator
 # chose when they wrote the mount and the workdir, so it is trusted here
 # rather than enumerated at build time. Building the list from a directory
@@ -910,14 +910,12 @@ fi
 # permissions with a notice when the worktree alone was trusted. Merged on
 # every start rather than written once, because the document outlives the
 # image in its volume, and a runtime that moves where it looks would
-# otherwise meet a file nothing amends.
+# otherwise meet a file nothing amends. A program rather than a jq pipeline,
+# because every container on this volume runs this line and several start at
+# once: trust-seed.py holds the lock, and says what each of its guards answers.
 repository=$(git -C "$PWD" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || printf '%s' "$PWD")
 case "$repository" in */.git) repository=${{repository%/.git}} ;; esac
-jq --arg here "$PWD" --arg repository "$repository" \\
-   '.projects[$here] = ((.projects[$here] // {{}}) + {{"hasTrustDialogAccepted": true}})
-    | .projects[$repository] = ((.projects[$repository] // {{}}) + {{"hasTrustDialogAccepted": true}})' \\
-   "$config/.claude.json" > "$config/.claude.json.lup" \\
-  && mv "$config/.claude.json.lup" "$config/.claude.json"
+python3 /opt/lup/trust-seed.py /opt/lup/trust-seed.json "$config/.claude.json" "$PWD" "$repository"
 # A selected host login is applied once per change. Native renewal remains
 # container-private, and unrelated records in a shared credential file survive.
 if [ -n "${{LUP_CREDENTIAL_NAME:-}}" ]; then
@@ -941,6 +939,9 @@ ENTRYPOINT ["/usr/local/bin/lup-entrypoint"]
 COPY <<'CREDENTIAL' /opt/lup/credential-seed.py
 {seeding}
 CREDENTIAL
+COPY <<'TRUST' /opt/lup/trust-seed.py
+{trusting}
+TRUST
 
 # What `BROWSER` names, so a sign-in inside can reach a browser outside. The
 # pipe it writes to is mounted per launch; with nothing mounted the script
