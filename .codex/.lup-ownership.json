@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "efb47c89bb043433a6c789d0cc960821ee7fb1aaadb00b2234d97ed85aafcffe",
+  "source_digest": "2424582461579d92c594fc1cd1902d8681452fc4114f79208074cd41454a393d",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -121,7 +121,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/coordination/naming.py",
       "category": "generated",
-      "sha256": "c174416a57c78ee3c6482d30378e560db97cef24ceba220a2a6ec81cdbb66f7c",
+      "sha256": "fbabbe1491649e5551ce848c8f5b1a47aeffc6c2caf110ff2c0f29ad5b1c04b7",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -366,7 +366,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/session_naming.py",
       "category": "generated",
-      "sha256": "614d1cce6056f41da159820ac71e0394fed452229237e6b08104a1e9e5046042",
+      "sha256": "bb91209bfcf2b1ed22db99164e8bb02f36ebba723da8ef19eaec9098ce5a88f4",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -450,7 +450,7 @@
     {
       "path": ".codex/plugins/lup/hooks/session_naming.json",
       "category": "generated",
-      "sha256": "44872d65b024f379445f02817f0425b34befe7dbf7a9839824b89125ee9eff84",
+      "sha256": "cc76244c74640c0904e380321b5cee9ab8d0ee1cffeaebbaed6206d382688ca4",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "efb47c89bb043433a6c789d0cc960821ee7fb1aaadb00b2234d97ed85aafcffe",
+  "source_digest": "2424582461579d92c594fc1cd1902d8681452fc4114f79208074cd41454a393d",
   "target_requirements": [
     "claude-code"
   ],
@@ -394,7 +394,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/coordination/naming.py",
       "category": "generated",
-      "sha256": "c174416a57c78ee3c6482d30378e560db97cef24ceba220a2a6ec81cdbb66f7c",
+      "sha256": "fbabbe1491649e5551ce848c8f5b1a47aeffc6c2caf110ff2c0f29ad5b1c04b7",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -632,7 +632,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/session_naming.py",
       "category": "generated",
-      "sha256": "561d7d98c89d2cd0bcb8536d1d59608cfeadfb7823b8ff8b65f96fa597cbe012",
+      "sha256": "b68e1bb00b9f82c73e7a6a41c5e1d67c31a40bfdee20204cd6b61c617709a443",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -709,7 +709,7 @@
     {
       "path": ".claude/plugins/lup/hooks/session_naming.json",
       "category": "generated",
-      "sha256": "a08f8771caa702f0f7cb1f40fb760274ccdcaaa4ad34a2738c9b4de815d6f1c8",
+      "sha256": "6295f3459c72d10ff871d6e424abed67eb459c60392cea639e64258fe7d13e54",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -828,7 +828,7 @@
     {
       "path": "docs/platform-differentiation.md",
       "category": "generated",
-      "sha256": "4e61d249393ccc6776392a485c4a4493b652c42ca51b58f5ae259641e636109b",
+      "sha256": "e9676ffdd90fc0ae098f47d227b91a8218430cce8609188f702261633142a260",
       "semantic_id": "docs.platform-differentiation",
       "executable": false
     },

@@ -9,7 +9,7 @@ from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, rule_set_for
 from lup.providers.peer_delivery import delivery_artifacts, delivery_command
 from lup.providers.drift_prompt import drift_hook
-from lup.providers.session_naming import naming_hook
+from lup.providers.session_naming import NamingSpelling, naming_hook
 from lup.providers.subagent_cleanup import cleanup_hooks
 from lup.providers.roster_prompt import (
     departure_hook,
@@ -761,9 +761,14 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                     CLAUDE_PROMPT_EVENT,
                     CLAUDE_SESSION_NAMING,
                     "lup.providers.claude.assets.session_naming",
-                    self.spellings.model_alias,
-                    CLAUDE_EFFORT,
-                    waits=True,
+                    NamingSpelling(
+                        models=self.spellings.model_alias,
+                        efforts=CLAUDE_EFFORT,
+                        # The CLI's own spelling of a session with no built-in
+                        # tool: "Use \"\" to disable all tools" in its --help.
+                        arguments=["--tools", ""],
+                        waits=True,
+                    ),
                 ),
             ]
         )

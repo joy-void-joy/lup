@@ -40,6 +40,12 @@ something a name may hold up past its deadline or stop.
 """
 
 import json
+import os
+import signal
+
+# lup: ignore[subprocess] — `sh` is third-party and this package is shipped
+# into a bare interpreter that has no virtual environment to resolve it from
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TypedDict
@@ -73,7 +79,9 @@ class Naming(TypedDict):
 
     Written beside the hook by the generator, in the runtime's own spellings:
     ``model`` and ``effort`` are the words that runtime's CLI takes for the
-    declared tier and rung.
+    declared tier and rung, and ``arguments`` the words that open its ask
+    with no native tool at all — a list the adapter maintains for its own
+    sessions, compiled here because a bare script cannot import it.
     """
 
     model: str
@@ -82,6 +90,7 @@ class Naming(TypedDict):
     attempts: int
     deadline_seconds: float
     longest: int
+    arguments: list[str]
 
 
 class Titling(TypedDict):
@@ -144,15 +153,18 @@ def settings(path: Path) -> Naming | None:
     found = loaded(path, Naming)
     if found is None:
         return None
-    attempts, deadline, longest = (
+    attempts, deadline, longest, arguments = (
         found.get("attempts"),
         found.get("deadline_seconds"),
         found.get("longest"),
+        found.get("arguments"),
     )
     if not (
         isinstance(attempts, int)
         and isinstance(deadline, int | float)
         and isinstance(longest, int)
+        and isinstance(arguments, list)
+        and all(isinstance(word, str) for word in arguments)
     ):
         return None
     return Naming(
@@ -162,7 +174,58 @@ def settings(path: Path) -> Naming | None:
         attempts=attempts,
         deadline_seconds=float(deadline),
         longest=longest,
+        arguments=arguments,
     )
+
+
+def request_for(prompt: str) -> str:
+    """The prompt as the naming model reads it: quoted, as the thing to name.
+
+    Handed over bare, a prompt is a request the model answers — a runtime
+    whose naming model has tools was measured exploring a scratch directory
+    to explain what it had been asked to name, until its deadline ran out.
+    Between markers the declared instruction can point at, it is data.
+    """
+    return f"<request>\n{prompt}\n</request>"
+
+
+def ran(arguments: list[str], given: str, deadline: float, cwd: str = "") -> str | None:
+    """What *arguments* print when handed *given*, or nothing where they overran.
+
+    Started in a session of its own and killed whole at the deadline. A CLI
+    installed as a wrapper around its real binary leaves the binary running
+    when only the wrapper is killed: measured with Codex's npm wrapper, whose
+    binary went on past the deadline and wrote its answer into a directory
+    already removed.
+    """
+    try:
+        process = subprocess.Popen(
+            arguments,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            cwd=cwd or None,
+            start_new_session=True,
+        )
+    except OSError:
+        return None
+    try:
+        printed, _ = process.communicate(given, timeout=deadline)
+    except subprocess.TimeoutExpired:
+        stopped(process)
+        return None
+    return printed
+
+
+def stopped(process: subprocess.Popen[str]) -> None:
+    """Kill *process* and everything in its session, and reap it."""
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        process.wait()
+        return
+    process.communicate()
 
 
 def compiled_for(host: Path) -> Naming | None:

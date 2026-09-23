@@ -31,10 +31,6 @@ Every failure is silence: the prompt goes on, and the session keeps its name.
 """
 
 import json
-
-# lup: ignore[subprocess] — `sh` is third-party and this half is shipped into a
-# bare script that has no virtual environment to resolve it from
-import subprocess
 import sys
 from pathlib import Path
 from typing import TypedDict
@@ -57,6 +53,8 @@ from coordination.naming import (
     named,
     owning,
     pending,
+    ran,
+    request_for,
     settled,
 )
 
@@ -92,34 +90,30 @@ def asked(prompt: str, naming: Naming) -> str:
     pasted one would overrun, and whole: a prompt too long for the naming
     model is an ask that fails, not one to cut.
     """
+    printed = ran(
+        [
+            "claude",
+            "--safe-mode",
+            "-p",
+            "--model",
+            naming["model"],
+            "--effort",
+            naming["effort"],
+            "--no-session-persistence",
+            *naming["arguments"],
+            "--output-format",
+            "json",
+            "--json-schema",
+            answer_schema(),
+            "--system-prompt",
+            naming["instruction"],
+        ],
+        request_for(prompt),
+        naming["deadline_seconds"],
+    )
     try:
-        finished = subprocess.run(
-            [
-                "claude",
-                "--safe-mode",
-                "-p",
-                "--model",
-                naming["model"],
-                "--effort",
-                naming["effort"],
-                "--no-session-persistence",
-                "--tools",
-                "",
-                "--output-format",
-                "json",
-                "--json-schema",
-                answer_schema(),
-                "--system-prompt",
-                naming["instruction"],
-            ],
-            input=prompt,
-            capture_output=True,
-            text=True,
-            timeout=naming["deadline_seconds"],
-            check=False,
-        )
-        result: Result = json.loads(finished.stdout)
-    except (OSError, subprocess.TimeoutExpired, ValueError):
+        result: Result = json.loads(printed or "")
+    except ValueError:
         return ""
     if not isinstance(result, dict) or result.get("is_error", True):
         return ""

@@ -20,7 +20,7 @@ from typing import TypedDict
 import pytest
 import sh
 
-from lup.coordination.bare.naming import Naming, recalled
+from lup.coordination.bare.naming import Naming, recalled, request_for
 from lup.coordination.bare.store import current_name, member_of, session_actor
 from lup.coordination.identity import MEMBER_ENV, mint_member_id
 from lup.coordination.repository import RepositoryPeers
@@ -28,13 +28,19 @@ from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.harness.models import Artifact, HookSet
 from lup.providers.claude.harness import CLAUDE_PROMPT_EVENT, CLAUDE_SESSION_NAMING
 from lup.providers.codex.harness import CODEX_PROMPT_EVENT, CODEX_SESSION_NAMING
+from lup.providers.codex.native_tools import CodexNativeTools
 from lup.providers.roster_prompt import store_modules
-from lup.providers.session_naming import GUARD_SCRIPT, RUNTIME_ENTRY, naming_hook
+from lup.providers.session_naming import (
+    GUARD_SCRIPT,
+    RUNTIME_ENTRY,
+    NamingSpelling,
+    naming_hook,
+)
 from lup_template.harness.catalog import declared_hook_set
 from lup_template.harness.composition import claude_target, codex_target
 
 RUNTIMES = pytest.mark.parametrize(
-    ("target", "tree", "event", "host", "model", "timeout"),
+    ("target", "tree", "event", "host", "model", "timeout", "arguments"),
     [
         pytest.param(
             claude_target,
@@ -43,6 +49,7 @@ RUNTIMES = pytest.mark.parametrize(
             CLAUDE_SESSION_NAMING,
             "sonnet",
             30,
+            ["--tools", ""],
             id="claude",
         ),
         pytest.param(
@@ -52,6 +59,7 @@ RUNTIMES = pytest.mark.parametrize(
             CODEX_SESSION_NAMING,
             "gpt-5.6-terra",
             10,
+            CodexNativeTools().arguments(),
             id="codex",
         ),
     ],
@@ -226,6 +234,7 @@ def test_the_prompt_event_registers_the_naming_hook_and_refuses_nothing(
     host: str,
     model: str,
     timeout: int,
+    arguments: list[str],
 ) -> None:
     """Under the prompt event, never refusing, with the declaration in the runtime's words."""
     artifacts = shipped(target)
@@ -247,6 +256,7 @@ def test_the_prompt_event_registers_the_naming_hook_and_refuses_nothing(
     assert artifacts[plugin / "hooks" / "runtime" / RUNTIME_ENTRY].content == host
     assert settings["model"] == model
     assert settings["effort"] == "low"
+    assert settings["arguments"] == arguments
 
 
 @pytest.mark.parametrize("declined", ["peer_policy", "session_naming"])
@@ -260,9 +270,12 @@ def test_no_roster_or_no_naming_registers_nothing(declined: str) -> None:
         CLAUDE_PROMPT_EVENT,
         CLAUDE_SESSION_NAMING,
         "lup.providers.claude.assets.session_naming",
-        lambda _tier: "sonnet",
-        {"low": "low"},
-        waits=True,
+        NamingSpelling(
+            models=lambda _tier: "sonnet",
+            efforts={"low": "low"},
+            arguments=["--tools", ""],
+            waits=True,
+        ),
     )
 
     assert hook.registered == {}
@@ -292,8 +305,8 @@ def test_claude_names_the_session_while_its_first_prompt_waits(
     }
     assert session.called() == "session-naming-hook"
     [ask] = session.asked()
-    assert ask.get("prompt") == "Name each session after its work"
-    assert ask.get("arguments", [])[:8] == [
+    assert ask.get("prompt") == request_for("Name each session after its work")
+    assert ask.get("arguments", [])[:9] == [
         "--safe-mode",
         "-p",
         "--model",
@@ -302,6 +315,7 @@ def test_claude_names_the_session_while_its_first_prompt_waits(
         "low",
         "--no-session-persistence",
         "--tools",
+        "",
     ]
     assert session.prompted("And test it", title="session-naming-hook") == ""
     assert len(session.asked()) == 1
@@ -365,9 +379,11 @@ def test_codex_names_the_session_and_its_thread_without_holding_the_prompt(
     assert session.prompted("Name each session after its work") == ""
     ask, named = session.concluded(2)
 
-    assert ask.get("prompt") == "Name each session after its work"
+    assert ask.get("prompt") == request_for("Name each session after its work")
     assert ask.get("arguments", [])[:2] == ["exec", "--ephemeral"]
-    assert "--disable" in ask.get("arguments", [])
+    assert "features.hooks=false" in ask.get("arguments", [])
+    assert "features.shell_tool=false" in ask.get("arguments", [])
+    assert 'sandbox_mode="read-only"' in ask.get("arguments", [])
     assert named == Asked(
         named=Named(threadId="root-session", name="session-naming-hook")
     )

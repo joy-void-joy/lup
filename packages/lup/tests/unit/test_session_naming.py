@@ -9,6 +9,7 @@ library by construction rather than by a pin.
 """
 
 import json
+import time
 from datetime import timedelta
 from pathlib import Path
 
@@ -38,6 +39,7 @@ def declared(attempts: int = 3, deadline_seconds: float = 20.0) -> Naming:
         attempts=attempts,
         deadline_seconds=deadline_seconds,
         longest=48,
+        arguments=["--tools", ""],
     )
 
 
@@ -253,7 +255,57 @@ def test_a_malformed_declaration_names_nothing(tmp_path: Path) -> None:
     written = tmp_path / "session_naming.json"
     written.write_text(json.dumps({**declared(), "attempts": "3"}))
     assert naming.settings(written) is None
+    written.write_text(json.dumps({**declared(), "arguments": "--tools"}))
+    assert naming.settings(written) is None
 
     written.write_text(json.dumps(declared()))
     assert naming.settings(written) == declared()
     assert naming.settings(tmp_path / "absent.json") is None
+
+
+def test_the_compiled_declaration_is_read_beside_the_hooks_manifest(
+    tmp_path: Path,
+) -> None:
+    """Outside the runtime directory, whose every file a policy snapshot hashes."""
+    host = tmp_path / "hooks" / "runtime" / "session_naming.py"
+    host.parent.mkdir(parents=True)
+    (tmp_path / "hooks" / "session_naming.json").write_text(json.dumps(declared()))
+
+    assert naming.compiled_for(host) == declared()
+
+
+def test_the_prompt_reaches_the_model_quoted_as_the_thing_to_name() -> None:
+    """Between the markers the declared instruction points at, whole."""
+    prompt = "Refactor the roster\n\nand keep every line of this"
+
+    assert naming.request_for(prompt) == f"<request>\n{prompt}\n</request>"
+
+
+def test_an_ask_that_overruns_its_deadline_is_killed_with_everything_it_started(
+    tmp_path: Path,
+) -> None:
+    """A wrapper killed alone leaves its real binary running; the session goes whole."""
+    survivor = tmp_path / "survived"
+    started = utc_now()
+
+    assert (
+        naming.ran(
+            ["sh", "-c", f"(sleep 2; touch {survivor}) & wait"],
+            "",
+            0.5,
+        )
+        is None
+    )
+    assert (utc_now() - started).total_seconds() < 2
+    for _ in range(30):
+        if survivor.exists():
+            break
+        time.sleep(0.1)
+    assert not survivor.exists()
+
+
+def test_an_ask_that_answers_in_time_is_read_whole() -> None:
+    assert naming.ran(["cat"], '{"name": "auth-refactor"}', 5.0) == (
+        '{"name": "auth-refactor"}'
+    )
+    assert naming.ran(["no-such-program-anywhere"], "", 5.0) is None

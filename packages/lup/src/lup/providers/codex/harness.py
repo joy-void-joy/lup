@@ -11,7 +11,8 @@ from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.subagents import CODEX_EFFORT, CodexModelTiers
 from lup.providers.drift_prompt import drift_hook
 from lup.providers.peer_delivery import delivery_artifacts, delivery_command
-from lup.providers.session_naming import naming_hook
+from lup.providers.codex.native_tools import CodexNativeTools
+from lup.providers.session_naming import NamingSpelling, naming_hook
 from lup.providers.roster_prompt import (
     departure_hook,
     folded,
@@ -881,9 +882,15 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                     CODEX_PROMPT_EVENT,
                     CODEX_SESSION_NAMING,
                     "lup.providers.codex.assets.session_naming",
-                    self.spellings.model_alias,
-                    CODEX_EFFORT,
-                    waits=False,
+                    NamingSpelling(
+                        models=self.spellings.model_alias,
+                        efforts=CODEX_EFFORT,
+                        # Every facility that could hand the ask a tool, off:
+                        # measured with its shell on, the naming model went
+                        # exploring until its deadline instead of answering.
+                        arguments=CodexNativeTools().arguments(),
+                        waits=False,
+                    ),
                 ),
             ]
         )

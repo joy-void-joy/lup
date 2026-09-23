@@ -23,11 +23,16 @@ Measured on Codex 0.155.1:
   TUI's status line went on showing the title it already had.
 - Codex names a thread itself from its first prompt, and that is what the
   session's own status line shows.
-- ``codex exec --ephemeral --skip-git-repo-check --ignore-user-config
-  --disable hooks -s read-only -C <scratch>`` with ``--output-schema``
-  answered a naming ask in 3.7 seconds with JSON meeting the schema, and
-  ``-o`` wrote it to a file. Nothing of this project's plugin loads in it:
-  the configuration naming the plugin is ignored and hooks are off.
+- ``codex exec --ephemeral --skip-git-repo-check --ignore-user-config -C
+  <scratch>`` with ``--output-schema`` answered a naming ask in 3.7 seconds
+  with JSON meeting the schema, and ``-o`` wrote it to a file. With its shell
+  on, it met a prompt asking it to explain something by exploring the
+  scratch directory until the deadline passed, so the ask is opened with the
+  arguments the generator compiles from the adapter's own list of facilities
+  to switch off — every tool, every hook, every write — and the prompt
+  arrives quoted, as the thing to name. Killing the npm wrapper at that
+  deadline left the binary running, which is why an ask runs in a session of
+  its own that is killed whole.
 - The hook's ``session_id`` is the thread's id, which the arrival binder
   records as the thread ``codex queue`` takes.
 
@@ -35,6 +40,8 @@ Every failure is silence: the prompt goes on, and the session keeps its name.
 """
 
 import json
+import os
+import signal
 
 # lup: ignore[subprocess] — `sh` is third-party and this half is shipped into a
 # bare script that has no virtual environment to resolve it from
@@ -62,8 +69,11 @@ from coordination.naming import (
     looked,
     owning,
     pending,
+    ran,
     recalled,
+    request_for,
     settled,
+    stopped,
 )
 
 
@@ -110,49 +120,50 @@ def asked(prompt: str, naming: Naming) -> str:
 
     Asked from a scratch directory, so the project configuration beside the
     session is not the one read, and whole on stdin: a prompt too long for
-    the naming model is an ask that fails, not one to cut.
+    the naming model is an ask that fails, not one to cut. The compiled
+    arguments are what keep the ask to answering — no tool, no hook, nothing
+    written — and the configuration naming this project's plugin is not read.
     """
     with tempfile.TemporaryDirectory(prefix="lup-naming-") as scratch:
         schema = Path(scratch) / "schema.json"
         reply = Path(scratch) / "answer.json"
         try:
             schema.write_text(answer_schema(), encoding="utf-8")
-            subprocess.run(
-                [
-                    "codex",
-                    "exec",
-                    "--ephemeral",
-                    "--skip-git-repo-check",
-                    "--ignore-user-config",
-                    "--disable",
-                    "hooks",
-                    "-s",
-                    "read-only",
-                    "-C",
-                    scratch,
-                    "-m",
-                    naming["model"],
-                    "-c",
-                    f"model_reasoning_effort={json.dumps(naming['effort'])}",
-                    "-c",
-                    'web_search="disabled"',
-                    "-c",
-                    f"developer_instructions={json.dumps(naming['instruction'])}",
-                    "--output-schema",
-                    str(schema),
-                    "-o",
-                    str(reply),
-                    "-",
-                ],
-                input=prompt,
-                capture_output=True,
-                text=True,
-                timeout=naming["deadline_seconds"],
-                check=False,
-                cwd=scratch,
+        except OSError:
+            return ""
+        printed = ran(
+            [
+                "codex",
+                "exec",
+                "--ephemeral",
+                "--skip-git-repo-check",
+                "--ignore-user-config",
+                "-C",
+                scratch,
+                "-m",
+                naming["model"],
+                "-c",
+                f"model_reasoning_effort={json.dumps(naming['effort'])}",
+                "-c",
+                f"developer_instructions={json.dumps(naming['instruction'])}",
+                *naming["arguments"],
+                "--output-schema",
+                str(schema),
+                "-o",
+                str(reply),
+                "-",
+            ],
+            request_for(prompt),
+            naming["deadline_seconds"],
+            cwd=scratch,
+        )
+        try:
+            return (
+                answered(reply.read_text("utf-8"), naming["longest"])
+                if printed is not None
+                else ""
             )
-            return answered(reply.read_text("utf-8"), naming["longest"])
-        except (OSError, subprocess.TimeoutExpired):
+        except OSError:
             return ""
 
 
@@ -160,8 +171,9 @@ def thread_named(thread: str, name: str, deadline: float) -> bool:
     """Name *thread* through a short-lived app-server over the session's own home.
 
     The home is whatever the environment names, which is the session's: a
-    hook inherits it from the runtime that spawned it. Killed at the
-    deadline, which ends every read below with the stream it was waiting on.
+    hook inherits it from the runtime that spawned it. In a session of its
+    own and killed whole at the deadline, which ends every read below with
+    the stream it was waiting on — the wrapper and the binary it starts alike.
     """
     try:
         server = subprocess.Popen(
@@ -170,10 +182,11 @@ def thread_named(thread: str, name: str, deadline: float) -> bool:
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             text=True,
+            start_new_session=True,
         )
     except OSError:
         return False
-    watchdog = threading.Timer(deadline, server.kill)
+    watchdog = threading.Timer(deadline, os.killpg, (server.pid, signal.SIGKILL))
     watchdog.start()
     try:
         return (
@@ -197,8 +210,7 @@ def thread_named(thread: str, name: str, deadline: float) -> bool:
         )
     finally:
         watchdog.cancel()
-        server.kill()
-        server.wait()
+        stopped(server)
 
 
 def notified(server: subprocess.Popen[str], notification: Notification) -> bool:

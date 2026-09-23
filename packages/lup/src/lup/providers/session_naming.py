@@ -17,15 +17,17 @@ runtime directory a policy evaluator's snapshot admits only source into.
 
 Rendered once here rather than once per adapter, because what the adapters
 own is the event's name, the variable their plugin root is exported as, the
-host half, the words their CLI takes for the declared tier and effort, and
-whether the prompt waits on the ask — and everything else would be the same
-files twice.
+host half, and a :class:`NamingSpelling` — the words their CLI takes for the
+declared tier and effort and for an ask with no tools, and whether the prompt
+waits on it — and everything else would be the same files twice.
 """
 
 import json
 from collections.abc import Callable, Mapping
 from math import ceil
 from pathlib import Path
+
+from pydantic import BaseModel
 
 from lup.coordination.bare.naming import Naming
 from lup.formats.banner import (
@@ -43,15 +45,39 @@ RUNTIME_ENTRY = "session_naming.py"
 """What the plugin carries: the guard, and the host half the guard runs."""
 
 
-def compiled(declared: SessionNaming, model: str, effort: str) -> Naming:
+class NamingSpelling(BaseModel, frozen=True):
+    """What one runtime says for a naming ask, which the declaration leaves to it."""
+
+    models: Callable[[ModelTier], str | None]
+    """Its model for a declared tier, or nothing where it has no word for one."""
+
+    efforts: Mapping[SessionEffort, str]
+    """Its word for each rung of effort."""
+
+    arguments: list[str]
+    """The words that open its ask with no native tool, from its own list of them."""
+
+    waits: bool
+    """Whether it holds the prompt for the hook's answer.
+
+    One that takes a name only from that answer waits on the ask, and its
+    entry's timeout leaves the declared deadline room to run out first, so an
+    ask that overruns is abandoned by the host half rather than killed by the
+    runtime halfway through settling a name. One that names the session
+    elsewhere returns at once, and keeps the short budget every prompt-time
+    fold has."""
+
+
+def compiled(declared: SessionNaming, model: str, spelling: NamingSpelling) -> Naming:
     """The declaration in one runtime's words, as its host half reads it."""
     return Naming(
         model=model,
-        effort=effort,
+        effort=spelling.efforts[declared.effort],
         instruction=declared.instruction,
         attempts=declared.attempts,
         deadline_seconds=declared.deadline_seconds,
         longest=declared.longest,
+        arguments=spelling.arguments,
     )
 
 
@@ -62,30 +88,21 @@ def naming_hook(
     event: str,
     host: str,
     host_origin: str,
-    model_of: Callable[[ModelTier], str | None],
-    efforts: Mapping[SessionEffort, str],
-    waits: bool,
+    spelling: NamingSpelling,
 ) -> PromptHook:
     """The entry under *event* and the files behind it, where naming is declared.
-
-    *waits* is whether the runtime holds the prompt for the hook's answer. One
-    that takes a name only from that answer waits on the ask, and its entry's
-    timeout leaves the declared deadline room to run out first, so an ask that
-    overruns is abandoned by the host half rather than killed by the runtime
-    halfway through settling a name. One that names the session elsewhere
-    returns at once, and keeps the short budget every prompt-time fold has.
 
     A tier the runtime cannot spell registers nothing, rather than an ask that
     could only fail.
     """
     declared = source.session_naming
-    model = model_of(declared.tier) if declared is not None else None
+    model = spelling.models(declared.tier) if declared is not None else None
     if declared is None or source.peer_policy is None or model is None:
         return PromptHook(registered={}, artifacts=[])
     entry: JsonObject = {
         "type": "command",
         "command": guard_command(plugin_root_env, GUARD_SCRIPT),
-        "timeout": ceil(declared.deadline_seconds) + 10 if waits else 10,
+        "timeout": ceil(declared.deadline_seconds) + 10 if spelling.waits else 10,
     }
     hooks = plugin_root / "hooks"
     return PromptHook(
@@ -107,7 +124,7 @@ def naming_hook(
             Artifact(
                 path=hooks / Path(RUNTIME_ENTRY).with_suffix(".json"),
                 content=json.dumps(
-                    compiled(declared, model, efforts[declared.effort]),
+                    compiled(declared, model, spelling),
                     indent=2,
                     sort_keys=True,
                 ),
