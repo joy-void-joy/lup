@@ -1376,6 +1376,14 @@ class SpawnNames(BaseModel, frozen=True):
     written into portable guidance needs: a project running on one runtime
     alone may widen `punctuation` to what that runtime takes.
 
+    The refusal is the only thing that tells a caller which argument the name
+    is. Claude Code 2.1.280 shows the model an `Agent` schema with no `name`
+    in it, `additionalProperties` false, and accepts a `name` all the same;
+    a session refused with "pass a name beside the agent type" put it in
+    `description` twice before trying the key the schema did not list. So
+    ``recovery`` states the shape alone and the kernel opens it with the key
+    the dispatcher read, `name` on Claude Code and `task_name` on Codex.
+
     On by default, since the cost is one argument per spawn and the gain is
     every listing, message and stop naming the work rather than the type.
     """
@@ -1385,11 +1393,14 @@ class SpawnNames(BaseModel, frozen=True):
         " by its type alone, which says nothing about what it is doing"
     )
     recovery: str = (
-        "pass a name beside the agent type: the task in two or three words,"
-        " starting with a letter or digit and carrying only letters, digits"
-        " and underscores, at most 64 characters — it is what the listing"
-        " shows and what a message or a stop addresses"
+        "the task in two or three words, starting with a letter or digit and"
+        " carrying only letters, digits and underscores, at most 64 characters"
+        " — it is what the listing shows and what a message or a stop addresses"
     )
+    """The shape of a name, and nothing about where it goes: the key a runtime
+    reads it from is that runtime's, and the kernel opens the recovery with the
+    one the dispatcher read, so the sentence a caller meets names the argument
+    whether or not the tool schema they were shown did."""
     misspelled: str = (
         "a name outside that shape is rejected by one runtime or another, one"
         " of them silently, so the spawn dies where nothing records it"

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "a0c4bb45562807d25a1726d82b560eb75b6a0a839aa22a745fa051acf7579ef9",
+  "source_digest": "c28b1f3db718af3576d8aa4ad81ddb35bea969960527878c8026bc66d57f087e",
   "target_requirements": [
     "claude-code"
   ],
@@ -548,7 +548,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/rows.py",
       "category": "generated",
-      "sha256": "1bcaa06c26e4cd9fe342bdc07bece509fcba56f82155c54bc98421334ae69f15",
+      "sha256": "53de5c91c484c96c0ce0a48d58ccfb7b9785182d62a92b464b138c5b4c05b552",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -576,7 +576,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/spawns.py",
       "category": "generated",
-      "sha256": "8d2383b6e772a8bd9ac2e440fc4534ee515d3183b205633284a9d18e23a17295",
+      "sha256": "57cd9a73d5b7c5a0e1424b11dd5669e0e851e2d9f2d1625aba59da8b5ec41ca2",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -618,7 +618,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "6c47ab87b9059f1a5b72a6559380671e620b2e4921ef16eed143db30ce75d3bd",
+      "sha256": "0068384251b610e8ce2d0546b3afca47034bb3ba6f857d458c5bf12df0e03849",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -660,7 +660,7 @@
     {
       "path": ".claude/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "13448f5fa2299f28bd11af7779555bc1b4ae05eb53ad034e9de168ad10a73f3e",
+      "sha256": "63ec9e1f17f64ba4e238feae8377e639a233370f55bfb386274641ac8ad499a2",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
@@ -674,7 +674,7 @@
     {
       "path": ".claude/plugins/lup/hooks/scripts/policy_evaluator.py",
       "category": "generated",
-      "sha256": "ed83122dd587bc3b2936a337c00579c838051f4812fc234ac76e3c55a56ea1ae",
+      "sha256": "faa0d3b0273f014449ec51431e2345370e80cf76fdacde52cebd4506a738dbd3",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

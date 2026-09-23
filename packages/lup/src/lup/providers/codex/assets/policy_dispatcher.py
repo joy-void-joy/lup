@@ -225,6 +225,7 @@ def dispatch(payload, permission_request=False):
         return spawn_decision(
             tool_input["task_name"] if "task_name" in tool_input else "",
             [value for value in tool_input.values() if isinstance(value, str)],
+            "task_name",
         )
     # Asked of whatever reached here rather than of a listed few, exactly as
     # the Claude half asks it: which tools are worth refusing is the

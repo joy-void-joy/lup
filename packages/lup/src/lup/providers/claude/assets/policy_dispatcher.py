@@ -310,6 +310,7 @@ def dispatch(payload):
         return spawn_decision(
             tool_input["name"] if "name" in tool_input else "",
             [value for value in tool_input.values() if isinstance(value, str)],
+            "name",
         )
     # Asked of whatever reached here rather than of a listed few: which tools
     # are worth refusing is the declaration's answer, and naming any of them

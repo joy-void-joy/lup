@@ -2923,14 +2923,15 @@ def peer_listing_decision() -> KernelDecision:
     return decide_peer_listing(PEER_POLICY)
 
 
-def spawn_decision(name: str, values: list[str]) -> KernelDecision:
+def spawn_decision(name: str, values: list[str], field: str) -> KernelDecision:
     """Judge one native spawn by the name it carries, against what this project declared.
 
     ``name`` is the runtime's own field for it, read by the host half that
-    knows which key that is; every string the call carries rides beside it
-    so an escalation marker in any of them is found.
+    knows which key that is, and ``field`` is that key, so the refusal can
+    name the argument; every string the call carries rides beside them so an
+    escalation marker in any of them is found.
     """
-    return decide_spawn(name, values, SPAWN_NAMES)
+    return decide_spawn(name, values, SPAWN_NAMES, field)
 
 
 def peer_listing_attachment(cwd: Path | None) -> str:
@@ -3530,6 +3531,7 @@ def dispatch(payload, permission_request=False):
         return spawn_decision(
             tool_input["task_name"] if "task_name" in tool_input else "",
             [value for value in tool_input.values() if isinstance(value, str)],
+            "task_name",
         )
     # Asked of whatever reached here rather than of a listed few, exactly as
     # the Claude half asks it: which tools are worth refusing is the
