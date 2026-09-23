@@ -170,6 +170,7 @@ def test_a_claude_peer_is_woken_by_a_frame_written_to_its_own_inbox(
     }
 
 
+@pytest.mark.usefixtures("unix_socket")
 def test_a_claude_peer_whose_inbox_has_gone_leaves_the_mail_waiting(
     tmp_path: Path,
 ) -> None:
