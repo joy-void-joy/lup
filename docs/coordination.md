@@ -86,6 +86,23 @@ worktree has the plugin and no launcher, so it falls back to the identity its
 own runtime gave it and is named after its worktree when it joins, numbered
 the same way. It is a full peer that cannot prove who started it.
 
+**A session is named for its work at its first prompt.** The worktree's name
+is a default nobody chose, and every session opened in one checkout shares
+it. Where the hook set declares `session_naming` — on by default beside a
+roster — a hook under the runtime's prompt event asks a model, at the
+balanced tier and low effort, for a short name for the work the prompt
+describes, and renames the session to it: settled under the roster lock and
+numbered past a live session's name, as the default is, because nobody chose
+this one either. A prompt that does not say what the work is gets no name,
+and the next one is asked, up to the declared attempts; a session somebody
+renamed, or whose chrome shows a title somebody set, is never named over.
+The runtime's own name for the session follows the roster — the hook's answer
+on Claude Code, which takes a title from nothing else and so holds the prompt
+for the ask, and `thread/name/set` on Codex, sent by a process of the hook's
+own after the prompt has gone on — and a later rename of the roster reaches
+it the same way, once. What each runtime then shows, and what was measured,
+is on the platform page.
+
 **Every verb but describing is refused until the session has described
 itself.** The roster is read by sessions deciding whether they can touch the
 same code, and a row saying only where a session is answers them wrongly; a

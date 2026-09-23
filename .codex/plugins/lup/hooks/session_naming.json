@@ -1,0 +1,8 @@
+{
+  "attempts": 3,
+  "deadline_seconds": 20.0,
+  "effort": "low",
+  "instruction": "You name a coding session after the work its request describes. Answer with a name of two to four lowercase words joined by hyphens, specific to the work \u2014 what a colleague would call the task, not a restatement of the request \u2014 or null when the request does not say what the work is.",
+  "longest": 48,
+  "model": "gpt-5.6-terra"
+}

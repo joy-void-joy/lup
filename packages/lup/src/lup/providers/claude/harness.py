@@ -9,6 +9,7 @@ from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, rule_set_for
 from lup.providers.peer_delivery import delivery_artifacts, delivery_command
 from lup.providers.drift_prompt import drift_hook
+from lup.providers.session_naming import naming_hook
 from lup.providers.subagent_cleanup import cleanup_hooks
 from lup.providers.roster_prompt import (
     departure_hook,
@@ -64,7 +65,7 @@ from lup.policy.dispatcher import (
 )
 from lup.policy.kernel.rows import PathRoleRow
 from lup.policy.refused_tools import routed_for
-from lup.providers.claude.subagents import model_alias
+from lup.providers.claude.subagents import CLAUDE_EFFORT, model_alias
 from lup.types import ModelTier
 
 
@@ -658,6 +659,13 @@ CLAUDE_SUBAGENT_CLEANUP = (
 )
 """The host half of the subagent cleanup fold, shipped verbatim beside the kernel."""
 
+CLAUDE_SESSION_NAMING = (
+    resources.files("lup.providers.claude")
+    .joinpath("assets/session_naming.py")
+    .read_text("utf-8")
+)
+"""The naming hook's host half, shipped verbatim beside the package it imports."""
+
 # lup: ignore[constant-declaration] — the runtime's wire spelling of its own
 # event, which no project could choose differently and still be heard
 CLAUDE_EXIT_EVENT = "SessionEnd"
@@ -726,10 +734,12 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
         # Under its own event rather than beside the policy's: a prompt is not
         # a tool call, and what the roster has to say at that moment is
         # context rather than a verdict, so nothing here can refuse.
-        # Two folds under the one event, kept side by side rather than merged:
-        # who else is here, and whether what this project is built on still
-        # stands at one commit. Both are context and neither can refuse, so
-        # the runtime runs whichever of them the project declared.
+        # Three hooks under the one event, kept side by side rather than
+        # merged: who else is here, whether what this project is built on
+        # still stands at one commit, and what this session is called. None
+        # can refuse, so the runtime runs whichever the project declared. The
+        # name is the one this runtime waits on, since it takes a title only
+        # from the hook's own answer.
         roster = folded(
             [
                 prompt_hook(
@@ -743,6 +753,17 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                     "CLAUDE_PLUGIN_ROOT",
                     source,
                     CLAUDE_PROMPT_EVENT,
+                ),
+                naming_hook(
+                    Path(f".claude/plugins/{self.plugin_name}"),
+                    "CLAUDE_PLUGIN_ROOT",
+                    source,
+                    CLAUDE_PROMPT_EVENT,
+                    CLAUDE_SESSION_NAMING,
+                    "lup.providers.claude.assets.session_naming",
+                    self.spellings.model_alias,
+                    CLAUDE_EFFORT,
+                    waits=True,
                 ),
             ]
         )
@@ -769,8 +790,9 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
         hooks = {
             "description": (
                 "Lup semantic permission policy, peer delivery, the roster's "
-                "changes at each prompt, this session's departure as it ends, "
-                "and a subagent's report waiting on its background work"
+                "changes at each prompt, this session's name for its work, "
+                "this session's departure as it ends, and a subagent's report "
+                "waiting on its background work"
             ),
             "hooks": {
                 **{

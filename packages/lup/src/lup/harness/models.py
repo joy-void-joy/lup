@@ -54,7 +54,7 @@ from lup.policy.everyday import CommandFamily
 from lup.policy.shell_rules import RunnerTargetRule, ShellCommandRule
 from lup.policy.vocabulary import default_vocabulary
 from lup.seams import SelectableRule, Selection
-from lup.types import JsonValue, ModelTier, ToolGrant, ToolName
+from lup.types import JsonValue, ModelTier, SessionEffort, ToolGrant, ToolName
 
 if TYPE_CHECKING:
     from lup.harness.contracts import NativeSpellings, PromptRenderer
@@ -1446,6 +1446,64 @@ class SubagentCleanup(BaseModel, frozen=True):
     the same arrangement every other spelling in this declaration has."""
 
 
+class SessionNaming(BaseModel, frozen=True):
+    """A project's decision that a session is named for its work, at its first prompt.
+
+    A session is called after its worktree until something renames it, so
+    every session opened in one checkout answers to the same word with a
+    number on it — and so does the runtime chrome that agrees with the
+    roster. Declaring this registers a hook under the runtime's prompt event:
+    at the first prompt that says what the work is, a model is asked for a
+    short name for it, the roster is renamed to the answer, and the runtime's
+    own name for the session follows. Whatever the roster is renamed to later
+    reaches the runtime the same way, once.
+
+    Registered only where a roster is declared, since a name is what the
+    roster addresses. On by default: the cost is one small model call early
+    in a session, and the gain is every listing, message and resume naming
+    the work rather than the checkout.
+    """
+
+    tier: ModelTier = "balanced"
+    reason: str = (
+        "a two-to-four word label gains little from the strongest model, and "
+        "where a runtime takes a name only from the hook's own answer, the "
+        "first prompt waits on the ask"
+    )
+    """Why this role asks below the strongest tier, which every such role states."""
+
+    effort: SessionEffort = "low"
+    """How hard the naming model thinks; a label needs little."""
+
+    instruction: str = (
+        "You name a coding session after the work its request describes. "
+        "Answer with a name of two to four lowercase words joined by hyphens, "
+        "specific to the work — what a colleague would call the task, not a "
+        "restatement of the request — or null when the request does not say "
+        "what the work is."
+    )
+    """What the naming model is told; the prompt is its whole input."""
+
+    attempts: int = Field(default=3, ge=1)
+    """How many prompts are asked before the default name is left standing."""
+
+    deadline_seconds: float = Field(default=20.0, gt=0)
+    """How long one ask may take before it is abandoned and the prompt goes on."""
+
+    longest: int = Field(default=48, ge=8)
+    """The longest name taken; a longer answer names nothing."""
+
+    @model_validator(mode="after")
+    def a_hook_has_no_model_to_inherit(self) -> "SessionNaming":
+        """Refuse ``inherit``: a hook asks outside any session whose model it could take."""
+        if self.tier == "inherit":
+            raise ValueError(
+                "session naming asks outside any session, so it has no model to "
+                "inherit; name a tier"
+            )
+        return self
+
+
 class HookSandbox(BaseModel, frozen=True):
     """OS sandbox declaration compiled into native settings and launchers.
 
@@ -1626,6 +1684,17 @@ class HookSet(BaseModel, frozen=True):
             "and refused once at its stop while any of it is still listed. "
             "None declines, and leaves a subagent's leftovers to whoever "
             "notices them"
+        ),
+    )
+    session_naming: SessionNaming | None = Field(
+        default=SessionNaming(),
+        description=(
+            "Whether a session is named for its work at its first prompt: a "
+            "model is asked for a short name, the roster is renamed to it, and "
+            "the runtime's own name for the session follows, as it follows "
+            "every later rename of the roster. Registered only where a roster "
+            "is declared. None declines, and leaves every session called after "
+            "its worktree until somebody renames it"
         ),
     )
     peer_policy: PeerPolicy | None = Field(

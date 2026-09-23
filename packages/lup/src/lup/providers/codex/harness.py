@@ -8,9 +8,10 @@ from pathlib import Path
 
 import tomlkit
 from lup.providers.codex.login import CODEX_LOGIN
-from lup.providers.codex.subagents import CodexModelTiers
+from lup.providers.codex.subagents import CODEX_EFFORT, CodexModelTiers
 from lup.providers.drift_prompt import drift_hook
 from lup.providers.peer_delivery import delivery_artifacts, delivery_command
+from lup.providers.session_naming import naming_hook
 from lup.providers.roster_prompt import (
     departure_hook,
     folded,
@@ -661,6 +662,13 @@ outlives its report, and output forced onto that session afterwards resumes
 nobody — so the sentence is owed and the refusal is not.
 """
 
+CODEX_SESSION_NAMING = (
+    resources.files("lup.providers.codex")
+    .joinpath("assets/session_naming.py")
+    .read_text("utf-8")
+)
+"""The naming hook's host half, shipped verbatim beside the package it imports."""
+
 CODEX_PATCH_RUNTIME = (
     resources.files("lup.providers.codex").joinpath("patch.py").read_text("utf-8")
 )
@@ -837,10 +845,13 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                 ],
             }
         ]
-        # Two folds under the one event, kept side by side rather than merged:
-        # who else is here, and whether what this project is built on still
-        # stands at one commit. Both are context and neither can refuse, so
-        # the runtime runs whichever of them the project declared.
+        # The hooks under the one event, kept side by side rather than merged:
+        # which thread this session is, who else is here, whether what this
+        # project is built on still stands at one commit, and what this
+        # session is called. None can refuse, so the runtime runs whichever
+        # the project declared. The name holds no prompt here: this runtime
+        # names a thread through its app-server, which a process of the
+        # hook's own reaches after the hook has returned.
         roster = folded(
             [
                 wake_hook(
@@ -862,6 +873,17 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                     "PLUGIN_ROOT",
                     source,
                     CODEX_PROMPT_EVENT,
+                ),
+                naming_hook(
+                    Path(f".codex/plugins/{self.plugin_name}"),
+                    "PLUGIN_ROOT",
+                    source,
+                    CODEX_PROMPT_EVENT,
+                    CODEX_SESSION_NAMING,
+                    "lup.providers.codex.assets.session_naming",
+                    self.spellings.model_alias,
+                    CODEX_EFFORT,
+                    waits=False,
                 ),
             ]
         )
