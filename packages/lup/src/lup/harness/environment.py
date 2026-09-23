@@ -14,6 +14,7 @@ the child project must select its own environment from its working directory.
 from collections.abc import Mapping
 
 from lup.coordination.identity import MEMBER_ENV, NAME_ENV
+from lup.sessions.recursion import MAX_RECURSIVE_AGENT_ENV
 from lup.types import EnvVars
 
 # lup: ignore[library-default] — each pair is the variable and off-value git, ssh, gh, and keyring document
@@ -67,6 +68,24 @@ It names where this machine's toolchain is, and
 declaration can name a program rather than a layout. Taking it away would not
 make a suite posture-independent -- it would make it measure a machine it is
 not running on, and the gate that resolves a bare name would resolve nothing.
+"""
+
+
+TOOL_SERVER_ENV: list[str] = [MEMBER_ENV, NAME_ENV, MAX_RECURSIVE_AGENT_ENV]
+"""What a launcher exports for the tool servers its session's runtime starts.
+
+The coordination pair is who the session is on the roster, which a server
+joins under and answers to; the recursion allowance is how many more agent
+levels its tools may open. A server that sees none of them serves a session
+nobody can address and opens agents without limit, and neither says so.
+
+Declared as each such server's ``env_vars`` rather than trusted to arrive,
+because one runtime does not pass them on. Measured on Codex 0.155.1: a stdio
+server it starts sees ``HOME``, ``LANG``, ``LC_ALL``, ``LOGNAME``, ``PATH``,
+``SHELL``, ``TERM``, ``TMPDIR`` and ``USER`` and nothing else, with the three
+exported in Codex's own environment — and all three once ``env_vars`` names
+them. Claude Code hands a server its whole environment, so the declaration
+changes nothing there.
 """
 
 
