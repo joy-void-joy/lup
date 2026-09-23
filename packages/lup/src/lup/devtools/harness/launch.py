@@ -1775,11 +1775,12 @@ def launch_claude(
             # the name the roster answers to: the same minted name is
             # exported for the session's tool server to join under, numbered
             # already where a live session in this worktree has the plain
-            # one. The roster's name lives in `names.jsonl` and is what
-            # addressing resolves through, so this is a display detail rather
-            # than the identity — which is why Codex, whose launch takes no
-            # such flag, loses nothing by it: a peer there is addressed by
-            # exactly the same name, and renames through the same command.
+            # one. The roster's name lives on the member's own file in the
+            # store and is what addressing resolves through, so this is a
+            # display detail rather than the identity — which is why Codex,
+            # whose launch takes no such flag, loses nothing by it: a peer
+            # there is addressed by exactly the same name, and renames through
+            # the same command.
             #
             # Ahead of `extra_args`, so a caller who named their own session
             # still wins.
