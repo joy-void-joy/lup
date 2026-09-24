@@ -170,7 +170,7 @@ async def retain_chatgpt(
         requests,
         run,
         "The ChatGPT browser login is missing or expired. Run "
-        "`uv run lup-devtools setup conversation chatgpt`, then retry.",
+        "`uv run lup-devtools conversation setup chatgpt`, then retry.",
     )
 
 
@@ -225,7 +225,7 @@ async def retain_claude(
         requests,
         run,
         "The Claude browser login is missing or expired. Run "
-        "`uv run lup-devtools setup conversation claude`, then retry.",
+        "`uv run lup-devtools conversation setup claude`, then retry.",
     )
 
 
@@ -246,7 +246,7 @@ def setup_browser_login(
 def create_conversation_setup_app(
     profiles: ProfileDirectory | None = None,
 ) -> typer.Typer:
-    """Build the explicit interactive-login tree mounted beneath setup."""
+    """Build the interactive-login tree owned by the conversation module."""
     application = typer.Typer(
         no_args_is_help=True,
         help="Authenticate browser sessions used for conversation retention",
@@ -308,6 +308,7 @@ def create_conversation_app(
 ) -> typer.Typer:
     """Build the conversation command tree over a project's profile directory."""
     application = typer.Typer(no_args_is_help=True)
+    application.add_typer(create_conversation_setup_app(profiles), name="setup")
 
     @application.command("chatgpt")
     def chatgpt_cmd(
