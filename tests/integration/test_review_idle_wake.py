@@ -37,6 +37,8 @@ from lup.providers.codex.app_server import (
     native_environment,
 )
 from lup.types import JsonObject, JsonValue
+from lup.harness.environment import tool_server_env
+from lup_template.harness.catalog import agent_tool_servers
 
 pytestmark = pytest.mark.integration
 BASE_URL: Final = "http://127.0.0.1:8765"
@@ -67,6 +69,10 @@ async def test_browser_answer_starts_an_idle_codex_turn_through_the_relay(
     requests: list[JsonObject] = []
     peers = RepositoryPeers(root)
     peers.join("recipient", root, wake=WakePath(runtime="codex"))
+    declaration = next(
+        server for server in agent_tool_servers() if server.name == "coordination"
+    )
+    assert declaration.env_vars == tool_server_env()
 
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self) -> None:
@@ -146,7 +152,7 @@ async def test_browser_answer_starts_an_idle_codex_turn_through_the_relay(
                                 str(Path(__file__).with_name("coordination_server.py"))
                             ],
                             "cwd": str(root),
-                            "env_vars": [MEMBER_ENV, NAME_ENV],
+                            "env_vars": declaration.env_vars,
                             "startup_timeout_sec": 10,
                             "required": True,
                         }
@@ -328,7 +334,15 @@ async def test_browser_answer_starts_an_idle_codex_turn_through_the_relay(
                         )
                 assert response.status_code == 200
                 decision = ReviewDecision.model_validate(response.json())
-                assert decision.notification.queued and not decision.notification.woken
+                assert (
+                    not decision.notification.queued and not decision.notification.woken
+                )
+                outcome = (
+                    questions.ReviewStore(roots=(root,))
+                    .detail(summary.key)
+                    .notification
+                )
+                assert outcome is not None and outcome.queued and not outcome.woken
                 [mail] = peers.waiting("recipient").messages
                 await completed(2)
                 relay = InboxRelay(root=root, member_id="recipient")
