@@ -755,22 +755,41 @@ def test_root_discovery_keeps_only_named_repositories_and_their_worktrees(
 
 @pytest.mark.parametrize("open_page", [False, True])
 @pytest.mark.parametrize(
+    "selected_names", [(), ("additional",), ("additional", "other", "additional")]
+)
+@pytest.mark.parametrize(
     ("requested_port", "expected_url"), [(8765, BASE_URL), (80, "http://127.0.0.1")]
 )
 async def test_cli_serves_selected_roots_and_keeps_the_token_out_of_public_pages(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     open_page: bool,
+    selected_names: tuple[str, ...],
     requested_port: int,
     expected_url: str,
 ) -> None:
     current = tmp_path / "current"
-    additional = tmp_path / "additional"
-    for root in [current, additional]:
+    roots = [
+        tmp_path / name
+        for name in (
+            "current",
+            "current-sibling",
+            "additional",
+            "additional-sibling",
+            "other",
+            "other-sibling",
+        )
+    ]
+    for root in roots:
         (root / ".git").mkdir(parents=True)
-    entry = parked(current, "current-question")
-    parked(additional, "additional-question")
-    monkeypatch.setattr(questions, "sibling_worktrees", lambda root: [root])
+    entries = {root.name: parked(root, f"{root.name}-question") for root in roots}
+    watched = selected_names or ("current",)
+    entry = entries[watched[0]]
+    monkeypatch.setattr(
+        questions,
+        "sibling_worktrees",
+        lambda root: [root, root.with_name(f"{root.name}-sibling")],
+    )
     served: list[FastAPI] = []
     opened: list[str] = []
     sizes: list[int] = []
@@ -788,7 +807,12 @@ async def test_cli_serves_selected_roots_and_keeps_the_token_out_of_public_pages
     monkeypatch.setattr(secrets, "token_urlsafe", token)
     monkeypatch.setattr(webbrowser, "open", opened.append)
     monkeypatch.setattr(uvicorn, "run", serve)
-    arguments = ["serve", "--root", str(additional), "--port", str(requested_port)]
+    arguments = ["serve", "--port", str(requested_port)]
+    arguments.extend(
+        argument
+        for name in selected_names
+        for argument in ["--root", str(tmp_path / name)]
+    )
     if not open_page:
         arguments.append("--no-open")
 
@@ -818,9 +842,12 @@ async def test_cli_serves_selected_roots_and_keeps_the_token_out_of_public_pages
     assert TOKEN not in page.text
     assert unauthenticated.status_code == 401
     assert decision.status_code == 200
-    assert {
-        item.id for item in ReviewInbox.model_validate(snapshot.json()).reviews
-    } == {"current-question", "additional-question"}
+    expected_names = {name for root in watched for name in (root, f"{root}-sibling")}
+    assert {item.id for item in inbox.reviews} == {
+        f"{name}-question" for name in expected_names
+    }
+    assert {Path(item.path).name for item in inbox.roots} == expected_names
+    assert len(inbox.roots) == len(expected_names)
 
 
 @pytest.mark.parametrize("host", ["0.0.0.0", "192.0.2.1", "attacker.example"])

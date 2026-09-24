@@ -1104,8 +1104,10 @@ def create_questions_app(root: Path) -> typer.Typer:
 
     @app.command("serve")
     def serve_cmd(
-        additional_roots: list[Path] | None = typer.Option(
-            None, "--root", help="Also watch this repository's worktrees; repeatable"
+        selected_roots: list[Path] | None = typer.Option(
+            None,
+            "--root",
+            help="Watch this repository's worktrees instead of the current repository; repeatable",
         ),
         host: str = typer.Option("127.0.0.1", help="Loopback address to bind"),
         port: int = typer.Option(8766, min=1, max=65535, help="Browser inbox port"),
@@ -1121,7 +1123,7 @@ def create_questions_app(root: Path) -> typer.Typer:
         refuse_non_loopback(host, "Review inbox")
         roots = tuple(
             dict.fromkeys(
-                path.resolve(strict=True) for path in [root, *(additional_roots or [])]
+                path.resolve(strict=True) for path in (selected_roots or [root])
             )
         )
         authority = f"[{host}]" if ":" in host else host

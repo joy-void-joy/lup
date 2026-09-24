@@ -567,11 +567,12 @@ outside the agent session:
 uv run lup-devtools dev questions serve
 ```
 
-It listens on `127.0.0.1:8766`, opens the browser, and follows the launch
-repository's worktrees. Repeat `--root <checkout>` to include additional
-repositories, use `--no-open` to open the printed address manually, and choose
-another port with `--port`. Leave the terminal command running while reviewing;
-Ctrl-C stops its server.
+It listens on `127.0.0.1:8766` and opens the browser. Without `--root`, it
+follows the launch repository's worktrees. Each `--root <checkout>` selects a
+repository to watch; when supplied, only those repositories and their worktrees
+are included. Repeat `--root` to watch several repositories, use `--no-open` to
+open the printed address manually, and choose another port with `--port`. Leave
+the terminal command running while reviewing; Ctrl-C stops its server.
 
 The inbox titles requests from captured evidence: a file's action and path,
 the number of files, or the command to run. The exact operation, requester,
