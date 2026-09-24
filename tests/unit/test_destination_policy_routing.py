@@ -243,7 +243,7 @@ def test_destination_does_not_execute_mutable_checkout_resolver(
         {"command": f"cat > {shlex.quote(str(target))} <<'CONTENT'\n{after}CONTENT"},
     )
 
-    assert effect == ("ask" if runtime == "claude" else "deny")
+    assert effect == ("ask" if runtime == "claude" else "deny"), detail
     assert "dict-get" in detail
     assert not marker.exists()
     assert target.read_text() == before
