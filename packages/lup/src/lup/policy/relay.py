@@ -16,6 +16,9 @@ Two invariants hold everywhere:
   quietly reused.
 """
 
+import fcntl
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -249,6 +252,23 @@ class QuestionRelay:
         append_review_record(self.path, question.model_dump_json())
         return question
 
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """Serialize a state transition across relay instances and processes.
+
+        A separate lock leaves the log's own read and append locks available.
+        Each call opens its own descriptor, so threads also contend for it.
+        """
+        path = self.path.resolve()
+        lock = path.with_name(f"{path.name}.lock")
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        with lock.open("a", encoding="utf-8") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
     def questions(self) -> list[PersistentQuestion]:
         """Every question, folded forward to its latest recorded state.
 
@@ -298,43 +318,45 @@ class QuestionRelay:
         whose expiry passed, and one this principal may not answer — which
         includes the requester, always.
         """
-        entry = self.find(question)
-        if entry is None:
-            raise ValueError(f"no question {question!r} is recorded")
-        if entry.state != "pending":
-            raise ValueError(
-                f"question {question!r} is {entry.state} and cannot be answered again"
+        with self.transaction():
+            entry = self.find(question)
+            if entry is None:
+                raise ValueError(f"no question {question!r} is recorded")
+            if entry.state != "pending":
+                raise ValueError(
+                    f"question {question!r} is {entry.state} and cannot be answered again"
+                )
+            if entry.stale():
+                return self.record(entry.model_copy(update={"state": "expired"}))
+            if not entry.answerable_by(principal):
+                raise ValueError(
+                    f"{principal!r} may not answer {question!r}"
+                    f" — eligible: {', '.join(entry.eligible) or 'nobody'}"
+                )
+            return self.record(
+                entry.model_copy(
+                    update={
+                        "state": "approved" if approved else "rejected",
+                        "answer": Answer(
+                            approved=approved,
+                            principal=principal,
+                            note=note,
+                            receipt=receipt,
+                            unresolved_chain=not entry.chain_resolved,
+                        ),
+                    }
+                )
             )
-        if entry.stale():
-            return self.record(entry.model_copy(update={"state": "expired"}))
-        if not entry.answerable_by(principal):
-            raise ValueError(
-                f"{principal!r} may not answer {question!r}"
-                f" — eligible: {', '.join(entry.eligible) or 'nobody'}"
-            )
-        return self.record(
-            entry.model_copy(
-                update={
-                    "state": "approved" if approved else "rejected",
-                    "answer": Answer(
-                        approved=approved,
-                        principal=principal,
-                        note=note,
-                        receipt=receipt,
-                        unresolved_chain=not entry.chain_resolved,
-                    ),
-                }
-            )
-        )
 
     def cancel(self, question: str, reason: str = "") -> PersistentQuestion:
         """Withdraw a question nobody needs answered any more."""
-        entry = self.find(question)
-        if entry is None:
-            raise ValueError(f"no question {question!r} is recorded")
-        return self.record(
-            entry.model_copy(update={"state": "cancelled", "outcome": reason})
-        )
+        with self.transaction():
+            entry = self.find(question)
+            if entry is None:
+                raise ValueError(f"no question {question!r} is recorded")
+            return self.record(
+                entry.model_copy(update={"state": "cancelled", "outcome": reason})
+            )
 
     def advance(
         self, question: str, state: QuestionState, outcome: str = ""
@@ -346,19 +368,20 @@ class QuestionRelay:
         coordinator that crashed after sending finds ``dispatched`` written
         down, and a coordinator that finds it does not send again.
         """
-        entry = self.find(question)
-        if entry is None:
-            raise ValueError(f"no question {question!r} is recorded")
-        completed = (
-            datetime.now(UTC)
-            if state in ("completed", "failed", "in_doubt")
-            else entry.completed
-        )
-        return self.record(
-            entry.model_copy(
-                update={"state": state, "outcome": outcome, "completed": completed}
+        with self.transaction():
+            entry = self.find(question)
+            if entry is None:
+                raise ValueError(f"no question {question!r} is recorded")
+            completed = (
+                datetime.now(UTC)
+                if state in ("completed", "failed", "in_doubt")
+                else entry.completed
             )
-        )
+            return self.record(
+                entry.model_copy(
+                    update={"state": state, "outcome": outcome, "completed": completed}
+                )
+            )
 
     def dispatchable(self, question: str) -> PersistentQuestion:
         """The approved question this operation may act on, or a refusal saying why.
