@@ -159,6 +159,11 @@ from lup_template.harness.catalog import (
 )
 from lup_template.harness.content.docs.catalog import documents
 from lup_template.harness.content.catalog import GUIDANCE as COMPOSED_GUIDANCE
+from lup_template.harness.content.catalog import LAYOUT
+from lup_template.harness.content.modules.catalog import (
+    closing_modules,
+    opening_modules,
+)
 from lup_template.harness.content.settings import project_settings
 from lup.devtools.harness import launch
 from lup.devtools.harness.launch import (
@@ -1104,14 +1109,16 @@ def test_skill_argument_declarations_require_a_matching_reference(
 
 
 def test_every_typed_content_module_is_reachable_from_a_catalog() -> None:
-    """An orphaned content module renders into no tree and drifts unnoticed.
+    """Every retained content module belongs to a declared application catalog.
 
-    Importing the generation recipes pulls in every declaration a catalog
-    aggregates, so a module still on disk but absent from ``sys.modules`` is
-    one no artifact is rendered from — a retired skill left behind, or a
-    document nobody listed.
+    Generation imports only adopted modules. Audit every application-owned
+    builder, including declined declarations, without changing that selection
+    or importing the optional subjects owned by the library.
     """
+    for entry in [*opening_modules(LAYOUT), *closing_modules(LAYOUT)]:
+        assert entry.build().spec == entry.spec
     content = Path("src/lup_template/harness/content")
+    assert content.is_dir()
     loaded = {
         Path(source).resolve()
         for source in (

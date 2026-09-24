@@ -189,7 +189,11 @@ def test_bundled_dispatcher_keeps_provider_policy_data_isolated(
     spec = importlib.util.spec_from_file_location("policy_data", path)
     assert spec is not None and spec.loader is not None
     foreign = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(foreign)
+    with (
+        patch.dict(sys.modules),
+        patch.object(sys, "path", [str(path.parent), *sys.path]),
+    ):
+        spec.loader.exec_module(foreign)
     monkeypatch.setitem(sys.modules, "policy_data", foreign)
     previous_path = sys.path.copy()
 
