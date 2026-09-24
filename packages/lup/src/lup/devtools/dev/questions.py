@@ -38,7 +38,7 @@ from lup.devtools.utils import output_json
 from lup.policy.relay import PersistentQuestion, QuestionRelay
 from lup.policy.review import ReviewedFile, reviewed_files
 from lup.providers.harness import patch_review
-from lup.sandbox.rail import sibling_worktrees
+from lup.sandbox.rail import repository_layout, sibling_worktrees
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -615,6 +615,15 @@ def review_app(
 
     from lup.web.serve import bundle_app
 
+    def anchor(root: Path) -> Path:
+        try:
+            return repository_layout(root).common.resolve()
+        except (OSError, ValueError, sh.ErrorReturnCode):
+            # Keep unavailable selections so scans report them and can recover.
+            return root
+
+    if discover:
+        roots = tuple(dict.fromkeys(anchor(root) for root in roots))
     app = bundle_app("Review inbox", url, "reviews")
     store = ReviewStore(roots=roots, discover=discover)
 

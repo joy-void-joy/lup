@@ -670,6 +670,42 @@ async def test_open_inbox_discovers_a_worktree_created_after_startup(
     assert ReviewDetail.model_validate(detail.json()).question == entry
 
 
+async def test_inbox_tracks_siblings_after_its_launch_worktree_is_removed(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "repository"
+    launch = tmp_path / "launch"
+    remaining = tmp_path / "remaining"
+    arrived = tmp_path / "arrived-later"
+    git_repository(root)
+    for worktree in (launch, remaining):
+        sh.git("-C", str(root), "worktree", "add", "-b", worktree.name, str(worktree))
+    parked(remaining, "remaining-question")
+
+    async with client(launch, discover=True) as http:
+        before = await http.get("/api/reviews", headers=AUTHORIZATION)
+        sh.git("-C", str(root), "worktree", "remove", str(launch))
+        sh.git("-C", str(root), "worktree", "add", "-b", "arrived", str(arrived))
+        entry = parked(arrived, "arrived-question")
+        after = await http.get("/api/reviews", headers=AUTHORIZATION)
+        snapshot = ReviewInbox.model_validate(after.json())
+        found = next(row for row in snapshot.reviews if row.id == entry.id)
+        detail = await http.get(f"/api/reviews/{found.key}", headers=AUTHORIZATION)
+
+    assert before.status_code == after.status_code == 200
+    assert {row.id for row in ReviewInbox.model_validate(before.json()).reviews} == {
+        "remaining-question"
+    }
+    assert snapshot.errors == []
+    assert {Path(row.path) for row in snapshot.roots} == {root, remaining, arrived}
+    assert {row.id for row in snapshot.reviews} == {
+        "remaining-question",
+        "arrived-question",
+    }
+    assert detail.status_code == 200
+    assert ReviewDetail.model_validate(detail.json()).question == entry
+
+
 @pytest.mark.parametrize(
     ("ambiguous", "wake_failure"), [(False, False), (True, False), (False, True)]
 )
