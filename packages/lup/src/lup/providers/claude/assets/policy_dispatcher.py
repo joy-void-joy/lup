@@ -60,7 +60,8 @@ from host import (
     repaired_directives,
     sandbox_active,
 )
-from kernel.decision import KernelDecision, sandbox_escaped
+from kernel.decision import KernelDecision
+from kernel.decision import sandbox_escaped
 from policy_data import (
     AGENT_IDENTITY_ENV,
     AUTONOMOUS_AGENT_IDENTITIES,

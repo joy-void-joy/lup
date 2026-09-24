@@ -28,11 +28,18 @@ from lup.devtools.dev import questions
 from lup.devtools.dev.questions import (
     ReviewDecision,
     ReviewDetail,
+    ReviewFile,
     ReviewInbox,
+    ReviewLine,
+    ReviewSuppression,
+)
+from lup.devtools.dev.review_notifications import (
     ReviewNotification,
+    ReviewNotifications,
 )
 from lup.policy.operations import Operation
 from lup.policy.relay import PersistentQuestion, QuestionRelay
+from lup.policy.review import ReviewedFile
 from lup.web import serve as web_serve
 from lup.web.serve import page_app
 
@@ -154,12 +161,13 @@ async def test_answer_requires_the_exact_origin(
     assert questions.relay(tmp_path).find(entry.id) == entry
 
 
-async def test_answer_requires_a_token_even_with_the_correct_origin(
+async def test_answer_requires_authentication_even_with_the_correct_origin(
     tmp_path: Path,
 ) -> None:
     entry = parked(tmp_path)
     async with client(tmp_path) as http:
         key = await only_key(http)
+        http.cookies.clear()
         response = await http.post(
             f"/api/reviews/{key}/answer",
             headers={"Origin": BASE_URL},
@@ -268,6 +276,8 @@ async def test_detail_keeps_the_full_command_and_its_metadata(tmp_path: Path) ->
     assert detail.files == []
     assert detail.summary.answerable
     assert detail.stale_reason == ""
+    assert detail.command == entry.operation.payload["command"]
+    assert detail.preview_unavailable
 
 
 async def test_file_detail_uses_the_captured_preimage_and_preserves_both_documents(
@@ -311,11 +321,224 @@ async def test_file_detail_uses_the_captured_preimage_and_preserves_both_documen
     assert len(detail.files) == 1
     assert detail.files[0].before == before
     assert detail.files[0].after == after
+    assert detail.command is None
+    assert detail.preview_unavailable == ""
     assert "-original line 499" in detail.files[0].unified
     assert "+replacement line 599" in detail.files[0].unified
+    assert detail.files[0].additions == 600
+    assert detail.files[0].deletions == 500
+    assert detail.files[0].hunks[0].lines[-1] == ReviewLine(
+        kind="add", text="replacement line 599\n", new_line=600
+    )
     assert detail.stale_reason
     assert refused.status_code == 409
     assert rejected.status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "operation", "header", "additions", "deletions"),
+    [
+        (None, "first\nsecond\n", "create", "@@ -0,0 +1,2 @@", 2, 0),
+        ("first\nsecond\n", None, "delete", "@@ -1,2 +0,0 @@", 0, 2),
+        ("first\n", "", "modify", "@@ -1 +0,0 @@", 0, 1),
+        ("", "first\n", "modify", "@@ -0,0 +1 @@", 1, 0),
+    ],
+)
+def test_structured_diff_preserves_creation_deletion_and_empty_file_changes(
+    before: str | None,
+    after: str | None,
+    operation: str,
+    header: str,
+    additions: int,
+    deletions: int,
+) -> None:
+    change = ReviewedFile(path=Path("document.txt"), before=before, after=after)
+    shown = ReviewFile.of(change)
+
+    assert shown.before == before
+    assert shown.after == after
+    assert shown.operation == operation
+    assert shown.unified == change.unified()
+    assert shown.additions == additions
+    assert shown.deletions == deletions
+    assert len(shown.hunks) == 1
+    assert shown.hunks[0].header == header
+    assert [
+        line.new_line for line in shown.hunks[0].lines if line.kind == "add"
+    ] == list(range(1, additions + 1))
+    assert [
+        line.old_line for line in shown.hunks[0].lines if line.kind == "remove"
+    ] == list(range(1, deletions + 1))
+
+
+@pytest.mark.parametrize(
+    ("before", "after", "operation", "unchanged"),
+    [
+        (None, "", "create", False),
+        ("", None, "delete", False),
+        ("", "", "modify", True),
+    ],
+)
+def test_empty_file_changes_keep_the_operation_without_invented_diff_lines(
+    before: str | None, after: str | None, operation: str, unchanged: bool
+) -> None:
+    shown = ReviewFile.of(
+        ReviewedFile(path=Path("empty.txt"), before=before, after=after)
+    )
+
+    assert shown.operation == operation
+    assert shown.unchanged == unchanged
+    assert shown.hunks == []
+    assert shown.additions == shown.deletions == 0
+
+
+def test_separated_hunks_keep_all_changes_and_document_line_numbers() -> None:
+    before = "".join(f"line {number}\n" for number in range(1, 31))
+    after = "".join(
+        [
+            "line 1\n",
+            "replacement two\n",
+            "extra\n",
+            *(f"line {number}\n" for number in range(3, 25)),
+            *(f"line {number}\n" for number in range(26, 31)),
+        ]
+    )
+    shown = ReviewFile.of(
+        ReviewedFile(path=Path("long.txt"), before=before, after=after)
+    )
+
+    assert [hunk.header for hunk in shown.hunks] == [
+        "@@ -1,5 +1,6 @@",
+        "@@ -22,7 +23,6 @@",
+    ]
+    assert shown.additions == shown.deletions == 2
+    assert [
+        line for hunk in shown.hunks for line in hunk.lines if line.kind != "context"
+    ] == [
+        ReviewLine(kind="remove", text="line 2\n", old_line=2),
+        ReviewLine(kind="add", text="replacement two\n", new_line=2),
+        ReviewLine(kind="add", text="extra\n", new_line=3),
+        ReviewLine(kind="remove", text="line 25\n", old_line=25),
+    ]
+    assert ReviewLine(kind="context", text="line 3\n", old_line=3, new_line=4) in (
+        shown.hunks[0].lines
+    )
+    assert ReviewLine(kind="context", text="line 26\n", old_line=26, new_line=26) in (
+        shown.hunks[1].lines
+    )
+
+
+def test_suppressions_are_located_with_rules_reasons_and_result_line_highlights() -> (
+    None
+):
+    before = "# lup: ignore[empty-collection] — existing exception\nvalue = 1\n"
+    after = before + (
+        "# lup: ignore[dict-get, string-replace] — optional key\n"
+        "# documented by the external response contract\n"
+        "lookup = items.get('key')\n"
+    )
+    shown = ReviewFile.of(
+        ReviewedFile(path=Path("source.py"), before=before, after=after)
+    )
+
+    assert shown.suppressions == [
+        ReviewSuppression(
+            line=1,
+            rule_ids=["empty-collection"],
+            reason="— existing exception",
+            introduced=False,
+            review_effect="allow",
+            review_reason="This directive introduces no rule exception.",
+            review_rule_ids=[],
+        ),
+        ReviewSuppression(
+            line=3,
+            rule_ids=["dict-get", "string-replace"],
+            reason="— optional key documented by the external response contract",
+            introduced=True,
+            review_reason="No per-file decision was captured; this file remains visible as unclassified context.",
+            review_rule_ids=["dict-get", "string-replace"],
+        ),
+    ]
+    assert [
+        line.new_line for hunk in shown.hunks for line in hunk.lines if line.suppression
+    ] == [1, 3]
+
+
+def test_suppression_summary_includes_unchanged_markers_outside_diff_context() -> None:
+    before = "# lup: ignore[empty-collection] — existing exception\n" + "".join(
+        f"value_{number} = {number}\n" for number in range(30)
+    )
+    shown = ReviewFile.of(
+        ReviewedFile(path=Path("source.py"), before=before, after=before + "last = 1\n")
+    )
+
+    assert len(shown.suppressions) == 1
+    assert shown.suppressions[0].line == 1
+    assert not shown.suppressions[0].introduced
+    assert not any(line.suppression for hunk in shown.hunks for line in hunk.lines)
+
+
+@pytest.mark.parametrize(
+    ("path", "source"),
+    [
+        ("source.py", "message = '# lup: ignore[dict-get] — quoted example'\n"),
+        ("notes.md", "Use `# lup: ignore[dict-get]` for a deliberate exception.\n"),
+        ("notes.md", "```python\n# lup: ignore[dict-get] — fenced example\n```\n"),
+        ("record.json", '{"message": "# lup: ignore[dict-get]"}\n'),
+    ],
+)
+def test_quoted_suppression_examples_are_not_presented_as_exceptions(
+    path: str, source: str
+) -> None:
+    shown = ReviewFile.of(ReviewedFile(path=Path(path), after=source))
+
+    assert shown.suppressions == []
+    assert not any(line.suppression for hunk in shown.hunks for line in hunk.lines)
+
+
+def test_bare_and_empty_suppressions_remain_distinct_and_visible() -> None:
+    shown = ReviewFile.of(
+        ReviewedFile(path=Path("source.py"), after="# lup: ignore\n# lup: ignore[]\n")
+    )
+
+    assert [marker.rule_ids for marker in shown.suppressions] == [None, []]
+    assert all(marker.introduced for marker in shown.suppressions)
+
+
+def test_line_ending_changes_and_unterminated_lines_remain_visible() -> None:
+    shown = ReviewFile.of(
+        ReviewedFile(
+            path=Path("endings.txt"), before="same\r\nlast", after="same\nlast\n"
+        )
+    )
+
+    assert shown.additions == shown.deletions == 2
+    assert shown.hunks[0].lines == [
+        ReviewLine(kind="remove", text="same\r\n", old_line=1),
+        ReviewLine(kind="remove", text="last", old_line=2),
+        ReviewLine(kind="meta", text="\\ No newline at end of file"),
+        ReviewLine(kind="add", text="same\n", new_line=1),
+        ReviewLine(kind="add", text="last\n", new_line=2),
+    ]
+
+
+def test_captured_null_bytes_and_unterminated_context_are_preserved() -> None:
+    shown = ReviewFile.of(
+        ReviewedFile(
+            path=Path("captured.dat"),
+            before="\x00before\r\nlast",
+            after="\x00after\r\nlast",
+        )
+    )
+
+    assert shown.additions == shown.deletions == 1
+    assert shown.hunks[0].lines == [
+        ReviewLine(kind="remove", text="\x00before\r\n", old_line=1),
+        ReviewLine(kind="add", text="\x00after\r\n", new_line=1),
+        ReviewLine(kind="context", text="last", old_line=2, new_line=2),
+        ReviewLine(kind="meta", text="\\ No newline at end of file"),
+    ]
 
 
 async def test_an_absent_preimage_becoming_a_file_prevents_approval(
@@ -440,7 +663,10 @@ async def test_notification_failure_cannot_undo_the_recorded_answer(
     assert questions.relay(tmp_path).find(entry.id) == decision.review.question
     assert not decision.notification.queued
     assert not decision.notification.woken
-    assert "notification transport unavailable" in decision.notification.detail
+    assert "no confirmed outcome" in decision.notification.detail
+    persisted = ReviewNotifications(root=tmp_path).read(decision.review.question)
+    assert persisted is not None
+    assert "notification transport unavailable" in persisted.detail
 
 
 async def test_event_stream_sends_a_snapshot_then_queue_changes(tmp_path: Path) -> None:
@@ -863,8 +1089,10 @@ async def test_saved_answer_is_returned_when_notification_makes_the_queue_unavai
     assert response.status_code == 200
     decision = ReviewDecision.model_validate(response.json())
     assert decision.review.question.state == "approved"
-    assert decision.notification.queued
-    assert decision.notification.woken
+    assert not decision.notification.queued
+    assert not decision.notification.woken
+    persisted = ReviewNotifications(root=tmp_path).read(decision.review.question)
+    assert persisted is not None and persisted.queued and persisted.woken
     assert (
         QuestionRelay(tmp_path / ".lup/questions.jsonl").find(entry.id)
         == decision.review.question

@@ -17,6 +17,8 @@ Two invariants hold everywhere:
 """
 
 import fcntl
+import json
+from hashlib import sha256
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -26,6 +28,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from lup.policy.assets.host import append_review_record, review_records
+from lup.policy.kernel.decision import DecisionEffect
 from lup.policy.kernel.semantics import ReviewPurpose, ReviewerRequirement
 from lup.policy.operations import Operation
 from lup.types import JsonObject
@@ -155,6 +158,18 @@ class Answer(BaseModel, frozen=True):
     at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
+class CapturedFileReview(BaseModel, frozen=True):
+    """The original routed file verdict, bound to its captured input and result."""
+
+    path: Path
+    effect: DecisionEffect
+    reason: str
+    rule: str
+    rules: list[str]
+    before_sha256: str | None
+    after_sha256: str | None
+
+
 class PersistentQuestion(BaseModel, frozen=True):
     """One parked ask, durable, with everything needed to resume it exactly.
 
@@ -169,6 +184,8 @@ class PersistentQuestion(BaseModel, frozen=True):
     fingerprint: str
     preconditions: dict[Path, str | None] = {}
     """File preimages bound to a native hook review, rechecked before dispatch."""
+    file_reviews: list[CapturedFileReview] | None = None
+    """Original per-file attribution; absent on records that did not capture it."""
     resumption: Literal["coordinator", "native_retry"] = "coordinator"
     """Whether the coordinator dispatches or a native hook checks an exact retry."""
     reason: str
@@ -200,6 +217,19 @@ class PersistentQuestion(BaseModel, frozen=True):
     """Native invocation observed after dispatch; never an authority receipt."""
     execution_payload: JsonObject | None = None
     """Exact approved native rewrite; the operation retains the requested input."""
+
+    @classmethod
+    def review_fingerprint(
+        cls, operation: Operation, file_reviews: list[CapturedFileReview] | None
+    ) -> str:
+        """Bind captured attribution to an in-process operation's approval."""
+        if file_reviews is None:
+            return operation.fingerprint()
+        material = [
+            operation.fingerprint(),
+            [row.model_dump(mode="json") for row in file_reviews],
+        ]
+        return sha256(json.dumps(material, sort_keys=True).encode()).hexdigest()
 
     def answerable_by(self, principal: str) -> bool:
         """Whether this principal may answer, which the requester never may.

@@ -1587,6 +1587,24 @@ FETCH_POLICY_CASES = [
 EDIT_POLICY_CASES = [
     EditDecisionCase(
         path="src/module.py",
+        before='value: str = ""\n',
+        after='value: Any = "# lup: ignore[quoted]"  # lup: ignore[any-type] — explicit exception\n',
+        effect="ask",
+    ),
+    EditDecisionCase(
+        path="src/module.py",
+        before='label = "# lup: ignore[any-type]"\n',
+        after='value: Any = ""  # lup: ignore[any-type] — explicit exception\n',
+        effect="ask",
+    ),
+    EditDecisionCase(
+        path="src/module.py",
+        before='value: str = ""\n',
+        after='value: Any = "# lup: ignore[any-type]"\n',
+        effect="deny",
+    ),
+    EditDecisionCase(
+        path="src/module.py",
         before="value = 1",
         after="value: Any = 1",
         effect="deny",
