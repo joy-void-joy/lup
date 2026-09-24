@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "b1d1a804bfa709940b50d2ff6d6cbef6e1d1d2f43849ccf88275b246d7043f6a",
+  "source_digest": "3c53a0e3d74013743e9a97b261146ee6a00c9d9898c7791f9c463d592a778d8f",
   "target_requirements": [
     "claude-code"
   ],
@@ -800,7 +800,7 @@
     {
       "path": "docs/platform-differentiation.md",
       "category": "generated",
-      "sha256": "339adeed184b94a74e2953eafe43c3ce1d7c7dd8d8a04ad2e08be13c5b940c36",
+      "sha256": "1caebcc5957b25156aea49dd82aae38e5432a232cfbef0ef6a612569ac1c4962",
       "semantic_id": "docs.platform-differentiation",
       "executable": false
     },
