@@ -13,6 +13,7 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
+from unittest.mock import patch
 
 import pytest
 
@@ -173,8 +174,33 @@ def bundled_dispatcher() -> ModuleType:
     spec = importlib.util.spec_from_file_location("bundled_codex_policy", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    # Native hooks have separate interpreters; another runtime's declaration
+    # must not survive in this test process's import cache or search path.
+    with patch.dict(sys.modules), patch.object(sys, "path", sys.path.copy()):
+        sys.modules.pop("policy_data", None)
+        spec.loader.exec_module(module)
     return module
+
+
+def test_bundled_dispatcher_keeps_provider_policy_data_isolated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = Path.cwd() / ".claude/plugins/lup/hooks/runtime/policy_data.py"
+    spec = importlib.util.spec_from_file_location("policy_data", path)
+    assert spec is not None and spec.loader is not None
+    foreign = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(foreign)
+    monkeypatch.setitem(sys.modules, "policy_data", foreign)
+    previous_path = sys.path.copy()
+
+    dispatcher = bundled_dispatcher()
+
+    assert dispatcher.declared_policy is not foreign
+    assert Path(dispatcher.declared_policy.__file__) == (
+        Path.cwd() / ".codex/plugins/lup/hooks/runtime/policy_data.py"
+    )
+    assert sys.modules["policy_data"] is foreign
+    assert sys.path == previous_path
 
 
 def worktree(root: Path) -> Path:
@@ -218,7 +244,7 @@ class TestDispatchedPatches:
 
         decision = dispatcher.dispatch(payload)
 
-        assert decision.effect == effect
+        assert decision.effect == effect, decision.stated_whole()
         payload["tool_input"] = {
             "command": "*** Begin Patch\n*** Add File: README.md\n+# Title\n*** End Patch"
         }
