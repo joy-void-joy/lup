@@ -104,6 +104,18 @@ skill-only plugins do not require hook evidence.
 
 Neither runtime remembers an approval. An observed execution records that it ran and nothing more, so every ask re-enters review on both. A queue answer releases one exact retry: the receipt binds the captured documents, resolved paths, origin policy and accepted destination policies. `test_codex_review_delivery.py` verifies native notification, blocking, independent settlement and one-use replay using an inert local Responses server.
 
+`uv run lup-devtools dev questions serve` provides the same persistent browser
+inbox for durable review records from either runtime. One operator capability
+protects its queue APIs; the same captured diffs, exact commands, approval and
+rejection notes, and atomic answer transition apply to both. The command that
+mints that capability is operator-only under both generated policies. Claude's
+native permission requests remain native requests; the inbox displays what
+was parked in the durable relay. Browser settlement records the answer before
+attempting a session notification, whose failure does not undo the decision.
+Notification is not evidence that a runtime resumed an idle turn. Native
+approval releases an exact retry through that runtime's existing hook path;
+the inbox does not execute the operation itself.
+
 ## Parity audit of generated artifact families
 
 Every family in `.claude/` vs `.codex/`/`.agents/`, with an explicit decision.

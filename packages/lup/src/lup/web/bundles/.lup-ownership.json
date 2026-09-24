@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.4.0",
-  "source_digest": "cc2204cd443bd3fdd95099e36d901678ff4de29b2568f31c6f57fd44b38b64cc",
+  "source_digest": "c896a92be082ffa0be1f82015f8d070066bf8dc887a35bd63dc62a9c291c4517",
   "target_requirements": [
     "bun"
   ],
@@ -14,24 +14,45 @@
       "executable": false
     },
     {
-      "path": "packages/lup/src/lup/web/bundles/explorer/assets/index-CHbZnTGC.js",
+      "path": "packages/lup/src/lup/web/bundles/explorer/assets/index-DSDCZJIe.js",
       "category": "generated",
-      "sha256": "b93aabd4467a389474a967308169c11e0d48f81d6107cd21bf14a141ebff383d",
-      "semantic_id": "web.explorer.assets/index-CHbZnTGC.js",
+      "sha256": "43dae0df2eefac2004f69edc95a172967881a763bfef8fbf0d302d9edd3b39ed",
+      "semantic_id": "web.explorer.assets/index-DSDCZJIe.js",
       "executable": false
     },
     {
       "path": "packages/lup/src/lup/web/bundles/explorer/export.html.j2",
       "category": "generated",
-      "sha256": "0c6d12537d8f9cd81a64a93dcf03b9138d7fd1bdbf5772755c6f8e16d9c2456f",
+      "sha256": "076c6ca45a155d9746c45f819a8b20443bdaac7f6a11c7f1147437054ae77ae7",
       "semantic_id": "web.explorer.export.html.j2",
       "executable": false
     },
     {
       "path": "packages/lup/src/lup/web/bundles/explorer/index.html",
       "category": "generated",
-      "sha256": "30ed6773a75debb07c6798c99547b500f0bd464be733b7c0568722bbc2304674",
+      "sha256": "43ecdd460f0b10913863885e0d98688e518d637ff9d026c0f5eadf6b65f465a8",
       "semantic_id": "web.explorer.index.html",
+      "executable": false
+    },
+    {
+      "path": "packages/lup/src/lup/web/bundles/reviews/assets/index-BXAHbiYj.js",
+      "category": "generated",
+      "sha256": "886287f3c9c3911d23b0cee86a40d581d8ea53af838c5454dfc0a263e71209d8",
+      "semantic_id": "web.reviews.assets/index-BXAHbiYj.js",
+      "executable": false
+    },
+    {
+      "path": "packages/lup/src/lup/web/bundles/reviews/assets/index-EZed4CQT.css",
+      "category": "generated",
+      "sha256": "79ca0aeb4fcb68e0777de962f00a857215c3dd7b70445a895004b57ac4bdf45e",
+      "semantic_id": "web.reviews.assets/index-EZed4CQT.css",
+      "executable": false
+    },
+    {
+      "path": "packages/lup/src/lup/web/bundles/reviews/index.html",
+      "category": "generated",
+      "sha256": "e41b110fb4e172c3b1839d257b9774b45f483f72286fc4aa0b207d329258b09d",
+      "semantic_id": "web.reviews.index.html",
       "executable": false
     },
     {

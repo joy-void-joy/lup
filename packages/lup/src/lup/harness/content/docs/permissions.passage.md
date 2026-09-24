@@ -543,13 +543,48 @@ Codex delivers that denial as a supported structured `deny` carrying
 hook events; its agent still receives the same refusal and review commands.
 Neither surface turns a policy question into an implicit approval.
 
-The operator runs `uv run lup-devtools dev questions show <id>` from the
-indicated checkout, then `uv run lup-devtools dev questions answer <id>
---as operator` or `uv run lup-devtools dev questions reject <id> --as
-operator` outside the agent session. Queue answer operations are declared
-`operator_only` in the shell vocabulary; an escalation cannot grant the
-requester authority to answer itself. Nested command paths are declared
-with `ShellOperationRule.parents`, and the deepest matching path decides.
+The operator can keep one browser inbox open by running this from a terminal
+outside the agent session:
+
+```bash
+uv run lup-devtools dev questions serve
+```
+
+It listens on `127.0.0.1:8766`, opens the browser, and follows the launch
+repository's worktrees. Repeat `--root <checkout>` to include additional
+repositories, use `--no-open` to open the printed address manually, and choose
+another port with `--port`. Leave the terminal command running while reviewing;
+Ctrl-C stops its server.
+
+The inbox shows pending and settled questions with their requester, rule,
+reason, exact command or captured file diff, and recorded answer. Approve or
+reject one question with an optional note. The decision is recorded in the
+same durable relay that the terminal commands use, so a browser and terminal
+answering concurrently cannot replace each other's answer. Session notification
+is best effort after the answer is saved; a missing route or failed delivery
+does not erase it. A native-hook approval still requires the agent to retry
+the exact tool call. The inbox never executes a reconstructed command.
+
+The server mints a capability for that invocation and puts it in the printed
+browser URL's fragment, which HTTP requests do not send to the server. The
+page retains it in that tab's session storage and authenticates queue API
+requests with it. The page and its assets contain no credential. Restarting
+the server replaces the capability; reopen the address printed by that server.
+Treat the full address as an operator credential and keep it out of agent
+messages. The server binds loopback, checks Host against DNS rebinding, and
+checks the origin of answer submissions. These controls protect the browser
+surface; they are not isolation against arbitrary processes running as the
+operator's user. The session's filesystem and process boundary remains part
+of the authority boundary.
+
+The terminal surface remains available: run `uv run lup-devtools dev questions
+show <id>` from the indicated checkout, then `uv run lup-devtools dev questions
+answer <id> --as operator` or `uv run lup-devtools dev questions reject <id>
+--as operator` outside the agent session. Queue answers and the server that
+mints browser review credentials are declared `operator_only` in the shell
+vocabulary; an escalation cannot grant the requester authority to answer
+itself. Nested command paths are declared with `ShellOperationRule.parents`,
+and the deepest matching path decides.
 
 Approval releases one exact retry in the same session and directory.
 The hook re-runs policy, compares the payload, captured file preimages,
