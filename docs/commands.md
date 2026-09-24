@@ -21,6 +21,8 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | --- | --- |
 | `conversation chatgpt` | Retain ChatGPT conversations and their downloadable attachments. |
 | `conversation claude` | Retain Claude conversations and their API-provided attachments. |
+| `conversation setup chatgpt` | Open a browser to authenticate ChatGPT conversation access. |
+| `conversation setup claude` | Open a browser to authenticate Claude conversation access. |
 
 ## `coordination`
 
@@ -254,8 +256,6 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `setup api-key` | Set up Example API key. |
 | `setup codex` | Set Codex/OpenAI per-MTok pricing (enables budget caps). |
 | `setup timezone` | Set timezone. |
-| `setup conversation chatgpt` | Open a browser to authenticate ChatGPT conversation access. |
-| `setup conversation claude` | Open a browser to authenticate Claude conversation access. |
 | `setup profile list` | Show every profile, and which one a launch selects by default. |
 | `setup profile add` | Register a runtime configuration home under a name. |
 | `setup profile use` | Select the profile a launch uses when none is named. |

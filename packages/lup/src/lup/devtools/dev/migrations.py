@@ -138,6 +138,23 @@ class RenderedMigrations(BaseModel, frozen=True):
 
 DECLARED: list[Migration] = [
     Migration(
+        subjects=["setup conversation chatgpt", "setup conversation claude"],
+        reason=(
+            "conversation authentication belongs to the conversation module, "
+            "so declining it also removes its browser setup commands and imports"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Replace `lup-devtools setup conversation <provider>` with "
+                    "`lup-devtools conversation setup <provider>` in scripts and "
+                    "operator instructions. The provider and --profile arguments "
+                    "are unchanged. Projects declining conversation need no setup."
+                )
+            )
+        ],
+    ),
+    Migration(
         subjects=["last_release_tag"],
         reason=(
             "the migrations gate measures from the release commit rather than "
