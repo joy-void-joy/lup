@@ -64,6 +64,7 @@ from lup.formats.banner import (
     REGENERATE_COMMAND,
     GeneratedBanner,
 )
+from lup.harness.environment import tool_server_env
 from lup.harness.generation import ArtifactValidationError
 from lup.harness.requirements import LostCapability, Requirement, Run
 from lup.harness.materialization import (
@@ -3442,8 +3443,8 @@ def test_codex_tree_offers_the_tool_servers_in_its_project_config() -> None:
     assert parsed["mcp_servers"]["notes"]["command"] == "uv"
 
 
-def relaying_harness() -> Harness:
-    """The example harness with one environment name asked for by every server."""
+def relaying_harness(names: list[str]) -> Harness:
+    """The example harness with every server asking for exactly *names*."""
     source = portable_harness()
     plugin = source.plugins[0]
     return source.model_copy(
@@ -3452,7 +3453,7 @@ def relaying_harness() -> Harness:
                 plugin.model_copy(
                     update={
                         "mcp_servers": [
-                            server.model_copy(update={"env_vars": ["LUP_SESSION_DIR"]})
+                            server.model_copy(update={"env_vars": names})
                             for server in plugin.mcp_servers
                         ]
                     }
@@ -3471,7 +3472,7 @@ def test_only_the_runtime_that_forwards_nothing_is_told_what_to_forward() -> Non
     omits is a relay that never arrives — and a tool that binds to nothing
     serves an empty surface rather than failing.
     """
-    relayed = relaying_harness()
+    relayed = relaying_harness(["LUP_SESSION_DIR"])
     parsed = tomllib.loads(codex_project_config(relayed, CodexSpellings()))
     assert parsed["mcp_servers"]["notes"]["env_vars"] == ["LUP_SESSION_DIR"]
     declaration = next(
@@ -3484,8 +3485,23 @@ def test_only_the_runtime_that_forwards_nothing_is_told_what_to_forward() -> Non
 
 def test_a_server_naming_no_environment_renders_no_key_at_all() -> None:
     """An absent key leaves the runtime's own default, not an empty allowlist."""
-    parsed = tomllib.loads(codex_project_config(portable_harness(), CodexSpellings()))
+    parsed = tomllib.loads(codex_project_config(relaying_harness([]), CodexSpellings()))
     assert "env_vars" not in parsed["mcp_servers"]["notes"]
+
+
+def test_every_tool_server_asks_for_what_its_launcher_exported() -> None:
+    """A Codex session's tool servers answer to the session they belong to.
+
+    Codex starts each with a fixed base environment, so the member id, the
+    name and the recursion allowance the launcher exported reach a server
+    only where it names them. Without them the coordination server joins the
+    roster under no id and the session is on it nowhere, and a nested agent
+    opened by any group's tools spends no allowance at all.
+    """
+    parsed = tomllib.loads(codex_project_config(portable_harness(), CodexSpellings()))
+    assert {
+        name: server.get("env_vars") for name, server in parsed["mcp_servers"].items()
+    } == {name: tool_server_env() for name in startup_names(declared_tool_groups())}
 
 
 def test_both_runtimes_grant_the_declared_servers_the_same_way() -> None:

@@ -19,7 +19,7 @@ from lup.harness.codescan.common import AntiPattern
 from lup.policy.contracts import DecisionPolicy
 from lup.policy.grants import LeaseGrants
 from lup.policy.identity import AGENT_IDENTITY_ENV
-from lup.policy.kernel.decision import KernelDecision
+from lup.policy.kernel.decision import KernelDecision, captured_edit_decision
 from lup.policy.kernel.policy_protocol import read_response, routing_failure
 from lup.policy.kernel.edit import (
     decide_edit,
@@ -28,6 +28,7 @@ from lup.policy.kernel.edit import (
 from lup.policy.kernel.fetch import decide_fetch
 from lup.policy.kernel.semantics import UnjudgedAmbient
 from lup.policy.assets.host import (
+    document_digest,
     declared_identity,
     routed_edit_response,
     directory_write_targets,
@@ -323,7 +324,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         # script over it would answer about a document the first already
         # replaced.
         scripts_for = {
-            target: rewrite["scripts"]
+            target: rewrite
             for rewrite in reversed(shell_sed_rewrites(event.command, self.rules))
             for target in reversed(rewrite["targets"])
         }
@@ -333,8 +334,10 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         # run, so a comprehension per list would run every script twice
         documents: list[RewrittenDocumentRow] = []
         unproduced: list[UnproducedDocumentRow] = []  # lup: ignore[empty-collection]
-        for target, scripts in scripts_for.items():
-            attempt = rewritten_text(scripts, target, root)
+        for target, rewrite in scripts_for.items():
+            attempt = rewritten_text(
+                rewrite["scripts"], target, root, rewrite["options"]
+            )
             after = attempt["text"]
             if after is None:
                 unproduced.append(
@@ -462,11 +465,17 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         # carries the placement and the checkpoint that an edit verdict has
         # nothing to say about.
         carried = self.authored_verdict(event)
+        file_reviews = tuple(
+            row
+            for document in rewritten["documents"]
+            if "decision" in document
+            for row in document["decision"].file_reviews
+        ) + (carried.file_reviews if carried is not None else ())
         if carried is None or STRENGTH.index(carried.effect) <= STRENGTH.index(
             verdict.effect
         ):
-            return verdict
-        return carried
+            return verdict.model_copy(update={"file_reviews": file_reviews})
+        return carried.model_copy(update={"file_reviews": file_reviews})
 
     def decide_segment(self, segment: ShellSegment) -> Decision:
         return pydantic_decision(
@@ -594,16 +603,23 @@ class EditPolicy(DecisionPolicy[EditBatch]):
 
     def decide(self, event: EditBatch) -> Decision:
         decisions = [self.decide_change(change, event.cwd) for change in event.changes]
+        file_reviews = tuple(
+            row for decision in decisions for row in decision.file_reviews
+        )
         denied = next((item for item in decisions if item.effect == "deny"), None)
         if denied is not None:
-            return denied
+            return denied.model_copy(update={"file_reviews": file_reviews})
         asked = next((item for item in decisions if item.effect == "ask"), None)
         if asked is not None:
-            return asked
+            return asked.model_copy(update={"file_reviews": file_reviews})
         deferred = next((item for item in decisions if item.effect == "defer"), None)
         if deferred is not None:
-            return deferred
-        return Decision(effect="allow", reason="every edit in the batch is safe")
+            return deferred.model_copy(update={"file_reviews": file_reviews})
+        return Decision(
+            effect="allow",
+            reason="every edit in the batch is safe",
+            file_reviews=file_reviews,
+        )
 
     def decide_change(self, change: EditChange, cwd: Path | None = None) -> Decision:
         root = cwd or Path.cwd()
@@ -620,31 +636,50 @@ class EditPolicy(DecisionPolicy[EditBatch]):
                 declared_identity(AGENT_IDENTITY_ENV),
             )
             if response is not None:
-                return pydantic_decision(read_response(json.loads(response)))
+                return pydantic_decision(
+                    captured_edit_decision(
+                        read_response(json.loads(response)),
+                        path,
+                        before_sha256=document_digest(change.before),
+                        after_sha256=document_digest(change.after),
+                    )
+                )
         except (OSError, ValueError, KeyError, TypeError) as error:
-            return pydantic_decision(routing_failure(str(error)))
+            return pydantic_decision(
+                captured_edit_decision(
+                    routing_failure(str(error)),
+                    path,
+                    before_sha256=document_digest(change.before),
+                    after_sha256=document_digest(change.after),
+                )
+            )
         suffix = change.path.suffix.lower()
         return pydantic_decision(
-            decide_edit(
-                Path(path).relative_to(root).as_posix()
-                if not worktree_root(path) and Path(path).is_relative_to(root)
-                else worktree_path(path),
-                change.before,
-                change.after,
-                path_exists=Path(path).exists(),
-                path_rules=[path_rule_row(rule) for rule in self.protected],
-                antipattern_rows=antipattern_rows(change),
-                path_roles=self.path_roles,
-                maximum_added_lines=self.maximum_added_lines,
-                autonomous=self.autonomous,
-                allowances=self.grants.granted(),
-                python_source=suffix in (".py", ".pyi"),
-                acceptance_guard=self.acceptance_guard,
-                suffix=suffix,
-                operation=change.operation,
-                edit_rules=self.edit_rules,
-                import_boundaries=self.import_boundaries,
-                foreign=foreign_repository(path, root),
-                outside_project=outside_this_project(path, root),
+            captured_edit_decision(
+                decide_edit(
+                    Path(path).relative_to(root).as_posix()
+                    if not worktree_root(path) and Path(path).is_relative_to(root)
+                    else worktree_path(path),
+                    change.before,
+                    change.after,
+                    path_exists=Path(path).exists(),
+                    path_rules=[path_rule_row(rule) for rule in self.protected],
+                    antipattern_rows=antipattern_rows(change),
+                    path_roles=self.path_roles,
+                    maximum_added_lines=self.maximum_added_lines,
+                    autonomous=self.autonomous,
+                    allowances=self.grants.granted(),
+                    python_source=suffix in (".py", ".pyi"),
+                    acceptance_guard=self.acceptance_guard,
+                    suffix=suffix,
+                    operation=change.operation,
+                    edit_rules=self.edit_rules,
+                    import_boundaries=self.import_boundaries,
+                    foreign=foreign_repository(path, root),
+                    outside_project=outside_this_project(path, root),
+                ),
+                path,
+                before_sha256=document_digest(change.before),
+                after_sha256=document_digest(change.after),
             )
         )

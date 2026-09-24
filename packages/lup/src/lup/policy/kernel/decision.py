@@ -225,6 +225,18 @@ def sandbox_escaped(sandbox: SandboxPlacement) -> bool:
     return sandbox == "outside"
 
 
+class FileReviewRow(TypedDict):
+    """A caller-bound record of the actual file verdict, never authority itself."""
+
+    path: str
+    effect: DecisionEffect
+    reason: str
+    rule: str
+    rules: list[str]
+    before_sha256: str | None
+    after_sha256: str | None
+
+
 class Revision(TypedDict, total=False):
     """What one settlement row may rewrite, absent where it changes nothing.
 
@@ -250,6 +262,7 @@ class Revision(TypedDict, total=False):
     rule: str
     evaluator: str
     recovery: str
+    file_reviews: tuple[FileReviewRow, ...]
 
 
 class KernelDecision:
@@ -377,6 +390,9 @@ class KernelDecision:
     the agent learns its way round if the answer is no.
     """
 
+    file_reviews: tuple[FileReviewRow, ...]
+    """Original per-file findings attached by the caller after owner routing."""
+
     def __init__(
         self,
         effect: DecisionEffect,
@@ -396,6 +412,7 @@ class KernelDecision:
         rule: str = "",
         evaluator: str = "",
         recovery: str = "",
+        file_reviews: tuple[FileReviewRow, ...] = (),
     ) -> None:
         if effect not in ("allow", "ask", "deny", "defer"):
             raise ValueError(f"invalid kernel decision effect {effect!r}")
@@ -419,6 +436,7 @@ class KernelDecision:
         self.rule = rule
         self.evaluator = evaluator
         self.recovery = recovery
+        self.file_reviews = file_reviews
         # Only a verdict this policy actually reached is placed: a refusal is
         # not softened by where the operation would have run, and a deferral
         # hands the whole question over, placement included.
@@ -456,6 +474,7 @@ class KernelDecision:
             changes["rule"] if "rule" in changes else self.rule,
             changes["evaluator"] if "evaluator" in changes else self.evaluator,
             changes["recovery"] if "recovery" in changes else self.recovery,
+            changes["file_reviews"] if "file_reviews" in changes else self.file_reviews,
         )
 
     def placed(self, escapable: bool, contained: bool = False) -> "KernelDecision":
@@ -642,4 +661,31 @@ def recovery_dischargeable(decision: KernelDecision) -> bool:
         part.purpose == "unrecovered_local_mutation"
         and part.checkpoint != "unrecoverable"
         for part in asking
+    )
+
+
+def captured_edit_decision(
+    decision: KernelDecision,
+    path: str,
+    *,
+    before_sha256: str | None,
+    after_sha256: str | None,
+) -> KernelDecision:
+    """Bind the already-routed verdict to the exact images its owner judged."""
+    return decision.revised(
+        file_reviews=(
+            FileReviewRow(
+                path=path,
+                effect=decision.effect,
+                reason=decision.reason,
+                rule=decision.rule,
+                rules=[
+                    part.rule
+                    for part in contributions(decision)
+                    if part.effect != "allow"
+                ],
+                before_sha256=before_sha256,
+                after_sha256=after_sha256,
+            ),
+        )
     )

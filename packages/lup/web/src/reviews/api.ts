@@ -1,17 +1,24 @@
 import type { ReviewAnswer, ReviewDecision, ReviewDetail, ReviewInbox } from "../generated/views";
 
 const TOKEN_KEY = "lup-review-token";
+export type ReviewAccess = { token: string; notice: string };
 
-/** Keep the browser capability in this tab, removing it from the address bar. */
-export function takeToken(): string {
+/** Share the launch capability only with tabs at this exact browser origin. */
+export function takeToken(previous = ""): ReviewAccess {
   const url = new URL(window.location.href);
-  const supplied = new URLSearchParams(url.hash.slice(1)).get("token");
+  const fragment = new URLSearchParams(url.hash.slice(1));
+  const supplied = fragment.get("token");
   if (supplied !== null) {
-    sessionStorage.setItem(TOKEN_KEY, supplied);
-    url.hash = "";
+    fragment.delete("token");
+    url.hash = fragment.toString();
     window.history.replaceState(null, "", url);
   }
-  return sessionStorage.getItem(TOKEN_KEY) ?? "";
+  try {
+    if (supplied !== null) localStorage.setItem(TOKEN_KEY, supplied);
+    return { token: supplied ?? localStorage.getItem(TOKEN_KEY) ?? "", notice: "" };
+  } catch {
+    return { token: supplied ?? previous, notice: "Browser storage is unavailable. Open the operator's launch link in each tab; access cannot be shared between tabs." };
+  }
 }
 
 export class ReviewError extends Error {
@@ -28,7 +35,25 @@ async function accepted(response: Response): Promise<Response> {
 }
 
 function authorization(token: string): Record<string, string> {
-  return { Authorization: `Bearer ${token}` };
+  return token === "" ? {} : { Authorization: `Bearer ${token}` };
+}
+
+export type ReviewLink = { id: string; root: string | null };
+
+export function readReviewLink(): ReviewLink | null {
+  const fragment = new URLSearchParams(window.location.hash.slice(1));
+  const id = fragment.get("review");
+  return id === null ? null : { id, root: fragment.get("root") };
+}
+
+/** A shareable address names a review and never carries browser authority. */
+export function reviewLink(id: string, root: string | null = null): string {
+  const url = new URL(window.location.href);
+  const fragment = new URLSearchParams({ review: id });
+  if (root !== null) fragment.set("root", root);
+  url.search = "";
+  url.hash = fragment.toString();
+  return url.href;
 }
 
 export async function readInbox(token: string, signal?: AbortSignal): Promise<ReviewInbox> {

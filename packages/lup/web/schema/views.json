@@ -278,6 +278,68 @@
       "title": "BlockStartedEvent",
       "type": "object"
     },
+    "CapturedFileReview": {
+      "additionalProperties": false,
+      "description": "The original routed file verdict, bound to its captured input and result.",
+      "properties": {
+        "after_sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "After Sha256"
+        },
+        "before_sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Before Sha256"
+        },
+        "effect": {
+          "$ref": "#/$defs/DecisionEffect"
+        },
+        "path": {
+          "format": "path",
+          "title": "Path",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "rule": {
+          "title": "Rule",
+          "type": "string"
+        },
+        "rules": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Rules",
+          "type": "array"
+        }
+      },
+      "required": [
+        "path",
+        "effect",
+        "reason",
+        "rule",
+        "rules",
+        "before_sha256",
+        "after_sha256"
+      ],
+      "title": "CapturedFileReview",
+      "type": "object"
+    },
     "CarriedParent": {
       "additionalProperties": false,
       "description": "One parent whose commits another parent already contains.",
@@ -518,6 +580,15 @@
       ],
       "title": "CriteriaCarriedEvent",
       "type": "object"
+    },
+    "DecisionEffect": {
+      "enum": [
+        "allow",
+        "ask",
+        "deny",
+        "defer"
+      ],
+      "type": "string"
     },
     "EdgeCount": {
       "additionalProperties": false,
@@ -1871,6 +1942,21 @@
           "default": null,
           "title": "Expires"
         },
+        "file_reviews": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/CapturedFileReview"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "File Reviews"
+        },
         "fingerprint": {
           "title": "Fingerprint",
           "type": "string"
@@ -1948,6 +2034,7 @@
         "operation",
         "fingerprint",
         "preconditions",
+        "file_reviews",
         "resumption",
         "reason",
         "rule",
@@ -2282,12 +2369,43 @@
       "additionalProperties": false,
       "description": "Everything the operator reviews before answering.",
       "properties": {
+        "command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Command"
+        },
         "files": {
           "items": {
             "$ref": "#/$defs/ReviewFile"
           },
           "title": "Files",
           "type": "array"
+        },
+        "notification": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReviewNotification"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "preview_notice": {
+          "default": "",
+          "title": "Preview Notice",
+          "type": "string"
+        },
+        "preview_unavailable": {
+          "title": "Preview Unavailable",
+          "type": "string"
         },
         "question": {
           "$ref": "#/$defs/PersistentQuestion"
@@ -2304,7 +2422,11 @@
         "summary",
         "question",
         "files",
-        "stale_reason"
+        "stale_reason",
+        "command",
+        "preview_unavailable",
+        "preview_notice",
+        "notification"
       ],
       "title": "ReviewDetail",
       "type": "object"
@@ -2333,6 +2455,10 @@
       "additionalProperties": false,
       "description": "Captured file contents and the corresponding proposed change.",
       "properties": {
+        "additions": {
+          "title": "Additions",
+          "type": "integer"
+        },
         "after": {
           "anyOf": [
             {
@@ -2355,6 +2481,17 @@
           ],
           "title": "Before"
         },
+        "deletions": {
+          "title": "Deletions",
+          "type": "integer"
+        },
+        "hunks": {
+          "items": {
+            "$ref": "#/$defs/ReviewHunk"
+          },
+          "title": "Hunks",
+          "type": "array"
+        },
         "operation": {
           "title": "Operation",
           "type": "string"
@@ -2362,6 +2499,29 @@
         "path": {
           "title": "Path",
           "type": "string"
+        },
+        "review_effect": {
+          "default": "unknown",
+          "enum": [
+            "allow",
+            "ask",
+            "deny",
+            "unknown"
+          ],
+          "title": "Review Effect",
+          "type": "string"
+        },
+        "review_reason": {
+          "default": "No per-file decision was captured.",
+          "title": "Review Reason",
+          "type": "string"
+        },
+        "suppressions": {
+          "items": {
+            "$ref": "#/$defs/ReviewSuppression"
+          },
+          "title": "Suppressions",
+          "type": "array"
         },
         "unchanged": {
           "title": "Unchanged",
@@ -2378,9 +2538,38 @@
         "before",
         "after",
         "unified",
-        "unchanged"
+        "unchanged",
+        "hunks",
+        "additions",
+        "deletions",
+        "suppressions",
+        "review_effect",
+        "review_reason"
       ],
       "title": "ReviewFile",
+      "type": "object"
+    },
+    "ReviewHunk": {
+      "additionalProperties": false,
+      "description": "A contiguous group of changes with unchanged context around it.",
+      "properties": {
+        "header": {
+          "title": "Header",
+          "type": "string"
+        },
+        "lines": {
+          "items": {
+            "$ref": "#/$defs/ReviewLine"
+          },
+          "title": "Lines",
+          "type": "array"
+        }
+      },
+      "required": [
+        "header",
+        "lines"
+      ],
+      "title": "ReviewHunk",
       "type": "object"
     },
     "ReviewInbox": {
@@ -2419,9 +2608,67 @@
       "title": "ReviewInbox",
       "type": "object"
     },
+    "ReviewLine": {
+      "additionalProperties": false,
+      "description": "One source line, with original terminators and both document positions.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "context",
+            "add",
+            "remove",
+            "meta"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "new_line": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "New Line"
+        },
+        "old_line": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Old Line"
+        },
+        "suppression": {
+          "default": false,
+          "title": "Suppression",
+          "type": "boolean"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "text",
+        "old_line",
+        "new_line",
+        "suppression"
+      ],
+      "title": "ReviewLine",
+      "type": "object"
+    },
     "ReviewNotification": {
       "additionalProperties": false,
-      "description": "Delivery is separate from the durable approval decision.",
+      "description": "Queue acceptance is separate from both approval and recipient delivery.",
       "properties": {
         "detail": {
           "title": "Detail",
@@ -2512,7 +2759,7 @@
     },
     "ReviewSummary": {
       "additionalProperties": false,
-      "description": "The queue row, with eligibility resolved by the server.",
+      "description": "The queue row, with eligibility and a descriptive evidence-based title.",
       "properties": {
         "answerable": {
           "title": "Answerable",
@@ -2535,6 +2782,13 @@
           "title": "Operation",
           "type": "string"
         },
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Paths",
+          "type": "array"
+        },
         "reason": {
           "title": "Reason",
           "type": "string"
@@ -2554,6 +2808,15 @@
         "state": {
           "title": "State",
           "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "total_files": {
+          "default": 0,
+          "title": "Total Files",
+          "type": "integer"
         }
       },
       "required": [
@@ -2563,12 +2826,89 @@
         "state",
         "requester",
         "reason",
+        "title",
+        "paths",
+        "total_files",
         "operation",
         "rule",
         "created",
         "answerable"
       ],
       "title": "ReviewSummary",
+      "type": "object"
+    },
+    "ReviewSuppression": {
+      "additionalProperties": false,
+      "description": "A result document's explicit rule exception, located for review.",
+      "properties": {
+        "introduced": {
+          "title": "Introduced",
+          "type": "boolean"
+        },
+        "line": {
+          "title": "Line",
+          "type": "integer"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "review_effect": {
+          "default": "unknown",
+          "enum": [
+            "allow",
+            "ask",
+            "deny",
+            "unknown"
+          ],
+          "title": "Review Effect",
+          "type": "string"
+        },
+        "review_reason": {
+          "default": "No directive-level decision was captured.",
+          "title": "Review Reason",
+          "type": "string"
+        },
+        "review_rule_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Review Rule Ids"
+        },
+        "rule_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Rule Ids"
+        }
+      },
+      "required": [
+        "line",
+        "rule_ids",
+        "reason",
+        "introduced",
+        "review_effect",
+        "review_reason",
+        "review_rule_ids"
+      ],
+      "title": "ReviewSuppression",
       "type": "object"
     },
     "ReviewView": {
