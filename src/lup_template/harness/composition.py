@@ -36,7 +36,10 @@ from lup_template.harness.catalog import (
     declared_hook_set,
     portable_harness,
 )
+from lup.harness.models import PromptDocument
+from lup_template.harness.content.catalog import COMPOSED, Composed
 from lup_template.harness.content.docs.catalog import documents
+from lup_template.harness.content.modules.specs import TEMPLATE_INIT
 import lup_template.harness.content.settings as settings_module
 from lup_template.harness.content.settings import project_settings
 from lup_template.harness.content.template_claude import (
@@ -49,20 +52,23 @@ from lup_template.harness.content.template_codex import (
 CONTENT_ROOT = Path(__file__).parent / "content"
 
 
-def project_content(root: Path, rules: RuleSelection | None = None) -> ProjectContent:
+def project_content(
+    root: Path, rules: RuleSelection | None = None, composed: Composed = COMPOSED
+) -> ProjectContent:
     """Everything this repository publishes beside its compiled plugin tree.
 
     ``rules`` is a launch overruling what this repository holds itself to for
     one session, and nothing else reads it: what the repository actually
     settled stays the declaration in its catalog, which is what a review sees
-    and what `dev seams` writes.
+    and what `dev seams` writes. ``composed`` is its module answer, for the
+    same reason :func:`portable_harness` takes one.
     """
-    harness = portable_harness(root=root)
+    harness = portable_harness(root=root, composed=composed)
     if rules is not None:
         harness = harness.holding(rules)
     return ProjectContent(
         harness=harness,
-        documents=documents(root),
+        documents=documents(root, composed),
         assets=[CONTENT_ROOT / "assets" / "file_suggest.sh"],
         settings=project_settings(harness.plugins[0]),
         settings_source=settings_module.__name__,
@@ -80,18 +86,39 @@ def profile_directory() -> ProfileDirectory:
     return local_profile_directory(project_root(), CLAUDE_LOGIN)
 
 
+def template_guidance(
+    document: PromptDocument, composed: Composed
+) -> PromptDocument | None:
+    """The guidance an installer merges into a target, where there is an installer.
+
+    It is what `/lup:init` and `/lup:install` merge, so it belongs to the
+    module shipping them: a project that declined standing projects up has
+    nobody to hand it to, and publishes none rather than a document teaching
+    two skills its plugin lacks.
+    """
+    return document if composed.selection.takes(TEMPLATE_INIT) else None
+
+
 def claude_target(
-    root: Path, rules: RuleSelection | None = None
+    root: Path, rules: RuleSelection | None = None, composed: Composed = COMPOSED
 ) -> NativeHarnessComposition:
     """This project's content, compiled through the Claude adapter."""
-    return ClaudeComposer().compose(root, project_content(root, rules), TEMPLATE_CLAUDE)
+    return ClaudeComposer().compose(
+        root,
+        project_content(root, rules, composed),
+        template_guidance(TEMPLATE_CLAUDE, composed),
+    )
 
 
 def codex_target(
-    root: Path, rules: RuleSelection | None = None
+    root: Path, rules: RuleSelection | None = None, composed: Composed = COMPOSED
 ) -> NativeHarnessComposition:
     """This project's content, compiled through the Codex adapter."""
-    return CodexComposer().compose(root, project_content(root, rules), TEMPLATE_CODEX)
+    return CodexComposer().compose(
+        root,
+        project_content(root, rules, composed),
+        template_guidance(TEMPLATE_CODEX, composed),
+    )
 
 
 TARGETS = NativeTargets(builders={"claude": claude_target, "codex": codex_target})

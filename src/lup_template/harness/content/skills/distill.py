@@ -37,9 +37,27 @@ SKILL = models.Skill(
                         plugin="lup", skill="brainstorm"
                     ),
                     "init_skill": models.SkillInvocation(plugin="lup", skill="init"),
-                    "import_skill": models.SkillInvocation(
-                        plugin="lup", skill="import"
-                    ),
+                    # How a carry is made, where upstream is taken to make it:
+                    # the stance that nothing is copied holds either way.
+                    **{
+                        value: models.WhereShipped(
+                            parts=[
+                                models.Passage(
+                                    module=__name__,
+                                    name=name,
+                                    values={
+                                        "import_skill": models.SkillInvocation(
+                                            plugin="lup", skill="import"
+                                        )
+                                    },
+                                )
+                            ]
+                        )
+                        for value, name in (
+                            ("import_route", "import-route"),
+                            ("import_later", "import-later"),
+                        )
+                    },
                     "arguments": models.ArgumentsRef(),
                     "ask": models.AskUser(
                         question="which repository this restart distills from, and their narrative of the direction it found"

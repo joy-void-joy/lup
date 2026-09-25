@@ -18,7 +18,7 @@ from lup.harness.codescan.portable import (
 )
 from lup.harness.contracts import NativeSpellings
 from lup.policy.kernel.decision import SANDBOX_ESCALATION_RECIPE
-from lup.harness.models import PromptDocument, TextPart
+from lup.harness.models import GuidanceDocument, GuidanceSection, TextPart
 from lup.harness.prompts import SPAWNED_SESSION_LOSES_SHELL
 from lup_template.harness.catalog import portable_harness
 
@@ -130,14 +130,23 @@ def test_vocabulary_follows_the_locations_a_runtime_can_spell() -> None:
     assert "AskUserQuestion" in vocabulary
 
 
+
+def guidance_of(text: str) -> GuidanceDocument:
+    """An always-loaded document holding this one line of prose and nothing else."""
+    return GuidanceDocument(
+        source=__name__,
+        sections=[
+            GuidanceSection(id="only", chapter="gates", parts=[TextPart(text=text)])
+        ],
+    )
+
+
 def test_compiling_refuses_prose_that_names_a_platform() -> None:
     """The gate has to bite at the seam, not only in this file's inventory."""
     harness = portable_harness()
     leaked = harness.model_copy(
         update={
-            "guidance": PromptDocument(
-                parts=[TextPart(text="Edit .claude/settings.json by hand")]
-            )
+            "guidance": guidance_of("Edit .claude/settings.json by hand")
         }
     )
 
@@ -248,7 +257,7 @@ def test_each_composition_rule_answers_its_own_examples(
     declaration is portable, so what the judge reports is the snippet's own.
     """
     judged = portable_harness().model_copy(
-        update={"guidance": PromptDocument(parts=[TextPart(text=example.code)])}
+        update={"guidance": guidance_of(example.code)}
     )
     breaches = rule.judge(judged, RUNTIMES)
 

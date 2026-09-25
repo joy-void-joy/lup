@@ -65,7 +65,7 @@ def prose_breaches(
     """
     plugins = [plugin.name for plugin in source.plugins]
     documents = [
-        ("harness.guidance", source.guidance),
+        ("harness.guidance", source.guidance.document()),
         *(
             (declaration.id, declaration.prompt)
             for plugin in source.plugins

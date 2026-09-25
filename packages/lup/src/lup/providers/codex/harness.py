@@ -560,9 +560,9 @@ class CodexGuidanceRenderer(ArtifactRenderer[Harness]):
             artifacts=[
                 Artifact.generated(
                     path=Path("AGENTS.md"),
-                    body=self.prompts.render(source.guidance),
+                    body=self.prompts.render(source.guidance.document()),
                     semantic_id="harness.guidance",
-                    banner=guidance_banner(self.prompts, source.guidance),
+                    banner=guidance_banner(self.prompts, source.guidance.document()),
                 ),
                 Artifact.generated(
                     path=Path(".codex/config.toml"),

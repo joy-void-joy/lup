@@ -63,7 +63,7 @@ Other sessions work in this repository, started by whoever. Before starting some
 <!-- passage: merge-conflict-resolution -->
 ### Merge Conflict Resolution
 
-**Never silently drop code during conflict resolution** — keeping both sides is safer than losing features, and a rename on one side must not swallow an addition on the other. Before completing any merge, **audit for deletions**: compare the result against both parents and verify every removed function, parameter, or command went deliberately, not as a side effect of choosing one side. `{{ merge_skill }}` carries the decision tree.
+**Never silently drop code during conflict resolution** — keeping both sides is safer than losing features, and a rename on one side must not swallow an addition on the other. Before completing any merge, **audit for deletions**: compare the result against both parents and verify every removed function, parameter, or command went deliberately, not as a side effect of choosing one side.{{ merge_pointer }}
 
 
 <!-- passage: commit-guidelines -->

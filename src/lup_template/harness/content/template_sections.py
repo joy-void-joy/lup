@@ -28,8 +28,32 @@ PRINCIPLES_THROUGH_PATTERN_MENU: list[models.PromptPart] = [
         module=__name__,
         name="important-context",
         values={
-            "bump_skill": models.SkillInvocation(plugin="lup", skill="bump"),
-            "debug_skill": models.SkillInvocation(plugin="lup", skill="debug"),
+            # Each a pointer to a skill another module ships, beside a command
+            # or a practice that holds without it.
+            "bump_alternative": models.WhereShipped(
+                parts=[
+                    models.TextPart(text=" (or `"),
+                    models.SkillInvocation(plugin="lup", skill="bump"),
+                    models.TextPart(text="`)"),
+                ]
+            ),
+            "bump_or": models.WhereShipped(
+                parts=[
+                    models.TextPart(text=" or `"),
+                    models.SkillInvocation(plugin="lup", skill="bump"),
+                    models.TextPart(text="`"),
+                ]
+            ),
+            "debug_step": models.WhereShipped(
+                parts=[
+                    models.TextPart(text="\n\nUse `"),
+                    models.SkillInvocation(plugin="lup", skill="debug"),
+                    models.TextPart(
+                        text=" <error message>` to trace an error through the "
+                        "logs automatically."
+                    ),
+                ]
+            ),
             "init_skill": models.SkillInvocation(plugin="lup", skill="init"),
         },
     ),
@@ -49,8 +73,24 @@ WORKFLOW_THROUGH_COMMIT_FORMAT: list[models.PromptPart] = [
         name="worktrees",
         values={
             "relocate": models.RelocateSession(path="the absolute path step 1 prints"),
-            "rebase_skill": models.SkillInvocation(plugin="lup", skill="rebase"),
-            "close_skill": models.SkillInvocation(plugin="lup", skill="close"),
+            # How a branch lands, where the plugin ships the skills that land
+            # one: the steps before it hold for any workflow.
+            "landing_steps": models.WhereShipped(
+                parts=[
+                    models.Passage(
+                        module=__name__,
+                        name="landing-steps",
+                        values={
+                            "rebase_skill": models.SkillInvocation(
+                                plugin="lup", skill="rebase"
+                            ),
+                            "close_skill": models.SkillInvocation(
+                                plugin="lup", skill="close"
+                            ),
+                        },
+                    )
+                ]
+            ),
         },
     ),
     *conventions.MERGE_CONFLICT_RESOLUTION.parts,
@@ -64,7 +104,15 @@ DIRECTORY_STRUCTURE_THROUGH_TOOLS: list[models.PromptPart] = [
     models.Passage(
         module=__name__,
         name="directory-structure",
-        values={"resolve_skill": models.SkillInvocation(plugin="lup", skill="resolve")},
+        values={
+            "resolve_step": models.WhereShipped(
+                parts=[
+                    models.TextPart(text=" Use `"),
+                    models.SkillInvocation(plugin="lup", skill="resolve"),
+                    models.TextPart(text="` to clear resolved notes."),
+                ]
+            )
+        },
     ),
 ]
 
@@ -126,7 +174,17 @@ def permission_hooks(policy_scope: str) -> list[models.PromptPart]:
             name="permission-hooks",
             values={
                 "textpart": models.TextPart(text=policy_scope),
-                "hooks_skill": models.SkillInvocation(plugin="lup", skill="hooks"),
+                "hooks_step": models.WhereShipped(
+                    parts=[
+                        models.TextPart(text=" Use\n`"),
+                        models.SkillInvocation(plugin="lup", skill="hooks"),
+                        models.TextPart(
+                            text="` to update canonical inputs, regenerate both "
+                            "plugins, and run the\nshared canonical/bundled "
+                            "fixture suite."
+                        ),
+                    ]
+                ),
             },
         ),
     ]

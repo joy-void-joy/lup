@@ -79,8 +79,12 @@ SKILL = models.Skill(
                     "project_settings": models.NativePath(
                         location="project_settings", scope="every_tree"
                     ),
-                    "update_skill": models.SkillInvocation(
-                        plugin="lup", skill="update"
+                    "update_route": models.WhereShipped(
+                        parts=[
+                            models.TextPart(text=" — "),
+                            models.SkillInvocation(plugin="lup", skill="update"),
+                            models.TextPart(text=" walks them that way"),
+                        ]
                     ),
                     "skill_pattern": models.SkillPattern(plugin="lup", placeholder="*"),
                     "root_plugin_path": models.PluginPath(
@@ -137,12 +141,30 @@ SKILL = models.Skill(
                 module=__name__,
                 name="seams",
                 values={
-                    "meta_skill": models.SkillInvocation(plugin="lup", skill="meta"),
-                    "commit_skill": models.SkillInvocation(
-                        plugin="lup", skill="commit"
+                    # Suggestions, each holding only where the plugin being
+                    # installed ships the skill it suggests.
+                    "meta_step": models.WhereShipped(
+                        parts=[
+                            models.TextPart(text="\n   - Try `"),
+                            models.SkillInvocation(plugin="lup", skill="meta"),
+                            models.TextPart(
+                                text="` to review the generated harness trees"
+                            ),
+                        ]
                     ),
-                    "update_skill": models.SkillInvocation(
-                        plugin="lup", skill="update"
+                    "commit_step": models.WhereShipped(
+                        parts=[
+                            models.TextPart(text="\n   - Run `"),
+                            models.SkillInvocation(plugin="lup", skill="commit"),
+                            models.TextPart(text="` to test the commit workflow"),
+                        ]
+                    ),
+                    "update_step": models.WhereShipped(
+                        parts=[
+                            models.TextPart(text="\n   - Consider `"),
+                            models.SkillInvocation(plugin="lup", skill="update"),
+                            models.TextPart(text="` later for ongoing sync"),
+                        ]
                     ),
                 },
             ),

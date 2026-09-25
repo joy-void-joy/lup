@@ -273,6 +273,9 @@ Commit early, commit often, and keep commits atomic — if the message needs an
 "and", it is two commits. The format is `type(scope): description`:
 
 
+<!-- passage: resolve-pass -->
+ {{ resolve_skill }} runs that pass;
+[resolver.md](resolver.md) describes what it does.
 <!-- passage: what-has-to-be-green -->
 
 A `data` commit of generated outputs may go straight to `dev`; code never
@@ -509,8 +512,7 @@ was asked. A `solved:` claim is retired only by the verify-solved review
 pass, through `dev comments --retire`; the edit gate refuses a hand-deletion
 or rewording for everyone, agent and human alike. `defer:` notes park work
 at the site until deliberately resumed, and `ignore[<rule-id>]` hatches are
-not feedback at all — they come out with the violation they cover. {{ resolve_skill }} runs that pass;
-[resolver.md](resolver.md) describes what it does.
+not feedback at all — they come out with the violation they cover.{{ resolve_pass }}
 
 ## Native evidence and the release gate
 

@@ -518,10 +518,10 @@ Start a `Monitor` over `uv run lup-devtools dev check`. Each line it emits arriv
 
 Once the scaffolding is generated, guide the user to:
 
-1. Run a few sessions: `uv run lup loop "task1" "task2"`
-2. Review traces in `notes/traces/`
-3. Use `/lup:feedback-loop` to analyze and improve
-4. Iterate on the feedback collection as patterns emerge
+- Run a few sessions: `uv run lup loop "task1" "task2"`
+- Review traces in `notes/traces/`
+- Use `/lup:feedback-loop` to analyze and improve
+- Iterate on the feedback collection as patterns emerge
 
 ## Key Files to Customize
 

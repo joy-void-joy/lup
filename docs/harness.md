@@ -227,6 +227,19 @@ from that rather than declared beside it, so declining a subject removes all
 five surfaces at once. `dev modules` prints the roster. Change the module that
 owns the subject, then regenerate.
 
+Declining one subject must not strand another's words, so every reach from one
+module into another is declared as one of two things. A **step** the module
+cannot do without — `/lup:update` resolving its merge through `/lup:merge`,
+git-workflow's skills running `dev check` — is a `requires` on the module's
+spec: taking the module without the one it names is refused before anything
+builds, in the words of the modules decided on. A **pointer** the module reads
+fine without — a suggestion, an aside naming where more lives — goes inside
+`WhereShipped`, whose words hold exactly where every skill they invoke ships
+and vanish where one does not. The harness refuses any invocation still naming
+a skill it does not ship, in its prompts, its always-loaded document, its pages
+and the guidance an installer merges, and lists every one at once with the
+section, skill or page and the passage holding it.
+
 **Skills:**
 
 - /lup:add-command — Create a new slash command in the lup plugin

@@ -12,7 +12,7 @@ import json
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError, model_validator
 from pydantic_core import ErrorDetails
 
 from lup.providers.harness import (
@@ -40,7 +40,9 @@ from lup.harness.models import (
     CapabilityReport,
     Document,
     Harness,
+    InvocationHolder,
     PromptDocument,
+    refusal_of,
 )
 from lup.types import JsonObject
 from lup.workspace.paths import declared_project_root
@@ -100,6 +102,28 @@ class ProjectContent(BaseModel, frozen=True):
     and carry nothing: the artifact they become is JSON too, so its provenance
     has no comment to sit in and would otherwise be nowhere at all.
     """
+
+    @model_validator(mode="after")
+    def documents_invoke_what_the_plugin_ships(self) -> "ProjectContent":
+        """A page sending its reader to a skill this plugin lacks is refused.
+
+        The harness answers the same question for its own prompts; a page is
+        composed beside it rather than inside it, so it is asked here, where
+        the two first meet. What a declined module leaves behind in a page is
+        the same pointer to nothing it leaves in a skill.
+        """
+        refused = self.harness.unresolved(
+            [
+                InvocationHolder(
+                    declaration=f"page {document.semantic_id!r}",
+                    parts=document.document.parts,
+                )
+                for document in self.documents
+            ]
+        )
+        if refused:
+            raise ValueError(refusal_of(refused))
+        return self
 
 
 class GenerationRecipe(BaseModel, frozen=True, arbitrary_types_allowed=True):
@@ -278,20 +302,36 @@ def rendered_document(
 
 
 def installer_guidance(
-    *, path: Path, document: PromptDocument | None, prompts: PromptRenderer
+    *,
+    path: Path,
+    document: PromptDocument | None,
+    prompts: PromptRenderer,
+    source: Harness,
 ) -> list[Artifact]:
     """Render the guidance an installer merges into a target, if there is any.
 
     Only a template has one: a project that is nobody's starting point has no
     downstream to hand guidance to, so it publishes no such file rather than
     advertising its own project guidance as something to install elsewhere.
+
+    It teaches the plugin it is installed beside, so it reads as that plugin
+    ships: a pointer to a skill of a module this project declined goes, and
+    an invocation still naming one is refused as the harness refuses its own.
     """
     if document is None:
         return []
+    settled = document.shipped(
+        frozenset(skill.name for plugin in source.plugins for skill in plugin.skills)
+    )
+    refused = source.unresolved(
+        [InvocationHolder(declaration="installer guidance", parts=settled.parts)]
+    )
+    if refused:
+        raise ValueError(refusal_of(refused))
     return [
         rendered_document(
             path=path,
-            document=document,
+            document=settled,
             prompts=prompts,
             semantic_id="harness.template-guidance",
         )
@@ -380,7 +420,10 @@ def claude_generation_recipe(
     support_artifacts = [
         *published_documents(prompts, content.documents),
         *installer_guidance(
-            path=plugin / "TEMPLATE_CLAUDE.md", document=guidance, prompts=prompts
+            path=plugin / "TEMPLATE_CLAUDE.md",
+            document=guidance,
+            prompts=prompts,
+            source=source,
         ),
         *verbatim,
         Artifact(
@@ -425,6 +468,7 @@ def codex_generation_recipe(
         path=Path(".codex/plugins") / source.plugins[0].name / "TEMPLATE_AGENTS.md",
         document=guidance,
         prompts=prompts,
+        source=source,
     )
     compiled = compile_codex(source)
     desired = validated_tree([*compiled.artifacts, *support_artifacts])

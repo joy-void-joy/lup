@@ -99,6 +99,7 @@ from lup.harness.models import (
     RelocateSession,
     NestedRun,
     WatchOutput,
+    WhereShipped,
     CommandInvocation,
     RequestApproval,
     ResolverEntry,
@@ -185,7 +186,7 @@ from lup.devtools.harness.generate import (
     inspect_generation,
 )
 
-GUIDANCE = COMPOSED_GUIDANCE
+GUIDANCE = COMPOSED_GUIDANCE.document()
 """The guidance this repository actually ships, module selection included."""
 
 
@@ -878,6 +879,17 @@ PART_CONTRACT: dict[str, PartExpectation] = {
         ),
         diverges=True,
     ),
+    # Words holding only where their skill ships spell as those words, so they
+    # diverge exactly where the invocation inside them does.
+    "WhereShipped": PartExpectation(
+        part=WhereShipped(
+            parts=[
+                TextPart(text="see "),
+                SkillInvocation(plugin="lup", skill="merge"),
+            ]
+        ),
+        diverges=True,
+    ),
     "InlinePart": PartExpectation(
         part=InlinePart(node=ProseCode(text="agent/core.py")), diverges=False
     ),
@@ -1014,11 +1026,11 @@ def test_an_undeclared_plugin_behind_an_invocation_names_the_invocation() -> Non
     gate see it — but only one of them can say which skill went missing.
     """
     source = portable_harness().model_dump()
-    source["guidance"]["parts"].append(
+    source["guidance"]["sections"][0]["parts"].append(
         SkillInvocation(plugin="absent", skill="merge").model_dump()
     )
 
-    with pytest.raises(ValueError, match="unknown declaration: absent:merge"):
+    with pytest.raises(ValueError, match="absent:merge names no skill"):
         Harness.model_validate(source)
 
 
@@ -1280,7 +1292,9 @@ def test_no_runtime_spells_an_invocation_portable_prose_would_admit() -> None:
 def test_deserializing_a_harness_refuses_an_invocation_in_guidance() -> None:
     """Reading a harness back is a declaration too, and refuses the same words."""
     source = portable_harness().model_dump()
-    source["guidance"]["parts"].append({"type": "text", "text": "Run $lup:merge"})
+    source["guidance"]["sections"][0]["parts"].append(
+        {"type": "text", "text": "Run $lup:merge"}
+    )
 
     with pytest.raises(ValueError, match="portable prose spells"):
         Harness.model_validate(source)

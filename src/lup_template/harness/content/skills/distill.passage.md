@@ -13,8 +13,7 @@ the old repository's evidence, handed to `{{ init_skill }}`.
 consult to answer design questions — never a template to walk, never a source
 tree to transplant. Everything in this project is rewritten from the brief. A
 verbatim carry — even one file, even a test — happens only when the user
-explicitly asks for it, and then it routes through `{{ import_skill }}` so every carried piece gets a ledger row and a
-completeness audit rather than a quiet paste.
+explicitly asks for it{{ import_route }}.
 
 ## User's Starting Point
 
@@ -45,7 +44,7 @@ session (`--continue` reaches this same conversation) and resume this skill.
 
 Read-only is the mechanism behind the no-copy stance, not a limitation. And
 the registration outlives this run on purpose: it keeps the old repository
-reachable by name, so a month from now one genuinely needed piece is `{{ import_skill }} <name> <scope>` away — nothing is lost by leaving
+reachable by name{{ import_later }} — nothing is lost by leaving
 everything behind today.
 
 ## Phase 1: Interview First
@@ -54,6 +53,11 @@ Read nothing yet. The user watched this exploration sprawl and knows why they
 are restarting; that knowledge is the input the old repository cannot give
 you.
 
+<!-- passage: import-route -->
+, and then it routes through `{{ import_skill }}` so every carried piece gets a ledger row and a
+completeness audit rather than a quiet paste
+<!-- passage: import-later -->
+, so a month from now one genuinely needed piece is `{{ import_skill }} <name> <scope>` away
 <!-- passage: archaeology -->
 
 Then the questions only a restart has: {{ ask }}.

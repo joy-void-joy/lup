@@ -349,3 +349,61 @@ def test_a_requirement_a_project_took_is_met() -> None:
     )
 
     assert "epsilon" in [module.spec.id for module in taken]
+
+
+def pointing(identity: str, name: str, target: str) -> models.Skill:
+    """A skill whose prose points at another skill, held where that one ships."""
+    return models.Skill(
+        id=identity,
+        name=name,
+        description="A worked-example skill.",
+        prompt=models.PromptDocument(
+            source=__name__,
+            parts=[
+                models.TextPart(text="Do the thing."),
+                models.WhereShipped(
+                    parts=[
+                        models.TextPart(text=" Then "),
+                        models.SkillInvocation(plugin="lup", skill=target),
+                        models.TextPart(text="."),
+                    ]
+                ),
+            ],
+        ),
+    )
+
+
+def test_a_pointer_into_a_declined_module_is_withheld_where_it_is_adopted() -> None:
+    """The roster is whole only once every taken module is built, so it is there.
+
+    A skill pointing at gamma's reads the pointer where gamma is taken and
+    loses it where gamma is not — the module holding the pointer has no way
+    to know which, and neither does the declaration it was written in.
+    """
+    delta_spec = modules.ModuleSpec(
+        id="delta", title="Delta", summary="Points elsewhere.", default_on=True
+    )
+    delta = modules.Module(
+        spec=delta_spec,
+        content=models.ContentRoster(skills=[pointing("skill.d1", "d1", "g1")]),
+    )
+    entries = [*ENTRIES, modules.ModuleEntry(spec=delta_spec, build=lambda: delta)]
+
+    def pointer(taken: list[modules.Module]) -> models.PromptPart:
+        [skill] = [
+            one for one in modules.composed_content(taken).skills if one.name == "d1"
+        ]
+        return skill.prompt.parts[1]
+
+    without = pointer(modules.adopted(entries))
+    with_gamma = pointer(
+        modules.adopted(
+            entries,
+            modules.ModuleSelection(
+                adoptions=[modules.Adoption(module="gamma", taken=True)]
+            ),
+        )
+    )
+
+    assert without.issued() == []
+    assert [issued.invocation.skill for issued in with_gamma.issued()] == ["g1"]

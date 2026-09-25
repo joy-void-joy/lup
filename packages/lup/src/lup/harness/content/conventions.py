@@ -202,7 +202,16 @@ MERGE_CONFLICT_RESOLUTION = models.GuidanceSection(
             module=__name__,
             name="merge-conflict-resolution",
             values={
-                "merge_skill": models.SkillInvocation(plugin="lup", skill="merge"),
+                # The rule holds for any merge; the skill carrying its decision
+                # tree is named only where one ships, since the section is
+                # also composed into guidance written for other projects.
+                "merge_pointer": models.WhereShipped(
+                    parts=[
+                        models.TextPart(text=" `"),
+                        models.SkillInvocation(plugin="lup", skill="merge"),
+                        models.TextPart(text="` carries the decision tree."),
+                    ]
+                ),
             },
         ),
     ],

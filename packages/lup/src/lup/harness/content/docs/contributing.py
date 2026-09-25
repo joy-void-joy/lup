@@ -44,8 +44,20 @@ def document(
                     ),
                     "close_skill": models.SkillInvocation(plugin="lup", skill="close"),
                     "merge_skill": models.SkillInvocation(plugin="lup", skill="merge"),
-                    "resolve_skill": models.SkillInvocation(
-                        plugin="lup", skill="resolve"
+                    # Who runs the pass, where the resolver is taken; the
+                    # lifecycle above holds without it.
+                    "resolve_pass": models.WhereShipped(
+                        parts=[
+                            models.Passage(
+                                module=__name__,
+                                name="resolve-pass",
+                                values={
+                                    "resolve_skill": models.SkillInvocation(
+                                        plugin="lup", skill="resolve"
+                                    )
+                                },
+                            )
+                        ]
                     ),
                 },
             ),

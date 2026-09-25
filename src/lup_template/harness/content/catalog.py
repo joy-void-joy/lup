@@ -19,10 +19,12 @@ the project knows that name, so it is supplied here rather than assumed there.
 
 from pathlib import Path
 
+from pydantic import BaseModel
+
 import lup.harness.models as models
 import lup_template.harness.content.guidance as guidance
 from lup.devtools.roster import LIBRARY_SPECS as LIBRARY_SUBAPPS
-from lup.devtools.subapps import unowned
+from lup.devtools.subapps import SubAppSelection, SubAppSpec, unowned
 from lup.harness.codescan.common import RuleSelection
 from lup.harness.content.application import ApplicationLayout
 from lup.harness.modules import (
@@ -30,6 +32,7 @@ from lup.harness.modules import (
     Module,
     ModuleEntry,
     ModuleSelection,
+    ModuleSpec,
     adopted,
     composed_content,
     composed_guidance,
@@ -145,7 +148,9 @@ rather than a list of what is kept.
 """
 
 
-def selection(layout: ApplicationLayout = LAYOUT) -> ModuleSelection:
+def selection(
+    layout: ApplicationLayout = LAYOUT, declined: list[str] | None = None
+) -> ModuleSelection:
     """What this project has: the derived answers, less what it declined.
 
     :func:`~lup.harness.modules.scaffold_selection` settles the two answers a
@@ -154,14 +159,19 @@ def selection(layout: ApplicationLayout = LAYOUT) -> ModuleSelection:
     is no contradiction between the two: naming a module you do not have *is*
     the decision the derivation stands in for, so a stated refusal wins over a
     rule that exists because nobody had stated anything.
+
+    ``declined`` is :data:`DECLINED` unless another answer is being asked about
+    — what the roster would ship had this project declined something else,
+    which is the question a test of every possible answer asks.
     """
+    refused = DECLINED if declined is None else declined
     derived = scaffold_selection(
         [entry.spec for entry in entries(layout)], adoptions(layout)
     )
     return ModuleSelection(
         adoptions=[
             entry.model_copy(update={"taken": False})
-            if entry.module in DECLINED
+            if entry.module in refused
             else entry
             for entry in derived.adoptions
         ]
@@ -180,41 +190,10 @@ Projected from the entries rather than listed again, so the order cannot be
 stated twice and come out differently the second time.
 """
 
-MODULE_SELECTION = selection()
-"""What this repository settled, under its own package name."""
 
-SUBAPPS = MODULE_SELECTION.subapps(MODULE_SPECS)
-"""Every top-level CLI group the adopted modules own.
-
-Read before anything is built, which is what makes it usable: the CLI has to
-know which command trees it serves in order to compose them, and a name is
-known from the spec while a skill is not. What the CLI serves is the
-intersection of this and what the library ships, so a module nobody took takes
-its commands with it rather than leaving them answering for machinery the
-project does not have.
-"""
-
-TOOL_GROUPS = MODULE_SELECTION.tool_groups(MODULE_SPECS)
-"""Every MCP tool group a session is offered, by adopted module."""
-
-SUBAPP_SELECTION = unowned(SUBAPPS, LIBRARY_SUBAPPS)
-"""Which of lup's own sub-apps this CLI declines, as the roster decided it.
-
-Empty for this repository, which takes every module it ships — and that is the
-derivation working rather than a statement about lup.
-"""
-
-APPLICATION_SPECS = [spec for spec in APPLICATION_ROSTER if spec.name in SUBAPPS]
-"""The sub-apps only this application has, narrowed the same way.
-
-``agent`` is served because this project took ``project``, whose subject it is.
-"""
-
-SUBAPP_SPECS = SUBAPP_SELECTION.specs(LIBRARY_SUBAPPS, APPLICATION_SPECS)
-"""Every sub-app this CLI serves, in the order `--help` lists them."""
-
-
-def modules(layout: ApplicationLayout = LAYOUT) -> list[Module]:
+def modules(
+    layout: ApplicationLayout = LAYOUT, declined: list[str] | None = None
+) -> list[Module]:
     """The modules this repository composes, in reading order.
 
     The layout is a parameter so the roster can be resolved under a package
@@ -223,13 +202,115 @@ def modules(layout: ApplicationLayout = LAYOUT) -> list[Module]:
     same string, so only a roster built as some other project can tell them
     apart — which is the one thing an adopter needs to be true.
     """
-    return adopted(entries(layout), selection(layout))
+    return adopted(entries(layout), selection(layout, declined))
 
 
-MODULES = modules()
+class Composed(BaseModel, frozen=True):
+    """Everything one answer to :data:`DECLINED` settles, surface by surface.
+
+    One value rather than a row of constants, so that every surface a declined
+    module leaves — the plugin's roster, the document, the command trees, the
+    pages that describe them — is read off the same composition. The constants
+    below are this repository's own answer; a different one is composed by
+    :func:`composed`, through the same code, which is the only way a test of
+    declining a module exercises what declining one actually builds.
+    """
+
+    specs: list[ModuleSpec]
+    """The whole roster these answers were given against, taken or not."""
+
+    selection: ModuleSelection
+    modules: list[Module]
+
+    @property
+    def content(self) -> models.ContentRoster:
+        """Every skill and agent the plugin ships, in module order."""
+        return composed_content(self.modules)
+
+    @property
+    def guidance(self) -> models.GuidanceDocument:
+        """The always-loaded document, chapter by chapter and module by module."""
+        return guidance.document(composed_guidance(self.modules, self.selection))
+
+    @property
+    def subapps(self) -> list[str]:
+        """Every top-level CLI group the adopted modules own.
+
+        Read before anything is built, which is what makes it usable: the CLI
+        has to know which command trees it serves in order to compose them,
+        and a name is known from the spec while a skill is not. What the CLI
+        serves is the intersection of this and what the library ships, so a
+        module nobody took takes its commands with it rather than leaving them
+        answering for machinery the project does not have.
+        """
+        return self.selection.subapps(self.specs)
+
+    @property
+    def tool_groups(self) -> list[str]:
+        """Every MCP tool group a session is offered, by adopted module."""
+        return self.selection.tool_groups(self.specs)
+
+    @property
+    def subapp_selection(self) -> SubAppSelection:
+        """Which of lup's own sub-apps this CLI declines, as the roster decided it."""
+        return unowned(self.subapps, LIBRARY_SUBAPPS)
+
+    @property
+    def application_specs(self) -> list[SubAppSpec]:
+        """The sub-apps only this application has, narrowed the same way."""
+        return [spec for spec in APPLICATION_ROSTER if spec.name in self.subapps]
+
+    @property
+    def subapp_specs(self) -> list[SubAppSpec]:
+        """Every sub-app this CLI serves, in the order `--help` lists them."""
+        return self.subapp_selection.specs(LIBRARY_SUBAPPS, self.application_specs)
+
+
+def composed(
+    layout: ApplicationLayout = LAYOUT, declined: list[str] | None = None
+) -> Composed:
+    """This repository's roster under one answer to which modules it declines."""
+    roster = entries(layout)
+    chosen = selection(layout, declined)
+    return Composed(
+        specs=[entry.spec for entry in roster],
+        selection=chosen,
+        modules=adopted(roster, chosen),
+    )
+
+
+COMPOSED = composed()
+"""This repository's own answer, composed once because every surface reads it."""
+
+MODULE_SELECTION = COMPOSED.selection
+"""What this repository settled, under its own package name."""
+
+SUBAPPS = COMPOSED.subapps
+"""Every top-level CLI group the adopted modules own."""
+
+TOOL_GROUPS = COMPOSED.tool_groups
+"""Every MCP tool group a session is offered, by adopted module."""
+
+SUBAPP_SELECTION = COMPOSED.subapp_selection
+"""Which of lup's own sub-apps this CLI declines, as the roster decided it.
+
+Empty for this repository, which takes every module it ships — and that is the
+derivation working rather than a statement about lup.
+"""
+
+APPLICATION_SPECS = COMPOSED.application_specs
+"""The sub-apps only this application has, narrowed the same way.
+
+``agent`` is served because this project took ``project``, whose subject it is.
+"""
+
+SUBAPP_SPECS = COMPOSED.subapp_specs
+"""Every sub-app this CLI serves, in the order `--help` lists them."""
+
+MODULES = COMPOSED.modules
 """The composed roster, built once because every surface below reads it."""
 
-CONTENT = composed_content(MODULES)
+CONTENT = COMPOSED.content
 """Every skill and agent this repository's plugin ships, in module order."""
 
 SKILLS = CONTENT.skills
@@ -238,11 +319,11 @@ SKILLS = CONTENT.skills
 AGENTS = CONTENT.agents
 """Every agent this repository's plugin ships."""
 
-GUIDANCE_SECTIONS = composed_guidance(MODULES, MODULE_SELECTION)
-"""The always-loaded document's sections, chapter by chapter and module by module."""
+GUIDANCE = COMPOSED.guidance
+"""The always-loaded document itself, each section under its own name."""
 
-GUIDANCE = guidance.document(GUIDANCE_SECTIONS)
-"""The always-loaded document itself."""
+GUIDANCE_SECTIONS = GUIDANCE.sections
+"""The always-loaded document's sections, chapter by chapter and module by module."""
 
 PLUGIN_NAME: models.NativeName = "lup"
 """The plugin every declared skill is invoked through.

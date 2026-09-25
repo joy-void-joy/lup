@@ -86,8 +86,15 @@ SKILL = models.Skill(
                     "watch": models.WatchOutput(
                         command="uv run lup-devtools dev check"
                     ),
-                    "feedback_loop_skill": models.SkillInvocation(
-                        plugin="lup", skill="feedback-loop"
+                    # The loop is off by default, so the step that runs it is
+                    # advice for a domain that took it rather than a phase of
+                    # initialization.
+                    "feedback_loop_step": models.WhereShipped(
+                        parts=[
+                            models.TextPart(text="\n- Use `"),
+                            models.SkillInvocation(plugin="lup", skill="feedback-loop"),
+                            models.TextPart(text="` to analyze and improve"),
+                        ]
                     ),
                 },
             ),

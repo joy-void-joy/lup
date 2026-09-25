@@ -129,9 +129,26 @@ CLOSING_PARTS: list[models.PromptPart] = [
         module=__name__,
         name="template",
         values={
-            "update_skill": models.SkillInvocation(plugin="lup", skill="update"),
-            "import_skill": models.SkillInvocation(plugin="lup", skill="import"),
-            "update_skill_2": models.SkillInvocation(plugin="lup", skill="update"),
+            # The registry is described whether or not upstream is taken; the
+            # two skills built on it are named only where they ship.
+            "built_on_it": models.WhereShipped(
+                parts=[
+                    models.TextPart(text=" The "),
+                    models.SkillInvocation(plugin="lup", skill="update"),
+                    models.TextPart(text=" and "),
+                    models.SkillInvocation(plugin="lup", skill="import"),
+                    models.TextPart(text=" skills are built on it."),
+                ]
+            ),
+            "generalized_back": models.WhereShipped(
+                parts=[
+                    models.TextPart(text=", so "),
+                    models.SkillInvocation(plugin="lup", skill="update"),
+                    models.TextPart(
+                        text=" can generalize emerged patterns back into the template"
+                    ),
+                ]
+            ),
         },
     ),
 ]

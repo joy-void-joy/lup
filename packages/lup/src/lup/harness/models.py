@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from itertools import dropwhile
 from json import dumps
 from pathlib import Path, PurePath, PurePosixPath
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal, Self
 
 from pydantic import (
     AfterValidator,
@@ -147,6 +147,50 @@ class SemanticPart(BaseModel, ABC, frozen=True):
         inside a sentence rather than beside one.
         """
         return []
+
+    def reached(self) -> list["SemanticPart"]:
+        """This part and everything it carries, however deep, in reading order.
+
+        Recursive because a carried part can carry again: a pointer that holds
+        only where its skill ships is a value of the sentence it sits in, and
+        the invocation it issues is a value of the passage inside it.
+        """
+        return [self, *(found for part in self.carried for found in part.reached())]
+
+    @property
+    def authored_in(self) -> str | None:
+        """Where the prose this part places its values into is written, if any.
+
+        What a diagnostic names beside the declaration, so its reader is sent
+        to the paragraph rather than to the whole prompt. Only a passage has an
+        answer, being the one kind whose words live in a file of their own.
+        """
+        return None
+
+    def issued(self, within: str = "") -> list["IssuedInvocation"]:
+        """Every invocation this part issues, with the passage it is written in.
+
+        ``within`` is the innermost passage enclosing this part, which a part
+        issuing an invocation from inside a sentence is attributed to.
+        """
+        here = self.authored_in or within
+        own = (
+            []
+            if self.invocation is None
+            else [IssuedInvocation(invocation=self.invocation, passage=here)]
+        )
+        return [*own, *(found for part in self.carried for found in part.issued(here))]
+
+    def shipped(self, skills: frozenset[str]) -> Self:
+        """This part as it reads where exactly these skills are shipped.
+
+        Nothing changes for a part that holds no condition, so that is the
+        answer here. A part that carries others answers with them settled, and
+        :class:`WhereShipped` answers with its words held or withheld — the
+        same kind of part either way, so a settled document holds exactly the
+        shapes the declaration did.
+        """
+        return self
 
     @property
     def invocation(self) -> "SkillInvocation | None":
@@ -305,6 +349,21 @@ class Passage(SemanticPart, frozen=True):
         return list(self.values.values())
 
     @property
+    def authored_in(self) -> str:
+        """This passage by its name beside the module whose file holds it."""
+        named = f"the {self.name!r} passage" if self.name else "the passage"
+        return f"{named} of {self.module}"
+
+    def shipped(self, skills: frozenset[str]) -> Self:
+        return self.model_copy(
+            update={
+                "values": {
+                    name: value.shipped(skills) for name, value in self.values.items()
+                }
+            }
+        )
+
+    @property
     def text_payload(self) -> str:
         """The authored prose, which is what a reader of this document reads.
 
@@ -313,6 +372,80 @@ class Passage(SemanticPart, frozen=True):
         own answer, checked where the value is declared.
         """
         return passage_text(self.module, self.name)
+
+
+class WhereShipped(SemanticPart, frozen=True):
+    """Words pointing into another module, held only where that module ships.
+
+    A module reaching into one it does not require — a suggestion, an aside,
+    a pointer naming another subject's skill — would otherwise leave the
+    pointer behind when a project declines the subject it points at, and the
+    harness refuses an invocation that resolves to nothing. ``requires`` is
+    the answer when the reach is a step the module cannot do without; this is
+    the answer when it is a pointer, which the module reads fine without.
+
+    What decides it is the words themselves: they hold where every skill they
+    invoke is shipped, so the condition cannot name a different skill from the
+    one the prose sends its reader to. The composition that knows what ships
+    settles it — :func:`~lup.harness.modules.adopted` for skills, agents and
+    guidance, the document composition for pages. Left unsettled it spells
+    its words, so a composition that forgot to settle one is refused by the
+    same check as any other invocation rather than trusted.
+    """
+
+    type: Literal["where_shipped"] = "where_shipped"
+    parts: list["PromptPart"] = Field(min_length=1)
+    """The words, in the order they read, including the invocations they hold."""
+
+    held: bool = True
+    """Whether the words stand here, which only a settled composition says.
+
+    Withheld words stay in the declaration they were written in and are read
+    by nothing — no walk reaches them, no renderer spells them — so a settled
+    document keeps the shape its declaration had while saying none of it.
+    """
+
+    @model_validator(mode="after")
+    def invokes_what_decides_it(self) -> "WhereShipped":
+        """Words that can go must invoke what decides it, and hold nothing else.
+
+        Words invoking no skill have nothing to hold on, so they always would.
+        Words reaching the skill's own arguments would take the only reference
+        to them when they went, leaving a skill whose declared arguments its
+        prompt never reads — a disagreement its own validator refuses, but
+        only where it is constructed, which a settled copy is not.
+        """
+        reached = [found for part in self.parts for found in part.reached()]
+        if not any(part.invocation is not None for part in reached):
+            raise ValueError(
+                "WhereShipped holds words that invoke no skill, so nothing decides "
+                "whether they are shipped: place the invocation inside it, or "
+                "write the words as ordinary prose"
+            )
+        if any(part.references_arguments for part in reached):
+            raise ValueError(
+                "WhereShipped holds a reference to the skill's own arguments, "
+                "which would go with the pointer: keep it outside"
+            )
+        return self
+
+    def spell(self, renderer: "PromptRenderer") -> str:
+        return "".join(part.spell(renderer) for part in self.carried)
+
+    @property
+    def carried(self) -> list["PromptPart"]:
+        return list(self.parts) if self.held else []
+
+    def shipped(self, skills: frozenset[str]) -> Self:
+        """These words where every skill they invoke ships, withheld elsewhere."""
+        needed = {
+            issued.invocation.skill for part in self.parts for issued in part.issued()
+        }
+        if not needed <= skills:
+            return self.model_copy(update={"held": False})
+        return self.model_copy(
+            update={"parts": [part.shipped(skills) for part in self.parts]}
+        )
 
 
 class SpellingExample(SemanticPart, frozen=True):
@@ -421,6 +554,32 @@ class SkillInvocation(SemanticPart, frozen=True):
     @property
     def named_plugin(self) -> NativeName:
         return self.plugin
+
+    def fault(self, skill: "Skill | None") -> str | None:
+        """What is wrong with this invocation of ``skill``, or nothing.
+
+        ``None`` for the skill is the harness shipping none under this name,
+        which is what a module declined without what reaches into it leaves.
+        """
+        named = f"{self.plugin}:{self.skill}"
+        if skill is None:
+            return f"{named} names no skill this harness ships"
+        supplied = [argument.name for argument in self.arguments]
+        declared = [argument.name for argument in skill.arguments]
+        missing = [
+            argument.name
+            for argument in skill.arguments
+            if argument.required and argument.name not in supplied
+        ]
+        if len(supplied) != len(dict.fromkeys(supplied)):
+            return f"{named} has duplicate arguments"
+        if any(name not in declared for name in supplied):
+            return f"{named} has an unknown argument"
+        if supplied != [name for name in declared if name in supplied]:
+            return f"{named} arguments are not in declaration order"
+        if missing:
+            return f"{named} is missing required arguments: {missing}"
+        return None
 
 
 type TreeLocation = Literal[
@@ -693,6 +852,7 @@ class ArgumentsRef(SemanticPart, frozen=True):
 type PromptPart = Annotated[
     TextPart
     | Passage
+    | WhereShipped
     | InlinePart
     | BulletList
     | SpellingExample
@@ -716,6 +876,32 @@ type PromptPart = Annotated[
 ]
 
 
+class IssuedInvocation(BaseModel, frozen=True):
+    """One skill invocation a declaration issues, and where its words are written."""
+
+    invocation: SkillInvocation
+
+    passage: str = ""
+    """The passage the invocation is placed in, or empty where it stands alone."""
+
+
+class InvocationHolder(BaseModel, frozen=True):
+    """One declaration whose words may invoke skills, named for whoever fixes it.
+
+    What an unresolvable invocation is reported against. The name is the one a
+    reader acts on — a guidance section's id, a skill's or an agent's name, a
+    page's semantic id — because that is what a project retires, rewrites, or
+    declines, and the rendered file it ends up in is none of those.
+    """
+
+    declaration: str
+    parts: list[PromptPart]
+
+    def issued(self) -> list[IssuedInvocation]:
+        """Every invocation these words issue, however deep, in reading order."""
+        return [found for part in self.parts for found in part.issued()]
+
+
 class PromptDocument(BaseModel, frozen=True):
     parts: list[PromptPart]
     source: str | None = None
@@ -733,7 +919,7 @@ class PromptDocument(BaseModel, frozen=True):
             raise ValueError("a document rendered to its own artifact needs a source")
         return self.source
 
-    def walked(self) -> list[PromptPart]:
+    def walked(self) -> list[SemanticPart]:
         """Every part this document holds, the ones inside a passage included.
 
         What a walk asks a part is asked of the values a passage names too: a
@@ -741,7 +927,13 @@ class PromptDocument(BaseModel, frozen=True):
         is named. Reading order, so a report listing what a document does
         lists it the way the document reads.
         """
-        return [found for part in self.parts for found in [part, *part.carried]]
+        return [found for part in self.parts for found in part.reached()]
+
+    def shipped(self, skills: frozenset[str]) -> "PromptDocument":
+        """This document as it reads where exactly these skills are shipped."""
+        return self.model_copy(
+            update={"parts": [part.shipped(skills) for part in self.parts]}
+        )
 
     def prose(self) -> list[str]:
         """Every literal prose payload this document carries, in reading order."""
@@ -1135,6 +1327,35 @@ def sectioned(sections: list[GuidanceSection]) -> list[PromptPart]:
     none.
     """
     return [part for section in sections for part in section.parts]
+
+
+class GuidanceDocument(BaseModel, frozen=True):
+    """The always-loaded document as the named sections it is read from.
+
+    Kept as sections rather than flattened, because a section is what a reader
+    acts on: a refusal naming an invocation the document cannot resolve names
+    the section holding it, which is the id a project retires or rewrites it
+    by. The document a runtime loads is those sections read end to end,
+    derived here rather than carried beside them, so the two cannot disagree.
+    """
+
+    source: str
+    """The module declaring the document, and where a reader edits it."""
+
+    sections: list[GuidanceSection]
+
+    def document(self) -> PromptDocument:
+        """The sections end to end, as the one document a runtime renders."""
+        return PromptDocument(source=self.source, parts=sectioned(self.sections))
+
+    def holders(self) -> list[InvocationHolder]:
+        """Each section as the declaration an invocation inside it answers to."""
+        return [
+            InvocationHolder(
+                declaration=f"guidance section {section.id!r}", parts=section.parts
+            )
+            for section in self.sections
+        ]
 
 
 class ContentRoster(BaseModel, frozen=True):
@@ -1868,12 +2089,30 @@ class Plugin(BaseModel, frozen=True):
         return self
 
 
+def refusal_of(unresolved: list[str]) -> str:
+    """Every unresolvable invocation as one refusal, and the two ways to answer it.
+
+    The answer is named here because a reader meets it in the middle of
+    declining a module, which is exactly when neither way is obvious: whether
+    the reach is a step the module cannot do without, or a pointer it reads
+    fine without, is a judgement about the prose and not about the build.
+    """
+    listed = "".join(f"\n  {line}" for line in unresolved)
+    return (
+        f"{len(unresolved)} skill invocation(s) cannot be resolved:{listed}\n"
+        "An invocation reaching into another module is a step its module cannot "
+        "do without — declare that module in its spec's `requires` — or a pointer, "
+        "which `WhereShipped` holds only where its skill ships. "
+        "docs/harness.md § What the plugin ships."
+    )
+
+
 class Harness(BaseModel, frozen=True):
     schema_version: int = 1
     generator_version: str
     source_evidence: dict[str, str] = {}  # lup: ignore[dict-str-payload]
     plugins: list[Plugin]
-    guidance: PromptDocument
+    guidance: GuidanceDocument
     resolver: ResolveSpec | None = None
     """How a resolver run is spelled, or nothing for a project without one.
 
@@ -1992,6 +2231,83 @@ class Harness(BaseModel, frozen=True):
             ]
         ]
 
+    def holders(self) -> list[InvocationHolder]:
+        """Every declaration here whose words may invoke a skill.
+
+        Each under the name a reader fixes it by: a guidance section by its
+        id, a skill or an agent by its name, the resolver spec by the field
+        naming the skill a run hands its work to.
+        """
+        resolver = (
+            []
+            if self.resolver is None
+            else [
+                InvocationHolder(
+                    declaration=f"resolver spec {self.resolver.id!r} ({field})",
+                    parts=[invocation],
+                )
+                for field, invocation in (
+                    ("worker_skill", self.resolver.worker_skill),
+                    ("review_skill", self.resolver.review_skill),
+                    ("merge_skill", self.resolver.merge_skill),
+                )
+            ]
+        )
+        return [
+            *self.guidance.holders(),
+            *(
+                InvocationHolder(
+                    declaration=f"skill {skill.name!r}", parts=skill.prompt.parts
+                )
+                for plugin in self.plugins
+                for skill in plugin.skills
+            ),
+            *(
+                InvocationHolder(
+                    declaration=f"agent {agent.name!r}", parts=agent.prompt.parts
+                )
+                for plugin in self.plugins
+                for agent in plugin.agents
+            ),
+            *resolver,
+        ]
+
+    def unresolved(self, holders: list[InvocationHolder]) -> list[str]:
+        """Every invocation these declarations issue that this harness cannot answer.
+
+        Collected rather than raised at the first, because the usual cause
+        leaves several at once: a module declined without what reaches into
+        it strands every pointer into it, and a refusal naming one per build
+        is a refusal read as many times as there are pointers. Each line names
+        the declaration and the passage holding the invocation, which is what
+        whoever fixes it opens.
+
+        Takes the holders rather than reading its own, so a document composed
+        beside this harness — a page, the guidance an installer merges — is
+        held to the plugin it describes by the same question.
+        """
+        skills = {
+            (plugin.name, skill.name): skill
+            for plugin in self.plugins
+            for skill in plugin.skills
+        }
+        return [
+            " ".join(
+                [
+                    f"{fault}, in {holder.declaration}",
+                    *([f"({issued.passage})"] if issued.passage else []),
+                ]
+            )
+            for holder in holders
+            for issued in holder.issued()
+            if (
+                fault := issued.invocation.fault(
+                    skills.get((issued.invocation.plugin, issued.invocation.skill))
+                )
+            )
+            is not None
+        ]
+
     @model_validator(mode="after")
     def unique_semantic_ids(self) -> "Harness":
         ids = self.declared_ids
@@ -2011,69 +2327,18 @@ class Harness(BaseModel, frozen=True):
         if discovery_size > 32_768:
             raise ValueError("harness discovery descriptions exceed 32768 characters")
 
-        skills = {
-            (plugin.name, skill.name): skill
-            for plugin in self.plugins
-            for skill in plugin.skills
-        }
+        refused = self.unresolved(self.holders())
+        if refused:
+            raise ValueError(refusal_of(refused))
+
         prompts = [
-            self.guidance,
+            self.guidance.document(),
             *[
                 declaration.prompt
                 for plugin in self.plugins
                 for declaration in [*plugin.skills, *plugin.agents]
             ],
         ]
-        invocations = [
-            issued
-            for prompt in prompts
-            for part in prompt.walked()
-            if (issued := part.invocation) is not None
-        ]
-        if self.resolver is not None:
-            invocations.extend(
-                [
-                    self.resolver.worker_skill,
-                    self.resolver.review_skill,
-                    self.resolver.merge_skill,
-                ]
-            )
-        for invocation in invocations:
-            skill = skills.get((invocation.plugin, invocation.skill))
-            if skill is None:
-                raise ValueError(
-                    "skill invocation refers to an unknown declaration: "
-                    f"{invocation.plugin}:{invocation.skill}"
-                )
-            supplied = [argument.name for argument in invocation.arguments]
-            if len(supplied) != len(dict.fromkeys(supplied)):
-                raise ValueError(
-                    f"skill invocation {invocation.plugin}:{invocation.skill} "
-                    "has duplicate arguments"
-                )
-            declared = [argument.name for argument in skill.arguments]
-            if any(name not in declared for name in supplied):
-                raise ValueError(
-                    f"skill invocation {invocation.plugin}:{invocation.skill} "
-                    "has an unknown argument"
-                )
-            expected_order = [name for name in declared if name in supplied]
-            if supplied != expected_order:
-                raise ValueError(
-                    f"skill invocation {invocation.plugin}:{invocation.skill} "
-                    "arguments are not in declaration order"
-                )
-            missing = [
-                argument.name
-                for argument in skill.arguments
-                if argument.required and argument.name not in supplied
-            ]
-            if missing:
-                raise ValueError(
-                    f"skill invocation {invocation.plugin}:{invocation.skill} "
-                    f"is missing required arguments: {missing}"
-                )
-
         declared_agents = [
             f"{plugin.name}:{agent.name}"
             for plugin in self.plugins
@@ -2096,7 +2361,7 @@ class Harness(BaseModel, frozen=True):
         if unknown_agents:
             raise ValueError(f"delegations name unknown agents: {unknown_agents}")
 
-        used = self.guidance.text_size()
+        used = self.guidance.document().text_size()
         if used > GUIDANCE_BUDGET.ceiling:
             raise ValueError(
                 f"always-loaded guidance is {used} bytes, over the "

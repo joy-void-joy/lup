@@ -203,6 +203,48 @@ class Module(BaseModel, frozen=True):
     documents: list[DocumentEntry] = []
     """Pages under ``docs/`` whose subject is this module's, unrendered."""
 
+    def shipped(self, skills: frozenset[str]) -> "Module":
+        """This module as it reads beside a roster shipping exactly these skills.
+
+        Every :class:`~lup.harness.models.WhereShipped` pointer in its skills,
+        agents and prose is settled here: kept where the skill it names ships,
+        gone where it does not. Pages are settled where they are rendered,
+        since a page does not exist until the composition hands it a context.
+        """
+        return self.model_copy(
+            update={
+                "content": models.ContentRoster(
+                    skills=[
+                        skill.model_copy(
+                            update={"prompt": skill.prompt.shipped(skills)}
+                        )
+                        for skill in self.content.skills
+                    ],
+                    agents=[
+                        agent.model_copy(
+                            update={"prompt": agent.prompt.shipped(skills)}
+                        )
+                        for agent in self.content.agents
+                    ],
+                ),
+                "guidance": [
+                    section.model_copy(
+                        update={
+                            "parts": [part.shipped(skills) for part in section.parts]
+                        }
+                    )
+                    for section in self.guidance
+                ],
+            }
+        )
+
+
+def shipped_skills(modules: list[Module]) -> frozenset[str]:
+    """Every skill these modules ship, by the name an invocation reaches it by."""
+    return frozenset(
+        skill.name for module in modules for skill in module.content.skills
+    )
+
 
 class Adoption(BaseModel, frozen=True):
     """What one project changed about one module, surface by surface.
@@ -432,13 +474,19 @@ def adopted(
     declined subject from costing an import: a module reaching into one the
     project does not have is answered here rather than by whichever
     declaration first fails to resolve.
+
+    What a module reaches for without requiring it is settled last, once the
+    roster is whole: a pointer into another module's skill holds exactly
+    where that skill ships, and this is the first moment the answer is known.
     """
     resolved = selection or ModuleSelection()
     taken = [entry for entry in entries if resolved.takes(entry.spec)]
     unmet = unmet_requirements([entry.spec for entry in taken])
     if unmet:
         raise ValueError("; ".join(unmet))
-    return [resolved.resolved(entry.build()) for entry in taken]
+    built = [resolved.resolved(entry.build()) for entry in taken]
+    skills = shipped_skills(built)
+    return [module.shipped(skills) for module in built]
 
 
 def composed_content(modules: list[Module]) -> models.ContentRoster:
@@ -463,9 +511,16 @@ def composed_documents(
     Rendering is here rather than where each module declared its pages because
     the context is the composition's own: a module knows which pages are its
     subject, and only the root that gathered every module knows the roster
-    three of them describe.
+    three of them describe. The same roster settles every pointer a page makes
+    into another module, the way :func:`adopted` settles the rest.
     """
-    return [entry.build(context) for module in modules for entry in module.documents]
+    skills = frozenset(skill.name for skill in context.skills)
+    return [
+        page.model_copy(update={"document": page.document.shipped(skills)})
+        for module in modules
+        for entry in module.documents
+        for page in [entry.build(context)]
+    ]
 
 
 def composed_guidance(

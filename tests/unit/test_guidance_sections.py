@@ -42,7 +42,7 @@ def test_the_parts_are_the_sections_read_end_to_end() -> None:
     """
     spliced = [part for section in SECTIONS for part in section.parts]
 
-    assert GUIDANCE.parts == spliced
+    assert GUIDANCE.document().parts == spliced
 
 
 def test_the_document_ends_in_one_newline_whoever_closes_it() -> None:

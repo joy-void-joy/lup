@@ -446,10 +446,9 @@ After generating files:
 
 Once the scaffolding is generated, guide the user to:
 
-1. Run a few sessions: `uv run lup loop "task1" "task2"`
-2. Review traces in `notes/traces/`
-3. Use `{{ feedback_loop_skill }}` to analyze and improve
-4. Iterate on the feedback collection as patterns emerge
+- Run a few sessions: `uv run lup loop "task1" "task2"`
+- Review traces in `notes/traces/`{{ feedback_loop_step }}
+- Iterate on the feedback collection as patterns emerge
 
 ## Key Files to Customize
 

@@ -110,7 +110,7 @@ added — and `agent/core.py` for how a session is composed.
 
 **Versioning:**
 
-- **pyproject.toml `[tool.lup] agent_version`**: The agent version — bump on behavior changes with `uv run lup-devtools version bump` (or `{{ bump_skill }}`)
+- **pyproject.toml `[tool.lup] agent_version`**: The agent version — bump on behavior changes with `uv run lup-devtools version bump`{{ bump_alternative }}
 
 **Environment:**
 
@@ -159,9 +159,7 @@ and is marked `@pytest.mark.integration`.
 
 ## Debugging
 
-**Do not hypothesize -- trace.** When debugging errors, find the actual logs and read the exact exception. Do not list "likely causes" or suggest the user check things. Open the log files yourself, grep for the error, read the traceback, and report what actually happened. If the logs don't contain enough information, say exactly what logging to add and where, so the error is captured next time.
-
-Use `{{ debug_skill }} <error message>` to trace an error through the logs automatically.
+**Do not hypothesize -- trace.** When debugging errors, find the actual logs and read the exact exception. Do not list "likely causes" or suggest the user check things. Open the log files yourself, grep for the error, read the traceback, and report what actually happened. If the logs don't contain enough information, say exactly what logging to add and where, so the error is captured next time.{{ debug_step }}
 
 ## Feedback Loop Scripts
 
@@ -234,7 +232,7 @@ agent_version = "0.1.0"
 ```
 
 - Set the initial version during init
-- Bump on behavior changes (prompts, tools, subagents) with `uv run lup-devtools version bump <level>` or `{{ bump_skill }}`
+- Bump on behavior changes (prompts, tools, subagents) with `uv run lup-devtools version bump <level>`{{ bump_or }}
 
 ### Step 7: Enable Persistent Agent Mode (Optional)
 
@@ -316,12 +314,14 @@ This project uses **git worktrees** (not regular branches) to develop multiple f
 , so no per-worktree plugin install is needed. **Never** use `git worktree add ./worktrees/...` — worktrees must be siblings, not nested inside another checkout.
 2. **Relocate this session into the worktree** -- {{ relocate }}. Creating a worktree does not move the session: skip this and the agent keeps editing the integration checkout while the branch it just made sits untouched, so the work stays invisible until it has already gone stale.
 3. **Commit regularly and atomically** -- Each commit should represent a single logical change. Don't bundle unrelated changes together.
-4. Push the branch when the feature is complete (or periodically for backup)
+4. Push the branch when the feature is complete (or periodically for backup){{ landing_steps }}
+
+
+<!-- passage: landing-steps -->
+
 5. **`{{ rebase_skill }}`** -- Pushes the branch, opens a PR, then cleans up the commit history with `git reset --soft main` and force-pushes.
 6. **Review the PR** -- If changes are needed, fix them on the feature branch and re-run `{{ rebase_skill }}` (it rebuilds the history and force-pushes, updating the PR).
 7. **`{{ close_skill }}`** -- Once the PR is approved, merges it and cleans up the branch.
-
-
 <!-- passage: commit-types -->
 **Types:**
 
@@ -426,7 +426,7 @@ The codebase should read as a **monolithic source of truth** -- understandable w
 
 A `# lup:` (or `// lup:`) comment is **actionable review feedback** for the agent to address — distinct from the `# lup: ignore` anti-pattern escape hatch. The edits hook prompts whenever an edit changes a file's `# lup:` marker count, and `lup-devtools` scans for unresolved notes.
 
-**Never delete a `# lup:` note until its concern is actually resolved** — fix the code it points at, or answer the question and reflect that answer in code, docs, or an explicit user decision. Making a file parse or tidying up does not count. A note in a comment-less format (e.g. JSON) still can't be silently dropped: resolve it, or relocate it to a file that can hold it. Use `{{ resolve_skill }}` to clear resolved notes.
+**Never delete a `# lup:` note until its concern is actually resolved** — fix the code it points at, or answer the question and reflect that answer in code, docs, or an explicit user decision. Making a file parse or tidying up does not count. A note in a comment-less format (e.g. JSON) still can't be silently dropped: resolve it, or relocate it to a file that can hold it.{{ resolve_step }}
 
 ## Error Handling Philosophy
 
@@ -619,7 +619,5 @@ application-owned `HookSet` in `devtools/harness/catalog.py`. Harness generation
 compiles one hermetic dispatcher and dependency-free runtime for each native
 plugin. Do not edit generated policy files directly.
 
-{{ textpart }} Use
-`{{ hooks_skill }}` to update canonical inputs, regenerate both plugins, and run the
-shared canonical/bundled fixture suite.
+{{ textpart }}{{ hooks_step }}
 

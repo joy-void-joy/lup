@@ -51,7 +51,16 @@ MARKER_VOCABULARY = models.GuidanceSection(
             module=__name__,
             name="marker-vocabulary",
             values={
-                "resolve_skill": models.SkillInvocation(plugin="lup", skill="resolve"),
+                # A pointer to the resolver's walk, not a step the markers
+                # need: a project that declined the resolver reads the same
+                # sentence without it.
+                "resolve_pointer": models.WhereShipped(
+                    parts=[
+                        models.TextPart(text=" (`"),
+                        models.SkillInvocation(plugin="lup", skill="resolve"),
+                        models.TextPart(text="`)"),
+                    ]
+                ),
             },
         ),
     ],
@@ -152,8 +161,8 @@ SELF_IMPROVEMENT = models.GuidanceSection(
 )
 
 
-def document(sections: list[models.GuidanceSection]) -> models.PromptDocument:
-    """The composed sections as one document.
+def document(sections: list[models.GuidanceSection]) -> models.GuidanceDocument:
+    """The composed sections as one document, each still under its own name.
 
     There is no order here to read. Reading order is the chapter spine crossed
     with the module roster, resolved where the modules are — so this takes the
@@ -166,4 +175,4 @@ def document(sections: list[models.GuidanceSection]) -> models.PromptDocument:
     so declining a subject left its prose behind and adding one meant editing
     a file in the other half.
     """
-    return models.PromptDocument(source=__name__, parts=models.sectioned(sections))
+    return models.GuidanceDocument(source=__name__, sections=sections)

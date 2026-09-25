@@ -56,7 +56,7 @@ resolver's supervisor page; see [supervisor.md](supervisor.md).
 ### The sync registry
 
 `lup-devtools sync` tracks the other repositories this project exchanges
-improvements with and reviews their commits since the last sync. The {{ update_skill }} and {{ import_skill }} skills are built on it. Two files declare
+improvements with and reviews their commits since the last sync.{{ built_on_it }} Two files declare
 what to track.
 
 The split between them is by whose fact each key is, not by which key it is.
@@ -147,7 +147,7 @@ an explicit branch mismatch is reported. A failed fetch exits nonzero.
 The registry has no direction in its name because direction depends on where
 you sit. A project built on the template configures the shipped `lup` entry and
 pulls *from* it. The lup repository itself sets `"ignore": true` on its own
-entry and registers its downstream fleet in `sync.json.local`, so {{ update_skill_2 }} can generalize emerged patterns back into the template. Same
+entry and registers its downstream fleet in `sync.json.local`{{ generalized_back }}. Same
 registry, opposite seats.
 
 An entry may also carry a `"mount"` of `"rw"` or `"ro"`, which is a

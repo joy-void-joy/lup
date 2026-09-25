@@ -65,14 +65,13 @@ from lup.devtools.roster import LIBRARY_SPECS as LIBRARY_SUBAPPS
 from lup.harness.coverage import ContentRoot, ModuleCoverage
 from lup_template.devtools.subapps import APPLICATION_ROSTER
 from lup_template.harness.content.catalog import (
-    AGENTS,
-    GUIDANCE,
+    COMPOSED,
     LAYOUT,
     MODULE_SELECTION,
     RULES,
-    SKILLS,
     SUBAPP_SELECTION,
     TOOL_GROUPS,
+    Composed,
     entries,
 )
 from lup_template.harness.content.image import agent_image
@@ -558,7 +557,9 @@ def dev_project() -> DevProject:
     )
 
 
-def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harness:
+def portable_harness(
+    version: str = "0.2.0", root: Path | None = None, composed: Composed = COMPOSED
+) -> Harness:
     """Build the canonical declaration graph consumed by every adapter.
 
     Deliberately one declaration, not one per platform: every intended
@@ -567,6 +568,10 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
     generation recipes, mapped in ``docs/platform-differentiation.md``.
     Per-platform declarations overriding a shared default were rejected
     because they would let semantic content fork silently.
+
+    ``composed`` is this repository's own module answer unless the harness a
+    different answer would build is being asked for — which is how declining
+    a module is tested against what declining one actually composes.
     """
     plugin_name = "lup"
     plugin = Plugin(
@@ -577,8 +582,8 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
         description=(
             "Self-improvement harness with feedback, review, and safe resolution flows"
         ),
-        skills=SKILLS,
-        agents=AGENTS,
+        skills=composed.content.skills,
+        agents=composed.content.agents,
         mcp_servers=agent_tool_servers(),
         hooks=HookSet(
             id="hooks.lup-policy",
@@ -881,7 +886,7 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
         requirements=manifest(),
         image=agent_image(),
         plugins=[plugin],
-        guidance=GUIDANCE,
+        guidance=composed.guidance,
         # A project that declined the resolver module has no worker, review
         # or merge skill for a spec to name, so it declares none.
         resolver=(
@@ -892,7 +897,7 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
                 review_skill=SkillInvocation(plugin="lup", skill="resolve-reviewer"),
                 merge_skill=SkillInvocation(plugin="lup", skill="merge"),
             )
-            if MODULE_SELECTION.takes(RESOLVER)
+            if composed.selection.takes(RESOLVER)
             else None
         ),
     )

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "c28b1f3db718af3576d8aa4ad81ddb35bea969960527878c8026bc66d57f087e",
+  "source_digest": "fe9936c5b64ec93250ad50ceed72465233690c8a70272f1eff4375cf492d0f00",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -569,14 +569,14 @@
     {
       "path": ".codex/plugins/lup/skills/init/SKILL.md",
       "category": "generated",
-      "sha256": "e9c6cca9603ee28575c450bc9db5cc7eb5bc695ca11a0bcf0566d50326d4384c",
+      "sha256": "1796c7cb7f2b75ede9dc139ed80760a20a2733b5faf559439ca7fbc0d976f616",
       "semantic_id": "skill.init",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/skills/install/SKILL.md",
       "category": "generated",
-      "sha256": "c8c407ba1c32a841c3f377f317b2b57267115f13148761c788f209ceac11eba8",
+      "sha256": "374e25654593f7a5b96788741fd213035b75a026cf99ce2172d7b3ac8a381e37",
       "semantic_id": "skill.install",
       "executable": false
     },

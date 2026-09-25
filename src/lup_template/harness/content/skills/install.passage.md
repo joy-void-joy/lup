@@ -119,10 +119,7 @@ membership changes. A binary's presence is not a successful verification.
 2. **Show a summary** of what was installed and why
 3. **Note what was skipped** and why (especially in non-interactive mode)
 4. **Suggest next steps**:
-   - Review the installed hooks and adjust patterns
-   - Try `{{ meta_skill }}` to review the generated harness trees
-   - Run `{{ commit_skill }}` to test the commit workflow
-   - Consider `{{ update_skill }}` later for ongoing sync
+   - Review the installed hooks and adjust patterns{{ meta_step }}{{ commit_step }}{{ update_step }}
 
 ## Guidelines
 
@@ -171,7 +168,7 @@ standing behind them.
 | --- | --- |
 | Nothing | Continue with the phases below — this is a first install. |
 | A `lup` dependency resolved from an index, a repository, or a checkout | Nothing to port. Move the release it resolves forward, regenerate its harness, and report. The library arrives as a package; only the target's own declarations are its business. |
-| A vendored `packages/lup/` copy | Do **not** overwrite it. Port the upstream commits through {{ update_skill }}, which reviews them one at a time against a tree that has diverged on purpose. Read the fork the other way too, before porting anything: run the library placement test over what it *added*, because a downstream that solved a framework problem is holding library code, and that folds back into lup rather than staying forked forever. Then offer to end the fork, saying plainly that it is one-way and worth reviewing: pick the acquisition mode by the § How the Target Obtains Lup table below rather than defaulting to a vendored copy, which is what the fork already is. |
+| A vendored `packages/lup/` copy | Do **not** overwrite it. Port the upstream commits one at a time, reviewing each against a tree that has diverged on purpose{{ update_route }}. Read the fork the other way too, before porting anything: run the library placement test over what it *added*, because a downstream that solved a framework problem is holding library code, and that folds back into lup rather than staying forked forever. Then offer to end the fork, saying plainly that it is one-way and worth reviewing: pick the acquisition mode by the § How the Target Obtains Lup table below rather than defaulting to a vendored copy, which is what the fork already is. |
 | An **absorbed fork**: lup-shaped modules under the target's own package, no `packages/lup/`, no `lup` dependency, and usually a plugin renamed to the target, so its skills answer to the target's own prefix rather than lup's | The fork boundary was erased by the rename, so there is nothing to update through and no diff to read. Reconstruct the boundary before touching anything: map each forked module to the lup module that now owns it, and report that mapping with line counts as the deletion set, because those copies drifted in place for however long the fork ran, which makes a swap a behavior change rather than a move. Never delete on the strength of a name match. That same rename is what makes coexistence safe — a skill under the target's own prefix cannot collide with one under {{ skill_pattern }} — so installing beside the fork and retiring it piecewise is available, and is the better first move whenever the target is something that has to keep working. Say plainly that two plugins means two hook sets classifying the same command, and settle which one decides before installing. |
 | An old install with no sync baseline | Baseline it first (step 9 below, against the target), so the next review lists commits rather than the entire history. |
 

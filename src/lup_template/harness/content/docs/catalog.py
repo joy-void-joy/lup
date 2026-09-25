@@ -23,12 +23,10 @@ from lup.providers.claude.harness import CLAUDE_DISPATCHER
 from lup.providers.codex.harness import CODEX_DISPATCHER
 from lup.devtools.dev.library import LibraryMode, read_mode
 from lup_template.harness.content.catalog import (
-    AGENTS,
+    COMPOSED,
     LAYOUT,
-    MODULES,
     PLUGIN_NAME,
-    SKILLS,
-    SUBAPP_SPECS,
+    Composed,
 )
 from lup_template.harness.content.docs import index
 
@@ -36,7 +34,7 @@ DOCS_ROOT = LAYOUT.docs().path
 """Directory this repository's own page modules live in, for their banners."""
 
 
-def context(root: Path) -> DocumentContext:
+def context(root: Path, composed: Composed = COMPOSED) -> DocumentContext:
     """What the adopted modules' pages render against, for one checkout.
 
     Built against a checkout rather than declared, because two of the pages
@@ -60,9 +58,9 @@ def context(root: Path) -> DocumentContext:
     return DocumentContext(
         layout=LAYOUT,
         root=root,
-        skills=SKILLS,
-        agents=AGENTS,
-        subapps=SUBAPP_SPECS,
+        skills=composed.content.skills,
+        agents=composed.content.agents,
+        subapps=composed.subapp_specs,
         plugin=PLUGIN_NAME,
         claude_decodes=CLAUDE_DISPATCHER.routed_tools,
         codex_decodes=CODEX_DISPATCHER.routed_tools,
@@ -70,7 +68,7 @@ def context(root: Path) -> DocumentContext:
     )
 
 
-def documents(root: Path) -> list[models.Document]:
+def documents(root: Path, composed: Composed = COMPOSED) -> list[models.Document]:
     """Every document under ``docs/``, the index first because it teaches the rest."""
-    pages = composed_documents(MODULES, context(root))
+    pages = composed_documents(composed.modules, context(root, composed))
     return [published("index", "README.md", index.document(pages), DOCS_ROOT), *pages]
