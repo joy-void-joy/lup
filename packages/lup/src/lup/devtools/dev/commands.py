@@ -288,9 +288,9 @@ def command_reference_artifact(app: typer.Typer) -> Artifact:
 
 def write_command_reference(
     app: typer.Typer,
-    project: DevProject,
     root: Path | None = None,
     *,
+    project: DevProject,
     check: bool = False,
 ) -> Path:
     """Write or verify the generated command reference, and what names a command.

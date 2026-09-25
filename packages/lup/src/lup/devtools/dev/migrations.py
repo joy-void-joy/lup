@@ -155,6 +155,42 @@ DECLARED: list[Migration] = [
             ),
         ],
     ),
+    Migration(
+        subjects=["Harness.guidance"],
+        reason=(
+            "the harness keeps its always-loaded document as the named sections "
+            "it is composed of, so a refusal can name the section holding an "
+            "invocation nobody ships"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Build it as GuidanceDocument(source=..., sections=[...]) from "
+                    "lup.harness.models, which a guidance module's document() "
+                    "returns; read what a runtime loads with "
+                    "harness.guidance.document(), and a section's parts with "
+                    "harness.guidance.sections[i].parts where guidance.parts was."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=["write_command_reference", "installer_guidance"],
+        reason=(
+            "the command reference judges written commands in the scope the "
+            "project's own gate does, and installer guidance reads as the plugin "
+            "it is installed beside ships"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Pass write_command_reference the project's DevProject as "
+                    "project=, and installer_guidance the Harness it ships beside "
+                    "as source=; both are keyword-only."
+                )
+            ),
+        ],
+    ),
 ]
 """Every break this library has taken since its last release, and what to do.
 
