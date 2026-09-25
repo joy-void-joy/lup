@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from lup.devtools.dev.boundaries import library_sources
+from lup.execution.shell import git
 from lup.harness.codescan.boundaries import (
     FRONT_DOOR_PATH,
     RuleId,
@@ -179,12 +180,24 @@ def test_the_rule_is_strong_and_refuses_every_directive() -> None:
     assert sorted(item.kind for item in findings) == ["missing", "spurious"]
 
 
-def live_library() -> list[PythonSource]:
-    return [source(held.text, held.rel) for held in library_sources()]
+def live_library(monkeypatch: pytest.MonkeyPatch) -> list[PythonSource]:
+    """The library as the tree holds it, read from the checkout's root.
+
+    `library_sources` lists paths relative to the working directory, and this
+    suite runs from `packages/lup`, where no path starts with the library root:
+    unanchored, the scan read nothing and the zero-findings test passed on it.
+    """
+    monkeypatch.chdir(git.out("rev-parse", "--show-toplevel").strip())
+    held = [source(item.text, item.rel) for item in library_sources()]
+    assert held, "no library source was read, so a scan over it proves nothing"
+    return held
 
 
-def test_every_name_the_live_root_exports_is_where_a_diagnostic_sends_it() -> None:
-    [root] = [held for held in live_library() if held.path == Path(FRONT_DOOR_PATH)]
+def test_every_name_the_live_root_exports_is_where_a_diagnostic_sends_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    library = live_library(monkeypatch)
+    [root] = [held for held in library if held.path == Path(FRONT_DOOR_PATH)]
     exports = front_door_exports(root.text)
 
     assert {"Claude", "Codex"} <= exports.keys()
@@ -195,7 +208,10 @@ def test_every_name_the_live_root_exports_is_where_a_diagnostic_sends_it() -> No
     ] == []
 
 
-def test_the_live_library_reads_nothing_through_its_front_door() -> None:
-    findings = front_door_findings(AuditedProject(sources=live_library()))
+def test_the_live_library_reads_nothing_through_its_front_door(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    library = live_library(monkeypatch)
+    findings = front_door_findings(AuditedProject(sources=library))
 
     assert [f"{item.path}:{item.line} {item.message}" for item in findings] == []
