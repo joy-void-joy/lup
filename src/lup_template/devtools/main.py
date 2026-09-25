@@ -82,8 +82,12 @@ def command_reference(root: Path | None = None, *, check: bool = False) -> Path:
     a repository writer runs long after both. Wired from the composition root
     because that is the only module that has the whole CLI — a writer declared
     beside the other two would have to import this one, which nothing does.
+    What the modules this project declined own is named too, so their own
+    hand-written files may go on describing them.
     """
-    return write_command_reference(app, root, check=check)
+    return write_command_reference(
+        app, root, check=check, declined=SUBAPP_SELECTION.retired
+    )
 
 
 def command_surface() -> CommandSurface:

@@ -27,11 +27,12 @@ answers.
 import re
 from pathlib import Path
 
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 
 from pydantic import BaseModel
 
 from lup.devtools.dev.tracked import tracked_files
+from lup.harness.ownership import load_manifest
 
 # lup: ignore[re-call] — see the module note: recognizing the toolchain's name
 # in prose, not parsing a structured format
@@ -111,7 +112,11 @@ def written_commands() -> list[WrittenCommand]:
     ]
 
 
-def unresolved(admits: Callable[[list[str]], bool]) -> list[WrittenCommand]:
+def unresolved(
+    admits: Callable[[list[str]], bool],
+    declined: Collection[str] = (),
+    generated: Collection[str] = (),
+) -> list[WrittenCommand]:
     """Every written mention naming no command the composed CLI serves.
 
     Takes the question rather than the surface that answers it —
@@ -123,15 +128,46 @@ def unresolved(admits: Callable[[list[str]], bool]) -> list[WrittenCommand]:
     or the toolchain named as a toolchain — is left alone: it instructs
     nothing this can check, and refusing it would refuse the sentence that
     introduces the CLI.
+
+    *declined* are the command trees a module this project declined owns, and
+    a hand-written file naming one is left alone too. The module's own code is
+    still in the tree — its sub-app's docstrings, its skill's prose, the page
+    it would publish — and each names that module's commands correctly, for
+    the project that takes it: refusing them made declining ``conversation``
+    fail generation on ``conversation``'s own skill. What *reaches a reader*
+    is what generation wrote, so a file in *generated* is still held to the
+    CLI this project serves, declined trees and all.
     """
     return [
         mention
         for mention in written_commands()
-        if (words := mention.command_words()) and not admits(words)
+        if (words := mention.command_words())
+        and not admits(words)
+        and (words[0] not in declined or mention.file in generated)
     ]
 
 
-def refuse_unresolved_commands(admits: Callable[[list[str]], bool]) -> None:
+def generated_files(root: Path) -> list[str]:
+    """Every file a native tree's ownership manifest says generation wrote.
+
+    Read off the manifests rather than re-composed, because the sweep runs
+    once the trees are on disk and a manifest is its tree's own record of what
+    it holds — the pages under ``docs/`` among them. Each runtime keeps one in
+    its own tree root, which is why they are found rather than named here.
+    """
+    return sorted(
+        item.path.as_posix()
+        for manifest_path in root.glob(".*/.lup-ownership.json")
+        if (manifest := load_manifest(manifest_path)) is not None
+        for item in manifest.files
+    )
+
+
+def refuse_unresolved_commands(
+    admits: Callable[[list[str]], bool],
+    declined: Collection[str] = (),
+    generated: Collection[str] = (),
+) -> None:
     """Raise unless every written command names one the CLI serves.
 
     What generation does with the sweep's answer. A gate reports and leaves
@@ -139,7 +175,7 @@ def refuse_unresolved_commands(admits: Callable[[list[str]], bool]) -> None:
     runs while a document is being made, and a document telling its reader to
     run something that does not exist is not finished.
     """
-    written = unresolved(admits)
+    written = unresolved(admits, declined, generated)
     if written:
         named = "\n  ".join(mention.named() for mention in written)
         raise ValueError(
