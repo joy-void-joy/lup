@@ -8,6 +8,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from uuid import uuid4
 
 import sh
 import tomlkit
@@ -225,6 +226,45 @@ def plugin_cache_evidence(
         installed_digest=installed,
         ready=installed == source,
     )
+
+
+def revision_snapshot(source_root: Path, revision: str, parent: Path) -> Path:
+    """The installed revision's exact content, written where a session never reaches.
+
+    What the home holds under ``revision`` is the source with its manifest's
+    version set to that name, as :func:`stage_cachebusted_marketplace`
+    stages it, so the same is written here from the source on the host. The
+    directory is named for the content and the revision together, reused
+    whole when present, and written aside with a marker last, so an
+    interrupted write is never mounted and a session still reading an older
+    snapshot never has it rewritten under it.
+    """
+    digest = plugin_content_digest(source_root)
+    if digest is None:
+        raise FileNotFoundError(f"Codex plugin source does not exist: {source_root}")
+    named = hashlib.sha256(f"{revision}\n{digest}".encode()).hexdigest()
+    target = parent / named[:16]
+    marker = target / ".lup-snapshot"
+    if marker.is_file():
+        return target
+    parent.mkdir(parents=True, exist_ok=True)
+    staging = parent / f".staging-{uuid4().hex}"
+    shutil.copytree(source_root, staging, ignore=shutil.ignore_patterns("__pycache__"))
+    manifest = staging / ".codex-plugin" / "plugin.json"
+    document = json.loads(manifest.read_text(encoding="utf-8"))
+    document["version"] = revision
+    manifest.write_text(
+        json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    (staging / ".lup-snapshot").write_text(named + "\n", encoding="utf-8")
+    try:
+        staging.rename(target)
+    except OSError:
+        # Another launch wrote the same content first; take it and drop this.
+        shutil.rmtree(staging)
+        if not marker.is_file():
+            raise
+    return target
 
 
 def stage_cachebusted_marketplace(

@@ -332,7 +332,7 @@ def test_profile_payload_crosses_stdin_only(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     settings = CodexProfileSettings.capture(source_home(tmp_path), "review")
-    command = Mock(return_value="")
+    command = Mock(return_value="{}")
     monkeypatch.setattr(sh, "Command", Mock(return_value=command))
     launch.prepare_codex_plugin(
         ["podman", "run", "-i", "image"],

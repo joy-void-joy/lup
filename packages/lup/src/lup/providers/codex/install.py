@@ -5,7 +5,7 @@ import sys
 from typing import Annotated
 
 import typer
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from lup.providers.codex.harness_runtime import CodexPluginInstaller, PluginCacheConfig
 from lup.providers.codex.home import (
@@ -17,13 +17,26 @@ from lup.providers.codex.marketplace import CodexMarketplace
 from lup.providers.codex.profile import CodexProfileSettings
 
 
+class PreparedPlugin(BaseModel, frozen=True):
+    """What preparing a home installed, reported for the launch that asked.
+
+    The revision Codex will run the plugin's hooks from, by the path it has
+    in the home. The launch reads it to hold that revision still for the
+    session: the home is the session's to write, and the revision's name is
+    chosen against what the home already caches, so only the preparation
+    that installed it knows it.
+    """
+
+    installed_root: Path | None = None
+
+
 def install_codex_plugin(
     root: Path,
     home: Path,
     force: bool = False,
     trusted: bool = False,
     plugin_root: Path | None = None,
-) -> None:
+) -> PreparedPlugin:
     """Install the checkout's plugin and verify native discovery and hook trust.
 
     ``plugin_root`` offers the plugin from somewhere other than the checkout
@@ -34,7 +47,7 @@ def install_codex_plugin(
     source = plugin_root or root
     declared = CodexMarketplace.declared(source)
     if declared is None:
-        return
+        return PreparedPlugin()
     if trusted:
         home.mkdir(parents=True, exist_ok=True)
         trust_project(home, root)
@@ -51,7 +64,10 @@ def install_codex_plugin(
         seed=trusted or CodexWorktreeHomeStore().derived(home),
         workspace=root,
     )
-    typer.echo(f"Verified installed Codex plugin in {home}: {cache.installed_root}")
+    typer.echo(
+        f"Verified installed Codex plugin in {home}: {cache.installed_root}", err=True
+    )
+    return PreparedPlugin(installed_root=cache.installed_root)
 
 
 app = typer.Typer()
@@ -65,6 +81,13 @@ def prepare(
     trusted: Annotated[bool, typer.Option("--trust-project")] = False,
     settings_stdin: Annotated[bool, typer.Option("--settings-stdin")] = False,
     plugin_root: Annotated[Path | None, typer.Option("--plugin-root")] = None,
+    report: Annotated[
+        bool,
+        typer.Option(
+            "--report",
+            help="Print what was installed as JSON, and nothing else, on stdout",
+        ),
+    ] = False,
 ) -> None:
     """Prepare one native home from the installed library's implementation."""
     if settings_stdin:
@@ -76,7 +99,9 @@ def prepare(
             raise typer.BadParameter(
                 "Cannot prepare the selected Codex profile; its settings were not logged."
             ) from None
-    install_codex_plugin(root, home, force, trusted, plugin_root)
+    prepared = install_codex_plugin(root, home, force, trusted, plugin_root)
+    if report:
+        typer.echo(prepared.model_dump_json())
 
 
 if __name__ == "__main__":

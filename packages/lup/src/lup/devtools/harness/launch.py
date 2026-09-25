@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from datetime import datetime
@@ -33,7 +34,8 @@ from lup.providers.codex.confinement import CODEX_CONFINEMENT
 from lup.providers.codex.harness import CodexSpellings
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.account import read_account
-from lup.providers.codex.install import install_codex_plugin
+from lup.providers.codex.harness_runtime import revision_snapshot
+from lup.providers.codex.install import PreparedPlugin, install_codex_plugin
 from lup.providers.codex.marketplace import CodexMarketplace
 from lup.providers.codex.profile import CodexProfileSettings
 from lup.providers.codex.transcripts import CodexTranscripts
@@ -58,6 +60,7 @@ from lup.devtools.harness.modes import (
     mode_home_scope,
     mode_notices,
     refuse_on_host,
+    snapshots_home,
     variant_of,
 )
 from lup.devtools.harness.posture import (
@@ -1706,7 +1709,7 @@ def session_argv(
     devices: list[Device] = [],
     authenticate: Callable[[list[str], Path, bool], None] | None = None,
     member: LaunchedMember | None = None,
-    prepare: Callable[[list[str], Path], None] | None = None,
+    prepare: Callable[[list[str], Path], dict[Path, str]] | None = None,
     state_scope: NativeHomeScope | None = None,
     settings: SessionSettings | None = None,
     read_only: dict[Path, str] = {},
@@ -1906,7 +1909,11 @@ def session_argv(
         in_passing=True,
     )
     if prepare is not None:
-        prepare(probing(opening, stdin=True), Path(image.config_home))
+        # What preparing the home asks to be held for the session is added
+        # before the session's command, as read-only mounts of its own.
+        opening = with_read_only(
+            opening, prepare(probing(opening, stdin=True), Path(image.config_home))
+        )
     # A contained session sharing host loopback can receive a browser callback.
     # Device login is needed where that callback stays outside its namespace.
     if authenticate is not None:
@@ -2212,13 +2219,6 @@ def launch_claude(
             checkpoint(provider="claude")
 
 
-# lup: defer: a contained Codex session runs its hooks from the revision
-# installed here, inside its home volume, which the session can write; the
-# Claude plugin is held with the generated trees, this copy is not. Hold the
-# installed revision read-only for the session (a volume sub-mount: Docker's
-# volume-subpath, podman's subpath) or install from a launch-time snapshot
-# the session cannot reach -- a choice between engine versions this launch
-# cannot yet assume
 def prepare_codex_plugin(
     prefix: list[str],
     home: Path,
@@ -2228,36 +2228,72 @@ def prepare_codex_plugin(
     trusted: bool = False,
     settings: CodexProfileSettings | None = None,
     plugin_root: Path | None = None,
-) -> None:
+) -> PreparedPlugin:
     """Prepare the home where the launch runs, through its own execution boundary.
 
     ``plugin_root`` is where the plugin is installed from when that is not
     the checkout -- a mode's compiled variant -- while ``root`` stays the
     project the home trusts and the session opens in.
+
+    Answers with the revision installed, by its path in the home: read back
+    from the preparation as JSON where it ran inside the container, since
+    only it knows the name the home's own cache made it take.
     """
     source = plugin_root or root
     if not prefix:
         if settings is not None:
             settings.install(home, enforce_policy=CodexMarketplace.enforced(source))
-        install_codex_plugin(root, home, force, trusted, plugin_root)
-        return
+        return install_codex_plugin(root, home, force, trusted, plugin_root)
     assert CODEX_LOGIN.home_preparation is not None
     command = [
         *prefix,
         *CODEX_LOGIN.home_preparation.command(
-            root, home, force, settings is not None, plugin_root
+            root, home, force, settings is not None, plugin_root, report=True
         ),
     ]
-    typer.echo(
-        str(
-            sh.Command(command[0])(
-                *command[1:],
-                _env=environment,
-                _in=settings.model_dump_json() if settings is not None else None,
-            )
-        ),
-        nl=False,
+    reported = str(
+        sh.Command(command[0])(
+            *command[1:],
+            _env=environment,
+            _in=settings.model_dump_json() if settings is not None else None,
+            _err=sys.stderr,
+        )
     )
+    return PreparedPlugin.model_validate_json(reported)
+
+
+def with_read_only(opening: list[str], held: dict[Path, str]) -> list[str]:
+    """This container argv with more read-only mounts among its options.
+
+    Placed straight after the engine's ``run``, where options go in any
+    order; the engines apply mounts parent before child whatever order they
+    are named in, so one nested under the home's volume lands over it.
+    """
+    if not held:
+        return opening
+    verb = opening.index("run") + 1
+    mounts = [
+        word for host, inside in held.items() for word in ("-v", f"{host}:{inside}:ro")
+    ]
+    return [*opening[:verb], *mounts, *opening[verb:]]
+
+
+def held_revision(
+    prepared: PreparedPlugin, source_root: Path, snapshots: Path
+) -> dict[Path, str]:
+    """The installed revision, held read-only for the session from a snapshot.
+
+    Codex runs a plugin's hooks from the revision installed in its home, and
+    the home is the session's to write -- so the revision is written again on
+    the host, outside the checkout, and mounted read-only over the path it
+    has in the home. The session then runs the policy it was launched with,
+    whatever it writes beside it, the way a Claude session runs from a
+    plugin directory the held trees keep still.
+    """
+    if prepared.installed_root is None:
+        return {}
+    snapshot = revision_snapshot(source_root, prepared.installed_root.name, snapshots)
+    return {snapshot: prepared.installed_root.as_posix()}
 
 
 # For the reason spelled at `launch_claude`: the mode is one optional argument
@@ -2432,8 +2468,8 @@ def launch_codex(
         if home.isolated and not sandbox.contained():
             store.publish(project_root())
 
-    def prepare(prefix: list[str], native_home: Path) -> None:
-        prepare_codex_plugin(
+    def prepare(prefix: list[str], native_home: Path) -> dict[Path, str]:
+        prepared = prepare_codex_plugin(
             prefix,
             native_home,
             project_root(),
@@ -2442,6 +2478,10 @@ def launch_codex(
             settings=selected_profile,
             plugin_root=plugin_root,
         )
+        declared = CodexMarketplace.declared(plugin_root or project_root())
+        if not prefix or declared is None:
+            return {}
+        return held_revision(prepared, declared.source, snapshots_home(project_root()))
 
     # A home per selected settings, and one apart again for a mode compiling
     # its own plugin: a home keeps whichever revision it installed last, so a

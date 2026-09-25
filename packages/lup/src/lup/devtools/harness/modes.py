@@ -138,6 +138,15 @@ def variants_home(root: Path, cache: Path | None = None) -> Path:
     return held / f"{root.name}-{digest}"
 
 
+def snapshots_home(root: Path) -> Path:
+    """Where one checkout's launch-time snapshots are kept, outside the checkout.
+
+    Beside the mode variants and for their reason: what a session runs on
+    is kept where no session can write it.
+    """
+    return variants_home(root, Path.home() / ".cache" / "lup" / "snapshots")
+
+
 def materialized(artifacts: list[Artifact], parent: Path) -> Path:
     """Write these artifacts under a directory named for their content.
 

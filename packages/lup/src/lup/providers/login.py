@@ -40,11 +40,13 @@ class HomePreparation(BaseModel, frozen=True):
         force: bool = False,
         settings: bool = False,
         plugin_root: Path | None = None,
+        report: bool = False,
     ) -> list[str]:
         """Run installed library code in the checkout's own Python environment.
 
         ``plugin_root`` installs the plugin from somewhere other than the
-        checkout, which stays the project the home trusts.
+        checkout, which stays the project the home trusts. ``report`` asks for
+        what was installed as JSON on stdout, and nothing else there.
         """
         return [
             "uv",
@@ -61,6 +63,7 @@ class HomePreparation(BaseModel, frozen=True):
             *(["--force"] if force else []),
             *(["--settings-stdin"] if settings else []),
             *(["--plugin-root", str(plugin_root)] if plugin_root is not None else []),
+            *(["--report"] if report else []),
         ]
 
 

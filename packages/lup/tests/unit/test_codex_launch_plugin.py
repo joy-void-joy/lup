@@ -1,6 +1,7 @@
 """Plugin readiness is measured where the session actually opens its home."""
 
 import json
+import sys
 from pathlib import Path
 from unittest.mock import ANY, AsyncMock, Mock
 
@@ -15,6 +16,7 @@ import lup.providers.codex.selection as codex_selection
 from lup.harness.clipboard import ClipboardBridge
 from lup.policy.identity import POLICY_ROOT_ENV
 from lup.providers.codex.login import CODEX_HOME, CODEX_LOGIN
+from lup.providers.codex.install import PreparedPlugin
 from lup.providers.codex.marketplace import CodexMarketplace
 from lup.providers.codex.trust import CodexHookReport
 from lup.providers.codex.selection import codex_config
@@ -52,6 +54,7 @@ def test_plugin_preparation_uses_the_actual_home_before_authentication(
     sandbox: launch.LaunchSandbox,
 ) -> None:
     calls = Mock()
+    calls.prepare.return_value = {}
     launch.session_argv(
         "codex",
         [],
@@ -118,7 +121,7 @@ def test_container_preparation_runs_the_owned_installer_in_the_same_boundary(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    execute = Mock(return_value="verified\n")
+    execute = Mock(return_value=PreparedPlugin().model_dump_json())
     command = Mock(return_value=execute)
     monkeypatch.setattr(sh, "Command", command)
     launch.prepare_codex_plugin(
@@ -140,8 +143,10 @@ def test_container_preparation_runs_the_owned_installer_in_the_same_boundary(
         "/cfg",
         "--trust-project",
         "--force",
+        "--report",
         _env={"FIXTURE": "yes"},
         _in=None,
+        _err=sys.stderr,
     )
 
 
@@ -155,6 +160,7 @@ def test_owned_home_preparation_verifies_discovery_and_hook_trust(
     declared.source = tmp_path / "plugin"
     monkeypatch.setattr(CodexMarketplace, "declared", Mock(return_value=declared))
     installer = Mock()
+    installer.ensure.return_value.installed_root = tmp_path / "revision"
     monkeypatch.setattr(
         installation, "CodexPluginInstaller", Mock(return_value=installer)
     )
