@@ -20,6 +20,13 @@ import pytest
 import sh
 
 from lup.devtools import sync
+from lup.devtools.harness import launch
+from lup.devtools.harness.policy_refresh import refresh_destination_policy
+from lup.devtools.harness.preflight import (
+    NONCE_VARIABLE,
+    ROOT_VARIABLE,
+    LaunchSentinels,
+)
 from lup.harness import credential
 from lup.harness.credential import (
     HttpsTransport,
@@ -29,7 +36,10 @@ from lup.harness.credential import (
     parse_remote,
     same_repository,
 )
-from lup.sandbox.rail import fleet_lease
+from lup.harness.models import Plugin
+from lup.harness.notice import Banner
+from lup.policy.assets.host import destination_policy_binding
+from lup.sandbox.rail import AccessibleRoot, fleet_lease
 from tests.unit.repos import commit_file, initialized_repo
 
 SHIPPED = sync.load_json(Path("sync.json"))
@@ -127,6 +137,59 @@ def standing_in(monkeypatch: pytest.MonkeyPatch, checkout: Path) -> None:
     monkeypatch.setattr(sync, "project_root", lambda: checkout)
 
 
+def settled_launch(
+    monkeypatch: pytest.MonkeyPatch, checkout: Path, roots: list[AccessibleRoot]
+) -> str:
+    """Settle a Codex launch's boundary from ``checkout`` over ``roots``; its nonce.
+
+    The step a launch takes between resolving its roots and opening the
+    session, which is where the ledger `harness policy-refresh` reads is
+    written: the lease, the policy accepted for every checkout granted, and
+    the repositories a later worktree may be accepted beneath.
+    """
+    monkeypatch.setattr(launch, "project_root", lambda: checkout)
+    sentinels = LaunchSentinels()
+    plugin = Plugin(
+        id="test.upstream",
+        name="test",
+        marketplace="test",
+        version="1.0.0",
+        description="The launch a refresh extends",
+        skills=[],
+        agents=[],
+    )
+    launch.settle_boundary(
+        plugin,
+        launch.LaunchSandbox.OUTER,
+        [],
+        sentinels,
+        {},
+        Banner(),
+        roots,
+        runtime="codex",
+    )
+    return sentinels.nonce
+
+
+def cut_with_policy(repository: Path, branch: str) -> Path:
+    """A worktree cut under ``tree/`` from ``main``, carrying a generated policy.
+
+    What `/lup:upstream` has done before editing a new worktree -- both
+    native trees generated there -- reduced to the one evaluator a refresh
+    accepts.
+    """
+    checkout = repository / "tree" / branch
+    sync.git_in(
+        str(repository), "worktree", "add", "-q", "-b", branch, str(checkout), "main"
+    )
+    hooks = checkout / ".codex" / "plugins" / "lup" / "hooks"
+    (hooks / "scripts").mkdir(parents=True)
+    (hooks / "runtime").mkdir()
+    (hooks / "scripts" / "policy_evaluator.py").write_text("print('inert')\n")
+    (hooks / "runtime" / "policy_data.py").write_text("EDIT_LIMIT = 3\n")
+    return checkout
+
+
 def test_the_shipped_registration_names_its_repository_over_https() -> None:
     """The one fact every project built on the scaffold inherits and cannot set.
 
@@ -150,7 +213,13 @@ def test_a_fresh_project_mounts_the_shipped_registration_read_write(
     cache: Path,
     layout: str,
 ) -> None:
-    """No `sync setup`, no `sync remote`: the launch's roots already hold lup."""
+    """No `sync setup`, no `sync remote`: the launch's roots already hold lup.
+
+    The whole clone, as one writable mount with the two paths whose contents
+    run on the host held read-only inside it -- so a worktree cut there after
+    the launch is writable too -- while `refs/lup` names the worktree of its
+    default branch.
+    """
     checkout = project(tmp_path, layout, SHIPPED)
     standing_in(monkeypatch, checkout)
     forge_spelling(monkeypatch, SHIPPED_URL, upstream)
@@ -158,15 +227,58 @@ def test_a_fresh_project_mounts_the_shipped_registration_read_write(
 
     roots = sync.accessible_roots(said.append)
 
-    mounted = cache / "lup.git" / "tree" / "main"
-    assert [(root.path, root.writable) for root in roots] == [(mounted, True)]
-    assert (checkout / "refs" / "lup").resolve() == mounted
+    clone = cache / "lup.git"
+    opened = clone / "tree" / "main"
+    assert [(root.path, root.writable) for root in roots] == [(clone, True)]
+    assert (checkout / "refs" / "lup").resolve() == opened
     no_rewrites(monkeypatch)
-    assert sync.git_in(str(mounted), "remote", "get-url", "origin") == SHIPPED_URL
+    assert sync.git_in(str(opened), "remote", "get-url", "origin") == SHIPPED_URL
     lease = fleet_lease(checkout, roots)
-    assert lease.writable_at(mounted / "pyproject.toml")
-    assert lease.writable_at(cache / "lup.git" / "refs")
-    assert not lease.writable_at(cache / "lup.git" / "config")
+    assert [path for path in lease.writable if path.is_relative_to(cache)] == [clone]
+    assert sorted(path for path in lease.read_only if path.is_relative_to(cache)) == [
+        clone / "config",
+        clone / "hooks",
+    ]
+    assert lease.writable_at(opened / "pyproject.toml")
+    assert lease.writable_at(clone / "tree" / "cut-later" / "pyproject.toml")
+    assert not lease.writable_at(clone / "hooks" / "pre-commit")
+
+
+@pytest.mark.parametrize("layout", LAYOUTS)
+def test_a_worktree_cut_in_the_clone_after_launch_is_judged_by_its_own_policy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    upstream: Path,
+    cache: Path,
+    layout: str,
+) -> None:
+    """What `/lup:upstream` needs, with no `--mount` on the launch.
+
+    The launch records the clone as an explicit writable repository, so the
+    operator's `harness policy-refresh` accepts a branch cut there afterwards
+    -- and an edit in it is then routed to that worktree's own generated
+    policy rather than judged by this project's.
+    """
+    monkeypatch.delenv(NONCE_VARIABLE, raising=False)
+    checkout = project(tmp_path, layout, SHIPPED)
+    standing_in(monkeypatch, checkout)
+    forge_spelling(monkeypatch, SHIPPED_URL, upstream)
+    nonce = settled_launch(
+        monkeypatch, checkout, sync.accessible_roots(lambda _said: None)
+    )
+    clone = cache / "lup.git"
+    fix = cut_with_policy(clone, "fix-later")
+
+    accepted = refresh_destination_policy(checkout, nonce, fix)
+
+    assert (accepted.checkout, accepted.repository) == (str(fix), str(clone))
+    assert accepted.writable_roots == [str(fix)]
+    assert not accepted.error
+    monkeypatch.setenv(NONCE_VARIABLE, nonce)
+    monkeypatch.setenv(ROOT_VARIABLE, str(checkout))
+    binding = destination_policy_binding(str(fix / "pyproject.toml"), checkout)
+    assert json.loads(binding)["checkout"] == str(fix)
+    assert (checkout / "refs" / "lup").resolve() == clone / "tree" / "main"
 
 
 @pytest.mark.parametrize("layout", LAYOUTS)
@@ -308,7 +420,7 @@ def test_a_checkpoint_outlives_the_spelling_its_clone_was_read_over(
     assert sync.checkpoint(sync.find_project("lup"), found) == reviewed
 
 
-def test_a_clone_another_project_made_is_linked_where_this_one_mounts_it(
+def test_a_clone_another_project_made_is_mounted_and_linked_in_this_one(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     upstream: Path,
@@ -329,7 +441,7 @@ def test_a_clone_another_project_made_is_linked_where_this_one_mounts_it(
 
     roots = sync.accessible_roots(lambda _said: None)
 
-    assert [root.path for root in roots] == [cache / "lup.git" / "tree" / "main"]
+    assert [root.path for root in roots] == [cache / "lup.git"]
     assert (second / "refs" / "lup").resolve() == cache / "lup.git" / "tree" / "main"
 
 
@@ -383,7 +495,7 @@ def test_a_registration_nothing_places_falls_back_to_its_distribution(
 
     assert sync.find_project("lup").get("url") == str(upstream)
     assert [root.path for root in sync.accessible_roots(lambda _said: None)] == [
-        cache / "lup.git" / "tree" / "main"
+        cache / "lup.git"
     ]
 
     (checkout / "sync.json.local").write_text(
@@ -417,3 +529,29 @@ def test_a_bare_registration_links_refs_to_its_worktree(
     sync.setup_project("lup", str(upstream), mount="rw")
 
     assert (checkout / "refs" / "lup").resolve() == attached
+
+
+def test_a_checkout_this_machine_keeps_is_mounted_at_its_working_tree_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, upstream: Path
+) -> None:
+    """A registration naming a path keeps the narrower grant.
+
+    The checkout is somebody's own and so may be its other worktrees, so the
+    launch mounts the working tree it resolves to and records no repository
+    a later worktree could be accepted beneath: one cut beside it is refused
+    by `harness policy-refresh` until a launch names the bare directory.
+    """
+    monkeypatch.delenv(NONCE_VARIABLE, raising=False)
+    checkout = project(tmp_path, "plain", {"projects": []})
+    standing_in(monkeypatch, checkout)
+    no_rewrites(monkeypatch)
+    attached = upstream / "tree" / "main"
+    sh.git("-C", str(upstream), "worktree", "add", "--quiet", str(attached), "main")
+    sync.setup_project("lup", str(upstream), mount="rw")
+    roots = sync.accessible_roots(lambda _said: None)
+    nonce = settled_launch(monkeypatch, checkout, roots)
+    beside = cut_with_policy(upstream, "fix-later")
+
+    assert [(root.path, root.writable) for root in roots] == [(attached, True)]
+    with pytest.raises(ValueError, match="No recorded writable repository authority"):
+        refresh_destination_policy(checkout, nonce, beside)
