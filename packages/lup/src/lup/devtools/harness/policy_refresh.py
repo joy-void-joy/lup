@@ -2,10 +2,20 @@
 
 import json
 import os
+import unicodedata
 from collections.abc import Callable
 from difflib import SequenceMatcher, unified_diff
 from pathlib import Path, PurePosixPath
-from typing import Literal
+from types import NoneType, UnionType
+from typing import (
+    Literal,
+    TypeAliasType,
+    Union,
+    get_args,
+    get_origin,
+    get_type_hints,
+    is_typeddict,
+)
 from tempfile import NamedTemporaryFile
 
 import typer
@@ -14,6 +24,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from lup.devtools.harness.preflight import NONCE_VARIABLE, ledger_path
 from lup.execution.shell import git
+from lup.policy.bundle import PolicyData
 from lup.policy.assets.host import (
     contents_digest,
     policy_data_literals,
@@ -242,9 +253,9 @@ class PolicyPreview(BaseModel, frozen=True):
             ],
         ]
         return [
-            f"Accepting the {self.runtime} policy {self.checkout} generates "
-            f"({self.digest}),",
-            f"in place of the one that judges it now ({self.judging}):",
+            f"Accepting the {self.runtime} policy {visible(self.checkout)} "
+            f"generates ({self.digest}),",
+            f"in place of the one that judges it now ({visible(self.judging)}):",
             *(entries or ["  No constant differs."]),
             *(code if self.code else ["  No code differs."]),
         ]
@@ -264,7 +275,7 @@ class UnreviewedCode(Exception):
 
     def __init__(self, preview: PolicyPreview) -> None:
         super().__init__(
-            f"{preview.checkout}'s {preview.runtime} evaluator code differs from "
+            f"{visible(preview.checkout)}'s {preview.runtime} evaluator code differs from "
             "what this launch's lup generates, in the files shown above. Nothing "
             "was accepted; once that diff is code you mean to run, refresh again "
             "with --accept-code."
@@ -272,22 +283,177 @@ class UnreviewedCode(Exception):
         self.preview = preview
 
 
-def entry_line(entry: JsonValue) -> str:
-    """One entry of a generated constant, on one line.
+def terminal_control(character: str) -> bool:
+    """Whether printing one character could move, erase or reorder what is shown.
 
-    A row shows the fields that say something, each as its JSON value. Every
-    row of a table carries the same fields, so one left out reads as empty,
-    and a flag turned on or a reason filled in shows as the field appearing.
+    Every C0 and C1 control and DEL -- a carriage return, an erase-line, a
+    cursor move -- the line and paragraph separators that break a line where
+    no newline is, and the bidirectional controls that reorder a line as it
+    is displayed without changing a byte a diff compares.
+    """
+    return (
+        unicodedata.category(character) in ("Cc", "Zl", "Zp")
+        or unicodedata.bidirectional(character)
+        in ("LRE", "RLE", "LRO", "RLO", "PDF", "LRI", "RLI", "FSI", "PDI")
+        or character in "\u200e\u200f\u061c"
+    )
+
+
+def visible(text: str) -> str:
+    """Text a session wrote, with every terminal control spelled as its code point.
+
+    What the operator reads is the decision this preview exists for, and the
+    session writing the checkout writes these strings too: a carriage return
+    and an erase-line can take a removed protected path off the screen.
+    """
+    return "".join(
+        f"\\u{ord(character):04x}" if terminal_control(character) else character
+        for character in text
+    )
+
+
+def literal(value: JsonValue) -> str:
+    """One value as its JSON spelling, every character that could hide it spelled out."""
+    return visible(json.dumps(value, ensure_ascii=False))
+
+
+def departures(value: object, annotation: object, where: str) -> list[str]:
+    """Every way a value departs from the type a generated constant declares.
+
+    Rows are held to their row type exactly: a field the type lacks, or one
+    it has left out, is a departure rather than something to render around,
+    so a missing field and an empty one can never read alike.
+    """
+    shape = (
+        annotation.__value__ if isinstance(annotation, TypeAliasType) else annotation
+    )
+    origin = get_origin(shape)
+    if is_typeddict(shape):
+        if not isinstance(value, dict):
+            return [f"{where} is not a row"]
+        fields = get_type_hints(shape)
+        required: frozenset[str] = vars(shape)["__required_keys__"]
+        return [
+            *[
+                f"{where}[{literal(key)}] is no field of its row"
+                for key in value
+                if key not in fields
+            ],
+            *[
+                f"{where} lacks {key}"
+                for key in fields
+                if key in required and key not in value
+            ],
+            *[
+                problem
+                for key, field in fields.items()
+                if key in value
+                for problem in departures(value[key], field, f"{where}.{key}")
+            ],
+        ]
+    match origin:
+        case _ if origin is list:
+            if not isinstance(value, list):
+                return [f"{where} is not a list"]
+            (item,) = get_args(shape)
+            return [
+                problem
+                for index, entry in enumerate(value)
+                for problem in departures(entry, item, f"{where}[{index}]")
+            ]
+        case _ if origin is dict:
+            if not isinstance(value, dict):
+                return [f"{where} is not a mapping"]
+            _, item = get_args(shape)
+            return [
+                *[
+                    f"{where} has a key that is not text"
+                    for key in value
+                    if not isinstance(key, str)
+                ],
+                *[
+                    problem
+                    for key, entry in value.items()
+                    for problem in departures(
+                        entry, item, f"{where}[{literal(str(key))}]"
+                    )
+                ],
+            ]
+        case _ if origin is Literal:
+            allowed = get_args(shape)
+            return (
+                []
+                if any(
+                    type(value) is type(option) and value == option
+                    for option in allowed
+                )
+                else [
+                    f"{where} is none of {', '.join(literal(option) for option in allowed)}"
+                ]
+            )
+        case _ if origin is Union or origin is UnionType:
+            branches = [departures(value, branch, where) for branch in get_args(shape)]
+            return [] if any(not problems for problems in branches) else branches[0]
+        case _ if shape is NoneType:
+            return [] if value is None else [f"{where} is not None"]
+        case _ if shape in (str, int, bool, float):
+            return [] if type(value) is shape else [f"{where} is not {shape.__name__}"]
+    raise TypeError(f"{where} is declared as {shape!r}, which no check here reads")
+
+
+def generated_data(path: Path, text: str) -> JsonObject:
+    """One side's constants, held to exactly the shape generation writes."""
+    data = policy_data_literals(path, text)
+    problems = departures(data, PolicyData, "")
+    if problems:
+        raise ValueError(
+            f"{visible(str(path))} holds data generation never writes, so none of "
+            f"it is shown: {'; '.join(problem.lstrip('.') for problem in problems)}"
+        )
+    return TypeAdapter(JsonObject).validate_python(data)
+
+
+def readable_code(name: PurePosixPath, content: bytes) -> str:
+    """One evaluator file's code, refused where printing it could lie.
+
+    Code is shown as a diff before it is accepted, and a line holding a
+    terminal control or a bidirectional control can read as other code than
+    it is. Generation writes neither -- a tab and a newline are all the
+    control a source needs -- so either is refused rather than escaped.
+    """
+    try:
+        code = content.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError(f"{visible(name.as_posix())} is not UTF-8: {error}") from error
+    found = next(
+        (
+            index
+            for index, character in enumerate(code)
+            if terminal_control(character) and character not in "\t\n"
+        ),
+        None,
+    )
+    if found is not None:
+        raise ValueError(
+            f"{visible(name.as_posix())}:{code.count(chr(10), 0, found) + 1} holds "
+            f"U+{ord(code[found]):04X}, a control that could make the diff shown "
+            "read as other code than it is; generation writes none, so it is refused"
+        )
+    return code
+
+
+def entry_line(entry: JsonValue) -> str:
+    """One entry of a generated constant, on one line, every field spelled.
+
+    A row shows each of its fields as its JSON value, empty ones included:
+    a field going from absent to empty, or from ``null`` to ``false``, is a
+    change, and a line that left empty fields out would show none.
     """
     match entry:
         case dict():
-            return " ".join(
-                f"{key}={json.dumps(field, ensure_ascii=False)}"
-                for key, field in entry.items()
-                if not (field is None or field is False or field in ("", [], {}))
-            )
+            return " ".join(f"{key}={literal(field)}" for key, field in entry.items())
         case _:
-            return json.dumps(entry, ensure_ascii=False)
+            return literal(entry)
 
 
 def constant_entries(value: JsonValue) -> list[str]:
@@ -303,7 +469,7 @@ def constant_entries(value: JsonValue) -> list[str]:
             return [entry_line(item) for item in value]
         case dict() if value and all(isinstance(rows, list) for rows in value.values()):
             return [
-                f"{key}: {entry_line(row)}"
+                f"{literal(key)}: {entry_line(row)}"
                 for key, rows in value.items()
                 if isinstance(rows, list)
                 for row in rows
@@ -348,12 +514,10 @@ def code_change(
 
     def read(content: bytes | None) -> list[str]:
         """A file's lines, or none where the side holds no such file."""
-        return (
-            [] if content is None else content.decode("utf-8", "replace").splitlines()
-        )
+        return [] if content is None else readable_code(name, content).splitlines()
 
     return CodeChange(
-        name=name.as_posix(),
+        name=visible(name.as_posix()),
         state=(
             "added"
             if generated is None
@@ -398,13 +562,11 @@ def policy_preview(
         launch = judging
     generated = held_contents if launch == judging else captured_policy(launch)
     data = PurePosixPath("runtime", "policy_data.py")
-    adapter = TypeAdapter(JsonObject)
-    accepting = adapter.validate_python(
-        policy_data_literals(source / data, theirs[data].decode("utf-8"))
-    )
-    held = adapter.validate_python(
-        policy_data_literals(judging / data, held_contents[data].decode("utf-8"))
-    )
+    accepting = generated_data(source / data, theirs[data].decode("utf-8"))
+    held = generated_data(judging / data, held_contents[data].decode("utf-8"))
+    for name, content in theirs.items():
+        if name != data:
+            readable_code(name, content)
     changes = [
         constant_change(name, held, accepting)
         for name in dict.fromkeys([*accepting, *held])

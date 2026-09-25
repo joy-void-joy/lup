@@ -7,6 +7,7 @@ import shlex
 import sys
 import time
 from pathlib import Path
+from typing import get_type_hints
 from subprocess import TimeoutExpired
 from unittest.mock import Mock
 
@@ -15,7 +16,11 @@ import sh
 
 from lup.devtools.dev.policy_explain import verdict_for
 from lup.devtools.harness.drift import policy_refresh_lines
-from lup.devtools.harness.policy_refresh import refresh_destination_policy
+from lup.devtools.harness.policy_refresh import (
+    generated_data,
+    refresh_destination_policy,
+)
+from lup.policy.bundle import PolicyData
 import lup.policy.assets.host as policy_host
 from lup.policy.kernel.decision import KernelDecision
 from lup.policy.identity import AGENT_IDENTITY_ENV
@@ -829,6 +834,21 @@ def test_a_ledger_recording_no_runtime_has_the_command_name_the_dispatchers(
 
     assert effect == "deny"
     assert f"{refresh_request(origin, sibling)} --runtime {runtime}" in detail
+
+
+def test_the_generated_policy_data_is_the_shape_a_refresh_holds_it_to(
+    runtime: str,
+) -> None:
+    """What generation writes passes the preview's reading, constant by constant.
+
+    The preview refuses any constant, field or value generation never writes;
+    this is what keeps the renderer and that declared shape from parting.
+    """
+    data = Path(f".{runtime}/plugins/lup/hooks/runtime/policy_data.py")
+
+    held = generated_data(data, data.read_text(encoding="utf-8"))
+
+    assert set(held) == set(get_type_hints(PolicyData))
 
 
 def test_a_catastrophically_slow_sibling_pattern_never_holds_up_the_verdict(

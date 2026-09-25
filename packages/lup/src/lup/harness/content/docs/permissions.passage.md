@@ -456,7 +456,15 @@ identities, lists the entries accepting removes and adds, one line each, at
 the position each holds — the path rules and roles are read first match
 first, so an entry moved above another shows as leaving one place and
 arriving at another. A `policy_data.py` holding anything generation never
-writes is refused rather than shown. Evaluator code runs once accepted, so
+writes is refused rather than shown: a statement other than a literal
+constant, a renamed import, a name both imported and assigned, a constant
+generation does not write, or a row with a field its row type lacks, without
+one it has, or holding a value of another type. Every field of a row is
+shown, empty ones included, and every character the session wrote that a
+terminal would act on — C0 and C1 controls, DEL, line separators,
+bidirectional controls — is shown as its code point, so nothing it wrote can
+erase or reorder a line of the preview. Evaluator code holding such a
+character, a tab and a newline apart, is refused outright. Evaluator code runs once accepted, so
 every file differing from what this launch's own lup generates is shown as a
 unified diff, and the refresh then refuses until it is run again with
 `--accept-code`; where the launch checkout generates no tree for that runtime,

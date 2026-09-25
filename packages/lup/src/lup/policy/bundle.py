@@ -14,6 +14,7 @@ import json
 import urllib.parse
 from collections.abc import Iterator
 from pathlib import Path
+from typing import TypedDict
 
 from pydantic import BaseModel
 
@@ -573,6 +574,48 @@ def import_boundary_rows_literal(rows: list[ImportBoundaryRow]) -> str:
         lines.append("    },")
     lines.append("]")
     return "\n".join(lines)
+
+
+class PolicyData(TypedDict, total=False):
+    """Every constant a generated ``policy_data.py`` may assign, with its type.
+
+    The shape :func:`render_policy_data` writes, stated where a reader can
+    hold a checkout's data to it. That checkout's data was written by the
+    session asking for it to be accepted, so before any of it is shown it has
+    to be exactly this: no constant generation does not write, no row with a
+    field its type lacks or without one it has, no value of another type.
+    Anything else could render as something it is not. Not total, because a
+    policy generated before a constant existed does not assign it.
+    """
+
+    ALLOWED_FETCH_SCOPES: list[UrlScopeRow]
+    DENIED_FETCH_SCOPES: list[UrlScopeRow]
+    PATH_RULES: list[PathRuleRow]
+    ANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]]
+    PATH_ROLES: list[PathRoleRow]
+    ACCEPTANCE_GUARD: AcceptanceGuardRow | None
+    SPAWN_NAMES: SpawnNameRow | None
+    VERIFICATION: VerificationRow
+    SHELL_RULES: list[ShellRuleRow]
+    EDIT_RULES: list[EditRuleRow]
+    IMPORT_BOUNDARIES: list[ImportBoundaryRow]
+    REFUSED_TOOLS: list[RefusedToolRow]
+    PEER_POLICY: PeerPolicyRow | None
+    AUTONOMOUS_AGENT_IDENTITIES: list[str]
+    POLICY_RUNTIME: str
+    AGENT_IDENTITY_ENV: str
+    POLICY_ROOT_ENV: str
+    ALLOWANCE_GRANTS_ENV: str
+    KNOWN_ALLOWANCES: list[str]
+    MAXIMUM_ADDED_LINES: int
+    RECOVERABLE_TARGET_LIMIT: int
+    RUNNER_TARGETS: list[RunnerTargetRow]
+    RUNNER_TARGET_TABLES: list[ShellRuleRow]
+    SANDBOX_EXCLUDED_COMMANDS: list[str]
+    AUTO_ESCAPE_PREFIXES: list[list[str]]
+    DIAGNOSTICS_COMMAND: list[str]
+    RESOLUTION_COMMAND: list[str]
+    REPAIR_COMMAND: list[str]
 
 
 def render_policy_data(

@@ -16,6 +16,7 @@ from lup.devtools.harness.policy_refresh import (
     RefreshDeclined,
     UnreviewedCode,
     refresh_destination_policy,
+    terminal_control,
 )
 from lup.devtools.harness.preflight import (
     LaunchSentinels,
@@ -49,7 +50,7 @@ def repository(path: Path, separate: Path | None = None) -> Path:
 
 
 def evaluator(
-    checkout: Path, runtime: str = "codex", data: str = "EDIT_LIMIT = 3\n"
+    checkout: Path, runtime: str = "codex", data: str = "MAXIMUM_ADDED_LINES = 3\n"
 ) -> Path:
     """An inert generated policy tree with one executable entry point."""
     hooks = checkout / f".{runtime}" / "plugins" / "example" / "hooks"
@@ -71,6 +72,8 @@ def policy_data(rules: list[str], owners: list[str]) -> str:
                 "message": f"no {rule}",
                 "context": "",
                 "matcher": "call",
+                "strength": "",
+                "resolution": "",
             }
             for rule in rules
         ]
@@ -303,7 +306,7 @@ def test_missing_or_symlinked_evaluator_is_an_unusable_grant(tmp_path: Path) -> 
     data = source / "runtime" / "policy_data.py"
     data.unlink()
     outside = tmp_path / "outside.py"
-    outside.write_text("EDIT_LIMIT = 3\n")
+    outside.write_text("MAXIMUM_ADDED_LINES = 3\n")
     data.symlink_to(outside)
 
     refused = accept_destination_policies(caller, accessible, Lease(), "codex")[0]
@@ -336,7 +339,7 @@ def test_operator_refresh_preserves_grants_and_other_launch_facts(
         read_only_roots=list(lease.read_only),
     )
     before = json.loads(ledger.read_text())
-    (source / "runtime" / "policy_data.py").write_text("EDIT_LIMIT = 4\n")
+    (source / "runtime" / "policy_data.py").write_text("MAXIMUM_ADDED_LINES = 4\n")
 
     refreshed = refresh_destination_policy(
         caller, sentinels.nonce, destination, approved
@@ -912,7 +915,8 @@ def test_the_operator_sees_what_accepting_changes_before_anything_is_accepted(
     changes = {change.name: change for change in preview.changes}
     assert list(changes) == ["ANTI_PATTERN_ROWS", "IMPORT_BOUNDARIES"]
     assert changes["ANTI_PATTERN_ROWS"].removed == [
-        '.py: id="dict-get" pattern="dict-get" message="no dict-get" matcher="call"'
+        '".py": id="dict-get" pattern="dict-get" message="no dict-get" context="" '
+        'matcher="call" strength="" resolution=""'
     ]
     assert changes["ANTI_PATTERN_ROWS"].added == []
     (before,) = changes["IMPORT_BOUNDARIES"].removed
@@ -922,7 +926,7 @@ def test_the_operator_sees_what_accepting_changes_before_anything_is_accepted(
     assert (code.name, code.state) == ("runtime/kernel/decision.py", "changed")
     assert "-VALUE = 1" in code.diff and "+VALUE = 2" in code.diff
     shown = "\n".join(preview.lines())
-    assert '    - .py: id="dict-get"' in shown
+    assert '    - ".py": id="dict-get"' in shown
     assert "  IMPORT_BOUNDARIES" in shown
     assert "    runtime/kernel/decision.py (changed)" in shown
     assert "      +VALUE = 2" in shown
@@ -940,7 +944,10 @@ def test_a_reordered_first_match_table_is_shown_where_each_entry_moves(
     """
     monkeypatch.delenv("LUP_BOUNDARY_NONCE", raising=False)
     bare, caller, sentinels = launched_in_own_repository(tmp_path)
-    roles = [{"root": "src/data/", "role": "data"}, {"root": "src/", "role": "source"}]
+    roles = [
+        {"root": "src/data/", "role": "data"},
+        {"root": "src/", "role": "production"},
+    ]
     (caller / ".codex/plugins/example/hooks/runtime/policy_data.py").write_text(
         f"PATH_ROLES = {roles!r}\n"
     )
@@ -956,10 +963,127 @@ def test_a_reordered_first_match_table_is_shown_where_each_entry_moves(
     # `src/` now comes first, and so wins for everything under `src/data/`.
     assert change.lines == [
         "@ entry 1 of 2",
-        '+ root="src/" role="source"',
+        '+ root="src/" role="production"',
         "@ entry 2 of 2",
-        '- root="src/" role="source"',
+        '- root="src/" role="production"',
     ]
+
+
+def rule(value: str, reason: str) -> dict[str, str | bool]:
+    """One protected-path row as generation writes it."""
+    return {
+        "kind": "exact",
+        "value": value,
+        "reason": reason,
+        "recovery": "",
+        "allow_autonomous": False,
+    }
+
+
+def test_the_preview_spells_out_whatever_could_rewrite_the_screen(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A removed protected path stays on screen, whatever the session wrote after it.
+
+    A carriage return and an erase-line in a reason, cursor movement and a
+    clear-screen in a suffix key, a right-to-left override: each would reach a
+    terminal as an instruction to it. Every one is spelled as its code point,
+    and every field of a row is shown, empty ones included.
+    """
+    monkeypatch.delenv("LUP_BOUNDARY_NONCE", raising=False)
+    bare, caller, sentinels = launched_in_own_repository(tmp_path)
+    kept = rule("pyproject.toml", "protected path requires approval")
+    (caller / ".codex/plugins/example/hooks/runtime/policy_data.py").write_text(
+        f"PATH_RULES = {[rule('README.md', 'README.md is human-authored'), kept]!r}\n"
+    )
+    hostile = rule("notes.md", "fine\r\x1b[2K\u202e")
+    pattern = {
+        "id": "x",
+        "pattern": "x",
+        "message": "x",
+        "context": "",
+        "matcher": "",
+        "strength": "",
+        "resolution": "",
+    }
+    feature = cut(bare, bare / "tree" / "feature", "feature")
+    evaluator(
+        feature,
+        "codex",
+        f"PATH_RULES = {[kept, hostile]!r}\n"
+        f"ANTI_PATTERN_ROWS = { ({'.py\x1b[1A\x1b[2J': [pattern]})!r}\n",
+    )
+    approve = Mock(return_value=True)
+
+    refresh_destination_policy(caller, sentinels.nonce, feature, approve)
+
+    (preview,) = approve.call_args.args
+    shown = preview.lines()
+    assert not [line for line in shown if any(terminal_control(c) for c in line)]
+    assert (
+        '    - kind="exact" value="README.md" reason="README.md is human-authored" '
+        'recovery="" allow_autonomous=false'
+    ) in shown
+    assert any("\\u001b[2K" in line and "\\u202e" in line for line in shown)
+    assert any("\\u001b[1A\\u001b[2J" in line for line in shown)
+
+
+@pytest.mark.parametrize(
+    "row, departure",
+    [
+        ({**rule("a", "b"), "hidden": "x"}, r'PATH_RULES\[0\]\["hidden"\] is no field'),
+        (
+            {"kind": "exact", "value": "a", "reason": "b"},
+            r"PATH_RULES\[0\] lacks recovery",
+        ),
+        ({**rule("a", "b"), "allow_autonomous": 0}, r"allow_autonomous is not bool"),
+        ({**rule("a", "b"), "kind": "anything"}, r"PATH_RULES\[0\]\.kind is none of"),
+    ],
+)
+def test_a_row_is_held_to_its_row_type_before_anything_is_shown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    row: dict[str, object],
+    departure: str,
+) -> None:
+    """A field the row type lacks, one it left out, one of another type: all refused."""
+    monkeypatch.delenv("LUP_BOUNDARY_NONCE", raising=False)
+    bare, caller, sentinels = launched_in_own_repository(tmp_path)
+    feature = cut(bare, bare / "tree" / "feature", "feature")
+    evaluator(feature, "codex", f"PATH_RULES = {[row]!r}\n")
+    approve = Mock(return_value=True)
+
+    with pytest.raises(ValueError, match=departure):
+        refresh_destination_policy(caller, sentinels.nonce, feature, approve)
+
+    assert not approve.called
+
+
+@pytest.mark.parametrize(
+    "character", ["\x1b", "\r", "\u202e", "\u2066", "\x85", "\u2028"]
+)
+def test_code_holding_a_control_is_refused_rather_than_shown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    character: str,
+) -> None:
+    """A diff whose lines a terminal would redraw is no diff an operator can read."""
+    monkeypatch.delenv("LUP_BOUNDARY_NONCE", raising=False)
+    bare, caller, sentinels = launched_in_own_repository(tmp_path)
+    feature = cut(bare, bare / "tree" / "feature", "feature")
+    hooks = evaluator(feature, "codex")
+    (hooks / "runtime" / "kernel" / "decision.py").write_text(
+        f"VALUE = 1\nOTHER = 2  # {character}hidden\n"
+    )
+    approve = Mock(return_value=True)
+
+    with pytest.raises(
+        ValueError, match=rf"decision\.py:2 holds U\+{ord(character):04X}"
+    ):
+        refresh_destination_policy(caller, sentinels.nonce, feature, approve)
+
+    assert not approve.called
 
 
 def test_a_declined_refresh_writes_nothing(
