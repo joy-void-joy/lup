@@ -10,7 +10,7 @@ import json
 import logging
 import os
 from collections.abc import Callable, Sequence
-from contextlib import AbstractContextManager, nullcontext
+from contextlib import AbstractContextManager, ExitStack, nullcontext
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
@@ -1477,6 +1477,7 @@ def session_argv(
     member: LaunchedMember | None = None,
     prepare: Callable[[list[str], Path], None] | None = None,
     state_scope: NativeHomeScope | None = None,
+    services: ExitStack | None = None,
 ) -> list[str]:
     """The argv that opens a session, inside the declared container or on the host.
 
@@ -1509,11 +1510,24 @@ def session_argv(
         """Open only the selected host service before announcing launch readiness."""
         if not composition.recipe.source.review_inbox:
             return
-        from lup.devtools.dev.review_service import ensure_review_inbox
+        if services is None:
+            raise ValueError("Review inbox requires a native session service scope")
+        from lup.devtools.dev.review_service import review_inbox_session
 
-        inbox = ensure_review_inbox(composition.recipe.root)
+        inbox = services.enter_context(review_inbox_session(composition.recipe.root))
         environment[REVIEW_INBOX_URL_ENV] = inbox.endpoint
-        banner.add([Notice(text=f"Review inbox: {inbox.endpoint}", urgency="detail")])
+        banner.add(
+            [
+                Notice(
+                    text=f"Background review inbox: {inbox.endpoint}. "
+                    "Shared by active harness sessions; the last session's exit "
+                    "or Ctrl+C stops it. Operator controls: "
+                    "uv run lup-devtools dev questions status; "
+                    "uv run lup-devtools dev questions stop.",
+                    urgency="detail",
+                )
+            ]
+        )
         if inbox.started and not inbox.browser_opened:
             banner.add(
                 [
@@ -1867,7 +1881,7 @@ def launch_claude(
             if mode is None
             else mode.opened("claude", transcript.journal, transcribing)
         )
-        with opening as session:
+        with opening as session, ExitStack() as services:
             environment.update(session)
             argv = session_argv(
                 "claude",
@@ -1884,6 +1898,7 @@ def launch_claude(
                 mounts,
                 devices,
                 member=member,
+                services=services,
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True
@@ -2065,7 +2080,7 @@ def launch_codex(
         )
 
     try:
-        with opening as session:
+        with opening as session, ExitStack() as services:
             environment.update(session)
             argv = session_argv(
                 "codex",
@@ -2083,6 +2098,7 @@ def launch_codex(
                 devices,
                 authenticate=authenticate,
                 prepare=prepare,
+                services=services,
                 state_scope=(
                     selected_profile.state_scope()
                     if selected_profile is not None and selected_profile.as_base

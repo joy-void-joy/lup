@@ -28,7 +28,7 @@ def module() -> Module:
                             "Native harness launches keep the operator's browser review "
                             "inbox available. `dev questions status` reports its state; "
                             "the operator opens it with `dev questions open`. "
-                            "`docs/review-inbox.md` describes service ownership and decisions."
+                            "`docs/review-inbox.md` describes service ownership and decisions.\n\n"
                         )
                     )
                 ],

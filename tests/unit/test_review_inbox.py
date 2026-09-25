@@ -759,7 +759,8 @@ def test_root_discovery_keeps_only_named_repositories_and_their_worktrees(
 
 @pytest.mark.parametrize("open_page", [False, True])
 @pytest.mark.parametrize(
-    "selected_names", [("current", "other"), ("additional", "other", "additional")]
+    "selected_names",
+    [(), ("additional",), ("current", "other"), ("additional", "other", "additional")],
 )
 @pytest.mark.parametrize(
     ("requested_port", "expected_url"), [(8765, BASE_URL), (80, "http://127.0.0.1")]
@@ -807,10 +808,17 @@ async def test_cli_serves_selected_roots_and_keeps_the_token_out_of_public_pages
         sizes.append(size)
         return TOKEN
 
-    def serve(app: FastAPI, host: str, port: int, access_log: bool) -> None:
+    def serve(
+        app: FastAPI,
+        host: str,
+        port: int,
+        access_log: bool,
+        timeout_graceful_shutdown: int,
+    ) -> None:
         assert host == "127.0.0.1"
         assert port == requested_port
         assert not access_log
+        assert timeout_graceful_shutdown == 2
         served.append(app)
 
     monkeypatch.setattr(secrets, "token_urlsafe", token)
@@ -870,8 +878,14 @@ def test_cli_refuses_non_loopback_before_serving_or_discovering_roots(
         discovered.append(root)
         return [root]
 
-    def serve(app: FastAPI, host: str, port: int, access_log: bool) -> None:
-        del host, port, access_log
+    def serve(
+        app: FastAPI,
+        host: str,
+        port: int,
+        access_log: bool,
+        timeout_graceful_shutdown: int,
+    ) -> None:
+        del host, port, access_log, timeout_graceful_shutdown
         served.append(app)
 
     monkeypatch.setattr(questions, "sibling_worktrees", discover)

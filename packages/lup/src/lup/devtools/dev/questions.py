@@ -1121,7 +1121,7 @@ def create_questions_app(
             True, "--open/--no-open", help="Open the browser"
         ),
     ) -> None:
-        """Keep an operator browser inbox open across the selected worktrees."""
+        """Serve the selected worktrees in this terminal until Ctrl+C."""
         from lup.devtools.dev.review_service import require_review_operator
 
         require_review_operator()
@@ -1135,20 +1135,18 @@ def create_questions_app(
                 path.resolve(strict=True) for path in (selected_roots or [root])
             )
         )
-        repositories = {repository_layout(path).common.resolve() for path in roots}
-        if len(repositories) == 1:
-            from lup.devtools.dev.review_service import serve_review_inbox
-
-            return serve_review_inbox(roots[0], host, port, open_page)
         authority = f"[{host}]" if ":" in host else host
         url = f"http://{authority}" if port == 80 else f"http://{authority}:{port}"
         token = secrets.token_urlsafe(32)
         app = review_app(url, token, roots, discover=True)
         browser_url = f"{url}/#token={token}"
-        typer.echo(f"Review inbox: {browser_url}")
+        typer.echo(f"Foreground review inbox: {url} — Ctrl+C stops this server.")
+        typer.echo(f"Operator launch URL: {browser_url}")
         if open_page:
             webbrowser.open(browser_url)
-        uvicorn.run(app, host=host, port=port, access_log=False)
+        uvicorn.run(
+            app, host=host, port=port, access_log=False, timeout_graceful_shutdown=2
+        )
 
     if review_inbox_enabled:
         from lup.devtools.dev.review_service import register_review_service_commands
