@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "a311e06fe97910c291bb3880d53480962ed7e2a6c532377fdd9c70b7d0b46406",
+  "source_digest": "328c1f494726f78cc0fec31f3a26303f530be80e3f3229801632ef4d618e81e3",
   "target_requirements": [
     "claude-code"
   ],
@@ -86,14 +86,14 @@
     {
       "path": ".claude/plugins/lup/commands/brainstorm.md",
       "category": "generated",
-      "sha256": "653d11c4e9f91ff197f404fcdf6888fb8189936b85fb04aa8914286ed4f7e0f7",
+      "sha256": "0b8973b3436cf847a69bb139fce507da61caac90828d9fe9324844bd8047da65",
       "semantic_id": "skill.brainstorm",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/commands/bump.md",
       "category": "generated",
-      "sha256": "61584acfcc9aa1b2ad2d0213dac4648e7e563333c3d5014a739fabeea06e3529",
+      "sha256": "b8a8f929eb3e6b68bf66fb86da2387f4a7035ba14689ae27405a7af120a405dd",
       "semantic_id": "skill.bump",
       "executable": false
     },
@@ -212,7 +212,7 @@
     {
       "path": ".claude/plugins/lup/commands/init.md",
       "category": "generated",
-      "sha256": "98e6064669a47165e6dc572e53ff83c481d8733662806faab9a6a4418ebc17da",
+      "sha256": "bc92984fd883f808e69533c1295d5fef509ddac175e6b265bcc7ad90848a30fa",
       "semantic_id": "skill.init",
       "executable": false
     },
@@ -716,7 +716,7 @@
     {
       "path": "docs/contributing.md",
       "category": "generated",
-      "sha256": "89677baa60516153d298ce084c44443b4cba043d3f178ba2043e9106a9678033",
+      "sha256": "c70c4d065c34781682d67c442262f5e568e1643d8626ca15a83cc45167470554",
       "semantic_id": "docs.contributing",
       "executable": false
     },
@@ -842,7 +842,7 @@
     {
       "path": "docs/template.md",
       "category": "generated",
-      "sha256": "2991a86c1c3e31205678e07c6be857faa28e7649aba407c5e3ea9520bbd78591",
+      "sha256": "2f62b205a157f2f9ab86a058bc3a2d40defb0a32949646ced22b0ff03755a9d3",
       "semantic_id": "docs.template",
       "executable": false
     },

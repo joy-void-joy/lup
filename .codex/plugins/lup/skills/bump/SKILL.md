@@ -17,7 +17,7 @@ If no level is provided, determine the appropriate level from the changes.
 
 ### 1. Commit pending changes
 
-Invoke `$lup:commit` to commit any uncommitted work before bumping.
+Commit any uncommitted work before bumping, with `$lup:commit`.
 
 ### 2. Gather context
 

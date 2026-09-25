@@ -23,7 +23,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.claude/plugins/lup/agents/version-reviewer.md` | lup.harness.content.agents.version_reviewer |
 | `.claude/plugins/lup/commands/add-command.md` | lup.harness.content.skills.add_command |
 | `.claude/plugins/lup/commands/analyze.md` | lup.harness.content.skills.analyze |
-| `.claude/plugins/lup/commands/brainstorm.md` | lup_template.harness.content.skills.brainstorm |
+| `.claude/plugins/lup/commands/brainstorm.md` | lup.harness.content.skills.brainstorm |
 | `.claude/plugins/lup/commands/bump.md` | lup.harness.content.skills.bump |
 | `.claude/plugins/lup/commands/close.md` | lup.harness.content.skills.close |
 | `.claude/plugins/lup/commands/commit.md` | lup.harness.content.skills.commit |
@@ -200,7 +200,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.codex/plugins/lup/hooks/scripts/subagent_cleanup.sh` | lup.providers.subagent_cleanup |
 | `.codex/plugins/lup/skills/add-command/SKILL.md` | lup.harness.content.skills.add_command |
 | `.codex/plugins/lup/skills/analyze/SKILL.md` | lup.harness.content.skills.analyze |
-| `.codex/plugins/lup/skills/brainstorm/SKILL.md` | lup_template.harness.content.skills.brainstorm |
+| `.codex/plugins/lup/skills/brainstorm/SKILL.md` | lup.harness.content.skills.brainstorm |
 | `.codex/plugins/lup/skills/bump/SKILL.md` | lup.harness.content.skills.bump |
 | `.codex/plugins/lup/skills/close/SKILL.md` | lup.harness.content.skills.close |
 | `.codex/plugins/lup/skills/commit/SKILL.md` | lup.harness.content.skills.commit |
