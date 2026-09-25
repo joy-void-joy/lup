@@ -835,7 +835,7 @@
     {
       "path": "docs/supervisor.md",
       "category": "generated",
-      "sha256": "753b4cd4aab2cb446c17ff958f8e0f2022ab9609d3325c3ca08065ef49e49678",
+      "sha256": "bc4a962fbcfaeda14e405c2fa2313c04aa66c610ecc44d71f11675538c5b4d45",
       "semantic_id": "docs.supervisor",
       "executable": false
     },
