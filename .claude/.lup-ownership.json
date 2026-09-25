@@ -716,7 +716,7 @@
     {
       "path": "docs/contributing.md",
       "category": "generated",
-      "sha256": "89677baa60516153d298ce084c44443b4cba043d3f178ba2043e9106a9678033",
+      "sha256": "f33e34a71787ebb187e8a0689b5513e94708ef964685fac57e0717ce055fec00",
       "semantic_id": "docs.contributing",
       "executable": false
     },
@@ -793,7 +793,7 @@
     {
       "path": "docs/permissions.md",
       "category": "generated",
-      "sha256": "8396da317c894fb823f89d0ccf833e4d60e649b903c4f84cb8d954435ab29282",
+      "sha256": "62dd61879dc09da354ddd184e27a8d00c0490234eda36bdbb6832ef9e1e81155",
       "semantic_id": "docs.permissions",
       "executable": false
     },
@@ -842,7 +842,7 @@
     {
       "path": "docs/template.md",
       "category": "generated",
-      "sha256": "2991a86c1c3e31205678e07c6be857faa28e7649aba407c5e3ea9520bbd78591",
+      "sha256": "eb7069bc5e5e5a32015c754af288d470d4b8d5a41ba9fd15d33a60f20dc35def",
       "semantic_id": "docs.template",
       "executable": false
     },

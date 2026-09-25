@@ -422,12 +422,17 @@ its bytes without restarting the session. From the caller checkout, run
 `uv run lup-devtools harness policy-refresh --nonce <nonce> --repository <checkout>`.
 The same command can accept a newly created worktree only beneath an original
 explicit writable bare-repository mount, with the same Git common directory
-and a writable measured boundary. It never discovers unrelated nested
-repositories or extends the launch's filesystem grants. The requester cannot
-run this operator action, and the authority ledger and accepted snapshots are
-protected edit paths. These records prevent accidental inheritance and stale
-policy execution; they are mutable local bookkeeping, not authentication
-against a hostile process with the same filesystem authority.
+and a writable measured boundary. A registration the per-user cache
+materialized is mounted as one: the launch mounts its whole bare clone, so a
+worktree cut in it afterwards is accepted this way. A registration naming a
+checkout this machine keeps mounts that working tree alone, and a worktree
+beside it needs a launch granting it. The refresh never discovers unrelated
+nested repositories or extends the launch's filesystem grants. The requester
+cannot run this operator action, and the authority ledger and accepted
+snapshots are protected edit paths. These records prevent accidental
+inheritance and stale policy execution; they are mutable local bookkeeping,
+not authentication against a hostile process with the same filesystem
+authority.
 
 Edit decisions cover protected paths, marker changes, size, the canonical
 anti-pattern audit, and declared import ownership. An edit over the size gate alone is deferred — the hook
