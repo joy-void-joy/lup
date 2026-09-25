@@ -152,7 +152,7 @@ export function Files({ files, navigation, command }: { files: ReviewFile[]; nav
           <span className="file-paging"><button type="button" disabled={visible.length === 0 || fileIndex === 0} aria-label="Previous file" aria-keyshortcuts="[" onClick={() => moveFile(-1)}>←</button>
             <span>{fileIndex < 0 ? "Outside search" : `${fileIndex + 1} / ${visible.length}`}</span><button type="button" disabled={visible.length === 0 || fileIndex + 1 >= visible.length} aria-label="Next file" aria-keyshortcuts="]" onClick={() => moveFile(1)}>→</button></span></span>
         <details className="file-review"><summary>{reviewLabel(file.review_effect)} · Why</summary><p>{file.review_effect === "defer" && "No Lup approval requested; the native provider decides. "}{file.review_reason}</p></details>
-        <details className="file-prefix"><summary>Full path</summary><code>{file.path}</code></details>
+        <div className="file-target"><span>Target file</span><code tabIndex={0}>{file.path}</code></div>
       </header>
       <div className="evidence-tabs" aria-label="File evidence">
         {([['diff', 'Diff'], ['before', 'Before'], ['after', 'After'], ['raw', 'Raw diff']] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={view === value} onClick={() => { setView(value); setJump(null); }}>{label}</button>)}

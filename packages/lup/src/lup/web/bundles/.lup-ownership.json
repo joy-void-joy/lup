@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.4.0",
-  "source_digest": "16c943b6fc665f55dab6429d7bc881ede32aa1d44ff2a156815b8b38334f1668",
+  "source_digest": "22180b376cb015da003e3c85375416152de44e064d809780c97724b24e85b3b0",
   "target_requirements": [
     "bun"
   ],
@@ -35,23 +35,23 @@
       "executable": false
     },
     {
-      "path": "packages/lup/src/lup/web/bundles/reviews/assets/index-B7lLyjMn.css",
+      "path": "packages/lup/src/lup/web/bundles/reviews/assets/index-7wdfuHV4.js",
       "category": "generated",
-      "sha256": "76f4350cae678e37923e027c0ec59dc42a703eaf245561f8d15114ba8e92f2dc",
-      "semantic_id": "web.reviews.assets/index-B7lLyjMn.css",
+      "sha256": "bd9f1f98f5ae669a72ae4760aff0b31c2aff570e3d1e202e46b9d8f3a01f6dc4",
+      "semantic_id": "web.reviews.assets/index-7wdfuHV4.js",
       "executable": false
     },
     {
-      "path": "packages/lup/src/lup/web/bundles/reviews/assets/index-oHoTyy1A.js",
+      "path": "packages/lup/src/lup/web/bundles/reviews/assets/index-BpnCpELs.css",
       "category": "generated",
-      "sha256": "6c0d3f93d15555354a22560c455c662c19778db0098f7ff3519155ab8ccb7155",
-      "semantic_id": "web.reviews.assets/index-oHoTyy1A.js",
+      "sha256": "0b6ec47011a9774f82416c1d7371467341576abf163880d016819a7b5095248c",
+      "semantic_id": "web.reviews.assets/index-BpnCpELs.css",
       "executable": false
     },
     {
       "path": "packages/lup/src/lup/web/bundles/reviews/index.html",
       "category": "generated",
-      "sha256": "a2e6f84acc1ed180c84c445bca7f76e38c55d96a85af7bec0d9fb34188b39b2f",
+      "sha256": "54adebcb71d41ca02353c6da8f5d5aff021e842f34f7a7a09ad52b0554671e31",
       "semantic_id": "web.reviews.index.html",
       "executable": false
     },
