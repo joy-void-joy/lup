@@ -98,9 +98,33 @@ def build_display(usage, stats):
 An unused parameter — `_context`, `_exc_type` — keeps its underscore. That is
 a linting convention, not a privacy one.
 
+A wrapper around one other function is not a helper to nest: it is inlined
+where it is called rather than hidden under a second name.
+
+## Importing a name from where it is defined
+
+`__all__` and an `__init__.py` re-export are refused: a name is imported from
+the module that defines it. The one carve-out is a standalone package's own
+top-level `__init__.py`, which may declare that package's public API this way —
+the package root only, never a subpackage.
+
 ## What each code-intelligence tool answers
 
 A name has a definition, a scope, and a set of references, and only a resolver
 knows them:
 
 {{ tools }}
+
+## Why the design principles hold
+
+The guidance states each design principle as the thing to do. The reason
+behind four of them is kept here:
+
+- **Compiling is stronger than emitting**: an artifact built from a typed
+  declaration cannot diverge from it.
+- **Never truncate**: a cut artifact looks complete — `[:200]` loses the rest
+  with nothing said.
+- **Say it once, where it is looked up**: a line repeated at every event
+  stops being read.
+- **Prose is a claim, not evidence**: prose goes stale before the code beside
+  it, and deferring to it hardens an unvetted call into a decision.

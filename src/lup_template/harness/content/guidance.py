@@ -118,7 +118,16 @@ KEEPING_IN_STEP = models.GuidanceSection(
     id="keeping-in-step",
     chapter="tooling",
     parts=[
-        models.Passage(module=__name__, name="keeping-in-step"),
+        models.Passage(
+            module=__name__,
+            name="keeping-in-step",
+            values={
+                "update_skill": models.SkillInvocation(plugin="lup", skill="update"),
+                "upstream_skill": models.SkillInvocation(
+                    plugin="lup", skill="upstream"
+                ),
+            },
+        ),
     ],
 )
 

@@ -137,10 +137,12 @@ SANCTIONED_EXCEPTIONS = models.GuidanceSection(
 """The carve-outs a rule id cannot deliver.
 
 Dropping the enumerated conventions is safe exactly where the checker says
-the same thing at the moment it matters. These three are what the checker
-does *not* say: its diagnostic names the refused shape and stops, so an
-agent obeying it literally would remove a package's public API or refuse a
-linting convention. They stay because nothing else carries them.
+the same thing at the moment it matters. The private-prefix diagnostics
+carry their own exemptions — nest inside the caller, an unused parameter
+keeps its underscore — so those are left to them. These two are what the
+checker does *not* say: its diagnostic names the refused shape and stops, so
+an agent obeying it literally would remove a package's public API or hide a
+wrapper that should have been inlined.
 """
 
 FAILURE_ANALYSIS = models.GuidanceSection(

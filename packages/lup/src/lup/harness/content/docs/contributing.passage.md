@@ -79,15 +79,20 @@ it has a single test: *would another project built on lup want this?* If yes,
 it goes in the library even if only this application uses it today. The
 library never imports the application, so a utility placed wrongly in
 {{ project_directory }} is unreachable from the library and will have to move
-later.
+later. Deciding a module belongs on the other side is one line of judgement
+and a hundred of consequence, which is where the judgement gets abandoned —
+so the consequence is a command: `dev relocate old.module=new.module`
+repoints every import and reports the mentions it left.
 
 `tmp/` is scratch: gitignored, so nothing written there reaches a diff, a
-reviewer, or a human — which is why it does not execute. One-off work takes
-the first of these that fits:
+reviewer, or a human. One-off work takes the first of these that fits:
 
 1. To read code rather than run it: `py info`, `py source`, `py search`, `py text`,
    `py imports`, and the codeintel tools. Resolve names with `py search` or
-   codeintel; find literal text in explicitly scoped Python paths with `py text`.
+   codeintel, and rename with `rename_symbol` rather than `replace_all`
+   ([conventions.md](conventions.md) says what each tool answers); find literal
+   text in explicitly scoped Python paths with `py text`, and characters in
+   non-Python files with grep.
 2. To compute something once: a script under `tmp/`, run directly. It imports
    this checkout the way any other module does, and the session it runs in is
    itself contained, so the objection — an unreviewable thing executing
@@ -117,8 +122,10 @@ reader that takes a file whole. `cat`-ing it is another result too large to
 return, persisted to another file, and `cat`-ing that one repeats it — a
 regress whose every step looks like the command having worked.
 
-Never create a tracking file. A `TODO.md`, backlog, or roadmap parks a
-decision where no workflow surfaces it again. Deferred work lives as a
+Never create a tracking file, and never write to the harness's persistent
+memory — a file per profile, unversioned, unreviewed. A `TODO.md`, backlog,
+roadmap, or memory file parks a decision where no workflow surfaces it again:
+delegation to nobody. Deferred work lives as a
 `# lup: defer: <text>` note at the site it concerns — where `dev comments`
 lists it in its own parked section and `dev check` keeps it visible until
 somebody wakes it. That bare spelling is the
@@ -155,7 +162,11 @@ A note is right when the subject is the code: a bug worth remarking on, an
 idea for a feature, anything the site it concerns can hold. Work whose
 subject is the tooling misbehaving — friction, a command that half-completes,
 a classifier reporting a failed probe as fact — has no site to sit at, and
-becomes a GitHub issue instead. When whether to defer at all is the open
+becomes a GitHub issue instead, since a narrated workaround teaches nobody; so
+does a milestone or plan, when the repository is deciding what comes next. A
+rule every future session should carry goes into the guidance's source, then
+regenerated. What a fresh session should pick up goes into a `tmp/` briefing,
+rewritten whole and never appended. When whether to defer at all is the open
 question, it becomes a question to the user rather than any note.
 
 ## Git workflow
@@ -469,6 +480,10 @@ more, because a permanent wall of text would sit in front of the notes
 somebody is actually owed. `dev init` clears the flag in the same rewrite that
 renames the package, and from then on every marker still standing lists in
 `dev check` as a decision this domain has not made.
+
+A marker asks a downstream repository's authors a question about their domain,
+whose answer every user of that repository then shares; a question two
+machines running one commit would answer differently is not one.
 
 `uv run lup-devtools dev todos` walks them either way — an alias for
 `dev comments --kind template` — and initialization goes through them one by

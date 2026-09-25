@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "092d4173694419d50daa472a9cfbed026158643fd78133389c9cc4407a7392be",
+  "source_digest": "18542099019f462cbf671eca975ecf102366732e026084fd42bd9e8507751ba5",
   "target_requirements": [
     "claude-code"
   ],
@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "52e197ece5298e0914da196b12748f894c02eaca8166ebdbd6367722a511d332",
+      "sha256": "23ba8e7e2df592226af64bb3746cf6c4bd757f92d01560525a5cd43c2ca94ad8",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -716,14 +716,14 @@
     {
       "path": "docs/contributing.md",
       "category": "generated",
-      "sha256": "8073002c1a6d0c0337fb4492df021a49656fcc8afc1137d65f9465b62e8a6e5d",
+      "sha256": "c2cfa5823a689fe9d772e3c83978ed6f44ab0189ffc6da637477526196742295",
       "semantic_id": "docs.contributing",
       "executable": false
     },
     {
       "path": "docs/conventions.md",
       "category": "generated",
-      "sha256": "7875053b7e056dfc58b5f35881515ed47b73b1af07fdb314727144028107b8bb",
+      "sha256": "cc45560d7216d566c254018180d31a23c0c3fe94e16a3a25e880be444e1e4547",
       "semantic_id": "docs.conventions",
       "executable": false
     },
@@ -793,14 +793,14 @@
     {
       "path": "docs/permissions.md",
       "category": "generated",
-      "sha256": "bd0b080538f7b4c6a13e2d1eb0fff8bd4926b78abc0821d9d45e1b630e8f9876",
+      "sha256": "cec890843e12d754342ef5a5d7bace179ae496f07c676016810712e6bfd5751e",
       "semantic_id": "docs.permissions",
       "executable": false
     },
     {
       "path": "docs/platform-differentiation.md",
       "category": "generated",
-      "sha256": "fb9edce8f22929282ee4a97765060f6429744e47fba71d45dfcd97cb2ce7ce87",
+      "sha256": "141e3faae1040cde11d202bb2e6364c6be8c29476dd75bbc76442616a135d472",
       "semantic_id": "docs.platform-differentiation",
       "executable": false
     },

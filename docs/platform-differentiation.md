@@ -31,7 +31,7 @@ This document is the map of every intended difference and the parity audit of
 every generated artifact family. "Parity" means the same semantic content in
 each platform's native format — never byte parity.
 
-Generated files are one surface, not the boundary of the audit. Launch readiness, authentication, host bridges, delegated-agent paths, runtime diagnostics, and verification must provide equivalent user-visible semantics too; a runtime-specific substitute belongs in this map with the evidence that proves its difference.
+Generated files are one surface, not the boundary of the audit. Every policy, flag, hook, and artifact, and launch readiness, launch services, authentication, host bridges, delegated-agent paths, runtime diagnostics, and verification must have its answer stated and built for every runtime, with equivalent user-visible semantics; a runtime-specific substitute belongs in this map with the evidence that proves its difference. Where one runtime's verdicts place no call, it renders the plain effect.
 
 ## Where each intended difference lives
 

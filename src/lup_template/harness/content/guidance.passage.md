@@ -5,19 +5,19 @@ Lup is a reusable framework and template for autonomous, tool-using agents: keep
 
 
 <!-- passage: changing-the-policy -->
-Change the policy those gates enforce with {{ hooks_skill }}, which edits `lup.policy` and the catalog's `HookSet`, regenerates both plugins, and runs the fixture suite; never edit a generated dispatcher or runtime. Harness settings stay project-level, in {{ project_settings }}, native settings outside that policy boundary; only lup's `~/.config/lup/` is user-level: accounts, profiles, theme and defaults belong to the person, not the project.
+Change the policy those gates enforce with {{ hooks_skill }}, never by editing a generated dispatcher or runtime. Harness settings stay project-level, in {{ project_settings }}, which holds only native settings outside that policy boundary; the one user-level place is lup's `~/.config/lup/`, since accounts, profiles, theme and defaults belong to the person, not the project.
 
 
 <!-- passage: marker-vocabulary -->
 ### The `# lup:` Marker Vocabulary
 
-A `# lup:` (or `// lup:`) comment is **actionable review feedback** about the code, at the site it concerns: bare is open, `solved:` claims you addressed it, `defer:` parks it, and **deleting any of the three is denied**. Resolve one by fixing what it points at, or answering a question definitively, then rewriting it as **`# lup: solved: <the note's original words>`**, text unchanged, so the claim can be checked against what was asked; only the verify-solved pass retires one. `ignore[<rule>]` and `template: <decision>` share the namespace without being feedback, and go when what they annotate does. `docs/contributing.md` carries the lifecycle, the bracketed `defer[<gate>]` spellings `dev check` resolves rather than reads, and what a `template:` marker asks of a repository that adopted the scaffold{{ resolve_pointer }}; `dev todos` walks those standing.
+A `# lup:` (or `// lup:`) comment is **actionable review feedback** at the site it concerns: bare is open, `solved:` claims you addressed it, `defer:` parks it, and **deleting any of the three is denied**. Resolve one by fixing what it points at, or answering a question definitively, then rewriting it as **`# lup: solved: <the note's original words>`**, text unchanged; only the verify-solved pass retires one. `docs/contributing.md` carries the lifecycle, the gated `defer[<gate>]` spellings, the `ignore[<rule>]` marker sharing the namespace, and what a `template:` one asks of an adopter{{ resolve_pointer }}.
 
 
 <!-- passage: deferred-work -->
 ### Deferred Work
 
-**Never create tracking files, and never write to the harness's persistent memory** — a file per profile, unversioned, unreviewed. A `TODO.md`, backlog, roadmap, or memory file parks a decision where no workflow will surface it again: delegation to nobody. What outlives this session goes to a `# lup: defer:` note at the site it concerns, which `dev check` keeps visible until somebody wakes it; a GitHub issue, milestone, or plan when the tooling rather than the code misbehaves, or the repository is deciding what comes next; this guidance's source, regenerated, for a rule every future session should carry; a `tmp/` briefing, rewritten whole and never appended, for what a fresh session picks up; or a question to the user, when whether to defer at all is itself the open question. `docs/contributing.md` carries which is which.
+**Never create tracking files, and never write to the harness's persistent memory.** What outlives this session goes to a `# lup: defer:` note at the site it concerns, which `dev check` keeps visible until somebody wakes it; `docs/contributing.md` carries when it goes instead to an issue, this guidance's source, a `tmp/` briefing, or the user.
 
 ---
 
@@ -25,7 +25,7 @@ A `# lup:` (or `// lup:`) comment is **actionable review feedback** about the co
 <!-- passage: development-workflow -->
 ## Development Workflow
 
-Use a **git worktree**; never commit code to `dev`. Run `uv run lup-devtools git worktree create feat-name` — which does not move this session, so an old-checkout edit misses the branch. Work in the path it prints: launch a session rooted there, or edit its files by absolute path where that tree is writable. `docs/contributing.md` carries the branch model, what a late relocation costs a running session, and the merge loop.
+Use a **git worktree**; never commit code to `dev`. `uv run lup-devtools git worktree create feat-name` does not move this session, so an old-checkout edit misses the branch: work in the path it prints, from a session rooted there or by absolute path where that tree is writable. `docs/contributing.md` carries the branch model and the merge loop.
 
 
 <!-- passage: commit-type-pointer -->
@@ -37,13 +37,13 @@ The type comes from `docs/contributing.md`'s table, which the commit skill rende
 
 ## Code Conventions
 
-Build on `lup` and pydantic; prefer an existing PyPI library to raw HTTP or a rebuilt wheel. The runtime an application composes against is provider-neutral: no module under `src/lup_template/` imports a provider SDK, each being one adapter's dependency behind an extra, and `seam-boundary` holds adapter imports to the composition roots naming them. `docs/conventions.md` names each library and its typed forms.
+Build on `lup` and pydantic; prefer an existing PyPI library to raw HTTP or a rebuilt wheel. No module under `src/lup_template/` imports a provider SDK, and `seam-boundary` holds adapter imports to the composition roots naming them. `docs/conventions.md` names each library, its typed forms, and a `@lup_tool` handler's contract.
 
 **Model selection.** Default to the **strongest** tier everywhere — main agent, subagents, reviewers, background agents — on a subscription where the best model is the point. Reach for **balanced** only where latency or cost provably dominates quality, **fast** almost never; a role warranting less declares its tier with a reason, naming a tier rather than a model id.
 
-**Error handling.** Raise for unrecoverable errors, wrap transient ones in `with_retry`, validate inputs early, never swallow one silently. A `@lup_tool` handler takes a validated model and returns one, raising `ToolError` to send a recoverable failure back as an MCP error saying what to do about it; the `is_error` envelope and input-validation reply are the decorator's. A catch-all `except Exception` is fine at a boundary that logs, handles, or re-raises — a task loop, a subagent delegation — which is why no rule refuses one.
+**Error handling.** Raise for unrecoverable errors, wrap transient ones in `with_retry`, validate inputs early, never swallow one silently; a catch-all `except Exception` is fine at a boundary that logs, handles, or re-raises — a task loop, a subagent delegation.
 
-**Placement, in this repository.** Reusable utilities belong in `packages/lup/`, what only this application needs in `src/lup_template/`, and logic already in `lup` is imported rather than copied. Deciding a module belongs on the other side is one line of judgement and a hundred of consequence, which is where the judgement gets abandoned — so the consequence is a command: `dev relocate old.module=new.module` repoints every import and reports the mentions it left.
+**Placement, in this repository.** The library is `packages/lup/`, the application `src/lup_template/`; logic already in `lup` is imported rather than copied, and `dev relocate old.module=new.module` moves a module across, repointing every import.
 
 
 <!-- passage: tooling -->
@@ -51,21 +51,19 @@ Build on `lup` and pydantic; prefer an existing PyPI library to raw HTTP or a re
 
 ## Tooling
 
-`uv` is the package manager — `uv add <package>`, never edit pyproject.toml directly. Lint and format with ruff, type-check with pyright; `docs/contributing.md` carries the commands that have to be green. `lup` itself is not added that way — `dev library status` says where it is resolved from, and whether its source is on disk to edit.
+`uv` is the package manager — `uv add <package>`, never edit pyproject.toml directly; `dev library status` says where `lup` itself resolves from, and whether its source is on disk to edit. Lint and format with ruff, type-check with pyright; `docs/contributing.md` carries the commands that have to be green.
 
-A leading `# lup: escalate[sandbox]: <why>` line asks to run one command with the per-call sandbox off. That is all it lifts: a launch's mounts hold for every process in the session, so a write to a read-only path — the shared git `config` or `hooks/` — fails approved exactly as it failed unmarked, and is the user's to run from a host terminal with the exact command. Try inside first.
+An approved `escalate[sandbox]` never lifts a launch's read-only mounts — the shared git `config` or `hooks/`: a write there is the user's to run from a host terminal, with the exact command.
 
 ### lup-devtools
 
-`lup-devtools` is the development CLI, composed from `packages/lup/` and this repository's `src/lup_template/`. **Use it instead of ad-hoc commands**, and running the same one repeatedly means **add a command** to the half that would reuse it. Inline Python (`-c`, `-m`, a REPL, or bare `python`) is denied; `uv run python <script.py>` is allowed because a file can be reviewed. Sandbox-masked dotfiles can look untracked to Git — read the real tree with `dev pending`, and a persisted result is read rather than `cat`-ed, which re-persists it.
-
-To **read** code use the `dev py` group or `codeintel`, which resolves a name through a language server rather than matching text: **prefer either for anything about a name**, `rename_symbol` over `replace_all`, which cannot tell one scope from another, `dev py text` for literal text in scoped Python source, and grep for characters in non-Python files. To **compute once**, write a script under gitignored `tmp/` and run it; to reuse it, add a command. `docs/contributing.md` carries the rest of that reviewability ladder, `docs/commands.md` every command the CLI serves — walked from the wired app, so read it to find one you did not know to look for, and `--help` for its options.
+`lup-devtools` is the development CLI, composed from `packages/lup/` and this repository's `src/lup_template/`. **Use it instead of ad-hoc commands**, and running the same one repeatedly means **add a command** to the half that would reuse it. Inline Python is denied: to **compute once**, run a script under gitignored `tmp/` with `uv run python <script.py>`. To **read** code, **prefer the `dev py` group or `codeintel` for anything about a name**, `rename_symbol` over `replace_all`; read the real tree with `dev pending`, as sandbox-masked dotfiles can look untracked to Git. `docs/contributing.md` carries that reviewability ladder and how a persisted result is read, `docs/commands.md` every command the CLI serves — read it to find one you did not know to look for.
 
 ### Generated Trees
 
-`harness generate all` regenerates every native plugin; `harness <runtime>` regenerates one and launches it. Skills and agents render from typed catalogs, one per half, composing both — change the catalog that owns the subject, then regenerate.
+Skills and agents render from typed catalogs, one per half: change the catalog that owns the subject, then `harness generate all`; `docs/harness.md` carries the rest.
 
-**Every runtime, same semantics.** A capability is complete only when every supported runtime provides equivalent user-visible behavior, validation, diagnostics, tests, and documentation. State and build each answer to every policy, flag, hook, artifact, launch service, host bridge, and delegated-agent path; a native substitute is valid only when its difference is explicit and evidence-backed. One runtime's verdicts place no call, so it renders the plain effect. Done means `harness generate all` reconciles both; `docs/platform-differentiation.md` audits parity and `docs/permissions.md` maps enforcement gaps.
+**Every runtime, same semantics.** A capability is complete only when every supported runtime provides equivalent user-visible behavior, validation, diagnostics, tests, and documentation; a native substitute is valid only when its difference is explicit and evidence-backed. Done means `harness generate all` reconciles both; `docs/platform-differentiation.md` maps every surface this covers and audits parity, `docs/permissions.md` maps enforcement gaps.
 
 
 <!-- passage: configuration -->
@@ -73,17 +71,15 @@ To **read** code use the `dev py` group or `codeintel`, which resolves a name th
 
 ## Configuration
 
-Configuration loads through pydantic-settings in `src/lup_template/agent/config.py`, the only module that reads the environment. `docs/template.md` lists the variables and how gitignored `.env.local` overrides `.env`.
+Settings load through pydantic-settings in `src/lup_template/agent/config.py`, the only module reading the environment; `docs/template.md` lists them and how gitignored `.env.local` overrides `.env`.
 
-**A committed declaration is consumer-independent.** It holds what every machine and every downstream user of this repository shares, so no fact about *this* machine sits in one: a path, a device, a client, a login. Those go where the machine keeps them, `.env.local` for the application's settings, `sync.json.local` for what the launcher grants sessions here, a flag for one launch. A `# lup: template:` marker asks a downstream repository's authors a question about their domain, whose answer every user of that repository then shares; a question two machines running one commit would answer differently is not one.
+**A committed declaration is consumer-independent**: no fact about *this* machine — a path, a device, a client, a login — sits in one. Those go in `.env.local` for the application's settings, `sync.json.local` for what the launcher grants sessions here, a flag for one launch. Nor does a `# lup: template:` marker ask what two machines running one commit would answer differently.
 
 
 <!-- passage: keeping-in-step -->
 ## What This Was Built From
 
-`dev update` moves all three carriers — the pin, the generated trees, the copied half — to one upstream commit, and reports the conflicts and migrations it leaves. Nothing else moves them: a hand-port diverges silently, where a merge makes the next update cheap.
-
-**Fix upstream defects upstream**, in a `refs/<project>` worktree, under its gate, pinned here until it lands. Explicit grants use its accepted edit policy with this session's boundary and approvals; a parent mount or symlink grants no authority. `docs/permissions.md` covers operator refresh without restarting. A copied-half workaround hides the repair.
+`dev update` ({{ update_skill }}) moves all three carriers — the pin, the generated trees, the copied half — to one upstream commit. Nothing else moves them: a hand-port diverges silently, where a merge makes the next update cheap. **Fix upstream defects upstream** with {{ upstream_skill }}, pinned here until it lands; a copied-half workaround hides the repair.
 
 
 <!-- passage: process-and-communication -->
@@ -93,7 +89,7 @@ Configuration loads through pydantic-settings in `src/lup_template/agent/config.
 
 **Wait on pushed tool output, not polls.** Keep a long-lived command's resumable call live and yield to the runtime's event-driven waiter; repeated shell-session reads are polling, even with long timeouts.
 
-**Surface every question through the harness's structured facility**, not narration — clarifications, choices, destructive confirmations — with concrete options plus free-form even when open-ended, because downstream notifications read structured answers. **Ask what form the project should take** rather than inferring it: the shape a fix takes, how work is cut into branches or issues, what a surface looks like are the user's to settle, and picking one silently spends their decision. **A design conversation is the exception:** its decisions go numbered in plaintext in one batch, each standing alone, so the user answers by number and skips what is yours to decide.
+**Surface every question through the harness's structured facility**, not narration — clarifications, choices, destructive confirmations — with concrete options plus free-form even when open-ended, because downstream notifications read structured answers. **Ask what form the project should take** rather than inferring it: the shape a fix takes, how work is cut into branches or issues, what a surface looks like are the user's to settle, and picking one silently spends their decision. **A design conversation is the exception:** its decisions go numbered in plaintext in one batch, each standing alone.
 
 **Explain decisions from scratch:** the problem, relevant state, options, rationale, and your recommendation marked as yours — a verdict cannot be judged, so prefer complete context to brevity. **Check a checkable claim before asking about it** — a version, a hook, a payload — and answer "did you check?" with what you read against what you ran. **Say what is, not how it came to be:** an overview carries the thing as it stands and the reasoning holding it up, not what was tried or which turn found what, your path rather than the subject.
 
@@ -103,13 +99,13 @@ Verify claims against **what was actually asked** — the note or issue itself, 
 <!-- passage: reporting-friction -->
 ### Reporting Friction
 
-**Fix tooling friction instead of working around it.** This repository usually owns the hook, command, or classifier that obstructed you; repair it on its own branch so the diff stays single-purpose. **Open an issue only when this session cannot repair it** — the owner is outside this repository, a design decision is missing, or reproduction is the work — because a narrated workaround teaches nobody. **Read the tracker first:** `dev issues` lists the open reports, closed ones are worth searching, and a match is updated with `--issue NUMBER` rather than split across duplicates. Record the exact command, error, resulting state, recovery cost, and owning component with `dev report-friction`, whose checkout selects the repository; evidence beats conclusions.
+**Fix tooling friction instead of working around it.** This repository usually owns the hook, command, or classifier that obstructed you; repair it on its own branch so the diff stays single-purpose. **Open an issue only when this session cannot repair it** — the owner is outside this repository, a design decision is missing, or reproduction is the work. **Read the tracker first:** `dev issues` lists the open reports, and closed ones are worth searching. File with `dev report-friction`, updating a match with `--issue NUMBER` rather than splitting it across duplicates; its fields want evidence, not conclusions.
 
 
 <!-- passage: external-resources -->
 ### External Resources
 
-When a question is about the harness you run under, its agent SDK, or its model API, read that runtime's own documentation rather than answering from memory — delegate to the documentation subagent your harness ships, or fetch the vendor's docs at {{ runtime_docs }}. The fetch scopes the policy admits are declared in `harness/catalog.py`. When the user provides documentation links, fold what they teach into the guidance source or the relevant skill.
+When a question is about the harness you run under, its agent SDK, or its model API, read that runtime's own documentation rather than answering from memory — delegate to the documentation subagent your harness ships, or fetch the vendor's docs at {{ runtime_docs }}. When the user provides documentation links, fold what they teach into the guidance source or the relevant skill.
 
 
 <!-- passage: self-improvement -->
