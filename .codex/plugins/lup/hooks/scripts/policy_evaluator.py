@@ -1415,10 +1415,45 @@ def foreign_repository(path_text: str, root: Path | None) -> bool:
     "cannot tell" is that this project's rules still apply: lifting them on a
     guess would silence the gates on this repository's own files, where
     keeping them costs friction somewhere that is not ours.
+
+    A relative path is anchored on the session's own directory first, as
+    :func:`outside_this_project` anchors it: read bare, a relative spelling
+    names no checkout at all, and would say no for a file that plainly has one.
     """
-    return bool(shared_git_directory(path_text)) and outside_this_project(
+    if root is None:
+        return False
+    return bool(shared_git_directory(str(root / path_text))) and outside_this_project(
         path_text, root
     )
+
+
+def this_checkout_path(path_text: str, root: Path | None) -> str:
+    """This path as the session's own checkout spells it, or "" outside it.
+
+    :func:`worktree_path` anchors a path at the checkout nearest the file,
+    which is the right anchor for every rule but one. A repository nested
+    inside this checkout -- a probe kit given its own ``git init`` under
+    ``tmp/``, so a runtime launched there takes it as the project root -- has
+    a ``.git`` nearer the file than this checkout's, so the file arrives
+    spelled against the kit and claims none of the roles this checkout
+    declares for the tree around it. This is the other anchor, and the kernel
+    reads it for that one question.
+
+    Resolved before it is compared, so a link is judged where it lands: a
+    ``refs/`` entry pointing at another project is outside this checkout
+    however it is spelled. A relative path is anchored on the session's own
+    directory, where the tool carrying it resolves it, and a session in no
+    checkout holds nothing, which the empty answer says.
+    """
+    if root is None:
+        return ""
+    checkout = worktree_root(str(root))
+    if not checkout:
+        return ""
+    resolved = (root / path_text).resolve()
+    if not resolved.is_relative_to(checkout):
+        return ""
+    return resolved.relative_to(checkout).as_posix()
 
 
 def publish_edition(path_text: str) -> None:
@@ -3031,6 +3066,7 @@ def rewritten_documents(
                         agent_identity=agent_identity,
                     ),
                     outside_project=outside_this_project(target, cwd),
+                    checkout_path=this_checkout_path(target, cwd),
                     resolution=None,
                 )
             )
@@ -3096,7 +3132,10 @@ def local_edit_decision(
     kernel, which sees a path and no filesystem. Another repository's file
     answers to that repository's conventions and gets the referral; a file in
     no repository of ours is not this project's code either, which is all the
-    gates about this project's own review notes need to decline it.
+    gates about this project's own review notes need to decline it. The file
+    as the session's own checkout spells it rides beside them, because a
+    repository nested under this checkout's scratch is still this checkout's
+    scratch, and only that spelling can show it.
 
     The gates this lease holds are read here, per call, rather than resolved
     when the session started: a grant is answered by a human while the session
@@ -3151,6 +3190,7 @@ def local_edit_decision(
         import_boundaries=IMPORT_BOUNDARIES,
         foreign=outside_this_repository,
         outside_project=beyond_this_project,
+        checkout_path=this_checkout_path(path_text, cwd),
         displaced=next(
             iter(
                 displaced_targets(

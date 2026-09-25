@@ -23,7 +23,13 @@ from .bindings import (
 from .decision import KernelDecision, unjudged
 from .effects import EffectEvidence, declare, verdict_for
 from .roles import spells_its_path
-from .rows import PathRoleRow, PathRuleRow, PathWord, ShellRuleRow
+from .rows import (
+    DisplacedTargetRow,
+    PathRoleRow,
+    PathRuleRow,
+    PathWord,
+    ShellRuleRow,
+)
 from .syntax import (
     Command,
     Pipeline,
@@ -879,6 +885,7 @@ def resolve_redirection(
     checkout_root: str = "",
     carried: bool = False,
     tracked_targets: list[str] | None = None,
+    displaced_targets: list[DisplacedTargetRow] | None = None,
 ) -> KernelDecision | None:
     """Classify one redirection, or ``None`` where it is safe.
 
@@ -899,7 +906,9 @@ def resolve_redirection(
 
     A generated plugin tree is refused ahead of every relaxation, including
     the create case: authoring a file there by hand is editing a build
-    product, whether or not one is already sitting at that path.
+    product, whether or not one is already sitting at that path. Only this
+    checkout's own scratch is exempt, where no generated tree lands, and a
+    target the host found landing elsewhere is not exempted by its spelling.
     """
     operator = redirect["operator"]
     if redirect["heredoc"]:
@@ -917,7 +926,9 @@ def resolve_redirection(
     spelled = word_text(redirect["target"][0])
     if writes_to_a_stream(spelled):
         return None
-    refused = refuses_generated_plugin_target(spelled)
+    refused = refuses_generated_plugin_target(
+        spelled, path_roles, checkout_root, displaced_targets
+    )
     if refused is not None:
         return refused
     protected = protected_write_target(
@@ -984,6 +995,7 @@ def redirection_verdict(
     contained: bool = False,
     checkout_root: str = "",
     tracked_targets: list[str] | None = None,
+    displaced_targets: list[DisplacedTargetRow] | None = None,
 ) -> KernelDecision | None:
     """The first redirection in a command that is not safe, judged as it is met.
 
@@ -1008,6 +1020,7 @@ def redirection_verdict(
                     bool(redirect["target"])
                     and word_text(redirect["target"][0]) in landing,
                     tracked_targets,
+                    displaced_targets,
                 )
             ]
             if decided is not None

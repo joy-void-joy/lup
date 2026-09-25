@@ -327,3 +327,19 @@ def path_role(path: str, rows: list[PathRoleRow]) -> PathRoleName:
         if role_pattern_covers(row["root"], normalized):
             return row["role"]
     return "production"
+
+
+def declared_scratch(spelled: str, rows: list[PathRoleRow]) -> bool:
+    """Whether a path inside this checkout sits under a root it declares scratch.
+
+    Narrower than :func:`path_role` answering ``"scratch"`` by exactly the two
+    roots the kernel knows unaided. The session scratchpad and the machine's
+    temporary root are scratch for every checkout and belong to none, so an
+    absolute spelling, one climbing out, and one only a run can expand all
+    say no. What is left is a repository-relative path under a root this
+    project declared, which is the only scratch a checkout can answer for.
+    """
+    normalized = posixpath.normpath(spelled)
+    if normalized.startswith(("/", "../")) or normalized == "..":
+        return False
+    return spells_its_path(normalized) and path_role(normalized, rows) == "scratch"

@@ -43,6 +43,7 @@ from host import (
     granted_allowances,
     managed_script_roots,
     outside_this_project,
+    this_checkout_path,
     patch_write_targets,
     peer_store,
     close_claim_window,
@@ -648,6 +649,7 @@ def rewritten_documents(
                         agent_identity=agent_identity,
                     ),
                     outside_project=outside_this_project(target, cwd),
+                    checkout_path=this_checkout_path(target, cwd),
                     resolution=None,
                 )
             )
@@ -713,7 +715,10 @@ def local_edit_decision(
     kernel, which sees a path and no filesystem. Another repository's file
     answers to that repository's conventions and gets the referral; a file in
     no repository of ours is not this project's code either, which is all the
-    gates about this project's own review notes need to decline it.
+    gates about this project's own review notes need to decline it. The file
+    as the session's own checkout spells it rides beside them, because a
+    repository nested under this checkout's scratch is still this checkout's
+    scratch, and only that spelling can show it.
 
     The gates this lease holds are read here, per call, rather than resolved
     when the session started: a grant is answered by a human while the session
@@ -768,6 +773,7 @@ def local_edit_decision(
         import_boundaries=IMPORT_BOUNDARIES,
         foreign=outside_this_repository,
         outside_project=beyond_this_project,
+        checkout_path=this_checkout_path(path_text, cwd),
         displaced=next(
             iter(
                 displaced_targets(

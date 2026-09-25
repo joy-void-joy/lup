@@ -18,11 +18,18 @@ from .edit import path_rule_matches, protected_path_reason
 from .roles import (
     GENERATED_PLUGIN_RECOVERY,
     GENERATED_PLUGIN_REFUSAL,
+    declared_scratch,
     is_generated_plugin_target,
     path_role,
     repository_relative,
 )
-from .rows import PathRoleRow, PathRuleRow, PathWord, ShellRuleRow
+from .rows import (
+    DisplacedTargetRow,
+    PathRoleRow,
+    PathRuleRow,
+    PathWord,
+    ShellRuleRow,
+)
 
 
 class EffectiveCommand(TypedDict):
@@ -850,21 +857,43 @@ def created_destination(
     return destination
 
 
-def refuses_generated_plugin_target(word: str) -> KernelDecision | None:
+def refuses_generated_plugin_target(
+    word: str,
+    path_roles: list[PathRoleRow] | None = None,
+    checkout_root: str = "",
+    displaced: list[DisplacedTargetRow] | None = None,
+) -> KernelDecision | None:
     """Refuse one path that would write inside a generated plugin tree.
 
     Every writing form routes its targets here — a path verb's operands, a
     redirection's target — so the refusal and the reason it carries are
     written once and cannot drift between the paths that reach them.
+
+    Scratch this checkout declares is the exception, for the reason the edit
+    gate gives: nothing this project generates lands there, so a plugin tree
+    under it is somebody's own — a probe kit's hand-written plugin. The word
+    is read back to the checkout's own spelling before it is asked, and one
+    the host found landing under another role keeps the refusal, because its
+    spelling is then not where the bytes go. Without the roles nothing is
+    scratch, and every plugin-shaped path is refused.
     """
     if not is_generated_plugin_target(word):
+        return None
+    if declared_scratch(
+        repository_relative(word, checkout_root), path_roles or []
+    ) and all(row["path"] != word for row in displaced or []):
         return None
     return KernelDecision(
         "deny", GENERATED_PLUGIN_REFUSAL, recovery=GENERATED_PLUGIN_RECOVERY
     )
 
 
-def refuses_generated_plugin_write(words: list[str]) -> KernelDecision | None:
+def refuses_generated_plugin_write(
+    words: list[str],
+    path_roles: list[PathRoleRow] | None = None,
+    checkout_root: str = "",
+    displaced: list[DisplacedTargetRow] | None = None,
+) -> KernelDecision | None:
     """Refuse a verb that would write inside a generated plugin tree.
 
     Every verb naming a path owes this, not only the ones the flag map
@@ -875,7 +904,9 @@ def refuses_generated_plugin_write(words: list[str]) -> KernelDecision | None:
     archived = archive_write(words)
     if archived is not None:
         for word in archive_targets(archived):
-            refused = refuses_generated_plugin_target(word)
+            refused = refuses_generated_plugin_target(
+                word, path_roles, checkout_root, displaced
+            )
             if refused is not None:
                 return refused
         return None
@@ -886,7 +917,9 @@ def refuses_generated_plugin_write(words: list[str]) -> KernelDecision | None:
     inert = verb["inert"]
     targets = written_operands(executable, operands) if inert else operands
     for word in targets:
-        refused = refuses_generated_plugin_target(word)
+        refused = refuses_generated_plugin_target(
+            word, path_roles, checkout_root, displaced
+        )
         if refused is not None:
             return refused
     return None
