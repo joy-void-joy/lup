@@ -142,10 +142,20 @@ class TreeProfileRegistrar(ProfileRegistrar):
         drop: the directory is the profile, and it holds the login that
         account earned. Answered as a ``ValueError`` whose message is the
         explanation, which is what a command tree renders in place of one.
+
+        Where that profile is the selection, the file recording it is named
+        too: removed alone, the directory leaves every launch naming none
+        refused for a profile that no longer exists, told to add it back.
         """
+        selection = self.folders.root / self.folders.active_file
+        selected = (
+            f", and {selection}, which selects it"
+            if self.folders.active() == name
+            else ""
+        )
         raise ValueError(
             f"a directory profile is {self.folders.root / name}, which holds "
-            "its login — remove that directory to remove the profile"
+            f"its login — remove that directory to remove the profile{selected}"
         )
 
 
