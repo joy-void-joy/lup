@@ -2494,6 +2494,28 @@ def test_compiled_dispatcher_reaches_only_what_a_bare_script_resolves(
 
 
 @pytest.mark.parametrize("target", sorted(SHIPPED_DISPATCHERS))
+def test_every_compiled_script_binds_each_import_once(target: str) -> None:
+    """Two halves standing on one module carry its import once between them.
+
+    The host half and the decisions half each import what they use, and
+    neither knows what the other brings. A script repeating an import reads
+    to a linter as an unused binding shadowed by its own repeat, in a file
+    nobody may edit to fix it.
+    """
+    dispatcher = SHIPPED_DISPATCHERS[target]
+    for text in (
+        compile_dispatcher(dispatcher.declaration),
+        (dispatcher.script.parent / "policy_evaluator.py").read_text(encoding="utf-8"),
+    ):
+        statements = [
+            ast.unparse(node)
+            for node in ast.parse(text).body
+            if isinstance(node, (ast.Import, ast.ImportFrom))
+        ]
+        assert len(statements) == len(set(statements))
+
+
+@pytest.mark.parametrize("target", sorted(SHIPPED_DISPATCHERS))
 def test_compiled_dispatcher_is_already_formatted(target: str) -> None:
     """What the compiler emits has to be formatted, not merely correct.
 

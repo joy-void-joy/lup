@@ -680,6 +680,21 @@ def compiled_docstring(declaration: DispatcherDeclaration) -> str:
     )
 
 
+def carried_imports(prologue: str, halves: tuple[SourceHalf, ...]) -> list[str]:
+    """What the spliced halves add to one script's prologue, each import once.
+
+    Two halves standing on the same module each carry its import, since
+    neither can know what the other brings; the script they become has to
+    bind the name once, or a linter reads the first binding as an unused
+    import shadowed by its own repeat.
+    """
+    return list(
+        dict.fromkeys(
+            segment for half in halves for segment in half.spliced_prologue(prologue)
+        )
+    )
+
+
 def edit_evaluator_artifact(
     plugin_root: Path,
     declaration: DispatcherDeclaration,
@@ -701,16 +716,7 @@ def edit_evaluator_artifact(
     body = (
         "\n\n\n".join(
             [
-                "\n".join(
-                    [
-                        prologue,
-                        *[
-                            segment
-                            for half in (shared, decisions)
-                            for segment in half.spliced_prologue(prologue)
-                        ],
-                    ]
-                ),
+                "\n".join([prologue, *carried_imports(prologue, (shared, decisions))]),
                 *[shared.source_of(node) for node in shared.functions()],
                 *[decisions.source_of(node) for node in decisions.functions()],
                 *[evaluator.source_of(node) for node in evaluator.functions()],
@@ -750,11 +756,7 @@ def compile_dispatcher(declaration: DispatcherDeclaration) -> str:
         raise ValueError(f"{runtime.module} " + "; ".join(breaches))
     header = "\n".join([SHEBANG, compiled_docstring(declaration)])
     prologue = runtime.prologue()
-    carried = [
-        segment
-        for half in (shared, decisions)
-        for segment in half.spliced_prologue(prologue)
-    ]
+    carried = carried_imports(prologue, (shared, decisions))
     blocks = [
         "\n".join([f"{header}\n\n{prologue}", *carried]),
         *[shared.source_of(node) for node in shared.functions()],
