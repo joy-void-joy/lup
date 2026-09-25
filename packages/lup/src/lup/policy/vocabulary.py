@@ -1711,20 +1711,24 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
 
     **Compensable collaboration allows.** Opening a pull request, retitling
     it, marking it ready, commenting, closing, reopening, and the same set for
-    issues: every one of them is restored by a normal follow-up operation, and
-    a review flow performs several of them every round. Compensable is a claim
-    about the remote *state*, never about observation — reopening a pull
-    request does not un-send the mail that closing it generated — so it is the
-    right test for whether a person needs to see the moment, and the wrong one
-    for whether the effect was free.
+    an existing issue: every one of them is restored by a normal follow-up
+    operation, and a review flow performs several of them every round.
+    Compensable is a claim about the remote *state*, never about observation
+    — reopening a pull request does not un-send the mail that closing it
+    generated — so it is the right test for whether a person needs to see the
+    moment, and the wrong one for whether the effect was free. Merging a pull
+    request allows beside them for the reason `git merge` does: it is how a
+    landing workflow finishes, and it declares that it integrates.
 
     **Execution, attestation, publication, and repository security ask.** A
-    merge runs something; an approving or request-changes review says
-    something in the caller's name; a release publishes; a secret, a ruleset,
-    or a repository setting is the security posture of the repository itself.
-    A later compensating action may exist for each and does not make them
-    compensable: what happened was an event, and events are what a person is
-    being asked about.
+    workflow run runs something; an approving or request-changes review says
+    something in the caller's name; a release publishes, and so does a new
+    issue, a report filed where other people are notified of it; a secret, a
+    ruleset, or a repository setting is the security posture of the
+    repository itself, which a merge past the branch's protection (``--admin``)
+    overrides. A later compensating action may exist for each and does not
+    make them compensable: what happened was an event, and events are what a
+    person is being asked about.
 
     **A deletion nested inside an allowed operation survives it.** ``gh pr
     close`` allows and ``gh pr close --delete-branch`` asks, because a safe
@@ -1930,7 +1934,13 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                 [
                     *reads(["list", "view", "status"]),
                     *compensable(
-                        ["create", "edit", "comment", "close", "reopen", "pin", "unpin"]
+                        ["edit", "comment", "close", "reopen", "pin", "unpin"]
+                    ),
+                    *judged(
+                        ["create"],
+                        "publication",
+                        "filing an issue publishes a report the repository's"
+                        " watchers are notified of",
                     ),
                     *judged(
                         ["delete", "transfer"],

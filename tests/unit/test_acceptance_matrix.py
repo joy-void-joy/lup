@@ -87,7 +87,6 @@ def exposed(command: str, unjudged_ambient: UnjudgedAmbient = "ask") -> KernelDe
         ("gh pr close 12", "allow"),
         ("gh pr reopen 12", "allow"),
         ("gh pr review 12 --comment --body x", "allow"),
-        ("gh issue create --title x", "allow"),
         ("gh issue comment 3 --body x", "allow"),
         ("gh issue close 3", "allow"),
         ("gh issue reopen 3", "allow"),

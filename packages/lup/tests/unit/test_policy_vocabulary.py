@@ -433,9 +433,11 @@ def test_compensable_collaboration_allows_and_the_events_do_not() -> None:
 
     Opening a pull request, retitling it, commenting, closing and reopening
     are each restored by a normal follow-up operation, and a review round
-    performs several of them. A merge runs the change into the base branch, an
-    approving review says something in the caller's name, and a release
-    publishes — none of which a later action undoes, whatever it compensates.
+    performs several of them; the merge that lands it is the workflow's own
+    last step. A new issue notifies the repository's watchers, a merge past
+    the branch's protection overrides it, an approving review says something
+    in the caller's name, and a release publishes — none of which a later
+    action undoes, whatever it compensates.
     """
     rules = [gh_rule()]
 
@@ -448,7 +450,9 @@ def test_compensable_collaboration_allows_and_the_events_do_not() -> None:
         "gh pr comment 12 --body x",
         "gh pr close 12",
         "gh pr reopen 12",
-        "gh issue create --title x",
+        "gh pr merge 12",
+        "gh pr merge 12 --squash --delete-branch",
+        "gh issue edit 3 --title x",
         "gh issue comment 3 --body x",
         "gh issue close 3",
         "gh issue reopen 3",
@@ -456,7 +460,8 @@ def test_compensable_collaboration_allows_and_the_events_do_not() -> None:
         assert effect(allowed) == "allow", allowed
 
     for asked in (
-        "gh pr merge 12",
+        "gh issue create --title x",
+        "gh pr merge 12 --admin",
         "gh release create v1",
         "gh secret set TOKEN",
         "gh repo edit --visibility public",

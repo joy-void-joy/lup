@@ -1248,7 +1248,11 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="gh pr close 1 --delete-branch", effect="ask"),
     DecisionCase(input="gh pr reopen 1", effect="allow"),
     DecisionCase(input="gh api -X POST /repos", effect="ask"),
-    DecisionCase(input="gh issue create --title x", effect="allow"),
+    # A new issue is a report filed where the repository's watchers are
+    # notified of it; working an existing one is compensable.
+    DecisionCase(input="gh issue create --title x", effect="ask"),
+    DecisionCase(input="gh issue create -R o/r --title x", effect="ask"),
+    DecisionCase(input="gh issue edit 3 --title x", effect="allow"),
     DecisionCase(input="gh issue comment 3 --body hi", effect="allow"),
     DecisionCase(input="gh issue close 3", effect="allow"),
     DecisionCase(input="gh release create v1", effect="ask"),
