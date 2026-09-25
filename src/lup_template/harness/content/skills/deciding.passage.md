@@ -63,8 +63,10 @@
   recommendation with a measurement behind it is the turn worth taking, not
   an embarrassment to soften.
 - **A harness behaviour is measured with a probe kit, not asked about.** A
-  throwaway project under `tmp/`, with its own `git init`, which keeps this
-  project's plugin out of the kit only where a plugin arrives per launch —
+  throwaway project under `tmp/`, with its own `git init`, because a runtime
+  that takes the nearest repository as its project root would otherwise run
+  the probe under this repository's instructions and project configuration.
+  The init keeps this project's plugin out only where a plugin arrives per launch —
   where a runtime installs plugins into its own home instead, every session
   on the machine runs under them whatever directory it starts in, and the
   kit is governed by the policy it was built to sit outside. Check a command
