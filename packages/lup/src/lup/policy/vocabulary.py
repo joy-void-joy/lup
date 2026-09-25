@@ -29,14 +29,16 @@ splices extra rules around it::
 The judgement running through all of it: generous for reading and for local
 work a second attempt undoes, conservative for anything that loses something.
 Networked is deliberately not the line — publishing is how work becomes
-reviewable and happens many times a session, so ``git push`` and the pull
-request verbs that open and describe one are ordinary. What stays guarded is
-the direction that removes something no second attempt restores.
+reviewable and happens many times a session, so ``git push``, the pull
+request verbs that open and describe one, and the merge that lands it are
+ordinary. What stays guarded is the direction that removes something no
+second attempt restores.
 
 Where a group's default encodes a judgement a reasonable project would make
-differently, it takes a parameter instead of a fork: whether a force push is
-guarded, whether ``checkout`` is redirected toward ``switch``/``restore``,
-whether opening a pull request is authoring or publishing.
+differently, it takes a parameter instead of a fork: which branches a leased
+force push still asks about, whether ``checkout`` is redirected toward
+``switch``/``restore``, whether opening a pull request is authoring or
+publishing.
 """
 
 from collections.abc import Sequence
@@ -992,8 +994,8 @@ GIT_REVERSIBLE_SUBCOMMANDS = (
 
 `merge` is deliberately not among them. What it does to *this* checkout is as
 reversible as a cherry-pick, but that is not what a merge is for: it is the
-step that puts work onto a branch other people build on, and the question it
-carries is about that rather than about recovering the tree.
+step that puts work onto a branch other people build on, so its row declares
+that effect rather than one about recovering the tree.
 """
 
 GIT_CONFIG_EXECUTING_KEYS = (
@@ -1147,11 +1149,7 @@ def git_rule(
             )
             for name in GIT_REVERSIBLE_SUBCOMMANDS
         ],
-        ShellSubcommandRule(
-            name="merge",
-            effects=[declare("integrates")],
-            reason="merging puts work on a branch other people build on",
-        ),
+        ShellSubcommandRule(name="merge", effects=[declare("integrates")]),
     ]
     # `--repo` is the one spelling of a destination the operand reading below
     # cannot reach: it carries the repository as a flag value, and a flag is
@@ -1903,10 +1901,18 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                         ask_flags=[*elsewhere, *attesting],
                         reason="approving or requesting changes attests in your name",
                     ),
-                    *judged(
-                        ["merge"],
-                        "execution",
-                        "merging runs the change into the base branch",
+                    # Deleting the head alongside is not the loss `close
+                    # --delete-branch` is: gh deletes it only once the merge
+                    # has landed what it held.
+                    ShellOperationRule(
+                        name="merge",
+                        effects=[declare("integrates", scope="pull request")],
+                        ask_flags=[*elsewhere, "--admin"],
+                        flag_effects=[
+                            declare("external_mutation", scope="repository_security")
+                        ],
+                        reason="--admin merges past the reviews and checks the base"
+                        " branch requires, and --repo merges in another repository",
                     ),
                     *(
                         []

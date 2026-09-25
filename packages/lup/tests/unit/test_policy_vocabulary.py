@@ -395,8 +395,9 @@ def test_a_global_that_moves_git_to_another_tree_is_not_itself_a_question() -> N
     assert effect("git -C /tmp/other commit -am x") == "allow"
     assert effect("git --git-dir=/tmp/x --work-tree=/tmp add .") == "allow"
     assert effect("git -C /tmp/o status") == "allow"
-    # The verb keeps its own question wherever it runs.
-    assert effect("git -C /tmp/o merge --abort") == "ask"
+    # The verb keeps its own answer wherever it runs, question or not.
+    assert effect("git -C /tmp/o merge --abort") == "allow"
+    assert effect("git -C /tmp/o push --force origin x") == "ask"
     assert effect("git --namespace=other push") == "ask"
     assert "cd into" not in verdict("git --namespace=o push", rules).recovery
     # Forcing the pager moves nothing, and the program it names is reachable
@@ -417,8 +418,8 @@ def test_allow_authoring_moves_only_the_author_describing_their_own_work() -> No
     # Reads and the verbs that reach reviewers stay where they were.
     assert verdict("gh pr view 12", authoring).effect == "allow"
     assert verdict("gh pr view 12", publishing).effect == "allow"
-    assert verdict("gh pr merge 12", authoring).effect == "ask"
-    assert verdict("gh pr merge 12", publishing).effect == "ask"
+    assert verdict("gh pr merge 12", authoring).effect == "allow"
+    assert verdict("gh pr merge 12", publishing).effect == "allow"
     # The grant says the work is the author's own and the branch is already
     # pushed. Pointing the verb at another repository denies both, under either
     # setting of the parameter — and a read there is still just a read.
@@ -519,7 +520,7 @@ def test_every_gh_question_says_which_rule_reached_it() -> None:
     Measured before rule ids existed: 860 asks with no recorded reason at all,
     and a native tool name that answers `Bash` for every one of them.
     """
-    asked = verdict("gh pr merge 12", [gh_rule()])
+    asked = verdict("gh pr merge 12 --admin", [gh_rule()])
 
     assert asked.rule == "shell:gh.pr.merge"
     assert asked.evaluator == "shell-vocabulary"
