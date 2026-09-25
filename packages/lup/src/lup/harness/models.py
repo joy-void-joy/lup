@@ -21,6 +21,7 @@ from pydantic import (
     Discriminator,
     Field,
     StringConstraints,
+    field_validator,
     model_validator,
 )
 
@@ -1898,6 +1899,23 @@ class SessionMode(BaseModel, frozen=True):
 
     Appended to the runtime's own system prompt, never replacing it, so the
     session knows which kind it is and what that asks of it."""
+
+    @field_validator("guidance")
+    @classmethod
+    def guidance_names_its_source(
+        cls, value: PromptDocument | None
+    ) -> PromptDocument | None:
+        """Refuse guidance with no declaring module, which a rendered file must name.
+
+        Said here rather than when the mode is first launched, which is where
+        the renderer would otherwise ask for it.
+        """
+        if value is not None and value.source is None:
+            raise ValueError(
+                "a mode's guidance renders to a file of its own, so it names the "
+                "module declaring it: PromptDocument(parts=..., source=...)"
+            )
+        return value
 
     def prompt(self) -> str:
         """The text appended to the session's system prompt, naming the mode."""
