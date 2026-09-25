@@ -769,8 +769,18 @@ def sync_base(
 def push(
     force: bool,
     as_json: bool,
+    protected: list[str],
 ) -> None:
     """Push the current branch and report any existing PR.
+
+    A forced push is a leased one. `--force-with-lease` replaces only what
+    this checkout last saw of the branch, and `--force-if-includes` refuses
+    where that sight came from a fetch rather than from this checkout's own
+    history -- the case a lease alone waves through, overwriting a push it
+    fetched and never built on. What this cannot see is whether the branch
+    is one other people build on, and the shell policy asks before forcing
+    one of ``protected``; so this refuses them, and names the command whose
+    question reaches the user.
 
     Both spellings state the destination as a full refspec, because a
     checkout reaches this with no upstream: creation publishes nothing, so
@@ -788,11 +798,19 @@ def push(
     """
     branch_name = current_branch()
     destination = f"refs/heads/{branch_name}:refs/heads/{branch_name}"
+    if force and branch_name in protected:
+        typer.echo(
+            f"Refusing to force {branch_name}: other people build on it. "
+            f"`git push --force-with-lease origin {branch_name}` puts the "
+            "question to the user.",
+            err=True,
+        )
+        raise typer.Exit(1)
 
     complaint = ""
     pushed = False
     try:
-        forced = ["--force"] if force else []
+        forced = ["--force-with-lease", "--force-if-includes"] if force else []
         git("push", *forced, "origin", destination)
         pushed = True
         records.remember(

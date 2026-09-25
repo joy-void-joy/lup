@@ -363,6 +363,11 @@ class ShellRuleRow(TypedDict):
     its verdict past its ``ask_flags`` and ``ask_refspecs``. Destination
     grammar still asks: a probe still contacts the repository it names, and
     where the work would land is guarded as a place, not as a write.
+    ``amending_flags`` name the flags that point an operation at a record
+    that already exists (``dev report-friction --issue N``): what the row
+    asks about is creating one, and amending one a follow-up restores, so a
+    non-allow row de-escalates to allow when one appears among literal words
+    free of guarded flags.
     ``frozen_flags`` name the flags that pin a dependency restore to what its
     lockfile already declares (``bun install --frozen-lockfile``): a non-allow
     row de-escalates to allow when one appears among literal words free of
@@ -456,6 +461,20 @@ class ShellRuleRow(TypedDict):
     as more spellings because the second list of spellings is what missed
     these.
 
+    ``force_flags``, ``lease_flags`` and ``protected_refs`` judge a forced
+    update, which is safe or not according to what it can discard. A
+    ``lease_flags`` spelling (``--force-with-lease``) forces only while the
+    remote still holds what this checkout last saw of it, so it cannot discard
+    work somebody else pushed; a ``force_flags`` spelling (``--force``), or a
+    refspec's leading plus, forces past any lease, so asks. A leased force
+    still asks where it names a ref in ``protected_refs`` -- a branch other
+    people build on, where rewriting is the loss whatever the lease holds --
+    or names no ref at all, because the one it reaches is then the checkout's
+    current branch, which a hermetic reader cannot see. ``value_flags`` on a
+    subcommand row name the options whose value is the next word, so the
+    operand reading here steps over it rather than taking it for a repository
+    or a refspec.
+
     ``sandbox`` says where this command has to run, independently of who
     decides it: a verb that reaches a remote is unusable confined however the
     effect reads, and a verb whose blast radius wants the OS boundary keeps it
@@ -527,12 +546,16 @@ class ShellRuleRow(TypedDict):
     refuses: str
     ask_destinations: list[str]
     ask_refspecs: list[str]
+    force_flags: list[str]
+    lease_flags: list[str]
+    protected_refs: list[str]
     ask_flags: list[str]
     flag_effects: list[EffectRow]
     write_flags: list[str]
     allow_flags: list[str]
     read_verbs: list[str]
     probe_flags: list[str]
+    amending_flags: list[str]
     frozen_flags: list[str]
     write_markers: list[str]
     guarded_keys: list[str]
@@ -562,12 +585,16 @@ type ShellRowField = Literal[
     "refuses",
     "ask_destinations",
     "ask_refspecs",
+    "force_flags",
+    "lease_flags",
+    "protected_refs",
     "ask_flags",
     "flag_effects",
     "write_flags",
     "allow_flags",
     "read_verbs",
     "probe_flags",
+    "amending_flags",
     "frozen_flags",
     "write_markers",
     "guarded_keys",
@@ -619,12 +646,16 @@ def shell_row_values(
         "refuses": row["refuses"],
         "ask_destinations": row["ask_destinations"],
         "ask_refspecs": row["ask_refspecs"],
+        "force_flags": row["force_flags"],
+        "lease_flags": row["lease_flags"],
+        "protected_refs": row["protected_refs"],
         "ask_flags": row["ask_flags"],
         "flag_effects": row["flag_effects"],
         "write_flags": row["write_flags"],
         "allow_flags": row["allow_flags"],
         "read_verbs": row["read_verbs"],
         "probe_flags": row["probe_flags"],
+        "amending_flags": row["amending_flags"],
         "frozen_flags": row["frozen_flags"],
         "write_markers": row["write_markers"],
         "guarded_keys": row["guarded_keys"],

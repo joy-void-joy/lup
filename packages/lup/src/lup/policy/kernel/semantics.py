@@ -171,7 +171,8 @@ classification of the state and not of the observation.
 
 ``attestation`` is a claim made in somebody's name: an approving review, a
 request-changes review. ``execution`` is something running as a result:
-a merge, an enabled auto-merge, a dispatched workflow. ``publication``,
+a dispatched or rerun workflow, an issue deleted or transferred. A merge is
+not one: it states that it integrates, which is its own effect. ``publication``,
 ``deployment``, and ``spending`` are what they say. ``repository_security``
 covers settings, rules, visibility, secrets, variables, and environments.
 ``opaque`` is an external mutation whose effect the classifier cannot name,

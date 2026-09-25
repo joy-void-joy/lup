@@ -521,7 +521,7 @@ class Publishes(Effect):
     Allowed, and deliberately. Pushing a branch and opening a request are how
     work is offered for review rather than how it takes effect -- both are
     reversible by a normal follow-up, and both are everyday operations whose
-    interruption buys nothing. What takes effect is :class:`Integrates`.
+    interruption buys nothing. What lands it is :class:`Integrates`.
     """
 
     kind = "publishes"
@@ -535,9 +535,12 @@ class Publishes(Effect):
 class Integrates(Effect):
     """Merging work into a branch other people build on.
 
-    The one publication that asks. A push offers; a merge decides, and the
-    decision is the person's rather than the agent's -- which is also why it is
-    the last step of every landing workflow rather than a step inside one.
+    Allowed, like the push before it. A push offers and a merge lands, and
+    landing is the last step of the workflow the session was set to finish
+    rather than a decision taken away from it: the review the merge concludes
+    happened on the request, and what the merge put on the branch a revert
+    takes off again. Kept apart from :class:`Publishes` because it is a
+    different act, and an audit reading which rows integrate should find them.
     """
 
     kind = "integrates"
@@ -545,11 +548,7 @@ class Integrates(Effect):
     def verdict(
         self, row: EffectRow, evidence: EffectEvidence, placement: SandboxPlacement
     ) -> DecisionEffect:
-        return "ask"
-
-    def purpose(self, row: EffectRow) -> ReviewPurpose | None:
-        """A decision other people build on."""
-        return "external_consequence"
+        return "allow"
 
 
 class ReachesHost(Effect):
@@ -855,14 +854,13 @@ def external_effects(effect_class: str) -> list[EffectRow]:
     which is true of a pull request and false of a release. A published
     artifact may already have been downloaded by the time anybody reconsiders,
     so ``publication`` asks alongside the classes that never claimed otherwise.
+    A merge is not ``execution``: it states that it integrates, on its own row.
     """
     match effect_class:
         case "":
             return []
         case "compensable":
             return [declare("publishes", scope=effect_class)]
-        case "execution":
-            return [declare("integrates", scope=effect_class)]
         case _:
             return [declare("external_mutation", scope=effect_class)]
 

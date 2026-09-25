@@ -77,23 +77,34 @@ def test_an_empty_group_replaces_the_offered_words_rather_than_adding_to_them() 
     assert verdict("cat f", read_only_rules(["cat"])).effect == "allow"
 
 
-def test_guard_force_push_moves_only_the_rewriting_push() -> None:
-    """A rebase flow republishes every round, so the force is the ordinary case.
+def test_integration_branches_move_only_the_leased_force_onto_them() -> None:
+    """A lease onto a feature branch allows; onto a declared shared one it asks.
 
-    Removing a ref is guarded either way: no second push restores it.
+    A review flow republishes its own branch every round, and a lease
+    replaces only what this checkout last saw, so that force is ordinary.
+    The parameter names the branches other people build on, and moves the
+    leased force onto those and nothing else: an unconditional force, a push
+    naming no branch, and a removal ask whatever it names.
     """
-    guarded = [git_rule()]
-    open_flow = [git_rule(guard_force_push=False)]
+    offered = [git_rule()]
+    two_tier = [git_rule(integration_branches=("main", "dev"))]
 
-    assert verdict("git push --force origin HEAD", guarded).effect == "ask"
-    assert verdict("git push --force origin HEAD", open_flow).effect == "allow"
-    assert verdict("git push -f origin HEAD", guarded).effect == "ask"
-    assert verdict("git push -f origin HEAD", open_flow).effect == "allow"
-    # Neither the plain push nor the removing one moves with the parameter.
-    assert verdict("git push -u origin HEAD", guarded).effect == "allow"
-    assert verdict("git push -u origin HEAD", open_flow).effect == "allow"
-    assert verdict("git push --delete origin old", guarded).effect == "ask"
-    assert verdict("git push --delete origin old", open_flow).effect == "ask"
+    for rules in (offered, two_tier):
+        assert verdict("git push --force-with-lease origin feat", rules).effect == (
+            "allow"
+        )
+        assert verdict("git push --force-with-lease origin main", rules).effect == (
+            "ask"
+        )
+        assert verdict("git push --force origin feat", rules).effect == "ask"
+        assert verdict("git push -f origin feat", rules).effect == "ask"
+        assert verdict("git push --force-with-lease origin", rules).effect == "ask"
+        assert verdict("git push -u origin HEAD", rules).effect == "allow"
+        assert verdict("git push --delete origin old", rules).effect == "ask"
+    assert verdict("git push --force-with-lease origin dev", offered).effect == (
+        "allow"
+    )
+    assert verdict("git push --force-with-lease origin dev", two_tier).effect == ("ask")
 
 
 def test_a_refspec_reaches_the_same_guard_its_flag_spelling_does() -> None:
@@ -105,15 +116,15 @@ def test_a_refspec_reaches_the_same_guard_its_flag_spelling_does() -> None:
     each effect.
     """
     guarded = [git_rule()]
-    open_flow = [git_rule(guard_force_push=False)]
 
-    # Removal is guarded either way, in both spellings.
+    # Removal is guarded in both spellings.
     assert verdict("git push origin :refs/heads/main", guarded).effect == "ask"
-    assert verdict("git push origin :refs/heads/main", open_flow).effect == "ask"
-    assert verdict("git push origin :main", open_flow).effect == "ask"
-    # The force half moves with the parameter, exactly as its flag does.
-    assert verdict("git push origin +main:main", guarded).effect == "ask"
-    assert verdict("git push origin +main:main", open_flow).effect == "allow"
+    assert verdict("git push origin :main", guarded).effect == "ask"
+    # A leading plus forces as `--force` does, and past a lease as it does.
+    assert verdict("git push origin +feat:feat", guarded).effect == "ask"
+    assert verdict("git push --force-with-lease origin +feat", guarded).effect == (
+        "ask"
+    )
     # An ordinary push carries neither effect, and a scp-style remote names a
     # non-empty source rather than a removal — read with the destination
     # guard off, which asks about that word for the other reason.
@@ -395,8 +406,9 @@ def test_a_global_that_moves_git_to_another_tree_is_not_itself_a_question() -> N
     assert effect("git -C /tmp/other commit -am x") == "allow"
     assert effect("git --git-dir=/tmp/x --work-tree=/tmp add .") == "allow"
     assert effect("git -C /tmp/o status") == "allow"
-    # The verb keeps its own question wherever it runs.
-    assert effect("git -C /tmp/o merge --abort") == "ask"
+    # The verb keeps its own answer wherever it runs, question or not.
+    assert effect("git -C /tmp/o merge --abort") == "allow"
+    assert effect("git -C /tmp/o push --force origin x") == "ask"
     assert effect("git --namespace=other push") == "ask"
     assert "cd into" not in verdict("git --namespace=o push", rules).recovery
     # Forcing the pager moves nothing, and the program it names is reachable
@@ -417,8 +429,8 @@ def test_allow_authoring_moves_only_the_author_describing_their_own_work() -> No
     # Reads and the verbs that reach reviewers stay where they were.
     assert verdict("gh pr view 12", authoring).effect == "allow"
     assert verdict("gh pr view 12", publishing).effect == "allow"
-    assert verdict("gh pr merge 12", authoring).effect == "ask"
-    assert verdict("gh pr merge 12", publishing).effect == "ask"
+    assert verdict("gh pr merge 12", authoring).effect == "allow"
+    assert verdict("gh pr merge 12", publishing).effect == "allow"
     # The grant says the work is the author's own and the branch is already
     # pushed. Pointing the verb at another repository denies both, under either
     # setting of the parameter — and a read there is still just a read.
@@ -432,9 +444,11 @@ def test_compensable_collaboration_allows_and_the_events_do_not() -> None:
 
     Opening a pull request, retitling it, commenting, closing and reopening
     are each restored by a normal follow-up operation, and a review round
-    performs several of them. A merge runs the change into the base branch, an
-    approving review says something in the caller's name, and a release
-    publishes — none of which a later action undoes, whatever it compensates.
+    performs several of them; the merge that lands it is the workflow's own
+    last step. A new issue notifies the repository's watchers, a merge past
+    the branch's protection overrides it, an approving review says something
+    in the caller's name, and a release publishes — none of which a later
+    action undoes, whatever it compensates.
     """
     rules = [gh_rule()]
 
@@ -447,7 +461,9 @@ def test_compensable_collaboration_allows_and_the_events_do_not() -> None:
         "gh pr comment 12 --body x",
         "gh pr close 12",
         "gh pr reopen 12",
-        "gh issue create --title x",
+        "gh pr merge 12",
+        "gh pr merge 12 --squash --delete-branch",
+        "gh issue edit 3 --title x",
         "gh issue comment 3 --body x",
         "gh issue close 3",
         "gh issue reopen 3",
@@ -455,7 +471,8 @@ def test_compensable_collaboration_allows_and_the_events_do_not() -> None:
         assert effect(allowed) == "allow", allowed
 
     for asked in (
-        "gh pr merge 12",
+        "gh issue create --title x",
+        "gh pr merge 12 --admin",
         "gh release create v1",
         "gh secret set TOKEN",
         "gh repo edit --visibility public",
@@ -519,7 +536,7 @@ def test_every_gh_question_says_which_rule_reached_it() -> None:
     Measured before rule ids existed: 860 asks with no recorded reason at all,
     and a native tool name that answers `Bash` for every one of them.
     """
-    asked = verdict("gh pr merge 12", [gh_rule()])
+    asked = verdict("gh pr merge 12 --admin", [gh_rule()])
 
     assert asked.rule == "shell:gh.pr.merge"
     assert asked.evaluator == "shell-vocabulary"

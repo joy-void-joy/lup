@@ -70,13 +70,13 @@ def test_a_redirect_in_front_of_a_reversible_mutation_costs_nothing_either() -> 
 def test_the_verb_behind_the_redirect_is_still_judged() -> None:
     """Stepping aside hands the question on rather than answering it.
 
-    A merge asks for its own reason -- it puts work on a branch other people
-    build on -- and a push that deletes a remote ref asks for its own, and
-    neither reason changes with the checkout the verb runs in.
+    A force without a lease asks for its own reason -- it can discard what
+    somebody else pushed -- and a push that deletes a remote ref asks for
+    its own, and neither reason changes with the checkout the verb runs in.
     """
-    merged = verdict("git -C ../sibling merge topic")
-    assert merged.effect == "ask"
-    assert "merg" in merged.reason
+    forced = verdict("git -C ../sibling push --force origin topic")
+    assert forced.effect == "ask"
+    assert "--force-with-lease" in forced.reason
 
     assert verdict("git -C ../sibling push --delete origin topic").effect == "ask"
     assert verdict("git -C ../sibling reset --hard").effect == "ask"

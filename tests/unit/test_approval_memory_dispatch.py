@@ -77,7 +77,7 @@ def test_claude_renders_the_question_rather_than_parking_it(repo: Path) -> None:
     """The verdict goes out as an ask, carrying the reason that earned it."""
     asked = decision(claude("PreToolUse", repo))
     assert asked["permissionDecision"] == "ask"
-    assert "removing a remote ref" in str(asked["permissionDecisionReason"])
+    assert "deleting a remote branch" in str(asked["permissionDecisionReason"])
     assert QuestionRelay(repo / ".lup/questions.jsonl").pending() == []
 
 

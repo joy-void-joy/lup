@@ -2124,7 +2124,7 @@ def test_generated_codex_permission_request_preserves_assignment_guards(
 def test_generated_codex_pretool_never_treats_pending_requests_as_approval(
     tmp_path: Path,
 ) -> None:
-    command = "gh pr merge 180"
+    command = "gh pr merge 180 --admin"
     common: JsonObject = {
         "session_id": "session-one",
         "turn_id": "turn-one",

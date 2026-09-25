@@ -175,7 +175,7 @@ Return the PR URL to the user.
 
 - **Never rebase dev/main/master**
 - **Confirm before force push**
-- **Use --force** (not --force-with-lease) -- after `git reset --soft`, --force-with-lease rejects the diverged ref
+- **`git pr push --force` pushes with a lease**: it replaces only what this checkout last pushed or built on, so a push somebody else made meanwhile is refused rather than overwritten -- fetch it, fold it in, and push again. It refuses an integration branch outright; spelled out by hand, a force needs `--force-with-lease` and a named feature branch, or it asks
 - **Never force-push an unverified rebuild**: step 8 is what makes the cleaned history a claim you checked rather than one you made
 - **Keep meaningful history**: Don't squash everything into one commit
 - **Write good messages**: Future you will thank present you

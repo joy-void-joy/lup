@@ -106,10 +106,10 @@ ALLOWED_UNDER_A_RESTRICTIVE_PARENT = (
     "git mv",
     "git cherry-pick",
     "git revert",
-    # `git merge` is deliberately absent. It sat here while it was classed
-    # among the reversible subcommands, which is true of what it does to this
-    # checkout and beside the point: a merge puts work on a branch other
-    # people build on, and that is the question it carries.
+    # A merge states the effect it has -- it integrates -- rather than one
+    # about this checkout, and landing work is the last step of the workflow
+    # a session is set to finish.
+    "git merge",
     "git notes",
     "git stage",
     "git log",

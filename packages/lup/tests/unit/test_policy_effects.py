@@ -145,12 +145,12 @@ class TestWritesPath:
 
 
 class TestExternalEffects:
-    """Offering work allows; deciding it asks; trusting a stranger asks loudest."""
+    """Offering and landing work allow; trusting a stranger asks loudest."""
 
-    def test_publishing_allows_and_integrating_asks(self) -> None:
-        """A push offers, a merge decides, and the decision is the person's."""
+    def test_publishing_and_integrating_allow(self) -> None:
+        """A push offers and a merge lands: the two ends of one workflow."""
         assert verdict_for([effect("publishes")], EffectEvidence()) == "allow"
-        assert verdict_for([effect("integrates")], EffectEvidence()) == "ask"
+        assert verdict_for([effect("integrates")], EffectEvidence()) == "allow"
 
     def test_a_declared_host_allows_and_an_undeclared_one_asks(self) -> None:
         """Asks rather than refuses: a wall only teaches a way around it."""

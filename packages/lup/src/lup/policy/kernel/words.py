@@ -1482,6 +1482,54 @@ def refspec_effects(word: str) -> list[str]:
     return [*effects, "delete"] if source.startswith(":") else effects
 
 
+def refspec_destination(word: str) -> str:
+    """The branch one ``git push`` refspec updates, or ``""`` where it names none.
+
+    The destination is what follows the colon, and without one it is the
+    source's own name -- `main` pushes `main` to `main`. Git resolves a short
+    destination against `refs/heads/` first, so `refs/heads/main`,
+    `heads/main` and `main` are one branch and read as one name here; a ref
+    under another namespace (`refs/tags/v1`) keeps its full spelling, which no
+    branch name matches.
+
+    Named-nothing is its own answer rather than a guess. `HEAD` and `@` push
+    whichever branch the checkout stands on, and a glob pushes whichever
+    branches match it, so neither says which branch it rewrites -- and a
+    reader that must not run git cannot find out.
+    """
+    source, colon, destination = word.removeprefix("+").partition(":")
+    named = destination if colon else source
+    if named in ("", "HEAD", "@") or "*" in named:
+        return ""
+    for prefix in ("refs/heads/", "heads/"):
+        if named.startswith(prefix):
+            return named.removeprefix(prefix)
+    return named
+
+
+def operand_words(arguments: list[str], value_flags: list[str]) -> list[str]:
+    """The words of a command line that are operands rather than options.
+
+    A flag declared as taking the next word as its value takes that word with
+    it, which is what stops `git push -o ci.skip origin` reading `ci.skip` as
+    the repository and `origin` as the refspec. Everything after `--` is an
+    operand however it is spelled.
+    """
+    operands: list[str] = []
+    consumed = False
+    for position, word in enumerate(arguments):
+        if consumed:
+            consumed = False
+            continue
+        if word == "--":
+            return [*operands, *arguments[position + 1 :]]
+        if word.startswith("-"):
+            consumed = word in value_flags
+            continue
+        operands.append(word)
+    return operands
+
+
 def destination_form(word: str) -> str:
     """How one ``git push`` operand names the repository it lands in.
 

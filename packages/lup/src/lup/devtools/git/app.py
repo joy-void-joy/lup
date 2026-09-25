@@ -28,6 +28,7 @@ from lup.devtools.dev.conflict_app import create_conflict_app
 from lup.devtools.dev.declarations import DevDeclarations
 from lup.devtools.harness.launch import relocation_hint
 from lup.harness.process import LocalProcessLauncher
+from lup.policy.vocabulary import protected_branches
 from lup.workspace.paths import project_root
 from lup.devtools.git.prepare import prepare
 from lup.devtools.launcher import console_script
@@ -449,7 +450,11 @@ def create_git_app(declared: Callable[[], DevDeclarations]) -> typer.Typer:
     def pr_push_cmd(
         force: Annotated[
             bool,
-            typer.Option("--force", "-f", help="Force push"),
+            typer.Option(
+                "--force",
+                "-f",
+                help="Force push with a lease, refused on an integration branch",
+            ),
         ] = False,
         as_json: Annotated[
             bool,
@@ -457,7 +462,8 @@ def create_git_app(declared: Callable[[], DevDeclarations]) -> typer.Typer:
         ] = False,
     ) -> None:
         """Push the current branch and report any existing PR."""
-        pr.push(force, as_json)
+        rules = declared().hooks.resolved_shell_rules()
+        pr.push(force, as_json, protected_branches(rules))
 
     @pr_app.command("create")
     def pr_create_cmd(

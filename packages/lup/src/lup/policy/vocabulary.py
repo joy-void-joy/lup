@@ -20,7 +20,7 @@ splices extra rules around it::
         *read_only_rules(),
         *judged_ask_rules(),
         *guarded_tool_rules(),
-        git_rule(guard_force_push=False, redirect_checkout=True),
+        git_rule(integration_branches=("main", "dev"), redirect_checkout=True),
         gh_rule(),
         docker_rule(),
         my_own_cli_rule(),
@@ -29,14 +29,16 @@ splices extra rules around it::
 The judgement running through all of it: generous for reading and for local
 work a second attempt undoes, conservative for anything that loses something.
 Networked is deliberately not the line — publishing is how work becomes
-reviewable and happens many times a session, so ``git push`` and the pull
-request verbs that open and describe one are ordinary. What stays guarded is
-the direction that removes something no second attempt restores.
+reviewable and happens many times a session, so ``git push``, the pull
+request verbs that open and describe one, and the merge that lands it are
+ordinary. What stays guarded is the direction that removes something no
+second attempt restores.
 
 Where a group's default encodes a judgement a reasonable project would make
-differently, it takes a parameter instead of a fork: whether a force push is
-guarded, whether ``checkout`` is redirected toward ``switch``/``restore``,
-whether opening a pull request is authoring or publishing.
+differently, it takes a parameter instead of a fork: which branches a leased
+force push still asks about, whether ``checkout`` is redirected toward
+``switch``/``restore``, whether opening a pull request is authoring or
+publishing.
 """
 
 from collections.abc import Sequence
@@ -735,6 +737,24 @@ def devtools_rules() -> list[ShellSubcommandRule]:
                         "part still outstanding."
                     ),
                 ),
+                # Files a GitHub issue on whichever tracker owns the component,
+                # the act `gh issue create` asks about. `--issue N` corrects a
+                # report already filed, which a follow-up restores the way an
+                # edited issue is.
+                ShellOperationRule(
+                    name="report-friction",
+                    effect_class="publication",
+                    reviewer="human_only",
+                    amending_flags=["--issue"],
+                    reason=(
+                        "filing a friction report opens an issue the tracker's"
+                        " watchers are notified of"
+                    ),
+                    recovery=(
+                        "`--issue N` adds to a report already filed instead; "
+                        "`dev issues` lists the open ones."
+                    ),
+                ),
                 # The scaffold's own initialization verb, whose body is
                 # `lup.devtools.dev.origin`: it writes the URL the forge says
                 # this project was generated from into the committed entry.
@@ -845,6 +865,28 @@ def devtools_rules() -> list[ShellSubcommandRule]:
                         "later launched on this machine"
                     ),
                     recovery=registry_recovery,
+                ),
+            ],
+        ),
+        # Deleting a branch takes origin's copy along only once it is spent --
+        # its commits reachable from the integration branch -- which loses
+        # nothing. `--remote` deletes that copy whatever it holds, which is
+        # the remote-branch deletion `git push --delete` asks about.
+        ShellSubcommandRule(
+            name="git",
+            operations=[
+                ShellOperationRule(
+                    name="delete",
+                    ask_flags=["--remote"],
+                    probe_flags=["--dry-run", "-n"],
+                    reason=(
+                        "`--remote` deletes origin's copy of the branch even where"
+                        " it holds commits no other branch has"
+                    ),
+                    recovery=(
+                        "Without `--remote`, origin's copy goes only once the"
+                        " integration branch holds its commits."
+                    ),
                 ),
             ],
         ),
@@ -992,8 +1034,8 @@ GIT_REVERSIBLE_SUBCOMMANDS = (
 
 `merge` is deliberately not among them. What it does to *this* checkout is as
 reversible as a cherry-pick, but that is not what a merge is for: it is the
-step that puts work onto a branch other people build on, and the question it
-carries is about that rather than about recovering the tree.
+step that puts work onto a branch other people build on, so its row declares
+that effect rather than one about recovering the tree.
 """
 
 GIT_CONFIG_EXECUTING_KEYS = (
@@ -1032,8 +1074,10 @@ spelling of the same one, and it runs a program just as readily.
 GIT_CONFIG_RETARGETING_KEYS = (
     "remote.*.url",
     "remote.*.pushurl",
+    "remote.*.push",
+    "remote.*.mirror",
 )
-"""The git settings that name which repository a later command talks to.
+"""The git settings that name where a later command's work lands.
 
 A second class beside the executing keys, guarded by the same absence test
 because it answers the same question about a write: is what this sets read
@@ -1043,6 +1087,12 @@ resolves which repository an issue comment, a close, or a pull request is
 about — so a write here moves the whole compensable band of forge operations
 onto a repository nobody approved, without touching one of them.
 
+`remote.<name>.push` and `remote.<name>.mirror` retarget within it: the first
+is the refspec a push naming no branch runs, which a leading plus forces or an
+empty source deletes, and the second makes every push a mirror, deleting each
+remote branch this checkout lacks. Either turns a later plain `git push` into
+the force or the deletion that asks when it is spelled on the command line.
+
 Only the keys that name a destination outright. `remote.pushdefault` and
 `branch.<name>.pushremote` choose among the remotes the table already holds,
 and every way of putting one there — `git remote add`, `git remote rename`,
@@ -1051,8 +1101,17 @@ somebody approved is not the retarget.
 """
 
 
+INTEGRATION_BRANCHES = ("main", "master")
+"""The branches a forced push asks about even under a lease.
+
+The names a forge gives a repository's default branch, which is the one
+branch every project has that other people build on. A project integrating
+through a second long-lived branch names it beside them.
+"""
+
+
 def git_rule(
-    guard_force_push: bool = True,
+    integration_branches: tuple[str, ...] = INTEGRATION_BRANCHES,
     redirect_checkout: bool = False,
     sandbox: SandboxPlacement = "ambient",
     config_executing_keys: tuple[str, ...] = GIT_CONFIG_EXECUTING_KEYS,
@@ -1064,21 +1123,23 @@ def git_rule(
     The judgements a project can reasonably differ on are parameters rather
     than a reason to fork the table.
 
-    ``guard_force_push`` decides whether replacing what a remote ref points
-    at is worth a question. It usually is. A project whose review flow
-    rebases and republishes a branch every round answers no, because there
-    the force is the ordinary case and the ask lands on nearly every push.
-    What removes a ref outright stays guarded either way: no second push
-    restores it.
+    ``integration_branches`` are the branches other people build on, which
+    is what decides whether replacing what a remote ref points at is worth a
+    question. A review flow rebases and republishes its own branch every
+    round, so a force there is the ordinary case -- and under
+    ``--force-with-lease`` it replaces only what this checkout last saw, so
+    it discards nothing anybody else pushed, and allows. Every other force
+    asks: ``--force`` and a refspec's leading plus replace whatever the
+    remote holds, a leased force onto an integration branch rewrites what
+    others built on, and a leased force naming no branch reaches whichever
+    one the checkout stands on. What removes a ref outright asks whatever it
+    names: no second push restores it.
 
-    Both effects are guarded twice over, because push spells each of them
+    Both effects are read twice over, because push spells each of them
     twice: as a flag, and as refspec grammar. ``--delete origin main`` and
     ``origin :refs/heads/main`` remove the same ref, ``--force`` and
     ``+main:main`` replace the same one, and a guard written only as flag
     spellings held the first half of each pair while allowing the second.
-    The parameter therefore moves ``ask_refspecs`` and ``ask_flags``
-    together: an effect this rule asks about is asked about however it was
-    written.
 
     ``redirect_checkout`` decides how ``git checkout`` is met. Off, it asks —
     the branch-switching form is harmless, but ``checkout -- <path>``
@@ -1147,19 +1208,26 @@ def git_rule(
             )
             for name in GIT_REVERSIBLE_SUBCOMMANDS
         ],
-        ShellSubcommandRule(
-            name="merge",
-            effects=[declare("integrates")],
-            reason="merging puts work on a branch other people build on",
-        ),
+        ShellSubcommandRule(name="merge", effects=[declare("integrates")]),
     ]
     # `--repo` is the one spelling of a destination the operand reading below
     # cannot reach: it carries the repository as a flag value, and a flag is
     # exactly what that reading skips. It asks whatever it names, because the
     # flag is legacy — git documents it as relevant only when no repository
     # operand is passed — and a question on an invocation nobody writes costs
-    # less than a second reader for one word.
-    push_flags = ["--delete", "--mirror", "--prune", "--repo"]
+    # less than a second reader for one word. `--mirror` and `--prune` delete
+    # every remote branch this checkout lacks, so they ask beside `--delete`;
+    # `--receive-pack` names the program the far side runs, the question
+    # `fetch --upload-pack` asks from the other direction.
+    push_flags = [
+        "--delete",
+        "-d",
+        "--mirror",
+        "--prune",
+        "--repo",
+        "--receive-pack",
+        "--exec",
+    ]
     guarded = [
         *[
             ShellSubcommandRule(
@@ -1247,19 +1315,23 @@ def git_rule(
             name="push",
             effects=[declare("publishes", scope="branch")],
             ask_destinations=list(push_destinations),
-            ask_refspecs=(["delete", "force"] if guard_force_push else ["delete"]),
-            ask_flags=(
-                [*push_flags, "-f", "--force", "--force-with-lease"]
-                if guard_force_push
-                else push_flags
-            ),
+            ask_refspecs=["delete"],
+            ask_flags=push_flags,
+            force_flags=["-f", "--force"],
+            lease_flags=["--force-with-lease"],
+            protected_refs=list(integration_branches),
+            value_flags=[
+                "-o",
+                "--push-option",
+                "--repo",
+                "--receive-pack",
+                "--exec",
+                "--recurse-submodules",
+            ],
             probe_flags=["-n", "--dry-run"],
             reason=(
-                "rewriting or removing a remote ref, or aiming the push"
-                " elsewhere, requires approval"
-                if guard_force_push
-                else "removing a remote ref, or aiming the push elsewhere,"
-                " requires approval"
+                "deleting a remote branch loses work no later push restores, and"
+                " --repo or --receive-pack redirects the push; each needs approval"
             ),
         ),
         # The same arrival `gh repo clone` is, reached by the other spelling:
@@ -1353,8 +1425,8 @@ def git_rule(
             ],
             guarded_keys=guarded_config,
             reason=(
-                "this git config write can change what program git runs or which"
-                " repository it talks to"
+                "this git config write can change what program git runs, which"
+                " repository it talks to, or what a later push forces or deletes"
             ),
         ),
         ShellSubcommandRule(
@@ -1706,6 +1778,23 @@ def git_rule(
     )
 
 
+def protected_branches(rules: list[ShellCommandRule]) -> list[str]:
+    """The branches a vocabulary asks about before a forced push reaches them.
+
+    Read off the declared push row rather than declared a second time, so a
+    tool forcing a push on the caller's behalf refuses exactly the branches a
+    forced push spelled out in the shell would have put to the user.
+    """
+    return [
+        branch
+        for rule in rules
+        if rule.name == "git"
+        for subcommand in rule.subcommands
+        if subcommand.name == "push"
+        for branch in subcommand.protected_refs
+    ]
+
+
 def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
     """Compile the gh surface by what each operation does beyond this machine.
 
@@ -1713,20 +1802,24 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
 
     **Compensable collaboration allows.** Opening a pull request, retitling
     it, marking it ready, commenting, closing, reopening, and the same set for
-    issues: every one of them is restored by a normal follow-up operation, and
-    a review flow performs several of them every round. Compensable is a claim
-    about the remote *state*, never about observation — reopening a pull
-    request does not un-send the mail that closing it generated — so it is the
-    right test for whether a person needs to see the moment, and the wrong one
-    for whether the effect was free.
+    an existing issue: every one of them is restored by a normal follow-up
+    operation, and a review flow performs several of them every round.
+    Compensable is a claim about the remote *state*, never about observation
+    — reopening a pull request does not un-send the mail that closing it
+    generated — so it is the right test for whether a person needs to see the
+    moment, and the wrong one for whether the effect was free. Merging a pull
+    request allows beside them for the reason `git merge` does: it is how a
+    landing workflow finishes, and it declares that it integrates.
 
     **Execution, attestation, publication, and repository security ask.** A
-    merge runs something; an approving or request-changes review says
-    something in the caller's name; a release publishes; a secret, a ruleset,
-    or a repository setting is the security posture of the repository itself.
-    A later compensating action may exist for each and does not make them
-    compensable: what happened was an event, and events are what a person is
-    being asked about.
+    workflow run runs something; an approving or request-changes review says
+    something in the caller's name; a release publishes, and so does a new
+    issue, a report filed where other people are notified of it; a secret, a
+    ruleset, or a repository setting is the security posture of the
+    repository itself, which a merge past the branch's protection (``--admin``)
+    overrides. A later compensating action may exist for each and does not
+    make them compensable: what happened was an event, and events are what a
+    person is being asked about.
 
     **A deletion nested inside an allowed operation survives it.** ``gh pr
     close`` allows and ``gh pr close --delete-branch`` asks, because a safe
@@ -1903,10 +1996,18 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                         ask_flags=[*elsewhere, *attesting],
                         reason="approving or requesting changes attests in your name",
                     ),
-                    *judged(
-                        ["merge"],
-                        "execution",
-                        "merging runs the change into the base branch",
+                    # Deleting the head alongside is not the loss `close
+                    # --delete-branch` is: gh deletes it only once the merge
+                    # has landed what it held.
+                    ShellOperationRule(
+                        name="merge",
+                        effects=[declare("integrates", scope="pull request")],
+                        ask_flags=[*elsewhere, "--admin"],
+                        flag_effects=[
+                            declare("external_mutation", scope="repository_security")
+                        ],
+                        reason="--admin merges past the reviews and checks the base"
+                        " branch requires, and --repo merges in another repository",
                     ),
                     *(
                         []
@@ -1924,7 +2025,13 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                 [
                     *reads(["list", "view", "status"]),
                     *compensable(
-                        ["create", "edit", "comment", "close", "reopen", "pin", "unpin"]
+                        ["edit", "comment", "close", "reopen", "pin", "unpin"]
+                    ),
+                    *judged(
+                        ["create"],
+                        "publication",
+                        "filing an issue publishes a report the repository's"
+                        " watchers are notified of",
                     ),
                     *judged(
                         ["delete", "transfer"],

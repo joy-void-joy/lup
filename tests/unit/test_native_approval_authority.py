@@ -386,5 +386,5 @@ def test_the_question_a_verdict_asks_reaches_the_prompt(root: Path) -> None:
     answer = native_response(root, "claude", tool="Bash", arguments=arguments)
     spoken = json.loads(answer.stdout)["hookSpecificOutput"]
     assert spoken["permissionDecision"] == "ask"
-    assert "remote ref" in spoken["permissionDecisionReason"]
+    assert "remote branch" in spoken["permissionDecisionReason"]
     assert QuestionRelay(root / ".lup/questions.jsonl").pending() == []

@@ -79,7 +79,7 @@ def test_a_refused_push_carries_its_reason_into_the_json(
     monkeypatch.setattr(pr, "git", StubGit(refuse_push=True))
 
     with pytest.raises(typer.Exit):
-        pr.push(force=False, as_json=True)
+        pr.push(force=False, as_json=True, protected=["main"])
 
     reported = json.loads(capsys.readouterr().out)
     assert reported["pushed"] is False
@@ -94,7 +94,7 @@ def test_a_push_that_landed_complains_about_nothing(
 ) -> None:
     monkeypatch.setattr(pr, "git", StubGit())
 
-    pr.push(force=False, as_json=True)
+    pr.push(force=False, as_json=True, protected=["main"])
 
     reported = json.loads(capsys.readouterr().out)
     assert reported["pushed"] is True
@@ -111,7 +111,7 @@ def test_a_silent_failed_push_stops_the_command_chain(
     monkeypatch.setattr(pr, "git", SilentFailedPush())
 
     with pytest.raises(typer.Exit) as caught:
-        pr.push(force=False, as_json=True)
+        pr.push(force=False, as_json=True, protected=["main"])
 
     reported = json.loads(capsys.readouterr().out)
     assert caught.value.exit_code == 1
