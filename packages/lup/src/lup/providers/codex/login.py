@@ -34,6 +34,14 @@ unchanged host credentials leave container renewals intact. The launcher asks
 Codex's account API to validate or renew the selected login inside the session
 boundary, choosing browser login when its callback can reach the session and
 device authentication when the container holds a separate loopback interface.
+
+The ambient home is the operator's account, joined onto this process's home
+directory as the module is imported and never onto a ``HOME`` a request hands
+its session: that session must still authenticate as the operator, so the
+login a worktree home is derived from stays the one this program was launched
+as. Codex left to choose would read the request's — its default is ``.codex``
+in the effective ``HOME``, as :func:`native_home` reads it — and a homed
+session is never left that choice, because homing names its home outright.
 """
 
 

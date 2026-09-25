@@ -91,7 +91,13 @@ def launched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Launched:
     monkeypatch.setattr(launch, "apply_sandbox_environment", lambda *a, **k: None)
     monkeypatch.setattr(launch, "ClaudeTranscripts", lambda _home: Mock())
     monkeypatch.setattr(launch, "CodexTranscripts", lambda _home: Mock())
-    monkeypatch.setattr(launch, "CodexWorktreeHomeStore", lambda **_: Mock())
+    monkeypatch.setattr(
+        launch,
+        "CodexWorktreeHomeStore",
+        lambda **_: Mock(
+            publish=Mock(return_value=False), return_settings=Mock(return_value=[])
+        ),
+    )
     monkeypatch.setattr(
         launch,
         "select_codex_home",
@@ -232,3 +238,25 @@ def test_codex_leaves_a_home_the_operator_brought_its_own_theme(
     launch.launch_codex(composition(), [], None, None, None, False, False)
 
     assert not any(argument.startswith("tui.theme=") for argument in launched.arguments)
+
+
+def test_codex_derives_its_worktree_home_from_the_selected_account(
+    config: UserConfigFile,
+    launched: Launched,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One name, one account: the profile a Claude launch opens, on Codex too."""
+    user_profile_directory(CLAUDE_LOGIN, config).add("work")
+    stores: list[dict[str, object]] = []
+
+    def store(**named: object) -> Mock:
+        stores.append(named)
+        return Mock(
+            publish=Mock(return_value=False), return_settings=Mock(return_value=[])
+        )
+
+    monkeypatch.setattr(launch, "CodexWorktreeHomeStore", store)
+
+    launch.launch_codex(composition(), [], None, None, None, False, False)
+
+    assert stores == [{"account_home": config.profiles_root() / "work" / "codex-home"}]

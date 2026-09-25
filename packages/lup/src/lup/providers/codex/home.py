@@ -1,19 +1,33 @@
-"""Stable per-worktree Codex homes for locally installed harness plugins."""
+"""Stable per-worktree Codex homes for locally installed harness plugins.
+
+A worktree's home exists for what a home installs: this project's plugin, its
+registration, and the trust Codex records for the hooks it runs. Everything
+else in it is the person's — their login, their settings, the checkouts they
+trust — and belongs to the account home it is derived from, which is theirs
+across every project. So each launch derives the settings afresh from that
+account home, keeping only what this home installed, and a session's own
+changes to them go back to the account when it closes: a new checkout opens
+with the settings the person has, not the ones some other checkout was
+seeded with once.
+"""
 
 import asyncio
+import json
 import logging
+from collections.abc import Iterator
 import shutil
 from datetime import datetime
 from pathlib import Path
 
 import jwt
 import tomlkit
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from lup.providers.codex.harness_runtime import CodexPluginInstaller, PluginCacheConfig
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.marketplace import CodexMarketplace
 from lup.providers.codex.theme import claude_daltonized_theme
+from lup.types import JsonObject, JsonValue
 from lup.providers.codex.trust import CodexHook, hooks_of, read_hooks, skipped
 from lup.types import EnvVars
 from lup.workspace.paths import declared_project_root, project_root
@@ -22,18 +36,6 @@ from lup.workspace.paths import declared_project_root, project_root
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_ACCOUNT_HOME = Path.home() / ".codex"
-"""The operator's own Codex account, which a worktree home is seeded from.
-
-Joined onto this process's home directory as the module is imported, and
-never onto a ``HOME`` a request hands its session. A request changes
-``HOME`` for a tool its session runs, and that session must still
-authenticate as the operator, so the login a worktree home copies in stays
-the one this program was launched as. Codex left to choose would read the
-request's instead — its default is ``.codex`` in the effective ``HOME``, as
-:func:`~lup.providers.codex.login.native_home` reads it — and a homed
-session is never left that choice, because homing names its home outright.
-"""
 SCOPED_HOME_DIR = Path(".lup") / "codex-home"
 """Where a checkout keeps the Codex home its own sessions run under.
 
@@ -140,6 +142,96 @@ def sanitized_codex_config(content: str) -> str:
     for key in CODEX_CONFIG_STATE_KEYS:
         if key in document:
             document.remove(key)
+    return tomlkit.dumps(document)
+
+
+def derived_codex_config(account: str, scoped: str) -> str:
+    """The configuration a worktree home opens with: the account's, and its own installs.
+
+    The account's settings as they stand now, sanitized as a seed always was,
+    with what only this home can say laid back over them — the plugins it
+    installed and registered, and the trust it recorded for checkouts and
+    hooks, which join the account's own trust rather than replacing it.
+    """
+    document = tomlkit.parse(sanitized_codex_config(account))
+    own = tomlkit.parse(scoped)
+    for key in CODEX_CONFIG_STATE_KEYS:
+        if key in own:
+            document[key] = own[key]
+    for path in ((PROJECTS_KEY,), (HOOKS_KEY, STATE_KEY)):
+        recorded = table_at(own, path)
+        if recorded:
+            held = table_at(document, path, create=True)
+            for name, entry in recorded.items():
+                held[name] = entry
+    return tomlkit.dumps(document)
+
+
+def table_at(
+    document: tomlkit.TOMLDocument, path: tuple[str, ...], create: bool = False
+) -> dict[str, object]:
+    """The table at a dotted path, made where ``create`` asks and it is absent."""
+    table: dict[str, object] = document
+    for key in path:
+        if key not in table:
+            if not create:
+                return {}
+            table[key] = tomlkit.table(is_super_table=True)
+        child = table[key]
+        if not isinstance(child, dict):
+            return {}
+        table = child
+    return table
+
+
+def personal_settings(content: str) -> JsonObject:
+    """Everything in one configuration that is the person's to carry between homes.
+
+    Not the installs, which each home makes for itself, and not the trust,
+    which a home records for the checkouts and hooks it met: trust granted in
+    one worktree's home is a decision about that worktree.
+    """
+    settings = dict(tomlkit.parse(content).unwrap())
+    for key in (*CODEX_CONFIG_STATE_KEYS, PROJECTS_KEY):
+        settings.pop(key, None)
+    hooks = settings.get(HOOKS_KEY)
+    if isinstance(hooks, dict):
+        remaining = {name: value for name, value in hooks.items() if name != STATE_KEY}
+        if remaining:
+            settings[HOOKS_KEY] = remaining
+        else:
+            settings.pop(HOOKS_KEY)
+    return settings
+
+
+def changed_settings(
+    before: JsonObject, after: JsonObject, prefix: tuple[str, ...] = ()
+) -> Iterator[tuple[tuple[str, ...], JsonValue | None]]:
+    """Every leaf a session set or removed, as a path and its new value.
+
+    ``None`` stands for removed: TOML has no null, so no setting can hold it.
+    """
+    for key in sorted({*before, *after}):
+        old, new = before.get(key), after.get(key)
+        if old == new:
+            continue
+        if isinstance(old, dict) and isinstance(new, dict):
+            yield from changed_settings(old, new, (*prefix, key))
+        else:
+            yield (*prefix, key), new
+
+
+def settled_codex_config(
+    account: str, changes: list[tuple[tuple[str, ...], JsonValue | None]]
+) -> str:
+    """The account's configuration with a session's changes applied, lines kept."""
+    document = tomlkit.parse(account)
+    for path, value in changes:
+        table = table_at(document, path[:-1], create=value is not None)
+        if value is None:
+            table.pop(path[-1], None)
+        else:
+            table[path[-1]] = value
     return tomlkit.dumps(document)
 
 
@@ -267,15 +359,24 @@ def profile_config_filename(profile: str) -> str:
 
 
 class CodexWorktreeHomeStore:
-    """Initialize persistent Lup-owned Codex homes from one personal account."""
+    """Derive persistent Lup-owned Codex homes from one personal account.
+
+    ``account_home`` is the account's own home — the operator's default,
+    joined onto this process's home when the login is imported, unless a
+    profile names another. ``launched_record`` is where a home keeps the
+    personal settings it was derived with, so what a session changed can be
+    told from what the account changed meanwhile.
+    """
 
     def __init__(
         self,
-        account_home: Path = DEFAULT_ACCOUNT_HOME,
+        account_home: Path = CODEX_LOGIN.ambient_home,
         scoped_dir: Path = SCOPED_HOME_DIR,
+        launched_record: str = ".lup-launched.json",
     ) -> None:
         self.account_home = account_home
         self.scoped_dir = scoped_dir
+        self.launched_record = launched_record
 
     def home_for(self, worktree: Path) -> Path:
         """The home belonging to the checkout that encloses one worktree.
@@ -307,7 +408,13 @@ class CodexWorktreeHomeStore:
         return resolved.parts[-len(self.scoped_dir.parts) :] == self.scoped_dir.parts
 
     def prepare(self, worktree: Path, profile: str | None = None) -> Path:
-        """Refresh Lup-owned files and seed account files into a scoped home."""
+        """Refresh Lup-owned files and derive the account's settings into a scoped home.
+
+        Derived at every launch rather than seeded once, because a seed is
+        the account as it stood the day this checkout first launched: every
+        setting the person changed since — in their own home, or in a
+        session in any other checkout — would never arrive here.
+        """
         scoped_home = self.home_for(worktree)
         scoped_home.mkdir(mode=0o700, parents=True, exist_ok=True)
         scoped_home.chmod(0o700)
@@ -316,20 +423,68 @@ class CodexWorktreeHomeStore:
             self.account_home / CODEX_LOGIN.credentials_file,
             scoped_home / CODEX_LOGIN.credentials_file,
         )
-        seed_config(self.account_home / "config.toml", scoped_home / "config.toml")
+        account = self.account_home / "config.toml"
+        config = scoped_home / "config.toml"
+        derived = derived_codex_config(
+            account.read_text(encoding="utf-8") if account.is_file() else "",
+            config.read_text(encoding="utf-8") if config.is_file() else "",
+        )
+        config.write_text(derived, encoding="utf-8")
         trust_project(scoped_home, worktree)
+        (scoped_home / self.launched_record).write_text(
+            json.dumps(personal_settings(derived)), encoding="utf-8"
+        )
         if profile is not None:
             filename = profile_config_filename(profile)
             seed_config(self.account_home / filename, scoped_home / filename)
         return scoped_home
 
     def publish(self, worktree: Path) -> bool:
-        """Return a credential the session rotated back to the account home."""
+        """Return a credential the session rotated back to the account home.
+
+        The account home is made where it does not exist yet: a profile's
+        first Codex sign-in happens in a worktree home, and has to arrive in
+        the account it signed in as.
+        """
         scoped_home = self.home_for(worktree)
+        self.account_home.mkdir(mode=0o700, parents=True, exist_ok=True)
         return sync_credential(
             scoped_home / CODEX_LOGIN.credentials_file,
             self.account_home / CODEX_LOGIN.credentials_file,
         )
+
+    def return_settings(self, worktree: Path) -> list[str]:
+        """Carry back to the account every personal setting a session changed.
+
+        Measured against what the home was derived with rather than against
+        the account, so a setting the person changed in their own home while
+        this session ran is not undone by a session that never touched it.
+        Written through the parsed document, keeping the account's own lines.
+        Answers the dotted names it carried, none where nothing changed.
+        """
+        scoped_home = self.home_for(worktree)
+        record = scoped_home / self.launched_record
+        config = scoped_home / "config.toml"
+        if not record.is_file() or not config.is_file():
+            return []
+        launched = TypeAdapter(JsonObject).validate_json(
+            record.read_text(encoding="utf-8")
+        )
+        now = personal_settings(config.read_text(encoding="utf-8"))
+        changes = list(changed_settings(launched, now))
+        if not changes:
+            return []
+        account = self.account_home / "config.toml"
+        self.account_home.mkdir(mode=0o700, parents=True, exist_ok=True)
+        account.write_text(
+            settled_codex_config(
+                account.read_text(encoding="utf-8") if account.is_file() else "",
+                changes,
+            ),
+            encoding="utf-8",
+        )
+        record.write_text(json.dumps(now), encoding="utf-8")
+        return [".".join(path) for path, _ in changes]
 
 
 def select_codex_home(

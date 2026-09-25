@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field, ValidationError
 from lup.harness.devices import Device
 from lup.providers.login import NativeHomeScope, ProviderLogin
 from lup.providers.profile_migration import legacy_notice
+from lup.providers.profile_tree import user_profile_directory
 from lup.providers.profiles import DefaultHomeProfile, ProfileDirectory
 from lup.providers.user_config import UserConfig, UserConfigFile
 from lup.devtools.harness.contained import contained_argv
@@ -2205,7 +2206,18 @@ def launch_codex(
             [*mounts, *accessible_roots()] if sandbox is LaunchSandbox.INNER else []
         ),
     )
-    store = CodexWorktreeHomeStore()
+    # The account a worktree home is derived from, and returns its login and
+    # settings to: the person's selected profile, one name meaning the same
+    # account here as on Claude, else the operator's own default home.
+    try:
+        account_home = user_profile_directory(CODEX_LOGIN, config).launch_home(None)
+    except (KeyError, DefaultHomeProfile) as error:
+        raise typer.BadParameter(str(error)) from error
+    store = (
+        CodexWorktreeHomeStore()
+        if account_home is None
+        else CodexWorktreeHomeStore(account_home=account_home)
+    )
     home = select_codex_home(codex_home, environment, project_root(), profile, store)
     selected_home = home.path
     selected_profile = (
@@ -2216,7 +2228,10 @@ def launch_codex(
         else None
     )
     if home.isolated:
-        typer.echo(f"Using worktree-scoped Codex home: {selected_home}")
+        typer.echo(
+            f"Using worktree-scoped Codex home: {selected_home}, derived from "
+            f"{store.account_home}"
+        )
     # The subcommand leads, and everything the envelope carries follows it,
     # because a word placed after a positional session id would be read as
     # another one.
@@ -2321,5 +2336,11 @@ def launch_codex(
         transcript.close(succeeded=succeeded, interrupted=interrupted)
         if home.isolated and store.publish(project_root()):
             typer.echo("Returned the refreshed Codex login to the account home")
+        carried = store.return_settings(project_root()) if home.isolated else []
+        if carried:
+            typer.echo(
+                f"Returned Codex settings this session changed to "
+                f"{store.account_home}: {', '.join(carried)}"
+            )
         if checkpoint is not None:
             checkpoint(provider="codex")

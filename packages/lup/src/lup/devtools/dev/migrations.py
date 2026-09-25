@@ -736,6 +736,28 @@ DECLARED: list[Migration] = [
             ),
         ],
     ),
+    Migration(
+        subjects=["DEFAULT_ACCOUNT_HOME"],
+        reason=(
+            "a worktree's Codex home was seeded from ~/.codex once and kept "
+            "that copy, so every setting changed since, and every one changed "
+            "in another checkout's session, never reached it; it is derived "
+            "from the selected account at each launch and a session's changes "
+            "return to that account, whose default the login declaration names"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Read CODEX_LOGIN.ambient_home, from lup.providers.codex.login, "
+                    "wherever DEFAULT_ACCOUNT_HOME was read, and construct "
+                    "CodexWorktreeHomeStore(account_home=...) with a profile's "
+                    "Codex home where a run is started as one. Call "
+                    "return_settings(worktree) beside publish(worktree) once a "
+                    "session over a derived home closes."
+                )
+            ),
+        ],
+    ),
 ]
 """Every break this library has taken since its last release, and what to do.
 
