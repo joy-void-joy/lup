@@ -11,6 +11,11 @@ default, so an adopter replaces the vocabulary rather than editing the library
 (``library-default``, the mechanical half of the placement criterion in
 ``docs/library.md``).
 
+The package root faces the other way from every module behind it: it
+re-exports the library's public names for its users, so ``front-door`` holds
+that nothing inside the library imports from it, and the dependency runs from
+the front door inward only.
+
 The same criterion holds beyond the library, where the choice is frozen for
 this project's own callers rather than for an adopter, so ``constant-declaration``
 judges every other module-level constant by it. The two read one enumeration
@@ -32,6 +37,7 @@ from pydantic import BaseModel
 
 from lup.harness.codescan.common import (
     ApplicationRoots,
+    LIBRARY_PACKAGE_ROOT,
     NO_APPLICATION,
     PythonContext,
     PythonSource,
@@ -79,6 +85,7 @@ class RuleId(StrEnum):
     LIBRARY_DEFAULT = "library-default"
     CONSTANT_DECLARATION = "constant-declaration"
     ASSEMBLY = "assembly-boundary"
+    FRONT_DOOR = "front-door"
 
 
 # lup: ignore[constant-declaration] — where this library's own sources sit in the
@@ -111,6 +118,9 @@ thing.
 
 ASSEMBLY_ROOT = f"{LIBRARY_ROOT}tools/toolsets.py"
 """Where a session's groups are assembled, and so the one caller of those."""
+
+FRONT_DOOR_PATH = f"{LIBRARY_ROOT}__init__.py"
+"""The package root: the one library module that may re-export from the rest."""
 
 # lup: ignore[constant-declaration] — the diagnostic for the assembly-boundary rule
 ASSEMBLY_BOUNDARY_MESSAGE = (
@@ -207,7 +217,7 @@ def native_import_boundaries(
 
 # lup: ignore[library-default] — files of this library, which no adopter relocates
 LIBRARY_COMPOSITION = (
-    f"{LIBRARY_ROOT}__init__.py",
+    FRONT_DOOR_PATH,
     f"{LIBRARY_ROOT}devtools/harness/composition.py",
     f"{LIBRARY_ROOT}devtools/harness/launch.py",
     f"{LIBRARY_ROOT}devtools/harness/resolve.py",
@@ -442,6 +452,109 @@ def kernel_import_violations(text: str) -> list[SourceViolation]:
             for module in modules
         )
     return violations
+
+
+# Its keys are as open as what the root binds, spelled the way Python spells it.
+# lup: ignore[dict-str-payload] — a re-exported name, to the module defining it
+type FrontDoorExports = dict[str, str]
+"""Each name the package root re-exports, keyed to the module that defines it."""
+
+
+def front_door_exports(text: str) -> FrontDoorExports:
+    """Each name the package root re-exports, and the module that defines it.
+
+    Read off the root's own imports — the ``TYPE_CHECKING`` block's among
+    them, which is where the agents it resolves lazily are named — so a name
+    the root starts exporting is known here the day it does, and the module a
+    diagnostic sends a reader to is the one the root itself imports from.
+    """
+    tree = python_tree(text)
+    if tree is None:
+        return {}
+    return {
+        alias.asname or alias.name: (
+            f"{LIBRARY_PACKAGE_ROOT}.{node.module}" if node.level else node.module
+        )
+        for node in python_nodes(tree)
+        if isinstance(node, ast.ImportFrom) and node.module and node.level < 2
+        for alias in node.names
+    }
+
+
+def front_door_violations(
+    source: PythonSource, exports: FrontDoorExports
+) -> Iterator[RuleViolation]:
+    """Every name one library module reads through the package root.
+
+    Both spellings reach it: ``from lup import Agent``, or the relative import
+    that climbs to the root, and ``lup.Agent`` wherever an ``import lup`` bound
+    the package. ``import lup`` alone reads no name — a module locating the
+    package by ``lup.__file__`` is not walking through the front door — so the
+    attribute form is judged against the names the root exports, which is
+    also what lets a diagnostic name the module each one is defined in.
+    """
+    tree = python_tree(source.text)
+    if tree is None:
+        return
+    # A from-import reaches the root by naming it, or relatively: naming no
+    # module, and climbing one package per directory between it and this file.
+    reaching = [
+        (0, LIBRARY_PACKAGE_ROOT),
+        (len(source.path.relative_to(LIBRARY_ROOT).parts), None),
+    ]
+
+    def binding(alias: ast.alias) -> list[str]:
+        """The name one ``import`` binds to the root: none, or exactly one."""
+        match alias:
+            case ast.alias(name=name, asname=None) if (
+                name == LIBRARY_PACKAGE_ROOT
+                or name.startswith(f"{LIBRARY_PACKAGE_ROOT}.")
+            ):
+                return [LIBRARY_PACKAGE_ROOT]
+            case ast.alias(name=name, asname=str(asname)) if (
+                name == LIBRARY_PACKAGE_ROOT
+            ):
+                return [asname]
+        return []
+
+    bound = [
+        held
+        for node in python_nodes(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+        for held in binding(alias)
+    ]
+
+    def refusal(read: str, name: str) -> str:
+        remedy = (
+            f"import it where it is defined: from {exports[name]} import {name}"
+            if name in exports
+            else f"import {name} from the module that defines it"
+        )
+        return (
+            f"{read} reads the package root, the library's front door for its "
+            f"users — {remedy}"
+        )
+
+    for node in python_nodes(tree):
+        match node:
+            case ast.ImportFrom(names=names) if (node.level, node.module) in reaching:
+                reads = [
+                    (f"from {LIBRARY_PACKAGE_ROOT} import {alias.name}", alias.name)
+                    for alias in names
+                ]
+            case ast.Attribute(value=ast.Name(id=held), attr=name) if (
+                held in bound and name in exports
+            ):
+                reads = [(f"{held}.{name}", name)]
+            case _:
+                continue
+        yield from (
+            RuleViolation(
+                path=source.path, line=node.lineno, message=refusal(read, name)
+            )
+            for read, name in reads
+        )
 
 
 def literal_string(node: ast.AST) -> str | None:
@@ -1063,6 +1176,34 @@ def kernel_import_findings(audited: AuditedProject) -> list[RuleFinding]:
     ]
 
 
+def front_door_findings(audited: AuditedProject) -> list[RuleFinding]:
+    """Every read of the package root from inside the library it fronts.
+
+    What the root exports is read off the root among the audited sources, so
+    the rule judges the front door the tree actually has. A fragment holding
+    no root still refuses every ``from lup import``; only the module a
+    diagnostic names, and the ``lup.<name>`` form, need the root beside it.
+    """
+    exports = {
+        name: module
+        for source in audited.sources
+        if source.path.as_posix() == FRONT_DOOR_PATH
+        for name, module in front_door_exports(source.text).items()
+    }
+    return audit_suppressions(
+        audited.sources,
+        [
+            violation
+            for source in audited.sources
+            if source.path.as_posix().startswith(LIBRARY_ROOT)
+            and source.path.as_posix() != FRONT_DOOR_PATH
+            for violation in front_door_violations(source, exports)
+        ],
+        RuleId.FRONT_DOOR,
+        strength="strong",
+    )
+
+
 def library_default_findings(audited: AuditedProject) -> list[RuleFinding]:
     """Every library table no adopter can replace, judged against the whole library.
 
@@ -1139,6 +1280,41 @@ ASSEMBLY_RULE = ProjectRule(
     audit=lambda audited: import_boundary_findings(audited, RuleId.ASSEMBLY),
 )
 """The assembly rule: a tool group's constructor is the toolset's to call."""
+
+FRONT_DOOR_RULE = ProjectRule(
+    id=RuleId.FRONT_DOOR,
+    family="boundary",
+    scope="Library modules",
+    examples=[
+        RuleExample(
+            code="from lup import Claude", verdict="flagged", path=NEUTRAL_MODULE
+        ),
+        RuleExample(
+            code="from lup.sessions.surface import Agent",
+            verdict="cleared",
+            path=NEUTRAL_MODULE,
+        ),
+        RuleExample(
+            code="from lup import Claude",
+            verdict="cleared",
+            path="examples/quickstart.py",
+        ),
+    ],
+    message=(
+        "The package root is the library's front door: it re-exports the public "
+        "names for the library's users and resolves Claude and Codex on first "
+        "access, so importing lup reaches no provider until an agent is named. "
+        "Inside the library an import from it runs the dependency backwards — a "
+        "module the root is still loading meets a half-built package, and an "
+        "agent taken through it reaches its adapter under a name the seam rule "
+        "never sees. Import each name from the module that defines it; the "
+        "application, the examples and the tests are the front door's users, "
+        "and keep importing from it."
+    ),
+    strength="strong",
+    audit=front_door_findings,
+)
+"""The front-door rule: the root re-exports, and nothing behind it imports it."""
 
 NATIVE_SPELLING_RULE = ProjectRule(
     id=RuleId.NATIVE_SPELLING,

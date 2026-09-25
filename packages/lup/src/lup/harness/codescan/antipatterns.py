@@ -67,6 +67,7 @@ from pydantic import BaseModel, Field
 from lup.harness.codescan.boundaries import (
     ASSEMBLY_RULE,
     CONSTANT_DECLARATION_RULE,
+    FRONT_DOOR_RULE,
     KERNEL_IMPORTS_RULE,
     LIBRARY_DEFAULT_RULE,
     NATIVE_SPELLING_RULE,
@@ -1560,6 +1561,7 @@ PROJECT_RULES: list[ProjectRule] = [
     CHAIN_RULE,
     SEAM_RULE,
     ASSEMBLY_RULE,
+    FRONT_DOOR_RULE,
     NATIVE_SPELLING_RULE,
     KERNEL_IMPORTS_RULE,
     LIBRARY_DEFAULT_RULE,
