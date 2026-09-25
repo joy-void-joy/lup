@@ -275,6 +275,39 @@ def test_a_machine_pushing_over_ssh_repoints_the_clone_it_already_has(
     assert sync.transport_url(sync.find_project("lup")) == ssh
 
 
+def test_a_checkpoint_outlives_the_spelling_its_clone_was_read_over(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    upstream: Path,
+    cache: Path,
+) -> None:
+    """Recorded inside a container, read on the host.
+
+    `/lup:init` baselines the checkpoint in a contained session, whose
+    rewrites answer the clone's origin over ssh; the host reads it over
+    https. One repository and one ref, so one review -- where comparing the
+    spellings would report every commit up to it as never reviewed.
+    """
+    address = parse_remote(SHIPPED_URL)
+    assert address is not None
+    checkout = project(tmp_path, "plain", SHIPPED)
+    standing_in(monkeypatch, checkout)
+    forge_spelling(monkeypatch, SHIPPED_URL, upstream)
+    sync.accessible_roots(lambda _said: None)
+    no_rewrites(monkeypatch)
+    clone = cache / "lup.git"
+    reviewed = sync.git_in(str(clone), "rev-parse", "refs/remotes/origin/main")
+    ssh = f"git@{address.host}:{address.repository}.git"
+    sync.git_in(str(clone), "remote", "set-url", "origin", ssh)
+    sync.mark_synced("lup", at=reviewed)
+    sync.git_in(str(clone), "remote", "set-url", "origin", SHIPPED_URL)
+
+    found = sync.existing_upstream(sync.find_project("lup"))
+
+    assert found is not None
+    assert sync.checkpoint(sync.find_project("lup"), found) == reviewed
+
+
 def test_a_clone_another_project_made_is_linked_where_this_one_mounts_it(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

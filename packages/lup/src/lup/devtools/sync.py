@@ -723,12 +723,21 @@ def checkpoint_identity(found: Upstream) -> sync_state.ReviewSource:
 
 
 def checkpoint(proj: ProjectEntry, found: Upstream) -> str:
-    """The shared checkpoint wins over stale worktree-local declarations."""
+    """The shared checkpoint wins over stale worktree-local declarations.
+
+    It holds for the ref it was taken on, in the repository reviewed rather
+    than the spelling that reached it: `checkpoint_identity` reads the origin
+    as git resolves it, so a review recorded inside a contained session reads
+    the ssh spelling its rewrites put there, and `sync remote` may repoint
+    the clone itself -- one repository either way, and one review.
+    """
     recorded = sync_state.read(project_root(), proj["name"])
     if recorded is None:
         return proj.get("last_synced_commit", "")
     source = checkpoint_identity(found)
-    if recorded.source != source:
+    if recorded.source.ref != source.ref or not same_repository(
+        recorded.source.repository, source.repository
+    ):
         logger.warning(
             "%s checkpoint belongs to %s at %s; %s at %s has not been reviewed",
             proj["name"],
