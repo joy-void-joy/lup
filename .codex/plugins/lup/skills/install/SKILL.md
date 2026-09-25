@@ -54,7 +54,7 @@ unmerged work, and nothing downstream announces that. Resolve both before
 Phase 1:
 
 - `git -C <source> rev-parse --abbrev-ref HEAD` — the branch the library would come from
-- `git -C <source> symbolic-ref --short refs/remotes/origin/HEAD` — what the remote treats as stable
+- `git -C <source> ls-remote --symref origin HEAD` — what the remote treats as stable, asked of the remote itself, since a bare clone keeps no `refs/remotes/origin/HEAD` to read it from
 
 When they differ, Ask the user directly, offering concrete options, and wait for the answer: whether to proceed from the checkout's current branch, which carries work the stable branch has not reviewed, or from the stable branch instead
 

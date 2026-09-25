@@ -89,6 +89,10 @@ def test_existing_remote_branch_is_accepted(tmp_path: Path) -> None:
 def test_update_diagnoses_deleted_pin_before_materializing_its_worktree(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A project that rooted its scaffold branch, so the pin is all that is wrong."""
+    sh.git("init", "--quiet", str(tmp_path))
+    sh.git("-C", str(tmp_path), "commit", "--quiet", "--allow-empty", "-m", "adopted")
+    sh.git("-C", str(tmp_path), "branch", scaffold.ScaffoldSource().branch)
     remote = tmp_path / "remote"
     sh.git("init", "--bare", str(remote))
     (tmp_path / "pyproject.toml").write_text(

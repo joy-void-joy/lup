@@ -16,6 +16,7 @@ from pathlib import Path
 from lup_template.devtools.dev.init import (
     PACKAGE_IMPORT_RE,
     PACKAGE_STRING_ANCHOR_RE,
+    drop_stale_metadata,
     find_stale_references,
     is_renamer_module,
     rename_pattern_in_file,
@@ -108,3 +109,28 @@ class TestStaleReferenceReport:
         renamer.write_text('OLD = "lup_template"\n')
 
         assert find_stale_references(tmp_path) == []
+
+
+class TestStaleInstallMetadata:
+    """Left behind, the old name's metadata registers a second devtools app."""
+
+    def test_the_old_names_egg_info_goes_with_the_rename(self, tmp_path: Path) -> None:
+        stale = tmp_path / "src" / "lup_template.egg-info"
+        stale.mkdir(parents=True)
+        (stale / "entry_points.txt").write_text(
+            "[lup.devtools]\napplication = lup_template.devtools.main:app\n"
+        )
+
+        assert drop_stale_metadata(tmp_path, dry_run=True) == [
+            "  src/lup_template.egg-info: the old name's install metadata, removed"
+        ]
+        assert stale.is_dir()
+
+        drop_stale_metadata(tmp_path, dry_run=False)
+
+        assert not stale.exists()
+
+    def test_a_checkout_never_installed_has_none_to_remove(
+        self, tmp_path: Path
+    ) -> None:
+        assert drop_stale_metadata(tmp_path, dry_run=False) == []

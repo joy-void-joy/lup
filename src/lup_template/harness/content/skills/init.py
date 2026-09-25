@@ -4,11 +4,14 @@ import lup.harness.models as models
 import lup_template.harness.content.provenance as provenance
 
 SPELLING = provenance.Provenance(
-    library_git="git",
     project_devtools="uv run lup-devtools",
     library_checkout="<lup-checkout>",
+    branch_tip="uv run lup-devtools dev init base",
 )
-"""One checkout, unqualified: this skill turns the library's clone into the project."""
+"""One checkout, unqualified: this skill turns the checkout it runs in into the
+project, and reads lup's branches through the clone `dev init base` fetched --
+the checkout's own `origin` is the project's wherever it was generated rather
+than cloned."""
 
 SKILL = models.Skill(
     id="skill.init",
@@ -26,8 +29,14 @@ SKILL = models.Skill(
     prompt=models.PromptDocument(
         source=__name__,
         parts=[
-            models.Passage(module=__name__),
-            *provenance.branch_probes(SPELLING),
+            models.Passage(
+                module=__name__,
+                values={
+                    "ask": models.AskUser(
+                        question="whether to go on from the base, which carries work the default branch has not reviewed, or from the default branch instead"
+                    ),
+                },
+            ),
             models.Passage(
                 module=__name__,
                 name="phases",
@@ -52,6 +61,9 @@ SKILL = models.Skill(
                 module=__name__,
                 name="merge-the-guidance",
                 values={
+                    "ask": models.AskUser(
+                        question="whether to pin the branch and carry the copied half across the commits it moved past the base with dev update now, or to pin the recorded commit as a revision and move later"
+                    ),
                     "guidance_file_path": models.NativePath(
                         location="guidance_file", scope="every_tree"
                     ),

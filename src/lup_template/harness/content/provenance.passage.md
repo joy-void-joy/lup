@@ -1,5 +1,5 @@
 - `{{ library_git }} rev-parse --abbrev-ref HEAD` — the branch the library would come from
-- `{{ library_git }} symbolic-ref --short refs/remotes/origin/HEAD` — what the remote treats as stable
+- `{{ library_git }} ls-remote --symref origin HEAD` — what the remote treats as stable, asked of the remote itself, since a bare clone keeps no `refs/remotes/origin/HEAD` to read it from
 
 When they differ, {{ ask }}
 
@@ -46,7 +46,7 @@ is not on this list — a vendored copy is a fork with all the reconciliation
 that implies, and is only right for a project that genuinely intends to modify
 library source.
 
-The git mode resolves `subdirectory = "packages/lup"`, because the distribution sits inside the repository rather than at its root, and pins whichever ref you name. **The ref resolves against the remote, not against any checkout on disk**: uv fetches the branch as the remote has it, so work the remote has not seen is not in what you pinned. Before declaring a git source, read what the remote's branch actually resolves to — `{{ library_git }} ls-remote origin <branch>` names that tip — and if it is not the recorded commit, say so rather than pinning a dependency whose contents you have not accounted for.
+The git mode resolves `subdirectory = "packages/lup"`, because the distribution sits inside the repository rather than at its root, and pins whichever ref you name. **The ref resolves against the remote, not against any checkout on disk**: uv fetches the branch as the remote has it, so work the remote has not seen is not in what you pinned. Before declaring a git source, read what the remote's branch actually resolves to — `{{ branch_tip }}` names that tip — and if it is not the recorded commit, say so rather than pinning a dependency whose contents you have not accounted for.
 
 The extras come from what the project runs: `claude` and/or `codex` for the
 adapters it drives, `docker` for the code-execution sandbox, `web` for the

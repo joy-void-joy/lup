@@ -30,6 +30,7 @@ import lup.devtools.dev.scaffold_fit as scaffold_fit
 from lup.formats.banner import REGENERATE_COMMAND
 from lup.devtools.sync import ensure_local, find_project
 from lup.devtools.utils import decode_stderr, short_sha, uv
+from lup.execution.shell import git
 
 
 class CarrierDrift(BaseModel, frozen=True):
@@ -307,6 +308,12 @@ def updated(
     in the checkout. Then this pass is the second half of an earlier one: the
     commit was decided there, and re-resolving the pin now would move the
     carriers out from under a merge that is only part-way applied.
+
+    Nor before a scaffold branch stands. The merge an update is has two
+    sides and a base, and a project that never rooted the branch has no base:
+    compiling one now would root it at the pin, so the merge would find no
+    ancestor at all -- and the branch left standing would refuse the adoption
+    that answers it.
     """
     standing = scaffold.merging(root)
     if standing:
@@ -318,6 +325,15 @@ def updated(
             standing,
             report,
         )
+    if not scaffold.branch_head(root, source.branch):
+        report(
+            f"This project has not rooted {source.branch}, so there is no commit "
+            "its copied half was last carried up to, and nothing to merge from. "
+            "Root it once, at the commit the project was stamped from: "
+            "`dev scaffold adopt --base <commit>` -- `dev scaffold fit` measures "
+            "the candidates where that commit is not known. Nothing has moved."
+        )
+        raise typer.Exit(1)
     resolved = resolved_pin(root, distribution, commit, report, source.project)
     if not resolved:
         report(
@@ -352,6 +368,11 @@ def adopted(
     base older than either. Refused too where the checkout's own copy says
     the base is wrong: the argument decides every later merge, and
     :func:`scaffold_fit.checked_base` measures it rather than trusting it.
+
+    And refused over a staged change, before anything is fetched or measured:
+    adoption is recorded as a merge, and git refuses a merge over a staged
+    change -- which a checkout that was just renamed always holds, the rename
+    being staged moves.
     """
     standing = scaffold.branch_head(root, source.branch)
     if standing:
@@ -359,6 +380,13 @@ def adopted(
             f"{source.branch} already stands at {short_sha(standing)}, compiled "
             f"at {short_sha(scaffold.compiled_at(root, standing))}. Adoption "
             "happens once; `dev update` is every time after it."
+        )
+    staged = git.lines("-C", str(root), "diff", "--cached", "--name-only")
+    if staged:
+        raise typer.BadParameter(
+            f"{len(staged)} path(s) are staged in this checkout, and adoption is "
+            "recorded as a merge, which git refuses over a staged change. "
+            "Commit them first."
         )
     repository = upstream_checkout(source.project, report)
     commit = scaffold_fit.checked_base(

@@ -59,8 +59,11 @@ follow. Then run `uv run --no-sync lup-devtools dev library git --branch
 commit can instead be selected with `dev update --commit <sha>`. A transport
 failure is reported as unconfirmed reachability, never as a deleted branch.
 
-**If this project has never adopted a scaffold branch**, the update says so.
-Root one once, at the commit the project was stamped from:
+**If this project has never adopted a scaffold branch**, the update says so
+and moves nothing. Root one once, at the commit the project was stamped from,
+which `uv run lup-devtools dev init base` reads out of lup's history — the
+newest commit a clone shares with it, or the one whose tree a repository
+generated from the template holds in its root commit:
 
 ```bash
 uv run lup-devtools dev scaffold adopt --base <commit>
