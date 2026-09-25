@@ -49,7 +49,9 @@ from .words import (
     git_restore_operands,
     key_matches,
     opaque_argument,
+    operand_words,
     protected_write_target,
+    refspec_destination,
     refspec_effects,
     sed_invocation,
     unread_over_tracked,
@@ -471,6 +473,65 @@ def frozen_restore(
     )
 
 
+def forced_update(row: ShellRuleRow, arguments: list[str]) -> str:
+    """Why a forced update this row judges asks, or ``""`` where it does not.
+
+    What a force can discard is the whole question. An unconditional force --
+    a force flag, or a refspec's leading plus, which git lets override a lease
+    as readily as the flag does -- replaces whatever the remote holds, so it
+    can discard commits somebody else pushed. A lease replaces only what this
+    checkout last saw there, so on a branch of the caller's own it discards
+    nothing anybody else wrote, and that is the one force that allows. On a
+    protected branch the rewrite is itself the loss, since other people have
+    built on what it replaces; and a push naming no branch reaches the current
+    one, which a reader that cannot run git cannot tell apart from those.
+
+    Git applies the last of a lease flag and its `--no-` form, so this reads
+    them in order rather than asking whether one appears.
+    """
+    if not (row["force_flags"] or row["lease_flags"]):
+        return ""
+    lease = next(iter(row["lease_flags"]), "")
+    cancels = [f"--no-{flag.removeprefix('--')}" for flag in row["lease_flags"]]
+    unconditional = next(
+        (
+            word
+            for word in arguments
+            if flag_matches(word, row["force_flags"])
+            or "force" in refspec_effects(word)
+        ),
+        None,
+    )
+    if unconditional is not None:
+        refusal = f"; {lease} would refuse that" if lease else ""
+        return (
+            f"{unconditional} overwrites the remote branch whatever it holds,"
+            f" discarding commits someone else pushed{refusal}"
+        )
+    toggles = [
+        word
+        for word in arguments
+        if flag_matches(word, row["lease_flags"]) or word in cancels
+    ]
+    if not toggles or toggles[-1] in cancels:
+        return ""
+    refspecs = [
+        word
+        for word in operand_words(arguments, row["value_flags"])[1:]
+        if not word.startswith("^")
+    ]
+    named = [refspec_destination(word) for word in refspecs]
+    if not named or "" in named:
+        return (
+            "this forced push names no branch, so it rewrites whichever one the"
+            " checkout is on; name the branch so a shared one is not rewritten"
+        )
+    shared = next((ref for ref in named if ref in row["protected_refs"]), None)
+    if shared is not None:
+        return f"forcing {shared} rewrites a branch other people build on"
+    return ""
+
+
 def apply_command_row(
     row: ShellRuleRow, arguments: list[str], facts: WriteFacts | None = None
 ) -> KernelDecision:
@@ -596,8 +657,14 @@ def apply_command_row(
     # escalation, because an unresolved word could become either. What
     # separates them is what happens next: a write flag names a path, and
     # naming it is what lets the write be judged where every other spelling
-    # of a write is judged rather than by this row's single verdict.
-    guarding = [*row["ask_flags"], *row["write_flags"]]
+    # of a write is judged rather than by this row's single verdict. The force
+    # spellings join them for the opacity test alone: they are judged below.
+    guarding = [
+        *row["ask_flags"],
+        *row["write_flags"],
+        *row["force_flags"],
+        *row["lease_flags"],
+    ]
     # A literal probe flag says the invocation performs nothing, so the flag-
     # and refspec-earned questions below stand down. The opacity bounce stays:
     # an unreadable word could name a destination, and destination grammar is
@@ -637,16 +704,15 @@ def apply_command_row(
                 row, arguments, no_write_facts() if facts is None else facts
             )
     if stated == "allow" and row["ask_destinations"]:
-        # The first word that is not a flag, which is where git reads the
-        # repository from and nowhere else: every later operand is a refspec.
-        # A flag's separate value can land here instead — `-o <option>` — and
-        # a bare option word reads as a remote name, so the miss costs a
-        # question that was not asked rather than one that was owed.
+        # The first operand, which is where git reads the repository from and
+        # nowhere else: every later operand is a refspec. A flag declared as
+        # taking a separate value takes it along, so `-o <option>` never reads
+        # as the repository.
         #
         # No opacity test, on the same grounds as the block below: a row
         # declaring destination forms declares flag effects too, so an
         # unreadable word has already been bounced above.
-        named = next((word for word in arguments if not word.startswith("-")), "")
+        named = next(iter(operand_words(arguments, row["value_flags"])), "")
         form = destination_form(named)
         if form in row["ask_destinations"]:
             return row_verdict(
@@ -675,6 +741,12 @@ def apply_command_row(
                 row["reason"] or f"{carried[0]} would {carried[1]} a ref",
                 arguments=arguments,
             )
+    if stated == "allow" and not probing:
+        # No opacity test of its own either: the force spellings joined the
+        # guarded list above, so an unreadable word has already been bounced.
+        forced = forced_update(row, arguments)
+        if forced:
+            return row_verdict(row, "ask", forced, arguments=arguments)
     # Read after every de-escalation above and before the row's own answer,
     # because it changes what the loss *is* rather than whether the row asks:
     # a scratch grant is still a scratch grant, and a delete reaching outside
@@ -1235,8 +1307,140 @@ GH_API_BODY_FLAGS = (
 GH_API_READ_METHODS = ("GET", "HEAD")
 
 
-def decide_gh_api_words(words: list[str]) -> KernelDecision:
-    """Allow only read-method ``gh api`` calls, the way curl is screened.
+class GhApiRoute(TypedDict):
+    """One REST route a ``gh api`` write is judged by, beyond its method.
+
+    ``path`` is the route below ``repos/<owner>/<repo>``, a segment per entry:
+    ``*`` stands for any one segment, and a trailing ``**`` for the rest of the
+    path however many segments it has -- a branch name can carry slashes.
+
+    An ``allow`` holds only where the endpoint names this checkout's own
+    repository through gh's ``{owner}/{repo}`` placeholders, because a literal
+    owner and name can be anybody's: the same line ``gh pr create --repo``
+    draws. An ``ask`` holds wherever the route points, and is here for the
+    reason it gives, which says more than the method does.
+    """
+
+    methods: list[str]
+    path: list[str]
+    act: str
+    effect: DecisionEffect
+    reason: str
+
+
+GH_API_ROUTES: tuple[GhApiRoute, ...] = (
+    GhApiRoute(
+        methods=["POST"],
+        path=["pulls"],
+        act="opening a pull request",
+        effect="allow",
+        reason="gh api opening a pull request is `gh pr create` by another name",
+    ),
+    GhApiRoute(
+        methods=["PATCH"],
+        path=["pulls", "*"],
+        act="editing a pull request",
+        effect="allow",
+        reason="gh api editing a pull request is `gh pr edit` by another name",
+    ),
+    GhApiRoute(
+        methods=["POST", "DELETE"],
+        path=["pulls", "*", "requested_reviewers"],
+        act="changing who reviews a pull request",
+        effect="allow",
+        reason="gh api changing a pull request's reviewers is `gh pr edit`"
+        " by another name",
+    ),
+    GhApiRoute(
+        methods=["PUT"],
+        path=["pulls", "*", "merge"],
+        act="merging a pull request",
+        effect="allow",
+        reason="gh api merging a pull request is `gh pr merge` by another name",
+    ),
+    GhApiRoute(
+        methods=["POST"],
+        path=["merges"],
+        act="merging one branch into another",
+        effect="allow",
+        reason="gh api merging one branch into another is `git merge` on the forge",
+    ),
+    GhApiRoute(
+        methods=["POST"],
+        path=["issues"],
+        act="filing an issue",
+        effect="ask",
+        reason="filing an issue publishes a report the repository's watchers"
+        " are notified of",
+    ),
+    GhApiRoute(
+        methods=["DELETE"],
+        path=["git", "refs", "heads", "**"],
+        act="deleting a remote branch",
+        effect="ask",
+        reason="deleting a remote branch loses work no later push restores",
+    ),
+)
+"""The routes a write through ``gh api`` is judged by, as ``gh`` judges them.
+
+The pull-request and merge routes allow because the typed verbs reaching them
+do: an endpoint is one more spelling of opening, editing or merging a request,
+and a verdict that changed with the spelling would be two policies. Filing an
+issue and deleting a branch ask for what they are, rather than for the method
+that happens to reach them. A project whose forge access differs passes its
+own routes.
+"""
+
+
+def gh_api_route(
+    endpoint: str, method: str, routes: tuple[GhApiRoute, ...]
+) -> KernelDecision | None:
+    """What the declared routes say about one write, or ``None`` where none match.
+
+    gh accepts the endpoint with or without a leading slash, and a query
+    string names no route, so both are set aside before the segments are
+    compared.
+    """
+    segments = endpoint.removeprefix("/").partition("?")[0].split("/")
+    if len(segments) < 4 or segments[0] != "repos":
+        return None
+    owner, repository, below = segments[1], segments[2], segments[3:]
+    own = owner in ("{owner}", ":owner") and repository in ("{repo}", ":repo")
+    for route in routes:
+        pattern = route["path"]
+        spread = pattern[-1:] == ["**"]
+        fixed = pattern[:-1] if spread else pattern
+        shaped = (
+            len(below) > len(fixed) if spread else len(below) == len(fixed)
+        ) and all(
+            expected in ("*", actual)
+            for expected, actual in zip(fixed, below, strict=False)
+        )
+        if not shaped or method not in route["methods"]:
+            continue
+        if route["effect"] == "allow" and not own:
+            return KernelDecision(
+                "ask",
+                f"{route['act']} in {owner}/{repository} reaches a repository"
+                " nobody declared; `{owner}/{repo}` names this checkout's own",
+                purpose="external_consequence",
+                rule="shell:gh.api",
+                evaluator="gh-api-screen",
+            )
+        return KernelDecision(
+            route["effect"],
+            route["reason"],
+            purpose="external_consequence" if route["effect"] == "ask" else None,
+            rule="shell:gh.api",
+            evaluator="gh-api-screen",
+        )
+    return None
+
+
+def decide_gh_api_words(
+    words: list[str], routes: tuple[GhApiRoute, ...] = GH_API_ROUTES
+) -> KernelDecision:
+    """Allow read-method ``gh api`` calls, and writes to a declared route.
 
     ``gh api`` is the read path for everything the typed ``gh`` subcommands
     cannot express, so a blanket ask on it asks about the ordinary case. What
@@ -1244,10 +1448,31 @@ def decide_gh_api_words(words: list[str]) -> KernelDecision:
     in curl: the method, plus whether a body is being sent. A field flag
     implies POST even with no ``-X``, which is why it decides on its own
     rather than only informing the method.
+
+    A write then meets ``routes``, which judge it as the typed verb reaching
+    the same route would be judged. Only a call this reads whole reaches
+    them: a word it cannot classify keeps the write's own question, and a
+    call aimed at another host (``--hostname``) keeps it too.
     """
-    method = "GET"
+    method = ""
+    body = False
+    elsewhere = False
+    endpoints: list[str] = []
     expect_value = False
     expect_method = False
+
+    def writing(unread: str) -> KernelDecision:
+        """The body's question where one was sent, else the unread word's."""
+        if body:
+            return KernelDecision(
+                "ask",
+                "gh api sending a request body can change remote state",
+                purpose="external_consequence",
+                rule="shell:gh.api",
+                evaluator="gh-api-screen",
+            )
+        return unjudged(unread)
+
     for word in words[2:]:
         if expect_value:
             expect_value = False
@@ -1263,37 +1488,43 @@ def decide_gh_api_words(words: list[str]) -> KernelDecision:
             method = word.partition("=")[2]
             continue
         if word in GH_API_BODY_FLAGS or word.partition("=")[0] in GH_API_BODY_FLAGS:
-            return KernelDecision(
-                "ask",
-                "gh api sending a request body can change remote state",
-                purpose="external_consequence",
-                rule="shell:gh.api",
-                evaluator="gh-api-screen",
-            )
-        if word in GH_API_VALUE_FLAGS:
-            expect_value = True
+            body = True
+            expect_value = word in GH_API_BODY_FLAGS
             continue
-        if word.partition("=")[0] in GH_API_VALUE_FLAGS:
+        if word in GH_API_VALUE_FLAGS or word.partition("=")[0] in GH_API_VALUE_FLAGS:
+            elsewhere = elsewhere or word.partition("=")[0] == "--hostname"
+            expect_value = word in GH_API_VALUE_FLAGS
             continue
         if word.startswith("-"):
-            return unjudged(f"gh api option {word!r} is not classified")
+            return writing(f"gh api option {word!r} is not classified")
         if opaque_argument(word):
-            return unjudged(
+            return writing(
                 "a gh api endpoint that expands at run time is not classified"
             )
+        endpoints.append(word)
     if expect_value or expect_method:
-        return unjudged("gh api option has no value")
-    if method.upper() not in GH_API_READ_METHODS:
+        return writing("gh api option has no value")
+    stated = method.upper() or ("POST" if body else "GET")
+    if not body and stated in GH_API_READ_METHODS:
         return KernelDecision(
-            "ask",
-            f"gh api {method} can change remote state",
-            purpose="external_consequence",
+            "allow",
+            "read-only gh api call",
             rule="shell:gh.api",
             evaluator="gh-api-screen",
         )
+    routed = (
+        gh_api_route(endpoints[0], stated, routes)
+        if len(endpoints) == 1 and not elsewhere
+        else None
+    )
+    if routed is not None:
+        return routed
+    if body:
+        return writing("")
     return KernelDecision(
-        "allow",
-        "read-only gh api call",
+        "ask",
+        f"gh api {method} can change remote state",
+        purpose="external_consequence",
         rule="shell:gh.api",
         evaluator="gh-api-screen",
     )
