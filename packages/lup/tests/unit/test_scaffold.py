@@ -18,12 +18,14 @@ tested is what git does: a merge base, three diffs, and a conflict.
 from pathlib import Path
 
 import pytest
+import sh
 
 from lup.devtools.dev.scaffold import (
     ScaffoldRoot,
     ScaffoldSource,
     adopt,
     advanced,
+    branch_head,
     compiled,
     compiled_at,
     merged,
@@ -276,6 +278,28 @@ def test_a_compile_of_what_the_branch_already_holds_records_nothing(
     assert again == rooted
     assert widened != rooted
     assert compiled_at(adopter, widened) == base
+
+
+def test_an_adoption_whose_merge_refuses_leaves_no_branch_standing(
+    tmp_path: Path,
+) -> None:
+    """Both or neither: a branch rooted and never recorded blocks every retry.
+
+    A staged change is what a freshly renamed checkout holds, and git refuses
+    the recording merge over one -- after the branch was already rooted.
+    """
+    upstream, base = upstream_at_base(tmp_path)
+    adopter = adopter_from(tmp_path, upstream, base)
+    wrote(adopter, "src/demo/staged.py", "staged = True\n")
+    git("-C", str(adopter), "add", "src/demo/staged.py")
+
+    with pytest.raises(sh.ErrorReturnCode):
+        adopt(adopter, upstream, SOURCE, PACKAGE, base)
+
+    assert branch_head(adopter, SOURCE.branch) == ""
+    committed(adopter, "the staged work")
+    adopt(adopter, upstream, SOURCE, PACKAGE, base)
+    assert merged_at(adopter, SOURCE.branch) == base
 
 
 def test_the_merge_base_carries_which_upstream_commit_was_taken(

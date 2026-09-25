@@ -310,3 +310,24 @@ def test_a_base_naming_no_commit_is_refused_by_the_clone_that_would_compile_it(
         update.adopted(adopter, SOURCE, PACKAGE, "v0.2.0", print)
 
     assert "names no commit in this project's upstream clone" in str(refusal.value)
+
+
+def test_an_adoption_over_a_staged_change_is_refused_before_it_fetches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A checkout just renamed holds staged moves, and git would refuse the merge."""
+    upstream, base = upstream_at_base(tmp_path)
+    adopter = adopter_from(tmp_path, upstream, base)
+    wrote(adopter, "src/demo/staged.py", "staged = True\n")
+    git("-C", str(adopter), "add", "src/demo/staged.py")
+
+    def unreached(project: str, report: Callable[[str], None]) -> Path:
+        raise AssertionError("fetched upstream for an adoption that cannot land")
+
+    monkeypatch.setattr(update, "upstream_checkout", unreached)
+
+    with pytest.raises(typer.BadParameter) as refusal:
+        update.adopted(adopter, SOURCE, PACKAGE, base, print)
+
+    assert "Commit them first" in str(refusal.value)
+    assert branch_head(adopter, SOURCE.branch) == ""

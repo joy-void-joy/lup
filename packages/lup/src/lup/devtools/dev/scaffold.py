@@ -32,6 +32,7 @@ from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 from urllib.parse import urlsplit
 
+import sh
 from pydantic import BaseModel
 
 from lup.devtools.utils import short_sha
@@ -542,22 +543,36 @@ def adopt(
     what makes git's merge base the adoption commit from then on. Without it
     the two histories are unrelated and every update would offer the whole
     scaffold as new.
+
+    Both or neither: a merge that refuses -- over a staged change, or a hook
+    saying no -- puts the branch back where it stood. A branch rooted and
+    never recorded is the one state adoption cannot recover from, since it is
+    what every later adoption reads as having happened already.
     """
+    standing = branch_head(root, source.branch)
     recorded_commit = advanced(root, repository, source, package, base)
-    git(
-        "-C",
-        str(root),
-        "merge",
-        "--strategy=ours",
-        "--allow-unrelated-histories",
-        "--no-edit",
-        "-m",
-        f"adopt {source.branch} at {short_sha(base)}\n\n"
-        f"Records which commit of {source.project} this project's copied half "
-        f"was stamped from, so an update is a merge against that base rather "
-        f"than against nothing.\n\n{SCAFFOLD_TRAILER}: {base}\n",
-        recorded_commit,
-    )
+    try:
+        git(
+            "-C",
+            str(root),
+            "merge",
+            "--strategy=ours",
+            "--allow-unrelated-histories",
+            "--no-edit",
+            "-m",
+            f"adopt {source.branch} at {short_sha(base)}\n\n"
+            f"Records which commit of {source.project} this project's copied half "
+            f"was stamped from, so an update is a merge against that base rather "
+            f"than against nothing.\n\n{SCAFFOLD_TRAILER}: {base}\n",
+            recorded_commit,
+        )
+    except sh.ErrorReturnCode:
+        branch = f"refs/heads/{source.branch}"
+        if standing:
+            git("-C", str(root), "update-ref", branch, standing, recorded_commit)
+        else:
+            git("-C", str(root), "update-ref", "-d", branch, recorded_commit)
+        raise
     return recorded_commit
 
 

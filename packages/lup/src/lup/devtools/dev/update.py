@@ -30,6 +30,7 @@ import lup.devtools.dev.scaffold_fit as scaffold_fit
 from lup.formats.banner import REGENERATE_COMMAND
 from lup.devtools.sync import ensure_local, find_project
 from lup.devtools.utils import decode_stderr, short_sha, uv
+from lup.execution.shell import git
 
 
 class CarrierDrift(BaseModel, frozen=True):
@@ -352,6 +353,11 @@ def adopted(
     base older than either. Refused too where the checkout's own copy says
     the base is wrong: the argument decides every later merge, and
     :func:`scaffold_fit.checked_base` measures it rather than trusting it.
+
+    And refused over a staged change, before anything is fetched or measured:
+    adoption is recorded as a merge, and git refuses a merge over a staged
+    change -- which a checkout that was just renamed always holds, the rename
+    being staged moves.
     """
     standing = scaffold.branch_head(root, source.branch)
     if standing:
@@ -359,6 +365,13 @@ def adopted(
             f"{source.branch} already stands at {short_sha(standing)}, compiled "
             f"at {short_sha(scaffold.compiled_at(root, standing))}. Adoption "
             "happens once; `dev update` is every time after it."
+        )
+    staged = git.lines("-C", str(root), "diff", "--cached", "--name-only")
+    if staged:
+        raise typer.BadParameter(
+            f"{len(staged)} path(s) are staged in this checkout, and adoption is "
+            "recorded as a merge, which git refuses over a staged change. "
+            "Commit them first."
         )
     repository = upstream_checkout(source.project, report)
     commit = scaffold_fit.checked_base(
