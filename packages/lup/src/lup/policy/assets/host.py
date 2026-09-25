@@ -1367,6 +1367,35 @@ def foreign_repository(path_text: str, root: Path | None) -> bool:
     )
 
 
+def this_checkout_path(path_text: str, root: Path | None) -> str:
+    """This path as the session's own checkout spells it, or "" outside it.
+
+    :func:`worktree_path` anchors a path at the checkout nearest the file,
+    which is the right anchor for every rule but one. A repository nested
+    inside this checkout -- a probe kit given its own ``git init`` under
+    ``tmp/``, so a runtime launched there takes it as the project root -- has
+    a ``.git`` nearer the file than this checkout's, so the file arrives
+    spelled against the kit and claims none of the roles this checkout
+    declares for the tree around it. This is the other anchor, and the kernel
+    reads it for that one question.
+
+    Resolved before it is compared, so a link is judged where it lands: a
+    ``refs/`` entry pointing at another project is outside this checkout
+    however it is spelled. A relative path is anchored on the session's own
+    directory, where the tool carrying it resolves it, and a session in no
+    checkout holds nothing, which the empty answer says.
+    """
+    if root is None:
+        return ""
+    checkout = worktree_root(str(root))
+    if not checkout:
+        return ""
+    resolved = (root / path_text).resolve()
+    if not resolved.is_relative_to(checkout):
+        return ""
+    return resolved.relative_to(checkout).as_posix()
+
+
 def publish_edition(path_text: str) -> None:
     """Say which checkout an edit landed in, for the servers that would guess.
 

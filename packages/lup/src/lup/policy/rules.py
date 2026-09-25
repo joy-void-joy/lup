@@ -38,6 +38,7 @@ from lup.policy.assets.host import (
     resolved_write_targets,
     rewritten_text,
     text_at,
+    this_checkout_path,
     tracked_write_targets,
 )
 from lup.policy.kernel.effects import STRENGTH
@@ -356,6 +357,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 after=after,
                 foreign=foreign_repository(target, root),
                 outside_project=outside_this_project(target, root),
+                checkout_path=this_checkout_path(target, root),
                 resolution=None,
             )
             if self.authored is not None:
@@ -646,5 +648,6 @@ class EditPolicy(DecisionPolicy[EditBatch]):
                 import_boundaries=self.import_boundaries,
                 foreign=foreign_repository(path, root),
                 outside_project=outside_this_project(path, root),
+                checkout_path=this_checkout_path(path, root),
             )
         )

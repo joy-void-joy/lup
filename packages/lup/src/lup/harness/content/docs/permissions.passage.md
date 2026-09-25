@@ -425,6 +425,18 @@ protected edit paths. These records prevent accidental inheritance and stale
 policy execution; they are mutable local bookkeeping, not authentication
 against a hostile process with the same filesystem authority.
 
+A file another repository holds, with no destination grant, meets a referral
+in place of the gates below: the edit **asks**, and the reason says that
+repository's conventions are its own, so the way through is never to restyle
+its code into this one's. The exception is this checkout's own scratch. A
+repository nested under a root declared scratch here — a probe kit given its
+own `git init` under `tmp/` — is judged as the scratch around it, so an edit,
+a redirect and a command's output landing there are allowed like any other
+scratch file, on both runtimes and after the fact alike. The claim is read off
+the path as this checkout spells it, never as the nested repository does, so
+a kit under a sibling worktree's `tmp/`, a `refs/` link landing in another
+project, and another repository's own `tmp/` all keep the referral.
+
 Edit decisions cover protected paths, marker changes, size, the canonical
 anti-pattern audit, and declared import ownership. An edit over the size gate alone is deferred — the hook
 emits no decision, so auto-accept applies while hard gates stay explicit.

@@ -994,6 +994,7 @@ def rewrite_verdict(
         edit_rules=context["edit_rules"],
         foreign=document["foreign"],
         outside_project=document["outside_project"],
+        checkout_path=document["checkout_path"],
         import_boundaries=context["import_boundaries"],
     )
     if verdict.effect == "allow":

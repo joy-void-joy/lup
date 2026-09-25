@@ -198,6 +198,13 @@ class RewrittenDocumentRow(TypedDict):
     outside_project: bool
     """Whether it sits in no checkout whose conventions these rules are."""
 
+    checkout_path: str
+    """The same file as the session's own checkout spells it, or "" outside it.
+
+    Differs from ``path`` only where a repository nested inside the checkout
+    holds the file, which is the one place the two anchors disagree.
+    """
+
     resolution: ResolutionRow | None
     """What a checker settled about the rewritten text, where one was worth running."""
     decision: NotRequired[KernelDecision]

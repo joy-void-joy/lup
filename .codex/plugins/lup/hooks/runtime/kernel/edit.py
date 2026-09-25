@@ -3762,6 +3762,7 @@ def decide_edit(
     edit_rules: list[EditRuleRow] | None = None,
     foreign: bool = False,
     outside_project: bool = False,
+    checkout_path: str = "",
     displaced: DisplacedTargetRow | None = None,
     import_boundaries: list[ImportBoundaryRow] | None = None,
 ) -> KernelDecision:
@@ -3802,7 +3803,30 @@ def decide_edit(
     ``marker_files`` is the other end of that same reasoning: a file whose
     content is nothing but its own docstring costs a reviewer nothing either,
     wherever it sits.
+
+    ``checkout_path`` is the same file as the session's own checkout spells
+    it, and empty where that checkout does not hold the file. It differs from
+    ``path`` only where a repository nested inside the checkout holds the
+    file, and it answers one question: whether a file another repository
+    holds lies under a root this checkout declares scratch.
     """
+    # This checkout's scratch outranks the referral below. A repository nested
+    # under a root declared scratch here -- a probe kit given its own `git
+    # init` under `tmp/` -- is as disposable as the tree around it: its `.git`
+    # makes it a project root for a runtime launched inside, not somebody
+    # else's code to defer to. So the file is judged as this checkout spells
+    # it. The claim is read off that spelling alone, which is empty wherever
+    # the checkout does not hold the file -- a sibling worktree, a `refs/` link
+    # landing in another project, the machine's temporary root -- so each of
+    # those keeps the referral, and another repository's own `tmp/` is never
+    # read as this checkout's. Only a foreign file is re-read: a worktree of
+    # this repository placed under `tmp/` is still this repository's code.
+    if (
+        foreign
+        and checkout_path
+        and path_role(checkout_path, path_roles or []) == "scratch"
+    ):
+        path, foreign = checkout_path, False
     granted = allowances or []
     previous = before or ""
     updated = after or ""
