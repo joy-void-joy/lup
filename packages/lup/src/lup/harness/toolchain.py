@@ -33,6 +33,7 @@ from lup.harness.requirements import (
     Manifest,
     MisleadingAbsence,
     MountProbe,
+    BindProbe,
     Package,
     SENTINEL_VARIABLE,
     RefusedLaunch,
@@ -1079,6 +1080,41 @@ def inside_placement_requirement(
             because="The check could not verify the container marker and checkout mount."
         ),
         recovery="Check the container or mount error above, then rerun the launcher.",
+        install=install,
+    )
+
+
+def read_only_binds_requirement(
+    where: Side = "image",
+    install: list[Package] = [],
+) -> Requirement:
+    """Whether every path the lease binds read-only is bound read-only inside.
+
+    The shared git `config` and `hooks/` are what a session must not write,
+    because the host runs what they name, and what holds them is the mount
+    table rather than the lease that asked for it. Read from the table
+    because the two can differ: a read-only *file* bind is detached by the
+    kernel the moment the host renames over the file, which is how git
+    rewrites `config`, and a boundary reported whole over a file that is
+    writable is worse than one reported missing.
+
+    ``at_launch`` for the reason the placement probe is: its failure is
+    invisible from outside, and the session would open looking healthy.
+    """
+    return Requirement(
+        capability="read-only binds",
+        at_launch=True,
+        purpose="holding the shared git config and hooks out of a session's reach",
+        where=where,
+        exercise=BindProbe(),
+        absence=RefusedLaunch(
+            because=(
+                "A path the lease binds read-only is not read-only inside the "
+                "container, so the host's git configuration or hooks would be "
+                "writable from the session."
+            )
+        ),
+        recovery="Check the paths named above against the container engine's mounts, then rerun the launcher.",
         install=install,
     )
 

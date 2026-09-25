@@ -124,6 +124,28 @@ def observed_topology() -> MountTopology:
     )
 
 
+def bound_read_only(path: str) -> bool:
+    """Whether a read-only mount sits at exactly this path in the running table.
+
+    Asked of `findmnt` by its exit status, which answers both halves at
+    once -- that the path is a mount point, and that the mount is read-only
+    -- with no option list taken apart and no `\\040` in a path to unescape.
+    Exact rather than covering: a file bind the host detached leaves its
+    path under whatever share it sat in, and a covering reading would report
+    the share's mode for a bind that is gone.
+    """
+    try:
+        findmnt("--mountpoint", path, "--options", "ro")
+    except sh.ErrorReturnCode:
+        return False
+    return True
+
+
+def unheld(expected: list[str]) -> list[str]:
+    """The read-only binds a launch recorded that the running table no longer holds."""
+    return [path for path in expected if not bound_read_only(path)]
+
+
 def leased_read_only(path: Path) -> bool:
     """Whether this path sits on a mount the boundary made unwritable.
 

@@ -559,7 +559,9 @@ def test_a_launch_asks_only_the_image_entries_marked_always() -> None:
     not there exits 127 and a shell reads 127 as an answer -- so it works on,
     holding conclusions it has no way to doubt. That is the one kind of
     absence a session cannot discover for itself, which is what a launch is
-    for.
+    for. The fourth is the boundary's own: a read-only bind the engine did
+    not apply leaves the host's git `config` writable in a session that
+    opens looking entirely healthy.
     """
     declared = manifest()
     opening = ["podman", "run", "--rm", "lup-agent:abc"]
@@ -574,6 +576,7 @@ def test_a_launch_asks_only_the_image_entries_marked_always() -> None:
     assert at_launch == {
         "session reaches the model endpoint",
         "inside placement",
+        "read-only binds",
         "shell commands",
     }
     assert "contained agent session" in at_setup - at_launch

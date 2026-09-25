@@ -874,6 +874,7 @@ def verify_inside(
     environment: EnvVars | None = None,
     in_passing: bool = False,
     skipped: Sequence[str] = (),
+    accessible: Sequence[AccessibleRoot] = (),
 ) -> list[Finding]:
     """Exercise the image half behind an argv somebody already assembled.
 
@@ -885,11 +886,16 @@ def verify_inside(
 
     ``skipped`` is what another composition over the same image already
     exercised, by :meth:`Manifest.inside_signatures`.
+
+    ``accessible`` is the roots the argv was assembled with, so the read-only
+    binds a probe checks are the lease that argv carries -- taken after the
+    argv, whose assembly readies each shared git directory the lease reads.
     """
     if environment is None:
         environ: EnvVars = dict(os.environ)  # lup: ignore[os-environ]
     else:
         environ = dict(environment)
+    leased = fleet_lease(project_root(), list(accessible))
     return reported(
         manifest.check_inside(
             environ,
@@ -899,6 +905,7 @@ def verify_inside(
                 checkout=project_root(),
                 inside_sentinel=sentinels.inside,
                 host_sentinel=sentinels.host,
+                read_only_binds=list(leased.read_only),
             ),
             skipped,
         ),
@@ -972,6 +979,7 @@ def report_inside_requirements(
         setting_up=setting_up,
         sentinels=sentinels,
         skipped=skipped,
+        accessible=accessible_roots(),
     )
 
 
@@ -1758,6 +1766,7 @@ def session_argv(
         sentinels=sentinels,
         environment=environment,
         in_passing=True,
+        accessible=accessible,
     )
     if prepare is not None:
         prepare(probing(opening, stdin=True), Path(harness.image.config_home))
