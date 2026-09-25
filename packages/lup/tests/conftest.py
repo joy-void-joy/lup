@@ -36,6 +36,25 @@ def launcher_decisions_taken_away() -> Iterator[None]:
 
 
 @pytest.fixture(scope="session", autouse=True)
+def personal_config_withheld(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Iterator[None]:
+    """Answer as lup's defaults, whatever the person running the suite decided.
+
+    Session-scoped and autouse for the reason the launcher's variables are
+    taken away above: a developer's own ``~/.config/lup/config.toml`` — a
+    theme, a tier, a selected profile — answers the question a test meant to
+    put to the code. Pointed at an empty directory rather than unset, which
+    would fall back to that same file. See :mod:`lup.providers.user_config`.
+    """
+    with pytest.MonkeyPatch.context() as environment:
+        environment.setenv(
+            "XDG_CONFIG_HOME", str(tmp_path_factory.mktemp("xdg-config"))
+        )
+        yield
+
+
+@pytest.fixture(scope="session", autouse=True)
 def committer_identity_armed() -> Iterator[None]:
     """Give every throwaway repository somebody to commit as, writing no file.
 
