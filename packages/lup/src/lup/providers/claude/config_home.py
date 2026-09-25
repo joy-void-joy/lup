@@ -5,12 +5,16 @@
 """Claude Code's configuration document, and a private one per workspace.
 
 Where that document sits is Claude's own rule rather than a shape any
-portable contract carries: with ``CLAUDE_CONFIG_DIR`` set it is
-``.config.json`` inside the named directory, and with the variable unset it
-is ``~/.claude.json`` beside the home instead of in it. Both answers matter,
-because a session whose document was derived from the wrong one starts
-holding no record of the projects it is trusted in — which is the same
-degraded state as having no document at all.
+portable contract carries, and it is decided in two steps. A ``.config.json``
+inside the configuration home is read wherever one exists. Otherwise the
+document is ``.claude.json`` — inside the directory ``CLAUDE_CONFIG_DIR``
+names, or, with the variable unset, beside the home directory rather than
+inside ``~/.claude`` — spelled ``.claude-custom-oauth.json`` instead while a
+custom OAuth server is selected. Every part of that matters, because a
+session reading the wrong document starts holding no record of the projects
+it is trusted in, no theme and no onboarding — the same degraded state as
+having no document at all — and the first step is decided by existence
+alone: a legacy file that is merely present is the one read, however empty.
 
 Trust is recorded here too, and only for a workspace lup itself created.
 Invoking a run against a repository is an explicit act of trust by whoever
@@ -28,8 +32,13 @@ from lup.channels.models import write_atomic
 from lup.providers.session_home import SessionHomeLayout, SessionHomes
 from lup.types import EnvVars, JsonObject, JsonValue
 
-CLAUDE_CONFIG_FILE = ".config.json"
-"""What Claude Code calls its configuration document inside a config home."""
+CLAUDE_LEGACY_DOCUMENT = ".config.json"
+"""What Claude Code first called its configuration document, inside the home.
+
+Read ahead of every other name wherever one exists, whatever the environment
+selects, and never created by the runtime itself: a home holds one only
+because something put it there, and from then on it is the only document a
+session opened there reads."""
 
 CLAUDE_SESSION_ENV = "session-env"
 """Where it keeps one entry per session's per-call environment.
@@ -39,8 +48,22 @@ filesystem grants it computes — which is why a session that cannot write
 here loses every shell call to an error naming no boundary."""
 
 CLAUDE_HOME_DOCUMENT = ".claude.json"
-"""What it calls the same document when no config home is named: a file in
-the user's home directory rather than an entry inside ``~/.claude``."""
+"""What it calls that document wherever no legacy one exists.
+
+An entry inside the directory ``CLAUDE_CONFIG_DIR`` names, and with nothing
+named a file in the user's home directory rather than an entry inside
+``~/.claude`` — so naming ``~/.claude`` outright selects a different document
+than naming nothing."""
+
+CLAUDE_OAUTH_URL_ENV = "CLAUDE_CODE_CUSTOM_OAUTH_URL"
+"""The variable selecting an OAuth server other than Claude's own."""
+
+CLAUDE_OAUTH_DOCUMENT = ".claude-custom-oauth.json"
+"""The document read in ``.claude.json``'s place while that variable is set.
+
+An account signed in through another OAuth server keeps a document of its
+own, so one home can hold both and the variable decides which a session
+reads."""
 
 CLAUDE_HOME_DIR = ".claude"
 """The configuration home a session falls back to, named in the user's home."""
@@ -49,13 +72,20 @@ WORKSPACE_SETTINGS = "settings.json"
 """A workspace's own settings, inside the directory Claude reads it from."""
 
 CLAUDE_BACKUP_DIR = "backups"
-"""Where Claude Code copies a document it could not read, beside the home."""
+"""Where Claude Code copies a document it could not read, inside the home
+wherever the document itself sits."""
 
 TRUST_FIELD = "hasTrustDialogAccepted"
 """The field a project entry carries once its workspace has been trusted."""
 
-CLAUDE_HOME_LAYOUT = SessionHomeLayout(private_files=[CLAUDE_CONFIG_FILE])
-"""Claude keeps one document, and it is the one a startup rewrites."""
+CLAUDE_HOME_LAYOUT = SessionHomeLayout(
+    private_files=[CLAUDE_LEGACY_DOCUMENT, CLAUDE_HOME_DOCUMENT, CLAUDE_OAUTH_DOCUMENT]
+)
+"""Claude keeps one document, which a startup rewrites, under any of these names.
+
+Every one of them is private: a derived home linking any back to the shared
+home would hand its sessions the shared document again, and a linked legacy
+one would be read ahead of the home's own."""
 
 
 class ClaudeConfigUnreadable(RuntimeError):
@@ -138,17 +168,27 @@ class ClaudeConfigHome(BaseModel, frozen=True):
         return None
 
 
+def home_document(environment: EnvVars) -> str:
+    """What Claude Code calls its document under this environment, legacy aside."""
+    if environment.get(CLAUDE_OAUTH_URL_ENV):
+        return CLAUDE_OAUTH_DOCUMENT
+    return CLAUDE_HOME_DOCUMENT
+
+
 def selected_config_home(environment: EnvVars) -> ClaudeConfigHome:
-    """The home and document a session opened under this environment reads."""
+    """The home and document a session opened under this environment reads.
+
+    Claude Code's own resolution, in its own order: a legacy document inside
+    the home wherever one exists, and otherwise the current one — inside a
+    named home, or beside the home directory when none is named.
+    """
     named = environment.get(CLAUDE_CONFIG_DIR)
-    if named is None:
-        return ClaudeConfigHome(
-            directory=default_config_home(),
-            document=Path.home() / CLAUDE_HOME_DOCUMENT,
-        )
-    directory = Path(named).expanduser()
+    directory = default_config_home() if named is None else Path(named).expanduser()
+    legacy = directory / CLAUDE_LEGACY_DOCUMENT
+    beside = Path.home() if named is None else directory
+    current = beside / home_document(environment)
     return ClaudeConfigHome(
-        directory=directory, document=directory / CLAUDE_CONFIG_FILE
+        directory=directory, document=legacy if legacy.exists() else current
     )
 
 
@@ -327,10 +367,16 @@ def workspace_config_environment(
     under whichever one that environment already selects, so a profile
     naming the account still decides the account: this narrows what a
     session writes, never which login it writes under.
+
+    The home keeps its document under the current name, seeded from whichever
+    document the selected home is read from, legacy or current. It holds no
+    legacy one, whatever put one there, because Claude Code would read that
+    in place of the home's own — and the home is lup's to keep that way.
     """
     selected = selected_config_home(environment)
     home = SessionHomes(selected.directory, layout).derive(workspace)
-    document = home / CLAUDE_CONFIG_FILE
+    (home / CLAUDE_LEGACY_DOCUMENT).unlink(missing_ok=True)
+    document = home / home_document(environment)
     if not document.exists():
         save_document(document, load_document(selected.document))
     if trust:

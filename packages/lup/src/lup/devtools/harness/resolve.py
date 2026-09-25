@@ -1682,8 +1682,11 @@ def run_resolve(
                 workspace,
                 trust=run_owned(workspace, root, worktree_root),
             )
+            # The whole session environment rather than the home alone: which
+            # document a session reads depends on more of it than the home.
+            session = {**environment, **derived}
             degradation = untrusted_degradation(
-                workspace, selected_config_home(derived).document
+                workspace, selected_config_home(session).document
             )
             if degradation is not None:
                 raise typer.BadParameter(
@@ -1691,7 +1694,7 @@ def run_resolve(
                     "was invoked against and to the checkouts it made of that "
                     f"repository under {worktree_root}, and to nothing else."
                 )
-            return {**environment, **derived}
+            return session
 
         # Once, before anything is leased. Every private home this run derives
         # is seeded from the one document this reads, so a run that cannot

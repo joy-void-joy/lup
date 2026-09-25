@@ -7,6 +7,7 @@ would then be one class answering for two powers. Composing it instead lets
 them share every byte of the format and stay separately constructible.
 """
 
+import os
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -16,6 +17,7 @@ from lup.providers.claude.config import (
     ClaudeProfileRegistry,
     ClaudeProfileSelection,
 )
+from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.providers.profiles import ProfileNames, ProfileRegistrar
 
 REGISTRY_PATH = Path.home() / ".lup" / "profiles.json"
@@ -76,15 +78,24 @@ class AccountFile:
         )
 
     def resolve_config_dir(self, name: str | None = None) -> Path:
-        """Resolve explicit, active, then default through the typed registry."""
+        """Resolve explicit, active, then default through the typed registry.
+
+        The default names no home, so it answers with the one the process
+        environment selects: the home a session opened under that default
+        runs in, which a reader of its login has to agree with.
+        """
         registry = self.resolver_registry()
         selected = name or registry.active
-        if selected is None:
-            return registry.default.config_directory
         try:
-            return registry.profiles[selected].config_directory
+            selection = (
+                registry.default if selected is None else registry.profiles[selected]
+            )
         except KeyError as error:
             raise KeyError(f"unknown Claude profile {selected!r}") from error
+        if selection.config_directory is not None:
+            return selection.config_directory
+        # lup: ignore[os-environ] — the environment an unnamed profile inherits
+        return CLAUDE_LOGIN.selected_home(dict(os.environ))
 
 
 class ClaudeProfileNames(ProfileNames):

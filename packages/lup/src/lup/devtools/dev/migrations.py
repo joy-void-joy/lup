@@ -155,6 +155,48 @@ DECLARED: list[Migration] = [
             ),
         ],
     ),
+    Migration(
+        subjects=["CLAUDE_CONFIG_FILE"],
+        reason=(
+            "Claude Code reads `.config.json` only as a legacy document, ahead "
+            "of `.claude.json` wherever one exists, so the constant naming it as "
+            "the configuration document sent every reader to a file most homes "
+            "do not hold, and every derived home it seeded began empty"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Read the document a session uses from "
+                    "selected_config_home(environment).document in "
+                    "lup.providers.claude.config_home, which resolves it by Claude "
+                    "Code's own rule, and name CLAUDE_LEGACY_DOCUMENT where only "
+                    "the legacy file is meant."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=["ClaudeProfileSelection", "ClaudeProfileRegistry"],
+        reason=(
+            "an unnamed Claude profile named ~/.claude as the configuration home, "
+            "and a named ~/.claude makes Claude Code read ~/.claude/.claude.json "
+            "rather than the ~/.claude.json it reads when nothing is named, so "
+            "every session opened through the default started from a document "
+            "the account never wrote; the default names no home, as Codex's does"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Read ClaudeProfileSelection.config_directory as optional: "
+                    "None leaves whichever home the session's environment already "
+                    "selects, and AccountFile.resolve_config_dir() answers that "
+                    "home, honouring whichever one the environment names. A "
+                    "registry that must pin a home passes "
+                    "default=ClaudeProfileSelection(config_directory=...)."
+                )
+            ),
+        ],
+    ),
 ]
 """Every break this library has taken since its last release, and what to do.
 

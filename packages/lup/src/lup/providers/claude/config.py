@@ -9,7 +9,6 @@ from lup.providers.claude.runtime import (
     ClaudeSessionConfig,
     create_claude,
 )
-from lup.providers.claude.config_home import default_config_home
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.providers.config import ConfigTransform, ProfileResolver, ProfileSelector
 
@@ -19,7 +18,15 @@ PLACEHOLDER_CREDENTIAL = "dummy"
 class ClaudeProfileSelection(BaseModel, frozen=True):
     """One complete Claude account/configuration home."""
 
-    config_directory: Path
+    config_directory: Path | None = None
+    """The configuration home a session is pointed at, or ``None`` for
+    whichever one its environment already selects.
+
+    ``None`` rather than ``~/.claude``, because naming that directory is not
+    the selection naming none makes: Claude Code then reads
+    ``~/.claude/.claude.json`` instead of the ``~/.claude.json`` beside it, and
+    a session opened that way starts from a document the account never wrote.
+    """
 
 
 class ClaudeProfileRegistry(BaseModel, frozen=True):
@@ -27,11 +34,7 @@ class ClaudeProfileRegistry(BaseModel, frozen=True):
 
     profiles: dict[str, ClaudeProfileSelection] = {}
     active: str | None = None
-    default: ClaudeProfileSelection = Field(
-        default_factory=lambda: ClaudeProfileSelection(
-            config_directory=default_config_home()
-        )
-    )
+    default: ClaudeProfileSelection = Field(default_factory=ClaudeProfileSelection)
 
 
 class ClaudeConfigDirectoryTransform(ConfigTransform[ClaudeSessionConfig]):
@@ -42,7 +45,10 @@ class ClaudeConfigDirectoryTransform(ConfigTransform[ClaudeSessionConfig]):
 
     def apply(self, config: ClaudeSessionConfig) -> ClaudeSessionConfig:
         environment = dict(config.environment)
-        environment.update(CLAUDE_LOGIN.environment(self.selection.config_directory))
+        if self.selection.config_directory is not None:
+            environment.update(
+                CLAUDE_LOGIN.environment(self.selection.config_directory)
+            )
         return config.model_copy(update={"environment": environment})
 
 
