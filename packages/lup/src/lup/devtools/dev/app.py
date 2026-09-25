@@ -26,6 +26,7 @@ import lup.devtools.dev.library as library_mod
 import lup.devtools.dev.history as history
 import lup.devtools.dev.undo as undo
 import lup.devtools.dev.model_config as model_config_mod
+import lup.devtools.dev.model_catalog as model_catalog_mod
 import lup.devtools.dev.environment as environment_mod
 import lup.devtools.dev.pending as pending_mod
 import lup.devtools.dev.plugin as plugin_mod
@@ -958,6 +959,28 @@ def create_dev_app(
             raise typer.Exit(1) from error
         verb = "verified" if check_only else "written"
         typer.echo(f"Lup rule reference {verb}: {destination}")
+
+    @app.command("models")
+    def models_cmd(
+        check_only: Annotated[
+            bool,
+            typer.Option("--check", help="Fail where a CLI's lineup moved"),
+        ] = False,
+    ) -> None:
+        """Read each runtime's model lineup from its CLI, and compile its types.
+
+        Rewrites the snapshot each provider package commits and the module
+        compiled from it. The gate never runs this — it needs both CLIs
+        installed — and recompiles the modules from the snapshots instead.
+        """
+        drifts = model_catalog_mod.refresh_catalogs(
+            model_catalog_mod.library_catalogs(), project_root(), check=check_only
+        )
+        for line in (line for drift in drifts for line in drift.lines()):
+            typer.echo(line)
+        if check_only and not all(drift.settled() for drift in drifts):
+            typer.echo(f"Run `{model_catalog_mod.MODELS_COMMAND}`.", err=True)
+            raise typer.Exit(1)
 
     @app.command("modules")
     def modules_cmd(
