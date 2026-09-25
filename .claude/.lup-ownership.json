@@ -331,7 +331,7 @@
     {
       "path": ".claude/plugins/lup/commands/upstream.md",
       "category": "generated",
-      "sha256": "7bbb4ddb6a7235a33d8982690e12cbcc624b7ded9c7bd0073651432c590c6412",
+      "sha256": "afd9a5b014480146a93402359d7c1a790e9083f7b7b3a10960a07c3f681b6203",
       "semantic_id": "skill.upstream",
       "executable": false
     },

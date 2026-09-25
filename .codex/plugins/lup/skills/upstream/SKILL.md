@@ -37,11 +37,12 @@ tree compiled from lup's own declarations — is lup's.
 `refs/lup` is lup's working tree, and a session holds it read-write from its
 first launch: the registration `sync.json` ships names lup's repository and
 mounts it `rw`, so the launch clones it under `~/.cache/lup/sync/lup.git`
-where nothing is there yet, attaches a worktree, and mounts that. A machine
-that keeps its own checkout of lup has registered that one instead, and
-`refs/lup` is its working tree. Where the project resolves lup from a
-repository, the registration follows that pin, so the checkout is always a
-clone of the repository the library comes from.
+where nothing is there yet, attaches a worktree for its default branch, and
+mounts the whole clone -- so a worktree cut in it later is as writable as
+that one. A machine that keeps its own checkout of lup has registered that
+one instead, and `refs/lup` is its working tree. Where the project resolves
+lup from a repository, the registration follows that pin, so the checkout is
+always a clone of the repository the library comes from.
 
 Cut the branch there, not here, from lup's integration branch:
 
@@ -80,14 +81,10 @@ The launch records the accepted evaluator bytes; a writable parent directory
 or a `refs/` symlink alone supplies no repository policy grant.
 
 Generate both native trees in a newly created worktree before editing it.
-When the launch explicitly mounted the writable bare lup repository, an
-operator can accept that worktree's policy without restarting this session.
-The registration mounts lup's worktree rather than that bare half, so a launch
-that should accept `<fix>` names it as well: `--mount <bare>`, where
-`git -C refs/lup rev-parse --path-format=absolute --git-common-dir` prints
-`<bare>`. Until then an edit in `<fix>` is judged by this project's policy as
-another repository's file, not by lup's. From the adopter checkout, the
-operator runs:
+Until its policy is accepted, an edit in `<fix>` is judged by this project's
+policy as another repository's file, not by lup's. The launch mounted lup's
+clone whole, so an operator accepts it without restarting this session; from
+the adopter checkout, the operator runs:
 
 ```bash
 uv run lup-devtools harness policy-refresh --nonce <launch-nonce> --repository <canonical-worktree-path>
@@ -97,8 +94,10 @@ This accepts only a worktree inside the original mount and belonging to that
 same Git repository. It is also the recovery after accepted generated policy
 changes: regenerate there, then have the operator refresh its snapshot. The
 requesting agent cannot approve replacement policy itself. A worktree outside
-the original mount needs a launch granting that path. Run the upstream gate
-even when its hook allows an edit; its checks also cover the completed branch.
+the original mount needs a launch granting that path -- which is where a
+checkout this machine keeps leaves `<fix>`, because a registration naming a
+path mounts that working tree alone. Run the upstream gate even when its hook
+allows an edit; its checks also cover the completed branch.
 
 Two conventions of lup's that are easy to miss from outside it:
 
