@@ -50,6 +50,19 @@ def create_git_app(declared: Callable[[], DevDeclarations]) -> typer.Typer:
         help="The git hooks refusing stale artifacts and a failing gate",
     )
 
+    @app.callback()
+    def guard_worktree_pointers() -> None:
+        """Refuse any git-workflow command run over a redirected worktree set.
+
+        The one host-side chokepoint for this command tree: every `dev git`
+        subcommand -- and so every `/lup:land` step, which runs them -- passes
+        through here before running git across the worktrees, so a pointer a
+        contained session moved is caught once rather than at each command. A
+        layout with no sibling worktrees no-ops, leaving a plain checkout's
+        commands untouched.
+        """
+        worktree.refuse_redirected_pointers()
+
     # -- worktree commands --
 
     @worktree_app.command("create")

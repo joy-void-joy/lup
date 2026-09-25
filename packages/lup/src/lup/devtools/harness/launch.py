@@ -120,7 +120,7 @@ from lup.devtools.harness.preflight import (
     retire_mount_table,
     sweep_ledgers,
 )
-from lup.devtools.dev.worktree import RelocationHint
+from lup.devtools.dev.worktree import RelocationHint, refuse_redirected_pointers
 from lup.devtools.layout import get_tree_dir
 
 
@@ -364,6 +364,11 @@ def ready_to_open(
     generate_targets(companions, repository_writers, in_passing=not generate_only)
     if generate_only:
         return None
+    # Before any host git runs on the way in -- base freshness, status, the
+    # preflight's own probes -- so a session a previous contained one left with
+    # a redirected worktree pointer is refused here rather than opened onto git
+    # reading the config that pointer now leads to.
+    refuse_redirected_pointers()
     # Before anything writes one, so a launch that was killed last week does
     # not leave its measurement standing for somebody to find. On the way in
     # rather than only on the way out, because the launch that crashed is
