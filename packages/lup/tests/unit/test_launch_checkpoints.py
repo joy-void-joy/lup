@@ -62,7 +62,7 @@ def test_claude_checkpoints_before_preflight_and_after_close(
     monkeypatch.setattr(
         launch,
         "claude_sandbox_arguments",
-        lambda _plugin, sandbox=launch.LaunchSandbox.INNER, accessible=[]: [],
+        lambda _plugin, sandbox=launch.LaunchSandbox.INNER, accessible=[], settings=None: [],
     )
     monkeypatch.setattr(launch, "non_interactive_environment", lambda _env: {})
     monkeypatch.setattr(

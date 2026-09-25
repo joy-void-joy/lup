@@ -8,9 +8,19 @@ runtime in to get it.
 import json
 
 from lup.providers.confinement import ProviderConfinement
+from lup.types import JsonObject
+
+# lup: ignore[constant-declaration] — Claude Code's own settings key for its
+# sandbox, spelled as the CLI reads it
+CLAUDE_SANDBOX_OFF: JsonObject = {"sandbox": {"enabled": False}}
+"""The settings document standing Claude Code's own sandbox down.
+
+Held as data beside the argv below, because the CLI reads one ``--settings``
+document: a launch with more to say — an effort's settings — merges into this
+rather than passing a second flag the CLI would read in its place."""
 
 CLAUDE_CONFINEMENT = ProviderConfinement(
-    off=["--settings", json.dumps({"sandbox": {"enabled": False}})]
+    off=["--settings", json.dumps(CLAUDE_SANDBOX_OFF)]
 )
 """What tells Claude Code that the container around it is the boundary.
 

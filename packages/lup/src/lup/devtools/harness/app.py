@@ -448,6 +448,15 @@ def create_harness_app(
                 str | None,
                 typer.Option("--model", "-m", help="Native model override"),
             ] = None,
+            effort: Annotated[
+                str | None,
+                typer.Option(
+                    "--effort",
+                    help="Reasoning effort: low, medium, high, xhigh, max, or "
+                    "ultra (xhigh with ultracode on); refused where the "
+                    "model's catalog row lacks it",
+                ),
+            ] = None,
             generate_only: Annotated[
                 bool,
                 typer.Option("--generate-only", help="Generate without launching"),
@@ -558,6 +567,7 @@ def create_harness_app(
                 mounts=launch.declared_mounts(mount, mount_ro),
                 devices=launch.declared_devices(device),
                 recorder=recorder_for("claude"),
+                effort=effort,
             )
 
     codex_target = targets.builder("codex")
@@ -611,6 +621,14 @@ def create_harness_app(
             model: Annotated[
                 str | None,
                 typer.Option("--model", "-m", help="Native model override"),
+            ] = None,
+            effort: Annotated[
+                str | None,
+                typer.Option(
+                    "--effort",
+                    help="Reasoning effort: low, medium, high, xhigh, max, or "
+                    "ultra; refused where the model's catalog row lacks it",
+                ),
             ] = None,
             generate_only: Annotated[
                 bool,
@@ -730,6 +748,7 @@ def create_harness_app(
                 mounts=launch.declared_mounts(mount, mount_ro),
                 devices=launch.declared_devices(device),
                 recorder=recorder_for("codex"),
+                effort=effort,
             )
 
     return app
