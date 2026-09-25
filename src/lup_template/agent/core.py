@@ -6,19 +6,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import AnyHttpUrl, BaseModel, SecretStr, TypeAdapter, ValidationError
+from pydantic import AnyHttpUrl, BaseModel, SecretStr
 
 from lup.providers.claude import ClaudeCompatibleEndpoint
 from lup.providers.claude.config import ClaudeCompatibilityTransform
 from lup.providers.claude.model_choice import ClaudeModelChoice, claude_model_choice
-from lup.providers.claude.models import ClaudeEffort
 from lup.providers.claude import Claude, ClaudeSandboxConfig, SESSION_THINKING_TOKENS
 from lup.tools.native import NativeToolGroup, NativeTools
 from lup.providers.claude.subagents import subagent_tools as claude_subagent_tools
 from lup.providers.codex import CodexCompatibleEndpoint
 from lup.providers.codex.config import CodexCompatibilityTransform
 from lup.providers.codex.model_choice import CodexModelChoice, codex_model_choice
-from lup.providers.codex.models import CodexEffort
 from lup.providers.codex import Codex, CodexMcpServerConfig
 from lup.providers.codex.subagents import CodexSubagentTools
 from lup.providers.codex.subagents import subagent_tools as codex_subagent_tools
@@ -224,7 +222,7 @@ def provider_factory(
                 if session_defaults
                 else None
             ),
-            effort=normalize_claude_effort(settings.reasoning_effort),
+            effort=settings.reasoning_effort,
             cwd=cwd,
             add_dirs=add_dirs or list(settings.extra_dirs),
             environment=(
@@ -327,9 +325,7 @@ def provider_factory(
                 or ("on-request" if hooks is not None else "never")
             ),
             hooks=hooks,
-            effort=normalize_codex_effort(
-                settings.codex_effort or settings.reasoning_effort
-            ),
+            effort=settings.codex_effort or settings.reasoning_effort,
             submission_gate_resolver=submission_gate,
             mcp_servers={**applications.mcp_servers, **(codex_mcp_servers or {})},
             application_tools=applications.application_tools,
@@ -358,16 +354,6 @@ def provider_factory(
         return config
 
     raise ValueError(f"unsupported engine {engine!r}")
-
-
-def normalize_claude_effort(value: str | None) -> ClaudeEffort | None:
-    """Validate the application setting against Claude's effort ladder."""
-    if value is None:
-        return None
-    try:
-        return TypeAdapter(ClaudeEffort).validate_python(value)
-    except ValidationError as error:
-        raise ValueError(f"unsupported Claude reasoning effort {value!r}") from error
 
 
 def normalize_codex_sandbox(
@@ -415,16 +401,6 @@ def normalize_codex_approval(
         f"Codex approval policy {value!r} is not one the app-server accepts; "
         "use 'never', 'on-request', 'untrusted', or 'granular'"
     )
-
-
-def normalize_codex_effort(value: str | None) -> CodexEffort | None:
-    """Validate the application setting against Codex's effort ladder."""
-    if value is None:
-        return None
-    try:
-        return TypeAdapter(CodexEffort).validate_python(value)
-    except ValidationError as error:
-        raise ValueError(f"unsupported Codex reasoning effort {value!r}") from error
 
 
 def decorate_factory(
