@@ -772,7 +772,7 @@
     {
       "path": "docs/native-capabilities.md",
       "category": "generated",
-      "sha256": "cb1078cae05e8bab03802b6086456754201a9349f8993899ddcd5c46c02bae9c",
+      "sha256": "54934356911b1024e200e268a77b93794f8acbbd9243dfe9d6c341954f5f3cee",
       "semantic_id": "docs.native-capabilities",
       "executable": false
     },
@@ -800,7 +800,7 @@
     {
       "path": "docs/platform-differentiation.md",
       "category": "generated",
-      "sha256": "cfe8fc705ee3bb84cf961d49b1b87faf562f0cb90f6dd92b9490193eca373eb4",
+      "sha256": "625f4c5931b13fe99668338d9993052abbda81e5f17a81ea2747c16150fde5f2",
       "semantic_id": "docs.platform-differentiation",
       "executable": false
     },
