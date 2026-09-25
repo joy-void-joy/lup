@@ -97,7 +97,7 @@ inbox="$root/{INBOX_DIR}/{MEMBER_KIND}-$LUP_COORDINATION_MEMBER"
 [ -d "$inbox" ] || exit 0
 set -- "$inbox"/*.json
 [ -e "$1" ] || exit 0
-exec python3 "${{0%/*}}/../runtime/{RUNTIME_MODULE}" "$root" "$LUP_COORDINATION_MEMBER"
+exec python3 -s "${{0%/*}}/../runtime/{RUNTIME_MODULE}" "$root" "$LUP_COORDINATION_MEMBER"
 """
 
 

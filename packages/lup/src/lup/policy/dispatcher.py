@@ -199,6 +199,11 @@ def hook_guard_artifact(plugin_root: Path, semantic_id: str) -> Artifact:
     Native runtimes can display the registered command with a hook error.
     Keeping recovery text in this script makes it visible only when needed.
     The inline command still refuses if this script or its shell is missing.
+
+    The interpreter is started with ``-s``, as every generated hook's is:
+    the dispatcher reaches only the standard library and the runtime beside
+    it, so the user's own site directory -- under a home the session writes
+    -- has nothing it needs and is never read.
     """
     return Artifact.generated(
         path=plugin_root / "hooks" / "scripts" / GUARD_SCRIPT,
@@ -213,7 +218,7 @@ if ! command -v python3 >/dev/null 2>&1; then
     printf 'Lup hook cannot start: python3 is missing. Install Python 3 or fix PATH.\\n' >&2
     exit {REFUSAL_STATUS}
 fi
-python3 "$script"
+python3 -s "$script"
 lup_hook_status=$?
 case "$lup_hook_status" in
     0|{REFUSAL_STATUS}) exit "$lup_hook_status" ;;

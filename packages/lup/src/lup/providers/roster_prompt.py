@@ -171,7 +171,7 @@ case "$shared" in
 esac
 root="$shared/{STORE_DIR}/{COORDINATION_DIR}"
 [ -d "$root/{MEMBERS_DIR}" ] || exit 0
-exec python3 "${{0%/*}}/../runtime/{entry}" "$root" "${MEMBER_ENV}" "{event}"{home_argument}{event_arguments}
+exec python3 -s "${{0%/*}}/../runtime/{entry}" "$root" "${MEMBER_ENV}" "{event}"{home_argument}{event_arguments}
 """
 
 
