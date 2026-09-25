@@ -96,9 +96,15 @@ architecture forks earn their turn.
 - **Each stands alone**: the failure it answers, drawn from the worked
   example with where it is recorded; the options; your recommendation marked
   as yours; one question. Someone who read nothing else can answer it.
+- **A decision about an interface is shown as a code sketch** — the few
+  lines the user would write under each option — not described in prose.
+- **Keep each one short**: the problem, what was checked, the options, the
+  recommendation — nothing about how you got there.
 - **Open every later reply with what is now decided, read back in your
   words.** A misreading surfaces there — "I'm unsure that should be on by
-  default" — and costs one line to fix instead of a build.
+  default" — and costs one line to fix instead of a build. When a check
+  reversed something you told the user, the readback says so plainly: what
+  you said, what the check found, what now holds.
 
 ### When the user says "walk me through" or "from scratch"
 
@@ -127,8 +133,10 @@ architecture forks earn their turn.
   recommendation with a measurement behind it is the turn worth taking, not
   an embarrassment to soften.
 - **A harness behaviour is measured with a probe kit, not asked about.** A
-  throwaway project under `tmp/`, with its own `git init`, which keeps this
-  project's plugin out of the kit only where a plugin arrives per launch —
+  throwaway project under `tmp/`, with its own `git init`, because a runtime
+  that takes the nearest repository as its project root would otherwise run
+  the probe under this repository's instructions and project configuration.
+  The init keeps this project's plugin out only where a plugin arrives per launch —
   where a runtime installs plugins into its own home instead, every session
   on the machine runs under them whatever directory it starts in, and the
   kit is governed by the policy it was built to sit outside. Check a command
