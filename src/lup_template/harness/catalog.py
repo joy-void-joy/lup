@@ -20,6 +20,7 @@ from pydantic import AnyHttpUrl
 
 from lup.harness.models import (
     CarrierPins,
+    CommandInvocation,
     Harness,
     HookPathRole,
     HookSandbox,
@@ -88,7 +89,7 @@ from lup_template.harness.content.shell_vocabulary import (
     SHELL_RULES,
 )
 
-EXCLUDED_COMMANDS = [
+EXCLUDED_TOOLS = [
     # Egress the sandbox proxy cannot carry: it allowlists hostnames over
     # HTTP, and the transport underneath a git remote is SSH on port 22. No
     # narrower lever reaches this — a credential path takes a mode and not a
@@ -101,6 +102,10 @@ EXCLUDED_COMMANDS = [
     # confined too — so excluding git without it moves the same failure one
     # call deeper.
     "gh *",
+]
+"""Programs this project runs with no OS boundary beneath them."""
+
+TOOLCHAIN_EXCLUSIONS = [
     # The toolchain opens agent sessions, and a runtime keeps per-session
     # state under its own configuration directory — for Claude Code,
     # `~/.claude/session-env/<session id>`, following `CLAUDE_CONFIG_DIR`.
@@ -116,11 +121,11 @@ EXCLUDED_COMMANDS = [
     # a bare EROFS, which reads to an agent like a broken repository rather
     # than like a boundary: one planning run finished that way and looked
     # normal.
-    "uv run lup-devtools harness *",
+    CommandInvocation(path=["harness"], arguments="*"),
     # A resolver run opens native sessions, which is the same requirement the
     # line above states from its own sub-app, and the exclusion follows the
     # commands rather than whichever name they are nested under.
-    "uv run lup-devtools resolve *",
+    CommandInvocation(path=["resolve"], arguments="*"),
     # The verbs that drive git rather than read it. `git *` is excluded above
     # and a child of a confined command is confined too, so leaving these
     # inside moves the same failure one call deeper: measured, `git worktree
@@ -128,17 +133,38 @@ EXCLUDED_COMMANDS = [
     # `git config --local` succeeds one call away. Named verb by verb because
     # most of the toolchain reads a repository, and confining that costs
     # nothing at all.
-    "uv run lup-devtools git worktree *",
-    "uv run lup-devtools git pr *",
-    "uv run lup-devtools git conflict *",
-    "uv run lup-devtools git hooks *",
-    "uv run lup-devtools dev undo *",
+    CommandInvocation(path=["git", "worktree"], arguments="*"),
+    CommandInvocation(path=["git", "pr"], arguments="*"),
+    CommandInvocation(path=["git", "conflict"], arguments="*"),
+    CommandInvocation(path=["git", "hooks"], arguments="*"),
+    CommandInvocation(path=["dev", "undo"], arguments="*"),
 ]
-"""Commands this project runs with no OS boundary beneath them.
+"""This project's own commands that run with no OS boundary beneath them.
 
-Each is a requirement the boundary cannot express any other way, and the
-count is the point: an exclusion is not a widened rule but a removed one, so
-the list stays as short as the toolchain's actual incompatibilities."""
+Declared as the commands they are rather than as spelled strings, so an
+exclusion names the command group it belongs to and goes with it: a
+project that declined the resolver serves no `resolve`, and an exclusion
+left standing for it would be policy naming a command nothing runs.
+"""
+
+
+def excluded_commands(served: list[str]) -> list[str]:
+    """Commands this project runs with no OS boundary beneath them.
+
+    Each is a requirement the boundary cannot express any other way, and the
+        count is the point: an exclusion is not a widened rule but a removed one,
+        so the list stays as short as the toolchain's actual incompatibilities —
+        and a command group this project does not serve has nothing to exclude.
+    """
+    return [
+        *EXCLUDED_TOOLS,
+        *(
+            command.spelled()
+            for command in TOOLCHAIN_EXCLUSIONS
+            if command.named_command in served
+        ),
+    ]
+
 
 ARTIFACT_REFUSAL = "publishing a page puts this work outside the repository"
 """Why an artifact is the wrong reflex here, as the approver of one reads it."""
@@ -963,7 +989,7 @@ def portable_harness(
                 # undeclared it refuses the write while the classifier allows
                 # it, which reads as a broken command rather than a boundary.
                 writable_paths=["~/.cache/uv", "/tmp"],
-                excluded_commands=EXCLUDED_COMMANDS,
+                excluded_commands=excluded_commands(composed.subapps),
             ),
         ),
     )
