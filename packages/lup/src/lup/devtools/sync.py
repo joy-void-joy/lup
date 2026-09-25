@@ -111,6 +111,7 @@ from lup.devtools.subapps import subapp
 from lup.devtools.utils import decode_stderr, format_table, short_sha
 from lup.execution.shell import git
 from lup.harness.devices import Device, registered_devices
+from lup.harness.services import ServicePorts
 from lup.harness.posture import (
     ClaudePermissionMode,
     CodexApprovalPolicy,
@@ -291,7 +292,7 @@ class SessionDefaults(TypedDict, total=False):
     approval_policy: CodexApprovalPolicy
     approvals_reviewer: CodexApprovalsReviewer
     sandbox_mode: CodexSandboxMode
-    services: dict[str, int]
+    services: ServicePorts
     """The host port each named host service listens on here, where it differs."""
     sudo: bool
     """Whether sessions here may administer their container through sudo."""

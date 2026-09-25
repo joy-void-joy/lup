@@ -40,6 +40,7 @@ from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.devtools.harness.profile_app import create_profile_app
 from lup.harness.models import Resumption, SessionMode
 from lup.harness.notice import Banner
+from lup.harness.services import ServicePorts
 from lup.harness.posture import (
     ClaudePermissionMode,
     CodexApprovalPolicy,
@@ -439,10 +440,10 @@ def create_harness_app(
         """A ``--memory`` value parsed, or refused in the flag's own name."""
         return None if spelled is None else posture.memory_limit(spelled, "--memory")
 
-    def services_asked(spelled: list[str]) -> dict[str, int]:
+    def services_asked(spelled: list[str]) -> ServicePorts:
         """Each ``--host-service NAME=PORT`` parsed, or refused in the flag's name."""
 
-        def moved(entry: str) -> dict[str, int]:
+        def moved(entry: str) -> ServicePorts:
             # lup: ignore[string-split] — the flag's own NAME=PORT grammar,
             # whose one separator is the whole of what there is to parse
             name, separator, port = entry.partition("=")

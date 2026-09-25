@@ -15,7 +15,7 @@ import sh
 from lup.policy.kernel.spawns import decide_spawn
 from lup.policy.relay import QuestionRelay
 from lup.types import JsonObject
-from lup_template.harness.catalog import portable_harness
+from lup_template.harness.catalog import declared_hook_set
 
 DISPATCHER = Path(".claude/plugins/lup/hooks/scripts/policy.py")
 
@@ -46,7 +46,7 @@ def spawn(
 
 def test_a_spawn_without_a_name_is_refused_with_the_shape_of_one() -> None:
     """The refusal says what a name is for and what one looks like."""
-    declared = portable_harness().declared_hooks.spawn_names
+    declared = declared_hook_set().spawn_names
     assert declared is not None
 
     decision = decide(spawn(None))
@@ -78,7 +78,7 @@ def test_a_hyphen_is_refused_here_rather_than_silently_where_it_lands() -> None:
     The model retried with underscores unprompted, having learned the shape
     by guessing. Refusing it here leaves a record and says what to pass.
     """
-    declared = portable_harness().declared_hooks.spawn_names
+    declared = declared_hook_set().spawn_names
     assert declared is not None
 
     decision = decide(spawn("leak-probe"))
@@ -94,7 +94,7 @@ def test_a_hyphen_is_refused_here_rather_than_silently_where_it_lands() -> None:
 
 def test_a_name_longer_than_the_limit_is_refused() -> None:
     """The shorter of the two runtimes' limits, counted rather than trusted."""
-    declared = portable_harness().declared_hooks.spawn_names
+    declared = declared_hook_set().spawn_names
     assert declared is not None
 
     decision = decide(spawn("a" * (declared.limit + 1)))
@@ -116,7 +116,7 @@ def test_a_name_may_not_open_with_its_punctuation() -> None:
 
 def test_a_project_running_one_runtime_may_widen_what_a_name_carries() -> None:
     """The safe set is the declaration's, since it follows from where it runs."""
-    declared = portable_harness().declared_hooks.spawn_names
+    declared = declared_hook_set().spawn_names
     assert declared is not None
     widened = declared.model_copy(update={"punctuation": "-_"}).erased()
 
@@ -126,7 +126,7 @@ def test_a_project_running_one_runtime_may_widen_what_a_name_carries() -> None:
 
 def test_a_misspelled_name_escalates_the_way_a_missing_one_does() -> None:
     """One refusal shape for both, so a caller who can answer for it is asked."""
-    declared = portable_harness().declared_hooks.spawn_names
+    declared = declared_hook_set().spawn_names
     assert declared is not None
 
     escalated = decide_spawn(

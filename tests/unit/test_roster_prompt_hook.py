@@ -42,7 +42,7 @@ from lup.providers.roster_prompt import (
     store_modules,
     wake_hook,
 )
-from lup_template.harness.catalog import portable_harness
+from lup_template.harness.catalog import declared_hook_set
 from lup_template.harness.composition import claude_target, codex_target
 
 RUNTIMES = pytest.mark.parametrize(
@@ -154,7 +154,7 @@ def test_the_ending_event_registers_the_departure_and_refuses_nothing(
 
 def test_a_project_without_a_roster_registers_nothing_and_carries_nothing() -> None:
     """The declaration is the peer policy, so declining it declines this too."""
-    undeclared = portable_harness().declared_hooks.model_copy(
+    undeclared = declared_hook_set().model_copy(
         update={"peer_policy": None}
     )
 
@@ -410,7 +410,7 @@ def test_arrival_guard_carries_only_its_declared_events(tmp_path: Path) -> None:
     hook = wake_hook(
         plugin,
         "PLUGIN_ROOT",
-        portable_harness().declared_hooks,
+        declared_hook_set(),
         "codex",
         (event,),
         "NATIVE_HOME",

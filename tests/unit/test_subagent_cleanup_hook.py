@@ -42,7 +42,7 @@ from lup.providers.claude.harness import (
 )
 from lup.providers.roster_prompt import store_modules
 from lup.providers.subagent_cleanup import GUARD_SCRIPT, RUNTIME_ENTRY, cleanup_hooks
-from lup_template.harness.catalog import portable_harness
+from lup_template.harness.catalog import declared_hook_set
 from lup_template.harness.composition import claude_target, codex_target
 
 
@@ -318,7 +318,7 @@ def test_a_runtime_that_resumes_nobody_takes_the_sentence_alone() -> None:
     quiet = cleanup_hooks(
         Path("plugin"),
         "PLUGIN_ROOT",
-        portable_harness().declared_hooks,
+        declared_hook_set(),
         "print()",
         "nowhere",
         CODEX_SUBAGENT_START_EVENT,
@@ -330,7 +330,7 @@ def test_a_runtime_that_resumes_nobody_takes_the_sentence_alone() -> None:
 
 def test_a_project_that_declined_registers_nothing_and_carries_nothing() -> None:
     """The declaration is the hook set's own field, so None declines both events."""
-    declined = portable_harness().declared_hooks.model_copy(
+    declined = declared_hook_set().model_copy(
         update={"subagent_cleanup": None}
     )
 

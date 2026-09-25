@@ -37,6 +37,11 @@ from lup.types import EnvVars
 
 logger = logging.getLogger(__name__)
 
+# lup: ignore[dict-str-payload] — keyed by the names a project declares its
+# services under, an open set checked against the declaration where it is read
+type ServicePorts = dict[str, int]
+"""The host port each named service listens on here, where it differs from declared."""
+
 
 class HostService(BaseModel, frozen=True):
     """One service on the host's loopback that a contained session may reach.
@@ -279,7 +284,7 @@ class HostServices(BaseModel, frozen=True):
             )
         ]
 
-    def with_ports(self, ports: dict[str, int]) -> "HostServices":
+    def with_ports(self, ports: ServicePorts) -> "HostServices":
         """These services with the host ports a machine or a launch moved them to.
 
         A name no declared service carries is refused, because an override

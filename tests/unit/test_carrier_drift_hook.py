@@ -26,7 +26,7 @@ from lup.harness.models import CarrierPins, HookSet
 from lup.providers.claude.harness import CLAUDE_PROMPT_EVENT
 from lup.providers.codex.harness import CODEX_PROMPT_EVENT
 from lup.providers.drift_prompt import GUARD_SCRIPT, RUNTIME_MODULE, drift_hook
-from lup_template.harness.catalog import portable_harness
+from lup_template.harness.catalog import declared_hook_set
 from lup_template.harness.composition import claude_target, codex_target
 
 RUNTIMES = pytest.mark.parametrize(
@@ -45,7 +45,7 @@ def rendered(tree: str) -> Path:
 
 def declared(branch: str) -> HookSet:
     """A hook set whose carriers name one branch, for a project that took one."""
-    return portable_harness().declared_hooks.model_copy(
+    return declared_hook_set().model_copy(
         update={"carriers": CarrierPins(branch=branch, distribution="lup")}
     )
 
@@ -125,7 +125,7 @@ def test_the_generated_tree_carries_both_folds_under_one_event(
 
 def test_a_project_that_took_no_copied_half_registers_nothing() -> None:
     """Including the scaffold itself, which is the origin of every copy."""
-    source = portable_harness().declared_hooks.model_copy(update={"carriers": None})
+    source = declared_hook_set().model_copy(update={"carriers": None})
 
     hook = drift_hook(Path(".claude/plugins/lup"), "PLUGIN_ROOT", source, "Prompt")
 

@@ -902,7 +902,6 @@ def container_lease(
     two mounts at one target by order.
     """
     said: list[Notice] = []
-    taken = set(read_only.values())
 
     def within(held: Lease) -> Lease:
         """This hold, less what the lease would not let be written anyway."""
@@ -915,7 +914,7 @@ def container_lease(
             read_only={
                 path: inside
                 for path, inside in held.read_only.items()
-                if lease.writable_at(path) and inside not in taken
+                if lease.writable_at(path) and inside not in read_only.values()
             },
         )
 

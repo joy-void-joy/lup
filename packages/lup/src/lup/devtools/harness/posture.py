@@ -27,6 +27,7 @@ from lup.devtools.sync import SessionDefaults
 from lup.harness.image import ContainerPrivileges, Image, MemoryLimit
 from lup.harness.models import Harness, SessionMode
 from lup.harness.notice import Notice
+from lup.harness.services import ServicePorts
 from lup.harness.posture import (
     ClaudePermissionMode,
     CodexApprovalPolicy,
@@ -108,7 +109,7 @@ class LaunchOverrides(BaseModel, frozen=True):
     approval_policy: CodexApprovalPolicy | None = None
     approvals_reviewer: CodexApprovalsReviewer | None = None
     sandbox_mode: CodexSandboxMode | None = None
-    services: dict[str, int] = {}
+    services: ServicePorts = {}
     sudo: bool | None = None
     rootful: bool = False
     """Whether this launch accepts widened privileges on an engine that is not rootless.
@@ -153,7 +154,7 @@ class SessionSettings(BaseModel, frozen=True):
     """
     rootful: bool = False
     """Whether this launch accepted widened privileges on an engine that is not rootless."""
-    services: Chosen[dict[str, int]] | None = None
+    services: Chosen[ServicePorts] | None = None
     """The host ports named services were moved to, by a machine or a launch.
 
     One origin for the whole map, the highest layer that moved any of them:
@@ -326,8 +327,8 @@ def administered(
 
 
 def moved_services(
-    harness: Harness, machine: dict[str, int], flags: LaunchOverrides
-) -> Chosen[dict[str, int]] | None:
+    harness: Harness, machine: ServicePorts, flags: LaunchOverrides
+) -> Chosen[ServicePorts] | None:
     """The host ports a machine and a launch moved named services to, merged.
 
     Checked against the declaration here, before anything is generated, so
@@ -344,7 +345,7 @@ def moved_services(
             "--host-service" if flags.services else "sync.json.local session.services"
         )
         raise typer.BadParameter(f"{where}: {refusal}") from refusal
-    return Chosen[dict[str, int]](
+    return Chosen[ServicePorts](
         value=moved, origin="flag" if flags.services else "machine"
     )
 
