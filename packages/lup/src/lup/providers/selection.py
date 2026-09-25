@@ -12,6 +12,7 @@ it into its own shape and states, in its own docstring, what it has no words
 for. A field added here is a request every runtime then has to answer.
 """
 
+import os
 from collections.abc import Callable
 from pathlib import Path
 from typing import Literal, Self
@@ -164,10 +165,12 @@ type SessionOpener = Callable[[SessionRequest], Client]
 type WorkspaceHome = Callable[[EnvVars, Path], EnvVars]
 """Give one workspace's sessions a configuration home of their own.
 
-Reads the environment a caller already selected — a profile naming which
-account to run as — and answers the variables routing this runtime's CLI at a
-home private to that workspace, so concurrent sessions cannot read each
-other's half-written startup document.
+Reads the environment a session will run with — the launching process's own,
+with whatever the request names layered over it — and answers the variables
+routing this runtime's CLI at a home private to that workspace, so concurrent
+sessions cannot read each other's half-written startup document. A profile
+naming which account to run as decides the account wherever it was named: in
+the request, or in the environment this program was launched with.
 
 Which variable carries it is the runtime's own, which is why this is a field
 rather than a shared helper: a session handed another runtime's is pointed at
@@ -203,10 +206,12 @@ class Runtime(BaseModel, frozen=True, arbitrary_types_allowed=True):
         Derived when a session is opened rather than when a request is built.
         A request is a declaration and should cost nothing to state; a home
         is a directory that has to exist, seeded from the account the
-        environment selects. Deriving it here is also what keeps the two from
-        disagreeing: an application that built the home into a request would
-        have chosen a runtime before naming one, and opening that request
-        through the other would point it at a directory no CLI there reads.
+        session's environment selects — the request's variables over this
+        process's own, as :meth:`workspace_environment` reads them. Deriving
+        it here is also what keeps the two from disagreeing: an application
+        that built the home into a request would have chosen a runtime before
+        naming one, and opening that request through the other would point it
+        at a directory no CLI there reads.
 
         A request naming no working directory is returned untouched — there
         is no workspace to home it against.
@@ -219,5 +224,23 @@ class Runtime(BaseModel, frozen=True, arbitrary_types_allowed=True):
         )
 
     def workspace_environment(self, environment: EnvVars, workspace: Path) -> EnvVars:
-        """Route this runtime's sessions at a home private to that workspace."""
-        return self.workspace_home(environment, workspace)
+        """Route this runtime's sessions at a home private to that workspace.
+
+        ``environment`` is what a session is handed, and the home is selected
+        from what it runs with. Every runtime here starts its CLI with this
+        process's own environment beneath the one it is handed, so a home
+        this program was launched under reaches the session unless the
+        request names another. Selected from the handed variables alone,
+        that home goes unseen: the session is routed at one derived from the
+        runtime's default instead, and the routing overrides the home it
+        would have inherited — so it opens as the default account, or as
+        none where the default holds no login, in place of the account it
+        was launched as and without a word.
+
+        Only the routing is answered, never the environment it was read
+        from, so a request homed here carries what it named and its home
+        rather than a copy of this process's variables taken as it opened.
+        """
+        # lup: ignore[os-environ] — what a session inherits
+        inherited = dict(os.environ)
+        return self.workspace_home({**inherited, **environment}, workspace)

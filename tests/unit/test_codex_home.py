@@ -337,6 +337,22 @@ def test_default_selection_prepares_the_scoped_home(tmp_path: Path) -> None:
     assert selection.path.is_dir()
 
 
+def test_an_empty_codex_home_names_no_home(tmp_path: Path) -> None:
+    """Codex ignores an empty ``CODEX_HOME`` and falls back to its default.
+
+    Read as a path it would be ``.``, and the session routed there would
+    have its policy installed into whatever directory the caller stood in.
+    """
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    store = CodexWorktreeHomeStore(account_home=tmp_path / "account")
+
+    selection = select_codex_home(None, {"CODEX_HOME": ""}, worktree, store=store)
+
+    assert selection.path == store.home_for(worktree)
+    assert selection.isolated is True
+
+
 def test_a_rotated_account_login_reaches_a_stale_scoped_home(tmp_path: Path) -> None:
     account = account_home_with(ROTATED_CREDENTIAL, tmp_path)
     worktree = tmp_path / "worktree"

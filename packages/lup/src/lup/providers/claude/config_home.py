@@ -182,6 +182,15 @@ def selected_config_home(environment: EnvVars) -> ClaudeConfigHome:
     the home wherever one exists, and otherwise the current one — inside a
     named home, or beside the home directory when none is named.
     """
+    # lup: defer: an exported empty CLAUDE_CONFIG_DIR is read here as the
+    # directory `.`, this process's working directory, with the document
+    # inside it. Claude Code 2.1.282 splits that value: its home keeps it
+    # (`CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude")`, so its own working
+    # directory) while its document falls back beside the user's home
+    # (`CLAUDE_CONFIG_DIR || homedir()`). A session homed under one is seeded
+    # from `./.claude.json` and links `.`'s entries by relative name, each
+    # link pointing at itself. Decide whether an empty value names no home,
+    # as Codex's does, or mirror both halves against the session's directory.
     named = environment.get(CLAUDE_CONFIG_DIR)
     directory = default_config_home() if named is None else Path(named).expanduser()
     legacy = directory / CLAUDE_LEGACY_DOCUMENT
