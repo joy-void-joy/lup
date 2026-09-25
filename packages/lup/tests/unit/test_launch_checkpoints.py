@@ -49,7 +49,9 @@ def test_claude_checkpoints_before_preflight_and_after_close(
     profiles = Mock()
     profiles.launch_home.return_value = None
     preflight = Mock(
-        side_effect=lambda *a, **k: events.append("ready") or launch.LaunchOpening()
+        side_effect=lambda *a, **k: (
+            events.append("ready") or launch.LaunchOpening(sandbox=k["sandbox"])
+        )
     )
     monkeypatch.setattr(
         launch,
@@ -92,9 +94,7 @@ def test_claude_checkpoints_before_preflight_and_after_close(
         sandbox=sandbox,
     )
 
-    assert preflight.call_args.kwargs["contained"] == (
-        sandbox is launch.LaunchSandbox.OUTER
-    )
+    assert preflight.call_args.kwargs["sandbox"] is sandbox
     assert events == [
         "checkpoint:claude",
         "ready",
@@ -112,7 +112,9 @@ def test_codex_checkpoints_before_preflight_and_after_close(
     home = Mock(path=tmp_path / "home", isolated=False)
     store = Mock()
     preflight = Mock(
-        side_effect=lambda *a, **k: events.append("ready") or launch.LaunchOpening()
+        side_effect=lambda *a, **k: (
+            events.append("ready") or launch.LaunchOpening(sandbox=k["sandbox"])
+        )
     )
     monkeypatch.setattr(
         launch,
@@ -156,9 +158,7 @@ def test_codex_checkpoints_before_preflight_and_after_close(
         sandbox=sandbox,
     )
 
-    assert preflight.call_args.kwargs["contained"] == (
-        sandbox is launch.LaunchSandbox.OUTER
-    )
+    assert preflight.call_args.kwargs["sandbox"] is sandbox
     assert events == [
         "checkpoint:codex",
         "ready",
@@ -252,7 +252,13 @@ def test_a_launch_names_the_waits_it_spends_silent(
     assert launch.ready_to_open(composition(), True, LaunchSentinels()) is None
     assert capsys.readouterr().out == ""
 
-    assert launch.ready_to_open(composition(), False, LaunchSentinels()) is not None
+    # Named, so the host is not asked which posture the default settles to.
+    assert (
+        launch.ready_to_open(
+            composition(), False, LaunchSentinels(), sandbox=launch.LaunchSandbox.OUTER
+        )
+        is not None
+    )
     assert capsys.readouterr().out.splitlines() == [
         "regenerating what this session opens against",
         "checking the host",

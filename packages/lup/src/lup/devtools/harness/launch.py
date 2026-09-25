@@ -39,6 +39,7 @@ from lup.providers.codex.transcripts import CodexTranscripts
 from lup.coordination.identity import MEMBER_ENV, NAME_ENV, LaunchedMember
 from lup.coordination.repository import launched_member
 from lup.harness.environment import non_interactive_environment
+from lup.harness.image import detected_client
 from lup.harness.models import HookSet, NativeName, Plugin, Resumption
 from lup.policy.boundary import BoundaryPreflight
 from lup.policy.identity import POLICY_ROOT_ENV
@@ -139,6 +140,45 @@ class LaunchSandbox(StrEnum):
         return self is LaunchSandbox.OUTER
 
 
+def settled_sandbox(asked: LaunchSandbox | None) -> LaunchSandbox:
+    """The sandbox a launch opens under: the one asked for, or the default the host holds.
+
+    ``None`` is a command line that named no sandbox, the one answer with
+    anything left to settle. The default is the verified container, which a
+    host with no container client cannot start, and refusing there would
+    leave the plain launch unopenable on every machine without Docker or
+    Podman. So the default opens under the runtime's own sandbox instead, and
+    says so at warning level: what would restore the container, and the flag
+    that states the choice without the warning.
+
+    Only the default degrades. ``--sandbox outer`` asks for the container by
+    name, and a launch that asked for a boundary and opened without one is
+    the failure the boundary exists to rule out, so that request reaches
+    :func:`~lup.devtools.harness.contained.contained_argv` and is refused
+    there. A client that answers and cannot drive the engine behind it is not
+    an absence either: the operator has an engine to repair rather than one
+    to install, and the refusal there says which.
+
+    Asked of :func:`~lup.harness.image.detected_client`, the probe the
+    container's argv is built from, so the two cannot disagree about whether
+    this host has an engine.
+    """
+    if asked is not None:
+        return asked
+    if detected_client() is not None:
+        return LaunchSandbox.OUTER
+    Notice(
+        text=(
+            "No working Docker or Podman client was found, so this session "
+            "runs under the inner sandbox on the host. Install Docker or "
+            "Podman to launch in the container (outer), or pass "
+            "`--sandbox inner` to choose this without the warning."
+        ),
+        urgency="warning",
+    ).say()
+    return LaunchSandbox.INNER
+
+
 def declared_mounts(
     writable: list[Path], read_only: list[Path]
 ) -> list[AccessibleRoot]:
@@ -235,6 +275,13 @@ class LaunchOpening(BaseModel):
     runtime: str = ""
     """The runtime this opens, and the version of it that answered."""
 
+    sandbox: LaunchSandbox = LaunchSandbox.OUTER
+    """The sandbox this session opens under, settled once for everything after.
+
+    Carried rather than recomputed, because the default is settled by asking
+    the host and says so when it falls back: a launcher reading the flag
+    again would see the question and not its answer."""
+
 
 def ready_to_open(
     composition: NativeHarnessComposition,
@@ -242,7 +289,7 @@ def ready_to_open(
     sentinels: LaunchSentinels,
     companions: list[NativeHarnessComposition] = [],
     repository_writers: list[RepositoryWriter] = [],
-    contained: bool = True,
+    sandbox: LaunchSandbox | None = None,
 ) -> LaunchOpening | None:
     """Generate this target's artifacts and clear every gate standing before a session.
 
@@ -277,6 +324,14 @@ def ready_to_open(
     checkout is brought level with its own remote, and a base that has moved
     is named on the way in.
 
+    Settling the sandbox is another. ``sandbox`` is what the command line
+    asked for, ``None`` where it named none, and :func:`settled_sandbox`
+    answers it once here, as the first thing asked of the host: the host
+    roster depends on which side of the container the session runs, and
+    everything after reads the answer off the opening. After generation, so
+    a generate-only invocation, which opens nothing, is neither probed nor
+    warned.
+
     The two lines said here are said before their work rather than after
     it, for the reason the fetch names itself below: these are the stretches
     a launch spends silent when everything is current, and a line naming
@@ -303,9 +358,11 @@ def ready_to_open(
             f"excluded {len(excluded)} sandbox placeholder file(s) from git "
             f"status: {', '.join(excluded)}"
         )
-    opening = LaunchOpening()
     typer.echo("checking the host")
-    opening.findings = runtime_preflight(composition, sentinels, opening, contained)
+    opening = LaunchOpening(sandbox=settled_sandbox(sandbox))
+    opening.findings = runtime_preflight(
+        composition, sentinels, opening, opening.sandbox.contained()
+    )
     settle_base_freshness(LocalProcessLauncher(), project_root())
     return opening
 
@@ -1480,9 +1537,11 @@ def session_argv(
     """The argv that opens a session, inside the declared container or on the host.
 
     One place decides this for both runtimes, because "contained unless the
-    operator said otherwise" is a property of the launch rather than of the
-    CLI being launched -- and a second runtime that decided it separately is
-    how one of them ends up quietly uncontained.
+    operator said otherwise, or the host has no engine to contain it" is a
+    property of the launch rather than of the CLI being launched -- and a
+    second runtime that decided it separately is how one of them ends up
+    quietly uncontained. ``sandbox`` arrives settled, by
+    :func:`settled_sandbox`, so the fallback is said before this runs.
 
     It is also the one place that knows the whole opening: what the container
     had to say about itself, and whether the checks behind it passed. So the
@@ -1711,7 +1770,7 @@ def launch_claude(
     mode: LaunchMode | None = None,
     resume: Resumption = Resumption(),
     relaxed: bool = False,
-    sandbox: LaunchSandbox = LaunchSandbox.OUTER,
+    sandbox: LaunchSandbox | None = None,
     checkpoint: LaunchCheckpoint | None = None,
     max_recursive_agent: int = -1,
     transcribe_session: bool = False,
@@ -1721,7 +1780,11 @@ def launch_claude(
     devices: list[Device] = [],
     recorder: SessionRecorder | None = None,
 ) -> None:
-    """Generate/reconcile Claude artifacts and launch the verified local plugin."""
+    """Generate/reconcile Claude artifacts and launch the verified local plugin.
+
+    ``sandbox`` is what the command line asked for, ``None`` where it named
+    none; :func:`settled_sandbox` answers the default.
+    """
     contradiction = resume.contradicted()
     if contradiction is not None:
         raise typer.BadParameter(contradiction)
@@ -1736,10 +1799,12 @@ def launch_claude(
         sentinels,
         companions,
         repository_writers,
-        contained=sandbox.contained(),
+        sandbox=sandbox,
     )
     if cleared is None:
         return
+    # What the gate settled on, which is the only posture read from here on.
+    sandbox = cleared.sandbox
     arguments: list[str] = claude_resume_arguments(resume)
     # A mode's model is a default rather than a fixture: it says what this kind
     # of session runs on when nobody said otherwise, and an explicit --model
@@ -1927,7 +1992,7 @@ def launch_codex(
     mode: LaunchMode | None = None,
     resume: Resumption = Resumption(),
     relaxed: bool = False,
-    sandbox: LaunchSandbox = LaunchSandbox.OUTER,
+    sandbox: LaunchSandbox | None = None,
     checkpoint: LaunchCheckpoint | None = None,
     max_recursive_agent: int = -1,
     transcribe_session: bool = False,
@@ -1937,7 +2002,10 @@ def launch_codex(
     devices: list[Device] = [],
     recorder: SessionRecorder | None = None,
 ) -> None:
-    """Generate/reconcile Codex artifacts and launch without updating the CLI."""
+    """Generate/reconcile Codex artifacts and launch without updating the CLI.
+
+    ``sandbox`` is read as :func:`launch_claude` reads it.
+    """
     contradiction = resume.contradicted()
     if contradiction is not None:
         raise typer.BadParameter(contradiction)
@@ -1952,10 +2020,12 @@ def launch_codex(
         sentinels,
         companions,
         repository_writers,
-        contained=sandbox.contained(),
+        sandbox=sandbox,
     )
     if cleared is None:
         return
+    # What the gate settled on, which is the only posture read from here on.
+    sandbox = cleared.sandbox
     environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]
     environment[MAX_RECURSIVE_AGENT_ENV] = str(max_recursive_agent)
     envelope = codex_sandbox_arguments(
