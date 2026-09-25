@@ -25,9 +25,11 @@ diligent one.
 """
 
 from pathlib import Path
+from typing import Annotated
 
 import sh
 import tomlkit
+import typer
 from pydantic import BaseModel
 
 from lup.devtools.dev.branches import detect_base_branch
@@ -39,6 +41,7 @@ from lup.devtools.dev.preservation import (
     surface_now,
 )
 from lup.devtools.project import DevProject
+from lup.devtools.utils import output_json
 from lup.execution.shell import git
 
 
@@ -385,3 +388,35 @@ def rendered(declared: list[Migration]) -> list[str]:
     stale the next time one module moves.
     """
     return [line for migration in declared for line in migration.spelled()]
+
+
+def migrate_pending_cmd(
+    revision: Annotated[
+        str,
+        typer.Argument(help="Where the project stands, as a commit of this one"),
+    ],
+    repository: Annotated[
+        Path | None,
+        typer.Option(help="Upstream checkout holding the migration commits"),
+    ] = None,
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Render an installed-library report as JSON"),
+    ] = False,
+) -> None:
+    """What a project standing at that commit still owes, beyond the map.
+
+    The declared residue: a signature that gained parameters, a refusal
+    that split. A project already past the commit that made the break has
+    applied it, and is told nothing.
+    """
+    owed = unapplied(DECLARED, revision, repository or Path.cwd())
+    if as_json:
+        output_json(RenderedMigrations(count=len(owed), lines=rendered(owed)))
+        return
+    if not owed:
+        typer.echo(f"nothing declared since {revision}")
+        return
+    typer.echo(f"{len(owed)} migration(s) since {revision}:")
+    for line in rendered(owed):
+        typer.echo(f"  {line}")

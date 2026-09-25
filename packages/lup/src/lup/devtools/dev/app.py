@@ -1402,43 +1402,7 @@ def create_dev_app(
         for change in changes:
             typer.echo(f"{'Would change' if dry_run else 'Changed'}: {change}")
 
-    @migrate_app.command("pending")
-    def migrate_pending_cmd(
-        revision: Annotated[
-            str,
-            typer.Argument(help="Where the project stands, as a commit of this one"),
-        ],
-        repository: Annotated[
-            Path | None,
-            typer.Option(help="Upstream checkout holding the migration commits"),
-        ] = None,
-        as_json: Annotated[
-            bool,
-            typer.Option("--json", help="Render an installed-library report as JSON"),
-        ] = False,
-    ) -> None:
-        """What a project standing at that commit still owes, beyond the map.
-
-        The declared residue: a signature that gained parameters, a refusal
-        that split. A project already past the commit that made the break has
-        applied it, and is told nothing.
-        """
-        owed = migrations.unapplied(
-            migrations.DECLARED, revision, repository or Path.cwd()
-        )
-        if as_json:
-            output_json(
-                migrations.RenderedMigrations(
-                    count=len(owed), lines=migrations.rendered(owed)
-                )
-            )
-            return
-        if not owed:
-            typer.echo(f"nothing declared since {revision}")
-            return
-        typer.echo(f"{len(owed)} migration(s) since {revision}:")
-        for line in migrations.rendered(owed):
-            typer.echo(f"  {line}")
+    migrate_app.command("pending")(migrations.migrate_pending_cmd)
 
     @app.command("release")
     def release_cmd(
