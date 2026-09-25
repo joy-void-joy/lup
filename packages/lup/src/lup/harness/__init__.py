@@ -20,8 +20,9 @@ generated. Modules map to concerns:
   proposal.
 - :mod:`lup.harness.proposals` — persists backpropagation source patches for
   review instead of applying them.
-- :mod:`lup.harness.process` — the local launcher for native CLIs (doctor
-  probes, plugin launches, resolver git and skill runs).
+- :mod:`lup.harness.process` — the captured-output local launcher (the
+  resolver's git operations and verification commands, the base-freshness
+  probe a launch settles).
 - :mod:`lup.harness.environment` — the non-interactive shell defaults merged
   into every agent-spawned command so credential prompts fail fast.
 

@@ -12,9 +12,11 @@ recipes (`claude_generation_recipe` / `codex_generation_recipe` in
 `packages/lup/src/lup/devtools/harness/generate.py`). A per-platform declaration
 layer was considered and rejected: it would let semantic content fork silently,
 whereas the adapter seam forces every difference to be a rendering decision
-over the same declarations. `compile_claude` / `compile_codex` enforce that:
-`reject_rendered_invocations` refuses native invocation sigils in canonical
-text, and `reject_native_prose` refuses any word an adapter would have spelled
+over the same declarations. Two checks enforce that. Every prose field a tree
+renders is `PortableText`, whose validator (`portable_prose` in
+`packages/lup/src/lup/harness/models.py`) refuses a native invocation sigil
+where the author writes it; and `compile_claude` / `compile_codex` call
+`reject_native_prose`, which refuses any word an adapter would have spelled
 — so a difference cannot hide in prose.
 
 That second check writes down no vocabulary of its own. It asks each

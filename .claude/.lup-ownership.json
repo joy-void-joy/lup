@@ -37,7 +37,7 @@
     {
       "path": ".claude/plugins/lup/TEMPLATE_CLAUDE.md",
       "category": "generated",
-      "sha256": "2d447a0469081aec9e154e6f293561394371b28d2c278463030e75eec04036ab",
+      "sha256": "d38b91f5aeca0b0ac610f0e848fbb4dc8fc2e19d089362ded348d0ed0175b8e7",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -751,7 +751,7 @@
     {
       "path": "docs/harness.md",
       "category": "generated",
-      "sha256": "9121d625e4af222fce9fe414e14c46721c4ae1f7fb7df68fa4c45413a9bf6a0f",
+      "sha256": "375df606c3cce170acf6479e08eae181adff6b51551eb8ecdf99d97d6b8243f0",
       "semantic_id": "docs.harness",
       "executable": false
     },
@@ -800,7 +800,7 @@
     {
       "path": "docs/platform-differentiation.md",
       "category": "generated",
-      "sha256": "fbd74d85d126790baad6603dfe295b95a2a62a8d1dab1661f20bc04d263bcd20",
+      "sha256": "0809c682af5b9a42c5673f832e782cc6eba56a80b407c024e3ca00f92e69b94d",
       "semantic_id": "docs.platform-differentiation",
       "executable": false
     },
@@ -828,7 +828,7 @@
     {
       "path": "docs/self-improvement.md",
       "category": "generated",
-      "sha256": "79327df803059f4d7897c6ecba64639bbc5acaa0926e8019791a18bafc88ef62",
+      "sha256": "4774805a2d37c288ed7c7ab3e1242e709e30222746da32c26d64646e7b07b2b1",
       "semantic_id": "docs.self-improvement",
       "executable": false
     },
