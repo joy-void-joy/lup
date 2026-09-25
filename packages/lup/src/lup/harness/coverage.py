@@ -35,7 +35,8 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from lup.devtools.subapps import SubAppSpec
-from lup.harness.modules import Module, ModuleSelection
+from lup.harness.dependencies import Published
+from lup.harness.modules import DocumentContext, Module, ModuleSelection
 
 
 class ContentFamily(BaseModel, frozen=True):
@@ -161,6 +162,24 @@ class ModuleCoverage(BaseModel, frozen=True):
 
     tool_groups: list[str] = []
     """Every tool group this project's sessions could open, whichever they do."""
+
+    context: DocumentContext | None = None
+    """What the modules' pages render against, for the check reading what each names.
+
+    The same roster, asked a second question: not who claims a declaration but
+    whether what each module's content names is something that module stands
+    on. A page is a function of the composition it describes, so only the root
+    that composed one can hand this over; left out, pages go unread and the
+    skills, agents and sections are still held to it.
+    """
+
+    beside: list[Published] = []
+    """Documents the root publishes on a module's behalf, held to the same question.
+
+    What no module declares as a surface and a module's presence still decides
+    — the guidance an installer carries into another repository, published
+    only where the module installing it is taken.
+    """
 
 
 def bound(node: ast.stmt) -> str:
