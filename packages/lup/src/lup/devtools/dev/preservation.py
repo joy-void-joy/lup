@@ -59,6 +59,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from lup.devtools.dev.library import LibraryMode, read_mode
 from lup.devtools.dev.model_config import materialize_revision
 from lup.harness.codescan.common import PACKAGE_ROOTS, module_name
 from lup.harness.codescan.symbols import defined_symbols
@@ -238,16 +239,29 @@ class Divergence(BaseModel, frozen=True):
 
 
 def walked_roots(
-    project: DevProject, roots: AbstractSet[str] = PACKAGE_ROOTS
+    project: DevProject,
+    roots: AbstractSet[str] = PACKAGE_ROOTS,
+    checkout: Path = Path(),
 ) -> AbstractSet[str]:
-    """The roots a capture covers: the library's, plus what the app publishes.
+    """The roots a capture covers: the library's where it is vendored, plus the app's.
 
     Read from the declaration rather than written down, for the reason
     :class:`~lup.devtools.project.DevProject` exists: initialization renames
     the application's package, and a root named here would go on naming one
     that is gone.
+
+    The library's roots are this checkout's surface only while it builds the
+    library from its own tree. A project resolving ``lup`` from its repository
+    or from a release imports every one of those names from the dependency, so
+    the commit that stops vendoring it has taken nothing from anybody — while
+    a walk reading the library at the base and none of it at the tip reports
+    every name the library declares as gone. Asked of the checkout rather than
+    of each revision, so both captures of one comparison cover the same roots;
+    a checkout with no manifest has no workspace to vendor into.
     """
-    return {*roots, project.package}
+    manifest = checkout / "pyproject.toml"
+    vendored = manifest.is_file() and read_mode(checkout) is LibraryMode.LOCAL
+    return {*roots, project.package} if vendored else {project.package}
 
 
 def offers_a_surface(parts: list[str], internal: Iterable[str]) -> bool:

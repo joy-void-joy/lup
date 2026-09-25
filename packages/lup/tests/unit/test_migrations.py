@@ -8,15 +8,19 @@ and says nothing about the first.
 
 from pathlib import Path
 
+import pytest
+
 from lup.devtools.dev.migrations import (
     DECLARED,
     Migration,
     MigrationStep,
     rendered,
     unapplied,
+    undeclared_breaks,
     unnamed,
 )
 from lup.devtools.dev.preservation import Capability
+from lup.devtools.project import DevProject
 from lup.execution.shell import git
 from lup.providers.claude.login import CLAUDE_CONFIG_DIR, CLAUDE_LOGIN
 from lup.providers.claude.profile_store import (
@@ -150,3 +154,90 @@ def test_every_standing_declaration_says_what_a_caller_does_about_it() -> None:
         assert migration.steps, f"{migration.subjects} declares no step to take"
         assert migration.reason
         assert all(step.instruction for step in migration.steps)
+
+
+VENDORING_MANIFEST = """\
+[project]
+name = "app"
+version = "0.1.0"
+dependencies = ["lup"]
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+lup = { workspace = true }
+"""
+"""A project resolving lup from the copy under ``packages/lup``."""
+
+GIT_MANIFEST = """\
+[project]
+name = "app"
+version = "0.1.0"
+dependencies = ["lup"]
+
+[tool.uv.sources]
+lup = { git = "https://github.com/joy-void-joy/lup", branch = "main", subdirectory = "packages/lup" }
+"""
+"""The same project after `dev library git`: lup is a dependency, not a tree."""
+
+
+def vendoring_checkout(root: Path) -> str:
+    """A project vendoring lup beside a package of its own, committed.
+
+    Returns the commit, which is the base the gate judges the range from.
+    """
+    repository(root)
+    (root / "pyproject.toml").write_text(VENDORING_MANIFEST, encoding="utf-8")
+    library = root / "packages/lup/src/lup"
+    library.mkdir(parents=True)
+    (library / "client.py").write_text("class Client: ...\n", encoding="utf-8")
+    (library / "session.py").write_text(
+        "def open_session() -> None: ...\n", encoding="utf-8"
+    )
+    (root / "src/app").mkdir(parents=True)
+    (root / "src/app/core.py").write_text(
+        "def run() -> None: ...\n\n\ndef stop() -> None: ...\n", encoding="utf-8"
+    )
+    committed(root, "vendored")
+    return git.out("-C", str(root), "rev-parse", "HEAD")
+
+
+def test_resolving_the_library_from_a_dependency_takes_nothing_from_anybody(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`dev library git` removes the vendored copy, and every name still imports.
+
+    What an adopter met right after switching: the base's vendored `lup`
+    read against a working tree holding none of it, and the gate failing on
+    every name the library declares. The project's own package is judged
+    across the same range all the same, so a name it really dropped is the
+    one thing reported.
+    """
+    root = tmp_path / "project"
+    base = vendoring_checkout(root)
+    monkeypatch.chdir(root)
+    (root / "pyproject.toml").write_text(GIT_MANIFEST, encoding="utf-8")
+    git("rm", "-r", "--quiet", "packages/lup")
+    (root / "src/app/core.py").write_text("def run() -> None: ...\n", encoding="utf-8")
+
+    owed = undeclared_breaks(DevProject(package="app"), base, declared=[])
+
+    assert [capability.identity for capability in owed] == ["stop"]
+
+
+def test_a_library_this_checkout_vendors_is_held_to_what_it_offered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Where the library's source is the checkout's own, a name it drops is a break.
+
+    lup's own repository is this case, and the one the gate exists for.
+    """
+    root = tmp_path / "project"
+    base = vendoring_checkout(root)
+    monkeypatch.chdir(root)
+    (root / "packages/lup/src/lup/session.py").write_text("\n", encoding="utf-8")
+
+    owed = undeclared_breaks(DevProject(package="app"), base, declared=[])
+
+    assert [capability.identity for capability in owed] == ["open_session"]
