@@ -548,6 +548,7 @@ class ClaudeMcpRenderer(ArtifactRenderer[Plugin]):
             server.name: {
                 "command": server.command,
                 "args": server.command_line(self.spellings),
+                **({"alwaysLoad": True} if server.always_load else {}),
             }
             for server in source.mcp_servers
         }
