@@ -65,6 +65,7 @@ from lup.workspace.paths import (
     read_project_name,
 )
 from lup.mcp import ServeLaunch
+from lup.tools.toolsets import startup_names
 from lup_template.agent.toolsets import (
     declared_tool_groups,
     declared_tool_servers,
@@ -272,6 +273,7 @@ def agent_tool_servers(
     the environment and present on every boot after.
     """
     launch = ServeLaunch(session=HARNESS_SESSION, needs=session_needs)
+    started = startup_names(declared_tool_groups())
     return [
         McpServer(
             id=f"mcp.{server.name}",
@@ -300,7 +302,7 @@ def agent_tool_servers(
         # that depended on what the generating machine had installed would
         # make two checkouts' plugins differ.
         for server in declared_tool_servers()
-        if server.group().serving == "startup" and server.name not in withheld
+        if server.name in started and server.name not in withheld
     ]
 
 
