@@ -335,8 +335,9 @@ population a repository-scoped roster cannot hold, so the verdict is a deferral
 and this repository's roster is attached beside the answer instead.
 
 This is the one decision whose inputs are not declarative. The roster is live,
-so the dispatcher's host half folds it — `peer_addresses` and `peer_listing` in
-`lup.policy.assets.host` — and hands the kernel the spellings it found, exactly
+so the dispatcher's host half folds it — `peer_send_decision` and
+`peer_listing_attachment` in `lup.policy.assets.decisions`, over the store's
+own reader — and hands the kernel the spellings it found, exactly
 the way an edit rule marked `resolution: required` is answered from a resolver
 the dispatcher ran. The kernel still reads no filesystem and still decides from
 its inputs alone. What is *declared* is only where to look: `HookSet.peer_policy`,
