@@ -555,18 +555,40 @@ def refreshable_checkout(path_text: str, root: Path | None) -> str:
         return ""
 
 
-def policy_refresh_command(checkout: str, root: Path | None) -> str:
+def recorded_runtime(root: Path | None) -> str:
+    """The runtime the launch's ledger says it opened, or "" where it says none.
+
+    Spelled into the path of a tree compared, so one that is not a single
+    name is read as no record at all rather than followed out of the checkout.
+    """
+    boundary = measured_boundary(root)
+    return next(
+        (
+            name
+            for name in (boundary["runtime"] if "runtime" in boundary else [])
+            if Path(name).name == name and name not in ("", ".", "..")
+        ),
+        "",
+    )
+
+
+def policy_refresh_command(checkout: str, root: Path | None, runtime: str = "") -> str:
     """The operator's command accepting one checkout's policy for this launch.
 
     Spelled whole, because whoever runs it stands outside this session and
     can read neither the launch's nonce nor the checkout it was launched
     from; ``--directory`` puts the command in that checkout, whose ledger it
     rewrites, so it runs from anywhere. "" where no launch is named.
+
+    ``runtime`` is the one the asking dispatcher was compiled for. A ledger
+    written before launches recorded theirs cannot say which tree to accept,
+    and the command refuses to guess, so there the command names it.
     """
     nonce = launch_nonce()
     launch = launch_root(root)
     if not nonce or launch is None or not checkout:
         return ""
+    named = ["--runtime", runtime] if runtime and not recorded_runtime(root) else []
     return shlex.join(
         [
             "uv",
@@ -580,11 +602,37 @@ def policy_refresh_command(checkout: str, root: Path | None) -> str:
             nonce,
             "--repository",
             checkout,
+            *named,
         ]
     )
 
 
-def policy_refresh_request(path_text: str, root: Path | None) -> str:
+def own_policies(path_text: str, root: Path | None, runtime: str = "") -> list[dict]:
+    """The data of each policy the checkout holding a path generates for itself.
+
+    What a caller re-decides a verdict by, to learn whether that checkout's
+    own policy would reach another one: read with :func:`policy_data_literals`
+    rather than imported, because the session wrote it. The trees read are
+    the recorded runtime's, else ``runtime``'s, else every runtime's. Best
+    effort like the rest of the refresh advice: anything unreadable is no
+    answer, and a caller with no answer keeps its advice.
+    """
+    try:
+        checkout = refreshable_checkout(path_text, root)
+        if not checkout:
+            return []
+        pattern = recorded_runtime(root) or runtime or "*"
+        return [
+            policy_data_literals(evaluator.parents[1] / "runtime" / "policy_data.py")
+            for evaluator in Path(checkout).glob(
+                f".{pattern}/plugins/*/hooks/scripts/policy_evaluator.py"
+            )
+        ]
+    except Exception:
+        return []
+
+
+def policy_refresh_request(path_text: str, root: Path | None, runtime: str = "") -> str:
     """The refresh that would put a path's own policy in force, or "".
 
     Two ways a checkout ends up judged by a policy other than the one it
@@ -597,11 +645,10 @@ def policy_refresh_request(path_text: str, root: Path | None) -> str:
     the operator's command, and only where running it would change what
     judges the path.
 
-    Where the ledger does not say which runtime the launch opened, every
-    runtime's generated tree is compared, so a difference in any of them
-    still counts. A recorded runtime is spelled into the path compared, so
-    one that is not a single name is read as no record at all rather than
-    followed out of the checkout.
+    Where the ledger does not say which runtime the launch opened, the tree
+    of ``runtime`` -- the one the asking dispatcher was compiled for -- is
+    compared, and where neither says, every runtime's, so a difference in
+    any of them still counts.
 
     Best effort, for the reason :func:`refreshable_checkout` gives: any
     failure to establish the answer is no answer, and never an exception
@@ -632,13 +679,7 @@ def policy_refresh_request(path_text: str, root: Path | None) -> str:
         launch = launch_root(root)
         if not checkout or launch is None:
             return ""
-        boundary = measured_boundary(root)
-        recorded = [
-            name
-            for name in (boundary["runtime"] if "runtime" in boundary else [])
-            if Path(name).name == name and name not in ("", ".", "..")
-        ]
-        runtime = recorded[0] if recorded else "*"
+        pattern = recorded_runtime(root) or runtime or "*"
         granted = [
             row
             for row in ledger_rows("destination_policies", root)
@@ -648,7 +689,7 @@ def policy_refresh_request(path_text: str, root: Path | None) -> str:
         trees = [
             evaluator.parents[1].relative_to(checkout)
             for evaluator in Path(checkout).glob(
-                f".{runtime}/plugins/*/hooks/scripts/policy_evaluator.py"
+                f".{pattern}/plugins/*/hooks/scripts/policy_evaluator.py"
             )
         ]
         current = (
@@ -659,7 +700,7 @@ def policy_refresh_request(path_text: str, root: Path | None) -> str:
                 for tree in trees
             )
         )
-        return "" if current else policy_refresh_command(checkout, root)
+        return "" if current else policy_refresh_command(checkout, root, runtime)
     except Exception:
         return ""
 

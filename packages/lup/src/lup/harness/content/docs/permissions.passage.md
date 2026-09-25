@@ -467,10 +467,14 @@ away from its accepted snapshot is refused with it as the recovery. A worktree
 no grant names — cut in the launch's own repository, or beneath an explicitly
 mounted one — is judged by the launch checkout's policy, so a package renamed
 there makes its own composition roots look like foreign importers; where the
-policy that worktree generates differs, a refusal or a question about its
-files carries the same command, and
+policy that worktree generates would decide a refusal or a question about one
+of its files otherwise, the verdict carries the same command, and
 `dev policy` shows it beside the verdict. The command is named only where the
-refresh would accept the checkout and change what judges it. Generation names
+refresh would accept the checkout and change the verdict at hand: a file both
+policies own a question about — a human-owned README — carries none, which is
+read from the worktree's generated tables as data, never by running them. A
+launch whose ledger records no runtime has the command name the asking
+dispatcher's, since the refresh will not guess which tree to accept. Generation names
 it first: `harness generate` in such a worktree ends on the same command once
 what it wrote differs from what the launch accepted, and
 `dev init rename-package` ends its next steps on it, after the regeneration a

@@ -974,6 +974,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                     ),
                     banner=POLICY_DATA_BANNER,
                     body=render_policy_data(
+                        runtime="codex",
                         verification=verification_row(source.subagent_cleanup),
                         allowed_fetch_scopes=[
                             runtime_url_scope(

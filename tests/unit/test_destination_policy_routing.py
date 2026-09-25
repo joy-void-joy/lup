@@ -745,12 +745,23 @@ def test_the_rename_ends_on_the_refresh_its_session_will_need(
     assert not any("policy-refresh" in step for step in next_steps(sibling))
 
 
+def disowned_readme(sibling: Path, runtime: str) -> None:
+    """The worktree's policy as generation writes it once README.md is disowned."""
+    data = sibling / f".{runtime}/plugins/lup/hooks/runtime/policy_data.py"
+    rules = [
+        row
+        for row in policy_host.policy_data_literals(data)["PATH_RULES"]
+        if row["value"] != "README.md"
+    ]
+    data.write_text(data.read_text() + f"\nPATH_RULES: list[PathRuleRow] = {rules!r}\n")
+
+
 def test_a_question_the_launch_policy_asks_carries_the_refresh_on_every_runtime(
     tmp_path: Path,
     runtime: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A human-owned file asks, and the question keeps the operator's refresh.
+    """A file the worktree disowned asks, and the question keeps the refresh.
 
     One runtime asks natively and hands the recovery over beside the question;
     the other turns every question into a review queue refusal, which must
@@ -758,7 +769,7 @@ def test_a_question_the_launch_policy_asks_carries_the_refresh_on_every_runtime(
     """
     origin, sibling = launched_beside(tmp_path, runtime, monkeypatch)
     (sibling / "README.md").write_text("before\n")
-    regenerated_after_rename(sibling, runtime)
+    disowned_readme(sibling, runtime)
 
     effect, detail = native_edit(origin, sibling / "README.md", runtime)
 
@@ -766,6 +777,57 @@ def test_a_question_the_launch_policy_asks_carries_the_refresh_on_every_runtime(
     assert refresh_request(origin, sibling) in detail
     if runtime == "codex":
         assert "questions show" in detail
+
+
+def test_a_question_both_policies_ask_hands_over_no_refresh(
+    tmp_path: Path,
+    runtime: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The worktree's own policy differs, but not about this file.
+
+    README.md is human-owned under both, so accepting the worktree's policy
+    would put the same question: the command would change nothing its reader
+    meets, and a verdict carrying it sends an operator to do nothing.
+    """
+    origin, sibling = launched_beside(tmp_path, runtime, monkeypatch)
+    (sibling / "README.md").write_text("before\n")
+    regenerated_after_rename(sibling, runtime)
+    assert policy_refresh_lines(sibling)
+
+    effect, detail = native_edit(origin, sibling / "README.md", runtime)
+    preview = verdict_for(
+        str(sibling / "README.md"), "edit", False, origin, declared_hook_set()
+    )
+
+    assert effect == ("ask" if runtime == "claude" else "deny")
+    assert "README.md is human-authored" in detail
+    assert "policy-refresh" not in detail
+    assert not any("policy-refresh" in reading.recovery for reading in preview.readings)
+
+
+def test_a_ledger_recording_no_runtime_has_the_command_name_the_dispatchers(
+    tmp_path: Path,
+    runtime: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A launch that predates recording its runtime cannot say which tree to accept.
+
+    The refresh refuses to guess there, so the dispatcher asking -- compiled
+    for one runtime -- spells it into the command it hands over.
+    """
+    origin, sibling = launched_beside(tmp_path, runtime, monkeypatch)
+    ledger = origin / ".lup/preflight/routing-test.json"
+    measured = json.loads(ledger.read_text())
+    measured["runtime"] = []
+    ledger.write_text(json.dumps(measured))
+    regenerated_after_rename(sibling, runtime)
+    target = sibling / "src" / "adlib" / "harness" / "composition.py"
+
+    effect, detail = native_edit(origin, target, runtime, "VALUE = 1", "VALUE = 2")
+
+    assert effect == "deny"
+    assert f"{refresh_request(origin, sibling)} --runtime {runtime}" in detail
 
 
 def failing_worktree_listing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

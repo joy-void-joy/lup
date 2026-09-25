@@ -1973,6 +1973,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
     write_kernel_package(runtime)
     (runtime / "policy_data.py").write_text(
         render_policy_data(
+            runtime="claude",
             allowed_fetch_scopes=[
                 runtime_url_scope("https://docs.example.com:8443", "/reference/"),
                 runtime_url_scope(

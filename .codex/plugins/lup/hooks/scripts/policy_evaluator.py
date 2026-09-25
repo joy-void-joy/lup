@@ -50,7 +50,9 @@ from kernel.lex import (
 )
 from kernel.rows import (
     DisplacedTargetRow,
+    EditTablesRow,
     ResolutionRow,
+    generated_edit_tables,
     RewriteReading,
     RewrittenDocumentRow,
     UnproducedDocumentRow,
@@ -76,6 +78,7 @@ from policy_data import (
     PATH_RULES,
     PEER_POLICY,
     POLICY_ROOT_ENV,
+    POLICY_RUNTIME,
     RECOVERABLE_TARGET_LIMIT,
     REFUSED_TOOLS,
     RUNNER_TARGET_TABLES,
@@ -608,18 +611,40 @@ def refreshable_checkout(path_text: str, root: Path | None) -> str:
         return ""
 
 
-def policy_refresh_command(checkout: str, root: Path | None) -> str:
+def recorded_runtime(root: Path | None) -> str:
+    """The runtime the launch's ledger says it opened, or "" where it says none.
+
+    Spelled into the path of a tree compared, so one that is not a single
+    name is read as no record at all rather than followed out of the checkout.
+    """
+    boundary = measured_boundary(root)
+    return next(
+        (
+            name
+            for name in (boundary["runtime"] if "runtime" in boundary else [])
+            if Path(name).name == name and name not in ("", ".", "..")
+        ),
+        "",
+    )
+
+
+def policy_refresh_command(checkout: str, root: Path | None, runtime: str = "") -> str:
     """The operator's command accepting one checkout's policy for this launch.
 
     Spelled whole, because whoever runs it stands outside this session and
     can read neither the launch's nonce nor the checkout it was launched
     from; ``--directory`` puts the command in that checkout, whose ledger it
     rewrites, so it runs from anywhere. "" where no launch is named.
+
+    ``runtime`` is the one the asking dispatcher was compiled for. A ledger
+    written before launches recorded theirs cannot say which tree to accept,
+    and the command refuses to guess, so there the command names it.
     """
     nonce = launch_nonce()
     launch = launch_root(root)
     if not nonce or launch is None or not checkout:
         return ""
+    named = ["--runtime", runtime] if runtime and not recorded_runtime(root) else []
     return shlex.join(
         [
             "uv",
@@ -633,11 +658,37 @@ def policy_refresh_command(checkout: str, root: Path | None) -> str:
             nonce,
             "--repository",
             checkout,
+            *named,
         ]
     )
 
 
-def policy_refresh_request(path_text: str, root: Path | None) -> str:
+def own_policies(path_text: str, root: Path | None, runtime: str = "") -> list[dict]:
+    """The data of each policy the checkout holding a path generates for itself.
+
+    What a caller re-decides a verdict by, to learn whether that checkout's
+    own policy would reach another one: read with :func:`policy_data_literals`
+    rather than imported, because the session wrote it. The trees read are
+    the recorded runtime's, else ``runtime``'s, else every runtime's. Best
+    effort like the rest of the refresh advice: anything unreadable is no
+    answer, and a caller with no answer keeps its advice.
+    """
+    try:
+        checkout = refreshable_checkout(path_text, root)
+        if not checkout:
+            return []
+        pattern = recorded_runtime(root) or runtime or "*"
+        return [
+            policy_data_literals(evaluator.parents[1] / "runtime" / "policy_data.py")
+            for evaluator in Path(checkout).glob(
+                f".{pattern}/plugins/*/hooks/scripts/policy_evaluator.py"
+            )
+        ]
+    except Exception:
+        return []
+
+
+def policy_refresh_request(path_text: str, root: Path | None, runtime: str = "") -> str:
     """The refresh that would put a path's own policy in force, or "".
 
     Two ways a checkout ends up judged by a policy other than the one it
@@ -650,11 +701,10 @@ def policy_refresh_request(path_text: str, root: Path | None) -> str:
     the operator's command, and only where running it would change what
     judges the path.
 
-    Where the ledger does not say which runtime the launch opened, every
-    runtime's generated tree is compared, so a difference in any of them
-    still counts. A recorded runtime is spelled into the path compared, so
-    one that is not a single name is read as no record at all rather than
-    followed out of the checkout.
+    Where the ledger does not say which runtime the launch opened, the tree
+    of ``runtime`` -- the one the asking dispatcher was compiled for -- is
+    compared, and where neither says, every runtime's, so a difference in
+    any of them still counts.
 
     Best effort, for the reason :func:`refreshable_checkout` gives: any
     failure to establish the answer is no answer, and never an exception
@@ -685,13 +735,7 @@ def policy_refresh_request(path_text: str, root: Path | None) -> str:
         launch = launch_root(root)
         if not checkout or launch is None:
             return ""
-        boundary = measured_boundary(root)
-        recorded = [
-            name
-            for name in (boundary["runtime"] if "runtime" in boundary else [])
-            if Path(name).name == name and name not in ("", ".", "..")
-        ]
-        runtime = recorded[0] if recorded else "*"
+        pattern = recorded_runtime(root) or runtime or "*"
         granted = [
             row
             for row in ledger_rows("destination_policies", root)
@@ -701,7 +745,7 @@ def policy_refresh_request(path_text: str, root: Path | None) -> str:
         trees = [
             evaluator.parents[1].relative_to(checkout)
             for evaluator in Path(checkout).glob(
-                f".{runtime}/plugins/*/hooks/scripts/policy_evaluator.py"
+                f".{pattern}/plugins/*/hooks/scripts/policy_evaluator.py"
             )
         ]
         current = (
@@ -712,7 +756,7 @@ def policy_refresh_request(path_text: str, root: Path | None) -> str:
                 for tree in trees
             )
         )
-        return "" if current else policy_refresh_command(checkout, root)
+        return "" if current else policy_refresh_command(checkout, root, runtime)
     except Exception:
         return ""
 
@@ -3495,7 +3539,39 @@ def edit_decision(
     )
     if decision.effect not in ("ask", "deny"):
         return decision
-    return unaccepted_policy(decision, policy_refresh_request(path, cwd))
+    refresh = policy_refresh_request(path, cwd, POLICY_RUNTIME)
+    try:
+        own = [
+            local_edit_decision(
+                path,
+                before,
+                after,
+                path_exists,
+                autonomous,
+                operation,
+                cwd,
+                tables=generated_edit_tables(data),
+            )
+            for data in (own_policies(path, cwd, POLICY_RUNTIME) if refresh else [])
+        ]
+    except Exception:
+        # Advice only: a policy whose tables will not read is no answer, and
+        # the command stands beside the verdict as it would have.
+        own = []
+    return unaccepted_policy(decision, refresh, own)
+
+
+def launch_edit_tables() -> EditTablesRow:
+    """The tables this launch's own policy judges an edit by."""
+    return EditTablesRow(
+        path_rules=PATH_RULES,
+        antipattern_rows=ANTI_PATTERN_ROWS,
+        path_roles=PATH_ROLES,
+        maximum_added_lines=MAXIMUM_ADDED_LINES,
+        acceptance_guard=ACCEPTANCE_GUARD,
+        edit_rules=EDIT_RULES,
+        import_boundaries=IMPORT_BOUNDARIES,
+    )
 
 
 def local_edit_decision(
@@ -3508,8 +3584,12 @@ def local_edit_decision(
     cwd: Path | None = None,
     allowances: list[str] | None = None,
     resolve_external: bool = True,
+    tables: EditTablesRow | None = None,
 ) -> KernelDecision:
     """Judge one file's before and after against the declared edit policy.
+
+    ``tables`` are another generated policy's, read to learn what it would
+    decide here; unnamed, they are this launch's own.
 
     The path is relativized against the worktree holding it rather than the
     directory the runtime started in, because every repo-relative rule matches
@@ -3535,9 +3615,11 @@ def local_edit_decision(
     """
     outside_this_repository = foreign_repository(path_text, cwd)
     beyond_this_project = outside_this_project(path_text, cwd)
+    policy = tables or launch_edit_tables()
     suffix = Path(path_text).suffix.lower()
     python_source = suffix in (".py", ".pyi")
-    rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else []
+    patterns = policy["antipattern_rows"]
+    rows = patterns[suffix] if suffix in patterns else []
     # A checker is not started for a file this policy has already decided it
     # has nothing to say about. It would resolve another repository's imports
     # against another repository's environment to answer a rule that will not
@@ -3555,10 +3637,10 @@ def local_edit_decision(
         before,
         after,
         path_exists=path_exists,
-        path_rules=PATH_RULES,
+        path_rules=policy["path_rules"],
         antipattern_rows=rows,
-        path_roles=PATH_ROLES,
-        maximum_added_lines=MAXIMUM_ADDED_LINES,
+        path_roles=policy["path_roles"],
+        maximum_added_lines=policy["maximum_added_lines"],
         autonomous=autonomous,
         allowances=(
             granted_allowances(ALLOWANCE_GRANTS_ENV, KNOWN_ALLOWANCES)
@@ -3566,12 +3648,12 @@ def local_edit_decision(
             else allowances
         ),
         python_source=python_source,
-        acceptance_guard=ACCEPTANCE_GUARD,
+        acceptance_guard=policy["acceptance_guard"],
         resolution=resolution,
         suffix=suffix,
         operation=operation,
-        edit_rules=EDIT_RULES,
-        import_boundaries=IMPORT_BOUNDARIES,
+        edit_rules=policy["edit_rules"],
+        import_boundaries=policy["import_boundaries"],
         foreign=outside_this_repository,
         outside_project=beyond_this_project,
         displaced=next(
@@ -3583,7 +3665,7 @@ def local_edit_decision(
                             [path_text], cwd
                         ).items()
                     ],
-                    PATH_ROLES,
+                    policy["path_roles"],
                 )
             ),
             None,
