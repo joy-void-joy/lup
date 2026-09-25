@@ -28,7 +28,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from importlib import import_module
 from pathlib import Path
-from typing import Annotated, ClassVar
+from typing import Annotated, ClassVar, Self
 
 from pydantic import (
     BaseModel,
@@ -38,6 +38,7 @@ from pydantic import (
     ImportString,
     PlainSerializer,
     TypeAdapter,
+    model_validator,
 )
 
 from lup.coordination.identity import MEMBER_ENV, mint_member_id
@@ -328,6 +329,14 @@ class Toolset(HostedServer, frozen=True):
         self, tools: Sequence[LupMcpTool] = (), *, name: str = "tools"
     ) -> None:
         BaseModel.__init__(self, tools=list(tools), name=name)
+
+    @model_validator(mode="after")
+    def tools_are_named_apart(self) -> Self:
+        """Refuse two tools under one name, which one server cannot address."""
+        names = [tool.name for tool in self.tools]
+        if len(names) != len(dict.fromkeys(names)):
+            raise ValueError(f"toolset {self.name!r} names a tool twice: {names}")
+        return self
 
     def group(self) -> ToolGroup:
         carried = list(self.tools)
