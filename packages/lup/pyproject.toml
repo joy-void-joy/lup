@@ -52,6 +52,12 @@ conversation = [
     "playwright>=1.62.0",
 ]
 
+# Where the source lives, which is also what a project resolving a release or
+# keeping a vendored copy reads as lup's repository when its sync registration
+# names none (`lup.devtools.sync.distribution_repository`).
+[project.urls]
+Repository = "https://github.com/joy-void-joy/lup"
+
 [project.scripts]
 lup-codex-plugin = "lup.providers.codex.install:app"
 [build-system]
