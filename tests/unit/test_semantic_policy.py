@@ -848,6 +848,37 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="gh api repos/o/r/pulls", effect="allow"),
     DecisionCase(input="gh api -X POST repos/o/r/issues", effect="ask"),
     DecisionCase(input="gh api -f title=x repos/o/r/issues", effect="ask"),
+    # A write to a pull-request or merge route is the typed verb by another
+    # spelling, and allows where the endpoint names this checkout's own
+    # repository; a literal owner and name are anybody's, the line `gh pr
+    # create --repo` draws. Filing an issue and deleting a branch ask for what
+    # they are rather than for their method.
+    DecisionCase(
+        input="gh api repos/{owner}/{repo}/pulls -f title=t -f head=a -f base=b",
+        effect="allow",
+    ),
+    DecisionCase(
+        input="gh api -X PATCH repos/{owner}/{repo}/pulls/3 -f title=t",
+        effect="allow",
+    ),
+    DecisionCase(
+        input="gh api -X PUT /repos/{owner}/{repo}/pulls/3/merge", effect="allow"
+    ),
+    DecisionCase(
+        input="gh api repos/{owner}/{repo}/merges -f base=dev -f head=feat",
+        effect="allow",
+    ),
+    DecisionCase(input="gh api -X PUT repos/o/r/pulls/3/merge", effect="ask"),
+    DecisionCase(
+        input="gh api --hostname h.example repos/{owner}/{repo}/pulls -f title=t",
+        effect="ask",
+    ),
+    DecisionCase(input="gh api repos/{owner}/{repo}/issues -f title=t", effect="ask"),
+    DecisionCase(
+        input="gh api -X DELETE repos/{owner}/{repo}/git/refs/heads/feat/x",
+        effect="ask",
+    ),
+    DecisionCase(input="gh api -X POST repos/{owner}/{repo}/labels", effect="ask"),
     # Reading a repository is read-only however deep in git's own vocabulary
     # the question is spelled.
     DecisionCase(input="git ls-remote --heads origin", effect="allow"),
