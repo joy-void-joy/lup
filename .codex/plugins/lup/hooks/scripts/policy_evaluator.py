@@ -568,35 +568,44 @@ def refreshable_checkout(path_text: str, root: Path | None) -> str:
     what this half can read, and they name the same checkouts. Anything else
     answers "", because naming the command there would send an operator to a
     refusal.
+
+    Only ever advice, so a lookup that cannot finish -- a Git call past its
+    timeout, an answer that will not decode -- answers "" as well rather than
+    raising: every caller hands this beside a verdict or a report that stands
+    without it, and in a dispatcher an exception here is a refusal the
+    verdict never reached.
     """
-    launch = launch_root(root)
-    boundary = measured_boundary(root)
-    owner = worktree_root(str(((root or Path.cwd()) / path_text).resolve()))
-    here = worktree_root(str(launch)) if launch is not None else ""
-    if not boundary or not owner or not here or owner == here:
+    try:
+        launch = launch_root(root)
+        boundary = measured_boundary(root)
+        owner = worktree_root(str(((root or Path.cwd()) / path_text).resolve()))
+        here = worktree_root(str(launch)) if launch is not None else ""
+        if not boundary or not owner or not here or owner == here:
+            return ""
+        if any(
+            "checkout" in row and row["checkout"] == owner
+            for row in ledger_rows("destination_policies", root)
+        ):
+            return owner
+        repository = shared_git_directory(owner)
+        mounted = any(
+            "repository" in row
+            and row["repository"] == repository
+            and "root" in row
+            and isinstance(row["root"], str)
+            and Path(owner).is_relative_to(row["root"])
+            for row in ledger_rows("destination_authorities", root)
+        )
+        writable = boundary["writable_roots"] if "writable_roots" in boundary else []
+        leased = Path(owner).is_relative_to(repository) or any(
+            str(Path(item).resolve()) == owner for item in writable
+        )
+        own = repository == shared_git_directory(here) and leased
+        held = bool(writable) and not execution_write_refusal(owner, root)
+        reached = bool(repository) and (mounted or own) and held
+        return owner if reached and not worktree_refusal(owner, here) else ""
+    except Exception:
         return ""
-    if any(
-        "checkout" in row and row["checkout"] == owner
-        for row in ledger_rows("destination_policies", root)
-    ):
-        return owner
-    repository = shared_git_directory(owner)
-    mounted = any(
-        "repository" in row
-        and row["repository"] == repository
-        and "root" in row
-        and isinstance(row["root"], str)
-        and Path(owner).is_relative_to(row["root"])
-        for row in ledger_rows("destination_authorities", root)
-    )
-    writable = boundary["writable_roots"] if "writable_roots" in boundary else []
-    leased = Path(owner).is_relative_to(repository) or any(
-        str(Path(item).resolve()) == owner for item in writable
-    )
-    own = repository == shared_git_directory(here) and leased
-    held = bool(writable) and not execution_write_refusal(owner, root)
-    reached = bool(repository) and (mounted or own) and held
-    return owner if reached and not worktree_refusal(owner, here) else ""
 
 
 def policy_refresh_command(checkout: str, root: Path | None) -> str:
@@ -646,11 +655,11 @@ def policy_refresh_request(path_text: str, root: Path | None) -> str:
     still counts. A recorded runtime is spelled into the path compared, so
     one that is not a single name is read as no record at all rather than
     followed out of the checkout.
+
+    Best effort, for the reason :func:`refreshable_checkout` gives: any
+    failure to establish the answer is no answer, and never an exception
+    turning the verdict it rides beside into a refusal.
     """
-    checkout = refreshable_checkout(path_text, root)
-    launch = launch_root(root)
-    if not checkout or launch is None:
-        return ""
 
     def generated(directory: Path) -> str:
         """One tree's policy digest, or why it has none, which differs from any."""
@@ -671,33 +680,41 @@ def policy_refresh_request(path_text: str, root: Path | None) -> str:
             and generated(Path(row["source"])) == row["digest"]
         )
 
-    boundary = measured_boundary(root)
-    recorded = [
-        name
-        for name in (boundary["runtime"] if "runtime" in boundary else [])
-        if Path(name).name == name and name not in ("", ".", "..")
-    ]
-    runtime = recorded[0] if recorded else "*"
-    granted = [
-        row
-        for row in ledger_rows("destination_policies", root)
-        if "checkout" in row and row["checkout"] == checkout
-    ]
-    here = Path(worktree_root(str(launch)))
-    trees = [
-        evaluator.parents[1].relative_to(checkout)
-        for evaluator in Path(checkout).glob(
-            f".{runtime}/plugins/*/hooks/scripts/policy_evaluator.py"
+    try:
+        checkout = refreshable_checkout(path_text, root)
+        launch = launch_root(root)
+        if not checkout or launch is None:
+            return ""
+        boundary = measured_boundary(root)
+        recorded = [
+            name
+            for name in (boundary["runtime"] if "runtime" in boundary else [])
+            if Path(name).name == name and name not in ("", ".", "..")
+        ]
+        runtime = recorded[0] if recorded else "*"
+        granted = [
+            row
+            for row in ledger_rows("destination_policies", root)
+            if "checkout" in row and row["checkout"] == checkout
+        ]
+        here = Path(worktree_root(str(launch)))
+        trees = [
+            evaluator.parents[1].relative_to(checkout)
+            for evaluator in Path(checkout).glob(
+                f".{runtime}/plugins/*/hooks/scripts/policy_evaluator.py"
+            )
+        ]
+        current = (
+            all(accepted(row) for row in granted)
+            if granted
+            else all(
+                generated(Path(checkout) / tree) == generated(here / tree)
+                for tree in trees
+            )
         )
-    ]
-    current = (
-        all(accepted(row) for row in granted)
-        if granted
-        else all(
-            generated(Path(checkout) / tree) == generated(here / tree) for tree in trees
-        )
-    )
-    return "" if current else policy_refresh_command(checkout, root)
+        return "" if current else policy_refresh_command(checkout, root)
+    except Exception:
+        return ""
 
 
 def sandbox_active() -> bool:

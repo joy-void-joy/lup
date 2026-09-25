@@ -768,6 +768,83 @@ def test_a_question_the_launch_policy_asks_carries_the_refresh_on_every_runtime(
         assert "questions show" in detail
 
 
+def failing_worktree_listing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Git on PATH, except that its worktree listing will not decode.
+
+    Only the refresh lookup lists worktrees, so the verdict it rides beside is
+    reached exactly as it would be while the lookup raises, in a dispatcher's
+    process and in this one alike.
+    """
+    real = shutil.which("git")
+    assert real is not None
+    shim = tmp_path / "shim"
+    shim.mkdir()
+    git = shim / "git"
+    git.write_text(
+        "#!/bin/sh\n"
+        'case "$*" in *"worktree list"*) printf \'\\377\\376\\n\'; exit 0 ;; esac\n'
+        f'exec {shlex.quote(real)} "$@"\n'
+    )
+    git.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{shim}{os.pathsep}{os.environ['PATH']}")
+
+
+@pytest.mark.parametrize(
+    "edited, before, after, reason",
+    [
+        ("src/adlib/harness/composition.py", "VALUE = 1", "VALUE = 2", "seam-boundary"),
+        ("README.md", "before", "after", "README.md is human-authored"),
+    ],
+)
+def test_a_refresh_lookup_that_raises_leaves_the_verdict_the_launch_policy_reached(
+    tmp_path: Path,
+    runtime: str,
+    monkeypatch: pytest.MonkeyPatch,
+    edited: str,
+    before: str,
+    after: str,
+    reason: str,
+) -> None:
+    """The advice rides beside a verdict that stands without it, on either runtime.
+
+    A lookup that raises must turn neither a refusal nor a question into the
+    dispatcher's own failure -- a question on one runtime, a crash refusal on
+    the other -- so both arrive with their own reason and without the command.
+    """
+    origin, sibling = launched_beside(tmp_path, runtime, monkeypatch)
+    (sibling / "README.md").write_text("before\n")
+    regenerated_after_rename(sibling, runtime)
+    failing_worktree_listing(tmp_path, monkeypatch)
+
+    effect, detail = native_edit(origin, sibling / edited, runtime, before, after)
+
+    asked = edited == "README.md" and runtime == "claude"
+    assert effect == ("ask" if asked else "deny")
+    assert reason in detail
+    assert "policy-refresh" not in detail
+
+
+def test_a_refresh_lookup_that_times_out_leaves_the_previewed_verdict_as_it_was(
+    tmp_path: Path,
+    runtime: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """In process, where `dev policy` previews what a session is handed."""
+    origin, sibling = launched_beside(tmp_path, runtime, monkeypatch)
+    regenerated_after_rename(sibling, runtime)
+    target = sibling / "src" / "adlib" / "harness" / "composition.py"
+
+    def timed_out(checkout: str, _launch: str) -> str:
+        raise TimeoutExpired(["git", "-C", checkout, "worktree", "list"], 5)
+
+    monkeypatch.setattr(policy_host, "worktree_refusal", timed_out)
+    preview = verdict_for(str(target), "edit", False, origin, declared_hook_set())
+
+    assert {reading.effect for reading in preview.readings} == {"deny"}
+    assert all("seam-boundary" in reading.reason for reading in preview.readings)
+    assert not any("policy-refresh" in reading.recovery for reading in preview.readings)
+
+
 def test_the_operator_refresh_puts_the_siblings_own_policy_in_force(
     tmp_path: Path,
     runtime: str,
