@@ -13,7 +13,12 @@ import pytest
 import lup.providers.codex.runtime as runtime
 from lup.providers.codex import Codex
 from lup.providers.codex.app_server import CodexAppServer
-from lup.providers.codex.runtime import CodexConversationState, CodexRecord
+from lup.providers.codex.app_server import RpcNotification
+from lup.providers.codex.runtime import (
+    CodexConversationState,
+    CodexRecord,
+    CodexTurnChannel,
+)
 from lup.sessions.events import SessionId, TurnId, TurnTextBlock
 from lup.types import EnvVars, JsonObject, JsonValue
 
@@ -61,6 +66,9 @@ async def test_a_thread_reads_back_as_the_messages_its_turns_made(
 
     assert asked == [("thread/read", {"threadId": THREAD_ID, "includeTurns": True})]
     assert [message.role for message in messages] == ["user", "assistant"]
+    assert messages[0].blocks == [
+        TurnTextBlock(text="Reply with the single word: pong")
+    ]
     assert messages[1].blocks == [TurnTextBlock(text="pong")]
     assert messages[1].native is not None
     assert CodexRecord(state).identity() == SessionId(value=THREAD_ID)
@@ -151,3 +159,24 @@ async def test_an_agent_lists_its_workspace_threads_newest_first(
     assert isinstance(sources, list) and "subAgent" not in sources
     assert ListingServer.asked[1]["cursor"] == "page-2"
     assert ListingServer.started[0]["CODEX_HOME"] == str(home.resolve())
+
+
+async def test_a_live_turn_keeps_its_prompt_in_the_transcript_not_its_blocks() -> None:
+    """A turn's blocks are what it produced; the question is not one of them."""
+    [turn] = THREAD["thread"]["turns"]
+    channel = CodexTurnChannel(THREAD_ID)
+    channel.turn_id = turn["id"]
+    for item in turn["items"]:
+        channel.feed(
+            RpcNotification(
+                method="item/completed",
+                params={"threadId": THREAD_ID, "turnId": turn["id"], "item": item},
+            )
+        )
+
+    assert channel.blocks == [TurnTextBlock(text="pong")]
+    assert [
+        message.role
+        for event in channel.durable
+        if (message := event.completed_message) is not None
+    ] == ["user", "assistant"]

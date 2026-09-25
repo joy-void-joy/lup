@@ -1308,6 +1308,19 @@ COMPLETED_ITEM_CASES = [
         blocks=[TurnTextBlock(text="hello")],
     ),
     CompletedItemCase(
+        name="userMessage",
+        arm="(type=userMessage, content)",
+        payload={
+            "type": "userMessage",
+            "id": "prompt",
+            "content": [
+                {"type": "text", "text": "Reply with pong", "text_elements": []},
+                {"type": "image", "url": "file:///shot.png"},
+            ],
+        },
+        blocks=[TurnTextBlock(text="Reply with pong")],
+    ),
+    CompletedItemCase(
         name="reasoning",
         arm="(type=reasoning)",
         payload={"type": "reasoning", "content": ["step one", "step two"]},

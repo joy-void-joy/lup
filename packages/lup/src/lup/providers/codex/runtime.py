@@ -389,19 +389,25 @@ class CodexTurnChannel:
                 "item": item,
             } if isinstance(item, dict):
                 completed = decode_completed_item(item)
-                for block in completed:
-                    self.blocks.append(block)
-                    self.emit(
-                        BlockCompletedEvent(identifiers=self.identifiers(), block=block)
-                    )
+                role = message_role(item)
+                # The prompt joins the transcript and not the turn's blocks:
+                # a turn's blocks are what it produced, which is all a Claude
+                # turn's blocks ever are, and a final answer read from the
+                # last text block must not find the question instead.
+                if role != "user":
+                    for block in completed:
+                        self.blocks.append(block)
+                        self.emit(
+                            BlockCompletedEvent(
+                                identifiers=self.identifiers(), block=block
+                            )
+                        )
                 if completed:
                     self.emit(
                         MessageCompletedEvent(
                             identifiers=self.identifiers(),
                             message=TurnMessage(
-                                role=message_role(item),
-                                blocks=completed,
-                                native=item,
+                                role=role, blocks=completed, native=item
                             ),
                         )
                     )
@@ -1422,6 +1428,15 @@ def message_role(payload: JsonObject) -> Literal["user", "assistant", "tool", "s
             return "assistant"
 
 
+def prompt_text(part: JsonValue) -> str | None:
+    """The words one part of a prompt carries, where it is words at all."""
+    match part:
+        case {"type": "text", "text": str(words)}:
+            return words
+        case _:
+            return None
+
+
 def decode_completed_item(payload: JsonObject) -> list[AnyTurnBlock]:
     """Decode one typed completed app-server item into canonical blocks."""
     from lup.sessions.events import (
@@ -1436,6 +1451,17 @@ def decode_completed_item(payload: JsonObject) -> list[AnyTurnBlock]:
     match payload:
         case {"type": "agentMessage", "text": str(text)}:
             return [TurnTextBlock(text=text)]
+        case {"type": "userMessage", "content": list(content)}:
+            said: list[AnyTurnBlock] = [
+                TurnTextBlock(text=words)
+                for part in content
+                if (words := prompt_text(part)) is not None
+            ]
+            return said or [
+                TurnNativeActivityBlock(
+                    provider="codex", activity=native.activity, payload=payload
+                )
+            ]
         case {"type": "reasoning"}:
             reasoning = CodexReasoningItem.model_validate(payload)
             return [
