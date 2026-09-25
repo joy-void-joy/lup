@@ -483,8 +483,10 @@ bidirectional controls — is shown as its code point, so nothing it wrote can
 erase or reorder a line of the preview. Evaluator code holding such a
 character, a tab and a newline apart, is refused outright. Evaluator code runs once accepted, so
 every file differing from what this launch's own lup generates is shown as a
-unified diff, and the refresh then refuses until it is run again with
-`--accept-code`; where the launch checkout generates no tree for that runtime,
+unified diff under one digest, and the refresh then refuses until it is run
+again with `--accept-code <digest>` naming it — code changed since it was
+shown has another digest, and is refused and shown again; where the launch
+checkout generates no tree for that runtime,
 the code is compared with the snapshot judging now. `--yes` accepts without
 asking, after showing the same preview, and answers only for the data. A
 declined question writes nothing. Every file is read once: the digest, what

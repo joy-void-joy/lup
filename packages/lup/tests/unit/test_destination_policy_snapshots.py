@@ -907,7 +907,11 @@ def test_the_operator_sees_what_accepting_changes_before_anything_is_accepted(
         refresh_destination_policy(caller, sentinels.nonce, feature, approve)
     assert not approve.called
     accepted = refresh_destination_policy(
-        caller, sentinels.nonce, feature, approve, accept_code=True
+        caller,
+        sentinels.nonce,
+        feature,
+        approve,
+        accept_code=unreviewed.value.preview.code_digest,
     )
 
     (preview,) = approve.call_args.args
@@ -1147,7 +1151,8 @@ def test_the_command_shows_differing_code_and_accepts_it_only_when_told_to(
     """Code the launch's lup would not generate is shown as a diff, then refused.
 
     `--yes` answers the question about data and nothing else: running other
-    code is its own answer, given once the diff has been read.
+    code is its own answer, naming the digest of the diff that was read, so
+    code changed after it was shown is refused under the old digest.
     """
     monkeypatch.delenv("LUP_BOUNDARY_NONCE", raising=False)
     bare, caller, sentinels = launched_in_own_repository(tmp_path)
@@ -1168,12 +1173,21 @@ def test_the_command_shows_differing_code_and_accepts_it_only_when_told_to(
 
     refused = CliRunner().invoke(app, arguments)
     untouched = json.loads(ledger.read_text())["destination_policies"]
-    accepted = CliRunner().invoke(app, [*arguments, "--accept-code"])
+    with pytest.raises(UnreviewedCode) as unreviewed:
+        refresh_destination_policy(caller, sentinels.nonce, feature, approved)
+    digest = unreviewed.value.preview.code_digest
+    (hooks / "runtime" / "kernel" / "decision.py").write_text("VALUE = 3\n")
+    moved = CliRunner().invoke(app, [*arguments, "--accept-code", digest])
+    (hooks / "runtime" / "kernel" / "decision.py").write_text("VALUE = 2\n")
+    accepted = CliRunner().invoke(app, [*arguments, "--accept-code", digest])
 
     assert refused.exit_code == 1
     assert "runtime/kernel/decision.py (changed)" in refused.output
     assert "-VALUE = 1" in refused.output and "+VALUE = 2" in refused.output
-    assert "--accept-code" in refused.output and untouched == []
+    assert f"--accept-code {digest}." in refused.output and untouched == []
+    assert moved.exit_code == 1
+    assert f"--accept-code named {digest}, but the code shown above" in moved.output
+    assert "+VALUE = 3" in moved.output
     assert accepted.exit_code == 0, accepted.output
     assert "+VALUE = 2" in accepted.output
     assert len(json.loads(ledger.read_text())["destination_policies"]) == 1

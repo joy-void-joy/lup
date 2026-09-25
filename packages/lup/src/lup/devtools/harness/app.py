@@ -139,13 +139,14 @@ def create_harness_app(
             ),
         ] = False,
         accept_code: Annotated[
-            bool,
+            str,
             typer.Option(
                 "--accept-code",
+                metavar="DIGEST",
                 help="Accept evaluator code that differs from what this launch's "
-                "lup generates, once its diff has been read",
+                "lup generates, naming the digest its diff was shown under",
             ),
-        ] = False,
+        ] = "",
     ) -> None:
         """Accept changed destination policy from an independent operator terminal.
 

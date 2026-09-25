@@ -5,6 +5,7 @@ import os
 import unicodedata
 from collections.abc import Callable
 from difflib import SequenceMatcher, unified_diff
+from hashlib import sha256
 from pathlib import Path, PurePosixPath
 from types import NoneType, UnionType
 from typing import (
@@ -231,6 +232,8 @@ class PolicyPreview(BaseModel, frozen=True):
     judging: str
     changes: list[ConstantChange]
     code: list[CodeChange]
+    code_digest: str
+    """What the differing code is, which ``--accept-code`` has to name to run it."""
     contents: dict[PurePosixPath, bytes]
 
     def lines(self) -> list[str]:
@@ -242,7 +245,7 @@ class PolicyPreview(BaseModel, frozen=True):
         ]
         code = [
             "  Code that runs once accepted, where it differs from what this "
-            "launch's lup generates:",
+            f"launch's lup generates ({self.code_digest}):",
             *[
                 line
                 for change in self.code
@@ -269,16 +272,22 @@ class UnreviewedCode(Exception):
     """The checkout's evaluator code differs, and nobody said to accept code.
 
     Carries the preview, so the refusal is read beside the diff it is about:
-    accepting code is its own answer, given with ``--accept-code`` after the
-    diff was seen rather than folded into a question about data.
+    accepting code is its own answer, given with ``--accept-code`` naming the
+    digest of the code that was shown, so an answer given to one diff cannot
+    run whatever the checkout holds by the time it is given.
     """
 
-    def __init__(self, preview: PolicyPreview) -> None:
+    def __init__(self, preview: PolicyPreview, named: str) -> None:
+        shown = (
+            f"--accept-code named {visible(named)}, but the code shown above is "
+            f"{preview.code_digest}"
+            if named
+            else "The code shown above differs from what this launch's lup generates"
+        )
         super().__init__(
-            f"{visible(preview.checkout)}'s {preview.runtime} evaluator code differs from "
-            "what this launch's lup generates, in the files shown above. Nothing "
-            "was accepted; once that diff is code you mean to run, refresh again "
-            "with --accept-code."
+            f"{shown}. Nothing was accepted for {visible(preview.checkout)}; once "
+            "that diff is code you mean to run, refresh again with "
+            f"--accept-code {preview.code_digest}."
         )
         self.preview = preview
 
@@ -571,6 +580,16 @@ def policy_preview(
         constant_change(name, held, accepting)
         for name in dict.fromkeys([*accepting, *held])
     ]
+    differing = [
+        name
+        for name in dict.fromkeys([*generated, *theirs])
+        if name != data
+        and (
+            name not in generated
+            or name not in theirs
+            or generated[name] != theirs[name]
+        )
+    ]
     return PolicyPreview(
         checkout=existing.checkout,
         runtime=runtime,
@@ -583,14 +602,22 @@ def policy_preview(
                 generated[name] if name in generated else None,
                 theirs[name] if name in theirs else None,
             )
-            for name in dict.fromkeys([*generated, *theirs])
-            if name != data
-            and (
-                name not in generated
-                or name not in theirs
-                or generated[name] != theirs[name]
-            )
+            for name in differing
         ],
+        code_digest=sha256(
+            json.dumps(
+                [
+                    [
+                        name.as_posix(),
+                        sha256(generated[name]).hexdigest()
+                        if name in generated
+                        else "",
+                        sha256(theirs[name]).hexdigest() if name in theirs else "",
+                    ]
+                    for name in differing
+                ]
+            ).encode("utf-8")
+        ).hexdigest(),
         contents=theirs,
     )
 
@@ -601,7 +628,7 @@ def refresh_destination_policy(
     repository: Path,
     approve: Callable[[PolicyPreview], bool],
     runtime: PolicyRuntime | None = None,
-    accept_code: bool = False,
+    accept_code: str = "",
 ) -> DestinationPolicy:
     """Replace one accepted snapshot without extending that launch's authority.
 
@@ -614,7 +641,7 @@ def refresh_destination_policy(
     the snapshot store as they were; approved, it accepts the bytes it was
     shown and no others. Evaluator code differing from what the launch's lup
     generates raises :class:`UnreviewedCode` before anybody is asked, unless
-    ``accept_code`` says the operator has seen that diff and means to run it.
+    ``accept_code`` names the digest of exactly the code that was shown.
     """
     # lup: ignore[os-environ] — reject an operator-only action inherited by the requesting session
     if os.environ.get(NONCE_VARIABLE):
@@ -654,8 +681,8 @@ def refresh_destination_policy(
             f"--runtime {runtime} names another runtime"
         )
     preview = policy_preview(existing, root.resolve(), existing.runtime)
-    if preview.code and not accept_code:
-        raise UnreviewedCode(preview)
+    if preview.code and accept_code != preview.code_digest:
+        raise UnreviewedCode(preview, accept_code)
     if not approve(preview):
         raise RefreshDeclined(checkout)
     accepted = existing.accepted(root.resolve(), existing.runtime, preview.contents)
@@ -683,13 +710,14 @@ def refresh_command(
     repository: Path,
     runtime: PolicyRuntime | None = None,
     yes: bool = False,
-    accept_code: bool = False,
+    accept_code: str = "",
 ) -> None:
     """Show the operator what a refresh changes, and accept it once they agree.
 
     The preview is printed either way, so what ``--yes`` accepted is on the
     record too; the flag skips only the question. Code differing from what
-    the launch's lup generates is shown and refused until ``--accept-code``.
+    the launch's lup generates is shown and refused until ``--accept-code``
+    names the digest it was shown under.
     """
 
     def approve(preview: PolicyPreview) -> bool:
