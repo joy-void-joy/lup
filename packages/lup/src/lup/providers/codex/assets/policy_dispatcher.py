@@ -51,8 +51,10 @@ from decisions import (
 from host import (
     approval_fingerprint,
     approval_subject,
+    closed_deadline,
     declared_identity,
     file_diagnostics,
+    opened_deadline,
     note_ran,
     observe_hook_call,
     policy_snapshot_digest,
@@ -422,6 +424,10 @@ def observe(payload):
 
 
 def main():
+    # Twenty-five of the thirty seconds each runtime gives this hook before
+    # it lets the call through: every step a verdict waits on shares them,
+    # and the rest is left for starting Python and writing the verdict.
+    previous = opened_deadline(25.0)
     payload = {}
     permission_request = False
     review_notice = False
@@ -496,6 +502,8 @@ def main():
         if not permission_request:
             sys.stderr.write(decision.addressed())
             raise SystemExit(2) from error
+    finally:
+        closed_deadline(previous)
     if permission_request and decision.effect != "defer":
         allowed = decision.effect == "allow"
         json.dump(

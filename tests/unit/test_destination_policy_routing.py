@@ -546,6 +546,20 @@ def test_evaluator_timeout_is_bounded_and_routed_as_unavailable(
         )
 
 
+def test_no_destination_evaluator_starts_once_the_hook_has_no_time_left(
+    repositories: tuple[Path, Path],
+    runtime: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Past the hook's deadline the accepted policy is not run, and the refusal says why."""
+    origin, owner = repositories
+    binding = authorize(origin, owner, runtime, monkeypatch)
+    monkeypatch.setenv("LUP_HOOK_DEADLINE", repr(time.monotonic() - 1.0))
+
+    with pytest.raises(ValueError, match="no time left"):
+        policy_host.destination_evaluation(binding.model_dump_json(), "{}")
+
+
 def test_a_destination_grant_without_measured_write_authority_cannot_run(
     repositories: tuple[Path, Path],
     runtime: str,
@@ -904,6 +918,78 @@ def test_advice_that_overruns_its_budget_is_left_off(
 
     assert stalled == "" and elapsed < 5
     assert answered == "in time"
+
+
+def stalled_resolver(checkout: Path, runtime: str) -> Path:
+    """A language server that never answers, declared as this checkout's resolver."""
+    resolver = checkout / "stalled-resolver"
+    resolver.write_text("#!/bin/sh\nsleep 60\n")
+    resolver.chmod(0o755)
+    data = checkout / f".{runtime}/plugins/lup/hooks/runtime/policy_data.py"
+    data.write_text(data.read_text() + f"\nRESOLUTION_COMMAND = [{str(resolver)!r}]\n")
+    return resolver
+
+
+def test_the_hook_deadline_bounds_a_language_server_that_never_answers(
+    tmp_path: Path,
+    runtime: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The verdict is written before the runtime's limit, whatever a step spends.
+
+    The resolver would hold the hook for its own thirty seconds, the whole of
+    what the runtime allows. The hook's deadline is inherited here as three
+    seconds from now -- a deadline set by a parent is never extended -- and
+    the edit is answered as one no checker looked at, in time.
+    """
+    origin, _ = launched_beside(tmp_path, runtime, monkeypatch)
+    stalled_resolver(origin, runtime)
+    target = origin / "engine.py"
+    target.write_text('def read(client):\n    return client.get("old")\n')
+    monkeypatch.setenv("LUP_HOOK_DEADLINE", repr(time.monotonic() + 3.0))
+    started = time.monotonic()
+
+    effect, detail = native_edit(
+        origin,
+        target,
+        runtime,
+        '    return client.get("old")',
+        '    return client.get("new")',
+    )
+
+    assert time.monotonic() - started < 10
+    assert effect == ("ask" if runtime == "claude" else "deny")
+    assert "dict-get" in detail
+
+
+def test_only_a_path_outside_the_launch_checkout_can_be_owed_a_refresh(
+    tmp_path: Path, runtime: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Inside the launch checkout no refresh can change the verdict, so none is asked about."""
+    origin, sibling = launched_beside(tmp_path, runtime, monkeypatch)
+
+    assert not policy_host.outside_launch(str(origin / "src" / "app.py"), origin)
+    assert policy_host.outside_launch(str(sibling / "src" / "app.py"), origin)
+    monkeypatch.delenv("LUP_BOUNDARY_ROOT")
+    assert not policy_host.outside_launch(str(sibling / "src" / "app.py"), None)
+
+
+def test_a_deadline_already_set_is_never_extended(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A process the hook starts inherits its deadline, and cannot push it back."""
+    monkeypatch.setenv("LUP_HOOK_DEADLINE", repr(time.monotonic() + 2.0))
+
+    previous = policy_host.opened_deadline(25.0)
+    try:
+        left = policy_host.hook_seconds_left(30.0)
+    finally:
+        policy_host.closed_deadline(previous)
+
+    assert left <= 2.0
+    assert policy_host.hook_seconds_left(30.0) <= 2.0
+    monkeypatch.delenv("LUP_HOOK_DEADLINE")
+    assert policy_host.hook_seconds_left(30.0) == 30.0
 
 
 def failing_worktree_listing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

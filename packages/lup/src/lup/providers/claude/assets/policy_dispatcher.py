@@ -50,8 +50,10 @@ from decisions import (
 from host import (
     approval_fingerprint,
     approval_subject,
+    closed_deadline,
     declared_identity,
     file_diagnostics,
+    opened_deadline,
     note_ran,
     observe_hook_call,
     publish_edition,
@@ -496,6 +498,10 @@ def observe(payload):
 
 
 def main():
+    # Twenty-five of the thirty seconds each runtime gives this hook before
+    # it lets the call through: every step a verdict waits on shares them,
+    # and the rest is left for starting Python and writing the verdict.
+    previous = opened_deadline(25.0)
     payload = {}
     event = ""
     placed = None
@@ -578,6 +584,8 @@ def main():
             sys.stdout,
         )
         return
+    finally:
+        closed_deadline(previous)
     json.dump(rendered(decision, payload, placed, attached), sys.stdout)
     if not failed:
         detail = (

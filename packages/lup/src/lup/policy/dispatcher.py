@@ -99,6 +99,7 @@ DISPATCHER_STDLIB = (
     "subprocess",
     "datetime",
     "hashlib",
+    "time",
     "csv",
     "fcntl",
     "shlex",
@@ -137,6 +138,12 @@ second, so two snapshots taken in the same second tie — and a tie means the
 listing hands back the older of the two at exactly the moment somebody is
 reaching for the newer one. Nothing already pinned here can produce a
 sub-second stamp.
+
+``time`` earns its place the same way. A runtime lets a call through once
+its policy hook runs past its limit, so everything a verdict waits on shares
+one deadline the hook sets as it starts and every step it starts reads back:
+a duration, which only a monotonic clock measures -- ``datetime`` reads the
+wall clock, which a machine may set back or forward in the middle of a hook.
 
 ``csv`` earns its place the same way. Asking Git which paths a patch would
 touch answers in its tab-separated report, and this repository's own

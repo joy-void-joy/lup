@@ -14,6 +14,7 @@ import fcntl
 import os
 import shlex
 from hashlib import sha256
+import time
 from datetime import UTC, datetime, timedelta
 
 # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
@@ -226,18 +227,18 @@ def policy_data_literals(path: Path, text: str | None = None) -> dict:
                 "a literal, which would run when the policy is imported"
             ) from error
 
-    imported = {
+    imported = [
         alias.name
         for statement in tree.body
         if isinstance(statement, ast.ImportFrom)
         for alias in statement.names
-    }
+    ]
     constants = {
         name: value
         for statement in tree.body
         for name, value in assigned(statement).items()
     }
-    shadowed = sorted(imported & set(constants))
+    shadowed = sorted(name for name in constants if name in imported)
     if shadowed:
         raise ValueError(
             f"{path} both imports and assigns {', '.join(shadowed)}, which "
@@ -366,6 +367,11 @@ def destination_evaluation(binding: str, request: str, timeout: float = 15) -> s
     snapshot = Path(row["snapshot"])
     if policy_snapshot_digest(snapshot) != row["digest"]:
         raise ValueError("accepted destination policy snapshot changed")
+    allowed = hook_seconds_left(timeout)
+    if allowed <= 0:
+        raise ValueError(
+            "this hook has no time left to run the destination's accepted policy"
+        )
     result = subprocess.run(
         [
             sys.executable,
@@ -379,7 +385,7 @@ def destination_evaluation(binding: str, request: str, timeout: float = 15) -> s
         input=request,
         text=True,
         capture_output=True,
-        timeout=timeout,
+        timeout=allowed,
         check=False,
     )
     if result.returncode != 0:
@@ -527,7 +533,7 @@ def worktree_refusal(checkout: str, launch: str) -> str:
             ["git", "-C", checkout, *arguments],
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=hook_seconds_left(5),
             check=False,
         )
 
@@ -706,6 +712,68 @@ def policy_refresh_command(checkout: str, root: Path | None, runtime: str = "") 
     )
 
 
+def opened_deadline(seconds: float) -> str:
+    """Give this hook, and every process it starts, one deadline: returns the one before.
+
+    Each runtime lets a call through once its policy hook runs past thirty
+    seconds, so everything a verdict may wait on -- a language server, a
+    destination's evaluator, the advice beside it -- shares one deadline set
+    here, where the hook starts, and each asks :func:`hook_seconds_left`
+    rather than spending a timeout of its own. Kept in the environment, on
+    the monotonic clock every process on the machine shares, so a process
+    this hook starts inherits the deadline and never extends it: one already
+    set by a parent stands where it is sooner.
+    """
+    environ = os.environ  # lup: ignore[os-environ]
+    previous = environ["LUP_HOOK_DEADLINE"] if "LUP_HOOK_DEADLINE" in environ else ""
+    deadline = time.monotonic() + seconds
+    try:
+        inherited = float(previous) if previous else deadline
+    except ValueError:
+        inherited = deadline
+    environ["LUP_HOOK_DEADLINE"] = repr(min(deadline, inherited))
+    return previous
+
+
+def closed_deadline(previous: str) -> None:
+    """Put back whatever deadline stood before :func:`opened_deadline`."""
+    environ = os.environ  # lup: ignore[os-environ]
+    if previous:
+        environ["LUP_HOOK_DEADLINE"] = previous
+        return
+    environ.pop("LUP_HOOK_DEADLINE", None)
+
+
+def hook_seconds_left(ceiling: float) -> float:
+    """How long a step may still take: ``ceiling``, or less where the hook's deadline is nearer.
+
+    Outside a hook no deadline is set and the step keeps its own ceiling.
+    """
+    environ = os.environ  # lup: ignore[os-environ]
+    if "LUP_HOOK_DEADLINE" not in environ:
+        return ceiling
+    try:
+        deadline = float(environ["LUP_HOOK_DEADLINE"])
+    except ValueError:
+        return ceiling
+    return max(0.0, min(ceiling, deadline - time.monotonic()))
+
+
+def outside_launch(path_text: str, root: Path | None) -> bool:
+    """Whether a path lies outside the launch checkout, where another policy could judge it.
+
+    Only there can a refresh change what judges a path: the launch checkout
+    is judged by the policy the session launched with and is never
+    refreshed. So only there is the advice worth a child process, and inside
+    it -- where nearly every edit lands -- none is started. No launch named,
+    no refresh either.
+    """
+    launch = launch_root(root)
+    return launch is not None and not (
+        (root or Path.cwd()) / path_text
+    ).resolve().is_relative_to(launch.resolve())
+
+
 def within_budget(entry: str, request: dict, budget: float = 5.0) -> str:
     """One function of this dispatcher, answered by a child held to a hard budget.
 
@@ -717,12 +785,13 @@ def within_budget(entry: str, request: dict, budget: float = 5.0) -> str:
     anything short of a clean answer in time is no answer. Only a dispatcher
     started as a script has itself to load, so anywhere else it answers "".
 
-    Five seconds by default: each runtime gives its policy hook thirty, and
-    the verdict this rides beside, a language server included, spends the
-    rest.
+    Five seconds by default, and less where the hook's deadline is nearer:
+    the verdict this rides beside has already been reached, and is written
+    in time whatever this does.
     """
     script = Path(sys.argv[0]) if sys.argv and sys.argv[0] else None
-    if script is None or not script.is_file():
+    allowed = hook_seconds_left(budget)
+    if script is None or not script.is_file() or allowed < 0.5:
         return ""
     child = (
         "import json, runpy, sys\n"
@@ -744,7 +813,7 @@ def within_budget(entry: str, request: dict, budget: float = 5.0) -> str:
             input=json.dumps(request),
             text=True,
             capture_output=True,
-            timeout=budget,
+            timeout=allowed,
             check=False,
         )
     except (subprocess.TimeoutExpired, OSError):
@@ -1802,13 +1871,25 @@ def shared_git_directory(path_text: str) -> str:
     root = worktree_root(path_text)
     if not root:
         return ""
-    result = subprocess.run(
-        ["git", "-C", root, "rev-parse", "--path-format=absolute", "--git-common-dir"],
-        capture_output=True,
-        text=True,
-        timeout=5,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                root,
+                "rev-parse",
+                "--path-format=absolute",
+                "--git-common-dir",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=hook_seconds_left(5),
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        # Git not answering in the time this hook has left reads as Git
+        # failing, which every caller already answers.
+        return ""
     return str(Path(result.stdout.strip()).resolve()) if result.returncode == 0 else ""
 
 
@@ -2185,7 +2266,7 @@ def file_diagnostics(
             text=True,
             cwd=root,
             env={**environ, "PATH": searched},
-            timeout=timeout_seconds,
+            timeout=hook_seconds_left(timeout_seconds),
             check=False,
         )
         reported = json.loads(finished.stdout)["generalDiagnostics"]
@@ -2247,7 +2328,7 @@ def repaired_directives(
             capture_output=True,
             text=True,
             cwd=root,
-            timeout=timeout_seconds,
+            timeout=hook_seconds_left(timeout_seconds),
             check=False,
         )
         reported = json.loads(finished.stdout)["repaired"]
@@ -2289,13 +2370,15 @@ def resolved_refutations(
     own name resolve against it and against nothing else.
 
     None where no answer was had — no declared resolver, none installed, a
-    crash, a timeout, output that will not decode — and it has to stay
+    crash, a timeout, output that will not decode, or no time left before the
+    hook's deadline for one to answer in — and it has to stay
     distinct from an empty refutation. Empty means a checker looked and
     refuted nothing, which is evidence; None means nothing looked, which is
     the gate's cue to ask rather than refuse. Collapsing the two would turn
     every unresolvable session into a wall of confident denials.
     """
-    if not command:
+    allowed = hook_seconds_left(timeout_seconds)
+    if not command or allowed < 1.0:
         return None
     root = worktree_root(path_text)
     if not root:
@@ -2310,7 +2393,7 @@ def resolved_refutations(
             text=True,
             input=proposed,
             cwd=root,
-            timeout=timeout_seconds,
+            timeout=allowed,
             check=False,
         )
         reported = json.loads(finished.stdout)
@@ -2408,8 +2491,11 @@ def git_answers(
             check=False,
             input=input_text,
             env={**environ, **overrides} if overrides else None,
+            # Bounded by what the hook has left: an answer that does not come
+            # in time is the unanswerable question this already reads as no.
+            timeout=hook_seconds_left(25.0),
         )
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         return None
     return finished.stdout.splitlines() if finished.returncode == 0 else None
 
@@ -2686,10 +2772,11 @@ def rewritten_text(
             capture_output=True,
             text=True,
             check=False,
+            timeout=hook_seconds_left(25.0),
         )
     except UnicodeDecodeError:
         return {"text": None, "cause": "unreadable"}
-    except (OSError, ValueError):
+    except (OSError, ValueError, subprocess.TimeoutExpired):
         return {"text": None, "cause": "refused"}
     if finished.returncode:
         return {"text": None, "cause": "refused"}
@@ -3617,7 +3704,12 @@ def edit_decision(
         if response is not None:
             return read_response(json.loads(response))
     except (OSError, ValueError, KeyError, TypeError) as error:
-        return routing_failure(str(error), within_budget("refresh_request", asked))
+        return routing_failure(
+            str(error),
+            within_budget("refresh_request", asked)
+            if outside_launch(path, cwd)
+            else "",
+        )
     decision = local_edit_decision(
         path,
         before,
@@ -3627,7 +3719,7 @@ def edit_decision(
         operation,
         cwd,
     )
-    if decision.effect not in ("ask", "deny"):
+    if decision.effect not in ("ask", "deny") or not outside_launch(path, cwd):
         return decision
     return unaccepted_policy(decision, within_budget("refresh_advice", asked))
 

@@ -42,6 +42,7 @@ from host import (
     foreign_repository,
     granted_allowances,
     managed_script_roots,
+    outside_launch,
     outside_this_project,
     own_policies,
     within_budget,
@@ -697,7 +698,12 @@ def edit_decision(
         if response is not None:
             return read_response(json.loads(response))
     except (OSError, ValueError, KeyError, TypeError) as error:
-        return routing_failure(str(error), within_budget("refresh_request", asked))
+        return routing_failure(
+            str(error),
+            within_budget("refresh_request", asked)
+            if outside_launch(path, cwd)
+            else "",
+        )
     decision = local_edit_decision(
         path,
         before,
@@ -707,7 +713,7 @@ def edit_decision(
         operation,
         cwd,
     )
-    if decision.effect not in ("ask", "deny"):
+    if decision.effect not in ("ask", "deny") or not outside_launch(path, cwd):
         return decision
     return unaccepted_policy(decision, within_budget("refresh_advice", asked))
 

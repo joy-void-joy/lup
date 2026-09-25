@@ -514,9 +514,17 @@ whole and in order, the roles, the anti-pattern rows for its suffix, the edit
 rules and limits, and for Python the import boundaries — and never searched
 with, since the session wrote them; a file both policies own a question about,
 a human-owned README, carries none. That comparison runs after the verdict is
-reached, in a child held to five of the thirty seconds a policy hook has, and
-is left off where it overruns, since a runtime lets a call through once its
-hook does. A launch whose ledger records no runtime has the command name the asking
+reached, only for a path outside the launch checkout, in a child held to five
+seconds, and is left off where it overruns.
+
+A runtime lets a call through once its policy hook runs past thirty seconds,
+so every step a verdict waits on shares one deadline, twenty-five seconds
+from the hook's start: the language server an anti-pattern rule consults, a
+destination's accepted evaluator, every Git and `sed` call, and the advice.
+Each takes what is left rather than a timeout of its own, and one cut short
+reads as the failure it already answers — no checker looked, Git could not
+say — so the verdict is written in time whatever overruns. A process the
+hook starts inherits the deadline and cannot extend it. A launch whose ledger records no runtime has the command name the asking
 dispatcher's, since the refresh will not guess which tree to accept. Generation names
 it first: `harness generate` in such a worktree ends on the same command once
 what it wrote differs from what the launch accepted, and
