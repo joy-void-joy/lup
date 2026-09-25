@@ -6,13 +6,25 @@ runtime has spelled it — which is the whole point of the request being a
 declaration each runtime renders.
 """
 
+import json
+import tomllib
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import get_args
 
 import pytest
+import tomlkit
 from pydantic import BaseModel, ValidationError
 
+from lup.providers.claude.config_home import (
+    CLAUDE_HOME_DIR,
+    CLAUDE_HOME_DOCUMENT,
+    CLAUDE_OAUTH_URL_ENV,
+    load_document,
+    save_document,
+)
+from lup.providers.claude.login import CLAUDE_CONFIG_DIR, CLAUDE_LOGIN
 from lup.providers.claude.runtime import ClaudeSessionConfig
 from lup.providers.claude.selection import (
     CLAUDE_AUTONOMY,
@@ -20,6 +32,8 @@ from lup.providers.claude.selection import (
     CLAUDE_RUNTIME,
     claude_config,
 )
+from lup.providers.codex.home import CodexWorktreeHomeStore
+from lup.providers.codex.login import CODEX_HOME, CODEX_LOGIN
 from lup.providers.codex.runtime import CODEX_PROGRAM, CodexSessionConfig
 from lup.providers.codex.selection import (
     CODEX_AUTONOMY,
@@ -43,6 +57,30 @@ from lup.sessions.events import SubmissionDecision
 
 AUTONOMY_DEGREES = get_args(SessionAutonomy.__value__)
 CONTAINMENT_WALLS = get_args(SessionContainment.__value__)
+
+
+@pytest.fixture(autouse=True)
+def empty_user_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Measure the runtimes, not the account this suite was launched as.
+
+    A session's home is selected from the environment it runs with, which
+    begins as this process's own — so a test leaving that alone derives
+    under whichever account launched the suite, and reads its document.
+    Every test here starts from an empty user directory with no runtime's
+    home named, and names one where that is its subject.
+
+    Codex's worktree store fixes its account home when it is imported, so
+    it is bound to the empty directory here rather than following ``HOME``.
+    """
+    user = tmp_path / "user"
+    user.mkdir()
+    monkeypatch.setenv("HOME", str(user))
+    for name in (CLAUDE_CONFIG_DIR, CLAUDE_OAUTH_URL_ENV, CODEX_HOME):
+        monkeypatch.delenv(name, raising=False)
+    account = user / CODEX_LOGIN.ambient_home.name
+    store = partial(CodexWorktreeHomeStore, account)
+    monkeypatch.setattr("lup.providers.codex.home.CodexWorktreeHomeStore", store)
+    return user
 
 
 @pytest.mark.parametrize("runtime", [CLAUDE_RUNTIME, CODEX_RUNTIME])
@@ -206,6 +244,145 @@ def test_a_request_naming_no_workspace_has_no_home_to_be_given(
     request = SessionRequest()
 
     assert runtime.homed(request) == request
+
+
+def claude_account(home: Path, document: Path, name: str) -> None:
+    """Give one Claude account a login in its home, and a document where Claude reads it."""
+    home.mkdir(parents=True, exist_ok=True)
+    login = json.dumps({"account": name})
+    CLAUDE_LOGIN.credentials_path(home).write_text(login, encoding="utf-8")
+    save_document(document, {"account": name})
+
+
+def codex_account(home: Path, name: str) -> None:
+    """Give one Codex account a login, and the settings it keeps beside it."""
+    home.mkdir(parents=True, exist_ok=True)
+    login = json.dumps({"account": name})
+    CODEX_LOGIN.credentials_path(home).write_text(login, encoding="utf-8")
+    settings = tomlkit.dumps({"account": name})
+    (home / "config.toml").write_text(settings, encoding="utf-8")
+
+
+def test_claude_homes_a_session_under_the_account_it_was_launched_as(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The process names the account and the request names nothing, as one
+    built with defaults does. The session inherits the process's variable,
+    so the home it is routed at is derived from that account — its login
+    linked in, its document carried — and the request gains that routing
+    alone, never a copy of the process's variables."""
+    launched = tmp_path / "launched"
+    claude_account(launched, launched / CLAUDE_HOME_DOCUMENT, "launched")
+    monkeypatch.setenv(CLAUDE_CONFIG_DIR, str(launched))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    homed = CLAUDE_RUNTIME.homed(SessionRequest(cwd=workspace))
+    home = Path(homed.environment[CLAUDE_CONFIG_DIR])
+
+    assert list(homed.environment) == [CLAUDE_CONFIG_DIR]
+    login = CLAUDE_LOGIN.credentials_path(home).resolve()
+    assert login == CLAUDE_LOGIN.credentials_path(launched).resolve()
+    assert load_document(home / CLAUDE_HOME_DOCUMENT) == {"account": "launched"}
+
+
+def test_claude_prefers_the_account_a_request_names_to_the_one_it_was_launched_as(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A request's variables are layered over the process's in the session,
+    and so in the selection: the account the request names wins."""
+    launched = tmp_path / "launched"
+    requested = tmp_path / "requested"
+    for account in (launched, requested):
+        claude_account(account, account / CLAUDE_HOME_DOCUMENT, account.name)
+    monkeypatch.setenv(CLAUDE_CONFIG_DIR, str(launched))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    request = SessionRequest(
+        cwd=workspace, environment={CLAUDE_CONFIG_DIR: str(requested)}
+    )
+
+    home = Path(CLAUDE_RUNTIME.homed(request).environment[CLAUDE_CONFIG_DIR])
+
+    login = CLAUDE_LOGIN.credentials_path(home).resolve()
+    assert login == CLAUDE_LOGIN.credentials_path(requested).resolve()
+    assert load_document(home / CLAUDE_HOME_DOCUMENT) == {"account": "requested"}
+
+
+def test_claude_falls_back_to_its_default_account_when_nothing_names_one(
+    empty_user_home: Path, tmp_path: Path
+) -> None:
+    """Neither names a home, so Claude's own default decides: ``.claude`` in
+    the user's home directory, with its document beside that, not inside."""
+    default = empty_user_home / CLAUDE_HOME_DIR
+    claude_account(default, empty_user_home / CLAUDE_HOME_DOCUMENT, "default")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    homed = CLAUDE_RUNTIME.homed(SessionRequest(cwd=workspace))
+    home = Path(homed.environment[CLAUDE_CONFIG_DIR])
+
+    login = CLAUDE_LOGIN.credentials_path(home).resolve()
+    assert login == CLAUDE_LOGIN.credentials_path(default).resolve()
+    assert load_document(home / CLAUDE_HOME_DOCUMENT) == {"account": "default"}
+
+
+def test_codex_opens_a_session_in_the_home_it_was_launched_under(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The process names the home and the request names nothing. Codex
+    honours a named home as it stands, so the session is routed at that home
+    itself — its login and its settings, left as they were — and no worktree
+    copy of the account is prepared in its place."""
+    launched = tmp_path / "launched"
+    codex_account(launched, "launched")
+    monkeypatch.setenv(CODEX_HOME, str(launched))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    homed = CODEX_RUNTIME.homed(SessionRequest(cwd=workspace))
+
+    assert homed.environment == {CODEX_HOME: str(launched)}
+    settings = (launched / "config.toml").read_text(encoding="utf-8")
+    assert settings == tomlkit.dumps({"account": "launched"})
+    assert not CodexWorktreeHomeStore().home_for(workspace).exists()
+
+
+def test_codex_prefers_the_home_a_request_names_to_the_one_it_was_launched_under(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A request's variables are layered over the process's in the session,
+    and so in the selection: the home the request names wins."""
+    launched = tmp_path / "launched"
+    requested = tmp_path / "requested"
+    for account in (launched, requested):
+        codex_account(account, account.name)
+    monkeypatch.setenv(CODEX_HOME, str(launched))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    request = SessionRequest(cwd=workspace, environment={CODEX_HOME: str(requested)})
+
+    assert CODEX_RUNTIME.homed(request).environment == {CODEX_HOME: str(requested)}
+
+
+def test_codex_falls_back_to_the_worktree_home_when_nothing_names_one(
+    empty_user_home: Path, tmp_path: Path
+) -> None:
+    """Neither names a home, so the checkout's own is prepared, seeded from
+    the account Codex keeps by default: its login copied in, its settings
+    carried over."""
+    codex_account(empty_user_home / CODEX_LOGIN.ambient_home.name, "default")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    homed = CODEX_RUNTIME.homed(SessionRequest(cwd=workspace))
+    home = Path(homed.environment[CODEX_HOME])
+
+    assert home == CodexWorktreeHomeStore().home_for(workspace)
+    login = CODEX_LOGIN.credentials_path(home).read_text(encoding="utf-8")
+    assert login == json.dumps({"account": "default"})
+    settings = tomllib.loads((home / "config.toml").read_text(encoding="utf-8"))
+    assert settings["account"] == "default"
 
 
 class GatedOutput(BaseModel):
