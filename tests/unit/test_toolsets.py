@@ -10,6 +10,8 @@ groups lup ships arrive with their companions, and that a group servable only
 by name reaches no default set.
 """
 
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -29,6 +31,7 @@ from lup.tools.toolsets import (
     served_names,
     startup_names,
 )
+from lup.workspace.context import SessionContext
 from lup_template.agent.toolsets import EXAMPLE_GROUP, declared_tool_groups
 
 
@@ -153,3 +156,45 @@ def test_in_process_registration_does_not_claim_a_receiver_lifecycle(
     servers = registered(build(tmp_path), declared_tool_groups(), BaseToolPolicy())
     [coordination] = [server for server in servers if server.name == "coordination"]
     assert coordination.companions == []
+
+
+def test_a_tool_server_starts_where_the_docker_extra_is_not_installed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A project that declined the sandbox installs no `lup[docker]`.
+
+    Every server its plugin starts is `lup-devtools agent serve-tools`, so this
+    runs that command, over a session relayed the way an adapter relays one,
+    in a fresh interpreter where `docker` cannot be imported — this one has
+    the extra installed and has imported it already. Sandboxing is left on,
+    as a project that declined the module keeps it by default: the session is
+    served without a container rather than not served at all.
+    """
+    context = SessionContext(
+        session_dir=tmp_path / "session",
+        outputs_dir=tmp_path / "outputs",
+        gate_flag=tmp_path / "gate",
+        session_id="no-docker",
+        task_id="no-docker",
+    )
+    for name, value in context.to_env().items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("AGENT_SANDBOX_ENABLED", "true")
+
+    served = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; sys.modules['docker'] = None; "
+            "from lup_template.devtools.main import app; "
+            "app(['agent', 'serve-tools', '--list'], prog_name='lup-devtools')",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert served.returncode == 0, served.stderr
+    names = served.stdout.splitlines()
+    assert "review" in names
+    assert not {"execute_code", "install_package"} & set(names)
+    assert "docker extra not installed" in served.stderr

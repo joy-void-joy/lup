@@ -18,13 +18,20 @@ from lup_template.devtools.dev.init import (
     mention_pattern,
     surviving_mentions,
 )
+from tests.unit.repos import initialized_repo
 
 
 @pytest.fixture
 def checkout(tmp_path: Path) -> Path:
-    """A tree holding what the scaffold ships, and prose naming it."""
+    """A committed tree holding what the scaffold ships, and prose naming it.
+
+    A repository rather than a directory, because what the scan reads is what
+    git holds: the ignore rules are half of what it is asked.
+    """
+    work = tmp_path / "checkout"
+    git = initialized_repo(work, tmp_path / "no-hooks")
     for path in SCAFFOLD_DEMONSTRATIONS:
-        target = tmp_path / path
+        target = work / path
         if path.suffix:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text("from examples.one_shot import main\n", encoding="utf-8")
@@ -33,13 +40,18 @@ def checkout(tmp_path: Path) -> Path:
             (target / "one_shot.py").write_text(
                 "from examples.common import Summary\n", encoding="utf-8"
             )
-    (tmp_path / "README.md").write_text(
+    (work / "README.md").write_text(
         "See [runtime examples](examples/README.md), which run end to end.\n"
         "This paragraph merely mentions examples. It names no path.\n",
         encoding="utf-8",
     )
-    (tmp_path / "catalog.py").write_text('composition = ["examples/"]\n', "utf-8")
-    return tmp_path
+    (work / "catalog.py").write_text('composition = ["examples/"]\n', "utf-8")
+    (work / ".gitignore").write_text(
+        ".venv-contained\npackages/lup/web/node_modules/\n", encoding="utf-8"
+    )
+    git("add", "--all")
+    git("commit", "--quiet", "-m", "scaffold")
+    return work
 
 
 def test_a_dry_run_reports_what_it_would_remove_and_removes_nothing(
@@ -78,6 +90,45 @@ def test_a_file_inside_what_is_going_is_not_reported(checkout: Path) -> None:
     mentions = surviving_mentions(checkout, SCAFFOLD_DEMONSTRATIONS)
 
     assert not any("examples/one_shot.py" in line for line in mentions)
+
+
+def test_what_the_ignore_rules_keep_out_is_never_read(checkout: Path) -> None:
+    """An environment and a dependency tree name the directory, and are nobody's.
+
+    The two trees an adopter's report was buried under: the contained
+    session's virtual environment, whose installed packages say `examples/`
+    in their own docstrings, and the frontend's dependencies. Neither is a
+    line anybody repairs, and both went unlisted in a skip list that could
+    only ever name the trees somebody had already thought of.
+    """
+    for tree in [
+        ".venv-contained/lib/python3.14/site-packages/pydantic",
+        "packages/lup/web/node_modules/vite",
+    ]:
+        (checkout / tree).mkdir(parents=True)
+        (checkout / tree / "fields.py").write_text(
+            '"""See examples/README.md for a worked schema."""\n', encoding="utf-8"
+        )
+        (checkout / tree / "README.md").write_text(
+            "Run `uv run -m examples.one_shot` first.\n", encoding="utf-8"
+        )
+
+    mentions = surviving_mentions(checkout, SCAFFOLD_DEMONSTRATIONS)
+
+    assert not any(".venv-contained" in line for line in mentions)
+    assert not any("node_modules" in line for line in mentions)
+    assert any(line.startswith("  README.md:1:") for line in mentions)
+
+
+def test_a_file_written_since_the_last_commit_is_still_read(checkout: Path) -> None:
+    """Untracked is not ignored: prose written a minute ago is somebody's."""
+    (checkout / "NOTES.md").write_text(
+        "Walk through examples/one_shot.py before the review.\n", encoding="utf-8"
+    )
+
+    mentions = surviving_mentions(checkout, SCAFFOLD_DEMONSTRATIONS)
+
+    assert any("NOTES.md:1" in line for line in mentions)
 
 
 @pytest.mark.parametrize(

@@ -29,7 +29,7 @@ arrives with the pin.
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel
 
@@ -37,7 +37,6 @@ from lup.coordination.wake import WakePath
 from lup.ledger.models import LedgerEdge, LedgerNode
 from lup.ledger.store import LedgerLayout
 from lup.orchestration.reflection import ReviewGate
-from lup.sandbox.container import Sandbox
 from lup.tools.mcp import (
     LupMcpServerConfig,
     LupMcpTool,
@@ -46,6 +45,22 @@ from lup.tools.mcp import (
     serve_stdio,
 )
 from lup.tools.policy import BaseToolPolicy
+
+
+@runtime_checkable
+class SessionSandbox(Protocol):
+    """What the sandbox group asks of a session's container: its verbs.
+
+    A shape rather than :class:`~lup.sandbox.container.Sandbox` itself,
+    because that class is the ``docker`` extra's and this module is not. Every
+    tool server a generated plugin starts imports this module, whichever
+    groups it serves, so naming the class here would make the extra a
+    requirement of serving any group at all — including for a project that
+    declined the sandbox. A container the caller started satisfies it as it
+    stands.
+    """
+
+    def create_tools(self) -> list[LupMcpTool]: ...
 
 
 class SessionNeeds(BaseModel, frozen=True, arbitrary_types_allowed=True):
@@ -75,7 +90,7 @@ class SessionNeeds(BaseModel, frozen=True, arbitrary_types_allowed=True):
     outputs_dir: Path | None = None
     """Past outputs a reviewer reads for calibration, where there are any."""
 
-    sandbox: Sandbox | None = None
+    sandbox: SessionSandbox | None = None
     """The session's container, where one was started for it."""
 
     realtime_dir: Path | None = None

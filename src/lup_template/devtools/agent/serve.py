@@ -9,6 +9,7 @@ what the roster knows it by — so this module resolves those into the
 """
 
 import atexit
+import logging
 
 import typer
 
@@ -18,6 +19,7 @@ from lup.providers.identity import native_session_id, native_wake
 from lup.tools.mcp import LupMcpTool
 from lup.tools.toolsets import (
     SessionNeeds,
+    SessionSandbox,
     SessionToolset,
     assembled,
     named_only,
@@ -26,6 +28,8 @@ from lup.tools.toolsets import (
 from lup.workspace.context import SessionContext
 from lup_template.agent.config import Engine
 from lup_template.agent.toolsets import NOTES_GROUP, declared_tool_groups
+
+logger = logging.getLogger(__name__)
 
 
 def collect_tools_by_server(context: SessionContext) -> dict[str, list[LupMcpTool]]:
@@ -63,20 +67,35 @@ def session_needs(
     tools, because it outlives that group: the container is registered for
     teardown when this process exits, and a group builder is not where a
     process-wide lifetime belongs.
+
+    Where the ``docker`` extra is not installed there is no container to
+    start, and the session is served without one — every server resolves
+    its needs here, so a project that declined the sandbox would otherwise
+    lose every group it kept for the one it did not.
     """
     from lup.coordination.identity import session_member_id
     from lup.orchestration.reflection import ReviewGate
-    from lup.sandbox.container import Sandbox
     from lup.workspace.paths import project_root
     from lup_template.agent.config import settings
 
-    sandbox = None
-    if context.session_id and settings.sandbox_enabled:
+    def started(session_id: str) -> SessionSandbox | None:
+        """This session's container, registered for teardown, where one can run."""
+        try:
+            from lup.sandbox.container import Sandbox
+        except ImportError:
+            logger.warning("docker extra not installed; code execution is unavailable")
+            return None
         sandbox = Sandbox(
-            session_id=context.session_id,
-            shared_dir=context.session_dir / "sandbox_shared",
+            session_id=session_id, shared_dir=context.session_dir / "sandbox_shared"
         )
         atexit.register(sandbox.stop)
+        return sandbox
+
+    sandbox = (
+        started(context.session_id)
+        if context.session_id and settings.sandbox_enabled
+        else None
+    )
 
     named = identity if identity is not None else (context.session_id or "")
     return SessionNeeds(
@@ -116,13 +135,23 @@ def collect_registry_tools() -> dict[str, list[LupMcpTool]]:
     (``inspect``, the ``repl`` welcome panel) can list real tools with real
     schemas. The handlers close over the discarded paths: introspect these
     tools, never serve or call them.
+
+    The sandbox group is listed where the ``docker`` extra is installed and
+    left out where it is not, which is what a session there would carry.
     """
     import tempfile
     from pathlib import Path
 
     from lup.orchestration.reflection import ReviewGate
-    from lup.sandbox.container import Sandbox
     from lup.workspace.paths import project_root
+
+    def unstarted(shared: Path) -> SessionSandbox | None:
+        """A container to read the sandbox's tools off, which nothing starts."""
+        try:
+            from lup.sandbox.container import Sandbox
+        except ImportError:
+            return None
+        return Sandbox(session_id="toolset-enum", shared_dir=shared)
 
     with tempfile.TemporaryDirectory(prefix="lup_toolset_enum_") as tmp:
         base = Path(tmp)
@@ -132,7 +161,7 @@ def collect_registry_tools() -> dict[str, list[LupMcpTool]]:
                 session_dir=base / "session",
                 root=project_root(),
                 gate=ReviewGate(),
-                sandbox=Sandbox(session_id="toolset-enum", shared_dir=base / "shared"),
+                sandbox=unstarted(base / "shared"),
                 realtime_dir=base / "realtime",
             ),
         )
