@@ -13,7 +13,7 @@ from lup.policy.kernel.rows import PathRoleRow
 class GitListing:
     """The file inventory both scans receive from Git."""
 
-    def lines(self, *_args: str) -> list[str]:
+    def lines(self, *_args: str, **_options: str) -> list[str]:
         return ["src/app.py", "notes/jobs/generated.py"]
 
     def __call__(self, *_args: str) -> str:
