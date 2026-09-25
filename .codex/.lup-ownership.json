@@ -709,7 +709,7 @@
     {
       "path": "AGENTS.md",
       "category": "generated",
-      "sha256": "ccaa5653c46596c23bc057ace0411dcbd85a58ec71c66dd6e880a99a4967c252",
+      "sha256": "defb44999fbcd96f6e8efd25267d5a7279d56575e8571ca868578c1ed95a7a00",
       "semantic_id": "harness.guidance",
       "executable": false
     }
