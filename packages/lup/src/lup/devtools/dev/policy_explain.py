@@ -68,11 +68,18 @@ and a reader given both never has to ask.
 
 
 class PolicyReading(BaseModel, frozen=True):
-    """What one placement's answer is, and why."""
+    """What one placement's answer is, why, and what to do about it."""
 
     placement: str
     effect: str
     reason: str
+    recovery: str = ""
+    """What the session would be told to do instead, where the verdict says.
+
+    Part of the preview because it is part of the answer a session is
+    handed: a refusal reaches the agent as its reason and this together, and
+    some routes out -- an operator command spelled with this launch's nonce --
+    are named nowhere else."""
 
 
 class PolicyVerdict(BaseModel, frozen=True):
@@ -186,7 +193,10 @@ def read_under(
             )
     decision = policy.decide(event)
     return PolicyReading(
-        placement=placement.name, effect=decision.effect, reason=decision.reason
+        placement=placement.name,
+        effect=decision.effect,
+        reason=decision.reason,
+        recovery=decision.recovery,
     )
 
 
@@ -313,6 +323,8 @@ def explain(
         for reading in shown:
             label = "" if verdict.settled() else f"{reading.placement}: "
             typer.echo(f"       {label}{reading.reason}")
+            for line in reading.recovery.splitlines():
+                typer.echo(f"       recovery {line}")
         for assumed in verdict.assumed:
             typer.echo(f"       assuming {assumed}")
         for unavailable in verdict.unavailable:
