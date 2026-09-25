@@ -1444,6 +1444,7 @@ def settle_boundary(
         ),
         read_only_roots=list(lease.read_only),
         destination_authorities=destination_authorities(accessible, runtime),
+        runtime=runtime,
     )
     if not sandbox.contained():
         # No mounts, so no mount table -- and the one a contained launch left
