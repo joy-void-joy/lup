@@ -32,14 +32,25 @@ def tracked_files(
     ``root`` is the working directory unless a caller holding a checkout by
     path names it, and git answers only for what lies beneath it — which is
     the whole tree from the top of a checkout, and one subtree from inside it.
+
+    Read as NUL-separated records, because a line-per-path listing quotes a
+    path holding a non-ASCII byte — `"docs/caf\\303\\251.md"`, quotes and all —
+    and a sweep matching suffixes or opening files then skips it as a name no
+    file answers to.
     """
-    listed = git.lines(
-        "ls-files",
-        "--cached",
-        "--deduplicate",
-        *(("--others", "--exclude-standard") if others else ()),
-        _cwd=str(root),
+    listed = str(
+        git(
+            "ls-files",
+            "--cached",
+            "--deduplicate",
+            "-z",
+            *(("--others", "--exclude-standard") if others else ()),
+            _cwd=str(root),
+        )
     )
     return [
-        rel for rel in listed if not suffixes or PurePosixPath(rel).suffix in suffixes
+        rel
+        # lup: ignore[string-split] — `-z` records, separated by NUL
+        for rel in listed.split("\0")
+        if rel and (not suffixes or PurePosixPath(rel).suffix in suffixes)
     ]

@@ -16,8 +16,9 @@ class GitListing:
     def lines(self, *_args: str, **_options: str) -> list[str]:
         return ["src/app.py", "notes/jobs/generated.py"]
 
-    def __call__(self, *_args: str) -> str:
-        return "src/app.py\nnotes/jobs/generated.py\n"
+    def __call__(self, *args: str, **_options: str) -> str:
+        separator = "\0" if "-z" in args else "\n"
+        return separator.join(["src/app.py", "notes/jobs/generated.py", ""])
 
 
 @pytest.fixture
