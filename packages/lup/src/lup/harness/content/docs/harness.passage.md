@@ -616,9 +616,9 @@ effort = "high"             # unset: xhigh, or the model's highest rung below it
 tier = "strongest"          # the model when nothing names one; "inherit" leaves
                             # it to the runtime
 
-[theme]                     # each runtime's own name for it
-claude = "dark-daltonized"  # lup's default: Claude Code's colorblind palette
-codex = "claude-daltonized" # lup's default: its port, installed into lup's homes
+[theme]                     # each runtime's own name; unset, the account's own
+claude = "light"            # named, it wins over the account's
+codex = "dracula"
 ```
 
 A value is chosen the same way everywhere: lup's default, then this file, then
@@ -626,10 +626,20 @@ what the project declares (a launch mode's model, an agent declaration's own
 fields), then what the invocation names (`--model`, `--effort`, `--profile`,
 `profile=`) — each overruling the one before. A named effort the model lacks is
 refused; the file's effort, like lup's, is where the default starts before
-stepping down to a rung the model takes. A launch carries the theme in the
-settings document it hands Claude Code, and as a `tui.theme` override over a
-Codex home lup made; a home the operator brought draws its own. A file that does
-not parse refuses the launch, naming itself.
+stepping down to a rung the model takes. A file that does not parse refuses the
+launch, naming itself.
+
+The theme is the one exception, because it is the account's rather than the
+launch's: a session's `/theme` is kept. A launch writes a theme into the
+account only where this file names one, which wins, or where neither this file
+nor the account names any, where it fills in lup's colorblind palette — Claude
+Code's `dark-daltonized` and its Codex port `claude-daltonized`. It never
+passes a theme as a launch override, which would outrank the session's own
+choice. A Claude session on the host runs in the account's own home, so what
+it chooses lands there; a Codex session's choice is carried back from its
+worktree home to the account's `config.toml` when it closes, with the theme's
+file, and without undoing a change the account took meanwhile. A contained
+session's theme is its config volume's for now.
 
 A profile names one account and the configuration home it runs under. Each
 profile is a directory beside that file — `profiles/<name>/`, with each
