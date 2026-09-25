@@ -21,6 +21,8 @@ from pathlib import Path
 
 import jwt
 import tomlkit
+from tomlkit.container import Container
+from tomlkit.items import Table
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from lup.providers.codex.harness_runtime import CodexPluginInstaller, PluginCacheConfig
@@ -160,26 +162,30 @@ def derived_codex_config(account: str, scoped: str) -> str:
             document[key] = own[key]
     for path in ((PROJECTS_KEY,), (HOOKS_KEY, STATE_KEY)):
         recorded = table_at(own, path)
-        if recorded:
-            held = table_at(document, path, create=True)
+        held = table_at(document, path, create=True) if recorded else None
+        if recorded is not None and held is not None:
             for name, entry in recorded.items():
                 held[name] = entry
     return tomlkit.dumps(document)
 
 
 def table_at(
-    document: tomlkit.TOMLDocument, path: tuple[str, ...], create: bool = False
-) -> dict[str, object]:
-    """The table at a dotted path, made where ``create`` asks and it is absent."""
-    table: dict[str, object] = document
+    document: Container, path: tuple[str, ...], create: bool = False
+) -> Container | Table | None:
+    """The table at a dotted path, made where ``create`` asks and it is absent.
+
+    ``None`` where the path is absent and nothing asked for it, or where
+    something other than a table already sits on it.
+    """
+    table: Container | Table = document
     for key in path:
         if key not in table:
             if not create:
-                return {}
+                return None
             table[key] = tomlkit.table(is_super_table=True)
         child = table[key]
-        if not isinstance(child, dict):
-            return {}
+        if not isinstance(child, Table):
+            return None
         table = child
     return table
 
@@ -204,13 +210,24 @@ def personal_settings(content: str) -> JsonObject:
     return settings
 
 
-def changed_settings(
-    before: JsonObject, after: JsonObject, prefix: tuple[str, ...] = ()
-) -> Iterator[tuple[tuple[str, ...], JsonValue | None]]:
-    """Every leaf a session set or removed, as a path and its new value.
+class SettingChange(BaseModel, frozen=True):
+    """One personal setting a session changed: set to ``value``, or removed.
 
     ``None`` stands for removed: TOML has no null, so no setting can hold it.
     """
+
+    path: tuple[str, ...]
+    value: JsonValue | None = None
+
+    def name(self) -> str:
+        """The setting as a person writes its key."""
+        return ".".join(self.path)
+
+
+def changed_settings(
+    before: JsonObject, after: JsonObject, prefix: tuple[str, ...] = ()
+) -> Iterator[SettingChange]:
+    """Every leaf a session set or removed, table by table."""
     for key in sorted({*before, *after}):
         old, new = before.get(key), after.get(key)
         if old == new:
@@ -218,20 +235,20 @@ def changed_settings(
         if isinstance(old, dict) and isinstance(new, dict):
             yield from changed_settings(old, new, (*prefix, key))
         else:
-            yield (*prefix, key), new
+            yield SettingChange(path=(*prefix, key), value=new)
 
 
-def settled_codex_config(
-    account: str, changes: list[tuple[tuple[str, ...], JsonValue | None]]
-) -> str:
+def settled_codex_config(account: str, changes: list[SettingChange]) -> str:
     """The account's configuration with a session's changes applied, lines kept."""
     document = tomlkit.parse(account)
-    for path, value in changes:
-        table = table_at(document, path[:-1], create=value is not None)
-        if value is None:
-            table.pop(path[-1], None)
+    for change in changes:
+        table = table_at(document, change.path[:-1], create=change.value is not None)
+        if table is None:
+            continue
+        if change.value is None:
+            table.pop(change.path[-1], None)
         else:
-            table[path[-1]] = value
+            table[change.path[-1]] = change.value
     return tomlkit.dumps(document)
 
 
@@ -484,7 +501,7 @@ class CodexWorktreeHomeStore:
             encoding="utf-8",
         )
         record.write_text(json.dumps(now), encoding="utf-8")
-        return [".".join(path) for path, _ in changes]
+        return [change.name() for change in changes]
 
 
 def select_codex_home(
