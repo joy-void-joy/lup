@@ -681,9 +681,10 @@ DECLARED: list[Migration] = [
                     "Read, Glob, Grep, WebFetch, WebSearch; WEB is 'web'; WRITE "
                     "is Write, Edit, NotebookEdit; SHELL is Bash, TaskOutput, "
                     "TaskStop; ALL is 'stock'. On Codex SHELL is Bash, WEB is "
-                    "WebSearch, WRITE is apply_patch, ALL is 'stock'. A Claude "
-                    "session that declared nothing had every built-in and now "
-                    "has the web alone: say builtin='stock' to keep them."
+                    "WebSearch, WRITE is apply_patch, ALL is 'stock'. A session "
+                    "that declared no grant had no built-in (on Claude with "
+                    "Claude Code's system prompt) and now has fetch and search: "
+                    "say builtin='none' to keep none."
                 )
             ),
             MigrationStep(
