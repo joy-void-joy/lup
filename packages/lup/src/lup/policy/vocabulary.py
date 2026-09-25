@@ -46,6 +46,7 @@ from pydantic import BaseModel
 from lup.policy.kernel.decision import CheckpointRequirement, SandboxPlacement
 from lup.policy.kernel.effects import EffectRow, declare
 from lup.policy.kernel.rows import DestinationForm
+from lup.policy.kernel.words import UV_GLOBAL_VALUE_OPTIONS
 from lup.policy.kernel.semantics import EffectClass, ReviewerRequirement
 from lup.policy.shell_rules import (
     RunnerTargetRule,
@@ -519,6 +520,70 @@ def downloader_rules(
             reason="a download writing that file requires approval",
         )
         for command in commands
+    ]
+
+
+def uv_rules(
+    global_values: Sequence[str] = UV_GLOBAL_VALUE_OPTIONS,
+    pip_reads: Sequence[str] = ("list", "show", "freeze", "check", "tree"),
+    tool_reads: Sequence[str] = ("list", "dir"),
+) -> list[ShellCommandRule]:
+    """The uv routes that bring in or send out a package this project never declared.
+
+    `uv add`, `sync`, `lock`, `remove` and `run` are the kernel's, which reads
+    them against the lockfile and the runner targets. What reaches these rows
+    is the rest of the surface, found past uv's global options the way every
+    subcommand-gated command is: `uv pip` and `uv tool` install into an
+    environment the lockfile does not describe, `uvx` fetches and runs a
+    package nobody declared, and `uv publish` uploads one. Each asks wherever
+    it runs, because what it weighs is trust in the package rather than where
+    its files land. Their read-only verbs list what is already installed, and
+    a verb this table does not name falls to the question.
+    """
+    installs = [declare("installs_dependency", scope="python package")]
+    reads = [declare("reads_environment", scope="python environment")]
+    return [
+        ShellCommandRule(
+            name="uv",
+            # Only bare `uv` reaches this level, which prints its usage: every
+            # verb is the kernel's or one of the subcommands below.
+            effects=[declare("changes_nothing")],
+            value_flags=list(global_values),
+            subcommands=[
+                ShellSubcommandRule(
+                    name="pip",
+                    effects=installs,
+                    reason="uv pip changes packages outside this project's lockfile",
+                    recovery="Use uv add / uv remove, which keep the lockfile.",
+                    operations=[
+                        ShellOperationRule(name=verb, effects=reads)
+                        for verb in pip_reads
+                    ],
+                ),
+                ShellSubcommandRule(
+                    name="tool",
+                    effects=[declare("installs_dependency", scope="python tool")],
+                    reason="uv tool fetches and runs a package that is not a"
+                    " declared dependency",
+                    recovery="Declare it with uv add and run it through uv run.",
+                    operations=[
+                        ShellOperationRule(name=verb, effects=reads)
+                        for verb in tool_reads
+                    ],
+                ),
+                ShellSubcommandRule(
+                    name="publish",
+                    effects=[declare("external_mutation", scope="package index")],
+                    reason="uv publish uploads a package where anyone can install it",
+                ),
+            ],
+        ),
+        ShellCommandRule(
+            name="uvx",
+            effects=[declare("installs_dependency", scope="python tool")],
+            reason="uvx fetches and runs a package that is not a declared dependency",
+            recovery="Declare it with uv add and run it through uv run.",
+        ),
     ]
 
 
@@ -2592,6 +2657,7 @@ def default_vocabulary() -> list[ShellCommandRule]:
         *redirected_rules(),
         *reaching_builtin_rules(),
         *downloader_rules(),
+        *uv_rules(),
         *guarded_tool_rules(),
         git_rule(),
         gh_rule(),

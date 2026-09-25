@@ -2278,6 +2278,55 @@ def test_generated_claude_hook_allows_managed_skill_scripts(
     assert decision("node -e 'process.exit()'") == "deny"
 
 
+def test_generated_hooks_find_uv_dependency_routes_past_global_flags(
+    tmp_path: Path,
+) -> None:
+    """Both shipped hooks walk to uv's verb past its global options.
+
+    A global before the verb, or between its words, is the spelling that
+    would slip a route past a reader matching by position. The Claude hook
+    asks and the Codex hook, which has no ask to render, parks the question;
+    the listing verbs read on both.
+    """
+    script = Path(".claude/plugins/lup/hooks/scripts/policy.py").resolve()
+
+    def claude(command: str) -> str:
+        body = {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "cwd": str(tmp_path),
+        }
+        result = sh.Command(str(script))(_in=json.dumps(body), _return_cmd=True)
+        assert isinstance(result, sh.RunningCommand)
+        output = ClaudeHookOutput.model_validate_json(result.stdout)
+        return output.hook_specific_output.permission_decision
+
+    def codex(command: str) -> str:
+        body: JsonObject = {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "cwd": str(tmp_path),
+        }
+        result = codex_hook_result(body, sandboxed=True)
+        if not result.stdout.strip():
+            return "allow" if result.exit_code == 0 else "deny"
+        return json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"]
+
+    for command in (
+        "uv -q pip install y",
+        "uv pip --quiet install x",
+        "uv --cache-dir /tmp/c tool install ruff",
+        "uv --offline publish",
+        "uvx ruff",
+    ):
+        assert claude(command) == "ask", command
+        assert codex(command) == "deny", command
+    for command in ("uv -q pip list", "uv --cache-dir /tmp/c tool list"):
+        assert claude(command) == "allow", command
+        assert codex(command) == "allow", command
+
+
 def test_generated_claude_hook_refuses_the_declared_calls(tmp_path: Path) -> None:
     """The refusal this repository declares, as the shipped hook enforces it.
 

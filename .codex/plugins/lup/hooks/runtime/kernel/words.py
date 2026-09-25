@@ -172,7 +172,6 @@ def command_words(words: list[str]) -> list[str]:
     return effective_command(words)["words"]
 
 
-# lup: ignore[library-default] — uv's global options consume one following value
 UV_GLOBAL_VALUE_OPTIONS = (
     "--cache-dir",
     "--color",
@@ -181,6 +180,10 @@ UV_GLOBAL_VALUE_OPTIONS = (
     "--project",
     "--config-file",
 )
+"""uv's global options that consume one following value, as `uv help` lists them.
+
+The vocabulary's uv row takes them as its default ``value_flags``, so the walker
+finds a declared uv verb past them exactly as the kernel's own reading does."""
 
 
 def uv_command_words(words: list[str]) -> list[str] | None:

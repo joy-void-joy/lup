@@ -219,6 +219,18 @@ and the event cannot tell them apart, and a human may answer by editing the
 command, so it fires for something other than what was judged. None of that
 touches a deferral, which is nobody's approval and is exactly known here.
 
+`uv add`, `sync`, `lock`, `remove`, `cache` and `run` are parsed in the
+kernel, against the lockfile and the runner targets. The rest of uv is the
+vocabulary's `uv_rules`, walked from the command as spelled so the verb is
+found past uv's global options, before it or between its words:
+`uv pip`, `uv tool` and `uvx` install into an environment the lockfile does
+not describe or fetch and run a package nobody declared, so they ask with
+the dependency effect at every placement, and `uv publish` asks as the
+external mutation an upload is. Their listing verbs (`uv pip list`, `show`,
+`freeze`, `check`, `tree`; `uv tool list`, `dir`) read, and a verb neither
+names falls to the question. A global option uv does not document leaves
+the verb unread, and is refused.
+
 `uv run <target>` is parsed rather than matched against that table, so its
 targets carry a table of their own — and they carry it in the same vocabulary:
 each declares its `effects`, its `refuses`, its placement, and its reason.

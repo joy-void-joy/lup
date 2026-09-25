@@ -565,13 +565,14 @@ def decide_segment_words(
                 " `uv run python <script>`; a bare interpreter is refused even"
                 " over a file.",
             )
-        return unjudged("uvx command is not classified")
+        return decide_command_rows(words, context["rows"], write_facts(context))
     if executable == "uv" and len(words) > 1:
         return decide_uv(
             words,
             context["runner_targets"],
             context["target_tables"],
             write_facts(context),
+            rows=context["rows"],
         )
     return decide_command_rows(words, context["rows"], write_facts(context))
 

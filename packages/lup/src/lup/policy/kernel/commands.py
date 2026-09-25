@@ -40,6 +40,7 @@ from .effects import (
     verdict_for,
 )
 from .words import (
+    UV_GLOBAL_VALUE_OPTIONS,
     INTERPRETERS,
     carried_setting,
     command_words,
@@ -1426,6 +1427,7 @@ def decide_uv(
     target_tables: list[ShellRuleRow] | None = None,
     facts: WriteFacts | None = None,
     frozen: tuple[str, ...] = UV_FROZEN_FLAGS,
+    rows: list[ShellRuleRow] | None = None,
 ) -> KernelDecision:
     """Classify a uv invocation, gating dependency and inline-code forms.
 
@@ -1466,6 +1468,7 @@ def decide_uv(
     source cannot authorize an operation the requester may never perform.
     """
     measured = no_write_facts() if facts is None else facts
+    spelled = words
     normalized = uv_command_words(words)
     if normalized is None:
         return KernelDecision(
@@ -1481,7 +1484,9 @@ def decide_uv(
     # resolves the whole declaration anew, which is what the pinned spelling
     # the recovery names does not. "Installing a package" said neither.
     if subcommand == "add":
-        named = uv_add_operands(words[2:])
+        named = uv_add_operands(
+            words[2:], (*UV_ADD_VALUE_FLAGS, *UV_GLOBAL_VALUE_OPTIONS)
+        )
         return KernelDecision(
             "ask",
             f"uv add fetches and runs the build code of {', '.join(named)}"
@@ -1631,7 +1636,18 @@ def decide_uv(
             )
         if bare_target and len(run_words) == 2 and run_words[1] == "--help":
             return KernelDecision("allow", "command help is read-only")
-    return unjudged(f"uv {words[1]} is not classified")
+    # A verb the vocabulary declares -- `pip`, `tool`, `publish` -- is walked
+    # from the command as spelled, so the row walker finds it past uv's global
+    # options exactly as it finds any subcommand, and what it answers is the
+    # row's rather than a second reading of the same verb here.
+    declared = [
+        row
+        for row in rows or []
+        if row["command"] == "uv" and row["subcommand"] == subcommand
+    ]
+    if declared:
+        return decide_command_rows(spelled, rows or [], measured)
+    return unjudged(f"uv {subcommand} is not classified")
 
 
 def git_checkout_pathspec(words: list[str]) -> KernelDecision | None:
