@@ -180,7 +180,7 @@ def test_the_worktree_lifecycle_refuses_a_redirected_pointer(
     from lup.devtools.dev import worktree
 
     common = common_of(repository)
-    monkeypatch.setattr(worktree, "get_tree_dir", lambda: common / "tree")
+    monkeypatch.setattr(worktree, "find_tree_dir", lambda: common / "tree")
     worktree.refuse_redirected_pointers()
 
     built = evil_gitdir(repository)
@@ -189,3 +189,82 @@ def test_the_worktree_lifecycle_refuses_a_redirected_pointer(
     )
     with pytest.raises(typer.Exit):
         worktree.refuse_redirected_pointers()
+
+
+def test_a_layout_with_no_tree_directory_is_a_silent_no_op(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A plain checkout has no sibling worktree to redirect, so nothing refuses.
+
+    This is what lets the guard sit in front of every git-workflow command
+    rather than only the worktree ones.
+    """
+    from lup.devtools.dev import worktree
+
+    monkeypatch.chdir(tmp_path)
+    worktree.refuse_redirected_pointers()
+
+
+def test_the_git_command_tree_guards_every_subcommand(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The `dev git` app runs the pointer guard before any subcommand body.
+
+    Wired as one callback rather than per command, so a command added later
+    is guarded without anyone remembering to. The guard is stubbed to a
+    refusal here: reaching it is the whole assertion, and a subcommand body
+    that never runs needs no repository.
+    """
+    from typer.testing import CliRunner
+
+    from lup.devtools.dev import worktree
+    from lup.devtools.git.app import create_git_app
+
+    def refuse() -> None:
+        raise typer.Exit(7)
+
+    monkeypatch.setattr(worktree, "refuse_redirected_pointers", refuse)
+    app = create_git_app(declared=lambda: None)  # type: ignore[arg-type]
+    result = CliRunner().invoke(app, ["worktree", "list"])
+    assert result.exit_code == 7
+    assert CliRunner().invoke(app, ["--help"]).exit_code == 0
+
+
+def test_the_launcher_guards_pointers_on_the_way_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`ready_to_open` refuses a redirected set before any on-the-way-in git.
+
+    The one gate both launchers pass through: settling base freshness, the
+    preflight probes and status all run host git after this point, so the
+    guard precedes them. A generate-only invocation returns before the guard
+    and is not gated, since it opens no session and touches no worktree.
+    """
+    from lup.devtools.harness import launch
+
+    called: list[str] = []  # lup: ignore[empty-collection] — one-flag record
+    monkeypatch.setattr(launch, "generate_with_report", lambda *a, **k: None)
+    monkeypatch.setattr(launch, "generate_targets", lambda *a, **k: None)
+    monkeypatch.setattr(
+        launch, "refuse_redirected_pointers", lambda: called.append("guarded")
+    )
+    assert (
+        launch.ready_to_open(
+            composition=None,  # type: ignore[arg-type]
+            generate_only=True,
+            sentinels=None,  # type: ignore[arg-type]
+        )
+        is None
+    )
+    assert called == []
+
+    def refuse() -> None:
+        raise typer.Exit(9)
+
+    monkeypatch.setattr(launch, "refuse_redirected_pointers", refuse)
+    with pytest.raises(typer.Exit):
+        launch.ready_to_open(
+            composition=None,  # type: ignore[arg-type]
+            generate_only=False,
+            sentinels=None,  # type: ignore[arg-type]
+        )

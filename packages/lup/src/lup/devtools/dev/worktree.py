@@ -22,7 +22,7 @@ from lup.devtools.dev.git_guards import (
 )
 from lup.policy.assets.host import project_environment
 from lup.web.build import dependencies_behind, restore_dependencies
-from lup.devtools.layout import get_tree_dir
+from lup.devtools.layout import find_tree_dir, get_tree_dir
 from lup.devtools.clipboard import copy_to_clipboard
 from lup.execution.shell import git
 from lup.sandbox.pointers import pointer_drift, refusal
@@ -674,9 +674,15 @@ def refuse_redirected_pointers() -> None:
     Anchored on the layout's shared directory -- the bare root or main
     checkout, whose own `.git` is a real directory no container can redirect
     to a gitdir it built -- never on a worktree pointer, which is itself what
-    an escape rewrites. Where the layout is no repository, nothing is verified.
+    an escape rewrites. A layout with no ``tree/`` has no sibling worktree to
+    redirect, and one that is no repository nothing to verify: both no-op, so
+    this is safe to call before any host git command rather than only the
+    worktree ones.
     """
-    root = get_tree_dir().parent
+    tree = find_tree_dir()
+    if tree is None:
+        return
+    root = tree.parent
     if not in_repository(root):
         return
     if message := refusal(pointer_drift(repository_layout(root).common)):
