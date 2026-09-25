@@ -374,7 +374,7 @@ alone would rebuild every block as a base instance and drop its payload.
 # Subagent specification
 # ---------------------------------------------------------------------------
 
-type ModelTier = Literal["inherit", "strongest", "balanced", "fast"]
+type ModelTier = Literal["inherit", "frontier", "strongest", "balanced", "fast"]
 """Portable model preference for one role.
 
 Runtimes name and version their own model lineups, so a declaration states the
@@ -382,7 +382,25 @@ need and each adapter spells whichever tier it can honor — or omits the choice
 where it has no proven vocabulary to spell it in. One alias for every
 declaration that states a preference, because a role's tier and a delegated
 spec's tier are the same vocabulary: spelled twice, an adapter honouring one
-copy would silently ignore whichever tier the other copy grew."""
+copy would silently ignore whichever tier the other copy grew.
+
+``frontier`` sits above ``strongest``: the newest model a runtime ships, where
+``strongest`` is the established one work defaults to."""
+
+
+class CustomModel(BaseModel, frozen=True, extra="forbid"):
+    """A model id outside a runtime's catalog, named as one on purpose.
+
+    Every model field takes the runtime's catalog of names, so a misspelt id
+    fails where it is written. An id the catalog does not list — a compatible
+    endpoint's own model, a release newer than the catalog — is still a model
+    a session can open with, and wrapping it says that leaving the catalog was
+    the choice rather than the typo. Nothing is checked against it: its
+    efforts are the endpoint's to refuse.
+    """
+
+    id: str = Field(min_length=1)
+
 
 type SubagentCapability = Literal["workspace-read", "web-search"]
 """A provider-neutral facility a delegated role may use."""
@@ -397,7 +415,7 @@ class SubagentSpec(BaseModel, extra="forbid"):
     capabilities: list[SubagentCapability] = []
     tools: list[ToolGrant] = []
     model: ModelTier = Field(
-        default="inherit",
+        default="strongest",
         description="Portable model tier for this subagent; inherit reuses the "
         "session's main model on every backend",
     )

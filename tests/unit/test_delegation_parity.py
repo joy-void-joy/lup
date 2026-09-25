@@ -74,7 +74,7 @@ async def test_served_roles_execute_on_the_selected_engine(
     config = configured[0]
     if engine == "claude":
         assert isinstance(config, ClaudeSessionConfig)
-        assert config.model == "opus"
+        assert config.model_id() == "opus"
         assert config.native_tools == [
             "Read",
             "Glob",
@@ -85,7 +85,7 @@ async def test_served_roles_execute_on_the_selected_engine(
         assert config.setting_sources == []
     else:
         assert isinstance(config, CodexSessionConfig)
-        assert config.model == "gpt-6-astra"
+        assert config.model_id() == "gpt-5.6-sol"
         assert config.sandbox == "read-only"
         assert config.approval_policy == "never"
         assert config.delegated_tools is not None
@@ -126,7 +126,7 @@ def test_inspect_exposes_capabilities_separately_from_exact_grants(
 
 
 @pytest.mark.parametrize(
-    "engine,expected", [("claude", "opus"), ("codex", "gpt-6-astra")]
+    "engine,expected", [("claude", "opus"), ("codex", "gpt-5.6-sol")]
 )
 def test_explicit_engine_without_model_selects_native_strongest(
     configured: list[ClaudeSessionConfig | CodexSessionConfig],
@@ -137,11 +137,12 @@ def test_explicit_engine_without_model_selects_native_strongest(
 ) -> None:
     monkeypatch.setattr(settings, "agent_sdk", engine)
     core.provider_factory(model=None, system_prompt="", cwd=tmp_path)
-    assert configured[0].model == expected
+    assert configured[0].model == "strongest"
+    assert configured[0].model_id() == expected
 
 
 @pytest.mark.parametrize(
-    "engine,expected", [("claude", "opus"), ("codex", "gpt-6-astra")]
+    "engine,expected", [("claude", "opus"), ("codex", "gpt-5.6-sol")]
 )
 def test_unconfigured_model_default_cannot_pin_another_provider(
     configured: list[ClaudeSessionConfig | CodexSessionConfig],
@@ -157,7 +158,7 @@ def test_unconfigured_model_default_cannot_pin_another_provider(
     monkeypatch.setattr(settings, "model", DefaultSettings().model)
     monkeypatch.setattr(settings, "agent_sdk", engine)
     core.provider_factory(model=settings.model, system_prompt="", cwd=tmp_path)
-    assert configured[0].model == expected
+    assert configured[0].model_id() == expected
 
 
 def test_codex_does_not_widen_role_to_session_sandbox(

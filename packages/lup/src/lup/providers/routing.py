@@ -9,10 +9,12 @@ front door would otherwise carry, reaching for both adapters to answer.
 """
 
 from collections.abc import Callable, Sequence
-from typing import Literal
+from typing import Literal, get_args
 
 from pydantic import BaseModel
 
+from lup.providers.claude.models import ClaudeModel
+from lup.providers.codex.models import CodexModel
 from lup.providers.config import ModelMatcher
 from lup.sessions.client import Client
 
@@ -117,3 +119,17 @@ def provider_for(
     return next(
         (route.provider for route in routes if route.matcher.matches(model)), None
     )
+
+
+def catalog_provider(model: str) -> Provider | None:
+    """Which provider's own catalog lists this name, or None when neither does.
+
+    Asked before any prefix route, because a catalog is the vendor's own
+    answer: an alias such as ``opus`` carries no vendor prefix at all, and a
+    route guessing from one could only miss it.
+    """
+    if model in get_args(ClaudeModel.__value__):
+        return "claude"
+    if model in get_args(CodexModel.__value__):
+        return "codex"
+    return None

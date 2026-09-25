@@ -44,9 +44,10 @@ a conversation over one session, or a process that outlives any of them.
 the same declaration renders into each. Two portable words are worth deciding
 early because they reach both:
 
-- **`effort`** (`minimal`/`low`/`medium`/`high`/`xhigh`/`max`) — how hard a
-  session thinks before answering. The four middle rungs are shared; the ends
-  are each runtime's own limit.
+- **`effort`** (`low`/`medium`/`high`/`xhigh`/`max`/`ultra`) — how hard a
+  session thinks before answering. Every rung is one both runtimes list;
+  which rungs a given model takes is its catalog's answer, and one it lacks is
+  refused where the session is declared.
 - **`autonomy`** (`ask`/`accept_edits`/`plan`/`unattended`) — how much a
   session may do before it stops to ask.
 

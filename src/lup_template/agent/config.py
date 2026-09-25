@@ -21,6 +21,8 @@ from typing import Annotated, Literal, Self
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode
 
+from lup.providers.routing import catalog_provider
+
 logger = logging.getLogger(__name__)
 
 type Engine = Literal["claude", "codex", "openai", "openai-compat", "claude-compat"]
@@ -153,10 +155,10 @@ class Settings(BaseSettings, env_file=(".env", ".env.local"), extra="ignore"):
         default=None,
         validation_alias="AGENT_REASONING_EFFORT",
         description=(
-            "Backend-agnostic reasoning effort. Valid levels differ by "
-            "backend: Claude accepts low, medium, high, xhigh, max; "
-            "Codex/OpenAI accept none, minimal, low, medium, high, xhigh "
-            "(CODEX_EFFORT overrides this on those backends)."
+            "Backend-agnostic reasoning effort: low, medium, high, xhigh, "
+            "max or ultra, on both backends. Which of them a model takes is "
+            "its catalog's answer, and a level the model lacks is refused "
+            "(CODEX_EFFORT overrides this on Codex/OpenAI backends)."
         ),
     )
 
@@ -303,15 +305,20 @@ settings = Settings()
 
 
 def engine_for_model(model: str | None) -> Engine:
-    """The engine one model id routes to by vendor prefix alone.
+    """The engine one model id routes to, by catalog and then vendor prefix.
 
+    A name either runtime's own catalog lists runs that runtime natively —
+    which is how an alias like ``fable`` routes at all. Otherwise
     ``claude-*`` runs the native Claude engine and ``gpt-*``/``o<digit>``/
     ``codex*`` runs Codex. Anything else runs a compat engine:
     ``claude-compat`` when ``OPENROUTER_API_KEY`` selects OpenRouter's
     Anthropic-protocol endpoint, ``openai-compat`` otherwise.
     """
-    if model is None or model in {"opus", "sonnet", "haiku"}:
+    if model is None:
         return "claude"
+    listed = catalog_provider(model)
+    if listed is not None:
+        return listed
     if model.startswith("claude-"):
         return "claude"
     if model.startswith(("gpt-", "codex")) or (

@@ -25,7 +25,20 @@ from lup.harness.devices import Device
 from lup.providers.login import NativeHomeScope, ProviderLogin
 from lup.providers.profiles import ProfileDirectory
 from lup.devtools.harness.contained import contained_argv
-from lup.providers.claude.confinement import CLAUDE_CONFINEMENT
+from lup.providers.claude.confinement import CLAUDE_SANDBOX_OFF
+from lup.providers.claude.model_choice import (
+    claude_effort,
+    claude_effort_named,
+    listed_claude_model,
+    refuse_unsupported_effort as refuse_claude_effort,
+)
+from lup.providers.codex.model_choice import (
+    codex_effort_arguments,
+    codex_effort_named,
+    listed_codex_model,
+    refuse_unsupported_effort as refuse_codex_effort,
+)
+from lup.providers.codex.subagents import CodexModelTiers
 from lup.providers.claude.harness import ClaudeSpellings
 from lup.providers.claude.transcripts import ClaudeTranscripts
 from lup.providers.codex.confinement import CODEX_CONFINEMENT
@@ -1310,8 +1323,13 @@ def claude_sandbox_arguments(
     plugin: Plugin,
     sandbox: LaunchSandbox = LaunchSandbox.INNER,
     accessible: list[AccessibleRoot] = [],
+    settings: JsonObject | None = None,
 ) -> list[str]:
     """Say what this launch means the Claude sandbox to be, in one settings merge.
+
+    ``settings`` is whatever else this launch compiles into that document —
+    an effort's ultracode switch — merged in here because the CLI reads one
+    ``--settings`` flag, and a second would be read in place of the first.
 
     Establishing the inner sandbox, that is a widening: Claude roots writes at the working
     directory just as Codex does, so a second checkout is read-only to every
@@ -1358,22 +1376,27 @@ def claude_sandbox_arguments(
     from a repository's own settings — and what does refuse is the egress
     proxy, which is untouched by this.
     """
+    carried = settings or {}
+
+    def document(sandboxed: JsonObject) -> list[str]:
+        merged = {**sandboxed, **carried}
+        return ["--settings", json.dumps(merged)] if merged else []
+
     hooks = plugin.hooks
     if hooks is None or hooks.sandbox is None:
-        return []
+        return document({})
     if sandbox is not LaunchSandbox.INNER:
-        return list(CLAUDE_CONFINEMENT.off)
+        return document(CLAUDE_SANDBOX_OFF)
     try:
         tree = get_tree_dir()
     except (typer.Exit, SystemExit):
-        return []
-    allowed = [
+        return document({})
+    allowed: list[JsonValue] = [
         *hooks.sandbox.writable_paths,
         str(tree),
         *[str(item.path) for item in accessible if item.writable],
     ]
-    widened = {"sandbox": {"filesystem": {"allowWrite": allowed}}}
-    return ["--settings", json.dumps(widened)]
+    return document({"sandbox": {"filesystem": {"allowWrite": allowed}}})
 
 
 def companion_plugin_directories(root: Path, generated: str) -> list[Path]:
@@ -1785,6 +1808,7 @@ def launch_claude(
     mounts: list[AccessibleRoot] = [],
     devices: list[Device] = [],
     recorder: SessionRecorder | None = None,
+    effort: str | None = None,
 ) -> None:
     """Generate/reconcile Claude artifacts and launch the verified local plugin.
 
@@ -1794,6 +1818,23 @@ def launch_claude(
     contradiction = resume.contradicted()
     if contradiction is not None:
         raise typer.BadParameter(contradiction)
+    # A mode's model is a default rather than a fixture: it says what this kind
+    # of session runs on when nobody said otherwise, and an explicit --model
+    # still wins, because overriding the model is why a caller passes one.
+    selected_model = model or (
+        mode.native_model("claude") if mode is not None else None
+    )
+    # Refused before anything is generated or checkpointed: an effort the
+    # model's catalog row lacks would be dropped by the CLI without a word.
+    try:
+        chosen_effort = None if effort is None else claude_effort_named(effort)
+        refuse_claude_effort(
+            None if selected_model is None else listed_claude_model(selected_model),
+            chosen_effort,
+        )
+    except ValueError as refusal:
+        raise typer.BadParameter(str(refusal)) from refusal
+    compiled_effort = None if chosen_effort is None else claude_effort(chosen_effort)
     if checkpoint is not None and not generate_only:
         checkpoint(provider="claude")
     plugin = composition.recipe.source.plugins[0]
@@ -1812,14 +1853,10 @@ def launch_claude(
     # What the gate settled on, which is the only posture read from here on.
     sandbox = cleared.sandbox
     arguments: list[str] = claude_resume_arguments(resume)
-    # A mode's model is a default rather than a fixture: it says what this kind
-    # of session runs on when nobody said otherwise, and an explicit --model
-    # still wins, because overriding the model is why a caller passes one.
-    selected_model = model or (
-        mode.native_model("claude") if mode is not None else None
-    )
     if selected_model is not None:
         arguments.extend(["--model", selected_model])
+    if compiled_effort is not None:
+        arguments.extend(compiled_effort.arguments())
     root = project_root()
     # Minted here rather than where the argv is settled, because this runtime
     # shows the name in its own chrome and the flag carrying it is built now;
@@ -1840,6 +1877,9 @@ def launch_claude(
                     [*mounts, *accessible_roots()]
                     if sandbox is LaunchSandbox.INNER
                     else []
+                ),
+                settings=(
+                    compiled_effort.settings if compiled_effort is not None else None
                 ),
             ),
             # What this runtime shows in its own chrome, made to agree with
@@ -2007,6 +2047,7 @@ def launch_codex(
     mounts: list[AccessibleRoot] = [],
     devices: list[Device] = [],
     recorder: SessionRecorder | None = None,
+    effort: str | None = None,
 ) -> None:
     """Generate/reconcile Codex artifacts and launch without updating the CLI.
 
@@ -2015,6 +2056,18 @@ def launch_codex(
     contradiction = resume.contradicted()
     if contradiction is not None:
         raise typer.BadParameter(contradiction)
+    selected_model = model or (mode.native_model("codex") if mode is not None else None)
+    # Refused before anything is generated or checkpointed: the API refuses an
+    # effort the model lacks with a 400 that names neither.
+    try:
+        chosen_effort = None if effort is None else codex_effort_named(effort)
+        refuse_codex_effort(
+            None if selected_model is None else listed_codex_model(selected_model),
+            chosen_effort,
+            CodexModelTiers(),
+        )
+    except ValueError as refusal:
+        raise typer.BadParameter(str(refusal)) from refusal
     if checkpoint is not None and not generate_only:
         checkpoint(provider="codex")
     plugin = composition.recipe.source.plugins[0]
@@ -2066,9 +2119,10 @@ def launch_codex(
                 selected_profile.installed_name(),
             ]
         )
-    selected_model = model or (mode.native_model("codex") if mode is not None else None)
     if selected_model is not None:
         arguments.extend(["--model", selected_model])
+    if chosen_effort is not None:
+        arguments.extend(codex_effort_arguments(chosen_effort))
     arguments.extend(mode.command_words("codex") if mode is not None else [])
     arguments.extend(extra_args)
     environment["CODEX_HOME"] = str(selected_home)

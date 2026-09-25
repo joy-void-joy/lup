@@ -4,21 +4,27 @@ from typing import assert_never
 
 from pydantic import BaseModel
 
-from lup.types import JsonObject, ModelTier, SubagentSpec
+from lup.providers.codex.models import CodexModel
+from lup.types import CustomModel, JsonObject, ModelTier, SubagentSpec
 from lup.sessions.errors import UnsupportedCapability
 
 
 class CodexModelTiers(BaseModel, frozen=True):
     """Provider model defaults, replaceable for an account or compatible endpoint."""
 
-    strongest: str = "gpt-6-astra"
-    balanced: str = "gpt-5.6-terra"
-    fast: str = "gpt-5.6-luna"
+    frontier: CodexModel | CustomModel = "gpt-6-astra"
+    strongest: CodexModel | CustomModel = "gpt-5.6-sol"
+    balanced: CodexModel | CustomModel = "gpt-5.6-terra"
+    fast: CodexModel | CustomModel = "gpt-6-luna"
 
-    def resolve(self, tier: ModelTier, *, inherited: str | None = None) -> str | None:
+    def resolve(
+        self, tier: ModelTier, *, inherited: CodexModel | CustomModel | None = None
+    ) -> CodexModel | CustomModel | None:
         match tier:
             case "inherit":
                 return inherited
+            case "frontier":
+                return self.frontier
             case "strongest":
                 return self.strongest
             case "balanced":

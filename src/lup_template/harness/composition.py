@@ -11,6 +11,7 @@ from pathlib import Path
 
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.harness.codescan.common import RuleSelection
+from lup.devtools.dev.model_catalog import catalog_writers, library_catalogs
 from lup.devtools.dev.rules import write_rule_reference
 from lup.devtools.dev.workflow import write_publish, write_workflow
 from lup.devtools.harness.composition import (
@@ -118,5 +119,6 @@ REPOSITORY_WIDE: list[RepositoryWriter] = [
         Path("packages/lup/src/lup/web/bundles"),
         LIBRARY_SURFACES,
     ),
+    *catalog_writers(library_catalogs()),
 ]
 """Every project-owned generated file outside a native runtime tree."""

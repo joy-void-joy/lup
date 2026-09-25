@@ -7,12 +7,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import AnyHttpUrl, BaseModel, SecretStr
+from pydantic import AnyHttpUrl, BaseModel, SecretStr, TypeAdapter, ValidationError
 
 from lup.providers.claude.config import (
     ClaudeCompatibilityTransform,
     ClaudeCompatibleEndpoint,
 )
+from lup.providers.claude.model_choice import ClaudeModelChoice, claude_model_choice
+from lup.providers.claude.models import ClaudeEffort
 from lup.providers.claude.runtime import (
     SESSION_THINKING_TOKENS,
     ClaudeSandboxConfig,
@@ -20,18 +22,19 @@ from lup.providers.claude.runtime import (
     create_claude,
 )
 from lup.tools.native import NativeToolGroup, NativeTools
-from lup.providers.claude.subagents import model_alias as claude_model_alias
 from lup.providers.claude.subagents import subagent_tools as claude_subagent_tools
 from lup.providers.codex.config import (
     CodexCompatibilityTransform,
     CodexCompatibleEndpoint,
 )
+from lup.providers.codex.model_choice import CodexModelChoice, codex_model_choice
+from lup.providers.codex.models import CodexEffort
 from lup.providers.codex.runtime import (
     CodexMcpServerConfig,
     CodexSessionConfig,
     create_codex,
 )
-from lup.providers.codex.subagents import CodexModelTiers, CodexSubagentTools
+from lup.providers.codex.subagents import CodexSubagentTools
 from lup.providers.codex.subagents import subagent_tools as codex_subagent_tools
 from lup.providers.codex.selection import codex_config
 from lup.providers.selection import SessionRequest
@@ -72,6 +75,7 @@ from lup.observability.sessions import (
 )
 from lup.observability.trace import TraceLogger
 from lup.types import (
+    CustomModel,
     PayloadText,
     SubagentCapability,
     SubagentSpec,
@@ -200,6 +204,15 @@ def provider_factory(
         settings.agent_sdk or "unset — routed by model",
     )
     if engine in ("claude", "claude-compat"):
+        # A configured id is checked against Claude Code's catalog, except on
+        # a compatible endpoint, whose model ids are its own to name.
+        claude_model: ClaudeModelChoice | None = (
+            None
+            if model is None
+            else claude_model_choice(model)
+            if compat_base_url() is None
+            else CustomModel(id=model)
+        )
         if role is not None:
             native_tools = claude_subagent_tools(role)
             allowed_tools = list(native_tools)
@@ -208,13 +221,13 @@ def provider_factory(
                     raise ValueError(
                         "compatible endpoints require inherited role models"
                     )
-                model = claude_model_alias(role.model)
-        if model is None:
+                claude_model = role.model
+        if claude_model is None:
             if compat_base_url() is not None:
                 raise ValueError("AGENT_MODEL is required for a compatible endpoint")
-            model = claude_model_alias("strongest")
+            claude_model = "strongest"
         config = ClaudeSessionConfig(
-            model=model,
+            model=claude_model,
             system_prompt=system_prompt,
             coding_harness_preset=coding_harness_preset,
             native_tools=native_tools,
@@ -305,21 +318,30 @@ def provider_factory(
             if native_tools == []
             else None
         )
+        # A configured id is checked against Codex's catalog on the native
+        # engine; an OpenAI-compatible provider names its own models.
+        codex_model: CodexModelChoice | None = (
+            None
+            if model is None
+            else codex_model_choice(model)
+            if engine == "codex"
+            else CustomModel(id=model)
+        )
         if role is not None and role.model != "inherit":
             if engine != "codex":
                 raise ValueError("compatible endpoints require inherited role models")
-            model = CodexModelTiers().resolve(role.model)
-        if model is None:
+            codex_model = role.model
+        if codex_model is None:
             if engine != "codex":
                 raise ValueError("AGENT_MODEL is required for a compatible endpoint")
-            model = CodexModelTiers().strongest
+            codex_model = "strongest"
         applications = codex_config(
             SessionRequest(cwd=cwd, tool_servers=tool_servers or {})
         )
         if applications.mcp_servers.keys() & (codex_mcp_servers or {}).keys():
             raise ValueError("tool_servers and codex_mcp_servers name the same server")
         config = CodexSessionConfig(
-            model=model,
+            model=codex_model,
             developer_instructions=system_prompt,
             cwd=cwd,
             sandbox=(
@@ -370,13 +392,14 @@ def provider_factory(
     raise ValueError(f"unsupported engine {engine!r}")
 
 
-def normalize_claude_effort(
-    value: str | None,
-) -> Literal["low", "medium", "high", "xhigh", "max"] | None:
-    """Validate the application setting at the Claude adapter boundary."""
-    if value in (None, "low", "medium", "high", "xhigh", "max"):
-        return value
-    raise ValueError(f"unsupported Claude reasoning effort {value!r}")
+def normalize_claude_effort(value: str | None) -> ClaudeEffort | None:
+    """Validate the application setting against Claude's effort ladder."""
+    if value is None:
+        return None
+    try:
+        return TypeAdapter(ClaudeEffort).validate_python(value)
+    except ValidationError as error:
+        raise ValueError(f"unsupported Claude reasoning effort {value!r}") from error
 
 
 def normalize_codex_sandbox(
@@ -426,13 +449,14 @@ def normalize_codex_approval(
     )
 
 
-def normalize_codex_effort(
-    value: str | None,
-) -> Literal["none", "minimal", "low", "medium", "high", "xhigh"] | None:
-    """Validate reasoning effort at the Codex adapter boundary."""
-    if value in (None, "none", "minimal", "low", "medium", "high", "xhigh"):
-        return value
-    raise ValueError(f"unsupported Codex reasoning effort {value!r}")
+def normalize_codex_effort(value: str | None) -> CodexEffort | None:
+    """Validate the application setting against Codex's effort ladder."""
+    if value is None:
+        return None
+    try:
+        return TypeAdapter(CodexEffort).validate_python(value)
+    except ValidationError as error:
+        raise ValueError(f"unsupported Codex reasoning effort {value!r}") from error
 
 
 def decorate_factory(
@@ -738,6 +762,9 @@ def build_auxiliary_factory(
                 prompt=system_prompt,
                 tools=tools or [],
                 capabilities=capabilities or [],
+                # The role runs on the model this factory is handed, which is
+                # already the strongest tier where the caller named none.
+                model="inherit",
             )
             if tools is not None or capabilities is not None
             else None,

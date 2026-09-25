@@ -148,11 +148,14 @@ part of probing.
   `400 unsupported_value`, and the message names the rungs that model takes —
   `'none', 'low', 'medium', 'high', 'xhigh'`. Two readings follow. The ladder
   is per model rather than global: `max` is real for the newer model the home
-  was written for, and `minimal` sits in Lup's own accepted vocabulary while
-  that list omits it. And a named model must carry an effort, which is what
-  `CodexSessionConfig.model_selection` guarantees — the literal is
-  deliberately *not* narrowed to one model's answer, because which rungs a
-  model accepts is the vendor's to state per model.
+  was written for. And a named model must carry an effort, which is what
+  `CodexSessionConfig.model_selection` guarantees. The vendor states the
+  rungs per model in its own catalog — `codex debug models` lists each
+  model's `supported_reasoning_levels`, and the app-server types an effort as
+  "a non-empty reasoning effort value advertised by the model" — so lup
+  compiles that catalog (`providers/codex/models.py`, refreshed by
+  `dev models`) and refuses a rung a model's row lacks where the session is
+  declared, rather than guessing one ladder for every model.
 - **A Codex home decides whether the policy runs at all, through four gates,
   and `codex doctor` reports on none of them.** The plugin has to be installed
   and enabled; `[features] hooks = true` has to reach *that* home; the project

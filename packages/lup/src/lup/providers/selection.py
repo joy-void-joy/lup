@@ -23,9 +23,11 @@ from lup.policy.hooks import LupHooksConfig
 from lup.tools.mcp import McpServerEntry
 from lup.tools.native import NativeTools, native_grants
 from lup.sessions.client import Client
+from lup.providers.claude.models import ClaudeModel
+from lup.providers.codex.models import CodexModel
 from lup.providers.login import ProviderLogin
 from lup.sessions.events import SubmissionGateResolver
-from lup.types import EnvVars
+from lup.types import CustomModel, EnvVars, ModelTier
 
 type SessionAutonomy = Literal["ask", "accept_edits", "plan", "unattended"]
 """How much a session may do before it stops to ask.
@@ -36,14 +38,24 @@ approvals are decided against, and a caller wanting an unattended session
 should not have to know which.
 """
 
-type SessionEffort = Literal["minimal", "low", "medium", "high", "xhigh", "max"]
+type SessionEffort = Literal["low", "medium", "high", "xhigh", "max", "ultra"]
 """How hard a session is asked to think before it answers.
 
-The four middle rungs are the words both runtimes already share; the two ends
-are each runtime's own limit, and the runtime without one renders it as the
-nearest it has. Codex's ``none`` is deliberately absent: Claude has no rung
-below ``low``, so admitting it here would turn "do not reason" into "reason a
-little" on one runtime without saying so.
+Every rung is one both runtimes' catalogs list, so none is narrowed on the
+way to either: ``ultra`` is Codex's own top rung, and Claude's ``xhigh`` with
+ultracode on. Nothing sits below ``low``, because neither catalog lists a
+rung there — ``minimal`` and ``none`` left Codex's, and admitting either here
+would turn "barely reason" into "reason a little" without saying so. Which
+rungs one *model* takes is narrower still, and refused where it is declared.
+"""
+
+type SessionModel = ClaudeModel | CodexModel | CustomModel | ModelTier
+"""Every way a request may name its model.
+
+Either runtime's catalog, an id outside both, or a tier each runtime spells in
+its own lineup. A name only one catalog lists is refused by the other runtime
+when the request is opened through it, rather than sent to a CLI that does
+not know it.
 """
 
 
@@ -80,7 +92,7 @@ class SessionRequest(
 ):
     """What an application asks of a session, before a runtime renders it."""
 
-    model: str | None = None
+    model: SessionModel | None = None
     instructions: str = ""
     """The standing instructions a session opens with, however it spells them."""
 

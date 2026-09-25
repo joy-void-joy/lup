@@ -1,0 +1,338 @@
+{
+  "runtime": "claude",
+  "observed": "2.1.282 (Claude Code)",
+  "models": [
+    {
+      "id": "claude-3-5-haiku",
+      "efforts": []
+    },
+    {
+      "id": "claude-haiku-4-5",
+      "efforts": []
+    },
+    {
+      "id": "claude-3-5-sonnet",
+      "efforts": []
+    },
+    {
+      "id": "claude-3-7-sonnet",
+      "efforts": []
+    },
+    {
+      "id": "claude-sonnet-4-0",
+      "efforts": []
+    },
+    {
+      "id": "claude-sonnet-4-5",
+      "efforts": []
+    },
+    {
+      "id": "claude-sonnet-4-6",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "max"
+      ]
+    },
+    {
+      "id": "claude-sonnet-5",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ]
+    },
+    {
+      "id": "claude-opus-4-0",
+      "efforts": []
+    },
+    {
+      "id": "claude-opus-4-1",
+      "efforts": []
+    },
+    {
+      "id": "claude-opus-4-5",
+      "efforts": []
+    },
+    {
+      "id": "claude-opus-4-6",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "max"
+      ]
+    },
+    {
+      "id": "claude-opus-4-7",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ]
+    },
+    {
+      "id": "claude-opus-4-8",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ]
+    },
+    {
+      "id": "claude-opus-5",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ]
+    },
+    {
+      "id": "claude-opus-5-5",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ]
+    },
+    {
+      "id": "claude-fable-5",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ]
+    },
+    {
+      "id": "claude-fable-5-1",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ]
+    },
+    {
+      "id": "claude-mythos-5",
+      "efforts": []
+    },
+    {
+      "id": "claude-mythos-5-1",
+      "efforts": [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra"
+      ]
+    }
+  ],
+  "aliases": [
+    {
+      "name": "opus",
+      "targets": [
+        "claude-opus-5-5",
+        "claude-opus-4-6",
+        "claude-opus-4-7"
+      ]
+    },
+    {
+      "name": "sonnet",
+      "targets": [
+        "claude-sonnet-5",
+        "claude-sonnet-4-5",
+        "claude-sonnet-4-6"
+      ]
+    },
+    {
+      "name": "haiku",
+      "targets": [
+        "claude-haiku-4-5"
+      ]
+    },
+    {
+      "name": "fable",
+      "targets": [
+        "claude-fable-5-1",
+        "claude-fable-5"
+      ]
+    },
+    {
+      "name": "best",
+      "targets": [
+        "claude-fable-5-1",
+        "claude-fable-5"
+      ]
+    },
+    {
+      "name": "claude-3-5-haiku-20241022",
+      "targets": [
+        "claude-3-5-haiku"
+      ]
+    },
+    {
+      "name": "claude-haiku-4-5-20251001",
+      "targets": [
+        "claude-haiku-4-5"
+      ]
+    },
+    {
+      "name": "claude-3-5-sonnet-20241022",
+      "targets": [
+        "claude-3-5-sonnet"
+      ]
+    },
+    {
+      "name": "claude-3-7-sonnet-20250219",
+      "targets": [
+        "claude-3-7-sonnet"
+      ]
+    },
+    {
+      "name": "claude-sonnet-4-20250514",
+      "targets": [
+        "claude-sonnet-4-0"
+      ]
+    },
+    {
+      "name": "claude-sonnet-4-5-20250929",
+      "targets": [
+        "claude-sonnet-4-5"
+      ]
+    },
+    {
+      "name": "claude-opus-4-20250514",
+      "targets": [
+        "claude-opus-4-0"
+      ]
+    },
+    {
+      "name": "claude-opus-4-1-20250805",
+      "targets": [
+        "claude-opus-4-1"
+      ]
+    },
+    {
+      "name": "claude-opus-4-5-20251101",
+      "targets": [
+        "claude-opus-4-5"
+      ]
+    },
+    {
+      "name": "opus[1m]",
+      "targets": [
+        "claude-opus-5-5",
+        "claude-opus-4-6",
+        "claude-opus-4-7"
+      ]
+    },
+    {
+      "name": "sonnet[1m]",
+      "targets": [
+        "claude-sonnet-5",
+        "claude-sonnet-4-5",
+        "claude-sonnet-4-6"
+      ]
+    },
+    {
+      "name": "haiku[1m]",
+      "targets": [
+        "claude-haiku-4-5"
+      ]
+    },
+    {
+      "name": "claude-haiku-4-5[1m]",
+      "targets": [
+        "claude-haiku-4-5"
+      ]
+    },
+    {
+      "name": "claude-sonnet-4-0[1m]",
+      "targets": [
+        "claude-sonnet-4-0"
+      ]
+    },
+    {
+      "name": "claude-sonnet-4-5[1m]",
+      "targets": [
+        "claude-sonnet-4-5"
+      ]
+    },
+    {
+      "name": "claude-sonnet-4-6[1m]",
+      "targets": [
+        "claude-sonnet-4-6"
+      ]
+    },
+    {
+      "name": "claude-opus-4-0[1m]",
+      "targets": [
+        "claude-opus-4-0"
+      ]
+    },
+    {
+      "name": "claude-opus-4-1[1m]",
+      "targets": [
+        "claude-opus-4-1"
+      ]
+    },
+    {
+      "name": "claude-opus-4-5[1m]",
+      "targets": [
+        "claude-opus-4-5"
+      ]
+    },
+    {
+      "name": "claude-opus-4-6[1m]",
+      "targets": [
+        "claude-opus-4-6"
+      ]
+    },
+    {
+      "name": "claude-opus-4-7[1m]",
+      "targets": [
+        "claude-opus-4-7"
+      ]
+    },
+    {
+      "name": "claude-opus-4-8[1m]",
+      "targets": [
+        "claude-opus-4-8"
+      ]
+    },
+    {
+      "name": "claude-opus-5[1m]",
+      "targets": [
+        "claude-opus-5"
+      ]
+    },
+    {
+      "name": "claude-opus-5-5[1m]",
+      "targets": [
+        "claude-opus-5-5"
+      ]
+    }
+  ]
+}

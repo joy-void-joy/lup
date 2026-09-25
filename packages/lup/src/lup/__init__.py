@@ -27,8 +27,17 @@ from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from lup.providers.routing import PROVIDER_ROUTES, Provider, ProviderRoute, provider_for
+from lup.providers.claude.models import ClaudeModel
+from lup.providers.codex.models import CodexModel
+from lup.providers.routing import (
+    PROVIDER_ROUTES,
+    Provider,
+    ProviderRoute,
+    catalog_provider,
+    provider_for,
+)
 from lup.sessions.client import Client
+from lup.types import CustomModel, ModelTier
 from lup.tools.native import NativeToolGroup as NativeToolGroup, NativeTools
 from lup.sessions.events import (
     SessionHandle,
@@ -77,7 +86,7 @@ def __getattr__(name: str) -> Callable[..., Client]:
 
 
 def create_client(
-    model: str,
+    model: ClaudeModel | CodexModel | CustomModel | ModelTier,
     *,
     provider: Provider | None = None,
     system_prompt: str = "",
@@ -110,12 +119,19 @@ def create_client(
     turns out to select". So the common arguments are here, the whole
     declaration is there, and neither pretends to be the other.
 
-    An unrecognised model raises rather than guessing a provider. Guessing
-    would open a session against the wrong vendor and fail somewhere
-    downstream in that vendor's vocabulary, which is a worse error arriving
-    later.
+    A name either runtime's catalog lists routes to that runtime; a
+    ``CustomModel`` routes by ``routes``, since no catalog lists it; a tier
+    belongs to every runtime and so routes nowhere without ``provider``. An
+    unrecognised model raises rather than guessing a provider. Guessing would
+    open a session against the wrong vendor and fail somewhere downstream in
+    that vendor's vocabulary, which is a worse error arriving later.
     """
-    selected = provider or provider_for(model, routes)
+    match model:
+        case CustomModel(id=identifier):
+            routed = provider_for(identifier, routes)
+        case _:
+            routed = catalog_provider(model)
+    selected = provider or routed
     if selected is None:
         claimed = ", ".join(sorted({route.provider for route in routes}))
         raise LookupError(
@@ -145,6 +161,7 @@ def create_client(
 
 __all__ = [  # lup: ignore[all-export] -- the package-root public API
     "Client",
+    "CustomModel",
     "Provider",
     "SessionHandle",
     "SessionId",

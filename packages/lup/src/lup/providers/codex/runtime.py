@@ -31,7 +31,13 @@ from lup.providers.codex.home import CodexWorktreeHomeStore, install_declared_po
 from lup.providers.selection import SessionContainment
 from lup.providers.codex.login import CODEX_HOME, native_home
 from lup.providers.codex.output import CodexOutputContract, codex_output_contract
-from lup.providers.codex.subagents import CodexSubagentTools
+from lup.providers.codex.model_choice import (
+    CodexModelChoice,
+    codex_model_id,
+    refuse_unsupported_effort,
+)
+from lup.providers.codex.models import CodexEffort
+from lup.providers.codex.subagents import CodexModelTiers, CodexSubagentTools
 from lup.policy.hooks import LupHookInput, LupHookOutput, LupHooksConfig
 from lup.policy.identity import POLICY_ROOT_ENV
 from lup.providers.codex.native_tools import CodexNativeTools
@@ -84,23 +90,6 @@ from lup.sessions.transcript import fold_transcript
 from lup.types import EnvVars, JsonObject, JsonValue, Usage
 
 
-type CodexEffort = Literal["none", "minimal", "low", "medium", "high", "xhigh"]
-"""How much reasoning a Codex turn is asked to spend, in Codex's own words.
-
-Declared beside the config that carries it rather than beside the table that
-translates a portable tier into it, because a model and its effort are one
-choice on the wire and this is where that choice is assembled.
-
-Not every model accepts every rung, and the ladder moves: a home written for a
-newer model here carried ``max``, which the API refused for an older one with
-"Supported values are: 'none', 'low', 'medium', 'high', and 'xhigh'" — a list
-that also omits the ``minimal`` this closes over. What follows from that is
-:meth:`CodexSessionConfig.model_selection`, not a narrower literal: which
-rungs a given model accepts is the vendor's to answer per model, and guessing
-it here would refuse configurations that work.
-"""
-
-
 CODEX_PROGRAM = Path("codex")
 """The program a Codex session is started as when nothing names another.
 
@@ -120,7 +109,13 @@ class CodexSessionConfig(
 ):
     """Immutable Codex-only app-server configuration."""
 
-    model: str | None = None
+    model: CodexModelChoice | None = None
+    """A slug from Codex's catalog, a portable tier, or a custom id."""
+
+    model_tiers: CodexModelTiers = CodexModelTiers()
+    """The slug each portable tier selects, for an account or endpoint whose
+    lineup differs from the one lup ships as default."""
+
     developer_instructions: str = ""
     cwd: Path
     policy_root: Path | None = None
@@ -142,7 +137,9 @@ class CodexSessionConfig(
 
     ``None`` means inherit, which is right only while the *model* is also
     inherited. Where a model is named, :attr:`paired_effort` answers instead —
-    see :meth:`model_selection` for why the two cannot travel apart.
+    see :meth:`model_selection` for why the two cannot travel apart. Which
+    rungs a model accepts is its catalog row's answer, and a rung outside it
+    is refused where this is declared.
     """
 
     paired_effort: CodexEffort = "medium"
@@ -250,9 +247,27 @@ class CodexSessionConfig(
         effort beside it, the caller's where they gave one and
         :attr:`paired_effort` where they did not.
         """
-        if self.model is None:
+        model = self.model_id()
+        if model is None:
             return {} if self.effort is None else {"effort": self.effort}
-        return {"model": self.model, "effort": self.effort or self.paired_effort}
+        return {"model": model, "effort": self.effort or self.paired_effort}
+
+    def model_id(self) -> str | None:
+        """The slug the app-server is asked for, or None to inherit the home's."""
+        return codex_model_id(self.model, self.model_tiers)
+
+    @model_validator(mode="after")
+    def the_model_takes_its_effort(self) -> "CodexSessionConfig":
+        """Refuse an effort the catalog says this session's model cannot take.
+
+        The effort checked is the one :meth:`model_selection` would send — the
+        paired one where the caller named none — because a model is never
+        sent alone, and a paired rung the model lacks fails the same 400.
+        """
+        refuse_unsupported_effort(
+            self.model, self.effort or self.paired_effort, self.model_tiers
+        )
+        return self
 
     def native_capabilities(self) -> CodexNativeTools:
         """Resolve explicit delegated facilities through the same startup bounds."""
@@ -672,7 +687,7 @@ class CodexConversationState:
         self.inherited_servers = list(inherited.config.mcp_servers)
         self.inherited_plugins = list(inherited.config.plugins)
         if (
-            self.config.model is None
+            self.config.model_id() is None
             and inherited.config.model is not None
             and self.models is not None
             and inherited.config.model not in self.models
@@ -1254,7 +1269,10 @@ class CodexSessionOpener:
             arguments=native.arguments(),
         )
         catalog = await asyncio.to_thread(
-            native.model_catalog, config.executable, config.environment, config.model
+            native.model_catalog,
+            config.executable,
+            config.environment,
+            config.model_id(),
         )
         # Beside the session's own home, so a contained launch can read the
         # catalog it is pointed at; the home is the launch's to create when
@@ -1331,7 +1349,7 @@ class CodexSessionOpener:
 def create_codex(
     options: CodexSessionConfig | None = None,
     *,
-    model: str | None = None,
+    model: CodexModelChoice | None = None,
     system_prompt: str = "",
     cwd: Path | None = None,
     base_url: str | None = None,
@@ -1359,16 +1377,22 @@ def create_codex(
     if tools is not None and len({tool.name for tool in tools}) != len(tools):
         raise ValueError("application tool names must be unique")
     base = options or CodexSessionConfig(cwd=Path.cwd())
-    config = base.model_copy(
-        update={
-            "model": base.model if model is None else model,
-            "developer_instructions": system_prompt or base.developer_instructions,
-            "cwd": base.cwd if cwd is None else cwd,
-            "native_tools": base.native_tools if native_tools is ... else native_tools,
-            "application_tools": base.application_tools
-            if tools is None
-            else {f"lup_app_{tool.name}": tool for tool in tools},
-        }
+    # Validated again rather than copied as it stands, so a model named here
+    # is refused an effort the base carries by the same check a declaration is.
+    config = CodexSessionConfig.model_validate(
+        base.model_copy(
+            update={
+                "model": base.model if model is None else model,
+                "developer_instructions": system_prompt or base.developer_instructions,
+                "cwd": base.cwd if cwd is None else cwd,
+                "native_tools": base.native_tools
+                if native_tools is ...
+                else native_tools,
+                "application_tools": base.application_tools
+                if tools is None
+                else {f"lup_app_{tool.name}": tool for tool in tools},
+            }
+        )
     )
     if base_url is not None:
         # Imported inside the call for the reason the Claude constructor gives:

@@ -54,6 +54,7 @@ from lup.providers.selection import (
 )
 from lup.sessions.composition import submission_gate_resolver
 from lup.sessions.events import SubmissionDecision
+from lup.types import CustomModel
 
 AUTONOMY_DEGREES = get_args(SessionAutonomy.__value__)
 CONTAINMENT_WALLS = get_args(SessionContainment.__value__)
@@ -108,7 +109,7 @@ def test_claude_renders_the_whole_request(
     monkeypatch.setattr("lup.providers.claude.selection.create_claude", record)
     CLAUDE_RUNTIME.session_factory(
         SessionRequest(
-            model="a-model",
+            model=CustomModel(id="a-model"),
             instructions="be brief",
             cwd=tmp_path,
             autonomy="unattended",
@@ -121,7 +122,7 @@ def test_claude_renders_the_whole_request(
     )
 
     config = rendered[0]
-    assert config.model == "a-model"
+    assert config.model_id() == "a-model"
     assert config.system_prompt == "be brief"
     assert config.cwd == tmp_path
     assert config.permission_mode == "bypassPermissions"
@@ -144,7 +145,7 @@ def test_codex_renders_what_it_can_spell(
     monkeypatch.setattr("lup.providers.codex.selection.create_codex", record)
     CODEX_RUNTIME.session_factory(
         SessionRequest(
-            model="a-model",
+            model=CustomModel(id="a-model"),
             instructions="be brief",
             cwd=tmp_path,
             autonomy="accept_edits",
@@ -154,7 +155,7 @@ def test_codex_renders_what_it_can_spell(
     )
 
     config = rendered[0]
-    assert config.model == "a-model"
+    assert config.model_id() == "a-model"
     assert config.developer_instructions == "be brief"
     assert config.sandbox == "workspace-write"
     assert config.writable_roots == [tmp_path]
@@ -181,7 +182,7 @@ def test_codex_refuses_what_it_cannot_govern(
 
 def test_codex_will_not_infer_the_directory_it_sandboxes_against() -> None:
     with pytest.raises(ValueError, match="cwd"):
-        CODEX_RUNTIME.session_factory(SessionRequest(model="a-model"))
+        CODEX_RUNTIME.session_factory(SessionRequest(model=CustomModel(id="a-model")))
 
 
 def test_codex_rejects_a_tool_group_it_cannot_launch() -> None:

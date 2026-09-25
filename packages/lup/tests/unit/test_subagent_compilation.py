@@ -12,7 +12,14 @@ from lup.providers.codex.runtime import CodexConversationState, CodexSessionConf
 from lup.providers.codex.native_tools import CodexNativeTools
 from lup.providers.codex.subagents import CodexModelTiers, subagent_tools as codex_tools
 from lup.sessions.events import SessionId
-from lup.types import JsonObject, JsonValue, ModelTier, SubagentCapability, SubagentSpec
+from lup.types import (
+    CustomModel,
+    JsonObject,
+    JsonValue,
+    ModelTier,
+    SubagentCapability,
+    SubagentSpec,
+)
 
 
 def role(**fields: JsonValue) -> SubagentSpec:
@@ -36,24 +43,34 @@ def test_every_capability_has_both_compilers(capability: SubagentCapability) -> 
 
 @pytest.mark.parametrize("tier", get_args(ModelTier.__value__))
 def test_every_tier_has_both_compilers(tier: ModelTier) -> None:
+    parent = CustomModel(id="parent")
     assert (
         model_alias(tier)
         == {
             "inherit": "inherit",
+            "frontier": "fable",
             "strongest": "opus",
             "balanced": "sonnet",
             "fast": "haiku",
         }[tier]
     )
     assert (
-        CodexModelTiers().resolve(tier, inherited="parent")
+        CodexModelTiers().resolve(tier, inherited=parent)
         == {
-            "inherit": "parent",
-            "strongest": "gpt-6-astra",
+            "inherit": parent,
+            "frontier": "gpt-6-astra",
+            "strongest": "gpt-5.6-sol",
             "balanced": "gpt-5.6-terra",
-            "fast": "gpt-5.6-luna",
+            "fast": "gpt-6-luna",
         }[tier]
     )
+
+
+def test_an_undeclared_role_runs_on_the_strongest_tier() -> None:
+    """Everything defaults to ``strongest``: a role must ask to run lighter."""
+    assert role().model == "strongest"
+    assert model_alias(role().model) == "opus"
+    assert CodexModelTiers().resolve(role().model) == "gpt-5.6-sol"
 
 
 def test_exact_grants_keep_the_canonical_vocabulary() -> None:
