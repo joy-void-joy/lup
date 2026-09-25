@@ -175,6 +175,28 @@ DECLARED: list[Migration] = [
             ),
         ],
     ),
+    Migration(
+        subjects=["ClaudeProfileSelection", "ClaudeProfileRegistry"],
+        reason=(
+            "an unnamed Claude profile named ~/.claude as the configuration home, "
+            "and a named ~/.claude makes Claude Code read ~/.claude/.claude.json "
+            "rather than the ~/.claude.json it reads when nothing is named, so "
+            "every session opened through the default started from a document "
+            "the account never wrote; the default names no home, as Codex's does"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Read ClaudeProfileSelection.config_directory as optional: "
+                    "None leaves whichever home the session's environment already "
+                    "selects, and AccountFile.resolve_config_dir() answers that "
+                    "home, honouring whichever one the environment names. A "
+                    "registry that must pin a home passes "
+                    "default=ClaudeProfileSelection(config_directory=...)."
+                )
+            ),
+        ],
+    ),
 ]
 """Every break this library has taken since its last release, and what to do.
 

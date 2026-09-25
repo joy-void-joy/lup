@@ -228,6 +228,22 @@ def test_claude_profile_precedence_and_immutability(tmp_path: Path) -> None:
         resolver.resolve("missing")
 
 
+def test_an_unnamed_claude_profile_leaves_the_home_its_environment_selects() -> None:
+    """Naming ``~/.claude`` is not naming nothing, so the default names nothing.
+
+    Under a named ``~/.claude`` Claude Code reads ``~/.claude/.claude.json``,
+    and under none the ``~/.claude.json`` beside it, so a default naming the
+    directory opened every session on a document the account never wrote.
+    Codex's default names no home either."""
+    resolver = ClaudeProfileResolver(ClaudeProfileRegistry())
+    original = ClaudeSessionConfig(model="claude", environment={"KEEP": "1"})
+
+    configured = resolver.resolve(None).apply(original)
+
+    assert "CLAUDE_CONFIG_DIR" not in configured.environment
+    assert configured.environment["KEEP"] == "1"
+
+
 class RecordingBuilder:
     """Capture the configuration a selector hands to its factory builder."""
 
