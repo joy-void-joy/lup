@@ -18,6 +18,8 @@ The value is a transparent carrier — it composes no seam and decides nothing,
 so an application stores one the way it stores the runtime's name.
 """
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -33,3 +35,32 @@ class ProviderConfinement(BaseModel, frozen=True):
             "the vocabulary this value exists to carry"
         )
     )
+
+
+type SessionContainment = Literal["outer", "inner", "none"]
+"""Which wall a session is opened behind.
+
+The launcher's three words, in the same order and with the same meanings
+:class:`~lup.devtools.harness.launch.LaunchSandbox` gives them, because the
+two are one question asked at two moments -- what a launched session opens
+under, and what a session an application opens itself opens under. A caller
+holding one vocabulary per entry point would be holding two names for one
+wall.
+
+``outer`` is the container: the runtime is started as the program
+``contained_program`` names, and that runtime's own sandbox stands down
+inside it, because a wall that has to be weakened to start nested is worth
+less than saying plainly which wall is load-bearing. ``inner`` is the
+runtime's own sandbox, established wherever the session runs. ``none`` is
+neither, and is what every request meant before this field existed.
+
+Independent of :data:`~lup.providers.selection.SessionAutonomy`, which says
+how much a session may do before it stops to ask. One runtime spells the two
+with two fields and the other with one, which is a rendering problem each
+adapter settles in its own words -- not a reason for a caller to state a
+boundary as an autonomy.
+
+Declared here rather than beside the request that names it, because each
+adapter's own declaration names it too, and the request's module reads both
+adapters: kept there, it would be half-built whenever an adapter asked for it.
+"""

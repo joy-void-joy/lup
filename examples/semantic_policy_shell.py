@@ -17,7 +17,7 @@ from pydantic import AnyHttpUrl, BaseModel, Field
 from lup import create_claude
 from lup.harness.models import HookSet
 from lup.providers.claude.hooks import CLAUDE_SEMANTICS
-from lup.providers.claude.runtime import ClaudeSandboxConfig, ClaudeSessionConfig
+from lup.providers.claude import Claude, ClaudeSandboxConfig
 from lup.policy.hooks import LupHooksConfig
 from lup.policy.enforcement import SemanticToolPolicy, create_policy_hooks
 from lup.policy.rules import ShellPolicy, UrlScope
@@ -74,9 +74,9 @@ def policy_hooks() -> LupHooksConfig:
     )
 
 
-def session_config() -> ClaudeSessionConfig:
+def session_config() -> Claude:
     """Carry the enforcing hooks into the session the factory will open."""
-    return ClaudeSessionConfig(
+    return Claude(
         model="claude-opus-5",
         native_tools=["Bash"],
         system_prompt="Run what you are asked to run and report what happened.",

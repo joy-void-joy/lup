@@ -6,16 +6,13 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from lup import create_client
-from lup.providers.claude.runtime import (
-    ClaudeSessionConfig,
-    ClaudeSessionOpener,
-    build_claude_options,
-)
+from lup import create_claude, create_codex
+from lup.providers.claude import Claude
+from lup.providers.claude.runtime import ClaudeSessionOpener, build_claude_options
 from lup.providers.codex.app_server import CodexAppServer, RpcMessage
+from lup.providers.codex import Codex
 from lup.providers.codex.runtime import (
     CodexConversationState,
-    CodexSessionConfig,
     CodexSessionOpener,
     CodexTurnChannel,
 )
@@ -38,9 +35,9 @@ class Value(BaseModel):
 )
 def test_invalid_and_inherited_native_grants_are_rejected(value: str) -> None:
     with pytest.raises(ValueError):
-        ClaudeSessionConfig(native_tools=[value])
+        Claude(native_tools=[value])
     with pytest.raises(ValueError):
-        CodexSessionConfig(cwd=Path("."), native_tools=[value])
+        Codex(cwd=Path("."), native_tools=[value])
 
 
 def test_a_scalar_does_not_become_a_sequence_of_tool_letters() -> None:
@@ -79,18 +76,16 @@ def test_groups_compose_and_exact_grants_stay_exact() -> None:
 )
 def test_claude_other_fields_cannot_inject_tools(overrides: JsonObject) -> None:
     with pytest.raises(ValidationError):
-        ClaudeSessionConfig.model_validate(overrides)
+        Claude.model_validate(overrides)
 
 
 def test_unsafe_model_copies_are_revalidated_at_each_provider_boundary() -> None:
-    copied = ClaudeSessionConfig().model_copy(update={"allowed_tools": ["Write"]})
+    copied = Claude().model_copy(update={"allowed_tools": ["Write"]})
     with pytest.raises(ValidationError, match="outside native_tools"):
         ClaudeSessionOpener(copied)
     with pytest.raises(ValidationError, match="outside native_tools"):
         build_claude_options(copied, binding=lambda: None, resume=None, session_id=None)
-    copied_codex = CodexSessionConfig(cwd=Path(".")).model_copy(
-        update={"native_tools": ["Read"]}
-    )
+    copied_codex = Codex(cwd=Path(".")).model_copy(update={"native_tools": ["Read"]})
     with pytest.raises(ValidationError, match="exactly"):
         CodexSessionOpener(copied_codex)
 
@@ -108,7 +103,7 @@ def test_unsafe_model_copies_are_revalidated_at_each_provider_boundary() -> None
 )
 def test_provider_config_cannot_override_tool_authority(key: str) -> None:
     with pytest.raises(ValueError, match="explicit session authority"):
-        CodexSessionConfig(cwd=Path("."), provider_config={key: True})
+        Codex(cwd=Path("."), provider_config={key: True})
 
 
 async def test_claude_guard_denies_fabricated_tools_but_keeps_explicit_effectful_tools(
@@ -120,9 +115,7 @@ async def test_claude_guard_denies_fabricated_tools_but_keeps_explicit_effectful
         return params
 
     options = build_claude_options(
-        ClaudeSessionConfig(
-            tool_servers={"app": create_mcp_server("app", tools=[record])}
-        ),
+        Claude(tool_servers={"app": create_mcp_server("app", tools=[record])}),
         binding=lambda: None,
         resume="old-session",
         session_id=None,
@@ -224,8 +217,8 @@ def test_selection_preserves_app_tools_under_none_for_both_runtimes() -> None:
     assert claude_config(request).tool_servers["app"] is server
     assert codex_config(request).application_tools["lup_app_app__echo"] is echo
     assert codex_config(request).writable_roots == []
-    assert create_client("gpt-6-astra", tools=[echo])
-    assert create_client("claude-opus-5", tools=[echo])
+    assert create_codex(model="gpt-6-astra", tools=[echo])
+    assert create_claude(model="claude-opus-5", tools=[echo])
 
 
 def test_dynamic_tool_names_cannot_shadow_another_explicit_handler() -> None:
@@ -247,7 +240,7 @@ def test_dynamic_tool_names_cannot_shadow_another_explicit_handler() -> None:
     with pytest.raises(ValueError, match="collide"):
         codex_config(request)
     with pytest.raises(ValueError, match="unique"):
-        create_client("gpt-6-astra", tools=[first, first])
+        create_codex(model="gpt-6-astra", tools=[first, first])
 
 
 async def test_unknown_inherited_model_is_refused_before_start(
@@ -261,7 +254,7 @@ async def test_unknown_inherited_model_is_refused_before_start(
 
     monkeypatch.setattr(server, "request", request)
     state = CodexConversationState(
-        CodexSessionConfig(cwd=tmp_path), server, None, models={"known": {}}
+        Codex(cwd=tmp_path), server, None, models={"known": {}}
     )
     with pytest.raises(ValueError, match="inherited unknown model"):
         await state.ensure_thread()
@@ -287,7 +280,7 @@ async def test_failed_or_cancelled_startup_closes_server_and_catalog(
         lambda self, executable, environment, model: {"models": [{"slug": "known"}]},
     )
     opener = CodexSessionOpener(
-        CodexSessionConfig(cwd=tmp_path, environment={"CODEX_HOME": str(tmp_path)})
+        Codex(cwd=tmp_path, environment={"CODEX_HOME": str(tmp_path)})
     )
     with pytest.raises(error, match="startup stopped"):
         async with opener.open_session():

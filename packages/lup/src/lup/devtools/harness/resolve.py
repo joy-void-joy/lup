@@ -1575,19 +1575,15 @@ def run_resolve(
         report_a_blocked_registration(root)
 
     async def execute() -> None:
+        from lup.providers.claude import Claude, ClaudeSandboxConfig
         from lup.providers.claude.runtime import (
-            ClaudeSandboxConfig,
-            ClaudeSessionConfig,
             create_claude,
             environmental_fault,
             may_be_a_rotation,
             needs_a_person,
         )
-        from lup.providers.codex.runtime import (
-            CodexMcpServerConfig,
-            CodexSessionConfig,
-            create_codex,
-        )
+        from lup.providers.codex import Codex, CodexMcpServerConfig
+        from lup.providers.codex.runtime import create_codex
         from lup.providers.claude.model_choice import claude_model_choice
         from lup.providers.codex.model_choice import codex_model_choice
         from lup.providers.claude.config_home import (
@@ -1911,7 +1907,7 @@ def run_resolve(
                     concern_environment, cwd
                 )
                 return create_claude(
-                    ClaudeSessionConfig(
+                    Claude(
                         model=claude_model,
                         system_prompt="Execute the persisted Lup resolver assignment.",
                         native_tools=[NativeToolGroup.ALL],
@@ -1976,12 +1972,10 @@ def run_resolve(
                     )
                 )
             return create_codex(
-                CodexSessionConfig(
+                Codex(
                     model=codex_model,
                     native_tools=[NativeToolGroup.ALL],
-                    developer_instructions=(
-                        "Execute the persisted Lup resolver assignment."
-                    ),
+                    system_prompt=("Execute the persisted Lup resolver assignment."),
                     cwd=cwd,
                     sandbox="workspace-write",
                     containment="outer" if contained_actors else "none",
@@ -2046,7 +2040,7 @@ def run_resolve(
                     reviewer_environment, cwd
                 )
                 return create_claude(
-                    ClaudeSessionConfig(
+                    Claude(
                         model=claude_model,
                         system_prompt=(
                             "Independently review the persisted resolver change."
@@ -2072,14 +2066,14 @@ def run_resolve(
                     )
                 )
             return create_codex(
-                CodexSessionConfig(
+                Codex(
                     model=codex_model,
                     native_tools=[NativeToolGroup.WEB, NativeToolGroup.SHELL],
                     approval_policy="on-request",
                     hooks=merge_hooks(
                         create_permission_hooks([], [cwd]), context.hooks
                     ),
-                    developer_instructions=(
+                    system_prompt=(
                         "Independently review the persisted resolver change."
                     ),
                     cwd=cwd,

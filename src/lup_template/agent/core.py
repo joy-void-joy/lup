@@ -15,12 +15,8 @@ from lup.providers.claude.config import (
 )
 from lup.providers.claude.model_choice import ClaudeModelChoice, claude_model_choice
 from lup.providers.claude.models import ClaudeEffort
-from lup.providers.claude.runtime import (
-    SESSION_THINKING_TOKENS,
-    ClaudeSandboxConfig,
-    ClaudeSessionConfig,
-    create_claude,
-)
+from lup.providers.claude import Claude, ClaudeSandboxConfig, SESSION_THINKING_TOKENS
+from lup.providers.claude.runtime import create_claude
 from lup.tools.native import NativeToolGroup, NativeTools
 from lup.providers.claude.subagents import subagent_tools as claude_subagent_tools
 from lup.providers.codex.config import (
@@ -29,11 +25,8 @@ from lup.providers.codex.config import (
 )
 from lup.providers.codex.model_choice import CodexModelChoice, codex_model_choice
 from lup.providers.codex.models import CodexEffort
-from lup.providers.codex.runtime import (
-    CodexMcpServerConfig,
-    CodexSessionConfig,
-    create_codex,
-)
+from lup.providers.codex import Codex, CodexMcpServerConfig
+from lup.providers.codex.runtime import create_codex
 from lup.providers.codex.subagents import CodexSubagentTools
 from lup.providers.codex.subagents import subagent_tools as codex_subagent_tools
 from lup.providers.codex.selection import codex_config
@@ -226,7 +219,7 @@ def provider_factory(
             if compat_base_url() is not None:
                 raise ValueError("AGENT_MODEL is required for a compatible endpoint")
             claude_model = "strongest"
-        config = ClaudeSessionConfig(
+        config = Claude(
             model=claude_model,
             system_prompt=system_prompt,
             coding_harness_preset=coding_harness_preset,
@@ -340,9 +333,9 @@ def provider_factory(
         )
         if applications.mcp_servers.keys() & (codex_mcp_servers or {}).keys():
             raise ValueError("tool_servers and codex_mcp_servers name the same server")
-        config = CodexSessionConfig(
+        config = Codex(
             model=codex_model,
-            developer_instructions=system_prompt,
+            system_prompt=system_prompt,
             cwd=cwd,
             sandbox=(
                 "read-only"
@@ -614,7 +607,7 @@ def build_session_factory(
             tool_servers = dict(
                 policy.get_mcp_servers(*registered(toolset, groups, policy))
             )
-            from lup.providers.claude.runtime import SUBMISSION_TOOL
+            from lup.providers.claude import SUBMISSION_TOOL
 
             allowed_tools = policy.get_allowed_tools(
                 tool_servers,

@@ -22,23 +22,13 @@ imported by `import lup`, nor by naming a constructor, but only by opening a
 session with one.
 """
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from importlib import import_module
-from pathlib import Path
 from typing import TYPE_CHECKING
 
-from lup.providers.claude.models import ClaudeModel
-from lup.providers.codex.models import CodexModel
-from lup.providers.routing import (
-    PROVIDER_ROUTES,
-    Provider,
-    ProviderRoute,
-    catalog_provider,
-    provider_for,
-)
 from lup.sessions.client import Client
-from lup.types import CustomModel, ModelTier
-from lup.tools.native import NativeToolGroup as NativeToolGroup, NativeTools
+from lup.types import CustomModel
+from lup.tools.native import NativeToolGroup as NativeToolGroup
 from lup.sessions.events import (
     SessionHandle,
     SessionId,
@@ -51,7 +41,6 @@ from lup.sessions.events import (
 )
 
 if TYPE_CHECKING:
-    from lup.tools.mcp import LupMcpTool
     from lup.providers.claude.runtime import create_claude
     from lup.providers.codex.runtime import create_codex
 
@@ -85,84 +74,9 @@ def __getattr__(name: str) -> Callable[..., Client]:
     return getattr(import_module(CONSTRUCTORS[name]), name)
 
 
-def create_client(
-    model: ClaudeModel | CodexModel | CustomModel | ModelTier,
-    *,
-    provider: Provider | None = None,
-    system_prompt: str = "",
-    cwd: Path | None = None,
-    base_url: str | None = None,
-    api_key: str | None = None,
-    native_tools: NativeTools = None,
-    tools: Sequence["LupMcpTool"] | None = None,
-    routes: Sequence[ProviderRoute] = PROVIDER_ROUTES,
-) -> Client:
-    """Open a session with whichever provider serves this model.
-
-    The convenience over :func:`create_claude` and :func:`create_codex`, for
-    the common path where a caller has a model id and does not want to also
-    know which vendor owns which prefix. A caller that *does* know says so with
-    ``provider``, which skips the routes entirely -- that is the escape hatch
-    for a model id nothing claims, and for pointing one vendor's client at
-    another's compatible endpoint.
-
-    Here rather than beside ``Client`` because this is the only name at the
-    front door that has to know what is behind every door it opens. Written
-    one module down it made that module and ``providers`` import each other,
-    for the sake of a routing table the vendor edge was already keeping in
-    another shape.
-
-    Deliberately narrower than the two named constructors, and this is the
-    reason: dispatch cannot carry typed provider options. ``create_claude``
-    takes a ``ClaudeSessionConfig`` and the checker holds it to that; there is
-    no type this could accept that would mean "whichever config the model
-    turns out to select". So the common arguments are here, the whole
-    declaration is there, and neither pretends to be the other.
-
-    A name either runtime's catalog lists routes to that runtime; a
-    ``CustomModel`` routes by ``routes``, since no catalog lists it; a tier
-    belongs to every runtime and so routes nowhere without ``provider``. An
-    unrecognised model raises rather than guessing a provider. Guessing would
-    open a session against the wrong vendor and fail somewhere downstream in
-    that vendor's vocabulary, which is a worse error arriving later.
-    """
-    match model:
-        case CustomModel(id=identifier):
-            routed = provider_for(identifier, routes)
-        case _:
-            routed = catalog_provider(model)
-    selected = provider or routed
-    if selected is None:
-        claimed = ", ".join(sorted({route.provider for route in routes}))
-        raise LookupError(
-            f"no provider claims model {model!r}; routes are declared for "
-            f"{claimed}. Pass provider= to say which one serves it, or extend "
-            "routes="
-        )
-    # Resolved through the same table the deferred constructors above use, for
-    # the reason that table exists: a third adapter is one row rather than one
-    # more arm of a match nobody remembers to widen. `CONSTRUCTORS` is not a
-    # parameter here because it says outright that it is not an adopter's to
-    # replace. Imported per call for the reason it defers at all -- an adapter
-    # reaches its provider's whole tool ecosystem, and a caller routing to one
-    # should not pay for the other.
-    named = f"create_{selected}"
-    factory = getattr(import_module(CONSTRUCTORS[named]), named)
-    return factory(
-        model=model,
-        system_prompt=system_prompt,
-        cwd=cwd,
-        base_url=base_url,
-        api_key=api_key,
-        native_tools=native_tools,
-        tools=tools,
-    )
-
-
 __all__ = [  # lup: ignore[all-export] -- the package-root public API
     "Client",
     "CustomModel",
-    "Provider",
     "SessionHandle",
     "SessionId",
     "StartedTurn",
@@ -171,7 +85,6 @@ __all__ = [  # lup: ignore[all-export] -- the package-root public API
     "TurnRequest",
     "TurnResult",
     "create_claude",
-    "create_client",
     "create_codex",
     "turn_request",
 ]

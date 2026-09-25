@@ -22,18 +22,15 @@ from lup.providers.claude.model_choice import (
     claude_model_name,
     listed_claude_model,
 )
-from lup.providers.claude.runtime import (
-    ClaudeSandboxConfig,
-    ClaudeSessionConfig,
-    build_claude_options,
-)
+from lup.providers.claude import Claude, ClaudeSandboxConfig
+from lup.providers.claude.runtime import build_claude_options
 from lup.providers.claude.selection import CLAUDE_RUNTIME, claude_config
 from lup.providers.codex.model_choice import (
     codex_effort_arguments,
     codex_effort_named,
     codex_model_id,
 )
-from lup.providers.codex.runtime import CodexSessionConfig
+from lup.providers.codex import Codex
 from lup.providers.codex.selection import CODEX_RUNTIME, codex_config
 from lup.providers.codex.subagents import CodexModelTiers
 from lup.providers.selection import SessionRequest
@@ -58,7 +55,7 @@ def test_a_tier_compiles_to_each_lineups_model() -> None:
 
 def test_a_replaced_tier_table_is_the_one_a_session_resolves() -> None:
     endpoint = CodexModelTiers(strongest=CustomModel(id="served-large"))
-    config = CodexSessionConfig(model="strongest", model_tiers=endpoint, cwd=Path("."))
+    config = Codex(model="strongest", model_tiers=endpoint, cwd=Path("."))
 
     assert config.model_id() == "served-large"
     assert config.model_selection() == {"model": "served-large", "effort": "medium"}
@@ -67,19 +64,19 @@ def test_a_replaced_tier_table_is_the_one_a_session_resolves() -> None:
 def test_a_custom_id_reaches_the_cli_unchanged() -> None:
     assert claude_model_id(CustomModel(id="local-model")) == "local-model"
     assert codex_model_id(CustomModel(id="local"), CodexModelTiers()) == "local"
-    assert ClaudeSessionConfig(model=CustomModel(id="x")).model_id() == "x"
+    assert Claude(model=CustomModel(id="x")).model_id() == "x"
 
 
 def test_a_misspelt_model_is_refused_where_it_is_written() -> None:
     with pytest.raises(ValidationError):
-        ClaudeSessionConfig.model_validate({"model": "claude-opsu"})
+        Claude.model_validate({"model": "claude-opsu"})
     with pytest.raises(ValidationError):
-        CodexSessionConfig.model_validate({"model": "gpt-6-astr", "cwd": "."})
+        Codex.model_validate({"model": "gpt-6-astr", "cwd": "."})
 
 
 def test_ultra_compiles_to_xhigh_with_ultracode_for_the_sdk() -> None:
     options = build_claude_options(
-        ClaudeSessionConfig(model="opus", effort="ultra"),
+        Claude(model="opus", effort="ultra"),
         binding=lambda: None,
         resume=None,
         session_id=SESSION,
@@ -93,7 +90,7 @@ def test_ultra_compiles_to_xhigh_with_ultracode_for_the_sdk() -> None:
 def test_every_other_effort_reaches_the_sdk_unchanged_and_alone() -> None:
     for effort in ("low", "medium", "high", "xhigh", "max"):
         options = build_claude_options(
-            ClaudeSessionConfig(model="opus", effort=effort),
+            Claude(model="opus", effort=effort),
             binding=lambda: None,
             resume=None,
             session_id=SESSION,
@@ -105,9 +102,7 @@ def test_every_other_effort_reaches_the_sdk_unchanged_and_alone() -> None:
 def test_an_ultra_session_keeps_its_sandbox_in_the_same_settings() -> None:
     """The SDK merges its sandbox into the settings document it is given."""
     options = build_claude_options(
-        ClaudeSessionConfig(
-            model="opus", effort="ultra", sandbox=ClaudeSandboxConfig()
-        ),
+        Claude(model="opus", effort="ultra", sandbox=ClaudeSandboxConfig()),
         binding=lambda: None,
         resume=None,
         session_id=SESSION,
@@ -153,38 +148,38 @@ def test_codex_takes_ultra_under_its_own_name() -> None:
         "--config",
         'model_reasoning_effort="ultra"',
     ]
-    config = CodexSessionConfig(model="gpt-6-astra", effort="ultra", cwd=Path("."))
+    config = Codex(model="gpt-6-astra", effort="ultra", cwd=Path("."))
     assert config.model_selection() == {"model": "gpt-6-astra", "effort": "ultra"}
 
 
 def test_an_effort_the_model_lacks_is_refused_at_declaration() -> None:
     with pytest.raises(ValidationError, match="does not take effort 'ultra'"):
-        CodexSessionConfig(model="gpt-6-luna", effort="ultra", cwd=Path("."))
+        Codex(model="gpt-6-luna", effort="ultra", cwd=Path("."))
     with pytest.raises(ValidationError, match="does not take effort 'max'"):
-        CodexSessionConfig(model="gpt-5.5", effort="max", cwd=Path("."))
+        Codex(model="gpt-5.5", effort="max", cwd=Path("."))
     with pytest.raises(ValidationError, match="does not take effort 'high'"):
-        ClaudeSessionConfig(model="haiku", effort="high")
+        Claude(model="haiku", effort="high")
     with pytest.raises(ValidationError, match="does not take effort 'xhigh'"):
-        ClaudeSessionConfig(model="claude-opus-4-6", effort="xhigh")
+        Claude(model="claude-opus-4-6", effort="xhigh")
 
 
 def test_a_tier_is_refused_what_its_model_lacks() -> None:
     """``fast`` is luna on Codex, whose catalog row stops below ultra."""
     with pytest.raises(ValidationError, match="gpt-6-luna"):
-        CodexSessionConfig(model="fast", effort="ultra", cwd=Path("."))
+        Codex(model="fast", effort="ultra", cwd=Path("."))
 
 
 def test_the_paired_effort_is_checked_like_a_named_one() -> None:
     """A model is never sent alone, so its paired rung has to be one it takes."""
     with pytest.raises(ValidationError, match="does not take effort 'max'"):
-        CodexSessionConfig(model="gpt-5.5", paired_effort="max", cwd=Path("."))
+        Codex(model="gpt-5.5", paired_effort="max", cwd=Path("."))
 
 
 def test_what_the_catalog_cannot_see_is_left_to_the_cli() -> None:
-    ClaudeSessionConfig(model=CustomModel(id="served"), effort="ultra")
-    ClaudeSessionConfig(effort="max")
-    CodexSessionConfig(model=CustomModel(id="local"), effort="ultra", cwd=Path("."))
-    CodexSessionConfig(model="inherit", effort="ultra", cwd=Path("."))
+    Claude(model=CustomModel(id="served"), effort="ultra")
+    Claude(effort="max")
+    Codex(model=CustomModel(id="local"), effort="ultra", cwd=Path("."))
+    Codex(model="inherit", effort="ultra", cwd=Path("."))
 
 
 def test_a_model_the_other_runtime_lists_is_refused_by_this_one() -> None:

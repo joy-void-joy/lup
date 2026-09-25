@@ -67,7 +67,8 @@ from lup.policy.hooks import (
     allow_hook,
 )
 from lup.providers.codex.home import CodexWorktreeHomeStore
-from lup.providers.codex.runtime import CodexSessionConfig, create_codex
+from lup.providers.codex import Codex
+from lup.providers.codex.runtime import create_codex
 from lup.sessions.client import Client
 from lup.sessions.events import turn_request
 from lup.workspace.paths import find_project_root
@@ -156,7 +157,7 @@ class ApprovalWatch(BaseModel):
         return bool(self.arrivals)
 
 
-def answering_session(cwd: Path, watch: ApprovalWatch) -> CodexSessionConfig:
+def answering_session(cwd: Path, watch: ApprovalWatch) -> Codex:
     """A session whose approvals are live, which is what makes the arms possible.
 
     ``approval_policy`` is `on-request` rather than the `never` the control
@@ -168,9 +169,9 @@ def answering_session(cwd: Path, watch: ApprovalWatch) -> CodexSessionConfig:
     approval request is what a boundary *produces* — a session granted full
     access has nothing left to ask about.
     """
-    return CodexSessionConfig(
+    return Codex(
         model=PROBE_MODEL,
-        developer_instructions=INSTRUCTIONS,
+        system_prompt=INSTRUCTIONS,
         cwd=cwd,
         sandbox="workspace-write",
         native_tools=["Bash"],
@@ -179,7 +180,7 @@ def answering_session(cwd: Path, watch: ApprovalWatch) -> CodexSessionConfig:
     )
 
 
-def quiet_session(cwd: Path) -> CodexSessionConfig:
+def quiet_session(cwd: Path) -> Codex:
     """The control's session: the shape already known to complete a turn.
 
     `never` and full access, exactly as `test_codex_hook_firing.py` opens one.
@@ -187,9 +188,9 @@ def quiet_session(cwd: Path) -> CodexSessionConfig:
     be the first place a new configuration is tried — doing that is what left
     an earlier run's three failures indistinguishable from one another.
     """
-    return CodexSessionConfig(
+    return Codex(
         model=PROBE_MODEL,
-        developer_instructions=INSTRUCTIONS,
+        system_prompt=INSTRUCTIONS,
         cwd=cwd,
         sandbox="danger-full-access",
         native_tools=["Bash"],

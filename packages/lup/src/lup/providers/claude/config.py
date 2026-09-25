@@ -5,10 +5,8 @@ from typing import Literal
 
 from pydantic import AnyHttpUrl, BaseModel, Field, SecretStr
 
-from lup.providers.claude.runtime import (
-    ClaudeSessionConfig,
-    create_claude,
-)
+from lup.providers.claude import Claude
+from lup.providers.claude.runtime import create_claude
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.providers.config import ConfigTransform, ProfileResolver, ProfileSelector
 
@@ -37,13 +35,13 @@ class ClaudeProfileRegistry(BaseModel, frozen=True):
     default: ClaudeProfileSelection = Field(default_factory=ClaudeProfileSelection)
 
 
-class ClaudeConfigDirectoryTransform(ConfigTransform[ClaudeSessionConfig]):
+class ClaudeConfigDirectoryTransform(ConfigTransform[Claude]):
     """Select a Claude config home without mutating the source config."""
 
     def __init__(self, selection: ClaudeProfileSelection) -> None:
         self.selection = selection
 
-    def apply(self, config: ClaudeSessionConfig) -> ClaudeSessionConfig:
+    def apply(self, config: Claude) -> Claude:
         environment = dict(config.environment)
         if self.selection.config_directory is not None:
             environment.update(
@@ -52,13 +50,13 @@ class ClaudeConfigDirectoryTransform(ConfigTransform[ClaudeSessionConfig]):
         return config.model_copy(update={"environment": environment})
 
 
-class ClaudeProfileResolver(ProfileResolver[ClaudeSessionConfig]):
+class ClaudeProfileResolver(ProfileResolver[Claude]):
     """Resolve explicit, active, then default Claude account selection."""
 
     def __init__(self, registry: ClaudeProfileRegistry) -> None:
         self.registry = registry
 
-    def resolve(self, name: str | None) -> ConfigTransform[ClaudeSessionConfig]:
+    def resolve(self, name: str | None) -> ConfigTransform[Claude]:
         selected = name or self.registry.active
         if selected is None:
             return ClaudeConfigDirectoryTransform(self.registry.default)
@@ -73,7 +71,7 @@ class ClaudeProfileResolver(ProfileResolver[ClaudeSessionConfig]):
 # session factory that act on it would put both inside the declaration.
 def claude_profile_selector(
     registry: ClaudeProfileRegistry,
-) -> ProfileSelector[ClaudeSessionConfig]:
+) -> ProfileSelector[Claude]:
     """The surface a consumer holds over Claude account selection."""
     return ProfileSelector(ClaudeProfileResolver(registry), create_claude)
 
@@ -87,13 +85,13 @@ class ClaudeCompatibleEndpoint(BaseModel, frozen=True):
     map_model_aliases: bool = True
 
 
-class ClaudeCompatibilityTransform(ConfigTransform[ClaudeSessionConfig]):
+class ClaudeCompatibilityTransform(ConfigTransform[Claude]):
     """Point Claude scaffolding at one compatible endpoint."""
 
     def __init__(self, endpoint: ClaudeCompatibleEndpoint) -> None:
         self.endpoint = endpoint
 
-    def apply(self, config: ClaudeSessionConfig) -> ClaudeSessionConfig:
+    def apply(self, config: Claude) -> Claude:
         environment = dict(config.environment)
         environment["ANTHROPIC_BASE_URL"] = str(self.endpoint.base_url)
         credential = (

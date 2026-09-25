@@ -27,7 +27,8 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, Field
 
-from lup.providers.codex.runtime import CodexSessionConfig, create_codex
+from lup.providers.codex import Codex
+from lup.providers.codex.runtime import create_codex
 from lup.providers.codex.selection import CODEX_RUNTIME
 from lup.sessions.client import Client
 from lup.sessions.events import turn_request
@@ -63,16 +64,16 @@ class ShellAttempt(BaseModel):
     output: str = Field(description="Exactly what was printed, or the refusal text")
 
 
-def personal_home_session(cwd: Path) -> CodexSessionConfig:
+def personal_home_session(cwd: Path) -> Codex:
     """An app-server session left on whatever home the process already had.
 
     Which is the personal one, where the CLI installs plugins — so this arm
     measures the app-server surface while holding the plugin's presence
     constant, and answers only whether *the surface* fires hooks.
     """
-    return CodexSessionConfig(
+    return Codex(
         model=PROBE_MODEL,
-        developer_instructions=INSTRUCTIONS,
+        system_prompt=INSTRUCTIONS,
         cwd=cwd,
         sandbox="danger-full-access",
         native_tools=["Bash"],

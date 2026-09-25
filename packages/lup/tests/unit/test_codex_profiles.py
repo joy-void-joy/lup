@@ -17,7 +17,8 @@ import lup.providers.codex.install as installation
 from lup.providers.codex.account import read_account
 from lup.providers.codex.home import CodexHomeSelection
 from lup.providers.codex.profile import CodexProfileSettings
-from lup.providers.codex.runtime import CodexSessionConfig, CodexSessionOpener
+from lup.providers.codex import Codex
+from lup.providers.codex.runtime import CodexSessionOpener
 from lup.sessions.errors import UnsupportedCapability
 
 
@@ -350,7 +351,7 @@ def test_profile_payload_crosses_stdin_only(
 
 
 def test_sdk_named_profile_is_refused_before_startup(tmp_path: Path) -> None:
-    config = CodexSessionConfig(
+    config = Codex(
         cwd=tmp_path, named_profile="review", environment={"SECRET": "DO-NOT-LOG"}
     )
     with pytest.raises(UnsupportedCapability) as error:

@@ -8,7 +8,8 @@ from pydantic import ValidationError
 
 from lup.providers.claude.subagents import model_alias, subagent_tools as claude_tools
 from lup.providers.codex.app_server import CodexAppServer
-from lup.providers.codex.runtime import CodexConversationState, CodexSessionConfig
+from lup.providers.codex import Codex
+from lup.providers.codex.runtime import CodexConversationState
 from lup.providers.codex.native_tools import CodexNativeTools
 from lup.providers.codex.subagents import CodexModelTiers, subagent_tools as codex_tools
 from lup.sessions.events import SessionId
@@ -128,7 +129,7 @@ async def test_codex_disables_inherited_mcp_before_start(
         return {"thread": {"id": "restricted"}}
 
     monkeypatch.setattr(server, "request", request)
-    config = CodexSessionConfig(
+    config = Codex(
         cwd=tmp_path,
         sandbox="read-only",
         approval_policy="never",
@@ -155,7 +156,7 @@ async def test_codex_disables_inherited_mcp_before_start(
 
 
 async def test_codex_restricted_role_cannot_resume_wider_thread(tmp_path: Path) -> None:
-    config = CodexSessionConfig(
+    config = Codex(
         cwd=tmp_path,
         sandbox="read-only",
         approval_policy="never",
@@ -170,4 +171,4 @@ async def test_codex_restricted_role_cannot_resume_wider_thread(tmp_path: Path) 
 
 def test_codex_restricted_tools_require_enforced_bounds(tmp_path: Path) -> None:
     with pytest.raises(ValidationError, match="read-only sandbox"):
-        CodexSessionConfig(cwd=tmp_path, delegated_tools=codex_tools(role()))
+        Codex(cwd=tmp_path, delegated_tools=codex_tools(role()))

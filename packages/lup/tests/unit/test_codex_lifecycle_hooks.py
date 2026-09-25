@@ -7,10 +7,10 @@ import pytest
 
 from lup.policy.hooks import LupHookInput, LupHookMatcher, LupHookOutput, LupHooksConfig
 from lup.providers.codex.app_server import CodexAppServer, RpcNotification
+from lup.providers.codex import Codex
 from lup.providers.codex.runtime import (
     CodexConversationState,
     CodexHookSession,
-    CodexSessionConfig,
     CodexTurnToolBinder,
 )
 from lup.sessions.composition import ComposedSession
@@ -75,9 +75,7 @@ def hooked_session(
     tmp_path: Path, hooks: LupHooksConfig, *, tool: bool = False, cycles: int = 2
 ) -> tuple[CodexHookSession, CompletingServer]:
     server = CompletingServer(tool)
-    state = CodexConversationState(
-        CodexSessionConfig(cwd=tmp_path, hooks=hooks), server, None
-    )
+    state = CodexConversationState(Codex(cwd=tmp_path, hooks=hooks), server, None)
     state.thread_id = "thread"
     server.state = state
     raw = ComposedSession(state.start_turn, CodexTurnToolBinder(state))

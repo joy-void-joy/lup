@@ -19,12 +19,11 @@ import sh
 from pydantic import BaseModel, Field
 
 from lup.providers.claude.harness import ClaudeSpellings
-from lup.providers.claude.runtime import (
-    ClaudeSessionConfig,
-    create_claude,
-)
+from lup.providers.claude import Claude
+from lup.providers.claude.runtime import create_claude
 from lup.providers.codex.harness_runtime import CodexPluginInstaller, PluginCacheConfig
-from lup.providers.codex.runtime import CodexSessionConfig, create_codex
+from lup.providers.codex import Codex
+from lup.providers.codex.runtime import create_codex
 from lup.harness.process import LocalProcessLauncher
 from lup.resolver.core import ResolverCore
 from lup.tools.mcp import create_mcp_server, server_tool_names
@@ -53,7 +52,7 @@ CODEX_SMOKE_MODEL = "gpt-5.5"
 async def test_fresh_claude_session_completes_one_turn(tmp_path: Path) -> None:
     """A fresh native session id survives one complete turn."""
     factory = create_claude(
-        ClaudeSessionConfig(
+        Claude(
             model=CLAUDE_SMOKE_MODEL,
             system_prompt="Answer in one short sentence.",
             cwd=tmp_path,
@@ -82,9 +81,9 @@ class SmokeSubmission(BaseModel):
 async def test_codex_turn_start_carries_a_native_output_schema(tmp_path: Path) -> None:
     """A typed binding survives the installed app-server schema."""
     factory = create_codex(
-        CodexSessionConfig(
+        Codex(
             model=CODEX_SMOKE_MODEL,
-            developer_instructions="Follow the submission instruction exactly.",
+            system_prompt="Follow the submission instruction exactly.",
             cwd=tmp_path,
             sandbox="read-only",
             approval_policy="never",
@@ -121,7 +120,7 @@ async def test_a_claude_session_carries_context_across_same_schema_turns(
     connection has to carry the first turn's word into the second.
     """
     factory = create_claude(
-        ClaudeSessionConfig(
+        Claude(
             model=CLAUDE_SMOKE_MODEL,
             system_prompt="Call the submission tool. Never ask a question.",
             cwd=tmp_path,
@@ -222,7 +221,7 @@ async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) ->
             ),
         )
         return create_claude(
-            ClaudeSessionConfig(
+            Claude(
                 model=CLAUDE_SMOKE_MODEL,
                 system_prompt="Execute the persisted Lup resolver assignment.",
                 native_tools=["all"],
@@ -237,7 +236,7 @@ async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) ->
 
     def reviewer_factory(context: ReviewerContext) -> Client:
         return create_claude(
-            ClaudeSessionConfig(
+            Claude(
                 model=CLAUDE_SMOKE_MODEL,
                 system_prompt="Independently review the persisted resolver change.",
                 native_tools=["read", "shell"],

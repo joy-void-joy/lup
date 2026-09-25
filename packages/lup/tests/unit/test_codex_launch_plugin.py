@@ -10,6 +10,7 @@ import sh
 import lup.devtools.harness.launch as launch
 import lup.providers.codex.install as installation
 import lup.providers.codex.runtime as runtime
+from lup.providers.codex import CODEX_PROGRAM, Codex
 import lup.providers.codex.home as codex_home
 import lup.providers.codex.selection as codex_selection
 from lup.harness.clipboard import ClipboardBridge
@@ -215,7 +216,7 @@ async def test_custom_host_executables_still_need_host_policy_checks(
     server.start = AsyncMock(side_effect=RuntimeError("stop before any session"))
     server.close = AsyncMock()
     monkeypatch.setattr(runtime, "CodexAppServer", Mock(return_value=server))
-    config = runtime.CodexSessionConfig.model_validate(
+    config = Codex.model_validate(
         {
             "cwd": tmp_path,
             "executable": tmp_path / "custom-codex",
@@ -238,7 +239,7 @@ async def test_custom_host_executables_still_need_host_policy_checks(
 
 def test_outer_boundary_requires_a_container_executable(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="prepared container executable"):
-        runtime.CodexSessionConfig(cwd=tmp_path, containment="outer")
+        Codex(cwd=tmp_path, containment="outer")
 
 
 @pytest.mark.parametrize("containment", ["none", "inner"])
@@ -274,7 +275,7 @@ async def test_host_policy_and_process_use_the_same_resolved_native_home(
     server = Mock(start=AsyncMock(), close=AsyncMock())
     calls.server.return_value = server
     monkeypatch.setattr(runtime, "CodexAppServer", calls.server)
-    config = runtime.CodexSessionConfig.model_validate(
+    config = Codex.model_validate(
         {"cwd": tmp_path, "containment": containment, "environment": environment}
     )
 
@@ -307,9 +308,7 @@ async def test_host_policy_failure_stops_before_constructing_the_native_process(
     monkeypatch.setattr(runtime, "CodexAppServer", native)
 
     with pytest.raises(RuntimeError, match="declared plugin unavailable"):
-        async with runtime.CodexSessionOpener(
-            runtime.CodexSessionConfig(cwd=tmp_path)
-        ).open_session():
+        async with runtime.CodexSessionOpener(Codex(cwd=tmp_path)).open_session():
             pytest.fail("a policy failure must prevent native startup")
 
     policy.assert_called_once_with(
@@ -317,7 +316,7 @@ async def test_host_policy_failure_stops_before_constructing_the_native_process(
         tmp_path,
         seed=False,
         workspace=tmp_path,
-        executable=runtime.CODEX_PROGRAM,
+        executable=CODEX_PROGRAM,
         environment=ANY,
     )
     native.assert_not_called()
@@ -333,9 +332,7 @@ async def test_a_project_without_declared_policy_opens_with_its_native_default_h
     monkeypatch.setattr(runtime, "CodexAppServer", native)
     home = tmp_path / "user-home" / ".codex"
 
-    async with runtime.CodexSessionOpener(
-        runtime.CodexSessionConfig(cwd=tmp_path)
-    ).open_session():
+    async with runtime.CodexSessionOpener(Codex(cwd=tmp_path)).open_session():
         server.start.assert_awaited_once()
 
     assert home.is_dir()
@@ -380,7 +377,7 @@ async def test_application_policy_is_verified_in_an_external_native_workspace(
     config = (
         codex_config(SessionRequest(cwd=workspace, environment={CODEX_HOME: str(home)}))
         if portable
-        else runtime.CodexSessionConfig(
+        else Codex(
             cwd=workspace, policy_root=project, environment={CODEX_HOME: str(home)}
         )
     )

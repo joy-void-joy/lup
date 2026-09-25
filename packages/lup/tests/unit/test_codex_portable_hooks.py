@@ -6,7 +6,8 @@ import pytest
 
 from lup.policy.hooks import LupHookInput, LupHookMatcher, LupHookOutput, LupHooksConfig
 from lup.providers.codex.hooks import APPROVAL_METHODS
-from lup.providers.codex.runtime import CodexSessionConfig, CodexSessionOpener
+from lup.providers.codex import Codex
+from lup.providers.codex.runtime import CodexSessionOpener
 from lup.providers.codex.selection import codex_config
 from lup.providers.selection import SessionRequest
 from lup.sessions.errors import UnsupportedCapability
@@ -27,7 +28,7 @@ async def test_direct_opener_rejects_unenforceable_hooks_before_native_setup(
         "lup.providers.codex.runtime.child_recursive_agent_allowance", native_setup
     )
     hooks = LupHooksConfig(pre_tool_use=[LupHookMatcher(matcher=matcher, hook=observe)])
-    config = CodexSessionConfig(cwd=tmp_path, hooks=hooks, approval_policy="never")
+    config = Codex(cwd=tmp_path, hooks=hooks, approval_policy="never")
     with pytest.raises(UnsupportedCapability, match="explicit native approval scope"):
         async with CodexSessionOpener(config).open_session():
             pytest.fail("unsupported session must not open")
@@ -48,7 +49,7 @@ async def test_direct_pre_hooks_require_an_explicit_asking_policy(
     hooks = LupHooksConfig(
         pre_tool_use=[LupHookMatcher(matcher=APPROVAL_METHODS[0], hook=observe)]
     )
-    config = CodexSessionConfig.model_validate(
+    config = Codex.model_validate(
         {"cwd": tmp_path, "hooks": hooks, "approval_policy": approval_policy}
     )
     with pytest.raises(UnsupportedCapability, match="explicit asking"):
@@ -75,7 +76,7 @@ async def test_supported_direct_hooks_reach_setup_without_changing_approvals(
         if approval
         else [LupHookMatcher(hook=observe, tag="inbox")]
     )
-    config = CodexSessionConfig(
+    config = Codex(
         cwd=tmp_path, hooks=hooks, approval_policy="on-request" if approval else "never"
     )
     with pytest.raises(

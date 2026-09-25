@@ -10,7 +10,7 @@ from lup.providers.claude.config import (
     ClaudeProfileSelection,
     claude_profile_selector,
 )
-from lup.providers.claude.runtime import ClaudeSessionConfig
+from lup.providers.claude import Claude
 
 
 class Summary(BaseModel, frozen=True):
@@ -20,7 +20,7 @@ class Summary(BaseModel, frozen=True):
 
 
 async def main() -> None:
-    base = ClaudeSessionConfig(
+    base = Claude(
         model="claude-opus-5",
         system_prompt="Submit a concise structured summary.",
     )

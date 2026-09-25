@@ -1099,7 +1099,7 @@ SEAM_RULE = ProjectRule(
     scope="Neutral Python modules",
     examples=[
         RuleExample(
-            code="from lup.providers.codex.runtime import CodexSessionConfig",
+            code="from lup.providers.codex import Codex",
             verdict="flagged",
             path=NEUTRAL_MODULE,
         ),
@@ -1109,7 +1109,7 @@ SEAM_RULE = ProjectRule(
             path=NEUTRAL_MODULE,
         ),
         RuleExample(
-            code="from lup.providers.codex.runtime import CodexSessionConfig",
+            code="from lup.providers.codex import Codex",
             verdict="cleared",
             path=ADAPTER_MODULE,
         ),

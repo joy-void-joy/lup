@@ -1,14 +1,11 @@
-"""Which vendor serves a model id, and which recipe a configured route names.
+"""Which recipe a configured route names, and which runtime lists a model.
 
-Two questions with one vocabulary. A project that has declared its own
-factories routes a model to one of them by name or by match; a caller holding
-nothing but a model id asks the coarser question of which *provider* serves
-it. Both are matching a model name, so both are expressed with the matchers
-below rather than one of them growing a private prefix table -- which the
-front door would otherwise carry, reaching for both adapters to answer.
+A project that has declared its own agents routes a model to one of them by
+name or by match; a caller holding nothing but a model id asks the coarser
+question of which runtime's own catalog lists it.
 """
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from typing import Literal, get_args
 
 from pydantic import BaseModel
@@ -80,53 +77,14 @@ class ModelRouter:
 
 
 type Provider = Literal["claude", "codex"]
-"""A provider by name, for the one route that dispatches rather than names."""
-
-
-class ProviderRoute(BaseModel, frozen=True, arbitrary_types_allowed=True):
-    """One vendor, and the model ids it claims."""
-
-    provider: Provider
-    matcher: ModelMatcher
-
-
-PROVIDER_ROUTES: list[ProviderRoute] = [
-    ProviderRoute(provider="claude", matcher=PrefixModelMatcher("claude-")),
-    ProviderRoute(provider="codex", matcher=PrefixModelMatcher("gpt-")),
-    ProviderRoute(provider="codex", matcher=PrefixModelMatcher("o1-")),
-    ProviderRoute(provider="codex", matcher=PrefixModelMatcher("o3-")),
-    ProviderRoute(provider="codex", matcher=PrefixModelMatcher("o4-")),
-]
-"""Which vendor's models a model id belongs to.
-
-A default rather than a fixture: a vendor ships a new family under a prefix
-nobody here has heard of, and an adopter says so by passing its own list
-instead of waiting for this one to catch up. A matcher rather than a bare
-prefix, so that adopter can also name a model exactly, or write a matcher of
-its own, where a prefix is the wrong shape for what it has to say.
-
-First declared match wins, which is the rule :class:`ModelRouter` already
-reads its own routes by. A narrower entry earns its answer by being written
-above a broader one, where a reader can see the ordering rather than infer it
-from a sort nothing on the page mentions.
-"""
-
-
-def provider_for(
-    model: str, routes: Sequence[ProviderRoute] = PROVIDER_ROUTES
-) -> Provider | None:
-    """Which provider serves this model id, or None when nothing claims it."""
-    return next(
-        (route.provider for route in routes if route.matcher.matches(model)), None
-    )
+"""A runtime by name, as a catalog lookup or a pin answers it."""
 
 
 def catalog_provider(model: str) -> Provider | None:
     """Which provider's own catalog lists this name, or None when neither does.
 
-    Asked before any prefix route, because a catalog is the vendor's own
-    answer: an alias such as ``opus`` carries no vendor prefix at all, and a
-    route guessing from one could only miss it.
+    A catalog is the vendor's own answer: an alias such as ``opus`` carries no
+    vendor prefix at all, so a guess from its spelling could only miss it.
     """
     if model in get_args(ClaudeModel.__value__):
         return "claude"

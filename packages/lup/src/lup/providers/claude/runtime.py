@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from time import perf_counter
 from types import EllipsisType
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from mcp.server import Server, ServerRequestContext
@@ -23,7 +23,7 @@ from mcp.types import (
     TextContent,
     Tool,
 )
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel
 
 from lup.tools.mcp import (
     LupMcpServerConfig,
@@ -33,21 +33,14 @@ from lup.tools.mcp import (
     relay_recursive_agent_to_mcp,
     running_companions,
 )
-from lup.tools.native import NativeTools, native_grants
+from lup.tools.native import NativeTools
+from lup.providers.claude import SUBMISSION_TOOL, Claude
 from lup.providers.claude.native_tools import claude_native_tools, claude_tool_allowed
-from lup.providers.claude.model_choice import (
-    ClaudeModelChoice,
-    claude_effort,
-    claude_model_id,
-    refuse_unsupported_effort,
-)
-from lup.providers.claude.models import ClaudeEffort
+from lup.providers.claude.model_choice import ClaudeModelChoice, claude_effort
 from lup.sessions.recursion import (
     child_recursive_agent_allowance,
     recursive_agent_scope,
 )
-from lup.policy.hooks import LupHooksConfig
-from lup.policy.enforcement import SandboxPosture
 from lup.sessions.composition import AcceptedTurn, CompletedTurn, ComposedSession
 from lup.sessions.capabilities import (
     EventStream,
@@ -71,7 +64,6 @@ from lup.sessions.events import (
     MessageCompletedEvent,
     SessionHandle,
     SessionId,
-    SubmissionGateResolver,
     AnyTurnBlock,
     TurnIdentifiers,
     TurnId,
@@ -84,9 +76,7 @@ from lup.sessions.events import (
 from lup.sessions.transcript import fold_blocks, fold_transcript
 from lup.sessions.output import TurnSubmission, bound_submission
 from lup.types import (
-    EnvVars,
     JsonValue,
-    SubagentSpec,
     Usage,
 )
 
@@ -95,183 +85,6 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     import claude_agent_sdk as claude
     from claude_agent_sdk import types as claude_types
-
-
-SESSION_THINKING_TOKENS = 128_000 - 1
-
-type ClaudeSettingSource = Literal["user", "project", "local"]
-"""One filesystem settings source the CLI may load for a session."""
-
-
-class ClaudeSandboxConfig(BaseModel, frozen=True):
-    """Claude SDK sandbox settings consumed by this factory."""
-
-    enabled: bool = True
-    auto_allow_bash_if_sandboxed: bool = True
-    allow_unsandboxed_commands: bool = False
-    excluded_commands: list[str] = Field(
-        default=[],
-        description=(
-            "Command prefixes this session runs outside the boundary. A "
-            "spawned session inherits none of the launching shell's settings "
-            "files, so a requirement stated there reaches it only by being "
-            "passed here too"
-        ),
-    )
-
-    def posture(self) -> SandboxPosture:
-        """These settings as the policy judging this session reads them.
-
-        The same two values reach the CLI and the policy from this one
-        object, so a session cannot be permitted more or less than whatever
-        judges it believes. Read off a runtime constant instead, the two
-        drifted the only way they can: the policy granted an escape the
-        settings forbade, and the runtime dropped it without a word.
-
-        The two halves are not equally firm, and only one of them settles
-        its own question. ``allow_unsandboxed_commands`` decides the escape
-        outright — off, the per-call argument is ignored. ``enabled`` only
-        asks for a sandbox: where one cannot start, the CLI warns and runs
-        the session unconfined, and this reports a boundary that is not
-        there. The CLI settles that with a fail-if-unavailable setting, which
-        this configuration cannot reach because the SDK's sandbox settings do
-        not carry it; until they do, the placement is settled here and the
-        confinement is asserted.
-        """
-        return SandboxPosture(
-            active=self.enabled, escapable=self.allow_unsandboxed_commands
-        )
-
-
-type ClaudePermissionMode = Literal[
-    "manual", "acceptEdits", "plan", "bypassPermissions", "dontAsk", "auto"
-]
-"""Claude Code's own words for how much a session may do without asking.
-
-These are the choices ``claude --permission-mode`` lists. The CLI still reads
-``default``, its internal name for ``manual``, which the Agent SDK's own
-literal spells, so :func:`create_claude` hands the SDK that spelling."""
-
-
-class ClaudeSessionConfig(
-    BaseModel,
-    frozen=True,
-    arbitrary_types_allowed=True,
-    extra="forbid",
-    revalidate_instances="always",
-):
-    """Immutable Claude-only provider configuration."""
-
-    model: ClaudeModelChoice | None = None
-    """A name from Claude Code's catalog, a portable tier, or a custom id."""
-
-    system_prompt: str = ""
-    coding_harness_preset: bool = True
-    native_tools: NativeTools = None
-    allowed_tools: list[str] = []
-    disallowed_tools: list[str] = []
-    tool_servers: dict[str, McpServerEntry] = {}
-    permission_mode: ClaudePermissionMode | None = "bypassPermissions"
-    max_turns: int | None = None
-    delta_streaming: bool = True
-    """Whether partial-message deltas are streamed, which gates `live()`."""
-
-    max_thinking_tokens: int | None = SESSION_THINKING_TOKENS
-    effort: ClaudeEffort | None = None
-    """How hard the session thinks; ``ultra`` is ``xhigh`` with ultracode on."""
-
-    cwd: Path | None = None
-    add_dirs: list[Path] = []
-    plugin_dirs: list[Path] = []
-    """Plugin directories this session loads, the way `--plugin-dir` does.
-
-    Settings inheritance is disabled; only explicitly named directories load.
-    Plugins can introduce delegated authority and require the broad ALL grant.
-    """
-    environment: EnvVars = {}
-    sandbox: ClaudeSandboxConfig | None = None
-    hooks: LupHooksConfig | None = None
-    submission_gate_resolver: SubmissionGateResolver | None = None
-    subagents: list[SubagentSpec] = []
-    max_buffer_size: int | None = None
-    stderr_tail_lines: int = Field(
-        default=50,
-        description=(
-            "How many trailing CLI stderr lines are kept to explain a dead "
-            "subprocess. Bounded because stderr is unbounded and only the "
-            "end of it says why the process stopped."
-        ),
-    )
-    setting_sources: list[ClaudeSettingSource] | None = None
-    cli_path: Path | None = Field(
-        default=None,
-        description=(
-            "The program this session's CLI is started as, where the default "
-            "is whichever `claude` the SDK finds on PATH. Named so a session "
-            "can be opened through a wrapper that execs the real CLI inside a "
-            "container: the SDK spawns whatever is here and passes it the "
-            "same arguments, so a worker gets its own boundary without this "
-            "adapter learning anything about containers"
-        ),
-    )
-    extra_args: dict[str, str | None] = {}  # lup: ignore[dict-str-payload]
-
-    @model_validator(mode="after")
-    def the_model_takes_its_effort(self) -> "ClaudeSessionConfig":
-        """Refuse an effort the catalog says this session's model cannot take.
-
-        Refused where it is declared, because the alternative is quieter and
-        worse: the CLI drops an effort a model lacks, and a session asked to
-        think at ``max`` runs at whatever the model does by default.
-        """
-        refuse_unsupported_effort(self.model, self.effort)
-        return self
-
-    def model_id(self) -> str | None:
-        """The model name the CLI is started with, or None to leave it the CLI's."""
-        return claude_model_id(self.model)
-
-    @model_validator(mode="after")
-    def enforce_native_authority(self) -> "ClaudeSessionConfig":
-        """Keep permissions, settings and delegated roles within the grant."""
-        from lup.providers.claude.subagents import subagent_tools
-
-        native_grants(self.native_tools)
-        roster = claude_native_tools(self.native_tools)
-        if self.setting_sources:
-            raise ValueError(
-                "session native_tools cannot inherit setting_sources; declare hooks and tool_servers explicitly"
-            )
-        if self.plugin_dirs and roster is not None:
-            raise ValueError(
-                "plugin_dirs can introduce delegated authority and require NativeToolGroup.ALL"
-            )
-        for argument, value in self.extra_args.items():
-            if argument not in {
-                "no-session-persistence",
-                "strict-mcp-config",
-                "debug",
-                "verbose",
-            }:
-                raise ValueError(
-                    f"extra_args {argument!r} may override native_tools; use a declared session field"
-                )
-            if argument == "strict-mcp-config" and value is not None:
-                raise ValueError("strict-mcp-config cannot be overridden")
-        for name in self.allowed_tools:
-            if name == SUBMISSION_TOOL:
-                continue
-            if not claude_tool_allowed(name, roster, self.tool_servers):
-                raise ValueError(
-                    f"allowed_tools {name!r} is outside native_tools and explicit tool_servers"
-                )
-        for role in self.subagents:
-            for name in subagent_tools(role):
-                if not claude_tool_allowed(name, roster, self.tool_servers):
-                    raise ValueError(
-                        f"subagent {role.name!r} tool {name!r} exceeds session native_tools"
-                    )
-        return self
 
 
 type SubmissionBindingSource = Callable[[], TurnSubmission | None]
@@ -877,8 +690,8 @@ class ClaudeFork(ForkSession):
 class ClaudeSessionOpener:
     """Open independently configured reconnecting Claude sessions."""
 
-    def __init__(self, config: ClaudeSessionConfig) -> None:
-        self.config = ClaudeSessionConfig.model_validate(config)
+    def __init__(self, config: Claude) -> None:
+        self.config = Claude.model_validate(config)
 
     def create_state(self, resume: SessionId | None) -> ClaudeConversationState:
         """Construct the reconnect state backing one opened session."""
@@ -945,7 +758,7 @@ class ClaudeSessionOpener:
 
 
 def create_claude(
-    options: ClaudeSessionConfig | None = None,
+    options: Claude | None = None,
     *,
     model: ClaudeModelChoice | None = None,
     system_prompt: str = "",
@@ -961,7 +774,7 @@ def create_claude(
     takes both shapes is that both are the front door for somebody. A reader
     meeting the library writes ``create_claude(model=...)`` and needs to have
     found nothing else first; a composition that already holds a
-    :class:`ClaudeSessionConfig` -- a profile selector resolving an account, a
+    :class:`Claude` -- a profile selector resolving an account, a
     router picking a recipe -- passes the whole declaration positionally.
 
     Keyword arguments are applied over ``options`` rather than instead of it,
@@ -973,10 +786,10 @@ def create_claude(
     -- naming one without ``api_key`` sends a placeholder credential, which is
     what a local endpoint expects.
     """
-    base = options or ClaudeSessionConfig()
+    base = options or Claude()
     # Validated again rather than copied as it stands, so a model named here
     # is refused an effort the base carries by the same check a declaration is.
-    config = ClaudeSessionConfig.model_validate(
+    config = Claude.model_validate(
         base.model_copy(
             update={
                 "model": base.model if model is None else model,
@@ -1010,13 +823,6 @@ def create_claude(
         )
         config = ClaudeCompatibilityTransform(endpoint).apply(config)
     return Client(ClaudeSessionOpener(config).open_session)
-
-
-# The fully qualified name of the turn-bound submission tool as Claude Code
-# sees it. Compositions that install their own tool-allowlist hooks must
-# include it, or the hook denies the very tool the turn requires.
-# lup: ignore[constant-declaration] — the qualified name Claude Code composes
-SUBMISSION_TOOL = "mcp__lup-output__submit_output"
 
 
 def build_submission_server(
@@ -1081,7 +887,7 @@ def build_submission_server(
 
 
 def build_claude_options(
-    config: ClaudeSessionConfig,
+    config: Claude,
     *,
     binding: SubmissionBindingSource,
     resume: str | None,
@@ -1093,7 +899,7 @@ def build_claude_options(
     from lup.providers.claude.hooks import lup_hooks_to_claude
     from lup.providers.claude.subagents import model_alias, subagent_tools
 
-    config = ClaudeSessionConfig.model_validate(config)
+    config = Claude.model_validate(config)
     native = claude_native_tools(config.native_tools)
     servers = dict(config.tool_servers)
     allowed = list(config.allowed_tools)

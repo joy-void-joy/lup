@@ -12,10 +12,9 @@ from lup.policy.hooks import LupHookInput, LupHookMatcher, LupHookOutput, LupHoo
 
 from lup.providers.codex.app_server import CodexAppServer, RpcMessage, RpcNotification
 from lup.providers.codex.output import CodexJsonEnvelope, codex_output_contract
+from lup.providers.codex import Codex, CodexMcpServerConfig
 from lup.providers.codex.runtime import (
     CodexConversationState,
-    CodexMcpServerConfig,
-    CodexSessionConfig,
     CodexTurnChannel,
     create_codex,
     decode_completed_item,
@@ -75,9 +74,7 @@ async def test_enveloped_output_corrects_json_and_gates_without_losing_defaults(
             )
         return SubmissionDecision(accepted=True)
 
-    config = CodexSessionConfig(
-        cwd=tmp_path, submission_gate_resolver=lambda _output: gate
-    )
+    config = Codex(cwd=tmp_path, submission_gate_resolver=lambda _output: gate)
     async with create_codex(config).open(resume) as handle:
         accepted = await handle.session.start(turn_request("score", FlexibleAnswer))
         result = await accepted.turn.result()
@@ -233,7 +230,7 @@ async def test_envelope_stop_then_gate_correction_share_one_logical_continuation
             accepted=value.scores["key"] == 2, message="Use score two"
         )
 
-    config = CodexSessionConfig(
+    config = Codex(
         cwd=tmp_path,
         hooks=LupHooksConfig(stop=[LupHookMatcher(hook=stop)]),
         submission_gate_resolver=lambda _output: gate,
@@ -316,7 +313,7 @@ async def test_late_tool_feedback_preserves_envelope_until_accepted_continuation
         gated.append(value.scores["key"])
         return SubmissionDecision(accepted=True)
 
-    config = CodexSessionConfig(
+    config = Codex(
         cwd=tmp_path,
         hooks=LupHooksConfig(
             post_tool_use=[LupHookMatcher(matcher="^ShellCommand$", hook=after)]
@@ -347,7 +344,7 @@ async def test_output_schema_is_per_turn_across_untyped_and_changed_types(
 ) -> None:
     server = scripted_codex
     server.answers.extend(['{"answer":"first"}', "untyped", '{"score":7}'])
-    async with create_codex(CodexSessionConfig(cwd=tmp_path)).open(resume) as handle:
+    async with create_codex(Codex(cwd=tmp_path)).open(resume) as handle:
         first = await handle.session.start(turn_request("answer", Answer))
         assert (await first.turn.result()).output == Answer(answer="first")
         second = await handle.session.start(turn_request("continue"))
@@ -385,9 +382,7 @@ async def test_gate_feedback_corrects_output_and_keeps_all_events_and_usage(
             accepted=value.answer == "accepted", message="Use the exact answer accepted"
         )
 
-    config = CodexSessionConfig(
-        cwd=tmp_path, submission_gate_resolver=lambda _output: gate
-    )
+    config = Codex(cwd=tmp_path, submission_gate_resolver=lambda _output: gate)
     async with create_codex(config).open() as handle:
         accepted = await handle.session.start(turn_request("answer", Answer))
         assert accepted.events is not None
@@ -413,7 +408,7 @@ async def test_exhausted_validation_keeps_each_attempt_and_usage(
 ) -> None:
     server = scripted_codex
     server.answers.extend(["not JSON", '{"wrong":"shape"}'])
-    config = CodexSessionConfig(cwd=tmp_path, correction=CorrectionConfig(cycles=1))
+    config = Codex(cwd=tmp_path, correction=CorrectionConfig(cycles=1))
     async with create_codex(config).open() as handle:
         accepted = await handle.session.start(turn_request("answer", Answer))
         with pytest.raises(StructuredOutputError) as raised:
@@ -432,7 +427,7 @@ async def test_correcting_turn_steers_and_interrupts_the_current_native_turn(
 ) -> None:
     server = scripted_codex
     server.answers.extend(['{"wrong":"shape"}', None])
-    async with create_codex(CodexSessionConfig(cwd=tmp_path)).open() as handle:
+    async with create_codex(Codex(cwd=tmp_path)).open() as handle:
         accepted = await handle.session.start(turn_request("answer", Answer))
         assert await server.started.get() == "turn-1"
         assert await asyncio.wait_for(server.started.get(), timeout=1) == "turn-2"
@@ -467,9 +462,7 @@ async def test_session_close_cancels_a_pending_submission_gate(
         finally:
             canceled.set()
 
-    config = CodexSessionConfig(
-        cwd=tmp_path, submission_gate_resolver=lambda _output: gate
-    )
+    config = Codex(cwd=tmp_path, submission_gate_resolver=lambda _output: gate)
     async with create_codex(config).open() as handle:
         accepted = await handle.session.start(turn_request("answer", Answer))
         await asyncio.wait_for(entered.wait(), timeout=1)
@@ -499,7 +492,7 @@ async def test_interactive_mcp_elicitations_are_never_accepted_as_tool_approval(
     tmp_path: Path, params: JsonObject
 ) -> None:
     state = CodexConversationState(
-        CodexSessionConfig(
+        Codex(
             cwd=tmp_path, mcp_servers={"tools": CodexMcpServerConfig(command="tools")}
         ),
         CodexAppServer(Path("codex")),
@@ -518,7 +511,7 @@ async def test_interactive_mcp_elicitations_are_never_accepted_as_tool_approval(
 
 async def test_mcp_approval_from_another_thread_is_declined(tmp_path: Path) -> None:
     state = CodexConversationState(
-        CodexSessionConfig(
+        Codex(
             cwd=tmp_path, mcp_servers={"tools": CodexMcpServerConfig(command="tools")}
         ),
         CodexAppServer(Path("codex")),

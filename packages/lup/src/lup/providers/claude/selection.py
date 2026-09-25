@@ -11,17 +11,13 @@ from lup.providers.claude.config_home import workspace_config_environment
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.providers.claude.model_choice import claude_model_choice
 from lup.providers.claude.models import ClaudeEffort
-from lup.providers.claude.runtime import (
-    ClaudePermissionMode,
-    ClaudeSandboxConfig,
-    ClaudeSessionConfig,
-    create_claude,
-)
+from lup.providers.claude import Claude, ClaudePermissionMode, ClaudeSandboxConfig
+from lup.providers.claude.runtime import create_claude
 from lup.sessions.client import Client
+from lup.providers.confinement import SessionContainment
 from lup.providers.selection import (
     Runtime,
     SessionAutonomy,
-    SessionContainment,
     SessionEffort,
     SessionRequest,
 )
@@ -79,7 +75,7 @@ existed.
 """
 
 
-def claude_config(request: SessionRequest) -> ClaudeSessionConfig:
+def claude_config(request: SessionRequest) -> Claude:
     """Render a portable request into Claude's own session configuration.
 
     Rendering is separate from building so an application can stack a
@@ -92,7 +88,7 @@ def claude_config(request: SessionRequest) -> ClaudeSessionConfig:
     does. Codex spells both with one word and has to reconcile them; here
     the request's two axes stay two.
     """
-    return ClaudeSessionConfig(
+    return Claude(
         model=None if request.model is None else claude_model_choice(request.model),
         system_prompt=request.instructions,
         native_tools=request.native_tools,

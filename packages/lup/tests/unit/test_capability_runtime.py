@@ -11,11 +11,8 @@ import pytest
 from pydantic import BaseModel
 
 from lup.providers.codex.app_server import CodexAppServer, RpcNotification
-from lup.providers.codex.runtime import (
-    CodexConversationState,
-    CodexSessionConfig,
-    CodexTurnChannel,
-)
+from lup.providers.codex import Codex
+from lup.providers.codex.runtime import CodexConversationState, CodexTurnChannel
 from lup.providers.codex.hooks import (
     CODEX_SEMANTICS,
     COMMAND_APPROVAL,
@@ -406,7 +403,7 @@ async def test_app_server_eof_fails_current_turn_with_partial_evidence(
 ) -> None:
     server = CodexAppServer(Path("codex"))
     state = CodexConversationState(
-        CodexSessionConfig(model=CustomModel(id="gpt"), cwd=tmp_path), server, None
+        Codex(model=CustomModel(id="gpt"), cwd=tmp_path), server, None
     )
     channel = CodexTurnChannel("session")
     channel.turn_id = "turn"
@@ -427,14 +424,12 @@ async def test_app_server_eof_fails_current_turn_with_partial_evidence(
 def test_codex_config_rejects_approvals_nothing_would_answer(tmp_path: Path) -> None:
     """An asking policy with no hooks stalls the turn on its first command."""
     with pytest.raises(ValueError, match="supply hooks to answer them"):
-        CodexSessionConfig(
-            model=CustomModel(id="gpt"), cwd=tmp_path, approval_policy="on-request"
-        )
+        Codex(model=CustomModel(id="gpt"), cwd=tmp_path, approval_policy="on-request")
 
 
 def test_codex_config_accepts_approvals_its_hooks_can_answer(tmp_path: Path) -> None:
     """Declared hooks are what makes an asking policy answerable."""
-    config = CodexSessionConfig(
+    config = Codex(
         model=CustomModel(id="gpt"),
         cwd=tmp_path,
         approval_policy="on-request",

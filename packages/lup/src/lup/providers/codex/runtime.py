@@ -13,7 +13,7 @@ from tempfile import TemporaryDirectory
 from types import EllipsisType
 from typing import Literal
 
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import BaseModel, Field, ValidationError
 
 from lup.execution.threads import run_sync
 from lup.providers.codex.app_server import (
@@ -28,21 +28,14 @@ from lup.providers.codex.hooks import (
     codex_hook_approval_policy,
 )
 from lup.providers.codex.home import CodexWorktreeHomeStore, install_declared_policy
-from lup.providers.selection import SessionContainment
 from lup.providers.codex.login import CODEX_HOME, native_home
 from lup.providers.codex.output import CodexOutputContract, codex_output_contract
-from lup.providers.codex.model_choice import (
-    CodexModelChoice,
-    codex_model_id,
-    refuse_unsupported_effort,
-)
-from lup.providers.codex.models import CodexEffort
-from lup.providers.codex.subagents import CodexModelTiers, CodexSubagentTools
+from lup.providers.codex import Codex
+from lup.providers.codex.model_choice import CodexModelChoice
 from lup.policy.hooks import LupHookInput, LupHookOutput, LupHooksConfig
 from lup.policy.identity import POLICY_ROOT_ENV
-from lup.providers.codex.native_tools import CodexNativeTools
 from lup.tools.native import NativeTools
-from lup.tools.mcp import LupMcpTool, ServerCompanion, ToolResponse, running_companions
+from lup.tools.mcp import LupMcpTool, ToolResponse, running_companions
 from lup.sessions.composition import AcceptedTurn, CompletedTurn, ComposedSession
 from lup.sessions.capabilities import (
     EventStream,
@@ -55,7 +48,7 @@ from lup.sessions.capabilities import (
 from lup.sessions.errors import ProviderTurnError, StructuredOutputError
 from lup.sessions.errors import TurnFailure, TurnInterruptedError, ValidationAttempt
 from lup.sessions.errors import UnsupportedCapability
-from lup.sessions.middleware import CorrectionConfig, DecoratingSession
+from lup.sessions.middleware import DecoratingSession
 from lup.sessions.errors import TurnAlreadyActiveError
 from lup.sessions.middleware import SerializedTurn
 from lup.sessions.client import Client
@@ -66,7 +59,6 @@ from lup.sessions.events import (
     MessageCompletedEvent,
     SessionHandle,
     SessionId,
-    SubmissionGateResolver,
     AnyTurnBlock,
     TurnCompletedEvent,
     TurnEvent,
@@ -87,206 +79,7 @@ from lup.sessions.recursion import (
     recursive_agent_scope,
 )
 from lup.sessions.transcript import fold_transcript
-from lup.types import EnvVars, JsonObject, JsonValue, Usage
-
-
-CODEX_PROGRAM = Path("codex")
-"""The program a Codex session is started as when nothing names another.
-
-Named once because two places read it: the field default below, and the
-caller that falls back to it when a request asked for no container to enter.
-Spelled twice, the fallback would be a second opinion about what this
-runtime is called.
-"""
-
-
-class CodexSessionConfig(
-    BaseModel,
-    frozen=True,
-    arbitrary_types_allowed=True,
-    extra="forbid",
-    revalidate_instances="always",
-):
-    """Immutable Codex-only app-server configuration."""
-
-    model: CodexModelChoice | None = None
-    """A slug from Codex's catalog, a portable tier, or a custom id."""
-
-    model_tiers: CodexModelTiers = CodexModelTiers()
-    """The slug each portable tier selects, for an account or endpoint whose
-    lineup differs from the one lup ships as default."""
-
-    developer_instructions: str = ""
-    cwd: Path
-    policy_root: Path | None = None
-    """Application project declaring policy; direct callers default to cwd."""
-    executable: Path = CODEX_PROGRAM
-    containment: SessionContainment = "none"
-    """The boundary owning this executable's home; outer wrappers prepare theirs."""
-    named_profile: str | None = None
-    model_provider: str | None = None
-    provider_config: JsonObject | None = None
-    sandbox: Literal["read-only", "workspace-write", "danger-full-access"] | None = None
-    # The app-server's own wire spellings, passed through by thread_parameters.
-    approval_policy: Literal["untrusted", "on-request", "granular", "never"] | None = (
-        None
-    )
-    hooks: LupHooksConfig | None = None
-    effort: CodexEffort | None = None
-    """What this session asks the model to spend, or None to leave it to the home.
-
-    ``None`` means inherit, which is right only while the *model* is also
-    inherited. Where a model is named, :attr:`paired_effort` answers instead —
-    see :meth:`model_selection` for why the two cannot travel apart. Which
-    rungs a model accepts is its catalog row's answer, and a rung outside it
-    is refused where this is declared.
-    """
-
-    paired_effort: CodexEffort = "medium"
-    """The effort a named model carries when the caller names none.
-
-    A judgement, so it is an overridable default rather than a constant: a
-    caller who knows what their model should spend says so and this is never
-    read. What it must not be is *absent*, because absence is what let a
-    caller's model reach the API beside a stranger's effort.
-    """
-
-    environment: EnvVars = {}
-    submission_gate_resolver: SubmissionGateResolver | None = None
-    correction: CorrectionConfig = CorrectionConfig()
-    continuation: CorrectionConfig = CorrectionConfig(
-        instruction="Continue according to the Stop hook feedback."
-    )
-    mcp_servers: dict[str, "CodexMcpServerConfig"] = {}
-    writable_roots: list[Path] = []
-    delegated_tools: CodexSubagentTools | None = None
-    native_tools: NativeTools = None
-    application_tools: dict[str, LupMcpTool] = {}
-    companions: list[ServerCompanion] = []
-
-    @model_validator(mode="after")
-    def reject_unanswerable_approvals(self) -> "CodexSessionConfig":
-        """Refuse a thread that would ask questions this session cannot answer.
-
-        An approval policy that asks makes the app-server send approval
-        requests back here, and only declared hooks answer them. Without
-        those the transport refuses every request as unhandled, which stalls
-        the turn on its first command — so the combination is rejected at
-        construction instead of at the first act.
-        """
-        if self.containment == "outer" and self.executable == CODEX_PROGRAM:
-            raise ValueError(
-                "outer containment requires the prepared container executable"
-            )
-        CodexNativeTools.compile(self.native_tools)
-        for key in self.provider_config or {}:
-            if key not in {"model_provider", "model_providers"}:
-                raise ValueError(
-                    f"provider_config {key!r} is outside provider endpoint declarations and explicit session authority; use native_tools or tool_servers"
-                )
-        for name in self.application_tools:
-            if (
-                not name.startswith("lup_app_")
-                or not name.isascii()
-                or not all(char.isalnum() or char in "_-" for char in name)
-                or len(name) > 64
-            ):
-                raise ValueError(f"invalid or reserved application tool name {name!r}")
-        if self.delegated_tools is not None and self.native_tools:
-            raise ValueError(
-                "delegated_tools and native_tools are alternative authority declarations"
-            )
-        if self.delegated_tools is not None and (
-            self.sandbox != "read-only" or self.approval_policy != "never"
-        ):
-            raise ValueError(
-                "delegated tools require read-only sandbox and never approvals"
-            )
-        if self.delegated_tools is not None and (
-            self.mcp_servers or self.writable_roots
-        ):
-            raise ValueError(
-                "delegated tool capabilities do not grant MCP servers or writable roots"
-            )
-        if self.approval_policy not in {None, "never"} and self.hooks is None:
-            raise ValueError(
-                f"approval_policy {self.approval_policy!r} makes the app-server "
-                "ask this session for decisions; supply hooks to answer them, "
-                "or use 'never'"
-            )
-        return self
-
-    def validated_for_app_server(self) -> "CodexSessionConfig":
-        """Refuse native capabilities before any process starts, without payloads."""
-        if self.named_profile is not None:
-            raise UnsupportedCapability(
-                "Codex app-server cannot select named profiles or apply all startup "
-                "settings through thread configuration. Configure the intended "
-                "CODEX_HOME/config.toml before opening, or supply explicit supported "
-                "session settings. Interactive Codex launches support named profiles."
-            )
-        return self
-
-    def model_selection(self) -> JsonObject:
-        """The model and the effort that goes with it — both, or neither.
-
-        A model and its reasoning effort are one choice, and the home this
-        session opens against already holds an answer to both: it is seeded
-        from the operator's own configuration, so it carries the model *they*
-        chose and the effort they chose for it.
-
-        Naming only the model therefore does not select a model. It selects
-        half of somebody else's pair, and the API is the first thing to notice
-        — ``'max' is not supported with the 'gpt-5.5' model``, a 400 before the
-        turn does anything, naming neither the home nor the caller. Every
-        Codex session Lup opened through a named model was one home edit away
-        from it.
-
-        So the two travel together. Naming neither inherits a pair that was
-        chosen together and is therefore coherent; naming a model sends an
-        effort beside it, the caller's where they gave one and
-        :attr:`paired_effort` where they did not.
-        """
-        model = self.model_id()
-        if model is None:
-            return {} if self.effort is None else {"effort": self.effort}
-        return {"model": model, "effort": self.effort or self.paired_effort}
-
-    def model_id(self) -> str | None:
-        """The slug the app-server is asked for, or None to inherit the home's."""
-        return codex_model_id(self.model, self.model_tiers)
-
-    @model_validator(mode="after")
-    def the_model_takes_its_effort(self) -> "CodexSessionConfig":
-        """Refuse an effort the catalog says this session's model cannot take.
-
-        The effort checked is the one :meth:`model_selection` would send — the
-        paired one where the caller named none — because a model is never
-        sent alone, and a paired rung the model lacks fails the same 400.
-        """
-        refuse_unsupported_effort(
-            self.model, self.effort or self.paired_effort, self.model_tiers
-        )
-        return self
-
-    def native_capabilities(self) -> CodexNativeTools:
-        """Resolve explicit delegated facilities through the same startup bounds."""
-        if self.delegated_tools is not None:
-            return CodexNativeTools(
-                shell=self.delegated_tools.workspace_read,
-                images=self.delegated_tools.workspace_read,
-                web=self.delegated_tools.web_search,
-            )
-        return CodexNativeTools.compile(self.native_tools)
-
-
-class CodexMcpServerConfig(BaseModel, frozen=True):
-    """One project tool group served to Codex over an explicit subprocess."""
-
-    command: str
-    args: list[str] = []
-    env: EnvVars = {}
-    required: bool = True
+from lup.types import JsonObject, JsonValue, Usage
 
 
 class CodexThreadRef(BaseModel, frozen=True):
@@ -647,14 +440,14 @@ class CodexConversationState:
 
     def __init__(
         self,
-        config: CodexSessionConfig,
+        config: Codex,
         server: CodexAppServer,
         resume: SessionId | None,
         policy_plugin: str | None = None,
         models: dict[str, JsonObject] | None = None,
         fork_from: SessionId | None = None,
     ) -> None:
-        self.config = CodexSessionConfig.model_validate(config)
+        self.config = Codex.model_validate(config)
         self.server = server
         self.resume = resume
         self.thread_id: str | None = None
@@ -681,7 +474,8 @@ class CodexConversationState:
             )
         inherited = CodexConfigReadResponse.model_validate(
             await self.server.request(
-                "config/read", {"cwd": str(self.config.cwd), "includeLayers": False}
+                "config/read",
+                {"cwd": str(self.config.workspace()), "includeLayers": False},
             )
         )
         self.inherited_servers = list(inherited.config.mcp_servers)
@@ -741,8 +535,8 @@ class CodexConversationState:
     def thread_parameters(self) -> JsonObject:
         """Preserve configured thread behavior for new and resumed threads."""
         params: JsonObject = {
-            "cwd": str(self.config.cwd),
-            "developerInstructions": self.config.developer_instructions,
+            "cwd": str(self.config.workspace()),
+            "developerInstructions": self.config.system_prompt,
         }
         # One half of the pair `model_selection` settles; its other half rides
         # `turn/start`, which is the only reason they are written apart.
@@ -881,7 +675,7 @@ class CodexConversationState:
                         await responder.evaluate(
                             LupHookInput(
                                 event="Stop",
-                                cwd=str(self.config.cwd),
+                                cwd=str(self.config.workspace()),
                                 stop_hook_active=stop_hook_active,
                             )
                         )
@@ -944,7 +738,7 @@ class CodexConversationState:
                                     tool_name=block.name,
                                     tool_input=block.arguments,
                                     tool_result=results.get(block.id, ""),
-                                    cwd=str(self.config.cwd),
+                                    cwd=str(self.config.workspace()),
                                 )
                             )
                             if not await responder.deliver(outputs):
@@ -1204,12 +998,10 @@ class CodexSessionOpener:
     Lifecycle observers leave the selected approval policy untouched.
     """
 
-    def __init__(self, config: CodexSessionConfig) -> None:
+    def __init__(self, config: Codex) -> None:
         # Re-validated first, because model_copy skips every validator and a
         # copy is how an unsupported grant reaches this boundary unchecked.
-        self.config = CodexSessionConfig.model_validate(
-            config
-        ).validated_for_app_server()
+        self.config = Codex.model_validate(config).validated_for_app_server()
 
     @asynccontextmanager
     async def open_session(
@@ -1230,9 +1022,12 @@ class CodexSessionOpener:
         environment = allowance.environment(self.config.environment)
         config = self.config.model_copy(
             update={
+                "cwd": self.config.workspace(),
                 "environment": {
                     **environment,
-                    POLICY_ROOT_ENV: str(self.config.policy_root or self.config.cwd),
+                    POLICY_ROOT_ENV: str(
+                        self.config.policy_root or self.config.workspace()
+                    ),
                 },
                 "mcp_servers": {
                     name: server.model_copy(
@@ -1252,9 +1047,9 @@ class CodexSessionOpener:
                 partial(
                     install_declared_policy,
                     home,
-                    config.policy_root or config.cwd,
+                    config.policy_root or config.workspace(),
                     seed=CodexWorktreeHomeStore().derived(home),
-                    workspace=config.cwd,
+                    workspace=config.workspace(),
                     executable=config.executable,
                     environment=effective,
                 )
@@ -1347,7 +1142,7 @@ class CodexSessionOpener:
 
 
 def create_codex(
-    options: CodexSessionConfig | None = None,
+    options: Codex | None = None,
     *,
     model: CodexModelChoice | None = None,
     system_prompt: str = "",
@@ -1363,27 +1158,18 @@ def create_codex(
     for the same reason: a reader meeting the library names arguments, and a
     composition that already holds a declaration passes it positionally.
 
-    ``system_prompt`` is the shared spelling across both constructors, and this
-    provider's configuration calls the same thing ``developer_instructions``.
-    The translation happens here rather than at the call, so a reader moving
-    between providers keeps one argument list -- which is the whole reason the
-    constructors share one.
-
-    ``cwd`` is resolved at call time rather than defaulted at import, because
-    this configuration requires one and the honest default is where the caller
-    is standing when it asks -- read at import, a library loaded before a
-    process changed directory would open every session somewhere else.
+    ``cwd`` left unset is where the caller stands when a session opens.
     """
     if tools is not None and len({tool.name for tool in tools}) != len(tools):
         raise ValueError("application tool names must be unique")
-    base = options or CodexSessionConfig(cwd=Path.cwd())
+    base = options or Codex()
     # Validated again rather than copied as it stands, so a model named here
     # is refused an effort the base carries by the same check a declaration is.
-    config = CodexSessionConfig.model_validate(
+    config = Codex.model_validate(
         base.model_copy(
             update={
                 "model": base.model if model is None else model,
-                "developer_instructions": system_prompt or base.developer_instructions,
+                "system_prompt": system_prompt or base.system_prompt,
                 "cwd": base.cwd if cwd is None else cwd,
                 "native_tools": base.native_tools
                 if native_tools is ...

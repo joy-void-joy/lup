@@ -13,7 +13,7 @@ import sys
 
 import lup
 
-CONSTRUCTORS = {"create_claude", "create_client", "create_codex"}
+CONSTRUCTORS = {"create_claude", "create_codex"}
 
 
 def in_a_fresh_interpreter(source: str) -> str:
@@ -44,7 +44,6 @@ def test_root_exports_only_portable_runtime_conveniences() -> None:
         # The one way to name a model no catalog lists, which every model
         # argument a root constructor takes accepts.
         "CustomModel",
-        "Provider",
         "SessionHandle",
         "SessionId",
         "StartedTurn",
@@ -53,7 +52,6 @@ def test_root_exports_only_portable_runtime_conveniences() -> None:
         "TurnRequest",
         "TurnResult",
         "create_claude",
-        "create_client",
         "create_codex",
         "turn_request",
     }

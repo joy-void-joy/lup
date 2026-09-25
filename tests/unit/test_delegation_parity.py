@@ -7,8 +7,9 @@ from typing import Literal
 import pytest
 from pydantic import TypeAdapter
 
-from lup.providers.claude.runtime import ClaudeSessionConfig, build_claude_options
-from lup.providers.codex.runtime import CodexSessionConfig
+from lup.providers.claude import Claude
+from lup.providers.claude.runtime import build_claude_options
+from lup.providers.codex import Codex
 from lup.orchestration.reflection import ReviewResult, ReviewVerdict
 from lup.sessions.client import Client
 from lup.sessions.events import TurnTextBlock
@@ -26,10 +27,10 @@ from tests.unit.test_template_fixes import static_session_factory
 @pytest.fixture
 def configured(
     monkeypatch: pytest.MonkeyPatch,
-) -> list[ClaudeSessionConfig | CodexSessionConfig]:
-    captured: list[ClaudeSessionConfig | CodexSessionConfig] = []
+) -> list[Claude | Codex]:
+    captured: list[Claude | Codex] = []
 
-    def capture(config: ClaudeSessionConfig | CodexSessionConfig) -> Client:
+    def capture(config: Claude | Codex) -> Client:
         captured.append(config)
         return static_session_factory([TurnTextBlock(text="verified findings")])
 
@@ -58,7 +59,7 @@ def configured(
 async def test_served_roles_execute_on_the_selected_engine(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    configured: list[ClaudeSessionConfig | CodexSessionConfig],
+    configured: list[Claude | Codex],
     engine: Literal["claude", "codex"],
     name: str,
 ) -> None:
@@ -73,7 +74,7 @@ async def test_served_roles_execute_on_the_selected_engine(
     assert len(configured) == 1
     config = configured[0]
     if engine == "claude":
-        assert isinstance(config, ClaudeSessionConfig)
+        assert isinstance(config, Claude)
         assert config.model_id() == "opus"
         assert config.native_tools == [
             "Read",
@@ -84,7 +85,7 @@ async def test_served_roles_execute_on_the_selected_engine(
         assert config.allowed_tools == config.native_tools
         assert config.setting_sources == []
     else:
-        assert isinstance(config, CodexSessionConfig)
+        assert isinstance(config, Codex)
         assert config.model_id() == "gpt-5.6-sol"
         assert config.sandbox == "read-only"
         assert config.approval_policy == "never"
@@ -95,7 +96,7 @@ async def test_served_roles_execute_on_the_selected_engine(
 
 def test_native_and_served_claude_roles_share_the_compiler() -> None:
     options = build_claude_options(
-        ClaudeSessionConfig(subagents=get_subagent_specs(), native_tools=["all"]),
+        Claude(subagents=get_subagent_specs(), native_tools=["all"]),
         binding=lambda: None,
         resume=None,
         session_id=None,
@@ -129,7 +130,7 @@ def test_inspect_exposes_capabilities_separately_from_exact_grants(
     "engine,expected", [("claude", "opus"), ("codex", "gpt-5.6-sol")]
 )
 def test_explicit_engine_without_model_selects_native_strongest(
-    configured: list[ClaudeSessionConfig | CodexSessionConfig],
+    configured: list[Claude | Codex],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     engine: str,
@@ -145,7 +146,7 @@ def test_explicit_engine_without_model_selects_native_strongest(
     "engine,expected", [("claude", "opus"), ("codex", "gpt-5.6-sol")]
 )
 def test_unconfigured_model_default_cannot_pin_another_provider(
-    configured: list[ClaudeSessionConfig | CodexSessionConfig],
+    configured: list[Claude | Codex],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     engine: str,
@@ -162,29 +163,29 @@ def test_unconfigured_model_default_cannot_pin_another_provider(
 
 
 def test_codex_does_not_widen_role_to_session_sandbox(
-    configured: list[ClaudeSessionConfig | CodexSessionConfig],
+    configured: list[Claude | Codex],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(settings, "agent_sdk", "codex")
     monkeypatch.setattr(settings, "codex_sandbox", "danger_full_access")
     core.build_subagent_factory(get_subagent_specs()[0])
-    assert isinstance(configured[0], CodexSessionConfig)
+    assert isinstance(configured[0], Codex)
     assert configured[0].sandbox == "read-only"
 
 
 def test_model_override_routes_when_no_engine_is_explicit(
-    configured: list[ClaudeSessionConfig | CodexSessionConfig],
+    configured: list[Claude | Codex],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(settings, "agent_sdk", None)
     monkeypatch.setattr(settings, "model", "claude-opus-5")
     core.provider_factory(model="gpt-6-astra", system_prompt="", cwd=tmp_path)
-    assert isinstance(configured[0], CodexSessionConfig)
+    assert isinstance(configured[0], Codex)
 
 
 def test_codex_explicit_role_turn_cap_is_not_ignored(
-    configured: list[ClaudeSessionConfig | CodexSessionConfig],
+    configured: list[Claude | Codex],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(settings, "agent_sdk", "codex")
@@ -198,7 +199,7 @@ def test_codex_explicit_role_turn_cap_is_not_ignored(
 
 @pytest.mark.parametrize("engine", ["claude", "codex"])
 async def test_reviewer_compiles_on_both_engines(
-    configured: list[ClaudeSessionConfig | CodexSessionConfig],
+    configured: list[Claude | Codex],
     monkeypatch: pytest.MonkeyPatch,
     engine: str,
 ) -> None:
@@ -227,13 +228,13 @@ async def test_reviewer_compiles_on_both_engines(
     assert len(configured) == 1
     config = configured[0]
     if engine == "codex":
-        assert isinstance(config, CodexSessionConfig)
+        assert isinstance(config, Codex)
         assert config.delegated_tools is not None
         assert (
             config.delegated_tools.workspace_read and config.delegated_tools.web_search
         )
     else:
-        assert isinstance(config, ClaudeSessionConfig)
+        assert isinstance(config, Claude)
         assert config.native_tools == ["Read", "Glob", "Grep", "WebSearch", "WebFetch"]
 
 

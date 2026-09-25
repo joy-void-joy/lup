@@ -11,11 +11,10 @@ from uuid import UUID
 import pytest
 from pydantic import BaseModel, Field, ValidationError
 
+from lup.providers.claude import Claude, SESSION_THINKING_TOKENS
 from lup.providers.claude.runtime import (
-    SESSION_THINKING_TOKENS,
     ClaudeConversationState,
     ClaudeFork,
-    ClaudeSessionConfig,
     ClaudeSessionOpener,
     ClaudeTurnToolBinder,
     SubmissionBindingSource,
@@ -30,10 +29,9 @@ from lup.providers.claude.runtime import (
     needs_a_person,
 )
 from lup.providers.codex.app_server import CodexAppServer, RpcMessage, RpcNotification
+from lup.providers.codex import Codex, CodexMcpServerConfig
 from lup.providers.codex.runtime import (
     CodexConversationState,
-    CodexMcpServerConfig,
-    CodexSessionConfig,
     CodexSteer,
     CodexTurnChannel,
     CodexTurnToolBinder,
@@ -89,7 +87,7 @@ class SecondOutput(BaseModel):
 
 def test_fresh_claude_session_uses_cli_valid_uuid() -> None:
     state = ClaudeConversationState(
-        ClaudeSessionOpener(ClaudeSessionConfig(model=CustomModel(id="claude"))), None
+        ClaudeSessionOpener(Claude(model=CustomModel(id="claude"))), None
     )
 
     assert str(UUID(state.session_id)) == state.session_id
@@ -100,7 +98,7 @@ def test_claude_session_defaults_and_hooks_reach_native_options(
 ) -> None:
     hooks = create_permission_hooks([tmp_path / "rw"], [tmp_path / "ro"])
     options = build_claude_options(
-        ClaudeSessionConfig(
+        Claude(
             model=CustomModel(id="claude"),
             system_prompt="Project rules",
             hooks=hooks,
@@ -125,7 +123,7 @@ def test_claude_session_defaults_and_hooks_reach_native_options(
 def test_the_manual_permission_mode_reaches_the_sdk_as_its_default() -> None:
     """The SDK's literal still spells the CLI's ``manual`` as ``default``."""
     options = build_claude_options(
-        ClaudeSessionConfig(permission_mode="manual"),
+        Claude(permission_mode="manual"),
         binding=lambda: None,
         resume=None,
         session_id="18f5debf-499a-42bb-8856-0b39dd59943d",
@@ -146,7 +144,7 @@ def test_a_named_plugin_directory_reaches_the_session(tmp_path: Path) -> None:
     """
     lease = tmp_path / "lease" / ".claude" / "plugins" / "lup"
     options = build_claude_options(
-        ClaudeSessionConfig(
+        Claude(
             model=CustomModel(id="claude"),
             cwd=tmp_path / "lease",
             plugin_dirs=[lease],
@@ -160,7 +158,7 @@ def test_a_named_plugin_directory_reaches_the_session(tmp_path: Path) -> None:
     assert options.plugins == [{"type": "local", "path": str(lease)}]
 
     unnamed = build_claude_options(
-        ClaudeSessionConfig(model=CustomModel(id="claude")),
+        Claude(model=CustomModel(id="claude")),
         binding=lambda: None,
         resume=None,
         session_id="18f5debf-499a-42bb-8856-0b39dd59943d",
@@ -170,7 +168,7 @@ def test_a_named_plugin_directory_reaches_the_session(tmp_path: Path) -> None:
 
 def test_claude_isolation_knobs_reach_native_options() -> None:
     options = build_claude_options(
-        ClaudeSessionConfig(
+        Claude(
             model=CustomModel(id="claude"),
             max_buffer_size=500 * 1024 * 1024,
             setting_sources=[],
@@ -191,7 +189,7 @@ def test_claude_isolation_knobs_reach_native_options() -> None:
 
 def test_claude_isolation_knobs_default_to_no_inherited_tools() -> None:
     options = build_claude_options(
-        ClaudeSessionConfig(model=CustomModel(id="claude")),
+        Claude(model=CustomModel(id="claude")),
         binding=lambda: None,
         resume=None,
         session_id="18f5debf-499a-42bb-8856-0b39dd59943d",
@@ -219,7 +217,7 @@ def test_claude_opener_builds_options_through_an_overridable_seam() -> None:
             options.max_buffer_size = 4096
             return options
 
-    opener = IsolatedOpener(ClaudeSessionConfig(model=CustomModel(id="claude")))
+    opener = IsolatedOpener(Claude(model=CustomModel(id="claude")))
     state = opener.create_state(None)
     options = state.opener.build_options(
         binding=lambda: None, resume=None, session_id=state.session_id
@@ -232,9 +230,9 @@ def test_claude_opener_builds_options_through_an_overridable_seam() -> None:
 def test_a_dead_cli_explains_itself_instead_of_pointing_at_stderr() -> None:
     from claude_agent_sdk import ProcessError
 
-    state = ClaudeSessionOpener(
-        ClaudeSessionConfig(model=CustomModel(id="claude"))
-    ).create_state(None)
+    state = ClaudeSessionOpener(Claude(model=CustomModel(id="claude"))).create_state(
+        None
+    )
     for line in ("loading plugin lup@local", "error: marketplace 'local' not found"):
         state.stderr_lines.append(line)
 
@@ -270,7 +268,7 @@ def test_only_the_sdk_s_process_error_is_rewritten() -> None:
 
 
 def test_the_captured_tail_is_bounded_by_configuration() -> None:
-    config = ClaudeSessionConfig(model=CustomModel(id="claude"), stderr_tail_lines=2)
+    config = Claude(model=CustomModel(id="claude"), stderr_tail_lines=2)
     state = ClaudeSessionOpener(config).create_state(None)
 
     for line in ("first", "second", "third"):
@@ -282,7 +280,7 @@ def test_the_captured_tail_is_bounded_by_configuration() -> None:
 
 def test_claude_native_subagents_and_reported_cost_are_preserved() -> None:
     options = build_claude_options(
-        ClaudeSessionConfig(
+        Claude(
             model=CustomModel(id="claude"),
             subagents=[
                 SubagentSpec(
@@ -308,7 +306,7 @@ def test_claude_native_subagents_and_reported_cost_are_preserved() -> None:
 def test_codex_thread_config_contains_project_mcp_and_writable_roots(
     tmp_path: Path,
 ) -> None:
-    config = CodexSessionConfig(
+    config = Codex(
         model=CustomModel(id="gpt"),
         cwd=tmp_path,
         mcp_servers={
@@ -340,7 +338,7 @@ def test_codex_thread_config_contains_project_mcp_and_writable_roots(
 
 
 def test_codex_thread_config_uses_app_server_approval_spelling(tmp_path: Path) -> None:
-    config = CodexSessionConfig(
+    config = Codex(
         cwd=tmp_path,
         approval_policy="on-request",
         native_tools=[NativeToolGroup.SHELL],
@@ -354,7 +352,7 @@ async def test_thread_parameters_omit_model_for_the_native_default(
     tmp_path: Path,
 ) -> None:
     state = CodexConversationState(
-        CodexSessionConfig(cwd=tmp_path), CodexAppServer(Path("codex")), None
+        Codex(cwd=tmp_path), CodexAppServer(Path("codex")), None
     )
 
     assert "model" not in state.thread_parameters()
@@ -363,7 +361,7 @@ async def test_thread_parameters_omit_model_for_the_native_default(
 async def test_mcp_elicitation_accepts_composed_servers_declines_others(
     tmp_path: Path,
 ) -> None:
-    config = CodexSessionConfig(
+    config = Codex(
         model=CustomModel(id="gpt"),
         cwd=tmp_path,
         mcp_servers={"notes": CodexMcpServerConfig(command="uv")},
@@ -540,7 +538,7 @@ async def test_claude_partial_events_are_live_and_completed_replay_is_preserved(
 
     monkeypatch.setattr(claude, "ClaudeSDKClient", FixtureClient)
     state = ClaudeConversationState(
-        ClaudeSessionOpener(ClaudeSessionConfig(model=CustomModel(id="claude"))), None
+        ClaudeSessionOpener(Claude(model=CustomModel(id="claude"))), None
     )
 
     accepted = await state.start_turn("hello")
@@ -613,7 +611,7 @@ async def test_claude_adopts_the_session_id_the_cli_persists(
 
     monkeypatch.setattr(claude, "ClaudeSDKClient", InitReportingClient)
     state = ClaudeConversationState(
-        ClaudeSessionOpener(ClaudeSessionConfig(model=CustomModel(id="claude"))), None
+        ClaudeSessionOpener(Claude(model=CustomModel(id="claude"))), None
     )
     minted = state.session_id
 
@@ -670,7 +668,7 @@ async def test_an_interrupted_claude_turn_is_not_a_retryable_provider_failure(
 
     monkeypatch.setattr(claude, "ClaudeSDKClient", InterruptibleClient)
     state = ClaudeConversationState(
-        ClaudeSessionOpener(ClaudeSessionConfig(model=CustomModel(id="claude"))), None
+        ClaudeSessionOpener(Claude(model=CustomModel(id="claude"))), None
     )
 
     unasked = await state.start_turn("hello")
@@ -751,7 +749,7 @@ async def test_the_durable_view_is_the_live_one_without_its_deltas(
 
     monkeypatch.setattr(claude, "ClaudeSDKClient", FixtureClient)
     state = ClaudeConversationState(
-        ClaudeSessionOpener(ClaudeSessionConfig(model=CustomModel(id="claude"))), None
+        ClaudeSessionOpener(Claude(model=CustomModel(id="claude"))), None
     )
 
     accepted = await state.start_turn("hello")
@@ -781,9 +779,7 @@ async def test_claude_latest_turn_fork_preserves_a_typed_session_handle(
     import claude_agent_sdk as claude
 
     state = ClaudeConversationState(
-        ClaudeSessionOpener(
-            ClaudeSessionConfig(model=CustomModel(id="claude"), cwd=tmp_path)
-        ),
+        ClaudeSessionOpener(Claude(model=CustomModel(id="claude"), cwd=tmp_path)),
         None,
     )
 
@@ -828,7 +824,7 @@ async def test_claude_binder_refreshes_same_schema_turns_without_reconnecting(
 
     monkeypatch.setattr(claude, "ClaudeSDKClient", RecordingClient)
     state = ClaudeConversationState(
-        ClaudeSessionOpener(ClaudeSessionConfig(model=CustomModel(id="claude"))), None
+        ClaudeSessionOpener(Claude(model=CustomModel(id="claude"))), None
     )
     binder = ClaudeTurnToolBinder(state)
 
@@ -923,7 +919,7 @@ async def test_claude_submission_server_serves_the_binding_installed_now() -> No
     from mcp import Client
 
     state = ClaudeConversationState(
-        ClaudeSessionOpener(ClaudeSessionConfig(model=CustomModel(id="claude"))), None
+        ClaudeSessionOpener(Claude(model=CustomModel(id="claude"))), None
     )
     binder = ClaudeTurnToolBinder(state)
 
@@ -954,7 +950,7 @@ async def test_codex_binder_refreshes_each_schema_without_replacing_the_thread(
     tmp_path: Path,
 ) -> None:
     state = CodexConversationState(
-        CodexSessionConfig(model=CustomModel(id="gpt"), cwd=tmp_path),
+        Codex(model=CustomModel(id="gpt"), cwd=tmp_path),
         CodexAppServer(Path("codex")),
         None,
     )
@@ -989,7 +985,7 @@ async def test_codex_steer_targets_the_active_turn(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state = CodexConversationState(
-        CodexSessionConfig(model=CustomModel(id="gpt"), cwd=tmp_path),
+        Codex(model=CustomModel(id="gpt"), cwd=tmp_path),
         CodexAppServer(Path("codex")),
         None,
     )
@@ -1066,7 +1062,7 @@ async def test_closing_a_session_settles_the_reader_before_the_transport(
         return clients[-1]
 
     monkeypatch.setattr(claude, "ClaudeSDKClient", track)
-    opener = ClaudeSessionOpener(ClaudeSessionConfig(model=CustomModel(id="claude")))
+    opener = ClaudeSessionOpener(Claude(model=CustomModel(id="claude")))
 
     async with opener.open_session() as handle:
         await handle.session.start(TurnRequest(input=TurnInput(text="hello")))

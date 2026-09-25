@@ -14,12 +14,8 @@ import pytest
 import tomlkit
 from pydantic import BaseModel
 
-from lup.providers.codex.runtime import (
-    CodexSchemaRebindingError,
-    CodexMcpServerConfig,
-    CodexSessionConfig,
-    create_codex,
-)
+from lup.providers.codex import Codex, CodexMcpServerConfig
+from lup.providers.codex.runtime import CodexSchemaRebindingError, create_codex
 from lup.providers.codex.home import CodexWorktreeHomeStore
 from lup.providers.codex.app_server import CodexAppServer
 from lup.sessions.events import SessionId, turn_request
@@ -136,7 +132,7 @@ def endpoint(
 
 def configuration(
     root: Path, endpoint: InertResponses, native_tools: NativeTools = None
-) -> CodexSessionConfig:
+) -> Codex:
     """No credentials, public network endpoints, or user home enter this process."""
     home = root / "home"
     home.mkdir(exist_ok=True)
@@ -160,7 +156,7 @@ def configuration(
         "mcp_servers": {"ambient": {"command": "touch", "args": [str(marker)]}},
     }
     (home / "config.toml").write_text(tomlkit.dumps(config))
-    return CodexSessionConfig(
+    return Codex(
         cwd=root,
         model="gpt-6-astra",
         model_provider="lup_probe",

@@ -11,7 +11,8 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
-from lup.providers.claude.runtime import ClaudeSessionConfig, create_claude
+from lup.providers.claude import Claude
+from lup.providers.claude.runtime import create_claude
 from lup.sessions.events import turn_request
 from lup.sessions.recursion import MAX_RECURSIVE_AGENT_ENV, recursive_agent_allowance
 from lup.tools.mcp import lup_tool
@@ -110,7 +111,7 @@ def endpoint(tmp_path: Path) -> Iterator[InertMessages]:
         endpoint.thread.join()
 
 
-def configuration(root: Path) -> ClaudeSessionConfig:
+def configuration(root: Path) -> Claude:
     home = root / "home"
     home.mkdir()
     marker = root / "ambient-mcp-started"
@@ -119,7 +120,7 @@ def configuration(root: Path) -> ClaudeSessionConfig:
             {"mcpServers": {"ambient": {"command": "touch", "args": [str(marker)]}}}
         )
     )
-    return ClaudeSessionConfig(
+    return Claude(
         cwd=root,
         model="claude-opus-5",
         environment={"CLAUDE_CONFIG_DIR": str(home)},
