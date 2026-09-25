@@ -11,6 +11,7 @@ from policy_data import AUTONOMOUS_AGENT_IDENTITIES
 import csv
 import fcntl
 import os
+import shlex
 from hashlib import sha256
 from datetime import UTC, datetime, timedelta
 
@@ -18,10 +19,9 @@ from datetime import UTC, datetime, timedelta
 import subprocess
 from typing import Literal
 from urllib.parse import urlsplit
-import shlex
 import policy_data as identity_policy
 from kernel.decision import KernelDecision
-from kernel.policy_protocol import read_response, routing_failure
+from kernel.policy_protocol import read_response, routing_failure, unaccepted_policy
 from coordination import store
 from kernel.edit import (
     awaits_resolution,
@@ -229,7 +229,8 @@ def destination_policy_binding(path_text: str, root: Path | None) -> str:
         for name in ("source", "snapshot"):
             if policy_snapshot_digest(Path(row[name])) != row["digest"]:
                 raise ValueError(
-                    f"destination policy {name} changed; refresh its accepted snapshot"
+                    f"destination policy {name} at {row[name]} changed after this "
+                    "launch accepted it"
                 )
         return encoded
     return ""
@@ -329,10 +330,193 @@ def routed_edit_response(
         raise ValueError("destination policy evaluator timed out") from error
 
 
+def ledger_rows(name: str, root: Path | None) -> list[dict]:
+    """One of the launch ledger's row lists, each row decoded.
+
+    Read leniently: a row that does not decode to an object is left out
+    here, and the routing that would have used it refuses over it on its own
+    terms.
+    """
+
+    def decoded(encoded: str) -> dict:
+        """One row, or an empty one where it is not an object."""
+        try:
+            row = json.loads(encoded)
+        except ValueError:
+            return {}
+        return row if isinstance(row, dict) else {}
+
+    boundary = measured_boundary(root)
+    return [
+        row
+        for encoded in (boundary[name] if name in boundary else [])
+        if (row := decoded(encoded))
+    ]
+
+
+def refreshable_checkout(path_text: str, root: Path | None) -> str:
+    """The checkout holding a path, where an operator refresh would reach it.
+
+    ``harness policy-refresh`` accepts a checkout the launch granted by name,
+    and a worktree no grant names wherever the measured boundary holds it
+    writable and it belongs either to the launch checkout's own repository or
+    to one the launch mounted explicitly as a writable bare repository around
+    it. The launch checkout itself is judged by the policy the session loaded
+    and is never refreshed. Anything else answers "", because naming the
+    command there would send an operator to a refusal.
+    """
+    launch = launch_root(root)
+    boundary = measured_boundary(root)
+    owner = worktree_root(str(((root or Path.cwd()) / path_text).resolve()))
+    here = worktree_root(str(launch)) if launch is not None else ""
+    if not boundary or not owner or not here or owner == here:
+        return ""
+    if any(
+        "checkout" in row and row["checkout"] == owner
+        for row in ledger_rows("destination_policies", root)
+    ):
+        return owner
+    repository = shared_git_directory(owner)
+    mounted = any(
+        "repository" in row
+        and row["repository"] == repository
+        and "root" in row
+        and isinstance(row["root"], str)
+        and Path(owner).is_relative_to(row["root"])
+        for row in ledger_rows("destination_authorities", root)
+    )
+    reached = bool(repository) and (mounted or repository == shared_git_directory(here))
+    writable = boundary["writable_roots"] if "writable_roots" in boundary else []
+    held = bool(writable) and not execution_write_refusal(owner, root)
+    return owner if reached and held else ""
+
+
+def policy_refresh_command(checkout: str, root: Path | None) -> str:
+    """The operator's command accepting one checkout's policy for this launch.
+
+    Spelled whole, because whoever runs it stands outside this session and
+    can read neither the launch's nonce nor the checkout it was launched
+    from; ``--directory`` puts the command in that checkout, whose ledger it
+    rewrites, so it runs from anywhere. "" where no launch is named.
+    """
+    nonce = launch_nonce()
+    launch = launch_root(root)
+    if not nonce or launch is None or not checkout:
+        return ""
+    return shlex.join(
+        [
+            "uv",
+            "run",
+            "--directory",
+            str(launch),
+            "lup-devtools",
+            "harness",
+            "policy-refresh",
+            "--nonce",
+            nonce,
+            "--repository",
+            checkout,
+        ]
+    )
+
+
+def policy_refresh_request(path_text: str, root: Path | None) -> str:
+    """The refresh that would put a path's own policy in force, or "".
+
+    Two ways a checkout ends up judged by a policy other than the one it
+    generates. A checkout granted at launch runs the snapshot this launch
+    accepted, and regenerating it moves its source away from that snapshot.
+    A worktree no grant names is judged by the launch checkout's policy,
+    whatever it generates for itself. Neither is settled from inside the
+    session -- a session relaxing the policy it is judged by is exactly what
+    operator acceptance exists to prevent -- so what this answers with is
+    the operator's command, and only where running it would change what
+    judges the path.
+
+    Where the ledger does not say which runtime the launch opened, every
+    runtime's generated tree is compared, so a difference in any of them
+    still counts.
+    """
+    checkout = refreshable_checkout(path_text, root)
+    launch = launch_root(root)
+    if not checkout or launch is None:
+        return ""
+
+    def generated(directory: Path) -> str:
+        """One tree's policy digest, or why it has none, which differs from any."""
+        try:
+            return policy_snapshot_digest(directory)
+        except (OSError, ValueError) as error:
+            return f"unavailable: {error}"
+
+    def accepted(row: dict) -> bool:
+        """Whether a grant's snapshot is still what its checkout generates."""
+        return (
+            "error" in row
+            and not row["error"]
+            and "source" in row
+            and isinstance(row["source"], str)
+            and bool(row["source"])
+            and "digest" in row
+            and generated(Path(row["source"])) == row["digest"]
+        )
+
+    boundary = measured_boundary(root)
+    recorded = boundary["runtime"] if "runtime" in boundary else []
+    runtime = recorded[0] if recorded else "*"
+    granted = [
+        row
+        for row in ledger_rows("destination_policies", root)
+        if "checkout" in row and row["checkout"] == checkout
+    ]
+    here = Path(worktree_root(str(launch)))
+    trees = [
+        evaluator.parents[1].relative_to(checkout)
+        for evaluator in Path(checkout).glob(
+            f".{runtime}/plugins/*/hooks/scripts/policy_evaluator.py"
+        )
+    ]
+    current = (
+        all(accepted(row) for row in granted)
+        if granted
+        else all(
+            generated(Path(checkout) / tree) == generated(here / tree) for tree in trees
+        )
+    )
+    return "" if current else policy_refresh_command(checkout, root)
+
+
 def sandbox_active() -> bool:
     """Whether the launcher confined this session to an OS sandbox."""
     environ = os.environ  # lup: ignore[os-environ]
     return "LUP_SANDBOX_ACTIVE" in environ and environ["LUP_SANDBOX_ACTIVE"] == "1"
+
+
+def launch_nonce() -> str:
+    """Which launch this session belongs to, or "" where none is named.
+
+    ``LUP_BOUNDARY_NONCE`` names it, and it names a ledger file, so only a
+    single file name counts: a value spelling a path would reach a ledger no
+    launch wrote for this session.
+    """
+    environ = os.environ  # lup: ignore[os-environ]
+    nonce = environ["LUP_BOUNDARY_NONCE"] if "LUP_BOUNDARY_NONCE" in environ else ""
+    return nonce if Path(nonce).name == nonce and nonce not in {"", ".", ".."} else ""
+
+
+def launch_root(root: Path | None) -> Path | None:
+    """The checkout the launch that opened this session ran from.
+
+    ``LUP_BOUNDARY_ROOT`` pins it wherever a tool or command runs, and a
+    session no launcher pinned answers from ``root``, its own directory. A pin
+    that is not a canonical absolute path names nothing at all.
+    """
+    environ = os.environ  # lup: ignore[os-environ]
+    if "LUP_BOUNDARY_ROOT" not in environ:
+        return root
+    pinned = Path(environ["LUP_BOUNDARY_ROOT"])
+    canonical = pinned.is_absolute() and str(pinned.resolve()) == str(pinned)
+    return pinned if canonical else None
 
 
 def measured_boundary(
@@ -341,8 +525,8 @@ def measured_boundary(
     """What the launch that opened this session measured about its boundary.
 
     Read back from the ledger that launch wrote, and only from the one it
-    named: ``LUP_BOUNDARY_NONCE`` says which file this session is entitled to
-    believe, and ``LUP_BOUNDARY_ROOT`` pins the launch checkout even when a
+    named: :func:`launch_nonce` says which file this session is entitled to
+    believe, and :func:`launch_root` pins the launch checkout even when a
     tool or preflight command runs elsewhere. A ledger left by some other launch
     is a measurement of some other session, and reading it would be the same
     class of wrong answer as a ledger at a constant path, arrived at from the
@@ -353,13 +537,9 @@ def measured_boundary(
     the honest one. A session whose launcher wrote no ledger gets exactly
     what a session whose boundary failed to stand gets.
     """
-    environ = os.environ  # lup: ignore[os-environ]
-    nonce = environ["LUP_BOUNDARY_NONCE"] if "LUP_BOUNDARY_NONCE" in environ else ""
-    if "LUP_BOUNDARY_ROOT" in environ:
-        root = Path(environ["LUP_BOUNDARY_ROOT"])
-        if not root.is_absolute() or str(root.resolve()) != str(root):
-            return {}
-    if root is None or not nonce or Path(nonce).name != nonce or nonce in {".", ".."}:
+    nonce = launch_nonce()
+    root = launch_root(root)
+    if root is None or not nonce:
         return {}
     try:
         raw = (root / ledger / f"{nonce}.json").read_text()
@@ -3047,7 +3227,15 @@ def edit_decision(
     cwd: Path | None = None,
     agent_identity: str = "",
 ) -> KernelDecision:
-    """Route an edit to its authorized owner while retaining the caller's boundary."""
+    """Route an edit to its authorized owner while retaining the caller's boundary.
+
+    A verdict that would have been reached differently under the policy the
+    checkout generates for itself says so, with the operator's command that
+    puts that policy in force: an owner whose accepted snapshot fell behind
+    its source refuses, and a sibling judged by this launch's policy carries
+    the command beside a refusal or a question. Asked only on those, since
+    comparing policies costs a read of both trees.
+    """
     path = str(((cwd or Path.cwd()) / path_text).resolve())
     try:
         response = routed_edit_response(
@@ -3063,8 +3251,8 @@ def edit_decision(
         if response is not None:
             return read_response(json.loads(response))
     except (OSError, ValueError, KeyError, TypeError) as error:
-        return routing_failure(str(error))
-    return local_edit_decision(
+        return routing_failure(str(error), policy_refresh_request(path, cwd))
+    decision = local_edit_decision(
         path,
         before,
         after,
@@ -3073,6 +3261,9 @@ def edit_decision(
         operation,
         cwd,
     )
+    if decision.effect not in ("ask", "deny"):
+        return decision
+    return unaccepted_policy(decision, policy_refresh_request(path, cwd))
 
 
 def local_edit_decision(

@@ -117,11 +117,20 @@ def create_harness_app(
             str, typer.Option(help="Live launch nonce from its policy diagnostic")
         ],
         repository: Annotated[
-            Path, typer.Option(help="Already granted destination checkout")
+            Path,
+            typer.Option(
+                help="Destination checkout: granted at launch, or a worktree of a repository the launch holds writable"
+            ),
         ],
+        runtime: Annotated[
+            str,
+            typer.Option(
+                help="Runtime the launch opened, for a launch ledger that records none"
+            ),
+        ] = "",
     ) -> None:
         """Accept changed destination policy from an independent operator terminal."""
-        policy_refresh.refresh_command(project_root(), nonce, repository)
+        policy_refresh.refresh_command(project_root(), nonce, repository, runtime)
 
     @app.command("check")
     def check_command(

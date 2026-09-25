@@ -61,11 +61,14 @@ def test_every_launch_replaces_inherited_ledger_ownership(
         agents=[],
     )
 
-    launch.settle_boundary(plugin, sandbox, [], sentinels, environment, Banner())
+    launch.settle_boundary(
+        plugin, sandbox, [], sentinels, environment, Banner(), runtime="claude"
+    )
 
     assert environment[ROOT_VARIABLE] == str(checkout)
     assert environment[NONCE_VARIABLE] == sentinels.nonce
-    assert (checkout / ".lup/preflight" / f"{sentinels.nonce}.json").is_file()
+    ledger = checkout / ".lup/preflight" / f"{sentinels.nonce}.json"
+    assert json.loads(ledger.read_text())["runtime"] == ["claude"]
 
 
 def test_mounting_a_parent_does_not_grant_unrelated_nested_repositories(
@@ -377,6 +380,191 @@ def test_an_operator_can_accept_a_later_worktree_inside_an_explicit_bare_mount(
     ledger.write_text(json.dumps(document))
     with pytest.raises(ValueError, match="No recorded writable repository authority"):
         refresh_destination_policy(caller, sentinels.nonce, protected)
+
+
+def launched_in_own_repository(
+    tmp_path: Path, runtime: str = "codex"
+) -> tuple[Path, Path, LaunchSentinels]:
+    """A launch from one worktree of a bare repository, as `tree/main` opens one.
+
+    Nothing was mounted by name: the lease is the checkout's own, which holds
+    the shared directory writable around every worktree beneath it and its
+    `config` and `hooks/` read-only, and the ledger records no grant.
+    """
+    bare = tmp_path / "project.git"
+    git("init", "-q", "--bare", "-b", "main", str(bare))
+    caller = bare / "tree" / "main"
+    git(
+        "-C",
+        str(bare),
+        "worktree",
+        "add",
+        "-q",
+        "--orphan",
+        "-b",
+        "launch",
+        str(caller),
+    )
+    lease = fleet_lease(caller)
+    sentinels = LaunchSentinels()
+    record_preflight(
+        measured(
+            compile_boundary(
+                HookSet(id="test", policy_ids=[]),
+                contained=True,
+                writable=list(lease.writable),
+            ),
+            [],
+            [],
+        ),
+        sentinels,
+        caller,
+        read_only_roots=list(lease.read_only),
+        runtime=runtime,
+    )
+    return bare, caller, sentinels
+
+
+def test_an_operator_can_accept_a_worktree_the_session_cut_in_its_own_repository(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("LUP_BOUNDARY_NONCE", raising=False)
+    bare, caller, sentinels = launched_in_own_repository(tmp_path)
+    ledger = caller / ".lup/preflight" / f"{sentinels.nonce}.json"
+    assert json.loads(ledger.read_text())["destination_authorities"] == []
+    checkout = bare / "tree" / "feature"
+    git(
+        "-C",
+        str(bare),
+        "worktree",
+        "add",
+        "-q",
+        "--orphan",
+        "-b",
+        "feature",
+        str(checkout),
+    )
+    evaluator(checkout)
+
+    accepted = refresh_destination_policy(caller, sentinels.nonce, checkout)
+
+    assert accepted.checkout == str(checkout)
+    assert accepted.repository == str(bare)
+    assert accepted.runtime == "codex"
+    assert accepted.writable_roots == [str(checkout)]
+    assert accepted.digest == policy_snapshot_digest(Path(accepted.source))
+    assert [
+        json.loads(row)["checkout"]
+        for row in json.loads(ledger.read_text())["destination_policies"]
+    ] == [str(checkout)]
+
+
+def test_the_launch_repository_authority_reaches_no_other_repository_or_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("LUP_BOUNDARY_NONCE", raising=False)
+    bare, caller, sentinels = launched_in_own_repository(tmp_path)
+    unrelated = repository(bare / "tree" / "unrelated")
+    evaluator(unrelated)
+    with pytest.raises(ValueError, match="No recorded writable repository authority"):
+        refresh_destination_policy(caller, sentinels.nonce, unrelated)
+    outside = tmp_path / "outside"
+    git(
+        "-C",
+        str(bare),
+        "worktree",
+        "add",
+        "-q",
+        "--orphan",
+        "-b",
+        "outside",
+        str(outside),
+    )
+    evaluator(outside)
+    with pytest.raises(ValueError, match="No recorded writable repository authority"):
+        refresh_destination_policy(caller, sentinels.nonce, outside)
+    withheld = bare / "tree" / "restricted"
+    protected = withheld / "worktree"
+    git(
+        "-C",
+        str(bare),
+        "worktree",
+        "add",
+        "-q",
+        "--orphan",
+        "-b",
+        "protected",
+        str(protected),
+    )
+    evaluator(protected)
+    ledger = caller / ".lup/preflight" / f"{sentinels.nonce}.json"
+    document = json.loads(ledger.read_text())
+    document["read_only_roots"].append(str(withheld))
+    ledger.write_text(json.dumps(document))
+    with pytest.raises(ValueError, match="No recorded writable repository authority"):
+        refresh_destination_policy(caller, sentinels.nonce, protected)
+    assert json.loads(ledger.read_text())["destination_policies"] == []
+
+
+def test_a_ledger_recording_no_runtime_takes_the_operators_word_for_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("LUP_BOUNDARY_NONCE", raising=False)
+    bare, caller, sentinels = launched_in_own_repository(tmp_path, runtime="")
+    checkout = bare / "tree" / "feature"
+    git(
+        "-C",
+        str(bare),
+        "worktree",
+        "add",
+        "-q",
+        "--orphan",
+        "-b",
+        "feature",
+        str(checkout),
+    )
+    evaluator(checkout, "claude")
+    evaluator(checkout, "codex")
+
+    with pytest.raises(ValueError, match="--runtime claude or --runtime codex"):
+        refresh_destination_policy(caller, sentinels.nonce, checkout)
+    accepted = refresh_destination_policy(caller, sentinels.nonce, checkout, "claude")
+
+    assert accepted.runtime == "claude"
+    assert ".claude" in Path(accepted.source).parts
+    with pytest.raises(ValueError, match="names another runtime"):
+        refresh_destination_policy(caller, sentinels.nonce, checkout, "codex")
+
+
+def test_a_recorded_runtime_outranks_an_operator_naming_another(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("LUP_BOUNDARY_NONCE", raising=False)
+    bare, caller, sentinels = launched_in_own_repository(tmp_path, runtime="codex")
+    checkout = bare / "tree" / "feature"
+    git(
+        "-C",
+        str(bare),
+        "worktree",
+        "add",
+        "-q",
+        "--orphan",
+        "-b",
+        "feature",
+        str(checkout),
+    )
+    evaluator(checkout, "claude")
+    evaluator(checkout, "codex")
+
+    with pytest.raises(ValueError, match="This launch opened codex"):
+        refresh_destination_policy(caller, sentinels.nonce, checkout, "claude")
+    assert (
+        refresh_destination_policy(caller, sentinels.nonce, checkout).runtime == "codex"
+    )
 
 
 def test_submodule_repository_identity_comes_from_git(tmp_path: Path) -> None:

@@ -416,14 +416,33 @@ Rules requiring unavailable resolution retain their conservative review verdict.
 After regenerating a destination policy, an independent operator can accept
 its bytes without restarting the session. From the caller checkout, run
 `uv run lup-devtools harness policy-refresh --nonce <nonce> --repository <checkout>`.
-The same command can accept a newly created worktree only beneath an original
-explicit writable bare-repository mount, with the same Git common directory
-and a writable measured boundary. It never discovers unrelated nested
+The same command can accept a worktree no launch grant named — one the
+session cut after it started — through one of two recorded authorities: an
+original explicit writable bare-repository mount holding it, with the same Git
+common directory, or the launch checkout's own repository, whose shared
+directory every launch leases writable. Under either, the deepest measured
+root over the worktree must be writable, so a sibling under a read-only mount
+or outside every measured root stays refused. The ledger records the runtime
+the launch opened, which selects the evaluator accepted; for a ledger that
+records none, `--runtime` names it. It never discovers unrelated nested
 repositories or extends the launch's filesystem grants. The requester cannot
 run this operator action, and the authority ledger and accepted snapshots are
 protected edit paths. These records prevent accidental inheritance and stale
 policy execution; they are mutable local bookkeeping, not authentication
 against a hostile process with the same filesystem authority.
+
+A verdict reached under a policy the destination does not hold says so, and
+names the command with this launch's real nonce and paths —
+`uv run --directory <launch checkout> lup-devtools harness policy-refresh --nonce <nonce> --repository <checkout>`,
+runnable from any directory. A granted checkout whose generated policy moved
+away from its accepted snapshot is refused with it as the recovery. A worktree
+no grant names — cut in the launch's own repository, or beneath an explicitly
+mounted one — is judged by the launch checkout's policy, so a package renamed
+there makes its own composition roots look like foreign importers; where the
+policy that worktree generates differs, a refusal or a question about its
+files carries the same command, and
+`dev policy` shows it beside the verdict. The command is named only where the
+refresh would accept the checkout and change what judges it.
 
 Edit decisions cover protected paths, marker changes, size, the canonical
 anti-pattern audit, and declared import ownership. An edit over the size gate alone is deferred — the hook

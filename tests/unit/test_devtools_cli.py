@@ -396,6 +396,28 @@ def test_the_unsandboxed_reading_ignores_the_container_around_this_process(
     assert [reading.effect for reading in verdict.readings] == ["allow", "ask"]
 
 
+def test_dev_policy_prints_the_recovery_a_session_would_be_handed() -> None:
+    """The way round is part of the answer, not only the verdict and its reason.
+
+    A refusal reaches a session as its reason and its recovery together, and
+    some routes out -- an operator's command, spelled with the launch's own
+    nonce -- are named nowhere else. A preview that drops them answers a
+    different question than the one the session will be put.
+    """
+    command = "uv run lup-devtools harness policy-refresh --nonce launch --repository /elsewhere"
+    shown = runner.invoke(app, ["dev", "policy", command])
+    listed = runner.invoke(app, ["dev", "policy", "--json", command])
+
+    assert (
+        "recovery The operator must refresh from a terminal outside the agent session."
+        in shown.output
+    )
+    assert all(
+        "The operator must refresh" in reading["recovery"]
+        for reading in json.loads(listed.stdout)[0]["readings"]
+    )
+
+
 def test_either_boundary_stays_askable_for_explicitly() -> None:
     """The flag still narrows to one placement, and the environment still cannot.
 

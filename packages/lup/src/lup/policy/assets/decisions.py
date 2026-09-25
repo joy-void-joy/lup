@@ -45,6 +45,7 @@ from host import (
     outside_this_project,
     patch_write_targets,
     peer_store,
+    policy_refresh_request,
     close_claim_window,
     declared_identity,
     open_claim_window,
@@ -62,7 +63,7 @@ from host import (
     worktree_path,
 )
 from kernel.decision import KernelDecision
-from kernel.policy_protocol import read_response, routing_failure
+from kernel.policy_protocol import read_response, routing_failure, unaccepted_policy
 from coordination import store
 from kernel.edit import (
     awaits_resolution,
@@ -664,7 +665,15 @@ def edit_decision(
     cwd: Path | None = None,
     agent_identity: str = "",
 ) -> KernelDecision:
-    """Route an edit to its authorized owner while retaining the caller's boundary."""
+    """Route an edit to its authorized owner while retaining the caller's boundary.
+
+    A verdict that would have been reached differently under the policy the
+    checkout generates for itself says so, with the operator's command that
+    puts that policy in force: an owner whose accepted snapshot fell behind
+    its source refuses, and a sibling judged by this launch's policy carries
+    the command beside a refusal or a question. Asked only on those, since
+    comparing policies costs a read of both trees.
+    """
     path = str(((cwd or Path.cwd()) / path_text).resolve())
     try:
         response = routed_edit_response(
@@ -680,8 +689,8 @@ def edit_decision(
         if response is not None:
             return read_response(json.loads(response))
     except (OSError, ValueError, KeyError, TypeError) as error:
-        return routing_failure(str(error))
-    return local_edit_decision(
+        return routing_failure(str(error), policy_refresh_request(path, cwd))
+    decision = local_edit_decision(
         path,
         before,
         after,
@@ -690,6 +699,9 @@ def edit_decision(
         operation,
         cwd,
     )
+    if decision.effect not in ("ask", "deny"):
+        return decision
+    return unaccepted_policy(decision, policy_refresh_request(path, cwd))
 
 
 def local_edit_decision(

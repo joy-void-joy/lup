@@ -91,6 +91,7 @@ def record_preflight(
     destination_policies: Sequence[DestinationPolicy] = (),
     read_only_roots: Sequence[Path] = (),
     destination_authorities: Sequence[RepositoryPolicyAuthority] = (),
+    runtime: str = "",
 ) -> Path:
     """Write what this launch measured, in the shape a bare script can read.
 
@@ -112,6 +113,11 @@ def record_preflight(
     because nothing else remembers the profile, sandbox, and flags that opened
     it. Defaulted from the process argv, which is the invocation, rather than
     a reconstruction that would drift from it.
+
+    ``runtime`` is the native CLI this launch opened, which is what selects a
+    destination's generated evaluator when an operator later accepts a
+    worktree no grant named at launch: that tree is one per runtime, and the
+    invocation spells the runtime only in the CLI's own grammar.
     """
     boundary = preflight.boundary
     written = ledger_path(root, sentinels.nonce)
@@ -136,6 +142,7 @@ def record_preflight(
                     row.model_dump_json() for row in destination_authorities
                 ],
                 "launch": list(launch if launch is not None else sys.argv[1:]),
+                "runtime": [runtime] if runtime else [],
             },
             indent=2,
         )

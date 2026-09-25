@@ -170,14 +170,47 @@ def read_decision(value: WireValue | DecisionWire) -> KernelDecision:
     )
 
 
-def routing_failure(reason: str) -> KernelDecision:
-    """An unavailable owner is a refusal, never an origin-policy fallback."""
+def routing_failure(reason: str, refresh: str = "") -> KernelDecision:
+    """An unavailable owner is a refusal, never an origin-policy fallback.
+
+    ``refresh`` is the operator's command where accepting the owner's
+    regenerated policy is what settles the refusal, spelled whole so the
+    agent can hand it over: the operator runs it outside the session, where
+    neither the launch's nonce nor its checkout can be looked up.
+    """
     return KernelDecision(
         "deny",
         f"Destination policy unavailable: {reason}",
         hard=True,
         rule="edit:destination-policy",
-        recovery="Regenerate the destination harness and ask the operator to refresh its accepted policy snapshot.",
+        recovery=(
+            "Regenerate the destination harness if it is behind its source, then "
+            "ask the operator to accept its policy from a terminal outside this "
+            f"session: `{refresh}`"
+            if refresh
+            else "Regenerate the destination harness and ask the operator to refresh its accepted policy snapshot."
+        ),
+    )
+
+
+def unaccepted_policy(decision: KernelDecision, refresh: str) -> KernelDecision:
+    """A verdict the launch's policy reached about a checkout generating another.
+
+    A worktree no grant names is judged by the policy the session launched
+    with, whatever it generates for itself: accepting another policy is an
+    operator's act, never the session's. A refusal reached that way reads
+    exactly like one the checkout's own policy reached -- a composition root
+    renamed there is a foreign import here -- so it says whose policy judged,
+    and hands over the command that would change that. Only a question or a
+    refusal says so; an allowance has nothing to recover from.
+    """
+    if not refresh or decision.effect not in ("ask", "deny"):
+        return decision
+    return decision.advising(
+        "This edit was judged by the policy this session launched with, not by "
+        "the one the checkout holding it generates, which differs. For that "
+        "checkout's own policy to judge its edits, ask the operator to run, "
+        f"from a terminal outside this session: `{refresh}`"
     )
 
 

@@ -73,8 +73,10 @@ From the adopter checkout, the operator runs:
 uv run lup-devtools harness policy-refresh --nonce <launch-nonce> --repository <canonical-worktree-path>
 ```
 
-This accepts only a worktree inside the original mount and belonging to that
-same Git repository. It is also the recovery after accepted generated policy
+The edit gate spells this line whole, with this launch's nonce, whenever it
+refuses an edit there under a policy the worktree does not generate; hand it
+to the operator as written. This accepts only a worktree inside the original
+mount and belonging to that same Git repository. It is also the recovery after accepted generated policy
 changes: regenerate there, then have the operator refresh its snapshot. The
 requesting agent cannot approve replacement policy itself. A worktree outside
 the original mount needs a launch granting that path. Run the upstream gate
