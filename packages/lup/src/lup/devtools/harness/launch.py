@@ -45,6 +45,7 @@ from lup.providers.codex.model_choice import (
     refuse_unsupported_effort as refuse_codex_effort,
 )
 from lup.providers.codex.subagents import CodexModelTiers
+from lup.providers.codex.theme import codex_theme_arguments
 from lup.providers.claude.harness import ClaudeSpellings
 from lup.providers.claude.transcripts import ClaudeTranscripts
 from lup.providers.codex.confinement import CODEX_CONFINEMENT
@@ -1963,9 +1964,13 @@ def launch_claude(
                     if sandbox is LaunchSandbox.INNER
                     else []
                 ),
-                settings=(
-                    compiled_effort.settings if compiled_effort is not None else None
-                ),
+                # The theme travels in the one settings document the CLI
+                # reads, so every launch draws the person's, on a home this
+                # launch made as on one they signed in to long ago.
+                settings={
+                    **(compiled_effort.settings if compiled_effort is not None else {}),
+                    "theme": personal.theme.claude,
+                },
             ),
             # What this runtime shows in its own chrome, made to agree with
             # the name the roster answers to: the same minted name is
@@ -2227,6 +2232,10 @@ def launch_codex(
         arguments.extend(["--model", selected_model])
     if chosen_effort is not None:
         arguments.extend(codex_effort_arguments(chosen_effort))
+    # Only over a home lup made, which is where lup's own theme is installed;
+    # a home the operator brought draws whatever they chose in it.
+    if home.isolated or sandbox.contained():
+        arguments.extend(codex_theme_arguments(personal.theme.codex))
     arguments.extend(mode.command_words("codex") if mode is not None else [])
     arguments.extend(extra_args)
     environment["CODEX_HOME"] = str(selected_home)

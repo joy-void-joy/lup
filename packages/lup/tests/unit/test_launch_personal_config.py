@@ -193,3 +193,42 @@ def test_a_config_lup_cannot_read_refuses_the_launch_naming_it(
     with pytest.raises(typer.BadParameter, match=str(config.path())):
         claude(config)
     assert launched.arguments == []
+
+
+def test_claude_draws_the_persons_theme_lups_by_default(
+    config: UserConfigFile, launched: Launched
+) -> None:
+    claude(config)
+    assert launched.settings["theme"] == "dark-daltonized"
+
+    writes(config, '[theme]\nclaude = "light-ansi"\n')
+    claude(config, model="opus", effort="max")
+
+    assert launched.settings["theme"] == "light-ansi"
+    assert launched.settings.get("ultracode") is None
+
+
+def test_codex_draws_the_persons_theme_over_a_home_lup_made(
+    config: UserConfigFile,
+    launched: Launched,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        launch,
+        "select_codex_home",
+        lambda *args: Mock(path=tmp_path / "home", isolated=True),
+    )
+    writes(config, '[theme]\ncodex = "dracula"\n')
+
+    launch.launch_codex(composition(), [], None, None, None, False, False)
+
+    assert 'tui.theme="dracula"' in launched.arguments
+
+
+def test_codex_leaves_a_home_the_operator_brought_its_own_theme(
+    config: UserConfigFile, launched: Launched
+) -> None:
+    launch.launch_codex(composition(), [], None, None, None, False, False)
+
+    assert not any(argument.startswith("tui.theme=") for argument in launched.arguments)
