@@ -75,6 +75,7 @@ from lup.sandbox.rail import (
     working_trees,
 )
 
+# lup: ignore[library-default] — a mirror of the directories lup's own modules write under a shared git directory, named from those modules; no adopter chooses it
 SHARED_STATE = (STORE_DIR, SLOT_DIRECTORY, ARCHIVE_DIRECTORY_NAME)
 """The directories lup keeps under a shared git directory, each made before a lease.
 
