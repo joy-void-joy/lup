@@ -2066,13 +2066,17 @@ def launch_codex(
     # Refused before anything is generated or checkpointed: the API refuses an
     # effort the model lacks with a 400 that names neither. Unnamed, it is the
     # model's default, the one a session declared in code takes, rather than
-    # whatever the home's configuration says.
+    # whatever the home's configuration says — except under a named profile
+    # with no model named over it, which chose its model and effort together.
     listed = None if selected_model is None else listed_codex_model(selected_model)
+    profiled = profile is not None and selected_model is None
     try:
         chosen_effort = (
-            codex_default_effort(listed, CodexModelTiers())
-            if effort is None
-            else codex_effort_named(effort)
+            codex_effort_named(effort)
+            if effort is not None
+            else None
+            if profiled
+            else codex_default_effort(listed, CodexModelTiers())
         )
         refuse_codex_effort(listed, chosen_effort, CodexModelTiers())
     except ValueError as refusal:

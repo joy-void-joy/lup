@@ -631,7 +631,8 @@ def create_harness_app(
                     "--effort",
                     help="Reasoning effort: low, medium, high, xhigh, max, or "
                     "ultra; refused where the model's catalog row lacks it. "
-                    "Default: xhigh, or the row's highest rung below it",
+                    "Default: xhigh, or the row's highest rung below it; a "
+                    "--profile with no --model keeps the profile's own",
                 ),
             ] = None,
             generate_only: Annotated[
