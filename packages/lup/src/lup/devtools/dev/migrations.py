@@ -246,6 +246,25 @@ DECLARED: list[Migration] = [
             ),
         ],
     ),
+    Migration(
+        subjects=["GitIdentity.configuration"],
+        reason=(
+            "a contained commit's author travels as GIT_AUTHOR_* and "
+            "GIT_COMMITTER_* variables, which git ranks above every "
+            "configuration source, rather than as user.* keys in "
+            "GIT_CONFIG_COUNT that a -c or an include could override"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Call GitIdentity.environment() from lup.harness.credential "
+                    "and merge the variables it returns into the container "
+                    "environment, as GitAccess.environment does; nothing reads "
+                    "user.name or user.email from the settings any more."
+                )
+            ),
+        ],
+    ),
 ]
 """Every break this library has taken since its last release, and what to do.
 
