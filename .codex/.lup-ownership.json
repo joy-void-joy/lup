@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "3c53a0e3d74013743e9a97b261146ee6a00c9d9898c7791f9c463d592a778d8f",
+  "source_digest": "be8b94e409e570384da55c661bdfa49c09ff363dfb9d57988687f2063661676a",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -366,35 +366,35 @@
     {
       "path": ".codex/plugins/lup/hooks/scripts/carrier_drift.sh",
       "category": "generated",
-      "sha256": "8f61e7d2a5ac48af9c8cde61a9945c9c3c7e22f9211f47b5dd5bf797f94c1153",
+      "sha256": "bb99c5c3c88da8aef83223a4d8ceddd736234bed61a07e01fc94c9247104ccdc",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
     {
       "path": ".codex/plugins/lup/hooks/scripts/coordination_arrival.sh",
       "category": "generated",
-      "sha256": "7fa4d0cd3b41415e25474df3c77da5408aeae1310cac7a3c27334c832f1eb77f",
+      "sha256": "038004b6c530230e6ba6c875669147fd7b31330d5ef91fa6da2db0fd3f645512",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
     {
       "path": ".codex/plugins/lup/hooks/scripts/coordination_changes.sh",
       "category": "generated",
-      "sha256": "695c975d6c41e3e8f61295d93d8fa3b80ebb30e96957c4e3ddd26fdd28cf14f2",
+      "sha256": "bdd1e504f728e2a2a9e75d0126e41453152c43140bd8f94f912f57f36a20841e",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
     {
       "path": ".codex/plugins/lup/hooks/scripts/coordination_delivery.sh",
       "category": "generated",
-      "sha256": "f1278dab1c57c2f15ff642c1365053abbc408f36af22d821f0add58ecabc702a",
+      "sha256": "f47a4d4f4d62658398d40795c9b265847eb3cb491b1b66388d88075835eb8de6",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
     {
       "path": ".codex/plugins/lup/hooks/scripts/coordination_departure.sh",
       "category": "generated",
-      "sha256": "f724c426a5eda511f1b9d7474ca7a51cbfe8ecbcafb79a22f3087988b9886e82",
+      "sha256": "72c825bfbcf6fd010dda9c54004a025d66e1d28d7413bf6aedd4633e52eb5ce2",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
@@ -408,7 +408,7 @@
     {
       "path": ".codex/plugins/lup/hooks/scripts/policy.sh",
       "category": "generated",
-      "sha256": "d1cfb6d3ed4c2f2054933374c2e4f784ac238f8522e132dd5adad7df02b43dfc",
+      "sha256": "e7bf46a46ae36b69cfe4d4719fd18f07ea9ea1e546aff704fccbcc756ef95aa0",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
@@ -422,7 +422,7 @@
     {
       "path": ".codex/plugins/lup/hooks/scripts/subagent_cleanup.sh",
       "category": "generated",
-      "sha256": "cc2684263b5024c9fb01c06365730c840310a7ff4f2aee0bcde09dd53c6da0d8",
+      "sha256": "c4fd6e736f7a8750bcfa30dff96541219f1cba6f21369d7640ead8e8a4c98895",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
