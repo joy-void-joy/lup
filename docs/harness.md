@@ -229,8 +229,8 @@ owns the subject, then regenerate.
 
 Declining one subject must not strand another's words, so every reach from one
 module into another is declared as one of two things. A **step** the module
-cannot do without — `/lup:update` resolving its merge through `/lup:merge`,
-git-workflow's skills running `dev check` — is a `requires` on the module's
+cannot do without — the update skill resolving its merge through the merge
+skill, git-workflow's skills running `dev check` — is a `requires` on the module's
 spec: taking the module without the one it names is refused before anything
 builds, in the words of the modules decided on. A **pointer** the module reads
 fine without — a suggestion, an aside naming where more lives — goes inside

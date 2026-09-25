@@ -38,6 +38,7 @@ from lup.harness.models import (
     Artifact,
     ArtifactTree,
     CapabilityReport,
+    RENDERED_INVOCATION,
     Document,
     Harness,
     InvocationHolder,
@@ -123,6 +124,22 @@ class ProjectContent(BaseModel, frozen=True):
         )
         if refused:
             raise ValueError(refusal_of(refused))
+        spelled = [
+            f"page {document.semantic_id!r} spells {found.group()!r} in "
+            f"{part.authored_in}"
+            for document in self.documents
+            for part in document.document.walked()
+            if part.authored_in is not None
+            for found in RENDERED_INVOCATION.finditer(part.text_payload or "")
+        ]
+        if spelled:
+            # A spelled invocation is one no check can see: it names a skill in
+            # one runtime's sigil, and stays when the module shipping it goes.
+            listed = "".join(f"\n  {line}" for line in spelled)
+            raise ValueError(
+                f"{len(spelled)} page passage(s) spell an invocation as text:"
+                f"{listed}\nPlace a SkillInvocation value in the passage instead."
+            )
         return self
 
 

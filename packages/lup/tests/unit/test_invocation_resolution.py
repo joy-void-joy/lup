@@ -214,3 +214,54 @@ def test_installer_guidance_reads_as_the_plugin_it_installs_ships() -> None:
             prompts=claude_prompt_renderer(),
             source=shipped,
         )
+
+
+def test_a_page_passage_spelling_an_invocation_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Spelled as text, an invocation escapes the check that would catch it.
+
+    It names a skill in one runtime's sigil and stays in the page when the
+    module shipping the skill is declined, so a page places a SkillInvocation
+    value instead — which is what this passage does, and why it passes, while
+    the same words spelled literally do not.
+    """
+    placed = models.Document(
+        path=Path("docs/worked.md"),
+        semantic_id="docs.worked",
+        source="worked_example/docs/worked.py",
+        document=models.PromptDocument(
+            source=__name__,
+            parts=[
+                models.Passage(
+                    module=PASSAGE,
+                    name="resolve-pass",
+                    values={"resolve_skill": gone("resolve")},
+                )
+            ],
+        ),
+    )
+    (tmp_path / "spelled_page_example.py").write_text("")
+    (tmp_path / "spelled_page_example.passage.md").write_text(
+        "Resolve a conflict with `/lup:merge`.\n"
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    shipped = harness([skill("resolve")])
+
+    assert ProjectContent(harness=shipped, documents=[placed]).documents == [placed]
+    with pytest.raises(ValidationError, match="spell an invocation as text"):
+        ProjectContent(
+            harness=shipped,
+            documents=[
+                placed.model_copy(
+                    update={
+                        "document": models.PromptDocument(
+                            source=__name__,
+                            parts=[
+                                models.Passage(module="spelled_page_example", values={})
+                            ],
+                        )
+                    }
+                )
+            ],
+        )

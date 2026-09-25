@@ -28,6 +28,7 @@ def document(
                 module=__name__,
                 values={
                     "setup": models.TextPart(text=setup),
+                    "land_skill": models.SkillInvocation(plugin="lup", skill="land"),
                     "project_directory": models.code(layout.directory()),
                     "harness_content_directory": models.code(
                         layout.directory("harness", "content")

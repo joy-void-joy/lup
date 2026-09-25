@@ -19,7 +19,7 @@ Three commands, because they answer different questions, and which one you owe
 depends on what you are about to do. `dev check` puts both test suites, pyright
 and ruff on the machine at once and costs whichever of them finishes last — a
 couple of minutes — and it is **the bar for landing**: run it on the integrated
-result before work reaches the integration branch, which is what `/lup:land`
+result before work reaches the integration branch, which is what `{{ land_skill }}`
 does and the only moment the whole answer means anything. The gate reports what
 each of its checks cost, so a run that felt slow can be read rather than
 guessed at.
