@@ -94,8 +94,23 @@ class SessionHomes:
         """Create or refresh the home that one workspace's sessions open."""
         home = self.root(workspace) / self.name_for(workspace)
         home.mkdir(parents=True, exist_ok=True)
+        self.unlink_private(home)
         self.link_shared(home)
         return home
+
+    def unlink_private(self, home: Path) -> None:
+        """Drop every link one derived home holds where an entry must be its own.
+
+        A private entry is the derived home's own file or nothing. A link in
+        its place hands every session opened through the home the shared file
+        itself — the one the layout names private because sessions racing on
+        it corrupt it — so a derivation refreshes the home toward the layout it
+        is derived under rather than trusting what an earlier one left there.
+        """
+        for name in self.layout.private_files:
+            entry = home / name
+            if entry.is_symlink():
+                entry.unlink(missing_ok=True)
 
     def link_shared(self, home: Path) -> None:
         """Point every shareable entry of one derived home at the shared one.

@@ -25,7 +25,7 @@ from lup.providers.claude.config_home import (
     workspace_config_environment,
 )
 from lup.providers.claude.login import CLAUDE_CONFIG_DIR
-from lup.providers.session_home import SessionHomes
+from lup.providers.session_home import SessionHomeLayout, SessionHomes
 
 SEEDED_PROJECT = "/already/trusted"
 
@@ -142,6 +142,26 @@ def test_an_entry_made_later_reaches_a_home_derived_before_it(tmp_path: Path) ->
     (homes.shared / "session-env").mkdir()
 
     assert (homes.derive(workspace) / "session-env").is_symlink()
+
+
+def test_a_home_holds_no_link_where_its_layout_names_a_private_entry(
+    tmp_path: Path,
+) -> None:
+    """A private entry is the home's own file or nothing, whatever linked it.
+
+    One home, derived under a layout sharing everything and then under one
+    naming an entry private: a derivation refreshes the home toward the layout
+    it is derived under rather than trusting it to match already."""
+    shared = shared_home(tmp_path)
+    workspace = tmp_path / "lease-a"
+    SessionHomes(shared, SessionHomeLayout()).derive(workspace)
+
+    private = SessionHomeLayout(private_files=["settings.json"])
+    derived = SessionHomes(shared, private).derive(workspace)
+
+    assert not (derived / "settings.json").is_symlink()
+    assert not (derived / "settings.json").exists()
+    assert (derived / ".credentials.json").is_symlink()
 
 
 def test_two_leases_sharing_a_basename_do_not_share_a_home(tmp_path: Path) -> None:
