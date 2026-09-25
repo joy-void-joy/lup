@@ -88,8 +88,7 @@ so the consequence is a command: `dev relocate old.module=new.module`
 repoints every import and reports the mentions it left.
 
 `tmp/` is scratch: gitignored, so nothing written there reaches a diff, a
-reviewer, or a human — which is why it does not execute. One-off work takes
-the first of these that fits:
+reviewer, or a human. One-off work takes the first of these that fits:
 
 1. To read code rather than run it: `py info`, `py source`, `py search`, `py text`,
    `py imports`, and the codeintel tools. Resolve names with `py search` or
