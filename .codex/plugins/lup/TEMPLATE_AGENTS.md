@@ -566,11 +566,13 @@ Run `uv run lup-devtools --help` for the full command tree.
 
 `lup-devtools harness codex` regenerates and verifies the Codex artifacts,
 installs an immutable content-addressed copy of the plugin after a digest check, and
-launches the Codex CLI in a persistent per-worktree home seeded from personal
-Codex authentication and settings.
+launches the Codex CLI in a persistent per-worktree home derived, at every
+launch, from the selected account's authentication and settings — the account
+home of the profile `~/.config/lup/config.toml` selects, else `~/.codex` — and
+returns what a session changed in them to that account when it closes.
 `lup-devtools dev usage codex` reports this backend's usage and
-`lup-devtools dev usage claude` the other's; profiles are managed with
-`lup-devtools setup profile`.
+`lup-devtools dev usage claude` the other's; profiles, one name per account on
+both runtimes, are managed with `lup-devtools setup profile`.
 `--codex-home` or an inherited `CODEX_HOME` selects an explicit home instead.
 
 Each repo names its plugin **marketplace** after the project — the plugin entry stays `lup`, so `$lup:*` is identical everywhere. Codex resolves the marketplace from the repository's `.agents/plugins/marketplace.json` and installs the plugin into its own cache, verifying the digest before every launch; `lup-devtools dev plugin name` (run by `$lup:init` and `$lup:install`) wires the per-project name.

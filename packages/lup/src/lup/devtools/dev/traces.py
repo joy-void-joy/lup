@@ -13,15 +13,13 @@ exact outcome being guarded against.
 
 Everything under that directory is copied, the harness journal mirror included.
 The mirror reads as a derived artifact whose source is safe -- it mirrors what a
-native CLI writes under its own configuration home -- and that holds only where
-the home is the operator's own. A project profile is kept at ``.lup/profiles/``
-inside the checkout, so a launch on one leaves both the mirror and the record it
-mirrors within the worktree, and the deletion takes the pair.
+native CLI writes under its own configuration home -- and that holds because
+the home is outside the checkout: the operator's own, or a profile kept beside
+their lup config, so the record a mirror copies survives the deletion.
 
-The profile home itself is not archived. It belongs to whichever checkout
-exported it rather than to the branch being deleted -- one home commonly serves
-sessions run from several worktrees -- and it holds the account's credentials
-beside its transcripts.
+The profile home itself is not archived. It belongs to the person rather than
+to the branch being deleted -- one home serves sessions run from every checkout
+-- and it holds the account's credentials beside its transcripts.
 
 The archive sits beside the repository's common directory rather than inside a
 worktree, for the reason the whole module exists: an archive kept inside a

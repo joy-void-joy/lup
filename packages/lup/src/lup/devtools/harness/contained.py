@@ -106,6 +106,14 @@ def checkout_tag(root: Path) -> str:
     return f"lup-agent:{root.name}"
 
 
+# lup: defer: a contained session's config home is one volume per repository,
+# so a first launch in a new repository opens its container on a fresh
+# document. The account, theme, tier and effort now arrive from the person's
+# lup config, but every other preference Claude Code keeps in its home —
+# editor mode, user settings.json, keybindings, user memory — starts over in
+# each repository's volume. Decide whether those travel from the selected
+# account's home into the volume at launch, or the volume is kept per person
+# rather than per repository, which shares a written hook across projects.
 def state_volume_name(root: Path, scope: NativeHomeScope | None = None) -> str:
     """The volume carrying this project's container-side config home.
 
@@ -1629,11 +1637,12 @@ def contained_argv(
 
     It is emphatically not derived from the home this launch runs under, and
     that is the distinction the parameter exists to hold. Under ``--profile``
-    the launch's home is `.lup/profiles/<name>/`, derived from a name no
-    editor has ever heard of, so bridging it bound a directory nothing writes
-    into: the editor connection never happened and nothing said why. Measured
-    on a `--profile test` session, whose container had an empty
-    `.lup/profiles/test/claude-config/ide` mounted at its configuration home.
+    the launch's home is the profile's, `profiles/<name>/claude-config` in the
+    person's lup config home, derived from a name no editor has ever heard of,
+    so bridging it bound a directory nothing writes into: the editor
+    connection never happened and nothing said why. Measured on a `--profile
+    test` session, whose container had the profile's empty `ide` directory
+    mounted at its configuration home.
     The lockfile is a rendezvous point rather than profile state -- a port and
     a token for one editor window, holding no account and no credential -- so
     which account a session runs under and which editor it talks to are
