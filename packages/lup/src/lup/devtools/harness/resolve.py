@@ -1600,7 +1600,6 @@ def run_resolve(
         from lup.providers.codex.install import install_codex_plugin
 
         from lup.providers.codex.home import CodexWorktreeHomeStore, select_codex_home
-        from lup.providers.codex.login import CODEX_LOGIN
         from lup.providers.profile_tree import user_profile_directory
 
         def codex_policy_environment(target: str, environment: EnvVars) -> EnvVars:
