@@ -9,12 +9,16 @@ import pytest
 
 from lup.providers.claude.config_home import (
     CLAUDE_BACKUP_DIR,
-    CLAUDE_CONFIG_FILE,
+    CLAUDE_HOME_DOCUMENT,
     CLAUDE_HOME_LAYOUT,
+    CLAUDE_LEGACY_DOCUMENT,
+    CLAUDE_OAUTH_DOCUMENT,
+    CLAUDE_OAUTH_URL_ENV,
     CLAUDE_SESSION_ENV,
     ClaudeConfigHome,
     ClaudeConfigUnreadable,
     load_document,
+    project_entries,
     record_trust,
     restorable_backups,
     restoration_advice,
@@ -26,25 +30,39 @@ from lup.providers.claude.config_home import (
 )
 from lup.providers.claude.login import CLAUDE_CONFIG_DIR
 from lup.providers.session_home import SessionHomeLayout, SessionHomes
+from lup.types import EnvVars
 
 SEEDED_PROJECT = "/already/trusted"
+SEEDED_THEME = "dark-daltonized"
 
 
-def shared_home(root: Path) -> Path:
-    """A configuration home holding what a real profile carries."""
+def shared_home(root: Path, document: str = CLAUDE_HOME_DOCUMENT) -> Path:
+    """A configuration home holding what a real profile carries.
+
+    Its document is under the current name by default, which is what Claude
+    Code writes into a named home that never held a legacy one."""
     home = root / "profile"
     (home / "plugins").mkdir(parents=True)
     (home / "settings.json").write_text('{"model": "opus"}', encoding="utf-8")
     (home / ".credentials.json").write_text('{"token": "shared"}', encoding="utf-8")
     save_document(
-        home / CLAUDE_CONFIG_FILE,
-        {"projects": {SEEDED_PROJECT: {"hasTrustDialogAccepted": True}}},
+        home / document,
+        {
+            "theme": SEEDED_THEME,
+            "projects": {SEEDED_PROJECT: {"hasTrustDialogAccepted": True}},
+        },
     )
     return home
 
 
 def homes_under(root: Path) -> SessionHomes:
     return SessionHomes(shared_home(root), CLAUDE_HOME_LAYOUT)
+
+
+def session_document(environment: EnvVars, workspace: Path) -> Path:
+    """The document a session of that workspace reads, as Claude Code finds it."""
+    derived = workspace_config_environment(environment, workspace)
+    return selected_config_home({**environment, **derived}).document
 
 
 def test_a_derived_home_shares_everything_but_the_document(tmp_path: Path) -> None:
@@ -54,7 +72,22 @@ def test_a_derived_home_shares_everything_but_the_document(tmp_path: Path) -> No
     assert (derived / "settings.json").is_symlink()
     assert (derived / "plugins").is_symlink()
     assert (derived / ".credentials.json").is_symlink()
-    assert not (derived / CLAUDE_CONFIG_FILE).exists()
+    assert not (derived / CLAUDE_HOME_DOCUMENT).exists()
+
+
+@pytest.mark.parametrize(
+    "document", [CLAUDE_LEGACY_DOCUMENT, CLAUDE_HOME_DOCUMENT, CLAUDE_OAUTH_DOCUMENT]
+)
+def test_no_name_claude_reads_its_document_under_is_linked(
+    tmp_path: Path, document: str
+) -> None:
+    """A linked document is the shared one, whichever name it is read under."""
+    home = shared_home(tmp_path, document)
+
+    derived = SessionHomes(home, CLAUDE_HOME_LAYOUT).derive(tmp_path / "lease-a")
+
+    assert not (derived / document).exists()
+    assert not (derived / document).is_symlink()
 
 
 def test_a_derived_home_lives_in_the_checkout_and_still_reads_the_account(
@@ -186,10 +219,9 @@ def test_a_worker_phase_of_twenty_eight_corrupts_no_document(tmp_path: Path) -> 
     leases = [tmp_path / "leases" / f"concern-{number}" for number in range(28)]
 
     def open_session(workspace: Path) -> Path:
-        environment = workspace_config_environment(
-            {CLAUDE_CONFIG_DIR: str(home)}, workspace, trust=True
-        )
-        document = Path(environment[CLAUDE_CONFIG_DIR]) / CLAUDE_CONFIG_FILE
+        environment = {CLAUDE_CONFIG_DIR: str(home)}
+        derived = workspace_config_environment(environment, workspace, trust=True)
+        document = selected_config_home({**environment, **derived}).document
         for version in range(20):
             content = load_document(document)
             content["migrationVersion"] = version
@@ -209,19 +241,18 @@ def test_a_worker_phase_of_twenty_eight_corrupts_no_document(tmp_path: Path) -> 
 def test_trust_is_recorded_for_the_lease_and_not_the_operator(tmp_path: Path) -> None:
     """The exception to project-level-only settings stays this narrow."""
     home = shared_home(tmp_path)
-    before = (home / CLAUDE_CONFIG_FILE).read_bytes()
+    before = (home / CLAUDE_HOME_DOCUMENT).read_bytes()
     lease = tmp_path / "lease"
     source = tmp_path / "source"
 
     def document_for(workspace: Path, trust: bool) -> Path:
-        environment = workspace_config_environment(
-            {CLAUDE_CONFIG_DIR: str(home)}, workspace, trust=trust
-        )
-        return Path(environment[CLAUDE_CONFIG_DIR]) / CLAUDE_CONFIG_FILE
+        environment = {CLAUDE_CONFIG_DIR: str(home)}
+        derived = workspace_config_environment(environment, workspace, trust=trust)
+        return selected_config_home({**environment, **derived}).document
 
     assert trusts(load_document(document_for(lease, True)), lease)
     assert not trusts(load_document(document_for(source, False)), source)
-    assert (home / CLAUDE_CONFIG_FILE).read_bytes() == before
+    assert (home / CLAUDE_HOME_DOCUMENT).read_bytes() == before
 
 
 def test_an_unnamed_home_reads_the_document_beside_it(
@@ -237,10 +268,144 @@ def test_an_unnamed_home_reads_the_document_beside_it(
 
 
 def test_a_named_home_reads_the_document_inside_it(tmp_path: Path) -> None:
+    """Named, the same name sits inside the home rather than beside it."""
     selected = selected_config_home({CLAUDE_CONFIG_DIR: str(tmp_path / "account")})
 
     assert selected.directory == tmp_path / "account"
-    assert selected.document == tmp_path / "account" / CLAUDE_CONFIG_FILE
+    assert selected.document == tmp_path / "account" / ".claude.json"
+
+
+@pytest.mark.parametrize("named", [True, False])
+def test_a_legacy_document_is_read_wherever_one_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, named: bool
+) -> None:
+    """Existence alone decides it, ahead of a current document beside it."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    home = tmp_path / "account" if named else tmp_path / ".claude"
+    environment = {CLAUDE_CONFIG_DIR: str(home)} if named else {}
+    save_document((home if named else tmp_path) / ".claude.json", {"theme": "light"})
+    save_document(home / ".config.json", {})
+
+    assert selected_config_home(environment).document == home / ".config.json"
+
+
+def test_a_custom_oauth_server_reads_a_document_of_its_own(tmp_path: Path) -> None:
+    """The variable selecting the server renames the document, in one place."""
+    save_document(tmp_path / ".claude.json", {"theme": "light"})
+    environment = {
+        CLAUDE_CONFIG_DIR: str(tmp_path),
+        CLAUDE_OAUTH_URL_ENV: "https://claude.fedstart.com",
+    }
+
+    document = selected_config_home(environment).document
+
+    assert document == tmp_path / ".claude-custom-oauth.json"
+
+
+def test_a_derived_home_carries_the_document_its_account_reads(
+    tmp_path: Path,
+) -> None:
+    """An account holding only the current document seeds the derived one.
+
+    Seeded from a legacy name the account never held, a derived home starts
+    from an empty document — no trusted project, no theme, no onboarding —
+    and Claude reads that emptiness rather than anything beside it."""
+    home = shared_home(tmp_path)
+    workspace = tmp_path / "lease"
+
+    document = session_document({CLAUDE_CONFIG_DIR: str(home)}, workspace)
+
+    assert document.name == ".claude.json"
+    assert workspace in document.parents
+    assert not document.is_symlink()
+    assert load_document(document) == load_document(home / CLAUDE_HOME_DOCUMENT)
+
+
+def test_a_derived_home_under_no_named_home_carries_the_one_beside_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With nothing named, the account's document is ``~/.claude.json``."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / ".claude").mkdir()
+    save_document(tmp_path / ".claude.json", {"theme": SEEDED_THEME})
+    workspace = tmp_path / "lease"
+
+    document = session_document({}, workspace)
+
+    assert document.name == ".claude.json"
+    assert workspace in document.parents
+    assert load_document(document)["theme"] == SEEDED_THEME
+
+
+def test_a_derived_home_keeps_a_legacy_seed_under_the_current_name(
+    tmp_path: Path,
+) -> None:
+    """An account read from a legacy document seeds from that one instead."""
+    home = shared_home(tmp_path, CLAUDE_LEGACY_DOCUMENT)
+    save_document(home / CLAUDE_HOME_DOCUMENT, {"theme": "light"})
+    workspace = tmp_path / "lease"
+
+    document = session_document({CLAUDE_CONFIG_DIR: str(home)}, workspace)
+
+    assert document.name == ".claude.json"
+    assert load_document(document)["theme"] == SEEDED_THEME
+    assert not (document.parent / ".config.json").exists()
+
+
+def test_a_derived_home_keeps_a_custom_oauth_document_of_its_own(
+    tmp_path: Path,
+) -> None:
+    """Under a custom OAuth server the seed and the copy both take its name."""
+    home = shared_home(tmp_path, CLAUDE_OAUTH_DOCUMENT)
+    environment = {
+        CLAUDE_CONFIG_DIR: str(home),
+        CLAUDE_OAUTH_URL_ENV: "https://claude.fedstart.com",
+    }
+
+    document = session_document(environment, tmp_path / "lease")
+
+    assert document.name == ".claude-custom-oauth.json"
+    assert not document.is_symlink()
+    assert load_document(document)["theme"] == SEEDED_THEME
+
+
+def test_an_empty_legacy_document_in_a_derived_home_stops_shadowing(
+    tmp_path: Path,
+) -> None:
+    """A derived home is lup's, so whatever it holds is brought to the layout.
+
+    The home here reads nothing but an empty legacy document, seeded from an
+    account that never had one, while its current name links to the account's
+    own — which Claude writes through, so the link would share the one file
+    every session was given a home to stop sharing. Derived again, it holds
+    neither: a document of its own under the current name, seeded from the
+    account's."""
+    home = shared_home(tmp_path)
+    workspace = tmp_path / "lease"
+    earlier = SessionHomeLayout(private_files=[CLAUDE_LEGACY_DOCUMENT])
+    derived = SessionHomes(home, earlier).derive(workspace)
+    save_document(derived / CLAUDE_LEGACY_DOCUMENT, {})
+    assert (derived / CLAUDE_HOME_DOCUMENT).is_symlink()
+
+    document = session_document({CLAUDE_CONFIG_DIR: str(home)}, workspace)
+
+    assert document == derived / ".claude.json"
+    assert not (derived / ".config.json").exists()
+    assert not document.is_symlink()
+    assert load_document(document)["theme"] == SEEDED_THEME
+
+
+def test_trust_is_recorded_in_the_document_a_session_reads(tmp_path: Path) -> None:
+    """Trust written anywhere else is trust no session ever sees."""
+    home = shared_home(tmp_path)
+    workspace = tmp_path / "lease"
+    environment = {CLAUDE_CONFIG_DIR: str(home)}
+
+    derived = workspace_config_environment(environment, workspace, trust=True)
+
+    read = selected_config_home({**environment, **derived}).document
+    assert trusts(load_document(read), workspace)
+    assert SEEDED_PROJECT in project_entries(load_document(read))
 
 
 def test_an_untrusted_workspace_names_what_it_is_dropping(tmp_path: Path) -> None:
@@ -253,7 +418,7 @@ def test_an_untrusted_workspace_names_what_it_is_dropping(tmp_path: Path) -> Non
         ),
         encoding="utf-8",
     )
-    document = tmp_path / CLAUDE_CONFIG_FILE
+    document = tmp_path / CLAUDE_HOME_DOCUMENT
     save_document(document, {})
 
     message = untrusted_degradation(workspace, document)
@@ -265,7 +430,7 @@ def test_an_untrusted_workspace_names_what_it_is_dropping(tmp_path: Path) -> Non
 
 
 def test_a_workspace_declaring_nothing_loses_nothing(tmp_path: Path) -> None:
-    document = tmp_path / CLAUDE_CONFIG_FILE
+    document = tmp_path / CLAUDE_HOME_DOCUMENT
     save_document(document, {})
 
     assert untrusted_degradation(tmp_path / "repo", document) is None
@@ -273,7 +438,7 @@ def test_a_workspace_declaring_nothing_loses_nothing(tmp_path: Path) -> None:
 
 def test_a_truncated_document_is_refused_rather_than_emptied(tmp_path: Path) -> None:
     """``Unexpected EOF`` must not read as a profile trusting nothing."""
-    document = tmp_path / CLAUDE_CONFIG_FILE
+    document = tmp_path / CLAUDE_HOME_DOCUMENT
     document.write_text('{"projects": {', encoding="utf-8")
 
     with pytest.raises(ClaudeConfigUnreadable):
@@ -281,7 +446,7 @@ def test_a_truncated_document_is_refused_rather_than_emptied(tmp_path: Path) -> 
 
 
 def test_an_absent_document_is_not_an_error(tmp_path: Path) -> None:
-    assert load_document(tmp_path / CLAUDE_CONFIG_FILE) == {}
+    assert load_document(tmp_path / CLAUDE_HOME_DOCUMENT) == {}
 
 
 def test_a_document_behind_a_permission_reads_as_unreadable(tmp_path: Path) -> None:
@@ -292,7 +457,7 @@ def test_a_document_behind_a_permission_reads_as_unreadable(tmp_path: Path) -> N
     `PermissionError` took out the fault report written to say a run cannot
     open a session anywhere — it crashed instead of saying so.
     """
-    document = tmp_path / CLAUDE_CONFIG_FILE
+    document = tmp_path / CLAUDE_HOME_DOCUMENT
     document.write_text('{"projects": {}}', encoding="utf-8")
     document.chmod(0o000)
 
@@ -307,7 +472,7 @@ def test_a_document_behind_a_permission_reads_as_unreadable(tmp_path: Path) -> N
 
 def backup(home: Path, name: str, content: str) -> Path:
     """One file where Claude Code copies a document it could not read."""
-    written = home / CLAUDE_BACKUP_DIR / f"{CLAUDE_CONFIG_FILE}.backup.{name}"
+    written = home / CLAUDE_BACKUP_DIR / f"{CLAUDE_HOME_DOCUMENT}.backup.{name}"
     written.parent.mkdir(parents=True, exist_ok=True)
     written.write_text(content, encoding="utf-8")
     return written
@@ -374,7 +539,7 @@ def test_a_home_that_cannot_keep_a_session_environment_says_which_boundary(
     path from a granted one.
     """
     home = ClaudeConfigHome(
-        directory=tmp_path / "home", document=tmp_path / "home" / CLAUDE_CONFIG_FILE
+        directory=tmp_path / "home", document=tmp_path / "home" / CLAUDE_HOME_DOCUMENT
     )
     assert home.shell_fault() is None
 

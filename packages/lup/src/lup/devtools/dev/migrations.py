@@ -155,6 +155,26 @@ DECLARED: list[Migration] = [
             ),
         ],
     ),
+    Migration(
+        subjects=["CLAUDE_CONFIG_FILE"],
+        reason=(
+            "Claude Code reads `.config.json` only as a legacy document, ahead "
+            "of `.claude.json` wherever one exists, so the constant naming it as "
+            "the configuration document sent every reader to a file most homes "
+            "do not hold, and every derived home it seeded began empty"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Read the document a session uses from "
+                    "selected_config_home(environment).document in "
+                    "lup.providers.claude.config_home, which resolves it by Claude "
+                    "Code's own rule, and name CLAUDE_LEGACY_DOCUMENT where only "
+                    "the legacy file is meant."
+                )
+            ),
+        ],
+    ),
 ]
 """Every break this library has taken since its last release, and what to do.
 
