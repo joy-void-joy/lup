@@ -5,14 +5,21 @@ refusal, which is what generation does with an answer of no. The corpus scan
 between them reads a checkout and is exercised by the gate that runs it.
 """
 
-import typer
+from pathlib import Path
+
 import pytest
+import sh
+import typer
 
 from lup.devtools.dev.commands import CommandSurface
 from lup.devtools.dev.documented import (
     WrittenCommand,
     refuse_unresolved_commands,
+    unjudged_roots,
+    written_commands,
 )
+from lup.devtools.project import DevProject
+from lup.harness.coverage import ContentRoot, ModuleCoverage
 from lup.harness.models import CommandInvocation
 
 
@@ -150,3 +157,86 @@ def test_a_declared_invocation_spells_the_executable_once() -> None:
     assert CommandInvocation(path=["dev", "check"]).spelled() == (
         "uv run lup-devtools dev check"
     )
+
+
+def checkout_writing(work: Path, written: dict[str, str]) -> None:
+    """A committed repository holding each file with its text."""
+    git = sh.Command("git").bake(
+        "-C",
+        str(work),
+        "-c",
+        "commit.gpgsign=false",
+        "-c",
+        "user.email=documented@example.test",
+        "-c",
+        "user.name=Documented Test",
+        _tty_out=False,
+    )
+    work.mkdir(parents=True)
+    git("init", "-b", "main")
+    for name, text in written.items():
+        (work / name).parent.mkdir(parents=True, exist_ok=True)
+        (work / name).write_text(text, encoding="utf-8")
+    git("add", "--all")
+    git("commit", "-m", "base")
+
+
+def project_declaring(directory: str) -> DevProject:
+    """A project whose one content-declaration tree is ``directory``."""
+    return DevProject(
+        package="worked_example",
+        coverage=ModuleCoverage(
+            roots=[ContentRoot(directory=Path(directory), package="worked_example")]
+        ),
+    )
+
+
+def test_prose_is_judged_where_it_renders_and_nowhere_it_does_not(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A declined module's own prose names its own commands, and blocks nothing.
+
+    Its declaration tree is compiled into the generated trees, which are read in
+    full — so a module the project took is judged there, once, and a module it
+    declined renders nowhere. A vendored library is lup's code, judged in lup;
+    only the checkout that authors it, the scaffold, reads it here.
+    """
+    stray = "Run `uv run lup-devtools resolve start` to begin.\n"
+    checkout_writing(
+        tmp_path / "adopter",
+        {
+            "pyproject.toml": "[project]\nname = 'adopter'\n",
+            "src/adopter/harness/content/skills/resolve.passage.md": stray,
+            "packages/lup/src/lup/devtools/resolve/app.py": f'"""{stray}"""\n',
+            ".claude/plugins/lup/skills/land/SKILL.md": stray,
+            "src/adopter/devtools/main.py": f'"""{stray}"""\n',
+        },
+    )
+    monkeypatch.chdir(tmp_path / "adopter")
+    unjudged = unjudged_roots(
+        project_declaring("src/adopter/harness/content"), tmp_path / "adopter"
+    )
+
+    judged = sorted(mention.file for mention in written_commands(unjudged))
+
+    assert unjudged == ["src/adopter/harness/content/", "packages/lup/"]
+    assert judged == [
+        ".claude/plugins/lup/skills/land/SKILL.md",
+        "src/adopter/devtools/main.py",
+    ]
+
+
+def test_the_scaffold_reads_the_library_it_authors(tmp_path: Path) -> None:
+    """While the template flag stands, `packages/lup/` is this checkout's own code."""
+    checkout_writing(
+        tmp_path / "scaffold",
+        {
+            "pyproject.toml": "[project]\nname = 'scaffold'\n\n[tool.lup]\ntemplate = true\n"
+        },
+    )
+
+    unjudged = unjudged_roots(
+        project_declaring("packages/lup/src/lup/harness/content"), tmp_path / "scaffold"
+    )
+
+    assert unjudged == ["packages/lup/src/lup/harness/content/"]

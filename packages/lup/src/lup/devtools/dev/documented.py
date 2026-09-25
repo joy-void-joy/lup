@@ -27,11 +27,14 @@ answers.
 import re
 from pathlib import Path
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 from pydantic import BaseModel
 
+from lup.devtools.dev.library import VENDORED_ROOT
 from lup.devtools.dev.tracked import tracked_files
+from lup.devtools.project import DevProject
+from lup.workspace.paths import is_template_scaffold
 
 # lup: ignore[re-call] — see the module note: recognizing the toolchain's name
 # in prose, not parsing a structured format
@@ -76,13 +79,32 @@ class WrittenCommand(BaseModel, frozen=True):
         ]
 
 
-def written_commands() -> list[WrittenCommand]:
+def unjudged_roots(project: DevProject, root: Path) -> list[str]:
+    """The trees whose written commands are answered elsewhere, as path prefixes.
+
+    Two kinds, each judged where it reaches a reader rather than where it is
+    written. A content-declaration tree is prose compiled into the generated
+    trees, which the sweep reads in full: a module this project took is
+    judged there against the CLI that serves it, and a module it declined
+    renders nowhere, so its own prose naming its own commands is no reader's
+    instruction and no blocker. A vendored library is another repository's
+    code, written against a CLI serving every module it ships and judged in
+    the repository that authors it — so it is read only while this checkout
+    is that repository, which is what the template flag says.
+    """
+    declared = [f"{entry.directory.as_posix()}/" for entry in project.coverage.roots]
+    vendored = [] if is_template_scaffold(root) else [f"{VENDORED_ROOT}/"]
+    return [*declared, *vendored]
+
+
+def written_commands(unjudged: Sequence[str] = ()) -> list[WrittenCommand]:
     """Every `uv run lup-devtools` mention in the tracked Python and Markdown.
 
-    Generated trees are read too. A wrong command reaches a session through
-    the rendered skill rather than through the module that declared it, and
-    one mention rendered into both is a defect reported twice — the cheaper
-    mistake than trusting a generated tree because it was generated.
+    Generated trees are read in full, since they are what reaches a session:
+    a wrong command arrives through the rendered skill rather than through
+    the module that declared it. The declaration trees behind them, and a
+    library this checkout only vendors, are ``unjudged`` —
+    :func:`unjudged_roots` says why each is judged elsewhere.
 
     A test tree is not read. What a fixture spells is an input to a gate
     rather than an instruction to a reader: `dev worktree create feature` is
@@ -106,12 +128,14 @@ def written_commands() -> list[WrittenCommand]:
     return [
         mention
         for file in tracked_files(suffixes=(".py", ".md"))
-        if "tests/" not in file
+        if "tests/" not in file and not file.startswith(tuple(unjudged))
         for mention in mentions(file)
     ]
 
 
-def unresolved(admits: Callable[[list[str]], bool]) -> list[WrittenCommand]:
+def unresolved(
+    admits: Callable[[list[str]], bool], unjudged: Sequence[str] = ()
+) -> list[WrittenCommand]:
     """Every written mention naming no command the composed CLI serves.
 
     Takes the question rather than the surface that answers it —
@@ -126,12 +150,14 @@ def unresolved(admits: Callable[[list[str]], bool]) -> list[WrittenCommand]:
     """
     return [
         mention
-        for mention in written_commands()
+        for mention in written_commands(unjudged)
         if (words := mention.command_words()) and not admits(words)
     ]
 
 
-def refuse_unresolved_commands(admits: Callable[[list[str]], bool]) -> None:
+def refuse_unresolved_commands(
+    admits: Callable[[list[str]], bool], unjudged: Sequence[str] = ()
+) -> None:
     """Raise unless every written command names one the CLI serves.
 
     What generation does with the sweep's answer. A gate reports and leaves
@@ -139,7 +165,7 @@ def refuse_unresolved_commands(admits: Callable[[list[str]], bool]) -> None:
     runs while a document is being made, and a document telling its reader to
     run something that does not exist is not finished.
     """
-    written = unresolved(admits)
+    written = unresolved(admits, unjudged)
     if written:
         named = "\n  ".join(mention.named() for mention in written)
         raise ValueError(
