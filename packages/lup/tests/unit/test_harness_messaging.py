@@ -19,7 +19,7 @@ import pytest
 
 from lup.coordination.wake import WakePath, wake
 from lup.harness.image import Image
-from lup.harness.messaging import SessionInboxes
+from lup.harness.messaging import SessionInboxes, cleared
 
 # The four directories Claude Code will scan for peers, as its own binary
 # spells them. Written out rather than imported because they are the runtime's
@@ -272,3 +272,34 @@ def test_a_nudge_reaches_the_member_of_its_own_repository(tmp_path: Path) -> Non
 
     assert roused.reached, roused.reason
     assert frame["message"]["content"] == "look at your inbox"
+
+
+def test_a_socket_whose_session_is_gone_is_cleared(tmp_path: Path) -> None:
+    """A crashed session leaves its socket file behind, bound by nobody.
+
+    The next session placed there would meet it, so it is removed before the
+    launch names the path -- which is only safe because nothing answers on it.
+    """
+    address = tmp_path / "gone.sock"
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as crashed:
+        crashed.bind(str(address))
+
+    assert address.is_socket()
+    assert cleared(address)
+    assert not address.exists()
+
+
+def test_a_socket_a_session_listens_on_is_left_to_it(tmp_path: Path) -> None:
+    """Removing a live inbox would cut its session off from every nudge, silently."""
+    address = tmp_path / "live.sock"
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as live:
+        live.bind(str(address))
+        live.listen(1)
+
+        assert not cleared(address)
+        assert address.is_socket()
+
+
+def test_a_path_nothing_is_at_is_clear(tmp_path: Path) -> None:
+    """The ordinary case: the first session to be placed there."""
+    assert cleared(tmp_path / "fresh.sock")

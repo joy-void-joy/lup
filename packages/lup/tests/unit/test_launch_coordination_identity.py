@@ -13,14 +13,22 @@ launch-time name flag loses nothing: the roster answers to the same name on
 both, and renaming goes through the same command.
 """
 
+import socket
 from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
+import typer
 
 import lup.devtools.harness.launch as launch
-from lup.coordination.identity import MEMBER_ENV, NAME_ENV, mint_member_id
+from lup.coordination.identity import (
+    MEMBER_ENV,
+    NAME_ENV,
+    LaunchedMember,
+    mint_member_id,
+)
 from lup.coordination.repository import RepositoryPeers
+from lup.coordination.wake import WakePath
 from lup.harness.messaging import SessionInboxes
 
 
@@ -213,3 +221,49 @@ def launched(
     monkeypatch.setattr(sh, "Command", lambda _name: lambda *args, **kwargs: None)
 
     launch.launch_claude(composition(), extra, profiles, None, None, False)
+
+
+def test_a_live_inbox_is_refused_by_name_rather_than_by_the_runtime(
+    tmp_path: Path,
+) -> None:
+    """The runtime's own refusal tells the reader to remove a live session's socket.
+
+    Measured, from a session launched while another held the path it was
+    given. lup asks first, and answers with the session the roster says is
+    woken there -- which is who an operator ends, rather than the file that
+    would cut it off if they removed it.
+    """
+    inboxes = SessionInboxes(directory=str(tmp_path / "in"))
+    inboxes.serve()
+    minted = LaunchedMember(member_id=mint_member_id(), cli_name="main")
+    inbox = inboxes.socket(tmp_path, "main")
+    RepositoryPeers(tmp_path).join(
+        mint_member_id(),
+        tmp_path,
+        cli_name="main",
+        wake=WakePath(runtime="claude", handle=inbox),
+    )
+
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as holder:
+        holder.bind(inbox)
+        holder.listen(1)
+        with pytest.raises(typer.BadParameter) as refused:
+            launch.placed_inbox(inboxes, tmp_path, minted)
+
+    assert str(refused.value).startswith(f"main is listening at {inbox}")
+
+
+def test_a_stale_inbox_is_cleared_and_placed(tmp_path: Path) -> None:
+    """A crashed session's socket file is nobody's, so the launch takes the path."""
+    inboxes = SessionInboxes(directory=str(tmp_path / "in"))
+    inboxes.serve()
+    inbox = inboxes.socket(tmp_path, "main")
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as crashed:
+        crashed.bind(inbox)
+
+    placed = launch.placed_inbox(
+        inboxes, tmp_path, LaunchedMember(member_id=mint_member_id(), cli_name="main")
+    )
+
+    assert placed == inbox
+    assert not Path(inbox).exists()

@@ -62,10 +62,10 @@ from lup.providers.codex.marketplace import CodexMarketplace
 from lup.providers.codex.profile import CodexProfileSettings
 from lup.providers.codex.transcripts import CodexTranscripts
 from lup.coordination.identity import MEMBER_ENV, NAME_ENV, LaunchedMember
-from lup.coordination.repository import launched_member
+from lup.coordination.repository import RepositoryPeers, launched_member
 from lup.harness.environment import non_interactive_environment
 from lup.harness.image import detected_client
-from lup.harness.messaging import SessionInboxes
+from lup.harness.messaging import SessionInboxes, cleared
 from lup.workspace.edition import shared_git_directory
 from lup.harness.models import HookSet, NativeName, Plugin, Resumption
 from lup.policy.boundary import BoundaryPreflight
@@ -1910,10 +1910,23 @@ def placed_inbox(
     and neither can reach the other. A directory that could not be made
     answers nothing, which is a peer that waits for its mail rather than a
     launch that fails.
+
+    Refused where something already listens there, before the runtime can say
+    so itself: its own refusal tells the reader to remove a socket that
+    belongs to a live session. This one names the session, off the roster.
     """
     if inboxes.serve() is None:
         return None
-    return inboxes.socket(shared_git_directory(root), member.cli_name)
+    inbox = inboxes.socket(shared_git_directory(root), member.cli_name)
+    if cleared(Path(inbox)):
+        return inbox
+    holders = RepositoryPeers(root).woken_through(inbox)
+    raise typer.BadParameter(
+        f"{', '.join(holders) or 'a process on no roster of this repository'} "
+        f"is listening at {inbox}, the inbox this session would bind. lup "
+        "leaves a live inbox alone rather than cut that session off from its "
+        "nudges: end it, or let it finish, and launch again"
+    )
 
 
 def launch_claude(

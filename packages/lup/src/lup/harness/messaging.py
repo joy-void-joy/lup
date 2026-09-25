@@ -44,8 +44,10 @@ its own and drops on a mismatch -- so a frame that reached the wrong session is
 refused by it rather than delivered.
 """
 
+import errno
 import hashlib
 import logging
+import socket
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -177,3 +179,24 @@ class SessionInboxes(BaseModel, frozen=True):
                 urgency="boundary",
             )
         ]
+
+
+def cleared(address: Path, patience: float = 1.0) -> bool:
+    """Whether a session can bind *address*, removing a socket nobody answers on.
+
+    Asked before a launch names the path, because the runtime refuses a live
+    socket with a message that tells the reader to remove it -- which, for a
+    session still running, would cut it off from every nudge while it went on
+    reporting nothing wrong. So a listener is found by connecting, and left:
+    the answer is ``False`` and the launcher says who holds it. A socket file
+    whose process has gone refuses the connection, and is removed, since
+    nothing reads it and the next session to bind there would otherwise meet
+    it. A connection opened and closed with no frame written is no message,
+    so the probe costs a live session nothing.
+    """
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
+        probe.settimeout(patience)
+        answered = probe.connect_ex(str(address))
+    if answered == errno.ECONNREFUSED and address.is_socket():
+        address.unlink(missing_ok=True)
+    return answered in (errno.ECONNREFUSED, errno.ENOENT)
