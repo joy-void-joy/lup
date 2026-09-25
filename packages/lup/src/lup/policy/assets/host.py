@@ -135,11 +135,18 @@ def policy_data_literals(path: Path, text: str | None = None) -> dict:
     def assigned(statement: ast.stmt) -> dict:
         """One statement as the constants it assigns, or a refusal naming it."""
         match statement:
-            case (
-                ast.Expr(value=ast.Constant(value=str()))
-                | ast.ImportFrom(module="kernel.rows", level=0)
+            case ast.Expr(value=ast.Constant(value=str())):
+                return {}
+            case ast.ImportFrom(module="kernel.rows", level=0, names=names) if all(
+                alias.asname is None for alias in names
             ):
                 return {}
+            case ast.ImportFrom(module="kernel.rows", level=0):
+                raise ValueError(
+                    f"{path}:{statement.lineno} imports a row type under another "
+                    "name, which generation never writes: the name it binds could "
+                    "stand for a constant this reading would not see"
+                )
             case ast.Assign(targets=[ast.Name(id=name)], value=value):
                 pass
             case ast.AnnAssign(
@@ -161,11 +168,25 @@ def policy_data_literals(path: Path, text: str | None = None) -> dict:
                 "a literal, which would run when the policy is imported"
             ) from error
 
-    return {
+    imported = {
+        alias.name
+        for statement in tree.body
+        if isinstance(statement, ast.ImportFrom)
+        for alias in statement.names
+    }
+    constants = {
         name: value
         for statement in tree.body
         for name, value in assigned(statement).items()
     }
+    shadowed = sorted(imported & set(constants))
+    if shadowed:
+        raise ValueError(
+            f"{path} both imports and assigns {', '.join(shadowed)}, which "
+            "generation never writes: which of the two a name holds depends on "
+            "the order the module runs, not on anything this reading shows"
+        )
+    return constants
 
 
 def execution_write_refusal(path_text: str, root: Path | None) -> str:

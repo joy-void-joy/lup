@@ -1102,6 +1102,10 @@ def test_what_is_accepted_is_exactly_what_was_shown(
         ("import os\n", "is a statement generation never writes"),
         ("LIMIT: print('ran') = 3\n", "is a statement generation never writes"),
         ("LIMIT = len('ran')\n", "assigns LIMIT something other than a literal"),
+        (
+            "from kernel.rows import PathRuleRow as LIMIT\n",
+            "imports a row type under another name",
+        ),
     ],
 )
 def test_a_policy_holding_more_than_data_is_refused_before_it_is_shown(
@@ -1118,6 +1122,29 @@ def test_a_policy_holding_more_than_data_is_refused_before_it_is_shown(
     approve = Mock(return_value=True)
 
     with pytest.raises(ValueError, match=rf"policy_data\.py:\d+ {refusal}"):
+        refresh_destination_policy(caller, sentinels.nonce, feature, approve)
+
+    assert not approve.called
+
+
+def test_a_name_both_imported_and_assigned_is_refused(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Which of the two a name holds is decided by run order, which no reading shows."""
+    monkeypatch.delenv("LUP_BOUNDARY_NONCE", raising=False)
+    bare, caller, sentinels = launched_in_own_repository(tmp_path)
+    feature = cut(bare, bare / "tree" / "feature", "feature")
+    evaluator(
+        feature,
+        "codex",
+        policy_data([], []) + "from kernel.rows import MAXIMUM_ADDED_LINES\n",
+    )
+    approve = Mock(return_value=True)
+
+    with pytest.raises(
+        ValueError, match="both imports and assigns MAXIMUM_ADDED_LINES"
+    ):
         refresh_destination_policy(caller, sentinels.nonce, feature, approve)
 
     assert not approve.called
