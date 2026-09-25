@@ -73,7 +73,7 @@ consumer would otherwise reach past a missing surface to reach.
 is the previous section seen from the consumer's side: `ModelMatcher` is the
 engine, `ExactModelMatcher` and `PrefixModelMatcher` fill it, and nobody
 outside the router calls `matches`. Callers hold the router and ask
-`resolve`. `Client` (`packages/lup/src/lup/client.py`) is the
+`resolve`. `Client` (`packages/lup/src/lup/sessions/client.py`) is the
 same arrangement one level up — a plain class parametrized by a single
 `SessionOpener`, which adapters, wrappers, and tests each supply differently.
 The engine there is a callable rather than an ABC, which is the point: what

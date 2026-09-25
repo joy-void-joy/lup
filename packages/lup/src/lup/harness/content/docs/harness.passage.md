@@ -365,8 +365,8 @@ uv run lup-devtools harness check all
 ```
 
 Inspect `hooks/runtime/policy_data.py` in both generated trees. The rows should
-change while `hooks/runtime/kernel.py` stays identical: configuration is
-generated data, policy control flow is one copied module.
+change while `hooks/runtime/kernel/` stays identical: configuration is
+generated data, policy control flow is one copied package.
 
 ### Change the shell classification
 
