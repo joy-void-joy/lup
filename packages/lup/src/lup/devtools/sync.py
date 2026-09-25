@@ -846,11 +846,14 @@ def missing_checkout(proj: ProjectEntry) -> MissingCheckout:
             )
 
 
-def owed_here(proj: ProjectEntry) -> bool:
-    """Whether this checkout owes a required registration a repository at all.
+def exemption(proj: ProjectEntry) -> str:
+    """Why this checkout owes a registration no repository, empty where it owes one.
 
-    Two requirements are not this checkout's to meet, and both are the same
-    shape: the registration names something this repository already is.
+    Two registrations are not this checkout's to answer, and both are the
+    same shape: the registration names something this repository already is.
+    Neither is fetched, mounted, located or reported missing, and `sync
+    status` says which one it is where the row would otherwise read as
+    something to act on.
 
     One names it outright — a project registered at the URL this checkout's
     own origin points at, which is what a repository tracking itself looks
@@ -859,22 +862,30 @@ def owed_here(proj: ProjectEntry) -> bool:
     tracking its parent is still owed one, because a fork is a different
     repository.
 
-    The other is a committed requirement read inside the template scaffold.
-    `sync.json` there is the file an adopting project receives, and the
-    scaffold is the upstream of every registration it ships: the requirement
-    is the adopter's to answer, and the tree that wrote it has nothing to
-    clone. A requirement in the machine's own local file is that machine's
-    and is owed here like any other.
+    The other is a committed requirement read inside the template scaffold,
+    which ``[tool.lup] template = true`` marks. `sync.json` there is the file
+    an adopting project receives, and the scaffold is the upstream of every
+    registration it ships: the requirement is the adopter's to answer, and
+    the tree that wrote it has nothing to clone -- whichever account it was
+    forked into. A requirement in the machine's own local file is that
+    machine's and is owed here like any other.
     """
     declared = registered_repository(proj)
     own = remote_url(project_root(), "origin")
     if declared and own and same_repository(declared, own):
-        return False
+        return "this checkout is that repository"
     tracked = load_json(sync_file()).get("projects", [])
     shipped = any(
         entry["name"] == proj["name"] and entry.get("required") for entry in tracked
     )
-    return not (shipped and is_template_scaffold(project_root()))
+    if shipped and is_template_scaffold(project_root()):
+        return "shipped by this scaffold for the projects built on it"
+    return ""
+
+
+def owed_here(proj: ProjectEntry) -> bool:
+    """Whether this checkout owes a registration a repository at all."""
+    return not exemption(proj)
 
 
 class LocatedProject(BaseModel, frozen=True):
@@ -1414,10 +1425,17 @@ def status_cmd() -> None:
         """
         return p["mount"] if "mount" in p else "—"
 
+    # Asked once per registration and read twice: a registration this
+    # checkout owes no repository is neither located nor tabled as missing,
+    # and its row says why rather than offering a fetch nobody should run.
+    exempt = {p["name"]: exemption(p) for p in projects}
+
     def project_row(p: ProjectEntry, resolved: Upstream | None) -> list[str]:
         synced = p.get("last_synced_commit", "")
         synced_short = short_sha(synced) if synced else "never"
 
+        if exempt[p["name"]]:
+            return [p["name"], "—", "—", reach(p), exempt[p["name"]]]
         if p.get("ignore"):
             where = f"{resolved.checkout}" if resolved is not None else "(skipped)"
             return [p["name"], "—", "ignored", reach(p), where]
@@ -1450,8 +1468,11 @@ def status_cmd() -> None:
         below reads the answer -- unless the project declared it needs the
         repository present or reachable, which `ignore` says nothing about:
         being the upstream of this repository is a reason not to read its
-        commits back and no reason at all to be out of reach.
+        commits back and no reason at all to be out of reach. One this
+        checkout owes nothing is never located: nothing below reads it.
         """
+        if exempt[p["name"]]:
+            return False
         return not p.get("ignore") or bool(p.get("required")) or "mount" in p
 
     # Located once and read twice: the table says where each project is, and
@@ -1500,13 +1521,20 @@ def fetch_cmd(
     This is where a fresh checkout materializes what the project declared it
     requires, including a registration whose *review* is ignored: `ignore`
     says the commits are not read back, and a project that needs the
-    repository present needs it whether or not anybody reviews it.
+    repository present needs it whether or not anybody reviews it. What the
+    sweep leaves out is a registration this checkout owes nothing -- the
+    scaffold's own lup entry, read inside the scaffold -- which would
+    otherwise clone a second copy of the tree the command runs in.
     """
     projects = load_projects()
     targets = (
         [find_project(project)]
         if project
-        else [p for p in projects if not p.get("ignore") or p.get("required")]
+        else [
+            p
+            for p in projects
+            if (not p.get("ignore") or p.get("required")) and owed_here(p)
+        ]
     )
     failed = False
     for p in targets:
