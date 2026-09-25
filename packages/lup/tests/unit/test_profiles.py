@@ -204,6 +204,24 @@ def test_forgetting_a_directory_profile_says_to_remove_the_directory(
         tree.remove("work")
 
 
+def test_forgetting_the_selected_directory_profile_names_its_selection_too(
+    tree: ProfileDirectory, tmp_path: Path
+) -> None:
+    """Removed alone, the directory leaves launches refused for a ghost."""
+    tree.add("work")
+    tree.add("personal")
+
+    with pytest.raises(ValueError) as selected:
+        tree.remove("work")
+    with pytest.raises(ValueError) as unselected:
+        tree.remove("personal")
+
+    assert f"and {tmp_path / 'profiles' / '.active'}, which selects it" in str(
+        selected.value
+    )
+    assert ".active" not in str(unselected.value)
+
+
 def test_a_selection_whose_directory_is_gone_reports_the_roster(
     tree: ProfileDirectory, folders: ProfileFolders
 ) -> None:

@@ -21,6 +21,7 @@ CLAUDE_LOGIN = ProviderLogin(
         " and .claudeAiOauth.refreshTokenExpiresAt > (now * 1000)"
     ),
     ambient_home=Path.home() / ".claude",
+    ambient_home_nameable=False,
     editor_lockfiles="ide",
     home_subdir="claude-config",
 )
@@ -41,4 +42,11 @@ the date, and inert by the one test that decides whether a request is
 answered. Read as renewable it suppresses the seed, and the session it
 suppresses it for opens demanding the one flow a contained session cannot
 finish.
+
+The ambient home cannot be named. Claude Code (read from 2.1.282) keeps its
+configuration document at ``join(CLAUDE_CONFIG_DIR || homedir(),
+".claude.json")``: ``~/.claude.json`` with the variable unset, and
+``~/.claude/.claude.json`` with it naming ``~/.claude`` — so a session pointed
+at its own default by name starts without the theme, trust records and
+projects the account keeps beside it.
 """

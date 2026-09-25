@@ -13,8 +13,9 @@ ship: :mod:`lup.providers.claude.profile_store` keeps the registry, and
 
 Nothing here names a provider. A directory carries the :class:`ProviderLogin`
 of the runtime whose homes it holds, so reporting whether one is signed in —
-and telling a caller how to sign it in — is answered in that runtime's own
-words rather than in words this module would have to choose.
+and telling a caller how to sign it in, or whether a profile may name that
+runtime's default home at all — is answered in that runtime's own words
+rather than in words this module would have to choose.
 """
 
 from abc import ABC, abstractmethod
@@ -73,6 +74,65 @@ class UnknownProfile(KeyError):
             f"unknown profile {self.name!r}; known: {', '.join(self.known) or 'none'}"
             f" — register one with `profile add {self.name}`"
         )
+
+
+class DefaultHomeProfile(ValueError):
+    """A profile naming the home its runtime opens when no profile is named.
+
+    Refused only where the runtime's login says naming that home outright is
+    not naming nothing — :attr:`ProviderLogin.ambient_home_nameable` — which
+    turns such a profile into a way to open the default account on state it
+    never wrote rather than a way to reach it. One worded refusal for every
+    place that registers, selects or resolves a profile, for the reason
+    :class:`UnknownProfile` is one; a ``ValueError`` because the name is known
+    and its home is what is wrong, which a command tree already renders.
+
+    ``registered`` says whether the profile already exists, and so whether
+    the way out starts with removing it. ``name`` is absent where a bare
+    selection is refused before it belongs to any name.
+    """
+
+    def __init__(
+        self, name: str | None, home: Path, variable: str, registered: bool
+    ) -> None:
+        super().__init__(name, home)
+        self.name = name
+        self.home = home
+        self.variable = variable
+        self.registered = registered
+
+    def __str__(self) -> str:
+        """The whole diagnostic, since a caller renders this and nothing else."""
+        subject = "a profile" if self.name is None else f"profile {self.name!r}"
+        default = self.home.expanduser().resolve()
+        consequence = (
+            f"naming it in {self.variable} reads different configuration than "
+            "leaving that unset"
+        )
+        way_out = "leave the profile unset to use the default account"
+        if self.registered and self.name is not None:
+            return (
+                f"{subject} names the default home {default}, and {consequence} "
+                f"— remove it (`profile remove {self.name}`) and {way_out}"
+            )
+        return (
+            f"{subject} cannot name the default home {default}: "
+            f"{consequence} — {way_out}"
+        )
+
+
+def named_home(
+    login: ProviderLogin, name: str | None, home: Path, registered: bool = True
+) -> Path:
+    """That home, unless it is one this runtime refuses to have a profile name.
+
+    The one check behind every refusal of a profile naming the default home,
+    whether the directory, an origin curating its own names, or a typed
+    selection is asking — so each says the same thing about the same home.
+    """
+    if not login.nameable(home):
+        raise DefaultHomeProfile(name, home, login.config_home_env, registered)
+    return home
 
 
 class ProfileNames(ABC):
@@ -198,11 +258,16 @@ class ProfileDirectory:
         whatever home the surrounding environment already selected, which is
         both what a project with no profiles expects and what keeps a session
         launched from inside another one on the account it was started under.
+
+        A profile naming the default home is refused here rather than
+        launched, whether named or merely active — the one registration a
+        refusal at registering could not have stopped is the one already on
+        disk before the refusal existed.
         """
         selected = name or self.names.active_profile()
         if selected is None:
             return None
-        return self.resolve(selected)
+        return named_home(self.login, selected, self.resolve(selected))
 
     def account(self, name: str | None) -> SessionAccount:
         """The account a run naming this profile opens every session under.
@@ -234,12 +299,25 @@ class ProfileDirectory:
             raise self.unknown(selected) from error
 
     def add(self, name: str, config_dir: Path | None = None) -> Profile:
-        """Register a profile and resolve what registering it produced."""
+        """Register a profile and resolve what registering it produced.
+
+        Judged before the origin sees anything, so a refusal leaves it as it
+        was, and refuses as the default home rather than as whatever else the
+        origin would say: a home named outright, or else the home the name
+        already holds — which is where a directory profile symlinked onto the
+        default home is caught, since adding it is what would select it.
+        """
+        match config_dir:
+            case Path():
+                named_home(self.login, name, config_dir, registered=False)
+            case None if name in self.names.names():
+                named_home(self.login, name, self.resolve(name))
         self.registrar.add_profile(name, config_dir)
         return self.profile(name)
 
     def use(self, name: str) -> Profile:
         """Make one profile the active selection, and resolve it."""
+        named_home(self.login, name, self.resolve(name))
         try:
             self.registrar.set_active(name)
         except KeyError as error:

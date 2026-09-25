@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AnyHttpUrl, BaseModel, Field, SecretStr
+from pydantic import AnyHttpUrl, BaseModel, Field, SecretStr, field_validator
 
 from lup.providers.claude.runtime import (
     ClaudeSessionConfig,
@@ -11,6 +11,7 @@ from lup.providers.claude.runtime import (
 )
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.providers.config import ConfigTransform, ProfileResolver, ProfileSelector
+from lup.providers.profiles import named_home
 
 PLACEHOLDER_CREDENTIAL = "dummy"
 
@@ -26,7 +27,16 @@ class ClaudeProfileSelection(BaseModel, frozen=True):
     the selection naming none makes: Claude Code then reads
     ``~/.claude/.claude.json`` instead of the ``~/.claude.json`` beside it, and
     a session opened that way starts from a document the account never wrote.
+    So naming it is refused, however spelled, and no registry — named
+    profiles or default — can hold a selection that does.
     """
+
+    @field_validator("config_directory")
+    @classmethod
+    def never_the_default_home(cls, directory: Path | None) -> Path | None:
+        if directory is None:
+            return None
+        return named_home(CLAUDE_LOGIN, None, directory, registered=False)
 
 
 class ClaudeProfileRegistry(BaseModel, frozen=True):

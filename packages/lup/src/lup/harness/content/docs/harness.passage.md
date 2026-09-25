@@ -626,8 +626,22 @@ have answered, at the launcher as well as at the command tree.
 
 A directory profile's home is derived from its name, so `add --config-dir`
 pointing elsewhere is refused, and `remove` says to remove the directory rather
-than forgetting it: the directory is the profile and it holds the login. To
-point one at a home that already exists, symlink that subdirectory at it.
+than forgetting it: the directory is the profile and it holds the login. Where
+that profile is the selected one, it names the `.active` file recording the
+selection as well, since a selection left naming a removed profile refuses
+every launch that names none. To point one at a home that already exists,
+symlink that subdirectory at it.
+
+No profile may name Claude Code's default home, `~/.claude`, however it is
+spelled or reached — a symlinked directory profile included. A profile exports
+its home as `CLAUDE_CONFIG_DIR`, and with `~/.claude` named there Claude Code
+reads `~/.claude/.claude.json` rather than the `~/.claude.json` a plain
+`claude` reads (see below), so every session would open without the account's
+theme, trust records and projects. `add` refuses one before writing it; `use`,
+a launch and a resolver run refuse one already registered, naming it, and
+`remove` still forgets it. Leave the profile unset to use the default account.
+Codex has no such trap: its `CODEX_HOME` set to `~/.codex` is the same home, and
+the same state, as leaving it unset.
 
 ### Workspace trust, and the profile it is recorded against
 

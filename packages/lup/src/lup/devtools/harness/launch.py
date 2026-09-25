@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from lup.harness.devices import Device
 from lup.providers.login import NativeHomeScope, ProviderLogin
-from lup.providers.profiles import ProfileDirectory
+from lup.providers.profiles import DefaultHomeProfile, ProfileDirectory
 from lup.devtools.harness.contained import contained_argv
 from lup.providers.claude.confinement import CLAUDE_SANDBOX_OFF
 from lup.providers.claude.model_choice import (
@@ -1923,11 +1923,12 @@ def launch_claude(
         sandbox=sandbox,
     )
     # A name no origin answers to reaches here from an explicit --profile, and
-    # from an active selection whose profile has since gone; both are the
-    # caller's to fix, so neither should arrive as a traceback.
+    # from an active selection whose profile has since gone; a profile naming
+    # the default home arrives by either route too. Each is the caller's to
+    # fix, so none should arrive as a traceback.
     try:
         home = profiles.launch_home(profile)
-    except KeyError as error:
+    except (KeyError, DefaultHomeProfile) as error:
         raise typer.BadParameter(str(error)) from error
     if home is not None:
         environment.update(profiles.login.environment(home))

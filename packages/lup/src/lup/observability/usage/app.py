@@ -14,7 +14,7 @@ import typer
 from pydantic import BaseModel
 
 from lup.observability.usage.display import WATCH_INTERVAL_SECONDS, UsageDisplay
-from lup.observability.usage.models import UsageReader
+from lup.observability.usage.models import UsageReader, UsageReport, UsageUnavailable
 
 
 class UsageEntry(BaseModel, frozen=True):
@@ -35,6 +35,23 @@ class UsageEntry(BaseModel, frozen=True):
 
     help: str
     open: Callable[[str | None], UsageReader]
+
+
+class UnopenedReader(UsageReader):
+    """An account an entry could not open, read as that failure every time.
+
+    What puts a failed ``open`` on the route its contract names. Each mode
+    already reports a failed read — a failed command, a JSON error object, an
+    error panel — so the display is handed the failure as one, rather than a
+    traceback escaping ahead of any mode.
+    """
+
+    def __init__(self, failure: UsageUnavailable) -> None:
+        self.failure = failure
+
+    def read(self, detail: bool) -> UsageReport:
+        del detail
+        raise UsageUnavailable(str(self.failure)) from self.failure
 
 
 def create_usage_app(entries: list[UsageEntry]) -> typer.Typer:
@@ -83,7 +100,11 @@ def create_usage_app(entries: list[UsageEntry]) -> typer.Typer:
                 ),
             ] = WATCH_INTERVAL_SECONDS,
         ) -> None:
-            display = UsageDisplay(entry.open(profile), entry.runtime_name)
+            try:
+                reader = entry.open(profile)
+            except UsageUnavailable as failure:
+                reader = UnopenedReader(failure)
+            display = UsageDisplay(reader, entry.runtime_name)
             display.run(detail, json_output, watch, interval)
 
         show_usage.__doc__ = entry.help

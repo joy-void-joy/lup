@@ -197,6 +197,32 @@ DECLARED: list[Migration] = [
             ),
         ],
     ),
+    Migration(
+        subjects=[
+            "ClaudeProfileSelection",
+            "ClaudeProfileRegistrar",
+            "ProfileDirectory",
+        ],
+        reason=(
+            "a named Claude profile whose home is ~/.claude pointed each session "
+            "at that home by name, which makes Claude Code read "
+            "~/.claude/.claude.json rather than the ~/.claude.json a plain "
+            "`claude` reads, so its sessions opened as if the account were new; "
+            "a profile naming the default home is refused wherever one is "
+            "registered, selected or resolved, and a typed selection cannot hold one"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Leave the profile unset to use the default account: forget a "
+                    "profile registered at ~/.claude with `harness profile remove "
+                    "<name>`, and pass config_directory=None rather than the default "
+                    "home to ClaudeProfileSelection. Each refusal raises "
+                    "DefaultHomeProfile from lup.providers.profiles, a ValueError."
+                )
+            ),
+        ],
+    ),
 ]
 """Every break this library has taken since its last release, and what to do.
 
