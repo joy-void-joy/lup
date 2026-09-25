@@ -28,6 +28,7 @@ from pydantic import (
 from lup.harness.codescan.common import AntiPattern, RuleSelection
 from lup.devtools.launcher import DEFAULT_ENVIRONMENT
 from lup.formats.banner import ArtifactBanner, GeneratedBanner
+from lup.harness.companions import HostCompanion
 from lup.harness.devices import Device
 from lup.harness.image import ContainerPrivileges, Image, MemoryLimit
 from lup.harness.posture import LaunchPosture, unconfining
@@ -2059,6 +2060,12 @@ class Harness(BaseModel, frozen=True):
     is launched by name and compiled per launch — see :class:`SessionMode` —
     and none of them is rendered into a tree a session can reach, so a
     session cannot widen what kind it is by editing a file.
+    """
+    companions: list[HostCompanion] = []
+    """Processes each launch runs on the host beside the session, and stops with it.
+
+    Started once the launch is cleared to open, so the declaration naming
+    them is the approved one; see :mod:`lup.harness.companions`.
     """
 
     def mode(self, name: str) -> SessionMode:

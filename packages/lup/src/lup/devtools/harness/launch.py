@@ -50,6 +50,7 @@ from lup.policy.snapshots import accept_destination_policies, destination_author
 from lup.sandbox.rail import AccessibleRoot, fleet_lease
 from lup.trust.approved import APPROVED_TREE_ENV
 from lup.devtools.dev.git_guards import STANDDOWN_VARIABLE
+from lup.devtools.harness.companions import companions_home, companions_running
 from lup.devtools.harness.modes import (
     MODE_VARIABLE,
     CompiledMode,
@@ -2177,7 +2178,17 @@ def launch_claude(
             if mode is None
             else mode.opened("claude", transcript.journal, transcribing)
         )
-        with opening as session:
+        # Started once the launch is cleared to open, so the declaration
+        # naming them is the approved one; stopped when the session ends.
+        with (
+            companions_running(
+                composition.recipe.source.companions,
+                project_root(),
+                companions_home(project_root()),
+            ) as alongside,
+            opening as session,
+        ):
+            cleared.banner.add(alongside)
             environment.update(session)
             argv = session_argv(
                 "claude",
@@ -2502,7 +2513,17 @@ def launch_codex(
     if plugin_root is not None and session_mode is not None:
         scope = mode_home_scope(session_mode, scope)
     try:
-        with opening as session:
+        # Started once the launch is cleared to open, so the declaration
+        # naming them is the approved one; stopped when the session ends.
+        with (
+            companions_running(
+                composition.recipe.source.companions,
+                project_root(),
+                companions_home(project_root()),
+            ) as alongside,
+            opening as session,
+        ):
+            cleared.banner.add(alongside)
             environment.update(session)
             argv = session_argv(
                 "codex",

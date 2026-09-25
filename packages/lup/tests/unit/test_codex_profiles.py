@@ -241,6 +241,7 @@ def test_launcher_selects_the_same_settings_for_preparation_auth_and_session(
     composition = Mock()
     composition.recipe.source.plugins = [Mock(hooks=None)]
     composition.recipe.source.image = Image()
+    composition.recipe.source.companions = []
     monkeypatch.setattr(
         launch, "ready_to_open", Mock(return_value=launch.LaunchOpening())
     )

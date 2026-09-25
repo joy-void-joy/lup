@@ -36,6 +36,7 @@ def composition() -> Mock:
     built = Mock()
     built.recipe.source.plugins = [plugin]
     built.recipe.source.image = Image()
+    built.recipe.source.companions = []
     return built
 
 
