@@ -4,7 +4,7 @@ import asyncio
 
 from pydantic import BaseModel, Field
 
-from lup import create_claude
+from lup import CustomModel, create_claude
 
 
 class Summary(BaseModel, frozen=True):
@@ -17,9 +17,10 @@ async def main() -> None:
     # The endpoint is a constructor argument rather than a transform to
     # choreograph: naming a base URL is the whole of pointing a client
     # somewhere else, and an omitted key sends the placeholder credential a
-    # local endpoint expects.
+    # local endpoint expects. The endpoint's own model id is outside Claude
+    # Code's catalog, so it is named as one on purpose.
     client = create_claude(
-        model="local-model",
+        model=CustomModel(id="local-model"),
         system_prompt="Submit a concise structured summary.",
         base_url="http://localhost:4000",
     )

@@ -1588,6 +1588,8 @@ def run_resolve(
             CodexSessionConfig,
             create_codex,
         )
+        from lup.providers.claude.model_choice import claude_model_choice
+        from lup.providers.codex.model_choice import codex_model_choice
         from lup.providers.claude.config_home import (
             selected_config_home,
             untrusted_degradation,
@@ -1655,6 +1657,18 @@ def run_resolve(
                 f"Configured model {model.name!r} does not route to adapter "
                 f"{adapter!r}; sessions use the adapter's native default model."
             )
+        # Read against the catalog of the adapter it routes to, so a name that
+        # adapter does not list is refused before any session is spawned.
+        claude_model = (
+            claude_model_choice(session_model)
+            if session_model is not None and adapter == "claude"
+            else None
+        )
+        codex_model = (
+            codex_model_choice(session_model)
+            if session_model is not None and adapter == "codex"
+            else None
+        )
 
         def isolated_claude_environment(
             environment: EnvVars, workspace: Path
@@ -1895,7 +1909,7 @@ def run_resolve(
                 )
                 return create_claude(
                     ClaudeSessionConfig(
-                        model=session_model,
+                        model=claude_model,
                         system_prompt="Execute the persisted Lup resolver assignment.",
                         native_tools=[NativeToolGroup.ALL],
                         cwd=cwd,
@@ -1960,7 +1974,7 @@ def run_resolve(
                 )
             return create_codex(
                 CodexSessionConfig(
-                    model=session_model,
+                    model=codex_model,
                     native_tools=[NativeToolGroup.ALL],
                     developer_instructions=(
                         "Execute the persisted Lup resolver assignment."
@@ -2030,7 +2044,7 @@ def run_resolve(
                 )
                 return create_claude(
                     ClaudeSessionConfig(
-                        model=session_model,
+                        model=claude_model,
                         system_prompt=(
                             "Independently review the persisted resolver change."
                         ),
@@ -2056,7 +2070,7 @@ def run_resolve(
                 )
             return create_codex(
                 CodexSessionConfig(
-                    model=session_model,
+                    model=codex_model,
                     native_tools=[NativeToolGroup.WEB, NativeToolGroup.SHELL],
                     approval_policy="on-request",
                     hooks=merge_hooks(
