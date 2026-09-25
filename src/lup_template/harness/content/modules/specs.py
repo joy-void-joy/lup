@@ -50,6 +50,10 @@ UPSTREAM = ModuleSpec(
         "tracked repository rather than rewriting it."
     ),
     default_on=True,
+    # An update is a merge whose conflicts `/lup:merge` resolves, and every
+    # direction the work travels ends in commits made through `/lup:commit`:
+    # git-workflow's skills, invoked as steps rather than pointed at.
+    requires=["git-workflow"],
     subapps=["sync"],
 )
 

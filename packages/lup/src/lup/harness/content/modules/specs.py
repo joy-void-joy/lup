@@ -47,8 +47,10 @@ GIT_WORKFLOW = ModuleSpec(
     ),
     default_on=True,
     # Landing and rebasing end at regenerating the trees a merge left behind
-    # their source, which is meta's command tree.
-    requires=["meta"],
+    # their source, which is meta's command tree. Every one of its skills
+    # stands on `dev pending` and `dev check`, and folding a local grant into
+    # the policy is `/lup:hooks` — core's command tree and core's skill.
+    requires=["meta", "core"],
     subapps=["git"],
 )
 
@@ -83,8 +85,11 @@ VERSION = ModuleSpec(
         "gather the evidence and review the proposal independently."
     ),
     default_on=True,
-    # The reviewer reads the traces of the version under review.
-    requires=["observability"],
+    # The reviewer reads the traces of the version under review. A bump opens
+    # by committing the work it versions through `/lup:commit`, and a release
+    # lands through the integration branch's pull request, read by `git pr
+    # status` — git-workflow's skill and command tree, as steps.
+    requires=["observability", "git-workflow"],
     subapps=["version"],
 )
 
