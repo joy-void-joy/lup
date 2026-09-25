@@ -1,36 +1,4 @@
-<!-- passage: template -->
-
-Run `uv run lup-devtools --help` for the full command tree. The three you will
-use daily:
-
-- **`dev`** — worktrees, branches, pull requests, conflict resolution, review
-  markers, and the pre-flight `dev check`. This is the git workflow.
-- **`harness`** — generate, verify, and launch the native trees. See
-  [harness.md](harness.md).
-- **`trace`** — read what a session actually did: `trace show`, `trace search`,
-  `trace errors`.
-
-If you run the same shell incantation twice, add a command here instead. The
-CLI is written with [typer](https://typer.tiangolo.com/), and shells out with
-[sh](https://sh.readthedocs.io/) rather than `subprocess`. One-off work goes
-through the reviewable ladder in
-[contributing.md](contributing.md) rather than a script in `tmp/`, which is
-gitignored and so reaches no diff and no reviewer.
-
-### `harness/` — the declaration graph
-
-Declaration content sits above the tooling that compiles it, so the harness is
-its own package rather than a corner of `devtools/`. `catalog.py` is the root:
-it assembles the skills and agents this project composes with the
-application-owned `HookSet` and the resolver spec into one `Harness`.
-`content/` holds the leaves — one module per skill, per agent, per document —
-and `content/modules/` groups them by subject: a module carries its content,
-its page, its paragraph in the always-loaded document, its command tree and
-its tool group, and `content/catalog.py` states which of them this project
-takes. What the plugin ships, what `docs/` publishes, what the CLI serves and
-what a session is offered are all derived from that one answer.
-[harness.md](harness.md) is the guide; this is only where the files are.
-
+<!-- passage: setup-dashboard -->
 ### The setup dashboard
 
 `uv run lup-devtools setup dashboard` serves a local browser interface at
@@ -50,9 +18,10 @@ cover the cases where the defaults do not fit.
 `--host` takes only a loopback address, and every request's `Host` header is
 checked against one. The page writes credentials into `.env.local`, and a
 local bind alone leaves that reachable by DNS rebinding from any page the
-browser has open. Both halves are `lup.web.loopback`, shared with the
-resolver's supervisor page; see [supervisor.md](supervisor.md).
+browser has open. Both halves are `lup.web.loopback`{{ shared_with_supervisor }}.
 
+
+<!-- passage: sync-registry -->
 ### The sync registry
 
 `lup-devtools sync` tracks the other repositories this project exchanges
@@ -90,10 +59,9 @@ anywhere. It is spelled https because that clone is made on the host before
 any credential is lent, and https reads a public repository with none; inside
 a session every mounted checkout's remotes are rewritten onto the transport
 the launch's credential reaches, so a push goes out on the operator's ssh key
-or token alike. {{ init_skill }} points it at the repository the project was
-actually generated from when that is a fork (`dev init upstream`), and where
-the project resolves lup from a repository the entry follows that pin rather
-than its own URL, so the two never name different repositories.
+or token alike. {{ init_points }}Where the project resolves lup from a repository the entry
+follows that pin rather than its own URL, so the two never name different
+repositories.
 
 `"required": true` says the project cannot work without that repository
 present: the workflows that fix a defect upstream, derive a relocation map
@@ -220,7 +188,41 @@ branch cut in the clone, a commit made on it, and every uncommitted file
 beside it exactly where they stand. `sync log` reports what the *upstream*
 added, never what a session working in the clone did.
 
-## How the two halves depend on each other
+
+<!-- passage: template -->
+
+Run `uv run lup-devtools --help` for the full command tree. The three you will
+use daily:
+
+- **`dev`** — worktrees, branches, pull requests, conflict resolution, review
+  markers, and the pre-flight `dev check`. This is the git workflow.
+- **`harness`** — generate, verify, and launch the native trees. See
+  [harness.md](harness.md).
+- **`trace`** — read what a session actually did: `trace show`, `trace search`,
+  `trace errors`.
+
+If you run the same shell incantation twice, add a command here instead. The
+CLI is written with [typer](https://typer.tiangolo.com/), and shells out with
+[sh](https://sh.readthedocs.io/) rather than `subprocess`. One-off work goes
+through the reviewable ladder in
+[contributing.md](contributing.md) rather than a script in `tmp/`, which is
+gitignored and so reaches no diff and no reviewer.
+
+### `harness/` — the declaration graph
+
+Declaration content sits above the tooling that compiles it, so the harness is
+its own package rather than a corner of `devtools/`. `catalog.py` is the root:
+it assembles the skills and agents this project composes with the
+application-owned `HookSet` and the resolver spec into one `Harness`.
+`content/` holds the leaves — one module per skill, per agent, per document —
+and `content/modules/` groups them by subject: a module carries its content,
+its page, its paragraph in the always-loaded document, its command tree and
+its tool group, and `content/catalog.py` states which of them this project
+takes. What the plugin ships, what `docs/` publishes, what the CLI serves and
+what a session is offered are all derived from that one answer.
+[harness.md](harness.md) is the guide; this is only where the files are.
+
+{{ setup_dashboard }}{{ sync_registry }}## How the two halves depend on each other
 
 `lup_template` imports `lup`. `lup` never imports `lup_template` — it is
 published standalone and could not. The placement test for any new utility is

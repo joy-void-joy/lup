@@ -12,7 +12,7 @@ If no level is provided, determine the appropriate level from the changes.
 
 ### 1. Commit pending changes
 
-Invoke `{{ commit_skill }}` to commit any uncommitted work before bumping.
+Commit any uncommitted work before bumping{{ commit_with }}.
 
 ### 2. Gather context
 

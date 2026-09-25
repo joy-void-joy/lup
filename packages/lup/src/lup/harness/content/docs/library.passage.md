@@ -285,7 +285,7 @@ member through `lup.coordination.sessions`; `turns.py` puts the prompts
 to them, `joins.py` brings branches together and settles what that breaks,
 `verification.py` runs one tree through the verification set, and
 `execution.py` drives one concern's revision loop. `core.py` composes them
-and owns only the sequence. [resolver.md](resolver.md) covers the lifecycle.
+and owns only the sequence.{{ resolver_lifecycle }}
 
 ### `providers` — the vendor edge
 

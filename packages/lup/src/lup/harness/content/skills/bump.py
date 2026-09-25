@@ -1,6 +1,7 @@
 """Canonical declaration for the bump skill."""
 
 import lup.harness.models as models
+from lup.harness.content.skills.committing import with_commit_skill
 
 SKILL = models.Skill(
     id="skill.bump",
@@ -29,9 +30,7 @@ SKILL = models.Skill(
                 module=__name__,
                 values={
                     "arguments": models.ArgumentsRef(),
-                    "commit_skill": models.SkillInvocation(
-                        plugin="lup", skill="commit"
-                    ),
+                    "commit_with": with_commit_skill(),
                     "guidance_file_path": models.NativePath(location="guidance_file"),
                     "ask": models.AskUser(question="which bump level to apply"),
                 },

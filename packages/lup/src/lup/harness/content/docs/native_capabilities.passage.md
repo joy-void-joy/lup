@@ -192,4 +192,4 @@ part of probing.
   outside `.claude/worktrees/` is taken only as a session's first entry from
   its launch directory, and a second switch into a sibling `tree/` worktree
   is refused with `is not under <repo>/.claude/worktrees`.
-  Owned by Claude Code; `docs/upstream-reports.md` carries the report to send.
+  Owned by Claude Code{{ upstream_report }}.

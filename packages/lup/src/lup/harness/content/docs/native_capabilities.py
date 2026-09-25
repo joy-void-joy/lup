@@ -118,6 +118,17 @@ def document(
                     ),
                     "publication_fixture": models.code(publication_fixture),
                     "authentication_fixture": models.code(authentication_fixture),
+                    # Where the report to a runtime's vendor is drafted is the
+                    # upstream module's page.
+                    "upstream_report": models.WhereTaken(
+                        module="upstream",
+                        parts=[
+                            models.TextPart(
+                                text="; `docs/upstream-reports.md` carries the "
+                                "report to send"
+                            )
+                        ],
+                    ),
                 },
             ),
         ],

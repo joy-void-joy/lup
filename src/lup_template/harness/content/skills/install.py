@@ -137,7 +137,18 @@ SKILL = models.Skill(
                 module=__name__,
                 name="seams",
                 values={
-                    "meta_skill": models.SkillInvocation(plugin="lup", skill="meta"),
+                    # `/lup:meta` is the meta module's, which a project that
+                    # authors no harness declines; the step goes with it.
+                    "meta_step": models.WhereTaken(
+                        module="meta",
+                        parts=[
+                            models.TextPart(text="\n   - Try `"),
+                            models.SkillInvocation(plugin="lup", skill="meta"),
+                            models.TextPart(
+                                text="` to review the generated harness trees"
+                            ),
+                        ],
+                    ),
                     "commit_skill": models.SkillInvocation(
                         plugin="lup", skill="commit"
                     ),

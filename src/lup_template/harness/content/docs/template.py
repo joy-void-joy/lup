@@ -129,10 +129,66 @@ CLOSING_PARTS: list[models.PromptPart] = [
         module=__name__,
         name="template",
         values={
-            "update_skill": models.SkillInvocation(plugin="lup", skill="update"),
-            "import_skill": models.SkillInvocation(plugin="lup", skill="import"),
-            "init_skill": models.SkillInvocation(plugin="lup", skill="init"),
-            "update_skill_2": models.SkillInvocation(plugin="lup", skill="update"),
+            # The dashboard is the setup module's, and the page it shares its
+            # loopback guard with is the resolver's: each sentence stays only
+            # where its module does.
+            "setup_dashboard": models.WhereTaken(
+                module="setup",
+                parts=[
+                    models.Passage(
+                        module=__name__,
+                        name="setup-dashboard",
+                        values={
+                            "shared_with_supervisor": models.WhereTaken(
+                                module="resolver",
+                                parts=[
+                                    models.TextPart(
+                                        text=", shared with the\nresolver's "
+                                        "supervisor page; see "
+                                        "[supervisor.md](supervisor.md)"
+                                    )
+                                ],
+                            )
+                        },
+                    )
+                ],
+            ),
+            # The registry is the upstream module's command tree, and the two
+            # skills built on it are that module's too.
+            "sync_registry": models.WhereTaken(
+                module="upstream",
+                parts=[
+                    models.Passage(
+                        module=__name__,
+                        name="sync-registry",
+                        values={
+                            "update_skill": models.SkillInvocation(
+                                plugin="lup", skill="update"
+                            ),
+                            "import_skill": models.SkillInvocation(
+                                plugin="lup", skill="import"
+                            ),
+                            "update_skill_2": models.SkillInvocation(
+                                plugin="lup", skill="update"
+                            ),
+                            # Initialization is template-init's, which a
+                            # project keeping upstream may still decline.
+                            "init_points": models.WhereTaken(
+                                module="template-init",
+                                parts=[
+                                    models.SkillInvocation(plugin="lup", skill="init"),
+                                    models.TextPart(
+                                        text=" points it at the repository "
+                                        "the project was\nactually generated "
+                                        "from when that is a fork "
+                                        "(`dev init upstream`).\n"
+                                    ),
+                                ],
+                            ),
+                        },
+                    )
+                ],
+            ),
         },
     ),
 ]

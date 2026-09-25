@@ -11,6 +11,19 @@ import lup.harness.models as models
 import lup.harness.content.conventions as conventions
 from lup.tools.lsp.tools import rendered_tool_declarations
 
+
+def bumped(lead: str, tail: str) -> models.WhereTaken:
+    """A pointer at `/lup:bump`, present only where the version module is taken."""
+    return models.WhereTaken(
+        module="version",
+        parts=[
+            models.TextPart(text=lead),
+            models.SkillInvocation(plugin="lup", skill="bump"),
+            models.TextPart(text=tail),
+        ],
+    )
+
+
 CODEINTEL_TOOL_ROSTER: list[models.PromptPart] = [
     models.ToolRoster(tools=rendered_tool_declarations())
 ]
@@ -28,9 +41,41 @@ PRINCIPLES_THROUGH_PATTERN_MENU: list[models.PromptPart] = [
         module=__name__,
         name="important-context",
         values={
-            "bump_skill": models.SkillInvocation(plugin="lup", skill="bump"),
+            # A downstream project is installed the plugin this one ships, so
+            # each line naming an optional module's skill or command goes with
+            # the module.
+            "version_bump": bumped(
+                " — bump on behavior changes with "
+                "`uv run lup-devtools version bump` (or `",
+                "`)",
+            ),
+            "setup_command": models.WhereTaken(
+                module="setup",
+                parts=[
+                    models.TextPart(
+                        text="uv run lup-devtools setup                # keys, "
+                        "integrations, env vars (`dashboard` for the web UI)\n"
+                    )
+                ],
+            ),
             "debug_skill": models.SkillInvocation(plugin="lup", skill="debug"),
+            "feedback_scripts": models.WhereTaken(
+                module="feedback-loop",
+                parts=[
+                    models.TextPart(
+                        text="# Collect feedback from sessions\n"
+                        "uv run lup-devtools feedback collect --all-time\n\n"
+                        "# Status: version, data, analysis state, aggregate "
+                        "stats\nuv run lup-devtools feedback status\n\n"
+                    )
+                ],
+            ),
             "init_skill": models.SkillInvocation(plugin="lup", skill="init"),
+            "bump_step": bumped(
+                "\n- Bump on behavior changes (prompts, tools, subagents) with "
+                "`uv run lup-devtools version bump <level>` or `",
+                "`",
+            ),
         },
     ),
 ]
@@ -64,7 +109,16 @@ DIRECTORY_STRUCTURE_THROUGH_TOOLS: list[models.PromptPart] = [
     models.Passage(
         module=__name__,
         name="directory-structure",
-        values={"resolve_skill": models.SkillInvocation(plugin="lup", skill="resolve")},
+        values={
+            "resolve_clears": models.WhereTaken(
+                module="resolver",
+                parts=[
+                    models.TextPart(text=" Use `"),
+                    models.SkillInvocation(plugin="lup", skill="resolve"),
+                    models.TextPart(text="` to clear resolved notes."),
+                ],
+            )
+        },
     ),
 ]
 
@@ -136,4 +190,11 @@ SELF_IMPROVEMENT_THROUGH_END: list[models.PromptPart] = [
     models.Passage(module=__name__, name="self-improvement-loop"),
     *conventions.FAILURE_ANALYSIS.parts,
     models.Passage(module=__name__, name="diagnosing-failures"),
+    # The walk through running the loop is the feedback-loop module's; what a
+    # session records, and how a failure is diagnosed, are every project's.
+    models.WhereTaken(
+        module="feedback-loop",
+        parts=[models.Passage(module=__name__, name="running-the-feedback-loop")],
+    ),
+    models.Passage(module=__name__, name="what-to-track"),
 ]

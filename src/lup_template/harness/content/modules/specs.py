@@ -46,6 +46,10 @@ TEMPLATE_INIT = ModuleSpec(
         "into it, and restarting one from an explored predecessor."
     ),
     default_on=True,
+    # Initialization settles how the project tracks lup and hands it to the
+    # update loop; distill carries a predecessor's pieces through the import.
+    # Both are upstream's command tree and skills.
+    requires=["upstream"],
 )
 
 UPSTREAM = ModuleSpec(
@@ -56,6 +60,10 @@ UPSTREAM = ModuleSpec(
         "tracked repository rather than rewriting it."
     ),
     default_on=True,
+    # An update is a merge and an import a commit series: each skill ends at
+    # the loop's merge decision tree and its commit skill, which is what it is
+    # rather than a pointer it could do without.
+    requires=["git-workflow"],
     subapps=["sync"],
 )
 
@@ -65,6 +73,9 @@ EXAMPLES = ModuleSpec(
     summary="The scaffold's demonstrations of itself, which no adopter runs.",
     default_on=True,
     scaffold_only=True,
+    # The monitored-run example is a `lup.runs` pipeline and tells its reader
+    # to watch it with the runs module's command tree.
+    requires=["runs"],
     tool_groups=["example"],
 )
 
