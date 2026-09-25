@@ -39,7 +39,7 @@ from lup.formats.markdown import (
     escaped,
 )
 from lup.formats.toml import TomlDocument
-from lup.harness.passages import passage_text, rendered
+from lup.harness.passages import rendered
 from lup.formats.yaml import PlainData, YamlDocument
 from lup.tools.mcp import ToolDeclaration
 from lup.policy.boundary import BoundaryCapability
@@ -157,6 +157,19 @@ class SemanticPart(BaseModel, ABC, frozen=True):
         """
         return [self, *(found for part in self.carried for found in part.reached())]
 
+    def unconditioned(self) -> list["SemanticPart"]:
+        """What :meth:`reached` finds, short of words held on a condition of their own.
+
+        What decides whether a :class:`WhereShipped` stands is what its own
+        words name. A pointer nested inside them is decided by its own
+        condition once the words around it stand, so what it names decides
+        nothing about them.
+        """
+        return [
+            self,
+            *(found for part in self.carried for found in part.unconditioned()),
+        ]
+
     @property
     def authored_in(self) -> str | None:
         """Where the prose this part places its values into is written, if any.
@@ -181,8 +194,8 @@ class SemanticPart(BaseModel, ABC, frozen=True):
         )
         return [*own, *(found for part in self.carried for found in part.issued(here))]
 
-    def shipped(self, skills: list["Skill"]) -> Self:
-        """This part as it reads where exactly these skills are shipped.
+    def shipped(self, roster: "Shipped") -> Self:
+        """This part as it reads where exactly this roster ships.
 
         Nothing changes for a part that holds no condition, so that is the
         answer here. A part that carries others answers with them settled, and
@@ -195,6 +208,11 @@ class SemanticPart(BaseModel, ABC, frozen=True):
     @property
     def invocation(self) -> "SkillInvocation | None":
         """The skill invocation this part issues, if it issues one."""
+        return None
+
+    @property
+    def named_command(self) -> str | None:
+        """The command group this part runs, which the CLI must serve."""
         return None
 
     @property
@@ -354,11 +372,11 @@ class Passage(SemanticPart, frozen=True):
         named = f"the {self.name!r} passage" if self.name else "the passage"
         return f"{named} of {self.module}"
 
-    def shipped(self, skills: list["Skill"]) -> Self:
+    def shipped(self, roster: "Shipped") -> Self:
         return self.model_copy(
             update={
                 "values": {
-                    name: value.shipped(skills) for name, value in self.values.items()
+                    name: value.shipped(roster) for name, value in self.values.items()
                 }
             }
         )
@@ -369,63 +387,103 @@ class Passage(SemanticPart, frozen=True):
 
         The words rather than the rendering: the portability scan is about
         the prose somebody wrote, and what each value becomes is that value's
-        own answer, checked where the value is declared.
+        own answer, checked where the value is declared. Each value is placed
+        empty rather than left as the name standing for it: a walk reaches
+        every value beside these words, so a measure summing both would count
+        a sentence's pointer twice — once as its name, which no reader sees,
+        and once as itself — and stop being the lower bound it claims.
         """
-        return passage_text(self.module, self.name)
+        return rendered(self.module, self.name, {name: "" for name in self.values})
 
 
 class WhereShipped(SemanticPart, frozen=True):
     """Words pointing into another module, held only where that module ships.
 
     A module reaching into one it does not require — a suggestion, an aside,
-    a pointer naming another subject's skill — would otherwise leave the
-    pointer behind when a project declines the subject it points at, and the
-    harness refuses an invocation that resolves to nothing. ``requires`` is
-    the answer when the reach is a step the module cannot do without; this is
-    the answer when it is a pointer, which the module reads fine without.
+    a pointer naming another subject's skill or command — would otherwise
+    leave the pointer behind when a project declines the subject it points at:
+    an invocation that resolves to nothing, or a command the CLI does not
+    serve. ``requires`` is the answer when the reach is a step the module
+    cannot do without; this is the answer when it is a pointer, which the
+    module reads fine without.
 
-    What decides it is the words themselves: they hold where every skill they
-    invoke is shipped, so the condition cannot name a different skill from the
-    one the prose sends its reader to. The composition that knows what ships
-    settles it — :func:`~lup.harness.modules.adopted` for skills, agents and
-    guidance, the document composition for pages. Left unsettled it spells
-    its words, so a composition that forgot to settle one is refused by the
-    same check as any other invocation rather than trusted.
+    What decides it is what the words name: every skill they invoke and every
+    command group they run must ship, so the condition cannot name something
+    other than what the prose sends its reader to. A command issued as a
+    :class:`CommandInvocation` names its group itself; prose that spells one
+    in its own words — a code block, a table of flags — names the group in
+    :attr:`commands`, and the test composing every declined roster holds that
+    list to the rendered words. A pointer nested inside the words is decided
+    by its own condition once they stand, so a whole subsection can be held
+    on its subject while an aside within it goes with another module alone.
+    The composition that knows what ships settles
+    it — :func:`~lup.harness.modules.adopted` for skills, agents and guidance,
+    the document composition for pages, generation for the guidance an
+    installer merges. Left unsettled it spells its words, so a composition
+    that forgot to settle one is refused by the checks it would otherwise have
+    passed rather than trusted.
     """
 
     type: Literal["where_shipped"] = "where_shipped"
     parts: list["PromptPart"] = Field(min_length=1)
-    """The words, in the order they read, including the invocations they hold."""
+    """The words, in the order they read, including what they invoke."""
+
+    commands: list[str] = []
+    """Command groups the words run in text of their own, beyond those issued."""
+
+    otherwise: list["PromptPart"] = []
+    """What reads in their place where they are withheld, if anything should.
+
+    Most pointers leave nothing behind; a step that has another way to be
+    taken says it, so a reader told how to get something done is not left
+    without a way once the module offering the easy one is gone.
+    """
 
     held: bool = True
     """Whether the words stand here, which only a settled composition says.
 
     Withheld words stay in the declaration they were written in and are read
     by nothing — no walk reaches them, no renderer spells them — so a settled
-    document keeps the shape its declaration had while saying none of it.
+    document keeps the shape its declaration had while saying only
+    :attr:`otherwise`.
     """
 
     @model_validator(mode="after")
-    def invokes_what_decides_it(self) -> "WhereShipped":
-        """Words that can go must invoke what decides it, and hold nothing else.
+    def names_what_decides_it(self) -> "WhereShipped":
+        """Words that can go must name what decides it, and hold nothing else.
 
-        Words invoking no skill have nothing to hold on, so they always would.
-        Words reaching the skill's own arguments would take the only reference
-        to them when they went, leaving a skill whose declared arguments its
-        prompt never reads — a disagreement its own validator refuses, but
-        only where it is constructed, which a settled copy is not.
+        Words naming no skill and no command have nothing to hold on, so they
+        always would. Words reaching the skill's own arguments would take the
+        only reference to them when they went, leaving a skill whose declared
+        arguments its prompt never reads — a disagreement its own validator
+        refuses, but only where it is constructed, which a settled copy is not.
+        The words standing in for them name nothing that could be withheld in
+        turn, since nothing would settle them.
         """
         reached = [found for part in self.parts for found in part.reached()]
-        if not any(part.invocation is not None for part in reached):
+        standing = [found for part in self.otherwise for found in part.reached()]
+        if not self.commands and not any(
+            part.invocation is not None or part.named_command is not None
+            for part in self.deciding
+        ):
             raise ValueError(
-                "WhereShipped holds words that invoke no skill, so nothing decides "
-                "whether they are shipped: place the invocation inside it, or "
-                "write the words as ordinary prose"
+                "WhereShipped holds words that name no skill and no command, so "
+                "nothing decides whether they are shipped: place the invocation "
+                "inside it, name the command group in `commands`, or write the "
+                "words as ordinary prose"
             )
-        if any(part.references_arguments for part in reached):
+        if any(part.references_arguments for part in [*reached, *standing]):
             raise ValueError(
                 "WhereShipped holds a reference to the skill's own arguments, "
                 "which would go with the pointer: keep it outside"
+            )
+        if any(
+            part.invocation is not None or part.named_command is not None
+            for part in standing
+        ):
+            raise ValueError(
+                "WhereShipped's `otherwise` names a skill or a command, which "
+                "nothing settles: the words standing in must hold everywhere"
             )
         return self
 
@@ -434,19 +492,36 @@ class WhereShipped(SemanticPart, frozen=True):
 
     @property
     def carried(self) -> list["PromptPart"]:
-        return list(self.parts) if self.held else []
+        return list(self.parts) if self.held else list(self.otherwise)
 
-    def shipped(self, skills: list["Skill"]) -> Self:
-        """These words where every skill they invoke ships, withheld elsewhere."""
-        names = {skill.name for skill in skills}
+    def unconditioned(self) -> list["SemanticPart"]:
+        """Nothing: these words stand on a condition of their own."""
+        return []
+
+    @property
+    def deciding(self) -> list["SemanticPart"]:
+        """Every part of these words whose name decides whether they stand."""
+        return [found for part in self.parts for found in part.unconditioned()]
+
+    def shipped(self, roster: "Shipped") -> Self:
+        """These words where everything they name ships, withheld elsewhere."""
+        skills = {skill.name for skill in roster.skills}
+        named = [
+            *self.commands,
+            *(
+                group
+                for part in self.deciding
+                if (group := part.named_command) is not None
+            ),
+        ]
         if any(
-            issued.invocation.skill not in names
-            for part in self.parts
-            for issued in part.issued()
-        ):
+            invocation.skill not in skills
+            for part in self.deciding
+            if (invocation := part.invocation) is not None
+        ) or any(group not in roster.commands for group in named):
             return self.model_copy(update={"held": False})
         return self.model_copy(
-            update={"parts": [part.shipped(skills) for part in self.parts]}
+            update={"parts": [part.shipped(roster) for part in self.parts]}
         )
 
 
@@ -832,6 +907,11 @@ class CommandInvocation(SemanticPart, frozen=True):
     def shell_command(self) -> str:
         return self.spelled()
 
+    @property
+    def named_command(self) -> str:
+        """The top-level group, which is what a declined module takes away."""
+        return self.path[0]
+
 
 class ResolverEntry(SemanticPart, frozen=True):
     type: Literal["resolver_entry"] = "resolver_entry"
@@ -931,10 +1011,10 @@ class PromptDocument(BaseModel, frozen=True):
         """
         return [found for part in self.parts for found in part.reached()]
 
-    def shipped(self, skills: list["Skill"]) -> "PromptDocument":
-        """This document as it reads where exactly these skills are shipped."""
+    def shipped(self, roster: "Shipped") -> "PromptDocument":
+        """This document as it reads where exactly this roster ships."""
         return self.model_copy(
-            update={"parts": [part.shipped(skills) for part in self.parts]}
+            update={"parts": [part.shipped(roster) for part in self.parts]}
         )
 
     def prose(self) -> list[str]:
@@ -1390,6 +1470,20 @@ class ContentRoster(BaseModel, frozen=True):
             skills=selection.over_skills().over(self.skills),
             agents=selection.over_agents().over(self.agents),
         )
+
+
+class Shipped(BaseModel, frozen=True):
+    """What one composition ships: its plugin's skills, and its CLI's commands.
+
+    What a pointer into another module holds on, both halves at once,
+    because a module declined takes both — its skills leave the plugin and
+    its command groups leave the CLI — and prose may point at either.
+    """
+
+    skills: list[Skill] = []
+
+    commands: list[str] = []
+    """The top-level command groups the CLI serves, by the word that runs each."""
 
 
 class McpWord(BaseModel, ABC, frozen=True):

@@ -72,6 +72,7 @@ def project_content(
     return ProjectContent(
         harness=harness,
         documents=documents(root, composed),
+        commands=composed.subapps,
         assets=[CONTENT_ROOT / "assets" / "file_suggest.sh"],
         settings=project_settings(harness.plugins[0]),
         settings_source=settings_module.__name__,

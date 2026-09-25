@@ -43,6 +43,7 @@ from lup.harness.models import (
     Harness,
     InvocationHolder,
     PromptDocument,
+    Shipped,
     refusal_of,
 )
 from lup.types import JsonObject
@@ -102,6 +103,14 @@ class ProjectContent(BaseModel, frozen=True):
     Carried beside them because the settings themselves are a ``JsonObject``
     and carry nothing: the artifact they become is JSON too, so its provenance
     has no comment to sit in and would otherwise be nowhere at all.
+    """
+
+    commands: list[str] = []
+    """The top-level command groups this project's CLI serves.
+
+    What prose composed beside the plugin may send its reader to run, so the
+    guidance an installer merges settles its pointers against it the way the
+    roster settled every other document's.
     """
 
     @model_validator(mode="after")
@@ -324,6 +333,7 @@ def installer_guidance(
     document: PromptDocument | None,
     prompts: PromptRenderer,
     source: Harness,
+    commands: list[str],
 ) -> list[Artifact]:
     """Render the guidance an installer merges into a target, if there is any.
 
@@ -332,13 +342,17 @@ def installer_guidance(
     advertising its own project guidance as something to install elsewhere.
 
     It teaches the plugin it is installed beside, so it reads as that plugin
-    ships: a pointer to a skill of a module this project declined goes, and
-    an invocation still naming one is refused as the harness refuses its own.
+    and its CLI ship: a pointer to a skill or a command of a module this
+    project declined goes, and an invocation still naming one is refused as
+    the harness refuses its own.
     """
     if document is None:
         return []
     settled = document.shipped(
-        [skill for plugin in source.plugins for skill in plugin.skills]
+        Shipped(
+            skills=[skill for plugin in source.plugins for skill in plugin.skills],
+            commands=commands,
+        )
     )
     refused = source.unresolved(
         [InvocationHolder(declaration="installer guidance", parts=settled.parts)]
@@ -441,6 +455,7 @@ def claude_generation_recipe(
             document=guidance,
             prompts=prompts,
             source=source,
+            commands=content.commands,
         ),
         *verbatim,
         Artifact(
@@ -486,6 +501,7 @@ def codex_generation_recipe(
         document=guidance,
         prompts=prompts,
         source=source,
+        commands=content.commands,
     )
     compiled = compile_codex(source)
     desired = validated_tree([*compiled.artifacts, *support_artifacts])

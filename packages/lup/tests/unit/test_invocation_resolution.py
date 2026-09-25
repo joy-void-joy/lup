@@ -142,14 +142,14 @@ def test_a_pointer_holds_exactly_where_its_skill_ships() -> None:
     sentence = models.Passage(
         module=PASSAGE, name="resolve-pass", values={"resolve_skill": held}
     )
-    withheld = held.shipped([skill("commit")])
+    withheld = held.shipped(models.Shipped(skills=[skill("commit")]))
     renderer = claude_prompt_renderer()
 
-    assert held.shipped([skill("merge")]) == held
+    assert held.shipped(models.Shipped(skills=[skill("merge")])) == held
     assert withheld.held is False
     assert withheld.issued() == [] and withheld.reached() == [withheld]
     assert renderer.render(models.PromptDocument(parts=[withheld])).strip() == ""
-    assert sentence.shipped([]).values["resolve_skill"] == withheld
+    assert sentence.shipped(models.Shipped()).values["resolve_skill"] == withheld
 
 
 def test_a_settled_pointer_passes_and_an_unsettled_one_is_refused() -> None:
@@ -159,7 +159,11 @@ def test_a_settled_pointer_passes_and_an_unsettled_one_is_refused() -> None:
     a pointer to nothing: the part's default is the strict reading.
     """
     words = [models.TextPart(text="Commit.")]
-    settled = skill("kept", *words, pointer_to("merge").shipped([skill("kept")]))
+    settled = skill(
+        "kept",
+        *words,
+        pointer_to("merge").shipped(models.Shipped(skills=[skill("kept")])),
+    )
 
     assert harness([settled]).plugins[0].skills == [settled]
     with pytest.raises(ValidationError, match="lup:merge names no skill"):
@@ -168,7 +172,7 @@ def test_a_settled_pointer_passes_and_an_unsettled_one_is_refused() -> None:
 
 def test_a_pointer_must_invoke_what_decides_it_and_carry_nothing_else() -> None:
     """Words invoking nothing would always hold; arguments would leave with it."""
-    with pytest.raises(ValidationError, match="invoke no skill"):
+    with pytest.raises(ValidationError, match="name no skill and no command"):
         models.WhereShipped(parts=[models.TextPart(text="nothing decides this")])
     with pytest.raises(ValidationError, match="own arguments"):
         models.WhereShipped(parts=[gone("merge"), models.ArgumentsRef()])
@@ -204,6 +208,7 @@ def test_installer_guidance_reads_as_the_plugin_it_installs_ships() -> None:
         document=guidance,
         prompts=claude_prompt_renderer(),
         source=shipped,
+        commands=[],
     )
 
     assert "resolve" not in artifact.content
@@ -213,6 +218,7 @@ def test_installer_guidance_reads_as_the_plugin_it_installs_ships() -> None:
             document=models.PromptDocument(source=__name__, parts=[gone("resolve")]),
             prompts=claude_prompt_renderer(),
             source=shipped,
+            commands=[],
         )
 
 
@@ -264,4 +270,85 @@ def test_a_page_passage_spelling_an_invocation_is_refused(
                     }
                 )
             ],
+        )
+
+
+def test_a_pointer_to_a_command_holds_where_its_group_is_served() -> None:
+    """A command issued inside the words names its group; prose names it itself.
+
+    Either way the words go with the command tree, and where a step has another
+    way to be taken the words standing in for them read instead.
+    """
+    issued = models.WhereShipped(
+        parts=[
+            models.TextPart(text="Run `"),
+            models.CommandInvocation(path=["sync", "fetch"], arguments="lup"),
+            models.TextPart(text="`."),
+        ]
+    )
+    written = models.WhereShipped(
+        parts=[models.TextPart(text="Register it with the sync registry.")],
+        commands=["sync"],
+        otherwise=[models.TextPart(text="Relaunch with a read-only mount.")],
+    )
+    renderer = claude_prompt_renderer()
+
+    def read(part: models.WhereShipped, roster: models.Shipped) -> str:
+        return renderer.render(models.PromptDocument(parts=[part.shipped(roster)]))
+
+    assert read(issued, models.Shipped(commands=["sync"])) == (
+        "Run `uv run lup-devtools sync fetch lup`.\n"
+    )
+    assert read(issued, models.Shipped(commands=["dev"])).strip() == ""
+    assert "sync registry" in read(written, models.Shipped(commands=["sync"]))
+    assert read(written, models.Shipped()) == "Relaunch with a read-only mount.\n"
+
+
+def test_the_words_standing_in_may_name_nothing_that_could_be_withheld() -> None:
+    """Nothing settles them, so they must hold everywhere they could be read."""
+    with pytest.raises(ValidationError, match="the words standing in must hold"):
+        models.WhereShipped(
+            parts=[gone("merge")],
+            otherwise=[models.CommandInvocation(path=["git", "worktree", "create"])],
+        )
+
+
+def test_a_nested_pointer_is_decided_by_its_own_condition() -> None:
+    """A subsection held on its subject keeps standing when only an aside goes.
+
+    The landing steps inside a git workflow point at skills a project can
+    retire one by one; the workflow around them holds wherever its command
+    tree is served. Deciding the outer words by everything inside them would
+    take the whole subsection away with one retired skill.
+    """
+    aside = models.WhereShipped(
+        parts=[
+            models.TextPart(text=" Land it with `"),
+            gone("land"),
+            models.TextPart(text="`."),
+        ]
+    )
+    subsection = models.WhereShipped(
+        parts=[models.TextPart(text="Cut a worktree."), aside],
+        commands=["git"],
+    )
+    renderer = claude_prompt_renderer()
+
+    def read(roster: models.Shipped) -> str:
+        return renderer.render(
+            models.PromptDocument(parts=[subsection.shipped(roster)])
+        )
+
+    assert read(models.Shipped(skills=[skill("land")], commands=["git"])) == (
+        "Cut a worktree. Land it with `/lup:land`.\n"
+    )
+    assert read(models.Shipped(commands=["git"])) == "Cut a worktree.\n"
+    assert read(models.Shipped(skills=[skill("land")])).strip() == ""
+
+
+def test_words_deciding_nothing_outside_a_nested_pointer_are_refused() -> None:
+    """The outer words need a condition of their own, not one borrowed from within."""
+    with pytest.raises(ValidationError, match="name no skill and no command"):
+        models.WhereShipped(
+            parts=[models.TextPart(text="Around it."), pointer_to("land")]
         )

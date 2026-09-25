@@ -216,7 +216,7 @@ class Module(BaseModel, frozen=True):
     documents: list[DocumentEntry] = []
     """Pages under ``docs/`` whose subject is this module's, unrendered."""
 
-    def shipped(self, skills: list[models.Skill]) -> "Module":
+    def shipped(self, roster: models.Shipped) -> "Module":
         """This module as it reads beside a roster shipping exactly these skills.
 
         Every :class:`~lup.harness.models.WhereShipped` pointer in its skills,
@@ -229,13 +229,13 @@ class Module(BaseModel, frozen=True):
                 "content": models.ContentRoster(
                     skills=[
                         skill.model_copy(
-                            update={"prompt": skill.prompt.shipped(skills)}
+                            update={"prompt": skill.prompt.shipped(roster)}
                         )
                         for skill in self.content.skills
                     ],
                     agents=[
                         agent.model_copy(
-                            update={"prompt": agent.prompt.shipped(skills)}
+                            update={"prompt": agent.prompt.shipped(roster)}
                         )
                         for agent in self.content.agents
                     ],
@@ -243,7 +243,7 @@ class Module(BaseModel, frozen=True):
                 "guidance": [
                     section.model_copy(
                         update={
-                            "parts": [part.shipped(skills) for part in section.parts]
+                            "parts": [part.shipped(roster) for part in section.parts]
                         }
                     )
                     for section in self.guidance
@@ -529,8 +529,11 @@ def composed_documents(
     three of them describe. The same roster settles every pointer a page makes
     into another module, the way :func:`adopted` settles the rest.
     """
+    roster = models.Shipped(
+        skills=context.skills, commands=[spec.name for spec in context.subapps]
+    )
     return [
-        page.model_copy(update={"document": page.document.shipped(context.skills)})
+        page.model_copy(update={"document": page.document.shipped(roster)})
         for module in modules
         for entry in module.documents
         for page in [entry.build(context)]
