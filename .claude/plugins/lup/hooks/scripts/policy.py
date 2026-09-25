@@ -43,6 +43,7 @@ from coordination import store
 from kernel.edit import (
     awaits_resolution,
     decide_edit,
+    judged_alike,
     relocated_edit_text,
     relocated_suppressions,
 )
@@ -133,19 +134,30 @@ def policy_snapshot_files(directory: Path) -> list[Path]:
     return sorted([evaluator, *runtime.rglob("*.py")])
 
 
-def policy_snapshot_digest(directory: Path) -> str:
-    """Bind the evaluator and every imported runtime source to accepted bytes."""
-    rows = [
-        [
-            str(item.relative_to(directory).as_posix()),
-            sha256(item.read_bytes()).hexdigest(),
-        ]
+def policy_snapshot_contents(directory: Path) -> dict[str, bytes]:
+    """Every file one evaluator's snapshot holds, read once, by its relative path.
+
+    In the order :func:`policy_snapshot_files` lists them, which is the order
+    a digest binds, so bytes held in memory hash exactly as the tree does.
+    """
+    return {
+        item.relative_to(directory).as_posix(): item.read_bytes()
         for item in policy_snapshot_files(directory)
-    ]
+    }
+
+
+def contents_digest(contents: dict[str, bytes]) -> str:
+    """Bind an evaluator's files, as held, to one digest."""
+    rows = [[name, sha256(content).hexdigest()] for name, content in contents.items()]
     return sha256(json.dumps(rows, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
-def policy_data_literals(path: Path) -> dict:
+def policy_snapshot_digest(directory: Path) -> str:
+    """Bind the evaluator and every imported runtime source to accepted bytes."""
+    return contents_digest(policy_snapshot_contents(directory))
+
+
+def policy_data_literals(path: Path, text: str | None = None) -> dict:
     """Every constant a generated ``policy_data.py`` assigns, read without running it.
 
     The module is read rather than imported because the checkout holding it
@@ -159,9 +171,15 @@ def policy_data_literals(path: Path) -> dict:
     would run at import, so it is refused, naming its line, rather than
     skipped: a reading that left it out would describe a module other than
     the one that runs.
+
+    ``text`` is the module as already read, where a caller holds the bytes it
+    will act on: a second read of ``path`` could describe other bytes.
     """
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        tree = ast.parse(
+            path.read_text(encoding="utf-8") if text is None else text,
+            filename=str(path),
+        )
     except SyntaxError as error:
         raise ValueError(f"{path} is not Python generation writes: {error}") from error
 
@@ -677,6 +695,52 @@ def policy_refresh_command(checkout: str, root: Path | None, runtime: str = "") 
             *named,
         ]
     )
+
+
+def within_budget(entry: str, request: dict, budget: float = 5.0) -> str:
+    """One function of this dispatcher, answered by a child held to a hard budget.
+
+    For work that only advises, beside a verdict already reached. It reads
+    trees and asks Git about a checkout the session writes, and a runtime lets
+    a call through once its hook overruns -- so the verdict must never wait on
+    it. The child is this same script, loaded without running its entry point,
+    asked for ``entry`` with ``request``, and killed at ``budget`` seconds;
+    anything short of a clean answer in time is no answer. Only a dispatcher
+    started as a script has itself to load, so anywhere else it answers "".
+
+    Five seconds by default: each runtime gives its policy hook thirty, and
+    the verdict this rides beside, a language server included, spends the
+    rest.
+    """
+    script = Path(sys.argv[0]) if sys.argv and sys.argv[0] else None
+    if script is None or not script.is_file():
+        return ""
+    child = (
+        "import json, runpy, sys\n"
+        "loaded = runpy.run_path(sys.argv[1], run_name='lup_advice')\n"
+        "sys.stdout.write(loaded[sys.argv[2]](json.load(sys.stdin)))\n"
+    )
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                "-S",
+                "-B",
+                "-c",
+                child,
+                str(script.resolve()),
+                entry,
+            ],
+            input=json.dumps(request),
+            text=True,
+            capture_output=True,
+            timeout=budget,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return ""
+    return result.stdout if result.returncode == 0 else ""
 
 
 def own_policies(path_text: str, root: Path | None, runtime: str = "") -> list[dict]:
@@ -3529,6 +3593,7 @@ def edit_decision(
     comparing policies costs a read of both trees.
     """
     path = str(((cwd or Path.cwd()) / path_text).resolve())
+    asked = {"path": path, "cwd": str(cwd or Path.cwd()), "path_exists": path_exists}
     try:
         response = routed_edit_response(
             path,
@@ -3543,7 +3608,7 @@ def edit_decision(
         if response is not None:
             return read_response(json.loads(response))
     except (OSError, ValueError, KeyError, TypeError) as error:
-        return routing_failure(str(error), policy_refresh_request(path, cwd))
+        return routing_failure(str(error), within_budget("refresh_request", asked))
     decision = local_edit_decision(
         path,
         before,
@@ -3555,26 +3620,53 @@ def edit_decision(
     )
     if decision.effect not in ("ask", "deny"):
         return decision
+    return unaccepted_policy(decision, within_budget("refresh_advice", asked))
+
+
+def refresh_request(request: dict) -> str:
+    """The operator's refresh for a path whose accepted policy could not route it.
+
+    What :func:`within_budget` asks a child for, beside a routing failure.
+    """
+    return policy_refresh_request(
+        str(request["path"]), Path(str(request["cwd"])), POLICY_RUNTIME
+    )
+
+
+def refresh_advice(request: dict) -> str:
+    """The operator's refresh for one edit, where the checkout's own tables differ.
+
+    What :func:`within_budget` asks a child for. The command is handed over
+    only where accepting the checkout's generated policy could change this
+    edit's verdict: its tables are read as data and compared with this
+    launch's wherever the verdict reads them, never run. Tables that will not
+    read leave the command standing, since nothing could be shown alike.
+    """
+    path = str(request["path"])
+    cwd = Path(str(request["cwd"]))
     refresh = policy_refresh_request(path, cwd, POLICY_RUNTIME)
+    if not refresh:
+        return ""
+    suffix = Path(path).suffix.lower()
     try:
         own = [
-            local_edit_decision(
-                path,
-                before,
-                after,
-                path_exists,
-                autonomous,
-                operation,
-                cwd,
-                tables=generated_edit_tables(data),
-            )
-            for data in (own_policies(path, cwd, POLICY_RUNTIME) if refresh else [])
+            generated_edit_tables(data)
+            for data in own_policies(path, cwd, POLICY_RUNTIME)
         ]
+        alike = bool(own) and all(
+            judged_alike(
+                launch_edit_tables(),
+                tables,
+                worktree_path(path),
+                path_exists=bool(request["path_exists"]),
+                suffix=suffix,
+                python_source=suffix in (".py", ".pyi"),
+            )
+            for tables in own
+        )
     except Exception:
-        # Advice only: a policy whose tables will not read is no answer, and
-        # the command stands beside the verdict as it would have.
-        own = []
-    return unaccepted_policy(decision, refresh, own)
+        alike = False
+    return "" if alike else refresh
 
 
 def launch_edit_tables() -> EditTablesRow:
@@ -3600,12 +3692,8 @@ def local_edit_decision(
     cwd: Path | None = None,
     allowances: list[str] | None = None,
     resolve_external: bool = True,
-    tables: EditTablesRow | None = None,
 ) -> KernelDecision:
     """Judge one file's before and after against the declared edit policy.
-
-    ``tables`` are another generated policy's, read to learn what it would
-    decide here; unnamed, they are this launch's own.
 
     The path is relativized against the worktree holding it rather than the
     directory the runtime started in, because every repo-relative rule matches
@@ -3631,11 +3719,9 @@ def local_edit_decision(
     """
     outside_this_repository = foreign_repository(path_text, cwd)
     beyond_this_project = outside_this_project(path_text, cwd)
-    policy = tables or launch_edit_tables()
     suffix = Path(path_text).suffix.lower()
     python_source = suffix in (".py", ".pyi")
-    patterns = policy["antipattern_rows"]
-    rows = patterns[suffix] if suffix in patterns else []
+    rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else []
     # A checker is not started for a file this policy has already decided it
     # has nothing to say about. It would resolve another repository's imports
     # against another repository's environment to answer a rule that will not
@@ -3653,10 +3739,10 @@ def local_edit_decision(
         before,
         after,
         path_exists=path_exists,
-        path_rules=policy["path_rules"],
+        path_rules=PATH_RULES,
         antipattern_rows=rows,
-        path_roles=policy["path_roles"],
-        maximum_added_lines=policy["maximum_added_lines"],
+        path_roles=PATH_ROLES,
+        maximum_added_lines=MAXIMUM_ADDED_LINES,
         autonomous=autonomous,
         allowances=(
             granted_allowances(ALLOWANCE_GRANTS_ENV, KNOWN_ALLOWANCES)
@@ -3664,12 +3750,12 @@ def local_edit_decision(
             else allowances
         ),
         python_source=python_source,
-        acceptance_guard=policy["acceptance_guard"],
+        acceptance_guard=ACCEPTANCE_GUARD,
         resolution=resolution,
         suffix=suffix,
         operation=operation,
-        edit_rules=policy["edit_rules"],
-        import_boundaries=policy["import_boundaries"],
+        edit_rules=EDIT_RULES,
+        import_boundaries=IMPORT_BOUNDARIES,
         foreign=outside_this_repository,
         outside_project=beyond_this_project,
         displaced=next(
@@ -3681,7 +3767,7 @@ def local_edit_decision(
                             [path_text], cwd
                         ).items()
                     ],
-                    policy["path_roles"],
+                    PATH_ROLES,
                 )
             ),
             None,

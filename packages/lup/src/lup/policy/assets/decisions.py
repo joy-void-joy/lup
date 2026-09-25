@@ -44,6 +44,7 @@ from host import (
     managed_script_roots,
     outside_this_project,
     own_policies,
+    within_budget,
     patch_write_targets,
     peer_store,
     policy_refresh_request,
@@ -69,6 +70,7 @@ from coordination import store
 from kernel.edit import (
     awaits_resolution,
     decide_edit,
+    judged_alike,
     relocated_edit_text,
     relocated_suppressions,
 )
@@ -680,6 +682,7 @@ def edit_decision(
     comparing policies costs a read of both trees.
     """
     path = str(((cwd or Path.cwd()) / path_text).resolve())
+    asked = {"path": path, "cwd": str(cwd or Path.cwd()), "path_exists": path_exists}
     try:
         response = routed_edit_response(
             path,
@@ -694,7 +697,7 @@ def edit_decision(
         if response is not None:
             return read_response(json.loads(response))
     except (OSError, ValueError, KeyError, TypeError) as error:
-        return routing_failure(str(error), policy_refresh_request(path, cwd))
+        return routing_failure(str(error), within_budget("refresh_request", asked))
     decision = local_edit_decision(
         path,
         before,
@@ -706,26 +709,53 @@ def edit_decision(
     )
     if decision.effect not in ("ask", "deny"):
         return decision
+    return unaccepted_policy(decision, within_budget("refresh_advice", asked))
+
+
+def refresh_request(request: dict) -> str:
+    """The operator's refresh for a path whose accepted policy could not route it.
+
+    What :func:`within_budget` asks a child for, beside a routing failure.
+    """
+    return policy_refresh_request(
+        str(request["path"]), Path(str(request["cwd"])), POLICY_RUNTIME
+    )
+
+
+def refresh_advice(request: dict) -> str:
+    """The operator's refresh for one edit, where the checkout's own tables differ.
+
+    What :func:`within_budget` asks a child for. The command is handed over
+    only where accepting the checkout's generated policy could change this
+    edit's verdict: its tables are read as data and compared with this
+    launch's wherever the verdict reads them, never run. Tables that will not
+    read leave the command standing, since nothing could be shown alike.
+    """
+    path = str(request["path"])
+    cwd = Path(str(request["cwd"]))
     refresh = policy_refresh_request(path, cwd, POLICY_RUNTIME)
+    if not refresh:
+        return ""
+    suffix = Path(path).suffix.lower()
     try:
         own = [
-            local_edit_decision(
-                path,
-                before,
-                after,
-                path_exists,
-                autonomous,
-                operation,
-                cwd,
-                tables=generated_edit_tables(data),
-            )
-            for data in (own_policies(path, cwd, POLICY_RUNTIME) if refresh else [])
+            generated_edit_tables(data)
+            for data in own_policies(path, cwd, POLICY_RUNTIME)
         ]
+        alike = bool(own) and all(
+            judged_alike(
+                launch_edit_tables(),
+                tables,
+                worktree_path(path),
+                path_exists=bool(request["path_exists"]),
+                suffix=suffix,
+                python_source=suffix in (".py", ".pyi"),
+            )
+            for tables in own
+        )
     except Exception:
-        # Advice only: a policy whose tables will not read is no answer, and
-        # the command stands beside the verdict as it would have.
-        own = []
-    return unaccepted_policy(decision, refresh, own)
+        alike = False
+    return "" if alike else refresh
 
 
 def launch_edit_tables() -> EditTablesRow:
@@ -751,12 +781,8 @@ def local_edit_decision(
     cwd: Path | None = None,
     allowances: list[str] | None = None,
     resolve_external: bool = True,
-    tables: EditTablesRow | None = None,
 ) -> KernelDecision:
     """Judge one file's before and after against the declared edit policy.
-
-    ``tables`` are another generated policy's, read to learn what it would
-    decide here; unnamed, they are this launch's own.
 
     The path is relativized against the worktree holding it rather than the
     directory the runtime started in, because every repo-relative rule matches
@@ -782,11 +808,9 @@ def local_edit_decision(
     """
     outside_this_repository = foreign_repository(path_text, cwd)
     beyond_this_project = outside_this_project(path_text, cwd)
-    policy = tables or launch_edit_tables()
     suffix = Path(path_text).suffix.lower()
     python_source = suffix in (".py", ".pyi")
-    patterns = policy["antipattern_rows"]
-    rows = patterns[suffix] if suffix in patterns else []
+    rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else []
     # A checker is not started for a file this policy has already decided it
     # has nothing to say about. It would resolve another repository's imports
     # against another repository's environment to answer a rule that will not
@@ -804,10 +828,10 @@ def local_edit_decision(
         before,
         after,
         path_exists=path_exists,
-        path_rules=policy["path_rules"],
+        path_rules=PATH_RULES,
         antipattern_rows=rows,
-        path_roles=policy["path_roles"],
-        maximum_added_lines=policy["maximum_added_lines"],
+        path_roles=PATH_ROLES,
+        maximum_added_lines=MAXIMUM_ADDED_LINES,
         autonomous=autonomous,
         allowances=(
             granted_allowances(ALLOWANCE_GRANTS_ENV, KNOWN_ALLOWANCES)
@@ -815,12 +839,12 @@ def local_edit_decision(
             else allowances
         ),
         python_source=python_source,
-        acceptance_guard=policy["acceptance_guard"],
+        acceptance_guard=ACCEPTANCE_GUARD,
         resolution=resolution,
         suffix=suffix,
         operation=operation,
-        edit_rules=policy["edit_rules"],
-        import_boundaries=policy["import_boundaries"],
+        edit_rules=EDIT_RULES,
+        import_boundaries=IMPORT_BOUNDARIES,
         foreign=outside_this_repository,
         outside_project=beyond_this_project,
         displaced=next(
@@ -832,7 +856,7 @@ def local_edit_decision(
                             [path_text], cwd
                         ).items()
                     ],
-                    policy["path_roles"],
+                    PATH_ROLES,
                 )
             ),
             None,

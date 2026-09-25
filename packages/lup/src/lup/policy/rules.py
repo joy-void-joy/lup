@@ -27,6 +27,7 @@ from lup.policy.kernel.policy_protocol import (
 )
 from lup.policy.kernel.edit import (
     decide_edit,
+    judged_alike,
     path_rule_matches as kernel_path_rule_matches,
 )
 from lup.policy.kernel.fetch import decide_fetch
@@ -642,53 +643,60 @@ class EditPolicy(DecisionPolicy[EditBatch]):
                 routing_failure(str(error), policy_refresh_request(path, root))
             )
         suffix = change.path.suffix.lower()
-
-        def judged(tables: EditTablesRow) -> KernelDecision:
-            """This change against one policy's tables, everything else alike."""
-            patterns = tables["antipattern_rows"]
-            return decide_edit(
-                Path(path).relative_to(root).as_posix()
-                if not worktree_root(path) and Path(path).is_relative_to(root)
-                else worktree_path(path),
-                change.before,
-                change.after,
-                path_exists=Path(path).exists(),
-                path_rules=tables["path_rules"],
-                antipattern_rows=patterns[suffix] if suffix in patterns else [],
-                path_roles=tables["path_roles"],
-                maximum_added_lines=tables["maximum_added_lines"],
-                autonomous=self.autonomous,
-                allowances=self.grants.granted(),
-                python_source=suffix in (".py", ".pyi"),
-                acceptance_guard=tables["acceptance_guard"],
-                suffix=suffix,
-                operation=change.operation,
-                edit_rules=tables["edit_rules"],
-                import_boundaries=tables["import_boundaries"],
-                foreign=foreign_repository(path, root),
-                outside_project=outside_this_project(path, root),
-            )
-
-        decision = judged(
-            EditTablesRow(
-                path_rules=[path_rule_row(rule) for rule in self.protected],
-                antipattern_rows={suffix: antipattern_rows(change)},
-                path_roles=self.path_roles,
-                maximum_added_lines=self.maximum_added_lines,
-                acceptance_guard=self.acceptance_guard,
-                edit_rules=self.edit_rules,
-                import_boundaries=self.import_boundaries,
-            )
+        relative = (
+            Path(path).relative_to(root).as_posix()
+            if not worktree_root(path) and Path(path).is_relative_to(root)
+            else worktree_path(path)
+        )
+        tables = EditTablesRow(
+            path_rules=[path_rule_row(rule) for rule in self.protected],
+            antipattern_rows={suffix: antipattern_rows(change)},
+            path_roles=self.path_roles,
+            maximum_added_lines=self.maximum_added_lines,
+            acceptance_guard=self.acceptance_guard,
+            edit_rules=self.edit_rules,
+            import_boundaries=self.import_boundaries,
+        )
+        decision = decide_edit(
+            relative,
+            change.before,
+            change.after,
+            path_exists=Path(path).exists(),
+            path_rules=tables["path_rules"],
+            antipattern_rows=tables["antipattern_rows"][suffix],
+            path_roles=tables["path_roles"],
+            maximum_added_lines=tables["maximum_added_lines"],
+            autonomous=self.autonomous,
+            allowances=self.grants.granted(),
+            python_source=suffix in (".py", ".pyi"),
+            acceptance_guard=tables["acceptance_guard"],
+            suffix=suffix,
+            operation=change.operation,
+            edit_rules=tables["edit_rules"],
+            import_boundaries=tables["import_boundaries"],
+            foreign=foreign_repository(path, root),
+            outside_project=outside_this_project(path, root),
         )
         if decision.effect not in ("ask", "deny"):
             return pydantic_decision(decision)
         refresh = policy_refresh_request(path, root)
         try:
             own = [
-                judged(generated_edit_tables(data))
+                generated_edit_tables(data)
                 for data in (own_policies(path, root) if refresh else [])
             ]
+            alike = bool(own) and all(
+                judged_alike(
+                    tables,
+                    held,
+                    relative,
+                    path_exists=Path(path).exists(),
+                    suffix=suffix,
+                    python_source=suffix in (".py", ".pyi"),
+                )
+                for held in own
+            )
         except Exception:
             # Advice only: tables that will not read leave the command standing.
-            own = []
-        return pydantic_decision(unaccepted_policy(decision, refresh, own))
+            alike = False
+        return pydantic_decision(unaccepted_policy(decision, "" if alike else refresh))

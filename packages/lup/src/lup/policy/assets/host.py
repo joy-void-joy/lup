@@ -624,6 +624,52 @@ def policy_refresh_command(checkout: str, root: Path | None, runtime: str = "") 
     )
 
 
+def within_budget(entry: str, request: dict, budget: float = 5.0) -> str:
+    """One function of this dispatcher, answered by a child held to a hard budget.
+
+    For work that only advises, beside a verdict already reached. It reads
+    trees and asks Git about a checkout the session writes, and a runtime lets
+    a call through once its hook overruns -- so the verdict must never wait on
+    it. The child is this same script, loaded without running its entry point,
+    asked for ``entry`` with ``request``, and killed at ``budget`` seconds;
+    anything short of a clean answer in time is no answer. Only a dispatcher
+    started as a script has itself to load, so anywhere else it answers "".
+
+    Five seconds by default: each runtime gives its policy hook thirty, and
+    the verdict this rides beside, a language server included, spends the
+    rest.
+    """
+    script = Path(sys.argv[0]) if sys.argv and sys.argv[0] else None
+    if script is None or not script.is_file():
+        return ""
+    child = (
+        "import json, runpy, sys\n"
+        "loaded = runpy.run_path(sys.argv[1], run_name='lup_advice')\n"
+        "sys.stdout.write(loaded[sys.argv[2]](json.load(sys.stdin)))\n"
+    )
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                "-S",
+                "-B",
+                "-c",
+                child,
+                str(script.resolve()),
+                entry,
+            ],
+            input=json.dumps(request),
+            text=True,
+            capture_output=True,
+            timeout=budget,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return ""
+    return result.stdout if result.returncode == 0 else ""
+
+
 def own_policies(path_text: str, root: Path | None, runtime: str = "") -> list[dict]:
     """The data of each policy the checkout holding a path generates for itself.
 

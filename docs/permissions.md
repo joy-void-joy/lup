@@ -469,12 +469,22 @@ grant accepted, or else the launch checkout's own — and asks. Both
 being accepted was written by the session asking: each named constant, from
 protected paths, path roles and anti-pattern rows through import boundaries,
 shell and fetch rules, sandbox-excluded commands, refused tools and autonomous
-identities, lists the entries accepting removes and adds, one line each, and
-every evaluator file whose code differs is named, because accepting runs it. A
-`policy_data.py` holding anything generation never writes is refused rather
-than shown. `--yes` accepts without asking, after showing the same preview; a
-declined question writes nothing, and what is accepted is exactly the bytes
-shown — a checkout regenerated in between is refused, to be shown again.
+identities, lists the entries accepting removes and adds, one line each, at
+the position each holds — the path rules and roles are read first match
+first, so an entry moved above another shows as leaving one place and
+arriving at another. A `policy_data.py` holding anything generation never
+writes is refused rather than shown. Evaluator code runs once accepted, so
+every file differing from what this launch's own lup generates is shown as a
+unified diff, and the refresh then refuses until it is run again with
+`--accept-code`; where the launch checkout generates no tree for that runtime,
+the code is compared with the snapshot judging now. `--yes` accepts without
+asking, after showing the same preview, and answers only for the data. A
+declined question writes nothing. Every file is read once: the digest, what
+is shown and the snapshot written all come from those bytes, and the checkout
+is not read again, so a change made after the showing — or made and undone
+while it was read — cannot put other bytes in the snapshot. A checkout that
+moves on afterwards is judged by what was shown, and its next edit names the
+refresh again.
 
 A verdict reached under a policy the destination does not hold says so, and
 names the command with this launch's real nonce and paths —
@@ -487,10 +497,16 @@ there makes its own composition roots look like foreign importers; where the
 policy that worktree generates would decide a refusal or a question about one
 of its files otherwise, the verdict carries the same command, and
 `dev policy` shows it beside the verdict. The command is named only where the
-refresh would accept the checkout and change the verdict at hand: a file both
-policies own a question about — a human-owned README — carries none, which is
-read from the worktree's generated tables as data, never by running them. A
-launch whose ledger records no runtime has the command name the asking
+refresh would accept the checkout and could change the verdict at hand. The
+worktree's generated tables are compared with the launch's as data wherever
+this edit's verdict reads them — the protected-path rules its path meets, and,
+whole and in order, the roles, the anti-pattern rows for its suffix, the edit
+rules and limits, and for Python the import boundaries — and never searched
+with, since the session wrote them; a file both policies own a question about,
+a human-owned README, carries none. That comparison runs after the verdict is
+reached, in a child held to five of the thirty seconds a policy hook has, and
+is left off where it overruns, since a runtime lets a call through once its
+hook does. A launch whose ledger records no runtime has the command name the asking
 dispatcher's, since the refresh will not guess which tree to accept. Generation names
 it first: `harness generate` in such a worktree ends on the same command once
 what it wrote differs from what the launch accepted, and

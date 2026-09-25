@@ -480,10 +480,16 @@ there makes its own composition roots look like foreign importers; where the
 policy that worktree generates would decide a refusal or a question about one
 of its files otherwise, the verdict carries the same command, and
 `dev policy` shows it beside the verdict. The command is named only where the
-refresh would accept the checkout and change the verdict at hand: a file both
-policies own a question about — a human-owned README — carries none, which is
-read from the worktree's generated tables as data, never by running them. A
-launch whose ledger records no runtime has the command name the asking
+refresh would accept the checkout and could change the verdict at hand. The
+worktree's generated tables are compared with the launch's as data wherever
+this edit's verdict reads them — the protected-path rules its path meets, and,
+whole and in order, the roles, the anti-pattern rows for its suffix, the edit
+rules and limits, and for Python the import boundaries — and never searched
+with, since the session wrote them; a file both policies own a question about,
+a human-owned README, carries none. That comparison runs after the verdict is
+reached, in a child held to five of the thirty seconds a policy hook has, and
+is left off where it overruns, since a runtime lets a call through once its
+hook does. A launch whose ledger records no runtime has the command name the asking
 dispatcher's, since the refresh will not guess which tree to accept. Generation names
 it first: `harness generate` in such a worktree ends on the same command once
 what it wrote differs from what the launch accepted, and

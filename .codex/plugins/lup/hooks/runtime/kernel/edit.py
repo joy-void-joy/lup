@@ -30,6 +30,7 @@ from .rows import (
     AntiPatternRow,
     DisplacedTargetRow,
     EditRuleRow,
+    EditTablesRow,
     ImportBoundaryRow,
     PathRoleRow,
     PathRuleRow,
@@ -3599,6 +3600,53 @@ def path_rule_matches(path: str, path_exists: bool, row: PathRuleRow) -> bool:
             )
         case _:
             raise ValueError(f"invalid path rule kind {kind!r}")
+
+
+def judged_alike(
+    launch: EditTablesRow,
+    own: EditTablesRow,
+    path: str,
+    *,
+    path_exists: bool,
+    suffix: str,
+    python_source: bool,
+) -> bool:
+    """Whether two policies' tables agree wherever one edit's verdict reads them.
+
+    Compared as data and never run. The checkout's own tables were written by
+    the session they would judge, so a pattern among them is one it chose,
+    and searching text with it spends time a hook does not have -- a runtime
+    lets a call through once its hook overruns. Every table this edit could
+    consult is therefore compared whole and in order, since several are read
+    first match first; only the protected-path rules are narrowed to the rows
+    this path meets, because meeting one is a string comparison and nothing
+    that runs.
+    """
+
+    def met(tables: EditTablesRow) -> list[PathRuleRow]:
+        """The protected-path rules this path meets, in the order they are read."""
+        return [
+            row
+            for row in tables["path_rules"]
+            if path_rule_matches(path, path_exists, row)
+        ]
+
+    def patterns(tables: EditTablesRow) -> list[AntiPatternRow]:
+        """The anti-pattern rows a file of this suffix is read against."""
+        rows = tables["antipattern_rows"]
+        return rows[suffix] if suffix in rows else []
+
+    return (
+        met(launch) == met(own)
+        and launch["path_roles"] == own["path_roles"]
+        and patterns(launch) == patterns(own)
+        and launch["maximum_added_lines"] == own["maximum_added_lines"]
+        and launch["acceptance_guard"] == own["acceptance_guard"]
+        and launch["edit_rules"] == own["edit_rules"]
+        and (
+            not python_source or launch["import_boundaries"] == own["import_boundaries"]
+        )
+    )
 
 
 def protected_path_reason(path: str, matched: PathRuleRow) -> str:

@@ -5,6 +5,7 @@ import os
 import shutil
 import shlex
 import sys
+import time
 from pathlib import Path
 from subprocess import TimeoutExpired
 from unittest.mock import Mock
@@ -828,6 +829,61 @@ def test_a_ledger_recording_no_runtime_has_the_command_name_the_dispatchers(
 
     assert effect == "deny"
     assert f"{refresh_request(origin, sibling)} --runtime {runtime}" in detail
+
+
+def test_a_catastrophically_slow_sibling_pattern_never_holds_up_the_verdict(
+    tmp_path: Path,
+    runtime: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The worktree's own tables are compared as data, and never searched with.
+
+    Its anti-pattern rows are the session's to write, and one that backtracks
+    exponentially over the edited line would outlast the hook: a runtime that
+    lets a call through once its hook overruns would let this one through.
+    The verdict lands in seconds, and the tables differing is still said.
+    """
+    origin, sibling = launched_beside(tmp_path, runtime, monkeypatch)
+    data = sibling / f".{runtime}/plugins/lup/hooks/runtime/policy_data.py"
+    rows = policy_host.policy_data_literals(data)["ANTI_PATTERN_ROWS"]
+    rows[".py"].append(
+        {**rows[".py"][0], "id": "backtracking", "pattern": "(a+)+b", "matcher": ""}
+    )
+    data.write_text(
+        data.read_text()
+        + f"\nANTI_PATTERN_ROWS: dict[str, list[AntiPatternRow]] = {rows!r}\n"
+    )
+    target = sibling / "src" / "adlib" / "harness" / "composition.py"
+    started = time.monotonic()
+
+    effect, detail = native_edit(
+        origin, target, runtime, "VALUE = 1", f"VALUE = {'a' * 40}"
+    )
+
+    assert time.monotonic() - started < 15
+    assert effect == "deny" and "seam-boundary" in detail
+    assert refresh_request(origin, sibling) in detail
+
+
+def test_advice_that_overruns_its_budget_is_left_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A child answers within its budget or is killed, and killed is no answer."""
+    script = tmp_path / "dispatcher.py"
+    script.write_text(
+        "import time\n\n"
+        "def prompt(request):\n    return request['say']\n\n"
+        "def stalled(request):\n    time.sleep(30)\n    return 'late'\n"
+    )
+    monkeypatch.setattr(sys, "argv", [str(script)])
+    started = time.monotonic()
+
+    stalled = policy_host.within_budget("stalled", {}, budget=1.0)
+    elapsed = time.monotonic() - started
+    answered = policy_host.within_budget("prompt", {"say": "in time"}, budget=10.0)
+
+    assert stalled == "" and elapsed < 5
+    assert answered == "in time"
 
 
 def failing_worktree_listing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
