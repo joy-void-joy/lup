@@ -2199,15 +2199,15 @@ def docker_rule() -> ShellCommandRule:
 def bun_rule() -> ShellCommandRule:
     """Compile the bun surface, which is a package manager wearing a runtime.
 
-    `bun` is in the kernel's interpreter set, so without a rule naming it
-    every invocation is refused as inline code — including `bun install`,
-    which carries none. Declaring the safe forms is what separates the two,
-    and it separates them the safe way round: the default is `deny`, so an
-    eval spelling this table never anticipated is refused by falling through
-    rather than by being listed. That matters more than usual, because the
-    ways of handing an interpreter a program are many and growing — `-e`,
-    `--eval`, `-p`, a bare `-` reading stdin, and on a sibling runtime an
-    `eval` *subcommand* that no flag list could have caught.
+    `bun` is in the kernel's interpreter set, and the kernel reads bun's own
+    grammar before this row: `bun <script file>` runs, and the inline
+    spellings (`-e`, `--eval`, `-p`, `--print`) are refused whatever a row
+    says. What reaches here is a subcommand, and without a rule naming them
+    every one would be refused as a bare interpreter — including `bun
+    install`, which carries no program. Declaring the safe forms separates
+    the two the safe way round: the default is `deny`, so a spelling this
+    table never anticipated is refused by falling through rather than by
+    being listed.
 
     The split between allow and ask is what a verb does to the lockfile
     rather than to the filesystem: restoring what it already pins, as

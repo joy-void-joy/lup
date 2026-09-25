@@ -223,6 +223,21 @@ and an undeclared root is refused with the declaration to extend named. An
 `-m` a declared target owns stays that target's: `uv run pytest -m slow`
 selects a marker expression, not a module.
 
+The same criterion answers an interpreter run directly. `bash`, `sh`, `zsh`,
+`node`, `bun` and `deno run` run a named script file, and `lup.policy.kernel.programs`
+reads each one's own grammar to find it: an option's value is never taken for
+the script, a cluster carries every letter in it, and an option the grammar
+does not list leaves the script unread and refuses. Inline code (`-c`, `-e`,
+`-p`, `--eval`, `--print`, `deno eval`, a `data:` import), a program read from
+stdin (`-s`, `-`, a pipe, a redirect, a heredoc, `/dev/stdin`), one fetched
+from a URL or package specifier, and an interpreter handed nothing stay
+refused, as do `eval`, `source` and `.`; the inline refusals hold where the
+vocabulary names the interpreter too, so `bun --eval` is refused beside the
+`bun` subcommands its row declares. Python runs through `uv run python
+<script>`, in this project's environment, so `python <script>` keeps its
+refusal and names that route, and `uv run <interpreter>` reads the same
+grammar.
+
 A target may also carry subcommands, because a toolchain reached through
 `uv run` is one target and many commands — a devtools CLI that mostly reads
 a repository may have one verb beneath it that opens a paid agent session,

@@ -62,6 +62,7 @@ from .words import (
     written_targets,
 )
 from .fetch import decide_fetch
+from .programs import program_verdict, read_program
 from .semantics import UnjudgedAmbient
 
 # lup: ignore[constant-declaration] — refusal wording, declared with its verdict
@@ -1549,11 +1550,11 @@ def decide_uv(
         # invocation is refused when it leaves no reviewable artifact behind.
         # `-c` leaves nothing to read and a bare interpreter runs nothing at
         # all; a path and a module in a declared root are both openable,
-        # diffable and runnable again, so neither is inline code.
-        rest = run_words[1:]
-        inline = [word for word in rest if word == "-c"]
-        named = [word for word in rest if not word.startswith("-")]
+        # diffable and runnable again, so neither is inline code. The
+        # interpreter's own grammar says which word is the program, the same
+        # reading a bare `bash <script>` meets.
         interpreted = run_command in INTERPRETERS
+        reading = read_program(run_words) if interpreted else None
         # A module is as readable as the file it lives in, so what decides one
         # is whether this project declares its root — read off the table that
         # already answers `uv run <target>`, because a blessed module root and
@@ -1565,14 +1566,20 @@ def decide_uv(
         declared_root = next(
             (row for row in runner_targets if row["name"] == module_root), None
         )
-        if run_command == "-c" or (interpreted and inline):
-            subject = "uv run -c" if run_command == "-c" else f"uv run {run_command} -c"
+        if run_command == "-c":
             return KernelDecision(
                 "deny",
-                f"{subject}: inline code leaves nothing behind to review",
+                "uv run -c: inline code leaves nothing behind to review",
                 recovery="Write it to a named script file, which can be reviewed"
                 " and run again.",
             )
+        refused = (
+            None
+            if reading is None
+            else program_verdict(f"uv run {run_command}", reading)
+        )
+        if refused is not None and refused.effect == "deny":
+            return refused
         if module_root is not None and declared_root is None:
             return KernelDecision(
                 "deny",
@@ -1581,12 +1588,12 @@ def decide_uv(
                 recovery="Name a script file instead, or declare the root as a"
                 " runner target.",
             )
-        if interpreted and not named:
+        if reading is not None and reading["kind"] == "subcommand":
             return KernelDecision(
                 "deny",
-                f"the bare interpreter uv run {run_command} runs whatever it is"
-                " fed, and leaves nothing behind to review",
-                recovery="Name a script file.",
+                f"uv run {run_command} {reading['subject']}: only a script file"
+                " is read through `uv run`",
+                recovery="Run the command itself, where its own rules judge it.",
             )
         # Transparent wrappers and nested runners cannot hide an operator-only
         # operation. Only its hard prohibition propagates: recognizing a target

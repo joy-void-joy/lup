@@ -2246,7 +2246,7 @@ def test_generated_codex_hook_allows_managed_skill_scripts(
     assert isinstance(allowed, sh.RunningCommand)
     assert allowed.exit_code == 0
 
-    body["tool_input"]["command"] = "node /tmp/untrusted-script.mjs"
+    body["tool_input"]["command"] = "python3 /tmp/untrusted-script.py"
     denied = sh.Command(str(script))(
         _in=json.dumps(body),
         _ok_code=[0, 2],
@@ -2273,9 +2273,9 @@ def test_generated_claude_hook_allows_managed_skill_scripts(
     helper = config_dir / "plugins/cache/official/tool/scripts/validate.mjs"
     assert decision(f"node {helper}") == "allow"
     assert decision(f"node {config_dir}/skills/tool/scripts/report.mjs") == "allow"
-    assert decision("node /tmp/untrusted-script.mjs") == "deny"
-    workspace_script = Path(".claude/plugins/lup/scripts/file_suggest.sh").resolve()
-    assert decision(f"sh {workspace_script}") == "deny"
+    assert decision(f"python3 {config_dir}/skills/tool/scripts/report.py") == "allow"
+    assert decision("python3 /tmp/untrusted-script.py") == "deny"
+    assert decision("node -e 'process.exit()'") == "deny"
 
 
 def test_generated_claude_hook_refuses_the_declared_calls(tmp_path: Path) -> None:

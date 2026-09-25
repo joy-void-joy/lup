@@ -58,6 +58,7 @@ from .bindings import (
     references,
 )
 from .escalation import read_escalation
+from .programs import SCRIPT_INTERPRETERS, program_verdict, read_program
 from .semantics import UnjudgedAmbient
 from .lex import (
     command_segments,
@@ -407,6 +408,48 @@ def decide_printenv_words(words: list[str]) -> KernelDecision:
     )
 
 
+def decide_interpreter_words(
+    words: list[str],
+    context: ShellContext,
+    runs_scripts: tuple[str, ...] = SCRIPT_INTERPRETERS,
+) -> KernelDecision | None:
+    """Judge one interpreter invocation by what it hands the interpreter to run.
+
+    The criterion `uv run` already applies: refused where the invocation
+    leaves nothing reviewable behind, which a script file does not do. An
+    interpreter in ``runs_scripts`` runs a named file; inline code, a program
+    fetched from elsewhere, and -- undeclared -- an interpreter handed nothing
+    are refused. The first three hold even where the vocabulary names the
+    interpreter, because a row declaring `bun install` speaks for a
+    subcommand and not for a program nobody can read.
+
+    ``None`` hands a declared interpreter's other forms to its row. Anything
+    else refuses as a bare interpreter, which Python meets over a file too:
+    it runs through `uv run python <script>`, in this project's environment.
+    """
+    executable = posixpath.basename(words[0])
+    declared = declares_command(executable, context["rows"])
+    reading = read_program(words)
+    if executable in runs_scripts:
+        verdict = program_verdict(executable, reading)
+        if verdict is not None and (
+            reading["kind"] in ("script", "inline", "remote") or not declared
+        ):
+            return verdict
+    if declared:
+        return None
+    if len(words) > 1 and is_trusted_script(words[1], context["trusted_script_roots"]):
+        return KernelDecision("allow", "native-managed skill script")
+    return KernelDecision(
+        "deny",
+        f"{executable}: a bare interpreter or inline code leaves nothing"
+        " behind to review",
+        recovery="Write the code to a named script file and run it through"
+        " `uv run python <script>`; a bare interpreter is refused even"
+        " over a file.",
+    )
+
+
 def decide_segment_words(
     words: list[str], context: ShellContext, directory: str | None = ""
 ) -> KernelDecision:
@@ -432,19 +475,10 @@ def decide_segment_words(
             recovery="Write the command without the wrapper, or name the"
             " wrapper's options so the command after them can be read.",
         )
-    if executable in INTERPRETERS and not declares_command(executable, context["rows"]):
-        if len(words) > 1 and is_trusted_script(
-            words[1], context["trusted_script_roots"]
-        ):
-            return KernelDecision("allow", "native-managed skill script")
-        return KernelDecision(
-            "deny",
-            f"{executable}: a bare interpreter or inline code leaves nothing"
-            " behind to review",
-            recovery="Write the code to a named script file and run it through"
-            " `uv run python <script>`; a bare interpreter is refused even"
-            " over a file.",
-        )
+    if executable in INTERPRETERS:
+        interpreted = decide_interpreter_words(words, context)
+        if interpreted is not None:
+            return interpreted
     if executable == "git" and any("ext::" in word for word in words):
         transport = next(word for word in words if "ext::" in word)
         return KernelDecision(

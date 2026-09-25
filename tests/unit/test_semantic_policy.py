@@ -532,6 +532,62 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="uv run python -m http.server", effect="deny"),
     DecisionCase(input="uv run -m http.server", effect="deny"),
     DecisionCase(input="uv run python", effect="deny"),
+    # The same criterion, read through each interpreter's own grammar: a named
+    # script file runs, and inline code, stdin, a heredoc, a stream alias, a
+    # program fetched from elsewhere, and an interpreter handed nothing do
+    # not. An option's value is never the script, and an option the grammar
+    # does not know leaves the script unread. Python keeps `uv run`.
+    DecisionCase(input="bash tmp/x.sh", effect="allow"),
+    DecisionCase(input="sh tmp/x.sh", effect="allow"),
+    DecisionCase(input="zsh tmp/x.sh", effect="allow"),
+    DecisionCase(input="node tmp/x.js", effect="allow"),
+    DecisionCase(input="bun tmp/x.ts", effect="allow"),
+    DecisionCase(input="deno run tmp/x.ts", effect="allow"),
+    DecisionCase(input="bash tmp/x.sh", effect="allow", sandboxed=True),
+    DecisionCase(input="bash -x tmp/x.sh -c ignored", effect="allow"),
+    DecisionCase(input="bash -O extglob tmp/x.sh", effect="allow"),
+    DecisionCase(input="bash -o pipefail tmp/x.sh", effect="allow"),
+    DecisionCase(input="node --require ./hooks.js tmp/x.js", effect="allow"),
+    DecisionCase(input="bun --watch tmp/x.ts", effect="allow"),
+    DecisionCase(input="deno run --allow-read tmp/x.ts", effect="allow"),
+    DecisionCase(input="deno run -A -c deno.json tmp/x.ts", effect="allow"),
+    DecisionCase(input="uv run bash tmp/x.sh", effect="allow"),
+    DecisionCase(input="uv run python -W ignore tmp/x.py", effect="allow"),
+    DecisionCase(input="bash -c ls", effect="deny"),
+    DecisionCase(input="bash -c ls", effect="deny", sandboxed=True),
+    DecisionCase(input="bash -lc ls", effect="deny"),
+    DecisionCase(input="bash -s", effect="deny"),
+    DecisionCase(input="sh -c ls", effect="deny"),
+    DecisionCase(input="zsh -c ls", effect="deny"),
+    DecisionCase(input="node -e 'x'", effect="deny"),
+    DecisionCase(input="node -p 'x'", effect="deny"),
+    DecisionCase(input="node --eval 'x'", effect="deny"),
+    DecisionCase(input="node --eval='x'", effect="deny"),
+    DecisionCase(input="node --print 'x'", effect="deny"),
+    DecisionCase(input="node --import data:text/javascript,x tmp/x.js", effect="deny"),
+    DecisionCase(input="bun --eval 'x'", effect="deny"),
+    DecisionCase(input="bun -e 'x'", effect="deny"),
+    DecisionCase(input="bun -p 'x'", effect="deny"),
+    DecisionCase(input="bun --print 'x'", effect="deny"),
+    DecisionCase(input="deno eval 'x'", effect="deny"),
+    DecisionCase(input="deno run -", effect="deny"),
+    DecisionCase(input="deno run https://example.com/x.ts", effect="deny"),
+    DecisionCase(input="deno run npm:cowsay", effect="deny"),
+    DecisionCase(input="bash < x.sh", effect="deny"),
+    DecisionCase(input="echo ls | bash", effect="deny"),
+    DecisionCase(input="bash <<'EOF'\nls\nEOF", effect="deny"),
+    DecisionCase(input="bash /dev/stdin", effect="deny"),
+    DecisionCase(input="bash -", effect="deny"),
+    DecisionCase(input="bash", effect="deny"),
+    DecisionCase(input="node", effect="deny"),
+    DecisionCase(input="deno", effect="deny"),
+    DecisionCase(input="bash -O extglob", effect="deny"),
+    DecisionCase(input="node --frobnicate tmp/x.js", effect="deny"),
+    DecisionCase(input="python tmp/x.py", effect="deny"),
+    DecisionCase(input="python3 tmp/x.py", effect="deny"),
+    DecisionCase(input="uv run node -e 'x'", effect="deny"),
+    DecisionCase(input="uv run python -W ignore", effect="deny"),
+    DecisionCase(input="uv run bun install", effect="deny"),
     DecisionCase(
         input="uv --unknown-option run lup-devtools dev questions answer abc --as operator",
         effect="deny",
@@ -1478,14 +1534,17 @@ SHELL_POLICY_CASES = [
     # wraps, rather than by skipping one word: skipping landed on the wrapper's
     # flag, and a word beginning with `-` matches no rule, so the segment was
     # "not classified" and allowed inside the boundary. Each of these carried
-    # an interpreter the table refuses outright.
-    DecisionCase(input="env -i node evil.js", effect="deny"),
-    DecisionCase(input="stdbuf -oL node evil.js", effect="deny"),
-    DecisionCase(input="setsid -f node evil.js", effect="deny"),
-    DecisionCase(input="time -p node evil.js", effect="deny"),
-    DecisionCase(input="command -p node evil.js", effect="deny"),
-    DecisionCase(input="exec -a nice node evil.js", effect="deny"),
-    DecisionCase(input="nohup env stdbuf -oL node evil.js", effect="deny"),
+    # inline code the table refuses outright, and a script file reached
+    # through the same wrapper is the file it names.
+    DecisionCase(input="env -i node -e evil", effect="deny"),
+    DecisionCase(input="stdbuf -oL node -e evil", effect="deny"),
+    DecisionCase(input="setsid -f node -e evil", effect="deny"),
+    DecisionCase(input="time -p node -e evil", effect="deny"),
+    DecisionCase(input="command -p node -e evil", effect="deny"),
+    DecisionCase(input="exec -a nice node -e evil", effect="deny"),
+    DecisionCase(input="nohup env stdbuf -oL node -e evil", effect="deny"),
+    DecisionCase(input="env -i python3 evil.py", effect="deny"),
+    DecisionCase(input="nohup env stdbuf -oL node tool.js", effect="allow"),
     # And the wrapper still reaches an ordinary command through those options.
     DecisionCase(input="stdbuf -oL cat f", effect="allow"),
     DecisionCase(input="env --unset=GH_TOKEN ls", effect="allow"),
@@ -3087,12 +3146,15 @@ def test_shell_policy_confines_trusted_native_skill_scripts() -> None:
     assert effect(f"node {helper}") == "allow"
     assert effect(f"if true; then sh {root}/tool/scripts/resolve; fi") == "allow"
     assert effect(f"node {helper} && rm source.py") == "ask"
-    assert effect("node /tmp/openai-docs/scripts/fetch-codex-manual.mjs") == "deny"
-    assert effect(f"node {root}/../escape.mjs") == "deny"
     assert effect("node --eval 'process.exit()'") == "deny"
+    # Any interpreter runs a script beneath a managed root; elsewhere only the
+    # ones that run a named script file do, which Python is not.
+    assert effect(f"python3 {root}/tool/scripts/report.py") == "allow"
+    assert effect("python3 /tmp/openai-docs/scripts/report.py") == "deny"
+    assert effect(f"python3 {root}/../escape.py") == "deny"
     assert (
         ShellPolicy(SHELL_RULES, trusted_script_roots=["/"])
-        .decide(ShellCommand(command="node /tmp/untrusted-script.mjs"))
+        .decide(ShellCommand(command="python3 /tmp/untrusted-script.py"))
         .effect
         == "deny"
     )
