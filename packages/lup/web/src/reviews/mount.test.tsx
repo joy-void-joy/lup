@@ -51,10 +51,12 @@ describe("review inbox page", () => {
   let answerWait: Promise<void> | null = null;
   let detailWait = new Map<string, Promise<void>>();
   let refreshStatus = 200;
+  let streamImmediately = true;
+  let issues: { root: string; message: string }[] = [];
   let stream: ReadableStreamDefaultController<Uint8Array> | null = null;
   let streamingAborted = false;
   let requests: { path: string; method: string; body: unknown; authorization: string | null }[] = [];
-  const inbox = () => ({ roots, reviews: rows, errors: [] });
+  const inbox = () => ({ roots, reviews: rows, errors: issues });
 
   beforeEach(() => {
     detail = review();
@@ -65,6 +67,8 @@ describe("review inbox page", () => {
     answerWait = null;
     detailWait = new Map();
     refreshStatus = 200;
+    streamImmediately = true;
+    issues = [];
     stream = null;
     streamingAborted = false;
     requests = [];
@@ -79,7 +83,7 @@ describe("review inbox page", () => {
       if (path === "api/events") return new Response(new ReadableStream<Uint8Array>({
         start(controller) {
           stream = controller;
-          controller.enqueue(new TextEncoder().encode(`${JSON.stringify(inbox())}\n`));
+          if (streamImmediately) controller.enqueue(new TextEncoder().encode(`${JSON.stringify(inbox())}\n`));
           options?.signal?.addEventListener("abort", () => {
             streamingAborted = true;
             controller.error(new DOMException("Stopped", "AbortError"));
@@ -228,6 +232,122 @@ describe("review inbox page", () => {
     expect(page.root.textContent).toContain("Live");
   });
 
+  test("a slow first snapshot shows unknown counts instead of claiming the queue is empty", async () => {
+    streamImmediately = false;
+    shown = mount(<App />);
+    await until(() => requests.some((request) => request.path === "api/events"), "the connecting stream");
+    expect(shown.root.textContent).toContain("Pending (?)");
+    expect(shown.root.textContent).toContain("Loading review queue…");
+    expect(shown.root.textContent).not.toContain("Pending (0)");
+    expect(shown.root.textContent).not.toContain("Queue complete");
+    expect(shown.root.textContent).not.toContain("No requests waiting");
+    expect(shown.root.querySelector(".queue")?.getAttribute("aria-busy")).toBe("true");
+    await act(async () => stream?.enqueue(new TextEncoder().encode(`${JSON.stringify(inbox())}\n`)));
+    await until(() => shown?.root.querySelector(".request h2") !== null, "the loaded request");
+    expect(shown.root.textContent).toContain("Pending (1)");
+    expect(shown.root.querySelector(".queue")?.getAttribute("aria-busy")).toBe("false");
+  });
+
+  test("a linked request is loading until its first snapshot resolves the identity", async () => {
+    streamImmediately = false;
+    window.history.replaceState(null, "", "/#token=browser-secret&review=q1");
+    shown = mount(<App />);
+    await until(() => requests.length > 0, "the linked stream");
+    expect(shown.root.textContent).toContain("Loading requested review…");
+    expect(shown.root.textContent).not.toContain("Request not found");
+    await act(async () => stream?.enqueue(new TextEncoder().encode(`${JSON.stringify(inbox())}\n`)));
+    await until(() => shown?.root.querySelector(".request h2") !== null, "the exact linked request");
+  });
+
+  test("reconnecting an empty queue does not present its previous zero count as current", async () => {
+    rows = [];
+    shown = mount(<App />);
+    await until(() => shown?.root.textContent?.includes("Queue complete") ?? false, "the confirmed empty queue");
+    streamImmediately = false;
+    await click(labelled(shown.root, "button", "Reconnect"));
+    await until(() => requests.filter((request) => request.path === "api/events").length === 2, "the replacement stream");
+    expect(shown.root.textContent).toContain("Pending (?)");
+    expect(shown.root.textContent).toContain("Refreshing review queue…");
+    expect(shown.root.textContent).not.toContain("Queue complete");
+    expect(shown.root.textContent).not.toContain("No requests waiting");
+    await act(async () => stream?.enqueue(new TextEncoder().encode(`${JSON.stringify(inbox())}\n`)));
+    await until(() => shown?.root.textContent?.includes("Queue complete") ?? false, "the refreshed empty queue");
+  });
+
+  test("failed checkout reads leave counts unknown while retaining known requests", async () => {
+    issues = [{ root: "/project/tree/other", message: "Queue could not be read" }];
+    const page = await open();
+    expect(page.root.textContent).toContain("Pending (?)");
+    expect(page.root.textContent).toContain("Some checkout queues are unavailable");
+    expect(page.root.querySelectorAll(".queue-row")).toHaveLength(1);
+    expect(page.root.textContent).toContain("Queue could not be read");
+    expect(page.root.textContent).not.toContain("Queue complete");
+    rows = [];
+    await act(async () => stream?.enqueue(new TextEncoder().encode(`${JSON.stringify(inbox())}\n`)));
+    expect(page.root.textContent).not.toContain("No requests waiting");
+    expect(page.root.textContent).not.toContain("Request not found");
+    expect(page.root.textContent).toContain("Requested review unavailable");
+  });
+
+  test("a disconnected empty queue stays unknown during the automatic reconnect delay", async () => {
+    rows = [];
+    shown = mount(<App />);
+    await until(() => shown?.root.textContent?.includes("Queue complete") ?? false, "the empty snapshot");
+    await act(async () => stream?.error(new Error("Connection lost")));
+    await until(() => shown?.root.textContent?.includes("Reconnecting") ?? false, "the retry status");
+    expect(shown.root.textContent).toContain("Pending (?)");
+    expect(shown.root.textContent).not.toContain("Queue complete");
+    expect(shown.root.textContent).not.toContain("No requests waiting");
+  });
+
+  test("identical heartbeats do not cancel a request detail that is still loading", async () => {
+    let finish = () => {};
+    detailWait.set("tree-q1", new Promise<void>((resolve) => { finish = resolve; }));
+    shown = mount(<App />);
+    await until(() => requests.some((request) => request.path === "api/reviews/tree-q1"), "the detail fetch");
+    for (const _heartbeat of [1, 2]) {
+      await act(async () => stream?.enqueue(new TextEncoder().encode(`${JSON.stringify(inbox())}\n`)));
+    }
+    expect(requests.filter((request) => request.path === "api/reviews/tree-q1")).toHaveLength(1);
+    await act(async () => finish());
+    await until(() => shown?.root.querySelector(".request h2") !== null, "the uninterrupted detail result");
+    detail.stale_reason = "The file changed while the inbox was open.";
+    await act(async () => stream?.enqueue(new TextEncoder().encode(`${JSON.stringify(inbox())}\n`)));
+    await until(() => shown?.root.textContent?.includes(detail.stale_reason) ?? false, "a completed request's next safety refresh");
+    expect(requests.filter((request) => request.path === "api/reviews/tree-q1")).toHaveLength(2);
+  });
+
+  test("opening a new deep link refreshes the queue instead of trusting an old empty snapshot", async () => {
+    rows = [];
+    shown = mount(<App />);
+    await until(() => shown?.root.textContent?.includes("Queue complete") ?? false, "the first empty snapshot");
+    const later = addRequest("tree-later");
+    streamImmediately = false;
+    await act(async () => { window.location.hash = "review=tree-later"; });
+    await until(() => requests.filter((request) => request.path === "api/events").length === 2, "a fresh stream for the direct link");
+    expect(shown.root.textContent).toContain("Loading requested review…");
+    expect(shown.root.textContent).not.toContain("Request not found");
+    await act(async () => stream?.enqueue(new TextEncoder().encode(`${JSON.stringify(inbox())}\n`)));
+    await until(() => shown?.root.querySelector(".request .reason")?.textContent === later.summary.reason, "the freshly linked request");
+  });
+
+  test.each(["explicit", "automatic"])("%s reconnect releases a held detail fetch and ignores its late response", async (mode) => {
+    let finish = () => {};
+    detailWait.set("tree-q1", new Promise<void>((resolve) => { finish = resolve; }));
+    shown = mount(<App />);
+    await until(() => requests.some((request) => request.path === "api/reviews/tree-q1"), "the held detail request");
+    const fresh = review();
+    fresh.summary.title = "Fresh request after reconnect";
+    details.set("tree-q1", fresh);
+    detailWait.delete("tree-q1");
+    if (mode === "explicit") await click(labelled(shown.root, "button", "Reconnect"));
+    else await act(async () => stream?.error(new Error("Connection lost")));
+    await until(() => shown?.root.querySelector(".request h2")?.textContent === fresh.summary.title, "a fresh detail fetch after reconnect", 1000);
+    expect(requests.filter((request) => request.path === "api/reviews/tree-q1")).toHaveLength(2);
+    await act(async () => finish());
+    expect(shown.root.querySelector(".request h2")?.textContent).toBe(fresh.summary.title);
+  });
+
   test("unchanged queue heartbeats still refresh selected file safety checks", async () => {
     const page = await open();
     await comment("Keep the draft during live safety checks.");
@@ -347,9 +467,12 @@ describe("review inbox page", () => {
     await comment("Preserve this draft.");
     await act(async () => stream?.error(new Error("Connection lost")));
     await until(() => page.root.textContent?.includes("Reconnecting") ?? false, "the reconnect status");
+    streamImmediately = false;
     await click(labelled(page.root, "button", "Reconnect"));
     await until(() => requests.filter((request) => request.path === "api/events").length === 2, "a fresh stream");
     expect(one<HTMLTextAreaElement>(page.root, "textarea").value).toBe("Preserve this draft.");
+    expect(page.root.textContent).toContain("Pending (?)");
+    await act(async () => stream?.enqueue(new TextEncoder().encode(`${JSON.stringify(inbox())}\n`)));
     expect(page.root.textContent).toContain("Live");
   });
 

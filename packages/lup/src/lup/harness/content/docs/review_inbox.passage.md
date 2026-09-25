@@ -41,6 +41,10 @@ Review decisions are recorded durably before requester notification, and a
 notification failure does not undo the decision. The requesting runtime must
 retry the exact operation; the browser never executes it.
 
+Until the first snapshot arrives, the page shows loading with unknown counts.
+Reconnecting or unreadable queues remain visibly incomplete; only a fresh,
+complete snapshot can confirm that no requests are waiting.
+
 The local server uses a bearer credential, loopback binding, and request-origin
 checks. Its private local state is not committed. An edit whose preimage changed
 cannot be approved until a fresh request captures the current content.

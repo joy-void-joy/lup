@@ -143,9 +143,13 @@ export function App() {
   const current = useRef(selected);
   const liveInbox = useRef(inbox);
   const settledReviews = useRef(new Map<string, ReviewDetail>());
+  const detailRequest = useRef<AbortController | null>(null);
   current.current = selected;
   liveInbox.current = inbox;
   const rows = inbox?.reviews ?? [];
+  const queuePartial = inbox !== null && inbox.errors.length > 0;
+  const queueCurrent = inbox !== null && connection === "Live" && !queuePartial;
+  const queueStatus = inbox === null ? "Loading review queue…" : queuePartial ? "Some checkout queues are unavailable" : "Refreshing review queue…";
   const pending = rows.filter((row) => row.state === "pending");
   const visible = rows.filter((row) => filter === "pending" ? row.state === "pending" : row.state !== "pending");
   const position = visible.findIndex((row) => row.key === selected);
@@ -155,6 +159,12 @@ export function App() {
     const fresh = takeToken(liveAccess.current.token);
     liveAccess.current = fresh;
     setAccess(fresh);
+  }
+
+  function reconnect() {
+    refreshAccess();
+    setConnection("Connecting…");
+    setRetry((value) => value + 1);
   }
 
   function navigate(row: ReviewSummary | null, replace = false) {
@@ -193,6 +203,8 @@ export function App() {
       current.current = "";
       setError("");
       setDecision(null);
+      setConnection("Connecting…");
+      setRetry((value) => value + 1);
     }
     window.addEventListener("hashchange", changed);
     window.addEventListener("popstate", changed);
@@ -243,23 +255,30 @@ export function App() {
           return;
         }
         setConnection(`Reconnecting — ${String(failure)}`);
-        timer = setTimeout(() => void connect(), 3000);
+        timer = setTimeout(() => setRetry((value) => value + 1), 3000);
       }
     }
     void connect();
     return () => { controller.abort(); clearTimeout(timer); };
   }, [token, retry]);
 
+  useEffect(() => () => {
+    detailRequest.current?.abort();
+    detailRequest.current = null;
+  }, [selected, token, retry]);
+
   useEffect(() => {
-    if (selected === "") return;
+    if (selected === "" || connection !== "Live" || detailRequest.current !== null) return;
     const controller = new AbortController();
+    detailRequest.current = controller;
     void readReview(selected, token, controller.signal).then((fresh) => {
       if (!controller.signal.aborted && !answering.current) setDetail(settledReviews.current.get(selected) ?? fresh);
     }).catch((failure: unknown) => {
       if (!controller.signal.aborted) setError(String(failure));
+    }).finally(() => {
+      if (detailRequest.current === controller) detailRequest.current = null;
     });
-    return () => controller.abort();
-  }, [selected, token, inbox]);
+  }, [selected, token, inbox, retry, connection]);
 
   function select(wanted: string) {
     if (answering.current) return;
@@ -356,7 +375,7 @@ export function App() {
     <p>This browser is not authorized, or its review session has expired. Open the launch link printed by the operator's review inbox command, then return to this request link.</p>
     {linked !== null && <p>Requested review: <code>{linked.id}</code></p>}
     {notice !== "" && <p className="notice" role="alert">{notice}</p>}
-    <button type="button" onClick={() => { refreshAccess(); setRetry((value) => value + 1); }}>Check access again</button>
+    <button type="button" onClick={reconnect}>Check access again</button>
   </main>;
 
   return <div className="inbox">
@@ -365,9 +384,9 @@ export function App() {
         {inbox === null ? <p className="watched-checkout">Loading watched checkout…</p> : inbox.roots.length === 1 ? <p className="watched-checkout">Watching queue <code tabIndex={0}>{inbox.roots[0]?.path}</code></p>
           : <details className="roots"><summary>Watching {inbox.roots.length} checkout queues</summary>{inbox.roots.map((root) => <p key={root.id}><code tabIndex={0}>{root.path}</code></p>)}</details>}
       </div>
-      <div className="connection"><span role="status" className={connection === "Live" ? "live" : "muted"}>{connection}</span>
+      <div className="connection"><span role="status" className={queueCurrent ? "live" : "muted"}>{connection === "Live" && queuePartial ? "Some queues unavailable" : connection}</span>
         <button type="button" aria-expanded={help} aria-controls="shortcut-help" onClick={() => setHelp((value) => !value)}>Keyboard shortcuts</button>
-        <button type="button" onClick={() => { refreshAccess(); setRetry((value) => value + 1); }}>Reconnect</button></div>
+        <button type="button" onClick={reconnect}>Reconnect</button></div>
     </header>
     {notice !== "" && <p className="notice" role="alert">{notice}</p>}
     {help && <section className="shortcut-help" id="shortcut-help" aria-label="Keyboard shortcuts">
@@ -376,20 +395,21 @@ export function App() {
       <span><kbd>[</kbd> / <kbd>]</kbd> Previous / next file</span><span><kbd>P</kbd> / <kbd>N</kbd> Previous / next rule exception</span>
       <p>Shortcuts pause while typing. Release the keys before deciding another request.</p>
     </section>}
-    <nav className="mobile-switch" aria-label="Workspace panel"><button type="button" aria-pressed={mobilePanel === "queue"} onClick={() => setMobilePanel("queue")}>Queue ({pending.length})</button><button type="button" aria-pressed={mobilePanel === "review"} onClick={() => setMobilePanel("review")}>Review</button></nav>
+    <nav className="mobile-switch" aria-label="Workspace panel"><button type="button" aria-pressed={mobilePanel === "queue"} onClick={() => setMobilePanel("queue")}>Queue ({queueCurrent ? pending.length : "?"})</button><button type="button" aria-pressed={mobilePanel === "review"} onClick={() => setMobilePanel("review")}>Review</button></nav>
     <div className="workspace" data-mobile-panel={mobilePanel}>
-      <aside className="queue" aria-label="Review requests">
+      <aside className="queue" aria-label="Review requests" aria-busy={!queueCurrent}>
         <div className="filters" aria-label="Request filter">
-          <button type="button" disabled={sending} aria-pressed={filter === "pending"} onClick={() => show("pending")}>Pending ({pending.length})</button>
-          <button type="button" disabled={sending} aria-pressed={filter === "history"} onClick={() => show("history")}>History ({rows.length - pending.length})</button>
+          <button type="button" disabled={sending} aria-pressed={filter === "pending"} onClick={() => show("pending")}>Pending ({queueCurrent ? pending.length : "?"})</button>
+          <button type="button" disabled={sending} aria-pressed={filter === "history"} onClick={() => show("history")}>History ({queueCurrent ? rows.length - pending.length : "?"})</button>
         </div>
         <label className="queue-setting"><input type="checkbox" checked={advance} disabled={sending} onChange={(event) => setAdvance(event.target.checked)} /> Advance after decision</label>
         <div className="queue-navigation">
           <button type="button" disabled={sending || position <= 0} onClick={() => move(-1)} aria-label="Previous request">← Previous</button>
-          <span>{position >= 0 ? `${position + 1} of ${visible.length}` : `${visible.length} requests`}</span>
+          <span>{!queueCurrent ? "Count unavailable" : position >= 0 ? `${position + 1} of ${visible.length}` : `${visible.length} requests`}</span>
           <button type="button" disabled={sending || position + 1 >= visible.length} onClick={() => move(1)} aria-label="Next request">Next →</button>
         </div>
-        {inbox !== null && visible.length === 0 && <p className="empty">{filter === "pending" ? "No requests waiting. This page will update when one arrives." : "No answered requests yet."}</p>}
+        {!queueCurrent && <p className="empty" role="status">{queueStatus}{inbox !== null && " · Previously loaded requests may be incomplete."}</p>}
+        {queueCurrent && visible.length === 0 && <p className="empty">{filter === "pending" ? "No requests waiting. This page will update when one arrives." : "No answered requests yet."}</p>}
         {visible.map((row) => <div className="queue-entry" key={row.key}><button type="button" disabled={sending} className={`queue-row ${selected === row.key ? "selected" : ""}`}
           aria-current={selected === row.key ? "true" : undefined} onClick={() => select(row.key)}>
           <span className="row-top"><span className={`state ${row.state}`}>{row.state}</span><time>{new Date(row.created).toLocaleTimeString()}</time></span>
@@ -406,11 +426,11 @@ export function App() {
           <span> {decision.review.summary.title}</span><p>{decision.notification.detail}</p>
         </div>}
         {linked !== null && selected === "" ? <section className="missing-review" role="status">
-          <h2>{inbox === null ? "Loading requested review…" : linkedRows.length > 1 ? "This request ID exists in multiple checkouts" : "Request not found"}</h2>
+          <h2>{!queueCurrent ? queuePartial ? "Requested review unavailable" : "Loading requested review…" : linkedRows.length > 1 ? "This request ID exists in multiple checkouts" : "Request not found"}</h2>
           <p>Requested review: <code>{linked.id}</code></p>
           <p>{linkedRows.length > 1 ? "Choose the intended checkout from the queue." : "This page will keep watching for that exact request in the selected repositories."}</p>
           <button type="button" disabled={sending} onClick={() => { setFilter("pending"); select(""); }}>Show pending queue</button>
-        </section> : selected === "" ? <section className="welcome"><h2>{pending.length === 0 ? "Queue complete" : "Ready for the next request"}</h2><p>Keep this tab open. New requests appear automatically, with their complete changes and tool inputs.</p></section>
+        </section> : selected === "" ? <section className="welcome"><h2>{!queueCurrent ? queueStatus : pending.length === 0 ? "Queue complete" : "Ready for the next request"}</h2><p>Keep this tab open. New requests appear automatically, with their complete changes and tool inputs.</p></section>
           : detail?.summary.key === selected ? <RequestDetails key={selected} detail={detail} queuePath={inbox?.roots.find((root) => root.id === detail.summary.root_id)?.path ?? null} note={notes[selected] ?? ""} sending={sending} fileNavigation={fileNavigation}
             onNote={(note) => setNotes((drafts) => ({ ...drafts, [selected]: note }))} onAnswer={answer} />
           : <p className="empty" role="status">Loading request…</p>}
