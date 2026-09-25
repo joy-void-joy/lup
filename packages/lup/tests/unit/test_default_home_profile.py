@@ -394,7 +394,7 @@ def test_a_launch_refuses_a_stored_default_home_as_a_bad_parameter(
     monkeypatch.setattr(
         launch,
         "claude_sandbox_arguments",
-        lambda _plugin, sandbox=launch.LaunchSandbox.INNER, accessible=[]: [],
+        lambda _plugin, sandbox=launch.LaunchSandbox.INNER, accessible=[], settings=None: [],
     )
     monkeypatch.setattr(launch, "non_interactive_environment", lambda _env: {})
     monkeypatch.setattr(launch, "apply_sandbox_environment", lambda *a, **k: None)
