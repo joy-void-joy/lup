@@ -335,6 +335,12 @@ class ShellOperationRule(BaseModel, frozen=True):
     ask_flags: list[str] = []
     flag_effects: list[EffectRow] = []
     write_flags: list[str] = []
+    probe_flags: list[str] = []
+    """Flags after which this operation performs nothing — its dry-run spelling.
+
+    The subcommand's column, for a verb nested beneath one: `dev init upstream
+    --dry-run` prints the registration it would write and writes none, so the
+    question its effects raise is about an effect the probe never performs."""
     sandbox: SandboxPlacement = ROOT_SANDBOX
     checkpoint: CheckpointRequirement = ROOT_CHECKPOINT
     reviewer: ReviewerRequirement = ROOT_REVIEWER
@@ -700,7 +706,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
                 write_flags=list(operation.write_flags),
                 allow_flags=[],
                 read_verbs=[],
-                probe_flags=[],
+                probe_flags=list(operation.probe_flags),
                 frozen_flags=[],
                 write_markers=[],
                 guarded_keys=[],

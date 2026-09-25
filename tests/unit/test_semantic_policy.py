@@ -664,6 +664,66 @@ SHELL_POLICY_CASES = [
     DecisionCase(input=".venv/bin/lup-devtools git pr push", effect="deny"),
     DecisionCase(input=".venv/bin/lup-devtools dev check", effect="deny"),
     DecisionCase(input=".venv/bin/lup-devtools harness generate all", effect="deny"),
+    # What a later launch reaches is widened by the registry and by a
+    # launcher's flags, and each writer asks the way an edit of the registry
+    # does: a mount added or moved, the repository a registration names, a
+    # device granted, one launch lent a folder. Contained or not, because the
+    # boundary this session runs in is not the one being widened. What only
+    # reads, keeps books, narrows, or dry-runs is the ordinary work it was.
+    DecisionCase(
+        input="uv run lup-devtools sync setup lup /srv/lup --mount rw", effect="ask"
+    ),
+    DecisionCase(
+        input="uv run lup-devtools sync setup lup /srv/lup --mount rw",
+        effect="ask",
+        sandboxed=True,
+    ),
+    DecisionCase(input="uv run lup-devtools sync setup lup /srv/lup", effect="ask"),
+    DecisionCase(
+        input="uv run lup-devtools sync remote lup git@github.com:o/lup.git",
+        effect="ask",
+    ),
+    DecisionCase(
+        input="uv run lup-devtools sync grant nvidia.com/gpu=all", effect="ask"
+    ),
+    DecisionCase(input="uv run lup-devtools dev init upstream", effect="ask"),
+    DecisionCase(
+        input="uv run lup-devtools dev library git --url=https://github.com/o/fork",
+        effect="ask",
+    ),
+    DecisionCase(
+        input="uv run lup-devtools harness claude --mount /srv/data", effect="ask"
+    ),
+    DecisionCase(
+        input="uv run lup-devtools harness codex --device nvidia.com/gpu=all",
+        effect="ask",
+    ),
+    DecisionCase(input="uv run lup-devtools sync status", effect="allow"),
+    DecisionCase(input="uv run lup-devtools sync fetch lup", effect="allow"),
+    DecisionCase(
+        input="uv run lup-devtools sync mark-synced lup --at 4c6293a6", effect="allow"
+    ),
+    DecisionCase(
+        input="uv run lup-devtools sync revoke nvidia.com/gpu=all", effect="allow"
+    ),
+    DecisionCase(input="uv run lup-devtools dev init upstream -n", effect="allow"),
+    DecisionCase(
+        input="uv run lup-devtools dev library git --branch main", effect="allow"
+    ),
+    DecisionCase(
+        input="uv run lup-devtools dev library git --url https://x/y --dry-run",
+        effect="allow",
+    ),
+    DecisionCase(
+        input="uv run lup-devtools harness claude --generate-only --mount /srv",
+        effect="allow",
+    ),
+    # A word that could expand into a lent folder keeps the conservative gate,
+    # and the spelling that skips `uv` is refused whatever it would widen.
+    DecisionCase(input="uv run lup-devtools harness claude $FLAGS", effect="deny"),
+    DecisionCase(
+        input="lup-devtools sync setup lup /srv/lup --mount rw", effect="deny"
+    ),
     # Redirections: discards and fd duplication are stripped; file writes ask.
     DecisionCase(input="grep x f 2>&1", effect="allow"),
     DecisionCase(input="grep x f > /dev/null", effect="allow"),
@@ -2054,7 +2114,8 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "    ALLOWED_FETCH_SCOPES, ANTI_PATTERN_ROWS, DENIED_FETCH_SCOPES,\n"
         "    EDIT_RULES, MAXIMUM_ADDED_LINES, PATH_ROLES, PATH_RULES,\n"
         "    IMPORT_BOUNDARIES,\n"
-        "    RUNNER_TARGETS, SANDBOX_EXCLUDED_COMMANDS, SHELL_RULES,\n"
+        "    RUNNER_TARGET_TABLES, RUNNER_TARGETS, SANDBOX_EXCLUDED_COMMANDS,\n"
+        "    SHELL_RULES,\n"
         ")\n"
         "assert EDIT_RULES, 'the declared edit table did not reach the runtime'\n"
         "assert IMPORT_BOUNDARIES, 'import ownership did not reach the runtime'\n"
@@ -2072,6 +2133,7 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "        existing_targets=case['existing'],\n"
         "        empty_directories=case['empty'],\n"
         "        runner_targets=RUNNER_TARGETS,\n"
+        "        target_tables=RUNNER_TARGET_TABLES,\n"
         "    )\n"
         "    assert result.effect == case['effect'], case\n"
         "for case in fixtures['fetch']:\n"
@@ -3054,6 +3116,7 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
             existing_targets=case.host_existing(),
             empty_directories=case.empty,
             runner_targets=policy.runner_targets,
+            target_tables=policy.target_tables,
         ).effect
         assert bundled_effect == case.effect, case.input
 

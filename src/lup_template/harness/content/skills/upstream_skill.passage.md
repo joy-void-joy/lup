@@ -57,9 +57,8 @@ as the session opened; `uv run lup-devtools sync status` names it again with
 the command that answers it. A machine that reaches lup over another
 transport records it with `sync remote lup <url>`, and one that keeps its own
 checkout with `sync setup lup /path/to/repo --mount rw`. Both write
-`sync.json.local`, which is a protected edit: put it to the user rather than
-writing it. Mounts are built at launch, so either takes effect at the next
-one.
+`sync.json.local`, a protected edit, so each asks the user before it writes.
+Mounts are built at launch, so either takes effect at the next one.
 
 ## 3. Make the change under lup's gate
 

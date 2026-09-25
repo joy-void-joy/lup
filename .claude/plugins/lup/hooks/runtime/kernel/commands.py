@@ -812,6 +812,13 @@ def decide_command_rows(
         return split
     subword = split["word"]
     remainder = split["remainder"]
+    # lup: defer: a verb word this walk cannot read -- `$OP`, a `$(...)`
+    # result, `set$X` -- matches no operation row and falls to the sub-app's
+    # default, as an unread sub-app word falls to the command's: `uv run
+    # lup-devtools sync $OP lup /x --mount rw` and `dev questions $(echo
+    # answer) <id> --as operator` both reach the target's allow. Decide what an
+    # unread verb earns: unjudged still defers inside a sandbox, where either
+    # write lands in the checkout, so perhaps the strictest row it could name
     subrows = [row for row in matches if subword and row["subcommand"] == subword]
     if not subrows:
         if default is None:

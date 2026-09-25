@@ -33,9 +33,9 @@ from lup.policy.shell_rules import (
 )
 from lup.policy.vocabulary import (
     bun_rule,
+    devtools_rules,
     git_rule,
     runner_target_rules,
-    review_queue_rules,
     typescript_rule,
 )
 from lup.seams import Selection
@@ -76,12 +76,30 @@ def lup_devtools_rule() -> ShellCommandRule:
     # whichever spelling reached it -- so the refusal is stated as one rather
     # than as an effect. `uv run lup-devtools dev check` and `lup-devtools dev
     # check` do identical things; only one of them guarantees the environment.
+    #
+    # lup's own verb table is carried for the one thing this spelling needs of
+    # it: an operator-only verb stays a refusal no marker escalates. Every
+    # other verb it judges is refused here for its spelling, so each sub-app
+    # tells the agent the route rather than a verdict about the verb.
+    routed = [
+        judged.model_copy(
+            update={
+                "reason": reach_through_uv,
+                "operations": [
+                    operation
+                    for operation in judged.operations
+                    if operation.operator_only
+                ],
+            }
+        )
+        for judged in devtools_rules()
+    ]
     return ShellCommandRule(
         name="lup-devtools",
         effects=[declare("runs_declared_target", scope="lup-devtools")],
         refuses=reach_through_uv,
         subcommands=[
-            *review_queue_rules(),
+            *routed,
             ShellSubcommandRule(
                 name="git",
                 operations=[

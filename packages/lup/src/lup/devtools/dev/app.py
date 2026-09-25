@@ -1655,6 +1655,11 @@ def create_dev_app(
         ] = False,
     ) -> None:
         """Show every shell form the declared vocabulary judges, and how."""
+        # lup: defer: the runner targets' verb tables are judged too -- every
+        # `uv run lup-devtools` verb that asks, or is refused to the requester,
+        # sits there -- and this survey reads the command table alone, so `sync
+        # setup`'s question shows in `dev policy` and nowhere here; decide how a
+        # target's verbs read beside the bare spelling of the same executable
         rules = (
             default_vocabulary() if offered else declared().hooks.resolved_shell_rules()
         )
