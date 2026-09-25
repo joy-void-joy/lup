@@ -23,6 +23,7 @@ from lup.providers.harness import guidance_artifacts
 from lup.harness.codescan.markers import find_feedback
 from lup.harness.coverage import coverage_gaps
 from lup.harness.modules import unloaded_guidance
+from lup.harness.notice import Notice
 from lup.harness.models import (
     GUIDANCE_BUDGET,
     GuidanceBudget,
@@ -657,22 +658,37 @@ def run_selected(
     the way the gate carries it: a caller who named one file wants pytest's
     own failure report, and the gate's ordered summary exists for a run whose
     checks finish out of order.
+
+    Admitted the way the gate is, holding one of the clone's slots across
+    every suite it runs and spreading each over its share of *workers*. This
+    is the gate's suite at the gate's width, and the command several agents
+    run at once while their changes are moving; unadmitted, each of them
+    opens a full-width suite beside whatever gate holds a slot, and the
+    division the gate makes is undone by the runs it cannot see. The notices
+    are said as they arise rather than after, because this output streams:
+    a run queued behind four others says so before it waits, not after.
+    The selection is read before a slot is asked for, so a path under no
+    suite is refused at once rather than after a wait.
     """
+    groups = group_by_root(test_roots, selections)
     failed: list[str] = []
-    for group in group_by_root(test_roots, selections):
-        if not group.root.directory.is_dir():
-            for line in group.root.absent().lines:
-                typer.echo(line)
-            failed.append(group.root.name)
-            continue
-        typer.echo(f"\n{group.root.name}  ({group.root.directory})")
-        try:
-            group.root.run(group.paths, workers, excluded_roots, foreground=True)
-        except sh.ErrorReturnCode:
-            failed.append(group.root.name)
-        except sh.ForkException as error:
-            typer.echo(f"{group.root.name}: never started\n{str(error).strip()}")
-            failed.append(group.root.name)
+    with admitted(project_root(), workers, announce=Notice.say) as admission:
+        for group in groups:
+            if not group.root.directory.is_dir():
+                for line in group.root.absent().lines:
+                    typer.echo(line)
+                failed.append(group.root.name)
+                continue
+            typer.echo(f"\n{group.root.name}  ({group.root.directory})")
+            try:
+                group.root.run(
+                    group.paths, admission.workers, excluded_roots, foreground=True
+                )
+            except sh.ErrorReturnCode:
+                failed.append(group.root.name)
+            except sh.ForkException as error:
+                typer.echo(f"{group.root.name}: never started\n{str(error).strip()}")
+                failed.append(group.root.name)
     if failed:
         typer.echo(f"\nFailed: {', '.join(failed)}")
         raise typer.Exit(1)
@@ -1502,6 +1518,13 @@ def run_changed(
     that is trusted and wrong costs more than a gate that is slow, so this one
     declines the question and says so on every run. `dev test` runs the files
     a person names; `dev check` stays the bar a commit passes.
+
+    **No gate slot is held**, where `dev check` and `dev test` each hold one.
+    This opens no suite, and its three tools over a handful of files finish in
+    seconds. Admitted, it would queue the loop's quick half behind runs of
+    minutes, and every run opening beside it would take a narrower share for
+    the whole of its own length — a share is fixed when a run opens — to make
+    room for a check long since finished.
     """
     started = perf_counter()
     scope = changed_python_files(since)

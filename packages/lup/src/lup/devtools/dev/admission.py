@@ -18,6 +18,17 @@ leaves — four gates of four workers rather than four of sixteen. The total
 stays near what the machine has, each run keeps its own answer, and none of
 them waits on another.
 
+A run is anything that opens the suites, which is `dev test` as much as the
+gate. `dev test` is the same suite at the same width over the files a caller
+names, and it is the half of the scoped loop a change runs while it is still
+moving — so ten agents iterating are ten suites of sixteen workers beside
+whatever gate is running, the contention this exists for arriving by the side
+door. `dev check --changed` takes no slot. It opens no suite, and its ruff and
+Pyright over a handful of files are done in seconds; a slot it held would
+narrow every run that started beside it for the whole of that run, since the
+share is fixed when a run opens, and would queue the seconds-long check behind
+runs of minutes.
+
 Nothing here is correctness. A slot that cannot be taken, a lock file that
 cannot be made, a holder that died without releasing: each ends in the gate
 running anyway at its full width, because a session that cannot coordinate
