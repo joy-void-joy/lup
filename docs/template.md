@@ -302,9 +302,11 @@ uv run lup-devtools sync setup lup /path/to/repo --mount rw
 The first records the URL this machine fetches from — say, over ssh where it
 pushes lup with its own key outside any container, where no launch rewrites a
 remote — and repoints the clone already made to it; the second records a
-checkout this machine already has, which is then what sessions open. A registration with neither
-is materialized at `~/.cache/lup/sync/<name>.git`, derived from the name, so a
-machine that keeps its clone there needs no local entry at all.
+checkout this machine already has, which is then what sessions open — the
+working tree it resolves to, rather than the whole clone a URL registration
+mounts (below). A registration with neither is materialized at
+`~/.cache/lup/sync/<name>.git`, derived from the name, so a machine that
+keeps its clone there needs no local entry at all.
 
 Repository identity is configured independently from the adopting project's
 own Git origin. `uv run lup-devtools dev library git --url <repository>` selects the dependency's
@@ -384,13 +386,18 @@ launchers take `--device <name>` for one launch.
 A registration that names only a URL is materialized under
 `~/.cache/lup/sync/<name>.git` in the layout one naming a local path already
 points at: a full bare clone — every branch, whole history — with a worktree
-attached at `tree/<branch>`. What is mounted is that worktree, so a session
-opens either kind of registration on the same terms, and `git worktree
-create` inside one lands its next checkout beside the first. The cache sits
-outside the project deliberately. A clone under the checkout is inside the
-session's own writable mount, which makes a `"ro"` registration silently
-`"rw"`, and it is re-cloned once per worktree where the history is worth
-having once per machine.
+attached at `tree/<branch>`, which `refs/<name>` names. What is mounted is
+the whole clone, so `git worktree create` inside it lands its next checkout
+beside the first and inside the same mount, where `harness policy-refresh`
+accepts that worktree's own policy without another launch. A registration
+naming a local path mounts only the working tree it resolves to, so a
+worktree cut beside that one is judged by this project's policy until a
+launch grants it.
+
+The cache sits outside the project deliberately. A clone under the checkout
+is inside the session's own writable mount, which makes a `"ro"`
+registration silently `"rw"`, and it is re-cloned once per worktree where
+the history is worth having once per machine.
 
 Nothing a review does moves a branch in one of those clones. The upstream's
 commits are read from its remote-tracking ref rather than from `HEAD`, so

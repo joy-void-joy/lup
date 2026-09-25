@@ -56,10 +56,10 @@ shared checkpoint is explicitly recorded with `mark-synced`.
 A project with a URL and no local path is materialized under
 ``~/.cache/lup/sync/`` in the layout a registration naming a local path
 already points at -- a bare repository with a worktree attached to it -- so a
-session opens either one on the same terms and can branch, commit and push in
-it. Nothing a review does moves a local branch: the upstream's commits are
-read from a remote-tracking ref, and refreshing one of these clones is a
-fetch and nothing else.
+session can branch, commit and push in either, and a launch mounts a clone it
+materialized whole (see :func:`mounted_root`). Nothing a review does moves a
+local branch: the upstream's commits are read from a remote-tracking ref, and
+refreshing one of these clones is a fetch and nothing else.
 
 An entry carrying a "mount" is also a declaration about *access*: a session
 can open that project, at the mode it names, wherever the project lives on
@@ -758,15 +758,28 @@ def record_checkpoint(proj: ProjectEntry, found: Upstream, commit: str) -> None:
     )
 
 
+def kept_checkout(proj: ProjectEntry) -> Path | None:
+    """The checkout this machine keeps for a registration, where it named one.
+
+    A ``path`` that is on disk, which is the one answer that outranks the
+    cache: a registration whose path has gone is looked for where a URL one
+    is. Asked by every reader that has to agree on which of the two a
+    registration is -- locating it, materializing it, and deciding how much
+    of it a launch mounts -- so the three cannot come to disagree.
+    """
+    path = proj.get("path", "")
+    return Path(path) if path and Path(path).exists() else None
+
+
 def existing_upstream(proj: ProjectEntry) -> Upstream | None:
     """Where this registration already is, WITHOUT cloning or fetching.
 
     Read-only counterpart to :func:`ensure_local` — for status reporting that
     must never mutate the working tree or hit the network.
     """
-    path = proj.get("path", "")
-    if path and Path(path).exists():
-        return registered_upstream(proj, Path(path))
+    kept = kept_checkout(proj)
+    if kept is not None:
+        return registered_upstream(proj, kept)
     repository = cached_clone(proj["name"])
     if repository is None:
         return None
@@ -950,6 +963,31 @@ def openable(
     return attach_worktree(found.checkout, branch, report)
 
 
+def mounted_root(proj: ProjectEntry, opened: Path) -> Path:
+    """The directory a launch mounts for a registration opened at ``opened``.
+
+    The whole clone where this machine materialized it in the cache: the
+    bare half, with every worktree it holds under ``tree/`` then or later.
+    A bare mount is what `harness policy-refresh` accepts a new worktree
+    beneath, so a branch `/lup:upstream` cuts in the clone is judged by that
+    project's own policy rather than this one's, with nothing added to the
+    launch. What that costs is edit authority over every worktree the clone
+    holds, including one another project on this machine cut there -- the
+    cache is per user, and only the projects registering that name work in
+    it.
+
+    ``opened`` for anything else. A checkout a registration names by path is
+    somebody's own, and its other worktrees may be theirs: mounting its
+    working tree accepts that checkout's policy alone, and a launch that
+    should accept a worktree beside it grants one with ``--mount`` -- that
+    worktree, or the bare directory holding it. A clone the cache holds in
+    the plain layout is its own working tree, so mounting that already
+    mounts all of it.
+    """
+    clone = cached_clone(proj["name"]) if kept_checkout(proj) is None else None
+    return clone if clone is not None and bare_repository(clone) else opened
+
+
 def accessible_roots(
     report: Callable[[str], None] = typer.echo,
 ) -> list[AccessibleRoot]:
@@ -978,17 +1016,21 @@ def accessible_roots(
     happens on the host, before the boundary and on the only side that can
     reach the forge -- and only where nothing is on disk yet, because
     :func:`ensure_local` also fetches, and opening a session is not a review.
-    `refs/<name>` is pointed at whatever is mounted either way, so a clone
-    another project on this machine materialized first is reachable here by
-    the same name the workflows use.
+    `refs/<name>` is pointed at the working tree opened either way, so a
+    clone another project on this machine materialized first is reachable
+    here by the same name the workflows use.
 
-    What is mounted is always a working tree, never the bare half of a clone.
-    The lease is the same either way -- `lease_for` holds every worktree of
-    the repository writable, its shared `config` and `hooks/` read-only --
-    but the edit authority the launch grants is not: a worktree mount accepts
-    that checkout's own policy and no other, where a bare one grants every
-    worktree the clone holds, somebody else's among them. So a clone found
-    without one has a worktree attached here, which costs no network and is
+    What is mounted depends on whose clone it is -- see :func:`mounted_root`.
+    A clone this machine materialized in the cache is mounted whole, its bare
+    half with every worktree under ``tree/``; a checkout a registration names
+    by path is mounted at the working tree it resolves to. The lease is the
+    same either way -- `lease_for` holds every worktree of the repository
+    writable, its shared `config` and `hooks/` read-only -- and what differs
+    is the edit authority the launch grants: a bare mount accepts every
+    worktree's own policy, and lets `harness policy-refresh` accept one cut
+    after the launch, where a worktree mount accepts that checkout's alone.
+    Either way a clone found without a worktree has one attached here,
+    because `refs/<name>` names a working tree; it costs no network and is
     the one write locating a project may do.
 
     A registration that asked for a mount and cannot be located is reported
@@ -1017,12 +1059,15 @@ def accessible_roots(
                 report(missing_checkout(project).spelled())
             return None
         ensure_ref_symlink(project["name"], str(opened))
-        # lup: defer: a worktree /lup:upstream cuts beside this one is no granted
+        # lup: solved: a worktree /lup:upstream cuts beside this one is no granted
         # destination -- `harness policy-refresh` accepts one only beneath a
         # mounted bare half -- so its edits are referred until a launch mounts the
         # clone's bare half by hand; decide whether a clone this machine
         # materialized, which only its registrants work in, mounts its bare half
-        return AccessibleRoot(path=opened.resolve(), writable=project["mount"] == "rw")
+        return AccessibleRoot(
+            path=mounted_root(project, opened).resolve(),
+            writable=project["mount"] == "rw",
+        )
 
     return [
         root for project in load_projects() if (root := located(project)) is not None
@@ -1337,14 +1382,12 @@ def ensure_local(
     Progress and error text goes through ``report`` so callers rendering
     tables can defer the messages instead of interleaving them mid-table.
     """
-    path = proj.get("path", "")
+    kept = kept_checkout(proj)
     name = proj["name"]
-    if path and Path(path).exists():
-        found = registered_upstream(proj, Path(path), report)
-        if proj.get("review_from", "remote") == "remote" and remote_url(
-            Path(path), "origin"
-        ):
-            refresh(name, Path(path), report)
+    if kept is not None:
+        found = registered_upstream(proj, kept, report)
+        if proj.get("review_from", "remote") == "remote" and remote_url(kept, "origin"):
+            refresh(name, kept, report)
         ensure_ref_symlink(name, str(found.checkout))
         return found
 

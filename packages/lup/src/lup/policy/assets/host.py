@@ -2268,6 +2268,49 @@ def unleased_write_targets(
     ]
 
 
+def readonly_write_targets(
+    targets: list[str], measured: dict[str, list[str]], root: Path | None = None
+) -> list[str]:
+    """Report which targets land inside a read-only hole this launch measured.
+
+    The other half of :func:`unleased_write_targets`, and the one a path verb
+    needs. That reports a target outside every writable root; this reports one
+    that sits inside a writable root but under a read-only region punched into
+    it -- a mounted bare clone's `config` and `hooks/`, whose contents run on
+    the host. The container binds those read-only, so every verb meets an
+    EROFS there; on the host nothing did, because a redirection's content
+    reached :func:`execution_write_refusal` while a `cp`, `mv` or `ln` that
+    places the same bytes reached only the loss gate, which a capture of the
+    session's own checkout wrongly discharged.
+
+    The deepest enclosing scope decides, exactly as `execution_write_refusal`
+    and the mount table read the same table: a writable subtree inside a
+    read-only region stays writable, and a read-only hole inside the writable
+    base is what this returns. Nothing is reported where no read-only region
+    was measured, for the reason the sibling gives about an unmeasured lease.
+    """
+    writable = measured["writable_roots"] if "writable_roots" in measured else []
+    readonly = measured["read_only_roots"] if "read_only_roots" in measured else []
+    if not readonly:
+        return []
+    where = Path.cwd() if root is None else root
+    found: list[str] = []  # lup: ignore[empty-collection] — filtered append below
+    for target in targets:
+        resolved = str((where / target).resolve())
+        matches = [
+            (len(Path(scope).parts), allowed)
+            for scopes, allowed in ((writable, True), (readonly, False))
+            for scope in scopes
+            if resolved == scope or resolved.startswith(scope + "/")
+        ]
+        deepest = max((depth for depth, _ in matches), default=0)
+        if matches and not any(
+            allowed for depth, allowed in matches if depth == deepest
+        ):
+            found.append(target)
+    return found
+
+
 def empty_directory_targets(targets: list[str], root: Path | None = None) -> list[str]:
     """Report which targets are directories with nothing in them.
 

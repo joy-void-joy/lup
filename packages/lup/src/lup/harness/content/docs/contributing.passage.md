@@ -215,15 +215,22 @@ to `.lup/boundary.json` beside the mount table, so a run's provenance says
 which devices its container held, and `harness requirements` re-exercises
 every grant it finds.
 
-A registration naming only a URL is mounted on the same terms, because it is
-materialized into the same shape: a full bare clone under
-`~/.cache/lup/sync/<name>.git` with a worktree attached at `tree/<branch>`,
-and the worktree is what the lease binds. Commit in it, cut branches in it,
+A registration naming only a URL is materialized into the same shape: a full
+bare clone under `~/.cache/lup/sync/<name>.git` with a worktree attached at
+`tree/<branch>`, which `refs/<name>` names. Commit in it, cut branches in it,
 push from it — the remotes of every mounted checkout are rewritten onto the
 transport this session can reach, not just the one it was launched from. A
 review never moves a branch there: `sync` reads the upstream's commits from
 its remote-tracking ref, so refreshing is a fetch and nothing in the clone is
 reset over.
+
+The launch mounts such a clone whole rather than at its one worktree. The
+lease is the same either way — every worktree writable, the shared `config`
+and `hooks/` read-only — and what the whole clone adds is edit authority:
+each worktree in it is judged by its own policy, and `harness policy-refresh`
+accepts one cut after the launch. A registration naming a path mounts the
+working tree it resolves to and accepts that checkout's policy alone, so a
+worktree beside it needs a launch that grants it.
 
 The `lup` entry `sync.json` ships is one of these. It names lup's repository
 over https, required and mounted read-write, so a project built on the

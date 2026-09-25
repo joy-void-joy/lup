@@ -454,12 +454,34 @@ its bytes without restarting the session. From the caller checkout, run
 `uv run lup-devtools harness policy-refresh --nonce <nonce> --repository <checkout>`.
 The same command can accept a newly created worktree only beneath an original
 explicit writable bare-repository mount, with the same Git common directory
-and a writable measured boundary. It never discovers unrelated nested
-repositories or extends the launch's filesystem grants. The requester cannot
-run this operator action, and the authority ledger and accepted snapshots are
-protected edit paths. These records prevent accidental inheritance and stale
-policy execution; they are mutable local bookkeeping, not authentication
-against a hostile process with the same filesystem authority.
+and a writable measured boundary. A registration the per-user cache
+materialized is mounted as one: the launch mounts its whole bare clone, so a
+worktree cut in it afterwards is accepted this way. A registration naming a
+checkout this machine keeps mounts that working tree alone, and a worktree
+beside it needs a launch granting it. The refresh never discovers unrelated
+nested repositories or extends the launch's filesystem grants. The requester
+cannot run this operator action, and the authority ledger and accepted
+snapshots are protected edit paths. These records prevent accidental
+inheritance and stale policy execution; they are mutable local bookkeeping,
+not authentication against a hostile process with the same filesystem
+authority.
+
+Every mounted repository's shared `config` and `hooks/` are the launch's
+read-only holes, because git runs on the host what they name. The container
+binds them read-only inside the writable share, and the ledger records them as
+read-only roots, which is what holds them on a host posture. The file tools
+meet them through the edit gates. Every spelling of a shell write meets them
+through the `read-only-write` settlement — a redirection, `tee`, `sed -i`,
+`cp`, `mv`, `ln` — which refuses rather than asks, as the bind does, and reads
+only the operands a verb writes, so copying a hook *out* stays a read. A git
+config write naming a program keeps its own question. The runtime's own
+sandbox holds them for what no rule reads: an inner Claude launch passes them
+as `sandbox.filesystem.denyWrite`, which holds inside a wider `allowWrite`.
+An inner Codex launch cannot say that — `sandbox_workspace_write.writable_roots`
+takes no read-only region inside a root, and Codex protects only a root's
+`.git`, which a bare repository does not have — so it admits a mounted bare
+clone's worktrees rather than its git directory, and a worktree cut after
+the launch is Codex's to write from the next one.
 
 A file another repository holds, with no destination grant, meets a referral
 in place of the gates below: the edit **asks**, and the reason says that

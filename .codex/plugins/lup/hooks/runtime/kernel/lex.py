@@ -1324,6 +1324,39 @@ def verb_path_words(words: list[str]) -> list[PathWord]:
     return path_verb_operands(words)["named"]
 
 
+def written_verb_words(words: list[str]) -> list[PathWord]:
+    """The words one segment's path verb writes, out of those it acts on.
+
+    :func:`verb_path_words` names a copy's sources and a link's target too,
+    which is right for what reads it -- facts consulted about a path. A
+    refusal is not consulted, so the operands a copy or a link only reads are
+    left out here, as :func:`~kernel.words.written_operands` leaves them out
+    of the loss: they are at their paths unchanged afterwards. A move keeps
+    every operand, because its source is unlinked.
+    """
+    named = verb_path_words(words)
+    executable = posixpath.basename(words[0]) if words else ""
+    if executable not in ("cp", "ln") or len(named) < 2:
+        return named
+    return named[-1:] if path_verb_operands(words)["inert"] else named
+
+
+def shell_written_targets(command: str, rows: list[ShellRuleRow]) -> list[str]:
+    """Name every operand a path verb in this command writes, placed.
+
+    :func:`shell_path_verb_targets` narrowed to the writes, for a reader that
+    refuses on what it is handed; a flag it cannot read widens back to every
+    operand, the conservative reading a refusal owes.
+    """
+    return [
+        placed
+        for segment in read_segments(command, rows)
+        for operand in written_verb_words(segment["words"])
+        for placed in [placed_path(operand["path"], segment["directory"])]
+        if placed is not None
+    ]
+
+
 class SedRewrite(TypedDict):
     """One in-place rewrite a command carries: what to run, and over what.
 

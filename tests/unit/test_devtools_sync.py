@@ -333,22 +333,24 @@ def test_work_done_in_a_clone_is_not_read_back_as_the_upstream_s_own(
     assert sync.commit_count(str(found.checkout), "", found.tip) == 3
 
 
-def test_a_url_registration_is_mounted_at_its_worktree_not_its_bare_half(
+def test_a_url_registration_is_mounted_whole_while_refs_names_its_worktree(
     registry_root: Path, cache: Path, remote: Path
 ) -> None:
-    """A mount has to land on a working tree.
+    """The clone this machine materialized, bare half and every worktree.
 
-    The lease is the same either way, but the edit authority is not: a
-    worktree mount accepts that checkout's own policy and no other, where a
-    bare one grants every worktree the clone holds.
+    The lease is what a worktree mount gets; the edit authority is not: a
+    bare mount accepts every worktree's own policy, and one cut after the
+    launch once the operator refreshes it. `refs/<name>` stays a working
+    tree, because that is what the workflows run a project's tooling in.
     """
     registered(registry_root, {"name": "up", "url": str(remote), "mount": "rw"})
 
     roots = sync.accessible_roots(lambda said: None)
 
-    assert [(root.path, root.writable) for root in roots] == [
-        (cache / "up.git" / "tree" / "main", True)
-    ]
+    assert [(root.path, root.writable) for root in roots] == [(cache / "up.git", True)]
+    assert (registry_root / "refs" / "up").resolve() == (
+        cache / "up.git" / "tree" / "main"
+    )
 
 
 def test_a_clone_registered_under_one_name_at_two_urls_is_refused(
@@ -533,9 +535,7 @@ def test_the_mount_table_carries_a_project_the_tracked_half_declares(
 
     roots = sync.accessible_roots(lambda said: None)
 
-    assert [(root.path, root.writable) for root in roots] == [
-        (cache / "up.git" / "tree" / "main", True)
-    ]
+    assert [(root.path, root.writable) for root in roots] == [(cache / "up.git", True)]
 
 
 def test_an_ssh_clone_of_an_https_registration_is_one_repository(

@@ -75,6 +75,7 @@ class SettlementFacts:
     checkpoint: CheckpointEvidence
     unjudged_ambient: UnjudgedAmbient
     unleased: list[str]
+    readonly: list[str]
     displaced: list[DisplacedTargetRow]
     hint: str
 
@@ -91,6 +92,7 @@ class SettlementFacts:
         checkpoint: CheckpointEvidence = "absent",
         unjudged_ambient: UnjudgedAmbient = "ask",
         unleased: list[str] | None = None,
+        readonly: list[str] | None = None,
         displaced: list[DisplacedTargetRow] | None = None,
         hint: str = "",
     ) -> None:
@@ -105,6 +107,7 @@ class SettlementFacts:
         self.checkpoint = checkpoint
         self.unjudged_ambient = unjudged_ambient
         self.unleased = unleased or []
+        self.readonly = readonly or []
         self.displaced = displaced or []
         self.hint = hint
 
@@ -162,6 +165,7 @@ class SettlementFacts:
             checkpoint=self.checkpoint,
             unjudged_ambient=self.unjudged_ambient,
             unleased=self.unleased,
+            readonly=self.readonly,
             displaced=self.displaced,
             hint=self.hint,
         )
@@ -407,6 +411,55 @@ class UnleasedWrite(SettlementRule):
             # Named, because the verdict this replaces was reached by the
             # vocabulary finding nothing to say and carries no id of its own.
             # An ask that names no rule is one nobody can write a case for.
+            rule=self.id,
+            abstention=None,
+        )
+
+
+class ReadOnlyWrite(SettlementRule):
+    """A write landing in a read-only region this launch measured, refused.
+
+    The container binds each repository's shared `config` and `hooks/`
+    read-only inside the writable share around them, because their contents
+    run on the host at the next git command there: `core.hooksPath`,
+    `alias.*`, `core.fsmonitor` and the scripts themselves. Inside it every
+    verb meets the bind. The launch records the same holes as its read-only
+    roots, and this is them held where no bind stands -- a host posture, or
+    a write the classification graded before any mount could answer.
+
+    Refused rather than asked, because that is what the bind does: nobody
+    can approve a write past a read-only mount, and git's own commands --
+    commit, fetch, worktree -- reach the state they need without writing
+    either. Every verb, because the hole is a place and not a spelling: a
+    redirection's content already met it through the edit gates, while a
+    `cp`, `mv` or `ln` placing the same bytes reached only the loss row,
+    which a capture of the session's own checkout discharged for a tree it
+    never held.
+
+    Read over ``allow``, ``defer`` and ``ask`` alike, and above
+    :class:`RecoveredLoss` for that reason; a refusal already standing needs
+    nothing from it.
+    """
+
+    id = "read-only-write"
+
+    def reached(self, facts: SettlementFacts) -> KernelDecision | None:
+        if not facts.readonly or facts.decision.effect == "deny":
+            return None
+        return facts.decision.revised(
+            effect="deny",
+            reason=(
+                f"writes {', '.join(facts.readonly)}, which this launch holds"
+                " read-only: git runs what its config and hooks name on the host"
+            ),
+            recovery=(
+                "Work in a worktree of that repository; git's own commands"
+                " reach what they need without writing config or hooks, and a"
+                " setting that has to change is changed from an operator"
+                " terminal."
+            ),
+            cause="deliberate",
+            purpose=None,
             rule=self.id,
             abstention=None,
         )
@@ -701,6 +754,7 @@ SETTLEMENT_ORDER: list[SettlementRule] = [
     SandboxEscalation(),
     TrappedPlacement(),
     UnleasedWrite(),
+    ReadOnlyWrite(),
     DisplacedWrite(),
     ProviderNative(),
     RecoveredLoss(),
@@ -730,7 +784,10 @@ filesystem does with the spelling afterwards.
 a proven capture settles a loss to a permission, and a capture of *this*
 session does not hold what lies outside the boundary it measured. Read the
 other way round, an undo reference covering the checkout would discharge a
-question about a tree it never held. ``Standing`` is last because it speaks
+question about a tree it never held. ``ReadOnlyWrite`` sits beside it, and
+above ``RecoveredLoss`` for the same reason taken one step further: a
+read-only region is not a loss a capture could put back but a place nothing
+writes, so it refuses an ``ask`` as well. ``Standing`` is last because it speaks
 for everything.
 """
 

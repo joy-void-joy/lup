@@ -58,7 +58,12 @@ from lup.policy.boundary import BoundaryPreflight
 from lup.policy.identity import POLICY_ROOT_ENV
 from lup.policy.profiles import compile_boundary, depended_on, measured
 from lup.policy.snapshots import accept_destination_policies, destination_authorities
-from lup.sandbox.rail import AccessibleRoot, fleet_lease
+from lup.sandbox.rail import (
+    AccessibleRoot,
+    accessible_lease,
+    fleet_lease,
+    working_trees,
+)
 from lup.devtools.sync import accessible_roots, granted_devices
 from lup.harness.notice import Banner, Notice
 from lup.harness.requirements import (
@@ -1250,12 +1255,34 @@ def writable_root_arguments(accessible: list[AccessibleRoot] = []) -> list[str]:
     read-only: this key grants writes, and there is no Codex spelling for
     "reachable and not writable" to be faithful to. Reads are not what it
     governs.
+
+    A bare repository is widened to its worktrees rather than to itself. Its
+    `config` and `hooks/` name what the host runs, which the container binds
+    read-only and Claude's widening denies; this key cannot hold a read-only
+    region inside a root, and Codex keeps only a root's `.git` read-only,
+    which a bare repository does not have. So the session writes the
+    worktrees the clone holds at launch and not its git directory -- which
+    also leaves a worktree cut later, and a commit that writes the object
+    store, to a later launch or to Claude.
     """
     try:
         tree = get_tree_dir()
     except (typer.Exit, SystemExit):
         return []
-    roots = [str(tree), *[str(item.path) for item in accessible if item.writable]]
+    roots = [
+        str(tree),
+        *[
+            str(checkout)
+            for item in accessible
+            if item.writable
+            for checkout in working_trees(item.path)
+        ],
+    ]
+    # lup: defer: a Codex permission profile can hold `config` and `hooks/`
+    # read-only inside a writable root (`[permissions.<name>.filesystem]`,
+    # deepest entry wins), which would give a mounted bare clone the whole-
+    # clone reach Claude has; it replaces `--sandbox workspace-write`, which
+    # overrides a profile, so it is the envelope's redesign and not this key's
     return ["-c", f"sandbox_workspace_write.writable_roots={json.dumps(roots)}"]
 
 
@@ -1343,6 +1370,14 @@ def claude_sandbox_arguments(
     one posture and refused it in the other would make where the session runs
     the thing that decides what it can do.
 
+    For the same reason the container's read-only binds reach it too, as
+    ``denyWrite``: each declared repository's shared `config` and `hooks/`,
+    read off the lease that makes those binds. A mounted bare clone admits
+    its git directory whole, and those two name what the host runs at the
+    next git command there -- the documented rule is that a deny holds inside
+    a wider allow, and Claude's own protection of `.git/hooks` and
+    `.git/config` covers only the working directory.
+
     The path is this machine's, so it is resolved at launch and passed as
     settings rather than declared: an artifact carrying an absolute path
     would be drift in every other checkout. The declared writable paths ride
@@ -1396,7 +1431,17 @@ def claude_sandbox_arguments(
         str(tree),
         *[str(item.path) for item in accessible if item.writable],
     ]
-    return document({"sandbox": {"filesystem": {"allowWrite": allowed}}})
+    held: list[JsonValue] = [
+        str(path)
+        for item in accessible
+        if item.writable
+        for path in accessible_lease(item).read_only
+    ]
+    filesystem: JsonObject = {
+        "allowWrite": allowed,
+        **({"denyWrite": held} if held else {}),
+    }
+    return document({"sandbox": {"filesystem": filesystem}})
 
 
 def companion_plugin_directories(root: Path, generated: str) -> list[Path]:
