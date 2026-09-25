@@ -48,8 +48,8 @@ def test_a_person_who_wrote_nothing_gets_lups_defaults(tmp_path: Path) -> None:
 
     assert loaded == UserConfig()
     assert loaded.profile is None
-    assert loaded.theme.claude == "dark-daltonized"
-    assert loaded.theme.codex == "claude-daltonized"
+    assert loaded.theme.claude is None
+    assert loaded.theme.codex is None
     assert loaded.effort is None
     assert loaded.tier == "strongest"
 
@@ -64,7 +64,7 @@ def test_one_line_changes_one_answer_and_leaves_the_rest_lups(tmp_path: Path) ->
 
     assert (loaded.profile, loaded.effort, loaded.tier) == ("work", "high", "balanced")
     assert loaded.theme.claude == "light"
-    assert loaded.theme.codex == "claude-daltonized"
+    assert loaded.theme.codex is None
 
 
 def test_a_file_that_does_not_parse_is_refused_naming_itself(tmp_path: Path) -> None:

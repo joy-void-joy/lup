@@ -24,14 +24,13 @@ decision silently dropped reads exactly like one never made.
 from pathlib import Path
 
 import tomlkit
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ValidationError
 from pydantic_settings import BaseSettings
 from tomlkit.exceptions import TOMLKitError
 
 from lup.channels.models import write_atomic
 from lup.harness.models import NativeName
 from lup.providers.claude.theme import ClaudeTheme
-from lup.providers.codex.theme import claude_daltonized_theme
 from lup.providers.selection import SessionEffort
 from lup.types import ModelTier
 
@@ -41,12 +40,14 @@ class UserTheme(BaseModel, frozen=True, extra="forbid"):
 
     A name per runtime rather than one for both, because the two share no
     vocabulary: Claude Code ships its themes, and Codex reads TextMate files
-    by name. lup's default is one colorblind palette on both — Claude Code's
-    own, and the port of it lup installs into every Codex home it makes.
+    by name. Named here, a theme wins over the one the account keeps; left
+    unset, the account's own stands, and a session's ``/theme`` returns to
+    it. Only where neither names one does lup draw its own colorblind palette
+    — Claude Code's ``dark-daltonized``, and its Codex port.
     """
 
-    claude: ClaudeTheme = "dark-daltonized"
-    codex: NativeName = Field(default_factory=lambda: claude_daltonized_theme().slug)
+    claude: ClaudeTheme | None = None
+    codex: NativeName | None = None
 
 
 class UserConfig(BaseModel, frozen=True, extra="forbid"):

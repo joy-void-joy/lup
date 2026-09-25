@@ -15,9 +15,17 @@ import sh
 import typer
 
 import lup.devtools.harness.launch as launch
+from lup.providers.claude.config_home import (
+    ClaudeConfigHome,
+    load_document,
+    save_document,
+    selected_config_home,
+)
 from lup.providers.claude.login import CLAUDE_CONFIG_DIR, CLAUDE_LOGIN
+from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.profile_tree import user_profile_directory
 from lup.providers.user_config import UserConfigFile
+from lup.types import EnvVars
 from lup.providers.claude.usage.reader import ClaudeUsageReader, claude_usage_entry
 from lup.providers.codex.usage.reader import CodexUsageReader, codex_usage_entry
 from tests.unit.test_launch_effort_default import Transcript, composition
@@ -158,7 +166,7 @@ def test_a_fresh_project_inherits_the_persons_account_theme_and_defaults(
 
     assert flag(launched.arguments, "--model") == "sonnet"
     assert flag(launched.arguments, "--effort") == "high"
-    assert launched.settings["theme"] == "light-daltonized"
+    assert load_document(home / ".claude.json")["theme"] == "light-daltonized"
     assert launched.environment[CLAUDE_CONFIG_DIR] == str(home)
 
 
@@ -205,43 +213,152 @@ def test_a_config_lup_cannot_read_refuses_the_launch_naming_it(
     assert launched.arguments == []
 
 
-def test_claude_draws_the_persons_theme_lups_by_default(
-    config: UserConfigFile, launched: Launched
+@pytest.fixture
+def account(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ClaudeConfigHome:
+    """The operator's default Claude home, for this test alone."""
+    home = ClaudeConfigHome(
+        directory=tmp_path / "user" / ".claude",
+        document=tmp_path / "user" / ".claude.json",
+    )
+
+    def selected(environment: EnvVars) -> ClaudeConfigHome:
+        if environment.get(CLAUDE_CONFIG_DIR):
+            return selected_config_home(environment)
+        return home
+
+    monkeypatch.setattr(launch, "selected_config_home", selected)
+    return home
+
+
+def test_claude_fills_lups_theme_only_where_the_account_names_none(
+    config: UserConfigFile, launched: Launched, account: ClaudeConfigHome
 ) -> None:
     claude(config)
-    assert launched.settings["theme"] == "dark-daltonized"
 
-    writes(config, '[theme]\nclaude = "light-ansi"\n')
-    claude(config, model="opus", effort="max")
-
-    assert launched.settings["theme"] == "light-ansi"
-    assert launched.settings.get("ultracode") is None
+    assert load_document(account.document) == {"theme": "dark-daltonized"}
+    assert "theme" not in launched.settings
 
 
-def test_codex_draws_the_persons_theme_over_a_home_lup_made(
+def test_claude_leaves_a_theme_the_account_already_has(
+    config: UserConfigFile, launched: Launched, account: ClaudeConfigHome
+) -> None:
+    save_document(account.document, {"theme": "light", "editorMode": "vim"})
+
+    claude(config)
+
+    assert load_document(account.document) == {"theme": "light", "editorMode": "vim"}
+
+
+def test_claude_leaves_a_theme_the_accounts_settings_hold(
+    config: UserConfigFile, launched: Launched, account: ClaudeConfigHome
+) -> None:
+    """Claude Code reads the settings' theme first, so that one is the account's."""
+    settings = account.directory / "settings.json"
+    save_document(settings, {"theme": "light-ansi"})
+
+    claude(config)
+
+    assert load_document(settings) == {"theme": "light-ansi"}
+    assert not account.document.exists()
+
+
+def test_a_theme_the_config_names_wins_over_the_accounts(
+    config: UserConfigFile, launched: Launched, account: ClaudeConfigHome
+) -> None:
+    save_document(account.document, {"theme": "light", "editorMode": "vim"})
+    writes(config, '[theme]\nclaude = "dark-ansi"\n')
+
+    claude(config)
+
+    assert load_document(account.document) == {
+        "theme": "dark-ansi",
+        "editorMode": "vim",
+    }
+
+
+def test_a_named_theme_is_written_where_the_account_keeps_its_own(
+    config: UserConfigFile, launched: Launched, account: ClaudeConfigHome
+) -> None:
+    settings = account.directory / "settings.json"
+    save_document(settings, {"theme": "light", "model": "opus"})
+    writes(config, '[theme]\nclaude = "dark-ansi"\n')
+
+    claude(config)
+
+    assert load_document(settings) == {"theme": "dark-ansi", "model": "opus"}
+    assert not account.document.exists()
+
+
+def test_a_claude_sessions_theme_change_stays_the_accounts(
     config: UserConfigFile,
     launched: Launched,
-    tmp_path: Path,
+    account: ClaudeConfigHome,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A host session runs in the account's own home, so /theme lands there.
+
+    Nothing after the session writes the document back, so a change the
+    account took meanwhile — here another process setting its editor mode —
+    survives beside the session's theme, and the next launch keeps both.
+    """
+
+    def session(_name: str) -> object:
+        def run(*args: object, _env: dict[str, str], **kwargs: object) -> None:
+            del args, _env, kwargs
+            chosen = {**load_document(account.document), "theme": "light"}
+            save_document(account.document, {**chosen, "editorMode": "vim"})
+
+        return run
+
+    monkeypatch.setattr(sh, "Command", session)
+
+    claude(config)
+
+    assert load_document(account.document) == {"theme": "light", "editorMode": "vim"}
+    claude(config)
+    assert load_document(account.document)["theme"] == "light"
+
+
+def test_a_contained_claude_launch_leaves_the_accounts_theme_alone(
+    config: UserConfigFile,
+    launched: Launched,
+    account: ClaudeConfigHome,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Its session runs in the repository's config volume, not the account."""
     monkeypatch.setattr(
         launch,
-        "select_codex_home",
-        lambda *args: Mock(path=tmp_path / "home", isolated=True),
+        "ready_to_open",
+        lambda *a, **k: launch.LaunchOpening(sandbox=launch.LaunchSandbox.OUTER),
     )
-    writes(config, '[theme]\ncodex = "dracula"\n')
 
-    launch.launch_codex(composition(), [], None, None, None, False, False)
+    claude(config)
 
-    assert 'tui.theme="dracula"' in launched.arguments
+    assert not account.document.exists()
+    assert "theme" not in launched.settings
 
 
-def test_codex_leaves_a_home_the_operator_brought_its_own_theme(
-    config: UserConfigFile, launched: Launched
+def test_codex_hands_the_named_theme_to_the_home_not_the_command_line(
+    config: UserConfigFile,
+    launched: Launched,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A launch-wide override would outrank the session's own /theme."""
+    writes(config, '[theme]\ncodex = "dracula"\n')
+    stores: list[dict[str, object]] = []
+
+    def store(**named: object) -> Mock:
+        stores.append(named)
+        return Mock(
+            publish=Mock(return_value=False), return_settings=Mock(return_value=[])
+        )
+
+    monkeypatch.setattr(launch, "CodexWorktreeHomeStore", store)
+
     launch.launch_codex(composition(), [], None, None, None, False, False)
 
-    assert not any(argument.startswith("tui.theme=") for argument in launched.arguments)
+    assert stores == [{"account_home": CODEX_LOGIN.ambient_home, "theme": "dracula"}]
+    assert not any("tui.theme" in argument for argument in launched.arguments)
 
 
 def test_codex_derives_its_worktree_home_from_the_selected_account(
@@ -263,7 +380,9 @@ def test_codex_derives_its_worktree_home_from_the_selected_account(
 
     launch.launch_codex(composition(), [], None, None, None, False, False)
 
-    assert stores == [{"account_home": config.profiles_root() / "work" / "codex-home"}]
+    assert stores == [
+        {"account_home": config.profiles_root() / "work" / "codex-home", "theme": None}
+    ]
 
 
 @pytest.mark.parametrize("named", ["work", None], ids=["named", "selected"])

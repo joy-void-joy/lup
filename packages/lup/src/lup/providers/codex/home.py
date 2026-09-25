@@ -28,7 +28,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from lup.providers.codex.harness_runtime import CodexPluginInstaller, PluginCacheConfig
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.marketplace import CodexMarketplace
-from lup.providers.codex.theme import claude_daltonized_theme
+from lup.providers.codex.theme import CodexTheme, claude_daltonized_theme
 from lup.types import JsonObject, JsonValue
 from lup.providers.codex.trust import CodexHook, hooks_of, read_hooks, skipped
 from lup.types import EnvVars
@@ -56,6 +56,12 @@ CODEX_CONFIG_STATE_KEYS = ("marketplaces", "plugins")
 # lup: ignore[constant-declaration] — Codex's own spelling for where a home
 # records which checkouts it will read the configuration of
 PROJECTS_KEY = "projects"
+
+# lup: ignore[constant-declaration] — Codex's own spelling for the interface's
+# table, and the theme it draws, as its `/theme` writes them
+TUI_KEY = "tui"
+THEME_KEY = "theme"
+THEMES_DIR = "themes"
 
 # lup: ignore[constant-declaration] — Codex's own word for that decision; a
 # caller given it to set would be writing a record the runtime cannot read
@@ -166,6 +172,23 @@ def derived_codex_config(account: str, scoped: str) -> str:
         if recorded is not None and held is not None:
             for name, entry in recorded.items():
                 held[name] = entry
+    return tomlkit.dumps(document)
+
+
+def themed_codex_config(content: str, named: str | None, fallback: str) -> str:
+    """A derived configuration drawing the theme it should.
+
+    ``named`` is the person's lup config naming one outright, which wins over
+    the account's for the session; unnamed, the account's own stands, and
+    only where it keeps none is ``fallback``, lup's own, filled in. Written
+    into the derived home rather than passed as a launch override, which
+    would outrank a session's ``/theme`` for as long as the session ran.
+    """
+    document = tomlkit.parse(content)
+    tui = table_at(document, (TUI_KEY,), create=True)
+    if tui is None or (named is None and THEME_KEY in tui):
+        return content
+    tui[THEME_KEY] = named or fallback
     return tomlkit.dumps(document)
 
 
@@ -308,6 +331,32 @@ def seed_config(source: Path, target: Path) -> bool:
     return True
 
 
+def carried_themes(
+    source: Path, destination: Path, overwrite: bool = False
+) -> list[str]:
+    """Copy the theme files one home keeps to another, by name.
+
+    A theme is selected by name and drawn from a file in the selecting home,
+    so a home derived from an account draws the account's own themes only if
+    it holds their files — refreshed at every derivation, since the account's
+    are the originals — and an account a session's choice returns to draws it
+    only if the file came back too, never over one the account already has.
+    """
+    themes = source / THEMES_DIR
+    if not themes.is_dir():
+        return []
+    missing = [
+        theme
+        for theme in sorted(themes.iterdir())
+        if theme.is_file()
+        and (overwrite or not (destination / THEMES_DIR / theme.name).exists())
+    ]
+    for theme in missing:
+        (destination / THEMES_DIR).mkdir(parents=True, exist_ok=True)
+        shutil.copy2(theme, destination / THEMES_DIR / theme.name)
+    return [theme.name for theme in missing]
+
+
 def trust_project(home: Path, worktree: Path) -> bool:
     """Record that a scoped home trusts the checkout it was made for.
 
@@ -382,7 +431,9 @@ class CodexWorktreeHomeStore:
     joined onto this process's home when the login is imported, unless a
     profile names another. ``launched_record`` is where a home keeps the
     personal settings it was derived with, so what a session changed can be
-    told from what the account changed meanwhile.
+    told from what the account changed meanwhile. ``theme`` is the one the
+    person's lup config names, if it names one; ``fallback_theme`` is lup's
+    own, drawn only where neither that nor the account names one.
     """
 
     def __init__(
@@ -390,10 +441,14 @@ class CodexWorktreeHomeStore:
         account_home: Path = CODEX_LOGIN.ambient_home,
         scoped_dir: Path = SCOPED_HOME_DIR,
         launched_record: str = ".lup-launched.json",
+        theme: str | None = None,
+        fallback_theme: CodexTheme | None = None,
     ) -> None:
         self.account_home = account_home
         self.scoped_dir = scoped_dir
         self.launched_record = launched_record
+        self.theme = theme
+        self.fallback_theme = fallback_theme or claude_daltonized_theme()
 
     def home_for(self, worktree: Path) -> Path:
         """The home belonging to the checkout that encloses one worktree.
@@ -435,16 +490,21 @@ class CodexWorktreeHomeStore:
         scoped_home = self.home_for(worktree)
         scoped_home.mkdir(mode=0o700, parents=True, exist_ok=True)
         scoped_home.chmod(0o700)
-        claude_daltonized_theme().write(scoped_home)
+        carried_themes(self.account_home, scoped_home, overwrite=True)
+        self.fallback_theme.write(scoped_home)
         sync_credential(
             self.account_home / CODEX_LOGIN.credentials_file,
             scoped_home / CODEX_LOGIN.credentials_file,
         )
         account = self.account_home / "config.toml"
         config = scoped_home / "config.toml"
-        derived = derived_codex_config(
-            account.read_text(encoding="utf-8") if account.is_file() else "",
-            config.read_text(encoding="utf-8") if config.is_file() else "",
+        derived = themed_codex_config(
+            derived_codex_config(
+                account.read_text(encoding="utf-8") if account.is_file() else "",
+                config.read_text(encoding="utf-8") if config.is_file() else "",
+            ),
+            self.theme,
+            self.fallback_theme.slug,
         )
         config.write_text(derived, encoding="utf-8")
         trust_project(scoped_home, worktree)
@@ -501,6 +561,7 @@ class CodexWorktreeHomeStore:
             encoding="utf-8",
         )
         record.write_text(json.dumps(now), encoding="utf-8")
+        carried_themes(scoped_home, self.account_home)
         return [change.name() for change in changes]
 
 

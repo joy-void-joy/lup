@@ -1,6 +1,5 @@
 """Typed TextMate themes provisioned in Lup-owned Codex homes."""
 
-import json
 import plistlib
 from pathlib import Path
 from typing import Annotated, Literal
@@ -77,16 +76,6 @@ class CodexTheme(BaseModel, frozen=True):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(self.render(), encoding="utf-8", newline="\n")
         return target
-
-
-def codex_theme_arguments(theme: str) -> list[str]:
-    """One theme as the interactive CLI takes it: a configuration override.
-
-    An override rather than a line written into the home, so the home's own
-    configuration stays the account's, and the theme a launch draws is the
-    person's lup config every time rather than whatever a session last set.
-    """
-    return ["--config", f"tui.theme={json.dumps(theme)}"]
 
 
 def claude_daltonized_theme() -> CodexTheme:

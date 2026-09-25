@@ -180,11 +180,33 @@ def test_claude_daltonized_theme_uses_truecolor_palette() -> None:
     )
 
 
-def test_prepare_generates_theme_without_selecting_it(tmp_path: Path) -> None:
+def home_theme(home: Path) -> object:
+    """The theme a home's configuration draws, or None where it names none."""
+    config = home / "config.toml"
+    if not config.is_file():
+        return None
+    return (
+        tomlkit.parse(config.read_text(encoding="utf-8"))
+        .unwrap()
+        .get("tui", {})
+        .get("theme")
+    )
+
+
+def worktree_of(tmp_path: Path, name: str = "worktree") -> Path:
+    """A checkout for a store to derive a home for."""
+    worktree = tmp_path / name
+    worktree.mkdir()
+    return worktree
+
+
+def test_lups_theme_is_drawn_only_where_the_account_names_none(
+    tmp_path: Path,
+) -> None:
     account = tmp_path / "account"
     account.mkdir()
-    worktree = tmp_path / "worktree"
-    worktree.mkdir()
+    (account / "config.toml").write_text(ACCOUNT_CONFIG, encoding="utf-8")
+    worktree = worktree_of(tmp_path)
     store = CodexWorktreeHomeStore(account)
     theme = claude_daltonized_theme()
     parsed_theme = TextMateThemeDocument.model_validate(
@@ -196,13 +218,131 @@ def test_prepare_generates_theme_without_selecting_it(tmp_path: Path) -> None:
     generated = scoped / "themes" / "claude-daltonized.tmTheme"
 
     assert generated.read_text(encoding="utf-8") == theme.render()
-    config = tomlkit.parse((scoped / "config.toml").read_text(encoding="utf-8"))
-    assert "tui" not in config
+    assert home_theme(scoped) == "claude-daltonized"
+    assert home_theme(account) is None, "the account was given lup's theme"
 
     generated.write_text("stale", encoding="utf-8")
     store.prepare(worktree)
 
     assert generated.read_text(encoding="utf-8") == theme.render()
+
+
+def test_a_theme_the_account_keeps_is_drawn_with_its_file(tmp_path: Path) -> None:
+    account = tmp_path / "account"
+    (account / "themes").mkdir(parents=True)
+    (account / "themes" / "mine.tmTheme").write_text("mine", encoding="utf-8")
+    (account / "config.toml").write_text(
+        ACCOUNT_CONFIG + '\n[tui]\ntheme = "mine"\n', encoding="utf-8"
+    )
+
+    scoped = CodexWorktreeHomeStore(account).prepare(worktree_of(tmp_path))
+
+    assert home_theme(scoped) == "mine"
+    assert (scoped / "themes" / "mine.tmTheme").read_text(encoding="utf-8") == "mine"
+
+
+def test_a_theme_the_config_names_wins_in_the_home_and_leaves_the_account(
+    tmp_path: Path,
+) -> None:
+    account = tmp_path / "account"
+    account.mkdir()
+    (account / "config.toml").write_text(
+        ACCOUNT_CONFIG + '\n[tui]\ntheme = "zenburn"\n', encoding="utf-8"
+    )
+    worktree = worktree_of(tmp_path)
+    store = CodexWorktreeHomeStore(account, theme="dracula")
+
+    scoped = store.prepare(worktree)
+
+    assert home_theme(scoped) == "dracula"
+    assert home_theme(account) == "zenburn"
+    assert store.return_settings(worktree) == []
+    assert home_theme(account) == "zenburn"
+
+
+def chosen_in_session(scoped: Path, theme: str) -> None:
+    """What a session's /theme writes into the home it runs in."""
+    config = tomlkit.parse((scoped / "config.toml").read_text(encoding="utf-8"))
+    config.setdefault("tui", tomlkit.table())["theme"] = theme
+    (scoped / "config.toml").write_text(tomlkit.dumps(config), encoding="utf-8")
+
+
+def test_a_sessions_theme_returns_to_the_account_with_its_file(
+    tmp_path: Path,
+) -> None:
+    account = tmp_path / "account"
+    account.mkdir()
+    (account / "config.toml").write_text(ACCOUNT_CONFIG, encoding="utf-8")
+    worktree = worktree_of(tmp_path)
+    store = CodexWorktreeHomeStore(account)
+    scoped = store.prepare(worktree)
+    (scoped / "themes" / "mine.tmTheme").write_text("mine", encoding="utf-8")
+    chosen_in_session(scoped, "mine")
+
+    assert store.return_settings(worktree) == ["tui.theme"]
+    assert home_theme(account) == "mine"
+    assert (account / "themes" / "mine.tmTheme").read_text(encoding="utf-8") == "mine"
+
+    elsewhere = CodexWorktreeHomeStore(account).prepare(worktree_of(tmp_path, "new"))
+    assert home_theme(elsewhere) == "mine"
+    assert (elsewhere / "themes" / "mine.tmTheme").is_file()
+
+
+def test_lups_filled_theme_never_returns_to_the_account(tmp_path: Path) -> None:
+    """Only what a session chose goes back; what lup drew for it does not."""
+    account = tmp_path / "account"
+    account.mkdir()
+    (account / "config.toml").write_text(ACCOUNT_CONFIG, encoding="utf-8")
+    worktree = worktree_of(tmp_path)
+    store = CodexWorktreeHomeStore(account)
+    scoped = store.prepare(worktree)
+    config = tomlkit.parse((scoped / "config.toml").read_text(encoding="utf-8"))
+    config["model"] = "gpt-chosen"
+    (scoped / "config.toml").write_text(tomlkit.dumps(config), encoding="utf-8")
+
+    assert store.return_settings(worktree) == ["model"]
+    assert home_theme(account) is None
+
+
+def test_a_sessions_theme_returns_without_undoing_the_accounts_meanwhile(
+    tmp_path: Path,
+) -> None:
+    account = tmp_path / "account"
+    account.mkdir()
+    (account / "config.toml").write_text(
+        ACCOUNT_CONFIG + '\n[tui]\ntheme = "zenburn"\n', encoding="utf-8"
+    )
+    worktree = worktree_of(tmp_path)
+    store = CodexWorktreeHomeStore(account)
+    scoped = store.prepare(worktree)
+    (account / "config.toml").write_text(
+        ACCOUNT_CONFIG.replace("gpt-personal", "gpt-meanwhile")
+        + '\n[tui]\ntheme = "zenburn"\n',
+        encoding="utf-8",
+    )
+    chosen_in_session(scoped, "dracula")
+
+    assert store.return_settings(worktree) == ["tui.theme"]
+    settings = tomlkit.parse((account / "config.toml").read_text(encoding="utf-8"))
+    assert settings["model"] == "gpt-meanwhile"
+    assert home_theme(account) == "dracula"
+
+
+def test_an_account_theme_changed_meanwhile_is_not_undone(tmp_path: Path) -> None:
+    account = tmp_path / "account"
+    account.mkdir()
+    (account / "config.toml").write_text(
+        ACCOUNT_CONFIG + '\n[tui]\ntheme = "zenburn"\n', encoding="utf-8"
+    )
+    worktree = worktree_of(tmp_path)
+    store = CodexWorktreeHomeStore(account)
+    store.prepare(worktree)
+    (account / "config.toml").write_text(
+        ACCOUNT_CONFIG + '\n[tui]\ntheme = "monokai"\n', encoding="utf-8"
+    )
+
+    assert store.return_settings(worktree) == []
+    assert home_theme(account) == "monokai"
 
 
 def test_prepare_keeps_what_the_home_itself_holds(tmp_path: Path) -> None:

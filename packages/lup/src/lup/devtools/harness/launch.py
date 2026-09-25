@@ -46,7 +46,11 @@ from lup.providers.codex.model_choice import (
     refuse_unsupported_effort as refuse_codex_effort,
 )
 from lup.providers.codex.subagents import CodexModelTiers
-from lup.providers.codex.theme import codex_theme_arguments
+from lup.providers.claude.config_home import (
+    ClaudeConfigUnreadable,
+    selected_config_home,
+)
+from lup.providers.claude.theme import settle_claude_theme
 from lup.providers.claude.harness import ClaudeSpellings
 from lup.providers.claude.transcripts import ClaudeTranscripts
 from lup.providers.codex.confinement import CODEX_CONFINEMENT
@@ -1965,13 +1969,9 @@ def launch_claude(
                     if sandbox is LaunchSandbox.INNER
                     else []
                 ),
-                # The theme travels in the one settings document the CLI
-                # reads, so every launch draws the person's, on a home this
-                # launch made as on one they signed in to long ago.
-                settings={
-                    **(compiled_effort.settings if compiled_effort is not None else {}),
-                    "theme": personal.theme.claude,
-                },
+                settings=(
+                    compiled_effort.settings if compiled_effort is not None else None
+                ),
             ),
             # What this runtime shows in its own chrome, made to agree with
             # the name the roster answers to: the same minted name is
@@ -2023,6 +2023,21 @@ def launch_claude(
         raise typer.BadParameter(str(error)) from error
     if home is not None:
         environment.update(profiles.login.environment(home))
+    # The theme is the account's, handed through its own files rather than as
+    # a launch override, which would outrank a session's /theme: filled in
+    # where the account keeps none, replaced only where the person's lup
+    # config names one. A session on the host runs in the account's own home,
+    # so what it changes there is the account's already.
+    # lup: defer: a contained session runs in its repository's config volume,
+    # so no theme reaches it and none it sets returns to the account; which
+    # home a container's theme belongs to is the volume's question.
+    if not sandbox.contained():
+        try:
+            settle_claude_theme(
+                selected_config_home(environment), personal.theme.claude
+            )
+        except ClaudeConfigUnreadable as error:
+            raise typer.BadParameter(str(error)) from error
     transcribing = transcribe_session or mode is None or mode.transcribes("claude")
     transcript = start_harness_transcript(
         "claude",
@@ -2213,10 +2228,9 @@ def launch_codex(
         account_home = user_profile_directory(CODEX_LOGIN, config).launch_home(None)
     except (KeyError, DefaultHomeProfile) as error:
         raise typer.BadParameter(str(error)) from error
-    store = (
-        CodexWorktreeHomeStore()
-        if account_home is None
-        else CodexWorktreeHomeStore(account_home=account_home)
+    store = CodexWorktreeHomeStore(
+        account_home=account_home or CODEX_LOGIN.ambient_home,
+        theme=personal.theme.codex,
     )
     home = select_codex_home(codex_home, environment, project_root(), profile, store)
     selected_home = home.path
@@ -2247,10 +2261,6 @@ def launch_codex(
         arguments.extend(["--model", selected_model])
     if chosen_effort is not None:
         arguments.extend(codex_effort_arguments(chosen_effort))
-    # Only over a home lup made, which is where lup's own theme is installed;
-    # a home the operator brought draws whatever they chose in it.
-    if home.isolated or sandbox.contained():
-        arguments.extend(codex_theme_arguments(personal.theme.codex))
     arguments.extend(mode.command_words("codex") if mode is not None else [])
     arguments.extend(extra_args)
     environment["CODEX_HOME"] = str(selected_home)
@@ -2336,6 +2346,10 @@ def launch_codex(
         transcript.close(succeeded=succeeded, interrupted=interrupted)
         if home.isolated and store.publish(project_root()):
             typer.echo("Returned the refreshed Codex login to the account home")
+        # lup: defer: a contained session runs in its repository's config
+        # volume, so a setting it changes there — its /theme included — never
+        # returns to the account; which home those belong to is the volume's
+        # question.
         carried = store.return_settings(project_root()) if home.isolated else []
         if carried:
             typer.echo(
