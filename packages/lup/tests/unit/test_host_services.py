@@ -138,7 +138,9 @@ def test_the_filtered_argv_mounts_the_relay_and_keeps_the_internal_network(
     network = argv[argv.index("--network") + 1]
     assert network == f"lup-egress-net-{tmp_path.name}"
     assert "--add-host" not in argv
-    assert not any("host-gateway" in word or "host.docker.internal" in word for word in argv)
+    assert not any(
+        "host-gateway" in word or "host.docker.internal" in word for word in argv
+    )
 
 
 def test_the_entrypoint_listens_where_the_session_is_told_to_call() -> None:
@@ -148,7 +150,7 @@ def test_the_entrypoint_listens_where_the_session_is_told_to_call() -> None:
     entrypoint = image.dockerfile(Manifest())
 
     assert "for entry in ${LUP_HOST_SERVICES:-}; do" in entrypoint
-    assert "TCP-LISTEN:\"$port\",bind=127.0.0.1" in entrypoint
+    assert 'TCP-LISTEN:"$port",bind=127.0.0.1' in entrypoint
     assert 'UNIX-CONNECT:"/run/lup/services/$name.sock"' in entrypoint
 
 

@@ -14,6 +14,7 @@ from typer.testing import CliRunner
 import lup.devtools.harness.launch as launch
 import lup.devtools.harness.contained as contained
 import lup.providers.codex.install as installation
+from lup.harness.image import Image
 from lup.providers.codex.account import read_account
 from lup.providers.codex.home import CodexHomeSelection
 from lup.providers.codex.profile import CodexProfileSettings
@@ -239,6 +240,7 @@ def test_launcher_selects_the_same_settings_for_preparation_auth_and_session(
     source = source_home(tmp_path)
     composition = Mock()
     composition.recipe.source.plugins = [Mock(hooks=None)]
+    composition.recipe.source.image = Image()
     monkeypatch.setattr(
         launch, "ready_to_open", Mock(return_value=launch.LaunchOpening())
     )

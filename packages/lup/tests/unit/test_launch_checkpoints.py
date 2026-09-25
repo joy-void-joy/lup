@@ -7,6 +7,7 @@ import pytest
 import sh
 
 import lup.devtools.harness.launch as launch
+from lup.harness.image import Image
 from lup.devtools.harness.preflight import LaunchSentinels
 
 
@@ -29,6 +30,7 @@ def composition() -> Mock:
     plugin.marketplace = "test"
     built = Mock()
     built.recipe.source.plugins = [plugin]
+    built.recipe.source.image = Image()
     return built
 
 
@@ -126,7 +128,7 @@ def test_codex_checkpoints_before_preflight_and_after_close(
     monkeypatch.setattr(
         launch,
         "codex_sandbox_arguments",
-        lambda _plugin, _environment, _args, sandbox=launch.LaunchSandbox.INNER, accessible=[]: [],
+        lambda _plugin, _environment, _args, sandbox=launch.LaunchSandbox.INNER, accessible=[], mode=None: [],
     )
     monkeypatch.setattr(launch, "CodexWorktreeHomeStore", lambda: store)
     monkeypatch.setattr(launch, "select_codex_home", lambda *args: home)

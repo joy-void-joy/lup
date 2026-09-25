@@ -8,6 +8,8 @@ from lup.devtools.dev.git_guards import (
     DECLARED_GUARDS,
     DRIFT_COMMAND,
     MERGE_STANDDOWN,
+    MODE_STANDDOWN,
+    STANDDOWN_VARIABLE,
     GitGuard,
     hooks_directory,
     install_guards,
@@ -48,22 +50,44 @@ def test_every_installed_hook_scrubs_the_environment_before_its_check() -> None:
 
 
 def test_the_declared_commit_guard_reads_the_merge_before_it_checks() -> None:
-    """The standdown goes after the scrub and before the check, in that order.
+    """The standdowns go after the scrub and before the check, in that order.
 
     After, because the scrub is what makes `git rev-parse` resolve the
     repository the hook is running in rather than the one a name in the
     environment points at. Before, because a check that has already started
-    cannot be stood down.
+    cannot be stood down. The mode's standdown reads only the session's
+    environment, so it comes first and asks git nothing.
     """
     for guard in (one for one in DECLARED_GUARDS if one.hook == "pre-commit"):
         check = guard.check()
 
-        assert guard.standdown == MERGE_STANDDOWN
+        assert guard.standdown == MODE_STANDDOWN + MERGE_STANDDOWN
         assert (
             check.index("unset ")
+            < check.index(STANDDOWN_VARIABLE)
             < check.index("MERGE_HEAD")
             < check.index(f"exec {guard.command}")
         )
+
+
+def run_guard_script(script: str, environment: dict[str, str]) -> sh.RunningCommand:
+    """Run a guard's shell text under the given environment, as git would start it."""
+    return sh.Command("sh")(
+        "-c", script, _env=environment, _return_cmd=True, _ok_code=[0, 1]
+    )
+
+
+def test_a_mode_that_asks_stands_the_guard_down_and_says_so() -> None:
+    """Only the launcher's word for it stands a guard down, and it is said, not silent."""
+    stood_down = run_guard_script(
+        MODE_STANDDOWN + "exit 1\n",
+        {"PATH": "/usr/bin:/bin", STANDDOWN_VARIABLE: "off"},
+    )
+    guarding = run_guard_script(MODE_STANDDOWN + "exit 1\n", {"PATH": "/usr/bin:/bin"})
+
+    assert stood_down.exit_code == 0
+    assert "stands the guard down" in str(stood_down.stderr, "utf-8")
+    assert guarding.exit_code == 1
 
 
 def test_the_commit_guard_stands_down_for_a_merge_and_not_for_what_follows(
