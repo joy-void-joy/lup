@@ -27,6 +27,7 @@ from lup.devtools.roster import LIBRARY_SPECS as LIBRARY_SUBAPPS
 from lup.devtools.subapps import SubAppSelection, SubAppSpec, unowned
 from lup.harness.codescan.common import RuleSelection
 from lup.harness.content.application import ApplicationLayout
+from lup.harness.content.docs.catalog import page
 from lup.harness.modules import (
     Adoption,
     Module,
@@ -40,6 +41,7 @@ from lup.harness.modules import (
 )
 from lup.seams import Selection
 from lup_template.devtools.subapps import APPLICATION_ROSTER
+from lup_template.harness.content.docs import corpus
 from lup_template.harness.content.modules.catalog import composed_entries
 from lup_template.harness.content.skills.meta import skill as build_meta
 from lup_template.harness.content.skills.review import skill as build_review
@@ -119,6 +121,24 @@ def adoptions(layout: ApplicationLayout) -> list[Adoption]:
         Adoption(
             module="meta",
             content=models.ContentSelection(skills=[build_meta(layout)]),
+        ),
+        Adoption(
+            module="ledger",
+            # The corpus is this repository's worked example of knowledge
+            # kinds over the ledger: its own page, since the library ships
+            # the mechanism and no epistemics, and the ledger's to publish,
+            # since every command it shows is the ledger's and a project
+            # without one would publish a page it cannot follow.
+            documents=Selection(
+                overrides=[
+                    page(
+                        "corpus",
+                        "corpus.md",
+                        lambda _: corpus.DOCUMENT,
+                        layout.docs(),
+                    )
+                ]
+            ),
         ),
     ]
 
