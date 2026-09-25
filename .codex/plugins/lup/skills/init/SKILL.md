@@ -194,7 +194,9 @@ than a leftover:
 - **`feedback-loop`** — turning an observed agent failure into a durable capability change. Take it only if ground truth or a feedback signal resolves over time; a domain whose output nobody grades has nothing to feed it.
 
 Ask about every module the roster offers rather than only those three — this
-list goes stale and `dev modules` does not.
+list goes stale and `dev modules` does not. A row marked `essential`, or
+needed by an essential one, is every project's and is not offered; a module
+another one `requires` goes only together with it, and generation says which.
 
 Ask the user directly, offering concrete options, and wait for the answer: which modules this domain takes and which it declines, one option per module the roster offers — for each, say which way you would go and why, from what the interview
 established rather than from what sounds useful.
@@ -509,11 +511,7 @@ If this domain has no consequential, judgment-bearing output, `reflection` is in
 
 The reflection gate (`lup.orchestration.reflection`) is domain-neutral and doesn't need modification. Only the tool and its input model are domain-specific.
 
-### 7. `devtools/feedback/state.py`
-
-The feedback collection module (exposed via `uv run lup-devtools feedback collect`). Customize `load_outcomes()` and `compute_metrics()` for the domain's ground truth type.
-
-### 8. Update the guidance
+### 7. Update the guidance
 
 Edit `src/<project>/harness/content/guidance.py`, then regenerate with `uv run lup-devtools harness generate all` -- .claude/CLAUDE.md under Claude Code, AGENTS.md under Codex are its outputs, and editing them directly is undone by the next generation.
 
@@ -524,7 +522,7 @@ The guidance should already carry the template sections from the Phase 2 merge. 
 - Add metrics and feedback collection instructions relevant to this domain
 - Add any domain-specific context sections (Important Context, data sources, constraints)
 
-### 9. Tool Description Standards
+### 8. Tool Description Standards
 
 The agent discovers tools through their descriptions -- a terse description means the agent can't tell when or why to use it. Each description should answer:
 
@@ -534,7 +532,7 @@ The agent discovers tools through their descriptions -- a terse description mean
 
 See `src/<project>/agent/tools/example.py` for the pattern.
 
-### 10. Setup Wizard (`src/<project>/devtools/setup.py`)
+### Setup Wizard (`src/<project>/devtools/setup.py`), where `setup` was taken
 
 Customize the interactive setup wizard for the domain's integrations:
 
@@ -549,13 +547,15 @@ The framework (env helpers, status table, mask, clipboard, browser open, wizard 
 The registry is a list of services, and which ones this domain has is the
 domain's answer rather than a guess from the code — so Ask the user directly, offering concrete options, and wait for the answer: which external services the agent uses, and for each whether it authenticates by OAuth flow, API key, or a credentials file before rewriting `INTEGRATIONS`.
 
-### 11. Update `feedback-loop.md`
+### The feedback loop, where `feedback-loop` was taken in Phase 1.5
 
-Customize the feedback loop command for the domain's specific:
+The feedback collection module is `devtools/feedback/state.py`, exposed via
+`uv run lup-devtools feedback collect`. Customize `load_outcomes()` and
+`compute_metrics()` for the domain's ground truth type.
 
-- Ground truth type
-- Metrics to analyze
-- Trace inspection approach
+Then customize the feedback loop command for the domain's ground truth type,
+the metrics to analyze and the trace inspection approach, and verify that it
+references the right scripts.
 
 ## Phase 4: Verify Setup
 
@@ -568,8 +568,7 @@ After generating files:
 Open `uv run lup-devtools dev check` with `exec_command`, which holds a live PTY, and read what it has emitted with `write_stdin` carrying no keystrokes. Keep the one session for as long as the command runs: re-running it starts over and loses everything it already reported
 
 3. Run `uv run lup --help` to verify CLI
-4. Verify the feedback loop command references the right scripts
-5. Declare the domain's external programs in `harness/content/requirements.py`
+4. Declare the domain's external programs in `harness/content/requirements.py`
    using `Requirement`: name their purpose, execution location, smallest real
    operation, failure consequence, and recovery. Run
    `uv run lup-devtools harness requirements` to exercise host prerequisites,
@@ -578,13 +577,13 @@ Open `uv run lup-devtools dev check` with `exec_command`, which holds a live PTY
    `uv run lup-devtools harness requirements --inside --launch-only`; full
    `--inside` checks additionally exercise a native model turn and require its
    configured login. Report any unexercised checks explicitly.
-6. Repair authorized local prerequisites and rerun their checks. Where the
+5. Repair authorized local prerequisites and rerun their checks. Where the
    report names an endpoint override, missing service, group membership, or
    session restart, give that specific recovery; do not call setup complete
    merely because the executable exists. Host administration and a fresh
    login session remain actions for the operator when this session cannot
    perform them.
-7. Regenerate both harnesses and check that the rendered guidance accurately describes the domain
+6. Regenerate both harnesses and check that the rendered guidance accurately describes the domain
 
 ## After Initialization
 
