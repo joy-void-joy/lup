@@ -26,7 +26,9 @@ import pytest
 import sh
 
 from lup.devtools.dev.policy_explain import verdict_for
-from lup.policy.models import EditBatch, EditChange
+from lup.harness.enforcement import declared_role_rows
+from lup.policy.models import EditBatch, EditChange, ShellCommand
+from lup.policy.rules import ShellPolicy
 from lup.types import JsonObject
 from lup_template.harness.catalog import declared_hook_set
 from tests.unit.native import codex_denial
@@ -339,6 +341,39 @@ def test_the_preview_reads_the_kit_as_scratch(base: Path) -> None:
     assert {reading.effect for read in readings for reading in read.readings} == {
         "allow"
     }
+
+
+@pytest.mark.parametrize(
+    ("target", "effect"),
+    [
+        pytest.param("tmp/kit/probe.py", "allow", id="kit"),
+        pytest.param("../elsewhere/src/probe.py", "ask", id="another-repository"),
+    ],
+)
+def test_a_rewrite_judged_from_its_row_alone_reads_the_same(
+    base: Path, target: str, effect: str
+) -> None:
+    """With no edit policy composed, the classifier judges a rewrite from its row.
+
+    The row has to carry every fact the edit path reads — which repository
+    holds the file, and how this checkout spells it — or the verdict would
+    turn on which of the two answered. A target spelled relative to the
+    session is anchored there before its repository is asked for: read bare,
+    it named none, and a rewrite of another repository's file was judged by
+    this one's conventions instead of meeting the referral.
+    """
+    hooks = declared_hook_set()
+    classifier = ShellPolicy(
+        hooks.resolved_shell_rules(),
+        path_roles=declared_role_rows(list(hooks.path_roles)),
+    )
+    command = f"sed -i 's/{PREIMAGE}/{REFUSED}/' {target}"
+
+    decided = classifier.decide(ShellCommand(command=command, cwd=base / "checkout"))
+
+    assert decided.effect == effect
+    if effect == "ask":
+        assert "different repository" in decided.reason
 
 
 @pytest.mark.parametrize("spelled", KEEPS_ITS_QUESTION)

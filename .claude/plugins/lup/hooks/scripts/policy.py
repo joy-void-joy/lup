@@ -1431,8 +1431,14 @@ def foreign_repository(path_text: str, root: Path | None) -> bool:
     "cannot tell" is that this project's rules still apply: lifting them on a
     guess would silence the gates on this repository's own files, where
     keeping them costs friction somewhere that is not ours.
+
+    A relative path is anchored on the session's own directory first, as
+    :func:`outside_this_project` anchors it: read bare, a relative spelling
+    names no checkout at all, and would say no for a file that plainly has one.
     """
-    return bool(shared_git_directory(path_text)) and outside_this_project(
+    if root is None:
+        return False
+    return bool(shared_git_directory(str(root / path_text))) and outside_this_project(
         path_text, root
     )
 
