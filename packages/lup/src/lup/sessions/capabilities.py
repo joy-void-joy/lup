@@ -13,11 +13,11 @@ if TYPE_CHECKING:
     from lup.sessions.events import (
         LiveTurnEvent,
         SessionId,
-        SessionHandle,
         TurnEvent,
         StartedTurn,
         TurnId,
         TurnInput,
+        TurnMessage,
         TurnRequest,
         TurnResult,
         TurnToolBinding,
@@ -101,14 +101,34 @@ class Steer(ABC):
         """Append input without creating a second turn."""
 
 
-class ForkSession(ABC):
-    """Fork a conversation at an optional completed turn."""
+class ForkSession[S](ABC):
+    """Fork a conversation at an optional completed turn.
+
+    Generic over the session it opens, because a fork is a session of the same
+    provider as the one it branched from, and a caller holding a provider's
+    session should get that provider's session back.
+    """
 
     @abstractmethod
-    def fork(
-        self, at: TurnId | None = None
-    ) -> AbstractAsyncContextManager[SessionHandle]:
+    def fork(self, at: TurnId | None = None) -> AbstractAsyncContextManager[S]:
         """Open the fork as an independent session."""
+
+
+class ConversationRecord(ABC):
+    """What the provider itself holds about one conversation.
+
+    Read from the provider's own record rather than kept here, so a
+    conversation resumed from another process, or begun outside this library,
+    reads the same as one this session took every turn of.
+    """
+
+    @abstractmethod
+    def identity(self) -> SessionId:
+        """The provider's identity for the conversation, which resumes it."""
+
+    @abstractmethod
+    async def messages(self) -> list[TurnMessage]:
+        """Every message of the conversation, in the order the provider holds them."""
 
 
 class SubmittedOutputStore(ABC):

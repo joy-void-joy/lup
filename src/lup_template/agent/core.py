@@ -9,20 +9,16 @@ from typing import TYPE_CHECKING, Literal
 
 from pydantic import AnyHttpUrl, BaseModel, SecretStr, TypeAdapter, ValidationError
 
-from lup.providers.claude.config import (
-    ClaudeCompatibilityTransform,
-    ClaudeCompatibleEndpoint,
-)
+from lup.providers.claude import ClaudeCompatibleEndpoint
+from lup.providers.claude.config import ClaudeCompatibilityTransform
 from lup.providers.claude.model_choice import ClaudeModelChoice, claude_model_choice
 from lup.providers.claude.models import ClaudeEffort
 from lup.providers.claude import Claude, ClaudeSandboxConfig, SESSION_THINKING_TOKENS
 from lup.providers.claude.runtime import create_claude
 from lup.tools.native import NativeToolGroup, NativeTools
 from lup.providers.claude.subagents import subagent_tools as claude_subagent_tools
-from lup.providers.codex.config import (
-    CodexCompatibilityTransform,
-    CodexCompatibleEndpoint,
-)
+from lup.providers.codex import CodexCompatibleEndpoint
+from lup.providers.codex.config import CodexCompatibilityTransform
 from lup.providers.codex.model_choice import CodexModelChoice, codex_model_choice
 from lup.providers.codex.models import CodexEffort
 from lup.providers.codex import Codex, CodexMcpServerConfig

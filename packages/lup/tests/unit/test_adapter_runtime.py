@@ -15,9 +15,9 @@ from lup.providers.claude import Claude, SESSION_THINKING_TOKENS
 from lup.providers.claude.runtime import (
     ClaudeConversationState,
     ClaudeFork,
+    ClaudeRecord,
     ClaudeSessionOpener,
     ClaudeTurnToolBinder,
-    SubmissionBindingSource,
     attach_cli_stderr,
     build_claude_options,
     build_submission_server,
@@ -74,7 +74,12 @@ from lup.types import Usage
 from tests.unit.test_adapter_transforms import arm_labels, decoder_arms
 
 if TYPE_CHECKING:
-    import claude_agent_sdk as claude
+    pass
+
+
+def claude_state(config: Claude) -> ClaudeConversationState:
+    """Conversation state for a new session, built the way the opener builds it."""
+    return ClaudeConversationState(ClaudeSessionOpener(config), config, None)
 
 
 class FirstOutput(BaseModel):
@@ -86,9 +91,7 @@ class SecondOutput(BaseModel):
 
 
 def test_fresh_claude_session_uses_cli_valid_uuid() -> None:
-    state = ClaudeConversationState(
-        ClaudeSessionOpener(Claude(model=CustomModel(id="claude"))), None
-    )
+    state = claude_state(Claude(model=CustomModel(id="claude")))
 
     assert str(UUID(state.session_id)) == state.session_id
 
@@ -202,37 +205,10 @@ def test_claude_isolation_knobs_default_to_no_inherited_tools() -> None:
     assert options.extra_args == {}
 
 
-def test_claude_opener_builds_options_through_an_overridable_seam() -> None:
-    class IsolatedOpener(ClaudeSessionOpener):
-        def build_options(
-            self,
-            *,
-            binding: SubmissionBindingSource,
-            resume: str | None,
-            session_id: str | None,
-        ) -> "claude.ClaudeAgentOptions":
-            options = super().build_options(
-                binding=binding, resume=resume, session_id=session_id
-            )
-            options.max_buffer_size = 4096
-            return options
-
-    opener = IsolatedOpener(Claude(model=CustomModel(id="claude")))
-    state = opener.create_state(None)
-    options = state.opener.build_options(
-        binding=lambda: None, resume=None, session_id=state.session_id
-    )
-
-    assert state.opener is opener
-    assert options.max_buffer_size == 4096
-
-
 def test_a_dead_cli_explains_itself_instead_of_pointing_at_stderr() -> None:
     from claude_agent_sdk import ProcessError
 
-    state = ClaudeSessionOpener(Claude(model=CustomModel(id="claude"))).create_state(
-        None
-    )
+    state = claude_state(Claude(model=CustomModel(id="claude")))
     for line in ("loading plugin lup@local", "error: marketplace 'local' not found"):
         state.stderr_lines.append(line)
 
@@ -269,7 +245,7 @@ def test_only_the_sdk_s_process_error_is_rewritten() -> None:
 
 def test_the_captured_tail_is_bounded_by_configuration() -> None:
     config = Claude(model=CustomModel(id="claude"), stderr_tail_lines=2)
-    state = ClaudeSessionOpener(config).create_state(None)
+    state = claude_state(config)
 
     for line in ("first", "second", "third"):
         state.stderr_lines.append(line)
@@ -537,9 +513,7 @@ async def test_claude_partial_events_are_live_and_completed_replay_is_preserved(
             )
 
     monkeypatch.setattr(claude, "ClaudeSDKClient", FixtureClient)
-    state = ClaudeConversationState(
-        ClaudeSessionOpener(Claude(model=CustomModel(id="claude"))), None
-    )
+    state = claude_state(Claude(model=CustomModel(id="claude")))
 
     accepted = await state.start_turn("hello")
     assert accepted.events is not None
@@ -610,9 +584,7 @@ async def test_claude_adopts_the_session_id_the_cli_persists(
             )
 
     monkeypatch.setattr(claude, "ClaudeSDKClient", InitReportingClient)
-    state = ClaudeConversationState(
-        ClaudeSessionOpener(Claude(model=CustomModel(id="claude"))), None
-    )
+    state = claude_state(Claude(model=CustomModel(id="claude")))
     minted = state.session_id
 
     accepted = await state.start_turn("hello")
@@ -667,9 +639,7 @@ async def test_an_interrupted_claude_turn_is_not_a_retryable_provider_failure(
             )
 
     monkeypatch.setattr(claude, "ClaudeSDKClient", InterruptibleClient)
-    state = ClaudeConversationState(
-        ClaudeSessionOpener(Claude(model=CustomModel(id="claude"))), None
-    )
+    state = claude_state(Claude(model=CustomModel(id="claude")))
 
     unasked = await state.start_turn("hello")
     with pytest.raises(ProviderTurnError):
@@ -748,9 +718,7 @@ async def test_the_durable_view_is_the_live_one_without_its_deltas(
             )
 
     monkeypatch.setattr(claude, "ClaudeSDKClient", FixtureClient)
-    state = ClaudeConversationState(
-        ClaudeSessionOpener(Claude(model=CustomModel(id="claude"))), None
-    )
+    state = claude_state(Claude(model=CustomModel(id="claude")))
 
     accepted = await state.start_turn("hello")
     assert accepted.events is not None
@@ -772,35 +740,79 @@ async def test_the_durable_view_is_the_live_one_without_its_deltas(
 
 
 @pytest.mark.asyncio
-async def test_claude_latest_turn_fork_preserves_a_typed_session_handle(
+async def test_a_claude_fork_branches_the_parent_under_an_id_of_its_own(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import claude_agent_sdk as claude
+    """The CLI makes the branch, resuming the parent with its fork flags.
 
+    So the new transcript is filed under the session's own home, which the
+    SDK's file-copying fork cannot promise: it reads only this process's
+    environment for where transcripts live.
+    """
+    state = claude_state(Claude(model=CustomModel(id="claude"), cwd=tmp_path))
+    state.recorded = True
+
+    async with ClaudeFork(state).fork() as forked:
+        assert isinstance(forked.record, ClaudeRecord)
+        options = forked.record.state.options()
+
+    assert forked.id.value != state.session_id
+    assert options.resume == state.session_id
+    assert options.fork_session is True
+    assert options.session_id == forked.id.value
+    assert options.resume_session_at is None
+
+
+@pytest.mark.asyncio
+async def test_a_claude_fork_at_a_turn_keeps_that_turn_s_last_message() -> None:
+    state = claude_state(Claude(model=CustomModel(id="claude")))
+    state.recorded = True
+    state.turn_points[TurnId(value="the-turn")] = "the-last-message"
+
+    async with ClaudeFork(state).fork(TurnId(value="the-turn")) as forked:
+        assert isinstance(forked.record, ClaudeRecord)
+        options = forked.record.state.options()
+
+    assert options.resume_session_at == "the-last-message"
+
+
+def test_a_claude_fork_refuses_a_turn_the_session_never_took() -> None:
+    state = claude_state(Claude(model=CustomModel(id="claude")))
+    state.recorded = True
+
+    with pytest.raises(ValueError, match="not one this session took"):
+        ClaudeFork(state).fork(TurnId(value="elsewhere"))
+
+
+def test_a_conversation_with_no_turn_has_nothing_to_fork() -> None:
+    state = claude_state(Claude(model=CustomModel(id="claude")))
+
+    with pytest.raises(ValueError, match="nothing to fork"):
+        ClaudeFork(state).fork()
+
+
+def test_a_new_claude_conversation_is_started_under_the_id_it_answers() -> None:
+    """Dictated rather than waited for, so ``id`` holds from the moment it opens."""
+    state = claude_state(Claude(model=CustomModel(id="claude")))
+
+    options = state.options()
+
+    assert options.session_id == state.session_id
+    assert options.resume is None
+    assert options.fork_session is False
+
+
+def test_a_resumed_claude_conversation_names_nothing_new() -> None:
+    config = Claude(model=CustomModel(id="claude"))
     state = ClaudeConversationState(
-        ClaudeSessionOpener(Claude(model=CustomModel(id="claude"), cwd=tmp_path)),
-        None,
+        ClaudeSessionOpener(config), config, SessionId(value="resumed-id")
     )
 
-    def fork_session(
-        session_id: str,
-        directory: str | None = None,
-        up_to_message_id: str | None = None,
-        title: str | None = None,
-    ) -> claude.ForkSessionResult:
-        assert session_id == state.session_id
-        assert directory == str(tmp_path)
-        assert up_to_message_id is None
-        assert title is None
-        return claude.ForkSessionResult(
-            session_id="18f5debf-499a-42bb-8856-0b39dd59943d"
-        )
+    options = state.options()
 
-    monkeypatch.setattr(claude, "fork_session", fork_session)
-
-    async with ClaudeFork(state).fork() as handle:
-        assert handle.fork is not None
+    assert state.session_id == "resumed-id"
+    assert options.resume == "resumed-id"
+    assert options.session_id is None
 
 
 @pytest.mark.asyncio
@@ -823,9 +835,7 @@ async def test_claude_binder_refreshes_same_schema_turns_without_reconnecting(
             disconnects += 1
 
     monkeypatch.setattr(claude, "ClaudeSDKClient", RecordingClient)
-    state = ClaudeConversationState(
-        ClaudeSessionOpener(Claude(model=CustomModel(id="claude"))), None
-    )
+    state = claude_state(Claude(model=CustomModel(id="claude")))
     binder = ClaudeTurnToolBinder(state)
 
     def submission_tool_is_bound() -> bool:
@@ -918,9 +928,7 @@ async def test_claude_submission_server_serves_the_binding_installed_now() -> No
     """A connection outlives the turn that opened it, so its tool must too."""
     from mcp import Client
 
-    state = ClaudeConversationState(
-        ClaudeSessionOpener(Claude(model=CustomModel(id="claude"))), None
-    )
+    state = claude_state(Claude(model=CustomModel(id="claude")))
     binder = ClaudeTurnToolBinder(state)
 
     opening_store = InMemorySubmittedOutputStore()
@@ -1064,8 +1072,8 @@ async def test_closing_a_session_settles_the_reader_before_the_transport(
     monkeypatch.setattr(claude, "ClaudeSDKClient", track)
     opener = ClaudeSessionOpener(Claude(model=CustomModel(id="claude")))
 
-    async with opener.open_session() as handle:
-        await handle.session.start(TurnRequest(input=TurnInput(text="hello")))
+    async with opener.open_session() as session:
+        await session.engine.start(TurnRequest(input=TurnInput(text="hello")))
         # An unfinished turn is torn down with its reader suspended inside the
         # response generator, so wait until it is actually there.
         await clients[-1].reading.wait()

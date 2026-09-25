@@ -23,6 +23,7 @@ repository, and to nothing else it happens to open a session in.
 """
 
 import json
+import os
 from pathlib import Path
 
 from pydantic import BaseModel, field_validator
@@ -214,6 +215,21 @@ def selected_config_home(environment: EnvVars) -> ClaudeConfigHome:
     return ClaudeConfigHome(
         directory=directory, document=legacy if legacy.exists() else current
     )
+
+
+def session_config_home(environment: EnvVars) -> Path:
+    """The configuration home a session spawned with ``environment`` runs under.
+
+    The CLI a session starts inherits this process's environment beneath the
+    variables it is handed, so the home it writes to is the one those name
+    over this process's own. Reading it here is what lets the session's
+    transcripts be found under its home rather than under whichever home the
+    calling process happens to name — which is all the SDK's own readers
+    consult.
+    """
+    # lup: ignore[os-environ] — what a spawned session inherits
+    inherited = dict(os.environ)
+    return selected_config_home({**inherited, **environment}).directory
 
 
 def load_document(path: Path) -> JsonObject:

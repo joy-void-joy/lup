@@ -1,9 +1,10 @@
-"""Codex: the declaration a program writes, and every word it is written in.
+"""Codex: the declaration a program writes, and every part it is written with.
 
-A program names Codex parts from here and nowhere deeper: the declaration,
-the program it starts, the tool servers it launches. Which module inside the
-adapter defines what is the adapter's business, so this module holds each
-public part itself rather than pointing at another.
+A program names Codex parts from here and nowhere deeper: the agent it
+declares, the session and turn that agent opens, the program it starts, the
+tool servers it launches, the endpoint it may talk to instead. Which module
+inside the adapter defines what is the adapter's business, so this module
+holds each public part itself rather than pointing at another.
 
 What stays behind in the modules beside this one is the adapter proper. The
 runtime side: ``app_server`` is the typed JSON-RPC stdio transport,
@@ -36,10 +37,12 @@ Deliberately Codex-only, with no neutral contract:
   would have exactly one possible implementation.
 """
 
+from collections.abc import AsyncIterator, Generator
+from contextlib import AbstractAsyncContextManager
 from pathlib import Path
-from typing import Literal, Self
+from typing import Literal, Self, overload
 
-from pydantic import BaseModel, model_validator
+from pydantic import AnyHttpUrl, BaseModel, SecretStr, model_validator
 
 from lup.policy.hooks import LupHooksConfig
 from lup.providers.codex.model_choice import (
@@ -51,9 +54,24 @@ from lup.providers.codex.models import CodexEffort
 from lup.providers.codex.native_tools import CodexNativeTools
 from lup.providers.codex.subagents import CodexModelTiers, CodexSubagentTools
 from lup.providers.confinement import SessionContainment
+from lup.sessions.capabilities import ConversationRecord, ForkSession, SessionEngine
 from lup.sessions.errors import UnsupportedCapability
-from lup.sessions.events import SubmissionGateResolver
+from lup.sessions.events import (
+    AnyTurnBlock,
+    LiveTurnEvent,
+    SessionId,
+    SessionSummary,
+    SubmissionGateResolver,
+    TurnEvent,
+    TurnId,
+    TurnInput,
+    TurnMessage,
+    TurnRequest,
+    TurnResult,
+)
+from lup.sessions.layers import SessionLayers
 from lup.sessions.middleware import CorrectionConfig
+from lup.sessions.turns import LazyTurn, turn_input
 from lup.tools.mcp import LupMcpTool, ServerCompanion
 from lup.tools.native import NativeTools
 from lup.types import EnvVars, JsonObject
@@ -67,6 +85,8 @@ Spelled twice, the fallback would be a second opinion about what this
 runtime is called.
 """
 
+OPENAI_COMPAT_API_KEY_ENV = "LUP_OPENAI_COMPAT_API_KEY"
+
 
 class CodexMcpServerConfig(BaseModel, frozen=True):
     """One project tool group served to Codex over an explicit subprocess."""
@@ -77,6 +97,119 @@ class CodexMcpServerConfig(BaseModel, frozen=True):
     required: bool = True
 
 
+class CodexCompatibleEndpoint(BaseModel, frozen=True):
+    """All configuration owned by one OpenAI-compatible model provider."""
+
+    identifier: str = "lup_openai_compat"
+    name: str | None = None
+    base_url: AnyHttpUrl
+    api_key: SecretStr | None = None
+    api_key_environment: str = OPENAI_COMPAT_API_KEY_ENV
+
+    def native_config(self) -> JsonObject:
+        provider: JsonObject = {
+            "name": self.name or self.identifier,
+            "base_url": str(self.base_url),
+        }
+        if self.api_key is not None:
+            provider["env_key"] = self.api_key_environment
+        return {
+            "model_provider": self.identifier,
+            "model_providers": {self.identifier: provider},
+        }
+
+
+class CodexTurn[T: BaseModel | None]:
+    """One turn of a Codex session: await it for the result, iterate its blocks.
+
+    Nothing starts until something asks — an await, an iteration,
+    :meth:`events`, :meth:`live`, :meth:`interrupt` or :meth:`steer` — and
+    then it starts once, however many ask. Awaiting it again, after iterating
+    or after awaiting, returns the same result.
+    """
+
+    def __init__(self, turn: LazyTurn[T]) -> None:
+        self.turn = turn
+
+    def __await__(self) -> Generator[object, None, TurnResult[T]]:
+        return self.turn.result().__await__()
+
+    def __aiter__(self) -> AsyncIterator[AnyTurnBlock]:
+        return self.turn.blocks()
+
+    def events(self) -> AsyncIterator[TurnEvent]:
+        """Every durable event of this turn, from its first, as they happen."""
+        return self.turn.events()
+
+    def live(self) -> AsyncIterator[LiveTurnEvent]:
+        """The durable events and the deltas between them, as they happen."""
+        return self.turn.live()
+
+    async def interrupt(self) -> None:
+        """Stop this turn, returning once it has stopped."""
+        await self.turn.interrupt()
+
+    async def steer(self, prompt: str | TurnInput) -> None:
+        """Add ``prompt`` to this turn while it runs, without starting another."""
+        await self.turn.steer(prompt)
+
+
+class CodexSession:
+    """One open Codex thread, and every turn asked of it."""
+
+    def __init__(
+        self,
+        engine: SessionEngine,
+        record: ConversationRecord,
+        forks: ForkSession["CodexSession"],
+    ) -> None:
+        self.engine = engine
+        self.record = record
+        self.forks = forks
+
+    @property
+    def id(self) -> SessionId:
+        """Codex's own identity for this thread, which resumes it."""
+        return self.record.identity()
+
+    @overload
+    def ask(self, prompt: str | TurnInput) -> CodexTurn[None]: ...
+
+    @overload
+    def ask[T: BaseModel](
+        self, prompt: str | TurnInput, output: type[T]
+    ) -> CodexTurn[T]: ...
+
+    def ask[T: BaseModel](
+        self, prompt: str | TurnInput, output: type[T] | None = None
+    ) -> CodexTurn[T] | CodexTurn[None]:
+        """A turn putting ``prompt`` to this thread, started when first used.
+
+        With ``output`` the turn ends in a final answer validated as that
+        model, which its result carries as ``output``; without, ``output`` is
+        ``None``.
+        """
+        if output is None:
+            request = TurnRequest[None](input=turn_input(prompt))
+            return CodexTurn(LazyTurn(self.engine, request, deltas=True))
+        typed = TurnRequest[T](input=turn_input(prompt), output_type=output)
+        return CodexTurn(LazyTurn(self.engine, typed, deltas=True))
+
+    async def history(self) -> list[TurnMessage]:
+        """Every message of this thread, as the app-server reads it back."""
+        return await self.record.messages()
+
+    def fork(
+        self, at: TurnId | None = None
+    ) -> AbstractAsyncContextManager["CodexSession"]:
+        """Open a new thread carrying this one's history, through turn ``at``.
+
+        ``at`` names a turn of this thread by the identifier its result
+        carries; unset, the fork carries everything so far.
+        """
+        return self.forks.fork(at)
+
+
 class Codex(
     BaseModel,
     frozen=True,
@@ -84,7 +217,7 @@ class Codex(
     extra="forbid",
     revalidate_instances="always",
 ):
-    """One Codex agent, declared whole."""
+    """One Codex agent, declared whole: what opens its sessions."""
 
     model: CodexModelChoice | None = None
     """A slug from Codex's catalog, a portable tier, or a custom id."""
@@ -116,6 +249,9 @@ class Codex(
     named_profile: str | None = None
     model_provider: str | None = None
     provider_config: JsonObject | None = None
+    endpoint: CodexCompatibleEndpoint | None = None
+    """An OpenAI-compatible provider the sessions talk to instead of OpenAI."""
+
     sandbox: Literal["read-only", "workspace-write", "danger-full-access"] | None = None
     # The app-server's own wire spellings, passed through by thread_parameters.
     approval_policy: Literal["untrusted", "on-request", "granular", "never"] | None = (
@@ -147,12 +283,26 @@ class Codex(
     continuation: CorrectionConfig = CorrectionConfig(
         instruction="Continue according to the Stop hook feedback."
     )
+    layers: SessionLayers = SessionLayers()
+    """What every session opened here is wrapped in, turn by turn and whole."""
+
     mcp_servers: dict[str, CodexMcpServerConfig] = {}
     writable_roots: list[Path] = []
     delegated_tools: CodexSubagentTools | None = None
     native_tools: NativeTools = None
+    tools: list[LupMcpTool] = []
+    """Application tools, answered in this process through the thread's own
+    dynamic tools, each named ``lup_app_`` and its own name."""
+
     application_tools: dict[str, LupMcpTool] = {}
     companions: list[ServerCompanion] = []
+
+    def applications(self) -> dict[str, LupMcpTool]:
+        """Every application tool a thread declares: the named ones, and ``tools``."""
+        return {
+            **self.application_tools,
+            **{f"lup_app_{tool.name}": tool for tool in self.tools},
+        }
 
     @model_validator(mode="after")
     def reject_unanswerable_approvals(self) -> Self:
@@ -174,7 +324,10 @@ class Codex(
                 raise ValueError(
                     f"provider_config {key!r} is outside provider endpoint declarations and explicit session authority; use native_tools or tool_servers"
                 )
-        for name in self.application_tools:
+        named = [*self.application_tools, *(f"lup_app_{t.name}" for t in self.tools)]
+        if len(named) != len(dict.fromkeys(named)):
+            raise ValueError("application tool names must be unique")
+        for name in named:
             if (
                 not name.startswith("lup_app_")
                 or not name.isascii()
@@ -272,3 +425,46 @@ class Codex(
     def workspace(self) -> Path:
         """The directory a session works in: the declared one, or where the caller is."""
         return self.cwd if self.cwd is not None else Path.cwd()
+
+    def open(
+        self, resume: SessionId | None = None
+    ) -> AbstractAsyncContextManager[CodexSession]:
+        """Open a thread, or resume the one ``resume`` names.
+
+        The app-server starts here and the thread with it, so the session
+        answers ``id`` from the moment it opens.
+        """
+        from lup.providers.codex.runtime import CodexSessionOpener
+
+        return CodexSessionOpener(self).open_session(resume)
+
+    @overload
+    async def ask(self, prompt: str | TurnInput) -> TurnResult[None]: ...
+
+    @overload
+    async def ask[T: BaseModel](
+        self, prompt: str | TurnInput, output: type[T]
+    ) -> TurnResult[T]: ...
+
+    async def ask[T: BaseModel](
+        self, prompt: str | TurnInput, output: type[T] | None = None
+    ) -> TurnResult[T] | TurnResult[None]:
+        """Open a thread, take one turn, and close it however the turn ends."""
+        async with self.open() as session:
+            if output is None:
+                return await session.ask(prompt)
+            return await session.ask(prompt, output)
+
+    async def sessions(self) -> list[SessionSummary]:
+        """The threads Codex has on record for this agent's workspace, newest first.
+
+        Asked of the app-server this agent's sessions run, under the same
+        home, so what it lists is what ``open(resume=...)`` can reach.
+        """
+        from lup.providers.codex.runtime import codex_sessions
+
+        return await codex_sessions(self)
+
+    def layered(self, layers: SessionLayers) -> Self:
+        """This agent with ``layers`` laid over its own, the fields set there winning."""
+        return self.model_copy(update={"layers": layers.over(self.layers)})

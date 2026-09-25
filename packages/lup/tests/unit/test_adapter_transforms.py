@@ -25,9 +25,9 @@ from typing import TypeAliasType, get_args
 import pytest
 from pydantic import AnyHttpUrl, BaseModel, SecretStr
 
+from lup.providers.claude import ClaudeCompatibleEndpoint
 from lup.providers.claude.config import (
     ClaudeCompatibilityTransform,
-    ClaudeCompatibleEndpoint,
     ClaudeProfileRegistry,
     ClaudeProfileResolver,
     ClaudeProfileSelection,
@@ -48,9 +48,9 @@ from lup.providers.claude.native import (
     parse_claude_before_tool,
 )
 from lup.providers.claude import Claude
+from lup.providers.codex import CodexCompatibleEndpoint
 from lup.providers.codex.config import (
     CodexCompatibilityTransform,
-    CodexCompatibleEndpoint,
     CodexProfileRegistry,
     CodexProfileResolver,
     CodexProfileSelection,

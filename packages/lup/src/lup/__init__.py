@@ -41,6 +41,8 @@ from lup.sessions.events import (
 )
 
 if TYPE_CHECKING:
+    from lup.providers.claude import Claude
+    from lup.providers.codex import Codex
     from lup.providers.claude.runtime import create_claude
     from lup.providers.codex.runtime import create_codex
 
@@ -52,12 +54,14 @@ if TYPE_CHECKING:
 # an adopter replaced would point `from lup import create_claude` at something
 # lup never wrote.
 CONSTRUCTORS = {
+    "Claude": "lup.providers.claude",
+    "Codex": "lup.providers.codex",
     "create_claude": "lup.providers.claude.runtime",
     "create_codex": "lup.providers.codex.runtime",
 }
 
 
-def __getattr__(name: str) -> Callable[..., Client]:
+def __getattr__(name: str) -> "type[Claude] | type[Codex] | Callable[..., Client]":
     """Resolve a constructor on first access, and nothing else.
 
     PEP 562's module hook, used for exactly the names above. Anything else
@@ -75,7 +79,9 @@ def __getattr__(name: str) -> Callable[..., Client]:
 
 
 __all__ = [  # lup: ignore[all-export] -- the package-root public API
+    "Claude",
     "Client",
+    "Codex",
     "CustomModel",
     "SessionHandle",
     "SessionId",

@@ -1,11 +1,10 @@
 """Claude-specific profile and compatible-endpoint transforms."""
 
 from pathlib import Path
-from typing import Literal
 
-from pydantic import AnyHttpUrl, BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field
 
-from lup.providers.claude import Claude
+from lup.providers.claude import Claude, ClaudeCompatibleEndpoint
 from lup.providers.claude.runtime import create_claude
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.providers.config import ConfigTransform, ProfileResolver, ProfileSelector
@@ -74,15 +73,6 @@ def claude_profile_selector(
 ) -> ProfileSelector[Claude]:
     """The surface a consumer holds over Claude account selection."""
     return ProfileSelector(ClaudeProfileResolver(registry), create_claude)
-
-
-class ClaudeCompatibleEndpoint(BaseModel, frozen=True):
-    """All configuration owned by an Anthropic-compatible endpoint."""
-
-    base_url: AnyHttpUrl
-    api_key: SecretStr | None = None
-    auth_style: Literal["auth_token", "api_key"] = "auth_token"
-    map_model_aliases: bool = True
 
 
 class ClaudeCompatibilityTransform(ConfigTransform[Claude]):

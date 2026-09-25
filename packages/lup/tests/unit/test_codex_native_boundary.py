@@ -49,6 +49,10 @@ else:
         if "id" not in request:
             continue
         result = {}
+        if request["method"] == "config/read":
+            result = {"config": {}}
+        if request["method"] == "thread/start":
+            result = {"thread": {"id": "thread-1"}}
         if request["method"] == "hooks/list":
             if os.environ["LUP_NATIVE_PROBE_HOOK_FAILURE"] == "yes":
                 print(json.dumps({"id": request["id"], "error": {

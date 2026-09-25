@@ -40,7 +40,9 @@ def test_every_export_resolves() -> None:
 
 def test_root_exports_only_portable_runtime_conveniences() -> None:
     assert set(lup.__all__) == {  # lup: ignore[set-shape] — exact export comparison
+        "Claude",
         "Client",
+        "Codex",
         # The one way to name a model no catalog lists, which every model
         # argument a root constructor takes accepts.
         "CustomModel",

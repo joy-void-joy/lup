@@ -3,9 +3,10 @@
 import asyncio
 import json
 import logging
+import shutil
 from collections import deque
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -23,18 +24,25 @@ from mcp.types import (
     TextContent,
     Tool,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 
 from lup.tools.mcp import (
     LupMcpServerConfig,
     LupMcpTool,
     McpServerEntry,
-    create_mcp_server,
     relay_recursive_agent_to_mcp,
     running_companions,
 )
 from lup.tools.native import NativeTools
-from lup.providers.claude import SUBMISSION_TOOL, Claude
+from lup.execution.threads import run_sync
+from lup.providers.claude import (
+    SUBMISSION_TOOL,
+    Claude,
+    ClaudeCompatibleEndpoint,
+    ClaudeSession,
+)
+from lup.providers.claude.config_home import session_config_home
+from lup.providers.claude.transcripts import ClaudeTranscripts, result_text
 from lup.providers.claude.native_tools import claude_native_tools, claude_tool_allowed
 from lup.providers.claude.model_choice import ClaudeModelChoice, claude_effort
 from lup.sessions.recursion import (
@@ -43,9 +51,11 @@ from lup.sessions.recursion import (
 )
 from lup.sessions.composition import AcceptedTurn, CompletedTurn, ComposedSession
 from lup.sessions.capabilities import (
+    ConversationRecord,
     EventStream,
     ForkSession,
     Interrupt,
+    SessionEngine,
     TurnToolBinder,
 )
 from lup.sessions.errors import (
@@ -76,6 +86,7 @@ from lup.sessions.events import (
 from lup.sessions.transcript import fold_blocks, fold_transcript
 from lup.sessions.output import TurnSubmission, bound_submission
 from lup.types import (
+    EnvVars,
     JsonValue,
     Usage,
 )
@@ -275,14 +286,43 @@ def turn_error(interrupt: "ClaudeInterrupt") -> type[TurnError]:
     return TurnInterruptedError if interrupt.requested else ProviderTurnError
 
 
-class ClaudeConversationState:
-    """Adapter-private reconnect/resume state for one Lup session."""
+class ClaudeForkPoint(BaseModel, frozen=True):
+    """Where a fork branches: the conversation, and the last message it carries.
 
-    def __init__(self, opener: "ClaudeSessionOpener", resume: SessionId | None) -> None:
+    ``through`` is a message of the parent's transcript, the last one the fork
+    keeps; ``None`` keeps everything the parent holds when the fork opens.
+    """
+
+    parent: str
+    through: str | None = None
+
+
+class ClaudeConversationState:
+    """Adapter-private reconnect/resume state for one Lup session.
+
+    A new conversation's id is dictated rather than waited for, so the
+    session answers ``id`` from the moment it opens and a transcript is
+    filed under the id it answers. The CLI's own report of the id is still
+    adopted wherever it differs, because the transcript is filed under
+    whatever the CLI says.
+    """
+
+    def __init__(
+        self,
+        opener: "ClaudeSessionOpener",
+        config: Claude,
+        resume: SessionId | None,
+        fork: ClaudeForkPoint | None = None,
+    ) -> None:
         self.opener = opener
-        self.config = opener.config
+        self.config = config
         self.resume = resume.value if resume is not None else None
+        self.forking = fork
         self.session_id = self.resume or str(uuid4())
+        self.recorded = self.resume is not None or fork is not None
+        """Whether the provider holds a transcript of this conversation yet."""
+        self.turn_points: dict[TurnId, str] = {}
+        """The last transcript message of each turn this session took."""
         self.client: claude.ClaudeSDKClient | None = None
         self.submission: TurnSubmission | None = None
         self.schema_digest: str | None = None
@@ -318,19 +358,59 @@ class ClaudeConversationState:
         finally:
             self.client = None
 
+    def options(self) -> "claude.ClaudeAgentOptions":
+        """The options this state's next connection opens with.
+
+        A new conversation is started under the id this state dictates; a
+        fork, until the CLI has made it, resumes its parent as a branch under
+        that id; anything else resumes the conversation it holds.
+        """
+        match self.forking, self.resume:
+            case ClaudeForkPoint(parent=parent, through=through), _:
+                return build_claude_options(
+                    self.config,
+                    binding=self.current_submission,
+                    resume=parent,
+                    session_id=self.session_id,
+                    fork_session=True,
+                    resume_session_at=through,
+                )
+            case None, None:
+                return build_claude_options(
+                    self.config,
+                    binding=self.current_submission,
+                    resume=None,
+                    session_id=self.session_id,
+                )
+            case None, resumed:
+                return build_claude_options(
+                    self.config,
+                    binding=self.current_submission,
+                    resume=resumed,
+                    session_id=None,
+                )
+
+    def fork_point(self, at: TurnId | None) -> ClaudeForkPoint:
+        """Where a fork of this conversation branches, at ``at`` or at its end."""
+        if not self.recorded:
+            raise ValueError(
+                "this conversation has no turn yet, so there is nothing to fork; "
+                "ask it something first, or open a new session instead"
+            )
+        if at is None:
+            return ClaudeForkPoint(parent=self.session_id)
+        if at not in self.turn_points:
+            raise ValueError(
+                f"turn {at.value!r} is not one this session took, so it names no "
+                "point in the transcript; fork at a turn whose result this session "
+                "returned, or pass no turn to fork at the latest"
+            )
+        return ClaudeForkPoint(parent=self.session_id, through=self.turn_points[at])
+
     async def connect(self) -> "claude.ClaudeSDKClient":
         if self.client is not None:
             return self.client
-        # The runtime assigns the id and this state reads it off the first
-        # result, mirroring `CodexTurnChannel.ensure_thread`. Dictating one
-        # instead let the two adapters disagree about who owns a session's
-        # identity, and only one of them can be right about a conversation the
-        # provider is the one persisting.
-        options = self.opener.build_options(
-            binding=self.current_submission,
-            resume=self.resume,
-            session_id=None,
-        )
+        options = self.options()
         # Connecting is where a refused resume surfaces, and it is as much a
         # failed turn as one that breaks midway — so it leaves through the
         # portable error the rest of the runtime raises. Escaping as the SDK's
@@ -339,7 +419,7 @@ class ClaudeConversationState:
         try:
             self.client = await self.connected(options)
         except Exception as error:
-            if self.resume is None:
+            if self.resume is None or self.forking is not None:
                 raise ProviderTurnError(
                     TurnFailure(
                         message=str(error),
@@ -348,19 +428,18 @@ class ClaudeConversationState:
                 ) from error
             # The provider no longer holds what this state was resuming. A
             # turn that cannot reach its history still beats one that cannot
-            # happen, so the conversation is forgotten rather than the run.
+            # happen, so the conversation is forgotten rather than the run —
+            # under an id of its own, since the lost one may yet be on disk.
             logger.warning(
                 "Claude refused to resume session %s (%s); continuing on a new one",
                 self.resume,
                 error,
             )
             self.resume = None
+            self.recorded = False
+            self.session_id = str(uuid4())
             try:
-                self.client = await self.connected(
-                    self.opener.build_options(
-                        binding=self.current_submission, resume=None, session_id=None
-                    )
-                )
+                self.client = await self.connected(self.options())
             except Exception as fresh_error:
                 raise ProviderTurnError(
                     TurnFailure(
@@ -402,6 +481,7 @@ class ClaudeConversationState:
             nonlocal identifiers
             durable: list[TurnEvent] = []  # lup: ignore[empty-collection]
             result: claude_types.ResultMessage | None = None
+            last_message: str | None = None
             exhausted: claude_types.RateLimitInfo | None = None
             started = perf_counter()
 
@@ -425,7 +505,9 @@ class ClaudeConversationState:
                             parent_tool_use_id=delegated_under,
                             model=message_model,
                             message_id=message_id,
+                            uuid=written,
                         ):
+                            last_message = written or last_message
                             record(
                                 TurnMessage(
                                     role="assistant",
@@ -440,7 +522,9 @@ class ClaudeConversationState:
                         case claude_types.UserMessage(
                             content=content,
                             parent_tool_use_id=delegated_under,
+                            uuid=written,
                         ) if isinstance(content, list):
+                            last_message = written or last_message
                             record(
                                 TurnMessage(
                                     role="tool",
@@ -470,15 +554,18 @@ class ClaudeConversationState:
                             ) as spent
                         ):
                             exhausted = spent
-                        # The CLI persists the transcript under its own id,
-                        # not the channel id this side minted — adopting it is
-                        # what lets a later resume name a conversation that
-                        # actually exists on disk.
+                        # The CLI files the transcript under the id it
+                        # reports here, which is the one this side dictated
+                        # unless the CLI chose otherwise. From here on the
+                        # conversation exists, so a reconnect resumes it and a
+                        # fork is no longer pending.
                         case claude_types.SystemMessage(
                             subtype="init", data={"session_id": str(adopted)}
-                        ) if adopted != self.session_id:
+                        ):
                             self.session_id = adopted
                             self.resume = adopted
+                            self.forking = None
+                            self.recorded = True
                             identifiers = identifiers.model_copy(
                                 update={"session": SessionId(value=adopted)}
                             )
@@ -524,6 +611,10 @@ class ClaudeConversationState:
             if result.session_id is not None:
                 self.session_id = result.session_id
                 self.resume = result.session_id
+            self.forking = None
+            self.recorded = True
+            if last_message is not None:
+                self.turn_points[identifiers.turn] = last_message
             messages = fold_transcript(durable)
             blocks = fold_blocks(durable)
             usage = claude_usage(result.usage, total_cost_usd=result.total_cost_usd)
@@ -655,36 +746,52 @@ class ClaudeInterrupt(Interrupt):
             await self.state.client.interrupt()
 
 
-class ClaudeFork(ForkSession):
-    """Fork the latest persisted Claude transcript into a new typed session."""
+class ClaudeRecord(ConversationRecord):
+    """This conversation as Claude Code keeps it: its id and its transcript."""
+
+    def __init__(self, state: ClaudeConversationState) -> None:
+        self.state = state
+
+    def identity(self) -> SessionId:
+        return SessionId(value=self.state.session_id)
+
+    async def messages(self) -> list[TurnMessage]:
+        """The transcript under this session's own configuration home.
+
+        A conversation with no turn yet has no transcript, and reads as
+        empty. One that has taken a turn and still has none — persistence
+        switched off, or a home that is not the one the CLI wrote to — is
+        refused rather than reported as a conversation that never happened.
+        """
+        config = self.state.config
+        transcripts = ClaudeTranscripts(session_config_home(config.environment))
+        session = self.identity()
+        found = await run_sync(partial(transcripts.conversation, session, config.cwd))
+        if found is not None:
+            return found
+        if self.state.recorded:
+            raise LookupError(
+                f"Claude Code keeps no transcript of session {session.value} "
+                f"under {transcripts.config_home}"
+            )
+        return []
+
+
+class ClaudeFork(ForkSession[ClaudeSession]):
+    """Branch this conversation into a new one the CLI files under its own id.
+
+    The CLI makes the branch itself, resuming the parent with its fork flags,
+    so the new transcript lands under the session's own configuration home
+    rather than under whichever home this process names.
+    """
 
     def __init__(self, state: ClaudeConversationState) -> None:
         self.state = state
 
     def fork(
         self, at: TurnId | None = None
-    ) -> AbstractAsyncContextManager[SessionHandle]:
-        return self.open_fork(at)
-
-    @asynccontextmanager
-    async def open_fork(self, at: TurnId | None) -> AsyncGenerator[SessionHandle]:
-        if at is not None:
-            raise ValueError("Claude transcript forking supports the latest turn only")
-        import claude_agent_sdk as claude
-
-        directory = (
-            str(self.state.config.cwd) if self.state.config.cwd is not None else None
-        )
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            result = await asyncio.get_running_loop().run_in_executor(
-                executor,
-                claude.fork_session,
-                self.state.session_id,
-                directory,
-            )
-        opener = self.state.opener
-        async with opener.open_session(SessionId(value=result.session_id)) as handle:
-            yield handle
+    ) -> AbstractAsyncContextManager[ClaudeSession]:
+        return self.state.opener.open_session(fork=self.state.fork_point(at))
 
 
 class ClaudeSessionOpener:
@@ -693,36 +800,37 @@ class ClaudeSessionOpener:
     def __init__(self, config: Claude) -> None:
         self.config = Claude.model_validate(config)
 
-    def create_state(self, resume: SessionId | None) -> ClaudeConversationState:
-        """Construct the reconnect state backing one opened session."""
-        return ClaudeConversationState(self, resume)
+    def compiled(self) -> Claude:
+        """The declaration as its sessions open with it.
 
-    def build_options(
-        self,
-        *,
-        binding: SubmissionBindingSource,
-        resume: str | None,
-        session_id: str | None,
-    ) -> "claude.ClaudeAgentOptions":
-        """Build the SDK options for one connection of this factory's sessions."""
-        return build_claude_options(
-            self.config, binding=binding, resume=resume, session_id=session_id
+        The application's own tools are served on a server of their own, and
+        a compatible endpoint becomes the environment that routes the CLI to
+        it — both here rather than at declaration, so an agent can be copied
+        and changed before either is built.
+        """
+        config = self.config.model_copy(
+            update={"tool_servers": self.config.servers(), "tools": []}
         )
+        if config.endpoint is None:
+            return config
+        from lup.providers.claude.config import ClaudeCompatibilityTransform
+
+        return ClaudeCompatibilityTransform(config.endpoint).apply(config)
 
     @asynccontextmanager
     async def open_session(
-        self, resume: SessionId | None = None
-    ) -> AsyncGenerator[SessionHandle]:
-        allowance = child_recursive_agent_allowance(self.config.environment)
-        config = self.config.model_copy(
-            update={"environment": allowance.environment(self.config.environment)}
+        self, resume: SessionId | None = None, *, fork: ClaudeForkPoint | None = None
+    ) -> AsyncGenerator[ClaudeSession]:
+        compiled = self.compiled()
+        allowance = child_recursive_agent_allowance(compiled.environment)
+        config = compiled.model_copy(
+            update={"environment": allowance.environment(compiled.environment)}
         )
-        opener = ClaudeSessionOpener(config)
-        state = opener.create_state(resume)
-        session = ComposedSession(
+        state = ClaudeConversationState(self, config, resume, fork)
+        composed = ComposedSession(
             starter=state.start_turn,
             binder=ClaudeTurnToolBinder(state),
-            gate_resolver=self.config.submission_gate_resolver,
+            gate_resolver=config.submission_gate_resolver,
             submission_tool=SUBMISSION_TOOL,
         )
         # lup: defer: A resolver run that parks can end on `an error occurred
@@ -746,15 +854,27 @@ class ClaudeSessionOpener:
             if isinstance(server, LupMcpServerConfig)
             for companion in server.companions
         ]
-        with recursive_agent_scope(allowance):
-            async with running_companions(companions):
-                try:
-                    yield SessionHandle(session=session, fork=ClaudeFork(state))
-                finally:
+
+        @asynccontextmanager
+        async def native() -> AsyncGenerator[SessionEngine]:
+            with recursive_agent_scope(allowance):
+                async with running_companions(companions):
                     try:
-                        await session.abort_active()
+                        yield composed
                     finally:
-                        await state.disconnect()
+                        try:
+                            await composed.abort_active()
+                        finally:
+                            await state.disconnect()
+
+        resumed = SessionId(value=fork.parent) if fork is not None else resume
+        async with config.layers.around(native(), resumed) as engine:
+            yield ClaudeSession(
+                engine,
+                ClaudeRecord(state),
+                ClaudeFork(state),
+                deltas=config.delta_streaming,
+            )
 
 
 def create_claude(
@@ -768,27 +888,15 @@ def create_claude(
     native_tools: NativeTools | EllipsisType = ...,
     tools: Sequence[LupMcpTool] | None = None,
 ) -> Client:
-    """Open Claude sessions, configured by argument or by whole declaration.
-
-    The package root's one constructor for this provider, and the reason it
-    takes both shapes is that both are the front door for somebody. A reader
-    meeting the library writes ``create_claude(model=...)`` and needs to have
-    found nothing else first; a composition that already holds a
-    :class:`Claude` -- a profile selector resolving an account, a
-    router picking a recipe -- passes the whole declaration positionally.
-
-    Keyword arguments are applied over ``options`` rather than instead of it,
-    so a caller may hold a configured base and still override the model for
-    one client without rebuilding the declaration.
-
-    ``base_url`` points the session at an Anthropic-compatible endpoint, which
-    is a constructor concern rather than a transform a caller has to choreograph
-    -- naming one without ``api_key`` sends a placeholder credential, which is
-    what a local endpoint expects.
-    """
+    """Open Claude sessions, configured by argument or by whole declaration."""
     base = options or Claude()
-    # Validated again rather than copied as it stands, so a model named here
-    # is refused an effort the base carries by the same check a declaration is.
+    endpoint = (
+        ClaudeCompatibleEndpoint.model_validate(
+            {"base_url": base_url, "api_key": api_key}
+        )
+        if base_url is not None
+        else base.endpoint
+    )
     config = Claude.model_validate(
         base.model_copy(
             update={
@@ -798,31 +906,20 @@ def create_claude(
                 "native_tools": base.native_tools
                 if native_tools is ...
                 else native_tools,
-                "tool_servers": {
-                    **base.tool_servers,
-                    **(
-                        {"lup-tools": create_mcp_server("lup-tools", tools=tools)}
-                        if tools is not None
-                        else {}
-                    ),
-                },
+                "tools": [*base.tools, *(tools or [])],
+                "endpoint": endpoint,
             }
         )
     )
-    if base_url is not None:
-        # Imported here rather than above, because `config` imports this module
-        # for its own transforms and naming it at module scope would close the
-        # cycle. The endpoint is the only argument that needs it.
-        from lup.providers.claude.config import (
-            ClaudeCompatibilityTransform,
-            ClaudeCompatibleEndpoint,
-        )
 
-        endpoint = ClaudeCompatibleEndpoint.model_validate(
-            {"base_url": base_url, "api_key": api_key}
-        )
-        config = ClaudeCompatibilityTransform(endpoint).apply(config)
-    return Client(ClaudeSessionOpener(config).open_session)
+    @asynccontextmanager
+    async def open_handle(
+        resume: SessionId | None = None,
+    ) -> AsyncGenerator[SessionHandle]:
+        async with config.open(resume) as session:
+            yield SessionHandle(session=session.engine)
+
+    return Client(open_handle)
 
 
 def build_submission_server(
@@ -886,12 +983,27 @@ def build_submission_server(
     )
 
 
+def installed_claude(environment: EnvVars) -> Path | None:
+    """The `claude` on the session's PATH, which is what an interactive launch runs.
+
+    The SDK prefers the CLI it bundles, which lags the installed one — and the
+    model catalog this library types against is read from the installed one,
+    so a model it lists could be one the bundled CLI has never heard of. ``None``
+    where nothing is installed, which is the one case the bundled CLI is for.
+    """
+    search = environment["PATH"] if "PATH" in environment else None
+    found = shutil.which("claude", path=search)
+    return Path(found) if found is not None else None
+
+
 def build_claude_options(
     config: Claude,
     *,
     binding: SubmissionBindingSource,
     resume: str | None,
     session_id: str | None,
+    fork_session: bool = False,
+    resume_session_at: str | None = None,
 ) -> "claude.ClaudeAgentOptions":
     """Build SDK options lazily and never enable native structured output."""
     import claude_agent_sdk as claude
@@ -1017,10 +1129,12 @@ def build_claude_options(
         include_partial_messages=config.delta_streaming,
         resume=resume,
         session_id=session_id,
+        fork_session=fork_session,
+        resume_session_at=resume_session_at,
         output_format=None,
         max_buffer_size=config.max_buffer_size,
         setting_sources=[],
-        cli_path=config.cli_path,
+        cli_path=config.cli_path or installed_claude(config.environment),
         extra_args=dict(config.extra_args),
     )
 
@@ -1047,17 +1161,15 @@ def convert_claude_block(block: "claude.ContentBlock") -> AnyTurnBlock:
             return TurnToolCallBlock(
                 id=identifier, name=name, arguments=input_data or {}
             )
-        case claude.ToolResultBlock(tool_use_id=identifier, content=content):
+        case claude.ToolResultBlock(
+            tool_use_id=identifier, content=content, is_error=failed
+        ):
             from lup.sessions.events import TurnToolResultBlock
 
-            rendered = (
-                content
-                if isinstance(content, str)
-                else json.dumps(content, default=str)
-            )
             return TurnToolResultBlock(
                 tool_call_id=identifier,
-                content=rendered or "",
+                content=result_text(TypeAdapter(JsonValue).validate_python(content)),
+                is_error=bool(failed),
             )
         case claude_types.ServerToolUseBlock(
             id=identifier, name=name, input=input_data

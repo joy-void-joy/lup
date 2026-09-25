@@ -21,6 +21,7 @@ from lup.providers.codex.trust import CodexHookReport
 from lup.providers.codex.selection import codex_config
 from lup.providers.login import NativeHomeScope
 from lup.providers.selection import SessionRequest
+from lup.types import JsonObject
 from lup.providers.codex.harness_runtime import (
     CodexPluginInstaller,
     PluginCacheConfig,
@@ -242,6 +243,28 @@ def test_outer_boundary_requires_a_container_executable(tmp_path: Path) -> None:
         Codex(cwd=tmp_path, containment="outer")
 
 
+def thread_opening_server() -> Mock:
+    """An app-server stand-in that starts, opens a thread when asked, and closes.
+
+    A session starts its thread as it opens, so it has an id to answer with
+    from then on; these tests are about the process, and answer the two
+    requests that takes with the least a session accepts.
+    """
+
+    async def answer(method: str, _params: JsonObject) -> JsonObject:
+        match method:
+            case "config/read":
+                return {"config": {}}
+            case "thread/start":
+                return {"thread": {"id": "thread-1"}}
+            case _:
+                raise AssertionError(f"unexpected app-server request {method}")
+
+    return Mock(
+        start=AsyncMock(), close=AsyncMock(), request=AsyncMock(side_effect=answer)
+    )
+
+
 @pytest.mark.parametrize("containment", ["none", "inner"])
 @pytest.mark.parametrize(
     ("explicit", "ambient", "expected"),
@@ -272,7 +295,7 @@ async def test_host_policy_and_process_use_the_same_resolved_native_home(
     )
     calls = Mock()
     monkeypatch.setattr(runtime, "install_declared_policy", calls.policy)
-    server = Mock(start=AsyncMock(), close=AsyncMock())
+    server = thread_opening_server()
     calls.server.return_value = server
     monkeypatch.setattr(runtime, "CodexAppServer", calls.server)
     config = Codex.model_validate(
@@ -327,7 +350,7 @@ async def test_a_project_without_declared_policy_opens_with_its_native_default_h
 ) -> None:
     monkeypatch.delenv(CODEX_HOME, raising=False)
     monkeypatch.setenv("HOME", str(tmp_path / "user-home"))
-    server = Mock(start=AsyncMock(), close=AsyncMock())
+    server = thread_opening_server()
     native = Mock(return_value=server)
     monkeypatch.setattr(runtime, "CodexAppServer", native)
     home = tmp_path / "user-home" / ".codex"
@@ -423,7 +446,7 @@ async def test_application_policy_is_verified_in_an_external_native_workspace(
         )
     )
     monkeypatch.setattr(codex_home, "read_hooks", discovery)
-    server = Mock(start=AsyncMock(), close=AsyncMock())
+    server = thread_opening_server()
     native = Mock(return_value=server)
     monkeypatch.setattr(runtime, "CodexAppServer", native)
 

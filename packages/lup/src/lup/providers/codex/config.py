@@ -2,15 +2,12 @@
 
 from pathlib import Path
 
-from pydantic import AnyHttpUrl, BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field
 
 from lup.providers.codex.login import CODEX_LOGIN
-from lup.providers.codex import Codex
+from lup.providers.codex import Codex, CodexCompatibleEndpoint
 from lup.providers.codex.runtime import create_codex
 from lup.providers.config import ConfigTransform, ProfileResolver, ProfileSelector
-from lup.types import JsonObject
-
-OPENAI_COMPAT_API_KEY_ENV = "LUP_OPENAI_COMPAT_API_KEY"
 
 
 class CodexProfileSelection(BaseModel, frozen=True):
@@ -70,28 +67,6 @@ def codex_profile_selector(
 ) -> ProfileSelector[Codex]:
     """The surface a consumer holds over Codex profile selection."""
     return ProfileSelector(CodexProfileResolver(registry), create_codex)
-
-
-class CodexCompatibleEndpoint(BaseModel, frozen=True):
-    """All configuration owned by one OpenAI-compatible model provider."""
-
-    identifier: str = "lup_openai_compat"
-    name: str | None = None
-    base_url: AnyHttpUrl
-    api_key: SecretStr | None = None
-    api_key_environment: str = OPENAI_COMPAT_API_KEY_ENV
-
-    def native_config(self) -> JsonObject:
-        provider: JsonObject = {
-            "name": self.name or self.identifier,
-            "base_url": str(self.base_url),
-        }
-        if self.api_key is not None:
-            provider["env_key"] = self.api_key_environment
-        return {
-            "model_provider": self.identifier,
-            "model_providers": {self.identifier: provider},
-        }
 
 
 class CodexCompatibilityTransform(ConfigTransform[Codex]):
