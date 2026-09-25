@@ -28,6 +28,7 @@ from lup.harness.codescan.boundaries import (
     audit_constant_declarations,
     audit_kernel_imports,
     audit_library_defaults,
+    declared_defaults,
     audit_path_boundaries,
     constant_declarations,
     default_position_names,
@@ -45,7 +46,8 @@ from lup_template.harness.catalog import (
     application_roots,
     dev_project,
 )
-from lup.harness.codescan.common import PythonSource
+from lup.devtools.dev.antipatterns import scanned_roots
+from lup.harness.codescan.common import PythonSource, module_name
 from lup.harness.codescan.project import RuleFinding
 from lup.policy.kernel.roles import path_role
 from lup.devtools.dev.boundaries import (
@@ -330,9 +332,12 @@ TABLE = 'READ_ONLY_COMMANDS = ("ls", "cat", "grep")\n'
 NOTHING_OVERRIDABLE = ()
 """A library where no caller can replace anything."""
 
+SAMPLE = "lup.sample"
+"""The library module these tables are judged as written in."""
+
 
 def test_a_library_table_no_caller_can_replace_breaches() -> None:
-    breaches = find_library_default_breaches(TABLE, NOTHING_OVERRIDABLE)
+    breaches = find_library_default_breaches(TABLE, NOTHING_OVERRIDABLE, SAMPLE)
 
     assert [(item.line, item.module) for item in breaches] == [
         (1, "READ_ONLY_COMMANDS")
@@ -347,7 +352,7 @@ def test_only_declared_multi_entry_tables_are_judged() -> None:
         "lowercase = (1, 2)\n"
     )
 
-    assert find_library_default_breaches(text, NOTHING_OVERRIDABLE) == []
+    assert find_library_default_breaches(text, NOTHING_OVERRIDABLE, SAMPLE) == []
 
 
 def test_every_admitted_default_spelling_clears_a_table() -> None:
@@ -364,10 +369,15 @@ def test_every_admitted_default_spelling_clears_a_table() -> None:
 
     for name, consumer in reached.items():
         declaration = f'{name} = ("a", "b")\n'
-        overridable = default_position_names(consumer)
+        overridable = declared_defaults(
+            PythonSource(path=Path("lup/sample.py"), module=SAMPLE, text=consumer)
+        )
 
-        assert name in overridable, name
-        assert find_library_default_breaches(declaration, overridable) == [], name
+        assert name in default_position_names(consumer), name
+        assert f"{SAMPLE}.{name}" in overridable, name
+        assert find_library_default_breaches(declaration, overridable, SAMPLE) == [], (
+            name
+        )
 
 
 # A directive inside the first ten lines governs the whole file, so proximity
@@ -377,7 +387,7 @@ BELOW_FILE_WINDOW = "\n" * 10
 
 def test_a_directive_heading_a_multi_line_table_suppresses_it() -> None:
     heading = BELOW_FILE_WINDOW + "# lup: ignore[library-default] — canonical\n" + TABLE
-    assert find_library_default_breaches(heading, NOTHING_OVERRIDABLE) == []
+    assert find_library_default_breaches(heading, NOTHING_OVERRIDABLE, SAMPLE) == []
 
     spread = (
         BELOW_FILE_WINDOW + "# lup: ignore[library-default] — canonical\n"
@@ -386,15 +396,15 @@ def test_a_directive_heading_a_multi_line_table_suppresses_it() -> None:
         '    "cat",\n'
         ")\n"
     )
-    assert find_library_default_breaches(spread, NOTHING_OVERRIDABLE) == []
-    assert audit_library_defaults(spread, NOTHING_OVERRIDABLE) == []
+    assert find_library_default_breaches(spread, NOTHING_OVERRIDABLE, SAMPLE) == []
+    assert audit_library_defaults(spread, NOTHING_OVERRIDABLE, SAMPLE) == []
 
 
 def test_a_directive_two_lines_above_a_table_stays_spurious() -> None:
     detached = (
         BELOW_FILE_WINDOW + "# lup: ignore[library-default] — canonical\n\n" + TABLE
     )
-    findings = audit_library_defaults(detached, NOTHING_OVERRIDABLE)
+    findings = audit_library_defaults(detached, NOTHING_OVERRIDABLE, SAMPLE)
 
     assert sorted(item.kind for item in findings) == ["missing", "spurious"]
 
@@ -444,6 +454,7 @@ def test_the_rule_names_every_table_if_the_vocabulary_returns_to_the_library() -
     breaches = find_library_default_breaches(
         SHELL_VOCABULARY.read_text(encoding="utf-8"),
         overridable_names(library_sources()),
+        "lup.policy.shell_vocabulary",
     )
 
     assert [breach.module for breach in breaches] == MOVED_TABLES
@@ -590,10 +601,15 @@ def test_the_live_tree_leaves_no_constant_unresolved() -> None:
     Production files only, as the sweep that gates them reads: a test declares
     its fixtures and nothing calls them, so the rule has nothing to say there.
     """
-    roles = dev_project().path_roles
+    project = dev_project()
+    roles = project.path_roles
     findings = audit_constant_declarations(
         [
-            PythonSource(path=source.path, module=source.rel, text=source.text)
+            PythonSource(
+                path=source.path,
+                module=module_name(source.path, scanned_roots(project)),
+                text=source.text,
+            )
             for source in tracked_python_sources()
             if path_role(source.rel, roles) == "production"
         ],

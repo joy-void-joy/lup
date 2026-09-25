@@ -187,15 +187,19 @@ def dispatched_models(
     return with_siblings | set(unioned())
 
 
-def audit_own_model_dispatch(sources: list[PythonSource]) -> list[RuleFinding]:
+def audit_own_model_dispatch(
+    sources: list[PythonSource], model_bases: set[str] = MODEL_BASES
+) -> list[RuleFinding]:
     """Build the project index, enforce the rule, and audit its suppressions.
 
     The index resolves through the library's classes as well, so a walk in a
     project built on this one that branches on a library variant -- a
     ``TextPart`` among the parts -- is reported there as it is here.
+    ``model_bases`` are the roots whose descendants count as the project's
+    own models.
     """
     symbols = project_index(sources)
-    models = descendants_of(symbols, MODEL_BASES)
+    models = descendants_of(symbols, model_bases)
     violations = dispatch_violations(
         sources, dispatched_models(sources, symbols, models)
     )

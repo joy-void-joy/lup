@@ -876,8 +876,13 @@ async def run_persistent_agent(
     *,
     session_id: str | None = None,
     on_reply: Callable[[str], Awaitable[None]] | None = None,
+    missing_sleep_message: str | None = None,
 ) -> PersistentSessionResult:
-    """Run the relay over the same ``Session`` contract as ordinary turns."""
+    """Run the relay over the same ``Session`` contract as ordinary turns.
+
+    ``missing_sleep_message`` is the nudge a turn ending without sleep gets;
+    unset is this domain's own, from the realtime tools.
+    """
     from lup.orchestration.realtime.relay import (
         REALTIME_DIRNAME,
         RealtimeMailbox,
@@ -905,7 +910,7 @@ async def run_persistent_agent(
             scheduler=scheduler,
             mailbox=mailbox,
             initial_prompt=task,
-            missing_sleep_message=MISSING_SLEEP_MESSAGE,
+            missing_sleep_message=missing_sleep_message or MISSING_SLEEP_MESSAGE,
             gate=relay_gate,
             trace_logger=build.trace_logger,
         )
