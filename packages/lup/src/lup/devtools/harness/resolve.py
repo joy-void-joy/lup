@@ -39,6 +39,7 @@ from lup.policy.identity import agent_identity_environment
 from lup.harness.environment import non_interactive_environment
 from lup.harness.ownership import GeneratedArtifacts, generated_artifacts
 from lup.harness.process import LaunchRequest, LocalProcessLauncher, ProcessLauncher
+from lup.sandbox.checked import PointerCheckedLauncher
 from lup.resolver.contracts import (
     ResolverAssemblyDeferred,
     ResolverAwaitingAnswers,
@@ -952,7 +953,7 @@ def refresh_run(
     repository = ResolverStateRepository(state_root, run_id)
     if not repository.exists():
         raise typer.BadParameter(f"no resolver run {run_id!r} under {state_root}")
-    launcher = LocalProcessLauncher()
+    launcher = PointerCheckedLauncher(LocalProcessLauncher(), root)
     journal = Journal(repository.root)
     run = ResolveRun(repository, journal)
     run.state = repository.load()
@@ -1526,7 +1527,7 @@ def run_resolve(
     resolver_spec = harness.resolver
     plugin = harness.plugins[0]
     root = project_root()
-    launcher = LocalProcessLauncher()
+    launcher = PointerCheckedLauncher(LocalProcessLauncher(), root)
     state_root = root / ".lup" / "resolve"
     resolved_run_id = run_id or chosen_run(
         state_root,

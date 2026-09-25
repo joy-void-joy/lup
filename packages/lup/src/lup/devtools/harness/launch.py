@@ -60,6 +60,7 @@ from lup.policy.boundary import BoundaryPreflight
 from lup.policy.identity import POLICY_ROOT_ENV
 from lup.policy.profiles import compile_boundary, depended_on, measured
 from lup.policy.snapshots import accept_destination_policies, destination_authorities
+from lup.devtools.pointer_trust import judged_roots, store_exposure
 from lup.sandbox.rail import (
     AccessibleRoot,
     host_run,
@@ -1565,7 +1566,18 @@ def settle_boundary(
     """
     root = project_root()
     declared = plugin.hooks or HookSet(id="hooks.absent", policy_ids=[])
+    # Before the lease asks git anything about these roots, on either posture:
+    # a root whose pointer its repository does not list back is refused here
+    # rather than mounted and read through, and each repository vouching for
+    # a root is remembered before any container runs in it.
+    trust = judged_roots([root, *(item.path for item in accessible)], operator=root)
+    for notice in trust.notices:
+        typer.echo(notice, err=True)
+    if trust.refusal:
+        raise typer.BadParameter(trust.refusal)
     lease = fleet_lease(root, accessible=accessible)
+    if exposed := store_exposure(lease):
+        raise typer.BadParameter(exposed)
     boundary = compile_boundary(
         declared,
         contained=sandbox.contained(),

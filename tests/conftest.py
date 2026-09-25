@@ -34,6 +34,23 @@ def launcher_decisions_taken_away() -> Iterator[None]:
 
 
 @pytest.fixture(scope="session", autouse=True)
+def trusted_repository_store_isolated(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Iterator[None]:
+    """Keep the store of trusted repositories the suite's own.
+
+    With the launcher's variables taken away every test runs as the host, and
+    any command a test drives that verifies a worktree also remembers the
+    repositories vouching for it -- into the machine's own store, trusting
+    throwaway repositories long after the suite has deleted them. See
+    :mod:`lup.sandbox.known`.
+    """
+    with pytest.MonkeyPatch.context() as environment:
+        environment.setenv("XDG_STATE_HOME", str(tmp_path_factory.mktemp("state")))
+        yield
+
+
+@pytest.fixture(scope="session", autouse=True)
 def committer_identity_armed() -> Iterator[None]:
     """Give every throwaway repository somebody to commit as, writing no file.
 

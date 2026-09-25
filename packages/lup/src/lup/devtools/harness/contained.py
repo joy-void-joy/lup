@@ -62,6 +62,7 @@ from lup.devtools.dev.traces import ARCHIVE_DIRECTORY_NAME
 from lup.harness.terminal import host_timezone
 from lup.providers.login import NativeHomeScope, ProviderLogin
 from lup.sandbox.attribution import WRITE_REFUSAL_MARKERS
+from lup.devtools.pointer_trust import judged_roots, store_exposure
 from lup.sandbox.rail import (
     AccessibleRoot,
     Lease,
@@ -1700,6 +1701,25 @@ def contained_argv(
         if not found.drives_its_server():
             raise typer.BadParameter(found.consequence())
         client = found.engine()
+    # Every root this launch mounts, before host git reads any of them -- the
+    # lease's own layout questions and the prune guard below both run git
+    # there -- and before a broker is started, which a refusal would strand.
+    # The lease is settled here for the same reason: a mount over lup's store
+    # of trusted repositories refuses the launch before anything starts.
+    trust = judged_roots([root, *(item.path for item in accessible)], operator=root)
+    for notice in trust.notices:
+        typer.echo(notice, err=True)
+    if trust.refusal:
+        raise typer.BadParameter(trust.refusal)
+    # Readied before the lease is read, because the lease binds only the
+    # directories that exist: one git or lup makes on first use cannot be
+    # made later under the read-only shared directory. A read-only root is
+    # not readied -- its whole lease is read-only, and it is not ours to move.
+    readied = [root, *(item.path for item in accessible if item.writable)]
+    said.add(preparation_notice(prepared_across(readied, SHARED_STATE)))
+    lease = lease if lease is not None else fleet_lease(root, accessible)
+    if exposed := store_exposure(lease):
+        raise typer.BadParameter(exposed)
     # Rebound before rendering, so the tag, the build, and the session all
     # read the same resolved copy -- and only they: the declaration the
     # ownership digests hash never carries a resolved version.
@@ -1729,13 +1749,6 @@ def contained_argv(
     said.add(
         image.browser.notice(handing is not None, image.egress.shares_host_loopback())
     )
-    # Readied before the lease is read, because the lease binds only the
-    # directories that exist: one git or lup makes on first use cannot be
-    # made later under the read-only shared directory. A read-only root is
-    # not readied -- its whole lease is read-only, and it is not ours to move.
-    readied = [root, *(item.path for item in accessible if item.writable)]
-    said.add(preparation_notice(prepared_across(readied, SHARED_STATE)))
-    lease = lease if lease is not None else fleet_lease(root, accessible)
     said.add(fleet_notice(accessible))
     said.add(
         pruning_notice(hold_pruning_across([root, *(item.path for item in accessible)]))
