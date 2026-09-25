@@ -9,7 +9,7 @@ import yaml
 
 from lup.devtools.dev.git_guards import CHECK_COMMAND, DRIFT_COMMAND
 from lup.devtools.dev.workflow import WORKFLOW_PATH, write_workflow
-from lup_template.harness.catalog import WORKFLOW
+from lup_template.harness.catalog import workflow as declared_workflow
 from lup.harness.evidence import (
     EVIDENCE_REGISTER,
     SCHEMA_COMMAND,
@@ -222,7 +222,9 @@ def test_pull_request_workflow_runs_the_same_gate_a_checkout_runs() -> None:
     # project with a bun workspace restores it from the lockfile before the
     # gate rebuilds the bundles it compares against what is committed.
     frontend = (
-        ["bun install --frozen-lockfile"] if WORKFLOW.frontend is not None else []
+        ["bun install --frozen-lockfile"]
+        if declared_workflow().frontend is not None
+        else []
     )
     assert commands == [
         *frontend,
@@ -235,4 +237,4 @@ def test_pull_request_workflow_runs_the_same_gate_a_checkout_runs() -> None:
 
 def test_the_workflow_on_disk_is_the_one_the_declaration_renders() -> None:
     """Generated rather than scaffolded, so `dev check` reports it when it drifts."""
-    write_workflow(WORKFLOW, check=True)
+    write_workflow(declared_workflow(), check=True)

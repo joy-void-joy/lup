@@ -31,10 +31,13 @@ from lup.web.schema import write_view_schema
 from lup.providers.profiles import ProfileDirectory
 from lup.workspace.paths import project_root
 from lup_template.harness.catalog import (
-    PUBLISH,
-    WORKFLOW,
+    LIBRARY_BUNDLES,
+    LIBRARY_WEB,
     declared_hook_set,
     portable_harness,
+    publish,
+    vendoring,
+    workflow,
 )
 from lup.harness.models import PromptDocument
 from lup_template.harness.content.catalog import COMPOSED, Composed
@@ -125,25 +128,38 @@ TARGETS = NativeTargets(builders={"claude": claude_target, "codex": codex_target
 """Every native runtime this project generates a tree for, by CLI selector."""
 
 
-# lup: ignore[constant-declaration] — which files outside a runtime tree this
-# project generates, decided here because nothing sits above it to be asked
-REPOSITORY_WIDE: list[RepositoryWriter] = [
-    partial(write_rule_reference, selection=declared_hook_set().rules),
-    partial(write_workflow, WORKFLOW),
-    partial(write_publish, PUBLISH),
-    partial(write_generated_paths, TARGETS),
-    # The schema before the bundles, because the frontend build compiles its
-    # types from it: written in this order, one generation leaves both true.
-    # Both read the one surface list, so a page and its types cannot disagree
-    # about which surfaces exist.
-    partial(
-        write_view_schema, Path("packages/lup/web/schema/views.json"), LIBRARY_SURFACES
-    ),
-    partial(
-        write_web_bundles,
-        Path("packages/lup/web"),
-        Path("packages/lup/src/lup/web/bundles"),
-        LIBRARY_SURFACES,
-    ),
-]
-"""Every project-owned generated file outside a native runtime tree."""
+def repository_writers(vendored: bool | None = None) -> list[RepositoryWriter]:
+    """Every project-owned generated file outside a native runtime tree.
+
+    The frontend's schema and bundles are the vendored library's build
+    products, written into its own tree, so a project resolving lup as a
+    dependency writes neither — the wheel it installed already carries them.
+    """
+    library = [
+        # The schema before the bundles, because the frontend build compiles
+        # its types from it: written in this order, one generation leaves both
+        # true. Both read the one surface list, so a page and its types cannot
+        # disagree about which surfaces exist.
+        partial(
+            write_view_schema,
+            Path(LIBRARY_WEB) / "schema" / "views.json",
+            LIBRARY_SURFACES,
+        ),
+        partial(
+            write_web_bundles,
+            Path(LIBRARY_WEB),
+            Path(LIBRARY_BUNDLES),
+            LIBRARY_SURFACES,
+        ),
+    ]
+    return [
+        partial(write_rule_reference, selection=declared_hook_set().rules),
+        partial(write_workflow, workflow(vendored)),
+        partial(write_publish, publish(vendored)),
+        partial(write_generated_paths, TARGETS),
+        *(library if vendoring(vendored) else []),
+    ]
+
+
+REPOSITORY_WIDE = repository_writers()
+"""This project's generated files outside a native tree, in its library mode."""

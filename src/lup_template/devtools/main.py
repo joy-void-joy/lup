@@ -41,6 +41,7 @@ import lup_template.agent.prompts as prompts
 from lup.providers.claude.usage.reader import claude_usage_entry
 from lup.providers.codex.usage.reader import codex_usage_entry
 from lup.devtools.dev import conflicts
+from lup.devtools.dev.library import VENDORED_ROOT
 from lup.devtools.dev.commands import CommandSurface, write_command_reference
 from lup.devtools.feedback.models import AgentPrompt
 from lup.devtools.harness.resolve import ConfiguredModel
@@ -52,6 +53,7 @@ from lup.workspace.paths import find_nearest_pyproject
 from lup_template.agent.config import engine_for_settings, settings
 from lup_template.devtools.agent import app as agent_app
 import lup_template.devtools.dev.app as dev
+from lup_template.harness.catalog import vendoring
 from lup_template.harness.composition import (
     REPOSITORY_WIDE,
     TARGETS,
@@ -96,24 +98,32 @@ def command_surface() -> CommandSurface:
     return CommandSurface.of(app)
 
 
+def relocation_roots(vendored: bool | None = None) -> list[Path]:
+    """The trees `dev relocate` rewrites imports across.
+
+    While the library is vendored, its own package root as well as the tree
+    that holds it: a sweep needs the wide one to find every importer, and
+    carrying the module's file needs the one its dotted name resolves against,
+    or a relocation inside the library repoints every import and moves
+    nothing. Overlapping roots are read once each. Resolved as a dependency,
+    the library is nobody's here to relocate.
+    """
+    library = [Path("packages"), Path(VENDORED_ROOT) / "src"]
+    return [
+        Path("src"),
+        *(library if vendoring(vendored) else []),
+        Path("tests"),
+        Path("examples"),
+    ]
+
+
 DECLARATIONS = DevtoolsDeclarations(
     dev=dev.declared,
     targets=TARGETS,
     repository_writers=[*REPOSITORY_WIDE, command_reference],
     command_surface=command_surface,
     prompt=assembled_prompt,
-    relocate_roots=[
-        Path("src"),
-        # The library's own package root as well as the tree that holds it: a
-        # sweep needs the wide one to find every importer, and carrying the
-        # module's file needs the one its dotted name resolves against, or a
-        # relocation inside the library repoints every import and moves
-        # nothing. Overlapping roots are read once each.
-        Path("packages"),
-        Path("packages/lup/src"),
-        Path("tests"),
-        Path("examples"),
-    ],
+    relocate_roots=relocation_roots(),
     integrations=INTEGRATIONS,
     usage_entries=[claude_usage_entry(), codex_usage_entry()],
     model=(
@@ -134,8 +144,9 @@ DECLARATIONS = DevtoolsDeclarations(
 
 One value reaches every sub-app the library ships, so a factory that grows an
 argument grows a field here with a default rather than breaking a call site.
-``relocate_roots`` names four because this repository vendors the library it
-publishes; ``usage_entries`` names both backends because it runs on both.
+``relocate_roots`` names the library's roots only while this repository vendors
+the library it publishes; ``usage_entries`` names both backends because it runs
+on both.
 """
 
 # lup: ignore[constant-declaration] — this CLI's own composition: which sub-apps

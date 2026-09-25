@@ -42,7 +42,13 @@ from lup.harness.codescan.boundaries import (
 )
 from lup.harness.content.modules.specs import RESOLVER
 from lup.devtools.dev.check import BunTestRoot, TestRoot, collected_test_roles
-from lup.devtools.dev.library import DISTRIBUTION, VENDORED_ROOT, library_trackers
+from lup.devtools.dev.library import (
+    DISTRIBUTION,
+    VENDORED_ROOT,
+    LibraryMode,
+    library_trackers,
+    read_mode,
+)
 from lup.devtools.dev.release import ReleaseSpec
 from lup.devtools.dev.reach import Spread
 from lup.devtools.dev.scaffold import ScaffoldSource
@@ -202,6 +208,34 @@ walled off — a deliberate use escalates with the marker the shell lattice
 already uses, and gets an approval question carrying its own stated reason.
 """
 
+LIBRARY_WEB = f"{VENDORED_ROOT}/web"
+"""The vendored library's frontend workspace, where its bundles are built."""
+
+LIBRARY_BUNDLES = f"{VENDORED_ROOT}/src/lup/web/bundles"
+"""Where Vite writes those bundles, into ``lup.web``'s package data."""
+
+
+def vendoring(stated: bool | None) -> bool:
+    """A library mode somebody stated, or this checkout's own where none was."""
+    return vendors_library() if stated is None else stated
+
+
+def vendors_library() -> bool:
+    """Whether this checkout builds lup from the source vendored in it.
+
+    Everything this catalog says about developing lup — its suite, its
+    frontend and the bundles built from it, its release and publication, its
+    policy's protection, its declaration tree — is true of a checkout exactly
+    while ``packages/lup/`` is a workspace member of it, which is what the
+    library mode declares. A project resolving lup from a repository or an
+    index holds none of it, and `dev library git` switching the mode is all
+    it takes for each of them to follow. The mode is asked rather than the
+    directory, so a copy `--keep-vendored` left on disk does not vote.
+    """
+    root = declared_project_root(Path(__file__).resolve())
+    return root is not None and read_mode(root) is LibraryMode.LOCAL
+
+
 HARNESS_SESSION = "harness"
 """The session a natively launched tool server opens for itself.
 
@@ -289,25 +323,30 @@ def declared_hook_set() -> HookSet:
     return portable_harness().declared_hooks
 
 
-def declared_test_roots() -> list[TestRoot]:
+def declared_test_roots(vendored: bool | None = None) -> list[TestRoot]:
     """The suites the gate runs: one pytest per installed root, and bun's own.
 
-    Both pytest suites are installed separately — the workspace root and the
-    vendored library — so the gate runs pytest once per root rather than
-    reporting a green tree that never exercised half of it. The frontend's
-    own tests are a third suite, run by bun from the workspace that holds
-    them. Declared beside the hook set because the policy reads the list
-    too: the files a suite collects carry the test role, derived from here.
-    Read where a command runs, since the first root is the working directory.
+    While the library is vendored, both pytest suites are installed
+    separately — the workspace root and the vendored library — so the gate
+    runs pytest once per root rather than reporting a green tree that never
+    exercised half of it, and the frontend's own tests are a third suite, run
+    by bun from the workspace that holds them. A project resolving lup as a
+    dependency runs its own suite alone. Declared beside the hook set because
+    the policy reads the list too: the files a suite collects carry the test
+    role, derived from here. Read where a command runs, since the first root
+    is the working directory.
     """
+    library = [
+        TestRoot(name="pytest (lup)", directory=Path(VENDORED_ROOT)),
+        BunTestRoot(name="bun test", directory=Path(LIBRARY_WEB)),
+    ]
     return [
         TestRoot(name="pytest", directory=Path.cwd()),
-        TestRoot(name="pytest (lup)", directory=Path("packages/lup")),
-        BunTestRoot(name="bun test", directory=Path("packages/lup/web")),
+        *(library if vendoring(vendored) else []),
     ]
 
 
-def declared_spread() -> Spread:
+def declared_spread(vendored: bool | None = None) -> Spread:
     """Which of this repository's trees reach a project built on it, and how.
 
     lup is two things at once and an adopter receives them by two different
@@ -320,15 +359,17 @@ def declared_spread() -> Spread:
     The generated prefixes are the ones the seam guard already resolves, taken
     from there rather than restated: a tree is generated because a recipe
     writes it, and a second list saying so would be the drift this measures.
+    The library tree is named only while it is vendored here: resolved as a
+    dependency, no commit of this repository can touch it.
     """
     return Spread(
-        library=["packages/lup/"],
+        library=[f"{VENDORED_ROOT}/"] if vendoring(vendored) else [],
         copied=["src/", "tests/"],
-        generated=application_roots().generated,
+        generated=application_roots(vendored=vendored).generated,
     )
 
 
-def declared_release() -> ReleaseSpec:
+def declared_release(vendored: bool | None = None) -> ReleaseSpec:
     """Which files a release moves here, and what its tag is called.
 
     The distribution this repository publishes sits under ``packages/``, not
@@ -340,8 +381,11 @@ def declared_release() -> ReleaseSpec:
 
     A project stamped out of this tree publishes itself from its own root and
     inherits nothing here: the library's default already describes that, and
-    this override is a fact about lup's own layout.
+    this override is a fact about lup's own layout — held only while the
+    library that layout names is vendored here.
     """
+    if not vendoring(vendored):
+        return ReleaseSpec()
     return ReleaseSpec(version_file=f"{VENDORED_ROOT}/pyproject.toml")
 
 
@@ -364,29 +408,43 @@ def declared_scaffold() -> ScaffoldSource:
     return ScaffoldSource(project="lup")
 
 
-WORKFLOW = WorkflowSpec(
-    branches=["main", "dev"],
-    frontend=FrontendSpec(workspace="packages/lup/web", bun_version="1.3.14"),
-)
-"""This project's gate: the two-tier model, where `dev` integrates and `main`
-carries what has landed, so both deserve a run of their own. The frontend
-workspace is the library's, installed first because `dev check` rebuilds the
-bundles it compares against what is committed."""
+def workflow(vendored: bool | None = None) -> WorkflowSpec:
+    """This project's gate: the two-tier model, where `dev` integrates and
+    `main` carries what has landed, so both deserve a run of their own.
+
+    The frontend workspace is the vendored library's, installed first because
+    `dev check` rebuilds the bundles it compares against what is committed;
+    a project resolving lup as a dependency builds no bundle and installs no
+    workspace.
+    """
+    return WorkflowSpec(
+        branches=["main", "dev"],
+        frontend=(
+            FrontendSpec(workspace=LIBRARY_WEB, bun_version="1.3.14")
+            if vendoring(vendored)
+            else None
+        ),
+    )
 
 
-PUBLISH = PublishSpec(package=DISTRIBUTION)
-"""What a release tag publishes here: the library, not the scaffold.
+def publish(vendored: bool | None = None) -> PublishSpec:
+    """What a release tag publishes here: the library, not the scaffold.
 
-The workspace root is `lup-template`, which nobody installs — so the member
-is named, and `uv build` is told which of the two distributions in this
-repository is the one that ships."""
+    The workspace root is `lup-template`, which nobody installs — so while
+    the library is vendored the member is named, and `uv build` is told which
+    of the two distributions in this repository is the one that ships. A
+    project resolving lup as a dependency is its own one distribution.
+    """
+    return PublishSpec(package=DISTRIBUTION) if vendoring(vendored) else PublishSpec()
 
 
 NATIVE_RUNTIMES: list[NativeSpellings] = [ClaudeSpellings(), CodexSpellings()]
 """Every runtime this project generates a tree for."""
 
 
-def application_roots(plugin_names: list[str] | None = None) -> ApplicationRoots:
+def application_roots(
+    plugin_names: list[str] | None = None, vendored: bool | None = None
+) -> ApplicationRoots:
     """Where this project composes concrete native implementations.
 
     The generated trees are asked of the runtimes rather than written down, so
@@ -402,7 +460,11 @@ def application_roots(plugin_names: list[str] | None = None) -> ApplicationRoots
     relative to a tree it is not under, which raises at import and before
     Typer has a command to fail. That is the whole class of failure the
     documented launcher exists to survive.
+
+    The vendored library's bundles and suite are roots only while it is
+    vendored, since a project resolving lup as a dependency holds neither.
     """
+    library = vendoring(vendored)
     package_path = Path(__file__).resolve().parents[1]
     package_root = declared_project_root(package_path)
     if package_root is None:
@@ -419,14 +481,15 @@ def application_roots(plugin_names: list[str] | None = None) -> ApplicationRoots
         # The frontend bundles: compiled by Vite into lup.web's package data
         # and owned by a manifest, so every scan skips them the way it skips
         # the native trees — a minified bundle is nobody's code to audit.
-        "packages/lup/src/lup/web/bundles/",
+        *([f"{LIBRARY_BUNDLES}/"] if library else []),
     ]
+    library_tests = [f"{VENDORED_ROOT}/tests/"] if library else []
     return ApplicationRoots(
         generated=generated,
         composition=[
             *generated,
             "tests/",
-            "packages/lup/tests/",
+            *library_tests,
             "examples/",
             f"{package}/agent/core.py",
             # Which backends this project runs on is a composition decision
@@ -437,12 +500,12 @@ def application_roots(plugin_names: list[str] | None = None) -> ApplicationRoots
             f"{package}/devtools/setup.py",
         ],
         portable_prose=[f"{harness}content/"],
-        native_dependencies=["tests/", "packages/lup/tests/", "examples/"],
+        native_dependencies=["tests/", *library_tests, "examples/"],
         source_roots=[f"{Path(package).parent.as_posix()}/"],
     )
 
 
-def declared_coverage() -> ModuleCoverage:
+def declared_coverage(vendored: bool | None = None) -> ModuleCoverage:
     """Everything this checkout declares, for the sweep that asks who claims it.
 
     Every module is built and none is filtered, and the selection travels
@@ -462,15 +525,19 @@ def declared_coverage() -> ModuleCoverage:
     with no module at all — the rule reference, the command reference, the
     generated-path table — are not declaration modules and never reach this
     census: each renders from a registry, the wired CLI, or the compiled trees.
+
+    The library's declaration tree is this checkout's to answer for only
+    while it is vendored here; resolved as a dependency, it is lup's.
     """
+    library = ContentRoot(
+        directory=Path(f"{VENDORED_ROOT}/src/lup/harness/content"),
+        package="lup.harness.content",
+    )
     return ModuleCoverage(
         modules=[entry.build() for entry in entries()],
         selection=MODULE_SELECTION,
         roots=[
-            ContentRoot(
-                directory=Path("packages/lup/src/lup/harness/content"),
-                package="lup.harness.content",
-            ),
+            *([library] if vendoring(vendored) else []),
             ContentRoot(
                 directory=Path(LAYOUT.path("harness", "content")),
                 package=f"{LAYOUT.package}.harness.content",
@@ -566,7 +633,10 @@ def dev_project() -> DevProject:
 
 
 def portable_harness(
-    version: str = "0.2.0", root: Path | None = None, composed: Composed = COMPOSED
+    version: str = "0.2.0",
+    root: Path | None = None,
+    composed: Composed = COMPOSED,
+    vendored: bool | None = None,
 ) -> Harness:
     """Build the canonical declaration graph consumed by every adapter.
 
@@ -580,8 +650,10 @@ def portable_harness(
     ``composed`` is this repository's own module answer unless the harness a
     different answer would build is being asked for — which is how declining
     a module is tested against what declining one actually composes.
+    ``vendored`` is this checkout's library mode unless another is asked.
     """
     plugin_name = "lup"
+    library = vendoring(vendored)
     plugin = Plugin(
         id="plugin.lup",
         name=plugin_name,
@@ -608,7 +680,7 @@ def portable_harness(
             # disagree; `dev seams --retire` edits it there.
             rules=RULES,
             import_boundaries=native_import_boundaries(
-                application_roots([plugin_name])
+                application_roots([plugin_name], vendored=library)
             ),
             allowed_fetch=[
                 HookUrlScope(origin=AnyHttpUrl("https://docs.claude.com")),
@@ -702,8 +774,9 @@ def portable_harness(
                 # the diff is in front of whoever answers, and it is durable —
                 # a declaration appears in a review, is drift-checked, and
                 # holds for the next session, where a per-call escape helps
-                # once and evaporates.
-                Path("packages/lup/src/lup/policy"),
+                # once and evaporates. The library's half of that policy is
+                # this checkout's to protect only while it is vendored here.
+                *([Path(f"{VENDORED_ROOT}/src/lup/policy")] if library else []),
                 Path("src/lup_template/harness/catalog.py"),
             ],
             # lup: template: what each tree in this domain is *for*. A role is
@@ -712,7 +785,11 @@ def portable_harness(
             # a generated client says so here, and every gate reads it at once.
             path_roles=[
                 HookPathRole(root=Path("tests"), role="test"),
-                HookPathRole(root=Path("packages/lup/tests"), role="test"),
+                *(
+                    [HookPathRole(root=Path(f"{VENDORED_ROOT}/tests"), role="test")]
+                    if library
+                    else []
+                ),
                 # Scratch is "disposable by construction", and a build product
                 # qualifies as squarely as a scratchpad does: every one of
                 # these is reproduced by a command, so destroying one costs
@@ -748,8 +825,10 @@ def portable_harness(
                 # keeps the source audits off a minified bundle; what keeps a
                 # hand from editing one is the ownership manifest and the
                 # drift check, which read it as a generated tree.
-                HookPathRole(
-                    root=Path("packages/lup/src/lup/web/bundles"), role="scratch"
+                *(
+                    [HookPathRole(root=Path(LIBRARY_BUNDLES), role="scratch")]
+                    if library
+                    else []
                 ),
                 # What each suite the gate runs collects is a test by
                 # derivation rather than by a second table: bun collects
@@ -758,7 +837,7 @@ def portable_harness(
                 # policy budgets as source is the disagreement deriving one
                 # from the other rules out. After the scratch rows, so a test
                 # under `node_modules` stays scratch.
-                *collected_test_roles(declared_test_roots()),
+                *collected_test_roles(declared_test_roots(library)),
                 # Deliberately absent, though Git ignores every one of them:
                 # `.env.local`, `notes/`, `.lup/`, and the `*.local` configs
                 # each hold the only copy of what is in them. Ignored means
