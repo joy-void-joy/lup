@@ -581,7 +581,7 @@ and a consumer has one.
 
 **The cohort owns the wiring.** Delivery works only if the inbox hook is in
 the options the session opened with, so callers pass an `ActorRecipe`
-(`(ActorRef, LupHooksConfig) -> Client`) and the cohort hands it the hooks. A
+(`(ActorRef, LupHooksConfig) -> Agent`) and the cohort hands it the hooks. A
 recipe that had to fetch them could be written once without them, producing an
 agent that looks spawned and reads nothing anyone sends it.
 
