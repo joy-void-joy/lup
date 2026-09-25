@@ -1,6 +1,6 @@
 """Accept destination repository policy bytes under one launch's explicit grants."""
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from tempfile import TemporaryDirectory
 from typing import Literal, TypeGuard, get_args
 
@@ -62,7 +62,7 @@ def evaluator_source(checkout: Path, runtime: PolicyRuntime) -> Path:
     return source
 
 
-def captured_policy(source: Path) -> dict[str, bytes]:
+def captured_policy(source: Path) -> dict[PurePosixPath, bytes]:
     """One evaluator's files as bytes held in memory, read so they describe one state.
 
     Everything after this reads the held bytes and never the checkout again:
@@ -91,7 +91,10 @@ class DestinationPolicy(BaseModel, frozen=True, extra="forbid"):
     error: str = ""
 
     def accepted(
-        self, root: Path, runtime: str, shown: dict[str, bytes] | None = None
+        self,
+        root: Path,
+        runtime: str,
+        shown: dict[PurePosixPath, bytes] | None = None,
     ) -> "DestinationPolicy":
         """Write held source bytes into a content-addressed launch snapshot.
 

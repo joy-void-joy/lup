@@ -4,7 +4,7 @@ import json
 import os
 from collections.abc import Callable
 from difflib import SequenceMatcher, unified_diff
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Literal
 from tempfile import NamedTemporaryFile
 
@@ -220,7 +220,7 @@ class PolicyPreview(BaseModel, frozen=True):
     judging: str
     changes: list[ConstantChange]
     code: list[CodeChange]
-    contents: dict[str, bytes]
+    contents: dict[PurePosixPath, bytes]
 
     def lines(self) -> list[str]:
         """The preview as the operator reads it, one compact line per entry."""
@@ -342,7 +342,7 @@ def constant_change(
 
 
 def code_change(
-    name: str, generated: bytes | None, accepting: bytes | None
+    name: PurePosixPath, generated: bytes | None, accepting: bytes | None
 ) -> CodeChange:
     """One evaluator file as the launch's lup generates it against the checkout's."""
 
@@ -353,7 +353,7 @@ def code_change(
         )
 
     return CodeChange(
-        name=name,
+        name=name.as_posix(),
         state=(
             "added"
             if generated is None
@@ -397,7 +397,7 @@ def policy_preview(
     except ValueError:
         launch = judging
     generated = held_contents if launch == judging else captured_policy(launch)
-    data = "runtime/policy_data.py"
+    data = PurePosixPath("runtime", "policy_data.py")
     adapter = TypeAdapter(JsonObject)
     accepting = adapter.validate_python(
         policy_data_literals(source / data, theirs[data].decode("utf-8"))

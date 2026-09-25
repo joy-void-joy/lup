@@ -18,6 +18,7 @@ from datetime import UTC, datetime, timedelta
 
 # lup: ignore[subprocess] — `sh` is third-party and this half is compiled into a bare script that has no virtual environment to resolve it from
 import subprocess
+from pathlib import Path, PurePosixPath
 from typing import Literal
 from urllib.parse import urlsplit
 import policy_data as identity_policy
@@ -118,21 +119,24 @@ def policy_snapshot_files(directory: Path) -> list[Path]:
     return sorted([evaluator, *runtime.rglob("*.py")])
 
 
-def policy_snapshot_contents(directory: Path) -> dict[str, bytes]:
+def policy_snapshot_contents(directory: Path) -> dict[PurePosixPath, bytes]:
     """Every file one evaluator's snapshot holds, read once, by its relative path.
 
     In the order :func:`policy_snapshot_files` lists them, which is the order
     a digest binds, so bytes held in memory hash exactly as the tree does.
     """
     return {
-        item.relative_to(directory).as_posix(): item.read_bytes()
+        PurePosixPath(item.relative_to(directory).as_posix()): item.read_bytes()
         for item in policy_snapshot_files(directory)
     }
 
 
-def contents_digest(contents: dict[str, bytes]) -> str:
+def contents_digest(contents: dict[PurePosixPath, bytes]) -> str:
     """Bind an evaluator's files, as held, to one digest."""
-    rows = [[name, sha256(content).hexdigest()] for name, content in contents.items()]
+    rows = [
+        [name.as_posix(), sha256(content).hexdigest()]
+        for name, content in contents.items()
+    ]
     return sha256(json.dumps(rows, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 

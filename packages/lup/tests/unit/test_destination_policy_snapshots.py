@@ -11,7 +11,6 @@ from typer.testing import CliRunner
 from lup.devtools.harness import launch
 from lup.devtools.harness.app import create_harness_app
 from lup.devtools.harness.composition import NativeTargets
-import lup.devtools.harness.policy_refresh as policy_refresh
 from lup.devtools.harness.policy_refresh import (
     PolicyPreview,
     RefreshDeclined,
@@ -27,7 +26,11 @@ from lup.devtools.harness.preflight import (
 from lup.execution.shell import git
 from lup.harness.models import HookSet, Plugin
 from lup.harness.notice import Banner
-from lup.policy.assets.host import policy_snapshot_digest, refreshable_checkout
+from lup.policy.assets.host import (
+    policy_data_literals,
+    policy_snapshot_digest,
+    refreshable_checkout,
+)
 from lup.policy.profiles import compile_boundary, measured
 from lup.policy.snapshots import (
     DestinationPolicy,
@@ -1064,14 +1067,13 @@ def test_what_is_accepted_is_exactly_what_was_shown(
     written = ledger.read_text()
 
     shown_data = (hooks / "runtime" / "policy_data.py").read_bytes()
-    reading = policy_refresh.policy_data_literals
 
     def changed_and_changed_back(path: Path, text: str | None = None) -> dict:
         """The checkout rewritten while the preview reads, then put back."""
         if path.is_relative_to(feature):
             path.write_text(policy_data(["dict-get"], []))
         try:
-            return reading(path, text)
+            return policy_data_literals(path, text)
         finally:
             if path.is_relative_to(feature):
                 path.write_bytes(shown_data)
@@ -1081,7 +1083,8 @@ def test_what_is_accepted_is_exactly_what_was_shown(
         return True
 
     monkeypatch.setattr(
-        policy_refresh, "policy_data_literals", changed_and_changed_back
+        "lup.devtools.harness.policy_refresh.policy_data_literals",
+        changed_and_changed_back,
     )
     accepted = refresh_destination_policy(
         caller, sentinels.nonce, feature, regenerated_while_asked
