@@ -17,7 +17,7 @@ from typing import Annotated
 import typer
 
 import lup_template.devtools.dev.init as init
-import lup_template.devtools.dev.origin as origin
+import lup.devtools.dev.origin as origin
 import lup_template.harness.catalog as catalog
 from lup.devtools.dev.declarations import DevDeclarations
 from lup.workspace.paths import project_root

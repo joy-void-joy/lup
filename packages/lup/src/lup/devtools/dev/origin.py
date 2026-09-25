@@ -1,11 +1,16 @@
-"""Point the shipped lup registration at the template a project was generated from.
+"""Point a scaffold's shipped registration at the template a project came from.
 
-`sync.json` ships naming lup's own repository, which is right for every
-project generated from lup and wrong for one generated from a fork of it: the
-registration would mount, review and merge the copied half from a repository
-the project was never stamped from. The forge knows which it was -- GitHub
-records the template a repository was generated from -- so initialization
-asks once and writes the answer where the project keeps it.
+A scaffold ships `sync.json` naming its own repository -- lup's names lup --
+which is right for every project generated from it and wrong for one
+generated from a fork of it: the registration would mount, review and merge
+the copied half from a repository the project was never stamped from. The
+forge knows which it was -- GitHub records the template a repository was
+generated from -- so initialization asks once and writes the answer where
+the project keeps it.
+
+Library code, although only initialization calls it, because the template
+is copied: a module there is frozen in every project at the moment it was
+generated, where one here reaches them through the dependency.
 
 Where the project resolves lup from a repository, the registration follows
 that pin rather than its own ``url`` (:func:`lup.devtools.sync.completed`), so

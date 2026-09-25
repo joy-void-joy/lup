@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 import sh
 
-import lup_template.devtools.dev.origin as origin
+import lup.devtools.dev.origin as origin
 from lup.devtools import sync
 from tests.unit.repos import initialized_repo
 

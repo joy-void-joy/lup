@@ -42,8 +42,7 @@ src/lup_template/
 │   │   └── serve.py         # Opening the session a tool server serves, and handing it to the library.
 │   ├── dev/                 # Dev operations: worktrees, branches, and pre-flight checks.
 │   │   ├── app.py           # What only a template adds to the `dev` tree the library already builds.
-│   │   ├── init.py          # Package renaming for downstream project initialization.
-│   │   └── origin.py        # Point the shipped lup registration at the template a project was generated from.
+│   │   └── init.py          # Package renaming for downstream project initialization.
 │   ├── main.py              # Root CLI app composing all devtools sub-apps.
 │   ├── setup.py             # This project's setup integrations, over the reusable wizard framework.
 │   └── subapps.py           # This application's sub-app delta: what it declines, and what only it has.
