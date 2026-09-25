@@ -716,7 +716,7 @@
     {
       "path": "docs/contributing.md",
       "category": "generated",
-      "sha256": "85db6635b0d0cc9bf9ecc78cfcf432c43937b1e76f33c63a7f8ba67e8ac25ca1",
+      "sha256": "06c0be5ce60662ac8f67c427b0180cd34b9c392bb6c4395be42a7c40f93dc44d",
       "semantic_id": "docs.contributing",
       "executable": false
     },
@@ -842,7 +842,7 @@
     {
       "path": "docs/template.md",
       "category": "generated",
-      "sha256": "6e26616a6bd4cf2978402ec9f3d3c2e7628d93c8ad7d6ecf139dc9bb9ac5b9ac",
+      "sha256": "739db933cb5ff26d0975f46b6e4e1ad44007d0aa3ae2f9ca82c748c89fb234b3",
       "semantic_id": "docs.template",
       "executable": false
     },

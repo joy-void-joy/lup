@@ -131,6 +131,7 @@ CLOSING_PARTS: list[models.PromptPart] = [
         values={
             "update_skill": models.SkillInvocation(plugin="lup", skill="update"),
             "import_skill": models.SkillInvocation(plugin="lup", skill="import"),
+            "init_skill": models.SkillInvocation(plugin="lup", skill="init"),
             "update_skill_2": models.SkillInvocation(plugin="lup", skill="update"),
         },
     ),
