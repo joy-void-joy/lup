@@ -76,6 +76,9 @@ class SessionRequest(
     cwd: Path | None = None
     autonomy: SessionAutonomy | None = None
     effort: SessionEffort | None = None
+    """How hard the session thinks. Unset, it is the rendered model's own
+    default: ``xhigh`` where that runtime's catalog row takes it, and the row's
+    highest rung below ``xhigh`` otherwise."""
 
     containment: SessionContainment = "none"
     """Which wall this session is opened behind, defaulting to the one it had."""

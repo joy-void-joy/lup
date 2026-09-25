@@ -1028,7 +1028,8 @@ def build_claude_options(
         if config.coding_harness_preset
         else config.system_prompt or None
     )
-    effort = claude_effort(config.effort) if config.effort is not None else None
+    chosen = config.resolved_effort()
+    effort = claude_effort(chosen) if chosen is not None else None
     return claude.ClaudeAgentOptions(
         model=config.model_id(),
         system_prompt=system_prompt,

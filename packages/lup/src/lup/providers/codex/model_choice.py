@@ -119,5 +119,27 @@ def refuse_unsupported_effort(
     if effort is not None and effort not in accepted:
         raise ValueError(
             f"Codex model {name!r} does not take effort {effort!r}; its catalog "
-            f"row accepts {', '.join(accepted)}. Name an effort it takes"
+            f"row accepts {', '.join(accepted)}. Name an effort it takes, or "
+            "leave effort unset for the model's default"
         )
+
+
+def codex_default_effort(
+    model: CodexModelChoice | None, tiers: CodexModelTiers
+) -> CodexEffort | None:
+    """The effort a session on ``model`` reasons at when it names none.
+
+    ``xhigh`` wherever the model's catalog row takes it, and otherwise the
+    highest rung the row has below ``xhigh``, so the default adapts to the
+    model where a named effort would be refused by it; a model whose row lists
+    no effort gets none. A model with no row — inherited, a tier ``tiers``
+    resolves to nothing, a custom id — gets ``xhigh``, since nothing says it
+    cannot.
+    """
+    match codex_model_resolved(model, tiers):
+        case None | CustomModel():
+            return "xhigh"
+        case name:
+            accepted = CODEX_MODEL_EFFORTS[name]
+    descending: list[CodexEffort] = ["xhigh", "high", "medium", "low"]
+    return next((rung for rung in descending if rung in accepted), None)

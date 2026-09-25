@@ -47,6 +47,7 @@ from pydantic import AnyHttpUrl, BaseModel, SecretStr, model_validator
 from lup.policy.hooks import LupHooksConfig
 from lup.providers.codex.model_choice import (
     CodexModelChoice,
+    codex_default_effort,
     codex_model_id,
     refuse_unsupported_effort,
 )
@@ -259,22 +260,12 @@ class Codex(
     )
     hooks: LupHooksConfig | None = None
     effort: CodexEffort | None = None
-    """What this session asks the model to spend, or None to leave it to the home.
+    """What this session asks the model to spend.
 
-    ``None`` means inherit, which is right only while the *model* is also
-    inherited. Where a model is named, :attr:`paired_effort` answers instead —
-    see :meth:`model_selection` for why the two cannot travel apart. Which
-    rungs a model accepts is its catalog row's answer, and a rung outside it
-    is refused where this is declared.
-    """
-
-    paired_effort: CodexEffort = "medium"
-    """The effort a named model carries when the caller names none.
-
-    A judgement, so it is an overridable default rather than a constant: a
-    caller who knows what their model should spend says so and this is never
-    read. What it must not be is *absent*, because absence is what let a
-    caller's model reach the API beside a stranger's effort.
+    Unset, the model's own default, which :meth:`resolved_effort` answers — so
+    a named model always carries an effort, which :meth:`model_selection`
+    explains the need for. Only the default adapts: a rung named here that the
+    model lacks is refused.
     """
 
     environment: EnvVars = {}
@@ -371,7 +362,7 @@ class Codex(
         return self
 
     def model_selection(self) -> JsonObject:
-        """The model and the effort that goes with it — both, or neither.
+        """The model and the effort that goes with it, never the model alone.
 
         A model and its reasoning effort are one choice, and the home this
         session opens against already holds an answer to both: it is seeded
@@ -385,31 +376,42 @@ class Codex(
         Codex session Lup opened through a named model was one home edit away
         from it.
 
-        So the two travel together. Naming neither inherits a pair that was
-        chosen together and is therefore coherent; naming a model sends an
-        effort beside it, the caller's where they gave one and
-        :attr:`paired_effort` where they did not.
+        So the two travel together. Naming a model sends an effort beside it,
+        the caller's where they gave one and the model's default where they
+        did not, and the default is drawn from the model's own catalog row, so
+        the pair is one the catalog says the model takes. An inherited model
+        still gets the default effort, sent alone over whichever model the
+        home holds.
         """
         model = self.model_id()
-        if model is None:
-            return {} if self.effort is None else {"effort": self.effort}
-        return {"model": model, "effort": self.effort or self.paired_effort}
+        effort = self.resolved_effort()
+        selection: JsonObject = {} if model is None else {"model": model}
+        return selection if effort is None else {**selection, "effort": effort}
 
     def model_id(self) -> str | None:
         """The slug the app-server is asked for, or None to inherit the home's."""
         return codex_model_id(self.model, self.model_tiers)
 
+    def resolved_effort(self) -> CodexEffort | None:
+        """The effort the app-server is asked for: the one named, or the default.
+
+        The default is :func:`~lup.providers.codex.model_choice.codex_default_effort`'s:
+        ``xhigh`` where the model's catalog row takes it, and the row's highest
+        rung below that otherwise.
+        """
+        if self.effort is not None:
+            return self.effort
+        return codex_default_effort(self.model, self.model_tiers)
+
     @model_validator(mode="after")
     def the_model_takes_its_effort(self) -> Self:
         """Refuse an effort the catalog says this session's model cannot take.
 
-        The effort checked is the one :meth:`model_selection` would send — the
-        paired one where the caller named none — because a model is never
-        sent alone, and a paired rung the model lacks fails the same 400.
+        Only a named effort can miss: the default is drawn from the model's
+        row, and a rung the model lacks is what the API refuses with a 400
+        before the first turn, naming neither the caller nor the model.
         """
-        refuse_unsupported_effort(
-            self.model, self.effort or self.paired_effort, self.model_tiers
-        )
+        refuse_unsupported_effort(self.model, self.effort, self.model_tiers)
         return self
 
     def native_capabilities(self) -> CodexNativeTools:

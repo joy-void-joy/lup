@@ -503,6 +503,16 @@ DECLARED: list[Migration] = [
                     "with them."
                 )
             ),
+            MigrationStep(
+                instruction=(
+                    "Read an unset effort as the model's default rather than the "
+                    "CLI's: xhigh where the model's catalog row takes it, the "
+                    "row's highest rung below xhigh otherwise, and none for a "
+                    "model taking no effort; resolved_effort() answers which rung "
+                    "a session starts at. Pass effort=... where a session should "
+                    "think at another."
+                )
+            ),
         ],
     ),
     Migration(
@@ -551,8 +561,19 @@ DECLARED: list[Migration] = [
                 instruction=(
                     "Construct Codex(...), from lup or lup.providers.codex, "
                     "wherever CodexSessionConfig(...) was built: "
-                    "developer_instructions=... is system_prompt=..., and every "
-                    "other field, validator and method keeps its name and type."
+                    "developer_instructions=... is system_prompt=..., "
+                    "paired_effort is gone, and every other field, validator and "
+                    "method keeps its name and type."
+                )
+            ),
+            MigrationStep(
+                instruction=(
+                    "Pass effort=... where paired_effort=... was passed: an unset "
+                    "effort is the model's default, xhigh where its catalog row "
+                    "takes it and the row's highest rung below xhigh otherwise, "
+                    "sent beside a named model and alone over an inherited one, "
+                    "so no session inherits its home's effort any more; "
+                    "resolved_effort() answers which rung is sent."
                 )
             ),
         ],

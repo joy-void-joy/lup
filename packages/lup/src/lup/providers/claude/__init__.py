@@ -52,6 +52,7 @@ from lup.policy.enforcement import SandboxPosture
 from lup.policy.hooks import LupHooksConfig
 from lup.providers.claude.model_choice import (
     ClaudeModelChoice,
+    claude_default_effort,
     claude_model_id,
     refuse_unsupported_effort,
 )
@@ -275,7 +276,11 @@ class Claude(
 
     max_thinking_tokens: int | None = SESSION_THINKING_TOKENS
     effort: ClaudeEffort | None = None
-    """How hard the session thinks; ``ultra`` is ``xhigh`` with ultracode on."""
+    """How hard the session thinks; ``ultra`` is ``xhigh`` with ultracode on.
+
+    Unset, the model's own default, which :meth:`resolved_effort` answers. Only
+    the default adapts: a rung named here that the model lacks is refused.
+    """
 
     cwd: Path | None = None
     add_dirs: list[Path] = []
@@ -335,6 +340,17 @@ class Claude(
     def model_id(self) -> str | None:
         """The model name the CLI is started with, or None to leave it the CLI's."""
         return claude_model_id(self.model)
+
+    def resolved_effort(self) -> ClaudeEffort | None:
+        """The effort the CLI is started with: the one named, or the model's default.
+
+        The default is :func:`~lup.providers.claude.model_choice.claude_default_effort`'s:
+        ``xhigh`` where the model's catalog row takes it, the row's highest rung
+        below that otherwise, and none for a model taking no effort.
+        """
+        if self.effort is not None:
+            return self.effort
+        return claude_default_effort(self.model)
 
     def servers(self) -> dict[str, McpServerEntry]:
         """Every tool server a session opens with: the declared ones, and ``tools``."""

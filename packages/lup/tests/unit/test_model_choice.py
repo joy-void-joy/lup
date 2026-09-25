@@ -16,6 +16,7 @@ from lup.devtools.harness.launch import LaunchSandbox, claude_sandbox_arguments
 from lup.harness.models import HookSandbox, HookSet, Plugin
 from lup.providers.claude.confinement import CLAUDE_CONFINEMENT
 from lup.providers.claude.model_choice import (
+    claude_default_effort,
     claude_effort,
     claude_effort_named,
     claude_model_id,
@@ -23,9 +24,11 @@ from lup.providers.claude.model_choice import (
     listed_claude_model,
 )
 from lup.providers.claude import Claude, ClaudeSandboxConfig
+from lup.providers.claude.models import ClaudeModel
 from lup.providers.claude.runtime import build_claude_options
 from lup.providers.claude.selection import CLAUDE_RUNTIME, claude_config
 from lup.providers.codex.model_choice import (
+    codex_default_effort,
     codex_effort_arguments,
     codex_effort_named,
     codex_model_id,
@@ -58,7 +61,7 @@ def test_a_replaced_tier_table_is_the_one_a_session_resolves() -> None:
     config = Codex(model="strongest", model_tiers=endpoint, cwd=Path("."))
 
     assert config.model_id() == "served-large"
-    assert config.model_selection() == {"model": "served-large", "effort": "medium"}
+    assert config.model_selection() == {"model": "served-large", "effort": "xhigh"}
 
 
 def test_a_custom_id_reaches_the_cli_unchanged() -> None:
@@ -97,6 +100,19 @@ def test_every_other_effort_reaches_the_sdk_unchanged_and_alone() -> None:
         )
         assert options.effort == effort
         assert options.settings is None
+
+
+@pytest.mark.parametrize(
+    ("model", "expected"), [("opus", "xhigh"), ("claude-opus-4-6", "high")]
+)
+def test_an_unnamed_effort_reaches_the_sdk_as_the_models_default(
+    model: ClaudeModel, expected: str
+) -> None:
+    options = build_claude_options(
+        Claude(model=model), binding=lambda: None, resume=None, session_id=SESSION
+    )
+
+    assert options.effort == expected
 
 
 def test_an_ultra_session_keeps_its_sandbox_in_the_same_settings() -> None:
@@ -169,10 +185,37 @@ def test_a_tier_is_refused_what_its_model_lacks() -> None:
         Codex(model="fast", effort="ultra", cwd=Path("."))
 
 
-def test_the_paired_effort_is_checked_like_a_named_one() -> None:
-    """A model is never sent alone, so its paired rung has to be one it takes."""
-    with pytest.raises(ValidationError, match="does not take effort 'max'"):
-        Codex(model="gpt-5.5", paired_effort="max", cwd=Path("."))
+def test_the_default_effort_is_xhigh_clamped_to_the_models_row() -> None:
+    """``claude-opus-4-6`` stops at ``max`` with no ``xhigh``; haiku takes none."""
+    assert claude_default_effort("opus") == "xhigh"
+    assert claude_default_effort("claude-opus-4-6") == "high"
+    assert claude_default_effort("haiku") is None
+    assert claude_default_effort("fast") is None
+    assert codex_default_effort("gpt-5.6-luna", CodexModelTiers()) == "xhigh"
+
+
+def test_a_model_without_a_row_defaults_to_xhigh() -> None:
+    """Inherited, custom, or a tier resolving to a custom id: no row refuses it."""
+    served = CodexModelTiers(strongest=CustomModel(id="served-large"))
+
+    assert claude_default_effort(CustomModel(id="served")) == "xhigh"
+    assert claude_default_effort("inherit") == "xhigh"
+    assert claude_default_effort(None) == "xhigh"
+    assert codex_default_effort(CustomModel(id="local"), CodexModelTiers()) == "xhigh"
+    assert codex_default_effort("strongest", served) == "xhigh"
+    assert codex_default_effort(None, CodexModelTiers()) == "xhigh"
+
+
+def test_only_the_default_adapts_to_the_model() -> None:
+    """An agent naming no effort takes the default; a named one is still checked."""
+    assert Claude(model="opus").resolved_effort() == "xhigh"
+    assert Claude(model="claude-opus-4-6").resolved_effort() == "high"
+    assert Claude(model="haiku").resolved_effort() is None
+    assert Claude(model=CustomModel(id="served")).resolved_effort() == "xhigh"
+    assert Claude(model="opus", effort="max").resolved_effort() == "max"
+    assert Codex(model="gpt-5.6-luna", cwd=Path(".")).resolved_effort() == "xhigh"
+    with pytest.raises(ValidationError, match="does not take effort 'ultra'"):
+        Codex(model="gpt-5.6-luna", effort="ultra", cwd=Path("."))
 
 
 def test_what_the_catalog_cannot_see_is_left_to_the_cli() -> None:
