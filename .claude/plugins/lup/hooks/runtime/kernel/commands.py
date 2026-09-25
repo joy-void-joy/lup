@@ -61,7 +61,9 @@ from .words import (
     write_scope,
     written_targets,
 )
+from .downloads import read_download
 from .fetch import decide_fetch
+from .lex import placed_path
 from .programs import program_verdict, read_program
 from .semantics import UnjudgedAmbient
 
@@ -291,6 +293,18 @@ def flag_write_verdict(
             row["reason"] or "this flag writes a file",
             arguments=arguments,
         )
+    return targets_write_verdict(row, targets, arguments, facts)
+
+
+def targets_write_verdict(
+    row: ShellRuleRow, targets: list[str], arguments: list[str], facts: WriteFacts
+) -> KernelDecision:
+    """What the files one row's command writes earn, taken together.
+
+    The flag spelling's answer, for a caller that found the paths itself: a
+    download lands its response at a name the URL chooses, which no write flag
+    names, and it is the same write to the same path whichever reader found it.
+    """
 
     def judged(target: str) -> WriteAnswer:
         """What one named path earns, beside the scope that earned it.
@@ -1066,149 +1080,6 @@ def decide_awk_words(words: list[str]) -> KernelDecision:
     return KernelDecision("allow", "read-only awk program")
 
 
-# lup: ignore[library-default] — curl's own flags that change reporting and not the request; the value follows curl's manual, not a project's taste
-CURL_SAFE_FLAGS = (
-    "-s",
-    "--silent",
-    "-S",
-    "--show-error",
-    "-f",
-    "--fail",
-    "--fail-with-body",
-    "-i",
-    "--include",
-    "-I",
-    "--head",
-    "-v",
-    "--verbose",
-    "--compressed",
-    "--no-progress-meter",
-    "-g",
-    "--globoff",
-    "-4",
-    "-6",
-)
-# The single letters above, which curl accepts clustered as readily as apart.
-# `-sS` is one word to every shell and to curl, and reading it as an unknown
-# option refused the request's most ordinary spellings while admitting the
-# same flags written with spaces between them.
-CURL_SAFE_CLUSTER_LETTERS = "".join(
-    flag[1] for flag in CURL_SAFE_FLAGS if len(flag) == 2 and not flag[1].isdigit()
-)
-
-
-def curl_safe_flag(word: str) -> bool:
-    """Whether one curl word is a declared reporting flag, clustered or alone."""
-    if word in CURL_SAFE_FLAGS:
-        return True
-    return (
-        len(word) > 1
-        and word.startswith("-")
-        and not word.startswith("--")
-        and all(letter in CURL_SAFE_CLUSTER_LETTERS for letter in word[1:])
-    )
-
-
-# lup: ignore[library-default] — curl's own value-taking flags; misreading one shifts the argument scan
-CURL_VALUE_FLAGS = (
-    "-H",
-    "--header",
-    "-m",
-    "--max-time",
-    "--connect-timeout",
-    "--retry",
-    "-A",
-    "--user-agent",
-    "-e",
-    "--referer",
-    "-r",
-    "--range",
-)
-
-
-def curl_url(word: str) -> str:
-    """Spell one curl operand the way curl itself resolves it.
-
-    curl accepts a URL with no ``scheme://`` and guesses one, defaulting to
-    HTTP — which is how a liveness probe is actually typed, and how its own
-    manual documents it. Reading the bare form as malformed put an approval
-    question on ``curl localhost:8000/health`` while the identical request
-    spelled in full was already declared safe.
-
-    Guessing HTTP where curl guesses HTTP keeps the verdict conservative on
-    its own terms: a scope declared for ``https`` alone does not match the
-    guess, so an origin reachable only over TLS still asks rather than
-    inheriting a grant its scheme never gave.
-    """
-    return word if "://" in word else f"http://{word}"
-
-
-def decide_curl_words(
-    words: list[str],
-    allowed_scopes: list[UrlScopeRow],
-    denied_scopes: list[UrlScopeRow],
-    unscoped: UnjudgedAmbient = "ask",
-) -> KernelDecision:
-    """Allow only read-method curl against the declared fetch scopes.
-
-    Every positional word must be a URL the fetch policy allows; denied
-    origins deny, and an origin no scope names is the fetch declaration's to
-    answer, the one `WebFetch` reads, so one spelling of reaching an
-    undeclared origin cannot answer differently from the other. Flags that
-    write files, send data, or carry credentials are not classified.
-
-    A `defer` returned from here is settled by `ProviderNative`, which is read
-    before the rule that would otherwise allow unjudged work inside a
-    boundary. That ordering is what makes this safe to thread: the contained
-    reading never sees it, and it must not, because its argument is that every
-    effect is confined there -- true of a command's writes and false of a
-    document entering the agent's context.
-    """
-    urls: list[str] = []
-    expect_value = False
-    expect_method = False
-    method = "GET"
-    for word in words[1:]:
-        if expect_value:
-            expect_value = False
-            continue
-        if expect_method:
-            method = word
-            expect_method = False
-            continue
-        if word in ("-X", "--request"):
-            expect_method = True
-            continue
-        if word.startswith("--request="):
-            method = word.partition("=")[2]
-            continue
-        if curl_safe_flag(word):
-            continue
-        if word in CURL_VALUE_FLAGS:
-            expect_value = True
-            continue
-        if (
-            word.startswith("--")
-            and "=" in word
-            and word.partition("=")[0] in CURL_VALUE_FLAGS
-        ):
-            continue
-        if word.startswith("-"):
-            return unjudged(f"curl option {word!r} is not classified")
-        urls.append(word)
-    if expect_value or expect_method:
-        return unjudged("curl option has no value")
-    if method not in ("GET", "HEAD"):
-        return KernelDecision("ask", f"curl {method} can change remote state")
-    if not urls:
-        return unjudged("curl has no URL")
-    for url in urls:
-        verdict = decide_fetch(curl_url(url), allowed_scopes, denied_scopes, unscoped)
-        if verdict.effect != "allow":
-            return verdict
-    return KernelDecision("allow", "read-only curl within declared scopes")
-
-
 # lup: ignore[library-default] — gh's own value-taking flags; misreading one shifts the argument scan
 GH_API_VALUE_FLAGS = (
     "-H",
@@ -1230,8 +1101,10 @@ GH_API_BODY_FLAGS = (
     "--field",
     "--input",
 )
-# lup: ignore[library-default] — the HTTP methods that do not change state; the same pair the curl screen reads, fixed by the protocol rather than by a project's taste
 GH_API_READ_METHODS = ("GET", "HEAD")
+"""The HTTP methods that do not change state, fixed by the protocol.
+
+The same pair the downloader screen reads, where it arrives as a default."""
 
 
 def decide_gh_api_words(words: list[str]) -> KernelDecision:
@@ -1295,6 +1168,106 @@ def decide_gh_api_words(words: list[str]) -> KernelDecision:
         "read-only gh api call",
         rule="shell:gh.api",
         evaluator="gh-api-screen",
+    )
+
+
+def curl_url(word: str) -> str:
+    """Spell one downloader operand the way curl and wget resolve it.
+
+    Both accept a URL with no ``scheme://`` and guess one, defaulting to HTTP
+    — which is how a liveness probe is actually typed, and how curl's own
+    manual documents it. Reading the bare form as malformed put an approval
+    question on ``curl localhost:8000/health`` while the identical request
+    spelled in full was already declared safe.
+
+    Guessing HTTP where the tools guess HTTP keeps the verdict conservative on
+    its own terms: a scope declared for ``https`` alone does not match the
+    guess, so an origin reachable only over TLS still asks rather than
+    inheriting a grant its scheme never gave.
+    """
+    return word if "://" in word else f"http://{word}"
+
+
+def decide_download_words(
+    words: list[str],
+    allowed_scopes: list[UrlScopeRow],
+    denied_scopes: list[UrlScopeRow],
+    unscoped: UnjudgedAmbient,
+    rows: list[ShellRuleRow],
+    facts: WriteFacts,
+    directory: str | None = "",
+    read_methods: tuple[str, ...] = GH_API_READ_METHODS,
+) -> KernelDecision:
+    """Judge one `curl` or `wget` by what it reads, sends, and writes.
+
+    Three answers, joined strongest first. Every URL is the fetch policy's:
+    a denied origin denies, a declared one allows, and one no scope names is
+    the fetch declaration's to answer -- the one `WebFetch` reads, so one
+    spelling of reaching an undeclared origin cannot answer differently from
+    another. A request body, or a method beyond the read pair, asks: it can
+    change state on the far end. Every file the response lands at is a write
+    to that path, judged by the tool's row the way any other written path is,
+    so a download into scratch is ordinary and one over a reviewed file asks.
+
+    A redirect `-L` follows is not re-judged: the scope answers for the origin
+    the command names, and the network boundary for where it is sent next.
+
+    A `defer` returned from here is settled by `ProviderNative`, which is read
+    before the rule that would otherwise allow unjudged work inside a
+    boundary. That ordering is what makes this safe to thread: the contained
+    reading never sees it, and it must not, because its argument is that every
+    effect is confined there -- true of a command's writes and false of a
+    document entering the agent's context.
+    """
+    tool = posixpath.basename(words[0])
+    reading = read_download(words)
+    if reading["unread"]:
+        return unjudged(f"{tool} option {reading['unread']!r} is not classified")
+    if not reading["urls"]:
+        return unjudged(f"{tool} has no URL")
+    row = next(
+        (row for row in rows if row["command"] == tool and not row["subcommand"]),
+        None,
+    )
+    found = [
+        decide_fetch(curl_url(url), allowed_scopes, denied_scopes, unscoped)
+        for url in reading["urls"]
+    ]
+    method = reading["method"].upper() or "GET"
+    if reading["sends"] or method not in read_methods:
+        asked = (
+            f"{tool} {reading['sends']} sends a request body, which can change"
+            " remote state"
+            if reading["sends"]
+            else f"{tool} {method} can change remote state"
+        )
+        found.append(
+            KernelDecision("ask", asked, purpose="external_consequence")
+            if row is None
+            else row_verdict(
+                row,
+                "ask",
+                asked,
+                effects=[declare("external_mutation", scope="upload")],
+                arguments=words[1:],
+            )
+        )
+    placed = [placed_path(target, directory) for target in reading["targets"]]
+    written = [target for target in placed if target is not None]
+    if placed:
+        found.append(
+            unjudged(f"{tool} writes a file this policy cannot place")
+            if row is None or len(written) < len(placed)
+            else targets_write_verdict(row, written, words[1:], facts)
+        )
+    for effect in ("deny", "ask", "defer"):
+        held = next((verdict for verdict in found if verdict.effect == effect), None)
+        if held is not None:
+            return held
+    return KernelDecision(
+        "allow",
+        f"{tool} reads within the declared fetch scopes"
+        + (", landing where nothing is reviewed" if placed else ""),
     )
 
 

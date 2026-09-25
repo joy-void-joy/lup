@@ -313,11 +313,6 @@ def judged_ask_rules(
         JudgedCommand(name="scp", reason="remote copies require approval"),
         JudgedCommand(name="rsync", reason="remote sync requires approval"),
         JudgedCommand(
-            name="wget",
-            reason="downloading files requires approval",
-            recovery="Prefer curl or a web fetch, which the fetch scopes judge.",
-        ),
-        JudgedCommand(
             name="make",
             read_verbs=["-n", "--dry-run", "--just-print", "-q", "--question"],
             reason="make runs whatever its recipes say",
@@ -489,6 +484,28 @@ def reaching_builtin_rules(
             refuses=command.reason,
             reason=command.reason,
             recovery=command.recovery,
+        )
+        for command in commands
+    ]
+
+
+def downloader_rules(
+    commands: Sequence[str] = ("curl", "wget"),
+) -> list[ShellCommandRule]:
+    """The downloaders, whose rows say what the files they land are judged by.
+
+    What a download reads is the fetch scopes' to answer and what it sends
+    asks, both read by the kernel's downloader screen before any row is
+    walked. The row answers for the rest: every file the response lands at is
+    a write to that path, judged the way `sort -o` and a redirection are, so
+    the reason here is the one a write the destination policy stops is asked
+    with. Only the tools that screen reads belong here.
+    """
+    return [
+        ShellCommandRule(
+            name=command,
+            effects=[declare("fetches", scope="declared")],
+            reason="a download writing that file requires approval",
         )
         for command in commands
     ]
@@ -2563,6 +2580,7 @@ def default_vocabulary() -> list[ShellCommandRule]:
         *judged_ask_rules(),
         *redirected_rules(),
         *reaching_builtin_rules(),
+        *downloader_rules(),
         *guarded_tool_rules(),
         git_rule(),
         gh_rule(),

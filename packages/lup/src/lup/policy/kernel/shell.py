@@ -79,7 +79,7 @@ from .commands import (
     unresolved_evidence,
     decide_awk_words,
     decide_command_rows,
-    decide_curl_words,
+    decide_download_words,
     decide_gh_api_words,
     decide_sed_words,
     decide_uv,
@@ -137,10 +137,10 @@ class ShellContext(TypedDict):
     the host found nothing moving the bytes elsewhere."""
 
     unscoped_fetch: UnjudgedAmbient
-    """What an origin no fetch scope names answers, carried for `curl`.
+    """What an origin no fetch scope names answers, carried for the downloaders.
 
     A segment classifier does not settle anything, so almost nothing here
-    needs this. `curl` does, because its screen hands the question
+    needs this. `curl` and `wget` do, because their screen hands the question
     to the fetch scopes -- and an origin no scope names is the question
     `WebFetch` answers from the same declaration. Without it, one spelling of
     reaching an undeclared origin answered from the declaration and the other
@@ -538,12 +538,15 @@ def decide_segment_words(
         return decide_env_words(words, context, directory)
     if executable == "printenv":
         return decide_printenv_words(words)
-    if executable == "curl":
-        return decide_curl_words(
+    if executable in ("curl", "wget"):
+        return decide_download_words(
             words,
             context["allowed_scopes"],
             context["denied_scopes"],
             context["unscoped_fetch"],
+            context["rows"],
+            write_facts(context),
+            directory,
         )
     if executable == "gh" and len(words) > 1 and words[1] == "api":
         return decide_gh_api_words(words)
@@ -674,7 +677,14 @@ def argument_safe_words(words: list[str], context: ShellContext) -> bool:
     executable = posixpath.basename(words[0])
     if executable == "uv":
         return uv_post_target_words_safe(words, context["runner_targets"])
-    if executable in INTERPRETERS or executable in ("sed", "git", "uvx", "xargs"):
+    if executable in INTERPRETERS or executable in (
+        "sed",
+        "git",
+        "uvx",
+        "xargs",
+        "curl",
+        "wget",
+    ):
         return False
     matches = [row for row in context["rows"] if row["command"] == executable]
     if len(matches) != 1 or matches[0]["subcommand"] or matches[0]["ask_flags"]:
@@ -1314,7 +1324,7 @@ def decide_shell(
     "nobody to ask" and "somebody, but not right now" are different answers
     and were sharing one.
 
-    ``unscoped_fetch`` is what a `curl` of an origin no fetch scope
+    ``unscoped_fetch`` is what a `curl` or `wget` of an origin no fetch scope
     names answers, and ``None`` reads ``unjudged_ambient`` for it.
     """
     hint = ESCALATE_HINT if interactive else RELAY_HINT if relayed else RESHAPE_HINT
@@ -1355,7 +1365,7 @@ def decide_shell(
                 # path inside the checkout reaches no declaration, and one
                 # file answers twice depending on how it was named.
                 checkout_root=checkout_root,
-                # And `curl` needs what an unlisted origin answers:
+                # And the downloaders need what an unlisted origin answers:
                 # the fetch declaration where the caller holds one, and the
                 # settlement's own posture below where it does not.
                 unscoped_fetch=unscoped_fetch or unjudged_ambient,

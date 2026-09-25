@@ -681,6 +681,7 @@ CODEX_DYNAMIC_COMMANDS = (
     "sed",
     "uv",
     "uvx",
+    "wget",
     "xargs",
 )
 """Executables whose semantic decision cannot be represented by one prefix."""

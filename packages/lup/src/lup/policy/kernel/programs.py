@@ -32,17 +32,12 @@ judged by whether this project declares its root, and a subcommand by the
 vocabulary row of the tool that owns it."""
 
 
-class InterpreterGrammar(TypedDict):
-    """How one interpreter's command line names the program it runs.
+class OptionGrammar(TypedDict):
+    """Which of one tool's options consume a value, and which consume nothing.
 
-    Every list is the interpreter's own spelling, a fact about the tool
-    rather than a preference about it: a spelling missing from ``inline`` is
-    a hole, and one missing from the others only makes a real invocation
-    unread.
+    The tool's own spellings, a fact about it rather than a preference: a
+    spelling missing here makes a real invocation unread, never permitted.
     """
-
-    inline: list[str]
-    """Options that carry the program itself, or have it read from stdin."""
 
     valued: list[str]
     """Options consuming the following word, or a value attached with ``=``."""
@@ -52,6 +47,38 @@ class InterpreterGrammar(TypedDict):
 
     families: list[str]
     """Prefixes of long options that consume nothing, such as ``--no-``."""
+
+    open_attached: bool
+    """Whether an unlisted long option carrying its value after ``=`` is inert.
+
+    True only for a tool none of whose unlisted options can change what the
+    reading is about: an attached value cannot move the operand after it, so
+    only a name that carries meaning of its own has to be listed."""
+
+
+class ReadOption(TypedDict):
+    """One option as a command line spelled it, and the value it consumed."""
+
+    name: str
+    value: str | None
+
+
+class ReadWord(TypedDict):
+    """The options one command-line word spelled, and the words they consumed."""
+
+    options: list[ReadOption]
+    width: int
+
+
+class InterpreterGrammar(OptionGrammar):
+    """How one interpreter's command line names the program it runs.
+
+    A spelling missing from ``inline`` is a hole, where one missing from the
+    option lists only makes a real invocation unread.
+    """
+
+    inline: list[str]
+    """Options that carry the program itself, or have it read from stdin."""
 
     module: str
     """The option naming a module to run in place of a file, or empty."""
@@ -82,6 +109,7 @@ def grammar(
     valued: tuple[str, ...] = (),
     flags: tuple[str, ...] = (),
     families: tuple[str, ...] = (),
+    open_attached: bool = False,
     module: str = "",
     runner: str = "",
     evaluator: str = "",
@@ -93,6 +121,7 @@ def grammar(
         valued=list(valued),
         flags=list(flags),
         families=list(families),
+        open_attached=open_attached,
         module=module,
         runner=runner,
         evaluator=evaluator,
@@ -216,6 +245,7 @@ INTERPRETER_GRAMMARS: dict[str, InterpreterGrammar] = {
             "--jitless",
         ),
         families=("--no-", "--experimental-", "--trace-", "--allow-", "--test-"),
+        open_attached=True,
     ),
     "bun": grammar(
         inline=("-e", "--eval", "-p", "--print"),
@@ -270,6 +300,7 @@ INTERPRETER_GRAMMARS: dict[str, InterpreterGrammar] = {
             "--help",
         ),
         families=("--no-",),
+        open_attached=True,
         suffixes=(".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts"),
     ),
     "deno": grammar(
@@ -314,6 +345,7 @@ INTERPRETER_GRAMMARS: dict[str, InterpreterGrammar] = {
             "--unsafely-ignore-certificate-errors",
         ),
         families=("--allow-", "--deny-", "--no-", "--unstable-"),
+        open_attached=True,
         runner="run",
         evaluator="eval",
     ),
@@ -334,55 +366,55 @@ Python is absent on purpose: it runs through `uv run python <script>`, in
 this project's environment, and the bare spelling keeps pointing there."""
 
 
-def option_width(
-    word: str, following: list[str], rules: InterpreterGrammar
-) -> int | ProgramReading:
-    """How many words one option consumes, or what it hands the interpreter.
+def read_options(
+    word: str, following: list[str], rules: OptionGrammar
+) -> ReadWord | None:
+    """The options one word spells, and how many words they consumed.
 
-    A single-dash word is read letter by letter, the way these interpreters
-    read a cluster: `-ec` sets `-e` and then carries `-c`, and `-Wignore`
-    attaches its value. A value that is itself a `data:` URL is a program
-    spelled inline wherever it appears.
+    A single-dash word is read letter by letter, the way these tools read a
+    cluster: `-ec` sets `-e` and then `-c`, `-Wignore` attaches its value,
+    and `-sSo out` ends in an option consuming the next word. ``None`` where
+    an option is unlisted or its value is missing, so nothing after it is
+    read in a position it might not hold.
     """
-
-    def valued(value: str | None, width: int) -> int | ProgramReading:
-        if value is None:
-            return ProgramReading(kind="unread", subject=word)
-        if value.startswith("data:"):
-            return ProgramReading(kind="inline", subject=word)
-        return width
-
     name, equals, attached = word.partition("=")
-    if name in rules["inline"]:
-        return ProgramReading(kind="inline", subject=word)
     if name in rules["valued"]:
-        return valued(
-            attached if equals else following[0] if following else None,
-            1 if equals else 2,
-        )
+        if equals:
+            return ReadWord(options=[ReadOption(name=name, value=attached)], width=1)
+        if not following:
+            return None
+        return ReadWord(options=[ReadOption(name=name, value=following[0])], width=2)
     if name in rules["flags"] or (
         word.startswith("--")
         and any(name.startswith(family) for family in rules["families"])
     ):
-        return 1
+        flagged = ReadOption(name=name, value=attached if equals else None)
+        return ReadWord(options=[flagged], width=1)
     if word.startswith("--"):
-        # An attached value cannot move the script, and no name here carries
-        # code; one with nothing attached may consume the next word.
-        return 1 if equals else ProgramReading(kind="unread", subject=word)
-    sign = word[0]
-    for index, letter in enumerate(word[1:], start=1):
-        option = sign + letter
-        if option in rules["inline"]:
-            return ProgramReading(kind="inline", subject=word)
-        if option in rules["valued"]:
-            rest = word[index + 1 :]
-            return valued(
-                rest if rest else following[0] if following else None,
-                1 if rest else 2,
-            )
-        if option not in rules["flags"]:
-            return ProgramReading(kind="unread", subject=word)
-    return 1
+        opened = equals and rules["open_attached"]
+        spelled = ReadOption(name=name, value=attached)
+        return ReadWord(options=[spelled], width=1) if opened else None
+    letters = [word[0] + letter for letter in word[1:]]
+    ends = next(
+        (at for at, option in enumerate(letters) if option in rules["valued"]),
+        len(letters),
+    )
+    if any(option not in rules["flags"] for option in letters[:ends]):
+        return None
+    read = [ReadOption(name=option, value=None) for option in letters[:ends]]
+    if ends == len(letters):
+        return ReadWord(options=read, width=1)
+    # The letter at `ends` sits at `ends + 1` in the word, after its sign.
+    rest = word[ends + 2 :]
+    if not rest and not following:
+        return None
+    return ReadWord(
+        options=[
+            *read,
+            ReadOption(name=letters[ends], value=rest if rest else following[0]),
+        ],
+        width=1 if rest else 2,
+    )
 
 
 def operand_reading(word: str, rules: InterpreterGrammar) -> ProgramReading:
@@ -420,6 +452,14 @@ def read_program(
     """
     executable = posixpath.basename(words[0])
     rules = grammars[executable] if executable in grammars else grammar()
+    # An inline option consumes nothing here: the reading stops at it, so what
+    # it would have consumed is never read in a position it does not hold.
+    readable = OptionGrammar(
+        valued=rules["valued"],
+        flags=[*rules["flags"], *rules["inline"]],
+        families=rules["families"],
+        open_attached=rules["open_attached"],
+    )
     signed = any(
         option.startswith("+") for option in [*rules["valued"], *rules["flags"]]
     )
@@ -448,10 +488,16 @@ def read_program(
                 subject=following[0] if following else word,
             )
         if len(word) > 1 and (word.startswith("-") or (signed and word[0] == "+")):
-            width = option_width(word, following, rules)
-            if not isinstance(width, int):
-                return found(width)
-            position += width
+            read = read_options(word, following, readable)
+            if read is None:
+                return found(ProgramReading(kind="unread", subject=word))
+            if any(
+                option["name"] in rules["inline"]
+                or (option["value"] or "").startswith("data:")
+                for option in read["options"]
+            ):
+                return found(ProgramReading(kind="inline", subject=word))
+            position += read["width"]
             continue
         if awaiting_runner:
             if word == rules["runner"]:

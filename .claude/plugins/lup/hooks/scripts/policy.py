@@ -2744,7 +2744,7 @@ def bash_decision(
         # uncontained session ever reaches: contained, the row above settles
         # the same operation first.
         unjudged_ambient="defer" if defers_unjudged(boundary) else "ask",
-        # What `curl` answers for an origin no scope names: the
+        # What `curl` and `wget` answer for an origin no scope names: the
         # project's fetch declaration, or the posture above where it made
         # none -- the same answer `fetch_decision` gives `WebFetch`.
         unscoped_fetch=UNSCOPED_FETCH,

@@ -1821,7 +1821,7 @@ class HookSet(BaseModel, frozen=True):
         default=None,
         description=(
             "What a fetch outside every declared scope answers, whichever "
-            "route reaches it: a web fetch or `curl`. `defer` hands "
+            "route reaches it: a web fetch, `curl` or `wget`. `defer` hands "
             "the origin to the runtime's own permission system; `ask` puts "
             "it to a reviewer. Unset, it follows `unjudged_ambient`. Its own "
             "declaration because reading an unlisted origin is not work the "
@@ -1886,7 +1886,7 @@ class HookSet(BaseModel, frozen=True):
         """What an origin no fetch scope names answers in this project.
 
         The fetch declaration where one was made, the unjudged posture where
-        none was: one answer for `WebFetch` and `curl` alike, asked
+        none was: one answer for `WebFetch`, `curl` and `wget` alike, asked
         here so the canonical policy composes no second reading of it.
         """
         return self.unscoped_fetch or self.unjudged_ambient

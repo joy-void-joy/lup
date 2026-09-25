@@ -134,7 +134,7 @@ class FetchPolicy(DecisionPolicy[FetchUrl]):
     """Evaluate deny scopes before allow scopes, and let the project answer the rest.
 
     ``unscoped`` is what an origin no scope names answers, and the shell
-    policy's curl screen is handed the same value, so one
+    policy's downloader screen is handed the same value, so one
     declaration answers on every surface rather than on one.
     """
 
@@ -190,7 +190,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
 
     The vocabulary is the caller's: ``rules`` is the whole table this project
     judges, not an extension of one the library chose. URL scopes feed the
-    kernel's curl screen, so shell reads and WebFetch consult one declared
+    kernel's downloader screen, so shell reads and WebFetch consult one declared
     origin table, and ``unscoped_fetch`` is what an origin outside it answers
     -- the value :class:`FetchPolicy` is handed.
     """

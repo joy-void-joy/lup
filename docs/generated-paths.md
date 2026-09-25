@@ -8,7 +8,7 @@ A source spelled as a dotted module is a module to open. One spelled as an ident
 
 The repository-wide artifacts written outside every runtime tree — the rule and command references, this page, and the CI workflow — belong to no recipe and are described in [harness.md](harness.md) instead.
 
-## `claude` — 122 artifacts
+## `claude` — 123 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -79,6 +79,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.claude/plugins/lup/hooks/runtime/kernel/commands.py` | lup.policy.kernel.commands |
 | `.claude/plugins/lup/hooks/runtime/kernel/decision.py` | lup.policy.kernel.decision |
 | `.claude/plugins/lup/hooks/runtime/kernel/delegation.py` | lup.policy.kernel.delegation |
+| `.claude/plugins/lup/hooks/runtime/kernel/downloads.py` | lup.policy.kernel.downloads |
 | `.claude/plugins/lup/hooks/runtime/kernel/edit.py` | lup.policy.kernel.edit |
 | `.claude/plugins/lup/hooks/runtime/kernel/effects.py` | lup.policy.kernel.effects |
 | `.claude/plugins/lup/hooks/runtime/kernel/escalation.py` | lup.policy.kernel.escalation |
@@ -135,7 +136,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `docs/template.md` | lup_template.harness.content.docs.template |
 | `docs/upstream-reports.md` | lup.harness.content.docs.upstream_reports |
 
-## `codex` — 102 artifacts
+## `codex` — 103 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -168,6 +169,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.codex/plugins/lup/hooks/runtime/kernel/commands.py` | lup.policy.kernel.commands |
 | `.codex/plugins/lup/hooks/runtime/kernel/decision.py` | lup.policy.kernel.decision |
 | `.codex/plugins/lup/hooks/runtime/kernel/delegation.py` | lup.policy.kernel.delegation |
+| `.codex/plugins/lup/hooks/runtime/kernel/downloads.py` | lup.policy.kernel.downloads |
 | `.codex/plugins/lup/hooks/runtime/kernel/edit.py` | lup.policy.kernel.edit |
 | `.codex/plugins/lup/hooks/runtime/kernel/effects.py` | lup.policy.kernel.effects |
 | `.codex/plugins/lup/hooks/runtime/kernel/escalation.py` | lup.policy.kernel.escalation |

@@ -21,6 +21,7 @@ from .bindings import (
     rebuilt_lists,
 )
 from .decision import KernelDecision, unjudged
+from .downloads import download_targets
 from .effects import EffectEvidence, declare, verdict_for
 from .roles import spells_its_path
 from .rows import (
@@ -1069,7 +1070,10 @@ def shell_flag_write_targets(command: str, rows: list[ShellRuleRow]) -> list[str
                 for flag in row["write_flags"]
             ]
         ]
-        for target in flag_write_targets(segment["words"], declared)
+        for target in [
+            *flag_write_targets(segment["words"], declared),
+            *download_targets(segment["words"]),
+        ]
         for placed in [placed_path(target, segment["directory"])]
         if placed is not None
     ]

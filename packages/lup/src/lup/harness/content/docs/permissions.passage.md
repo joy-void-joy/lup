@@ -271,7 +271,26 @@ arms, subshells, and brace groups classify recursively over frozen bindings —
 literal assignments instantiate, opaque ones (`read`, globs) gate
 flag-guarded commands. `find -exec` payloads and `timeout`/`nice` wrappers
 recurse, `sed`/`awk` pass read-only screens, quoted-delimiter heredocs are
-literal data, and `curl` is read-screened within the declared fetch scopes.
+literal data, and `curl` and `wget` are read the way the next section says.
+
+### A download
+
+`curl` and `wget` are read through each tool's own option grammar, in
+`lup.policy.kernel.downloads`, into three answers joined strongest first.
+Every URL is the fetch policy's: a refused scope denies, a declared one
+allows, and an origin outside every scope answers `unscoped_fetch`. A
+request body — curl's `-d`/`--data*`, `--json`, `-F`/`--form*`, `-T`, wget's
+`--post-data`, `--post-file`, `--body-data`, `--body-file` — or a method
+beyond `GET` and `HEAD`, attached (`-XPOST`) or apart, asks: it can change
+state on the far end. Every file the response lands at is a write to that
+path, judged by the tool's row in `downloader_rules` the way `sort -o` and a
+redirection are: `-o`/`-O FILE`, the URL's own name that `curl -O` and a
+plain `wget` take (in `wget -P`'s directory), and a log or header file. So a
+download into scratch or a new file is ordinary, and one over a protected,
+human-authored or tracked file asks. A redirect `-L` follows is not
+re-judged; the network boundary answers for where it is sent. An option
+neither grammar lists — a config file, a cookie jar, a recursive crawl, a
+server-chosen name — leaves the invocation unread.
 
 ### A write that carries its own content
 
@@ -345,7 +364,7 @@ row states its dry-run spelling in `probe_flags`, as a subcommand row does.
 
 ## Fetch scopes
 
-One declared origin table feeds both `WebFetch` and the `curl` screen. A
+One declared origin table feeds `WebFetch` and the downloader screen. A
 scope may opt into its subdomains, which also contributes the `*.host`
 wildcard to the OS sandbox network allowlist, so both boundaries admit the
 same set. Declare any origin an agent should be able to read as a fetch
@@ -353,7 +372,7 @@ scope; reserve the sandbox's `extra_domains` for hosts that need egress
 without being readable sources.
 
 An origin outside every scope answers `HookSet.unscoped_fetch`, by every
-route that reads one: `WebFetch` and `curl` alike. `ask` puts it to
+route that reads one: `WebFetch`, `curl` and `wget` alike. `ask` puts it to
 a reviewer, `defer` hands it to the runtime's own permission system — a
 Claude hook returns no decision and Codex's exits clean on both judging
 events, so the runtime asks or allows by its own rules and nothing here
