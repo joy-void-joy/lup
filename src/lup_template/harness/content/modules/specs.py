@@ -12,7 +12,9 @@ all happen before anything is built, and none of them should import a skill.
 ``template-init`` stays on for an adopter, which is not obvious and is worth
 saying: a project built from this scaffold still calls ``/lup:init`` and
 still installs the plugin. The design conversation is core's and reaches
-every project whatever it took. What it drops the
+every project whatever it took. ``project`` is essential: an adopter rewrites
+its sections rather than declining them, and its ``agent`` tree serves every
+tool group a session is offered. What an adopter drops the
 moment it is stood up is ``examples`` — a directory composing lup's own
 runtime against lup's own README, plus the test modules driving it, which
 an adopter inherits as a suite it must keep green and will never run. That is
@@ -30,6 +32,9 @@ PROJECT = ModuleSpec(
         "expects of a session working in it."
     ),
     default_on=True,
+    # Rewritten rather than declined: the seat is the point, and `agent` is
+    # what serves every tool group a session is offered.
+    essential=True,
     subapps=["agent"],
 )
 

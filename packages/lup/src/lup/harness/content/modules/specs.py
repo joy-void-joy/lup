@@ -28,14 +28,15 @@ CORE = ModuleSpec(
     title="Core",
     summary=(
         "Reading a codebase, designing a change, reporting what is left, "
-        "debugging, and querying the permission policy, with the reference "
-        "pages behind them."
+        "debugging, and querying the permission policy — with the gate, the "
+        "generator and the git machinery every other module stands on."
     ),
     default_on=True,
-    # The debug skill reads a session's trace, and the hooks skill ends at
-    # regenerating the trees: one command tree each, owned elsewhere.
-    requires=["observability", "meta"],
-    subapps=["dev"],
+    essential=True,
+    # The debug skill reads a session's trace, which is the one command tree
+    # it needs and does not own.
+    requires=["observability"],
+    subapps=["dev", "harness", "git"],
     tool_groups=["codeintel"],
 )
 
@@ -47,21 +48,17 @@ GIT_WORKFLOW = ModuleSpec(
         "that say what has to be green before one does."
     ),
     default_on=True,
-    # Landing and rebasing end at regenerating the trees a merge left behind
-    # their source, which is meta's command tree.
-    requires=["meta"],
-    subapps=["git"],
 )
 
 META = ModuleSpec(
     id="meta",
     title="Meta",
     summary=(
-        "Changing the machinery rather than the product: the harness a "
-        "session runs under, and the walks that move code without losing it."
+        "Changing the machinery rather than the product: authoring the "
+        "harness a session runs under, and the walks that move code without "
+        "losing it."
     ),
     default_on=True,
-    subapps=["harness"],
 )
 
 RESOLVER = ModuleSpec(
