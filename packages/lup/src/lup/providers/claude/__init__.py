@@ -284,6 +284,14 @@ class Claude(
     Plugins can introduce delegated authority and require the broad ALL grant.
     """
     environment: EnvVars = {}
+    profile: str | None = None
+    """The account every session opens as: a name among the person's lup
+    profiles, resolved to that account's Claude home the way ``harness claude
+    --profile`` resolves it, and taking precedence over a home ``environment``
+    names. Unset, sessions stay on the account this process already runs
+    under. An unknown name is refused when a session opens, listing the known
+    ones."""
+
     endpoint: ClaudeCompatibleEndpoint | None = None
     """An Anthropic-compatible endpoint the sessions talk to instead of Anthropic's."""
 
@@ -428,14 +436,18 @@ class Claude(
         """The conversations Claude Code has on record for this agent's workspace.
 
         Read from the transcripts Claude Code keeps under this agent's own
-        configuration home, newest first, whether this library opened them or
-        a terminal did.
+        configuration home — its profile's, where it names one — newest
+        first, whether this library opened them or a terminal did.
         """
         from lup.execution.threads import run_sync
         from lup.providers.claude.config_home import session_config_home
+        from lup.providers.claude.login import CLAUDE_LOGIN
         from lup.providers.claude.transcripts import ClaudeTranscripts
+        from lup.providers.profile_tree import profile_environment
 
-        transcripts = ClaudeTranscripts(session_config_home(self.environment))
+        account = profile_environment(CLAUDE_LOGIN, self.profile)
+        home = session_config_home({**self.environment, **account})
+        transcripts = ClaudeTranscripts(home)
         workspace = self.cwd if self.cwd is not None else Path.cwd()
         return await run_sync(lambda: transcripts.sessions(workspace))
 

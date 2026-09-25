@@ -52,7 +52,6 @@ from lup.providers.codex import CodexCompatibleEndpoint
 from lup.providers.codex.config import (
     CodexCompatibilityTransform,
     CodexProfileRegistry,
-    CodexProfileResolver,
     CodexProfileSelection,
     codex_profile_selector,
 )
@@ -289,25 +288,6 @@ def test_claude_compatible_endpoint_owns_auth_and_aliases() -> None:
     assert transformed.environment["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == ("served-model")
     assert transformed.environment["ANTHROPIC_DEFAULT_FABLE_MODEL"] == "served-model"
     assert "ANTHROPIC_BASE_URL" not in original.environment
-
-
-def test_codex_named_overlay_refusal_preserves_the_input_home(tmp_path: Path) -> None:
-    resolver = CodexProfileResolver(
-        CodexProfileRegistry(
-            profiles={
-                "work": CodexProfileSelection(
-                    codex_home=tmp_path / "account",
-                    named_profile="fast",
-                )
-            },
-            active="work",
-        )
-    )
-    original = Codex(model=CustomModel(id="gpt"), cwd=tmp_path)
-    with pytest.raises(ValueError, match="app-server cannot select named profiles"):
-        resolver.resolve(None).apply(original)
-    assert original.named_profile is None
-    assert original.environment == {}
 
 
 def test_codex_compatible_endpoint_uses_structured_provider_config(

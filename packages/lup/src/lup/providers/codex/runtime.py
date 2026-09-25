@@ -27,7 +27,8 @@ from lup.providers.codex.hooks import (
     codex_hook_approval_policy,
 )
 from lup.providers.codex.home import CodexWorktreeHomeStore, install_declared_policy
-from lup.providers.codex.login import CODEX_HOME, native_home
+from lup.providers.codex.login import CODEX_HOME, CODEX_LOGIN, native_home
+from lup.providers.profile_tree import profile_environment
 from lup.providers.codex.output import CodexOutputContract, codex_output_contract
 from lup.providers.codex import Codex, CodexSession
 from lup.policy.hooks import LupHookInput, LupHookOutput, LupHooksConfig
@@ -1093,7 +1094,7 @@ class CodexSessionOpener:
     def __init__(self, config: Codex) -> None:
         # Re-validated first, because model_copy skips every validator and a
         # copy is how an unsupported grant reaches this boundary unchecked.
-        self.config = Codex.model_validate(config).validated_for_app_server()
+        self.config = Codex.model_validate(config)
 
     @asynccontextmanager
     async def open_session(
@@ -1242,23 +1243,31 @@ class CodexSessionOpener:
         A compatible endpoint becomes the provider definition and credential
         the thread is configured with, here rather than at declaration, so an
         agent can be copied and changed before it is built.
+
+        A named profile becomes the account home the session runs under.
         """
-        if self.config.endpoint is None:
-            return self.config
+        declared = self.config
+        account = profile_environment(CODEX_LOGIN, declared.profile)
+        config = declared.model_copy(
+            update={"environment": {**declared.environment, **account}}
+        )
+        if config.endpoint is None:
+            return config
         from lup.providers.codex.config import CodexCompatibilityTransform
 
-        return CodexCompatibilityTransform(self.config.endpoint).apply(self.config)
+        return CodexCompatibilityTransform(config.endpoint).apply(config)
 
 
-async def codex_sessions(declared: Codex) -> list[SessionSummary]:
+async def codex_sessions(config: Codex) -> list[SessionSummary]:
     """The threads Codex keeps for an agent's workspace, newest first.
 
     Asked of an app-server started under the environment the agent's sessions
-    run with, so the home it reads is the one they write to. It starts no
-    thread and installs nothing: listing is a read.
+    run with — its profile's home, where it names one — so the home it reads
+    is the one they write to. It starts no thread and installs nothing:
+    listing is a read.
     """
-    config = declared.validated_for_app_server()
-    environment = native_environment(config.environment)
+    account = profile_environment(CODEX_LOGIN, config.profile)
+    environment = native_environment({**config.environment, **account})
     if config.containment != "outer":
         environment = {**environment, CODEX_HOME: str(native_home(environment))}
     server = CodexAppServer(config.executable, environment=environment)

@@ -10,10 +10,9 @@ from lup.providers.config import ConfigTransform, ProfileResolver, ProfileSelect
 
 
 class CodexProfileSelection(BaseModel, frozen=True):
-    """A Codex account home and optional independently named config overlay."""
+    """One Codex account home, or ``None`` for whichever the environment selects."""
 
     codex_home: Path | None = None
-    named_profile: str | None = None
 
 
 class CodexProfileRegistry(BaseModel, frozen=True):
@@ -25,7 +24,7 @@ class CodexProfileRegistry(BaseModel, frozen=True):
 
 
 class CodexProfileTransform(ConfigTransform[Codex]):
-    """Apply account-home and named-overlay inputs without conflating them."""
+    """Select a Codex account home without mutating the source config."""
 
     def __init__(self, selection: CodexProfileSelection) -> None:
         self.selection = selection
@@ -34,12 +33,7 @@ class CodexProfileTransform(ConfigTransform[Codex]):
         environment = dict(config.environment)
         if self.selection.codex_home is not None:
             environment.update(CODEX_LOGIN.environment(self.selection.codex_home))
-        return config.model_copy(
-            update={
-                "environment": environment,
-                "named_profile": self.selection.named_profile,
-            }
-        ).validated_for_app_server()
+        return config.model_copy(update={"environment": environment})
 
 
 class CodexProfileResolver(ProfileResolver[Codex]):

@@ -28,6 +28,7 @@ from lup.providers.profiles import (
     ProfileStateLocations,
 )
 from lup.providers.user_config import UserConfigFile
+from lup.types import EnvVars
 
 
 class ProfileFolders:
@@ -188,3 +189,23 @@ def user_profile_directory(
         login,
         TreeProfileStateLocations(folders),
     )
+
+
+def profile_environment(
+    login: ProviderLogin, name: str | None, config: UserConfigFile | None = None
+) -> EnvVars:
+    """The environment a declaration naming ``profile=name`` runs under.
+
+    What an agent's ``profile`` field resolves to, the same way a launch
+    naming that profile does: the account's home for this runtime, exported
+    through the variable the runtime reads. A name the person keeps no
+    profile under is refused listing the ones they do, and one whose home is
+    the runtime's default is refused as a launch refuses it.
+
+    Naming none exports nothing, rather than the person's selection: a
+    declaration opened inside a session stays on the account that session was
+    started under, which a launch already chose from that selection.
+    """
+    if name is None:
+        return {}
+    return user_profile_directory(login, config).account(name).variables
