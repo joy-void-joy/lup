@@ -49,7 +49,7 @@ A uv workspace member any project can depend on unmodified. Provider SDKs sit be
 
 #### Runtime capabilities
 
-Optional behavior is present on `SessionHandle` and `TurnHandle` or absent as `None` — no unsupported-operation stubs. This checked-in evidence targets Claude Agent SDK 0.2.89 and Codex CLI/app-server 0.144.4; regenerate it with `uv run lup-devtools agent capabilities --markdown` when native evidence changes.
+A capability a provider lacks is absent from its session or turn type rather than present and `None` — `CodexTurn` has `steer()`, `ClaudeTurn` has no such method — so there are no unsupported-operation stubs. This checked-in evidence targets the versions its header names; regenerate it with `uv run lup-devtools agent capabilities --markdown` when native evidence changes.
 
 | Capability | claude-sdk-0.2.152 | codex-app-server-0.155.1 |
 | --- | --- | --- |
@@ -62,7 +62,7 @@ Optional behavior is present on `SessionHandle` and `TurnHandle` or absent as `N
 | background | ✅ | ✅ |
 
 
-Codex accepts dynamic tools only on `thread/start`, so Lup rejects a typed-schema transition or typed resume rather than silently using a stale schema.
+Codex accepts dynamic tools only on `thread/start`, so Lup rejects a resume whose application tools differ rather than silently using a stale set. Typed output does not ride that channel: each turn carries its own `outputSchema`, so the model a turn is asked for may change from one turn to the next.
 
 ### The template — `src/lup_template`
 
