@@ -18,7 +18,7 @@ import typer
 from pydantic import BaseModel
 
 from lup.harness.models import GUIDANCE_BUDGET, document_byte_size
-from lup.harness.modules import Module, ModuleSelection
+from lup.harness.modules import Module, ModuleSelection, required_closure
 
 
 class ModuleRow(BaseModel, frozen=True):
@@ -38,6 +38,14 @@ class ModuleRow(BaseModel, frozen=True):
     default_on: bool
     """What it would have been had this project said nothing."""
 
+    pinned: str = ""
+    """Why no project may decline it, where none may: empty for the rest.
+
+    Said in the row because declining is a name in a list, and a list accepts
+    any name — so the refusal would otherwise be met at generation, in words
+    about requirements, by somebody who only wanted to drop a module.
+    """
+
     requires: list[str] = []
     guidance_used: int = 0
     skills: int = 0
@@ -54,6 +62,8 @@ class ModuleRow(BaseModel, frozen=True):
         given by nobody.
         """
         state = "taken" if self.taken else "declined"
+        if self.pinned:
+            return f"{state} ({self.pinned})"
         return state if self.taken == self.default_on else f"{state} (against default)"
 
     def surfaces(self) -> str:
@@ -72,6 +82,20 @@ class ModuleRow(BaseModel, frozen=True):
         return ", ".join(entry for entry in counted if entry) or "policy only"
 
 
+def pinning(module: Module, modules: list[Module]) -> str:
+    """Why no project may decline this module, or nothing where one may."""
+    if module.spec.essential:
+        return "essential"
+    specs = [every.spec for every in modules]
+    holders = [
+        held.spec.id
+        for held in modules
+        if held.spec.essential
+        and module.spec.id in required_closure([held.spec.id], specs)
+    ]
+    return f"{', '.join(holders)} needs it" if holders else ""
+
+
 def rows(modules: list[Module], selection: ModuleSelection) -> list[ModuleRow]:
     """Every module in the roster, in the order a composition lays it out."""
     return [
@@ -83,6 +107,7 @@ def rows(modules: list[Module], selection: ModuleSelection) -> list[ModuleRow]:
             taken=selection.takes(module.spec),
             loads=selection.loads(module.spec),
             default_on=module.spec.default_on,
+            pinned=pinning(module, modules),
             requires=module.spec.requires,
             guidance_used=sum(
                 document_byte_size(section.text) for section in module.guidance

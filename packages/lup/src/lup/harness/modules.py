@@ -62,7 +62,25 @@ class ModuleSpec(SelectableRule, frozen=True):
     """
 
     requires: list[str] = []
-    """Modules this one's declarations reach into, by id."""
+    """Modules this one's declarations reach into, by id.
+
+    Everything a module's content names — a skill it invokes, an agent it
+    delegates to, a command whose tree another module owns, a page another
+    module publishes — is either its own, reached through here, or inside a
+    :class:`~lup.harness.models.WhereTaken` naming the module it needs. `dev
+    check` holds every module to that, so declining one never breaks another
+    that did not say it needed it.
+    """
+
+    essential: bool = False
+    """Whether every project has this module, so no selection may decline it.
+
+    What every other module stands on: the gate, the generator, the tree every
+    session is launched from. A module may reach into an essential one without
+    naming it in :attr:`requires`, because there is no composition without it
+    — which is also why declining one is refused rather than honoured, since
+    honouring it would break every module at once.
+    """
 
     subapps: list[str] = []
     """Top-level CLI groups this module owns, by name.
@@ -294,9 +312,14 @@ class ModuleSelection(BaseModel, frozen=True):
         return [entry.module for entry in self.adoptions if entry.taken is False]
 
     def takes(self, spec: ModuleSpec) -> bool:
-        """Whether this project has a module, deferring where it stated nothing."""
+        """Whether this project has a module, deferring where it stated nothing.
+
+        An essential module is taken by saying nothing whatever its default,
+        since there is no composition without it; one declined anyway is
+        answered as declined, so the refusal can name it.
+        """
         taken = self.adoption(spec.id).taken
-        return spec.default_on if taken is None else taken
+        return (spec.default_on or spec.essential) if taken is None else taken
 
     def loads(self, spec: ModuleSpec) -> bool:
         """Whether a module's prose reaches this project's always-loaded document.
@@ -385,6 +408,55 @@ def unmet_requirements(specs: list[ModuleSpec]) -> list[str]:
         for needed in spec.requires
         if needed not in present
     ]
+
+
+def declined_essentials(
+    specs: list[ModuleSpec], selection: ModuleSelection
+) -> list[str]:
+    """Every essential module this selection declines, as the refusal it earns.
+
+    Returned rather than raised for the reason :func:`unmet_requirements` is:
+    a composition refuses on it, and a listing shows the same rows.
+    """
+    return [
+        f"module {spec.id!r} is essential and cannot be declined: every other "
+        "module stands on it"
+        for spec in specs
+        if spec.essential and not selection.takes(spec)
+    ]
+
+
+def required_closure(start: list[str], specs: list[ModuleSpec]) -> list[str]:
+    """These modules, and every module their ``requires`` reach, in reach order."""
+    needs = {spec.id: spec.requires for spec in specs}
+    reached = list(dict.fromkeys(start))
+    # Appending while walking is the breadth-first closure: each module
+    # reached is itself walked once, in the order it was reached.
+    for held in reached:
+        for needed in needs.get(held, []):
+            if needed not in reached:
+                reached.append(needed)
+    return reached
+
+
+def anchored(specs: list[ModuleSpec]) -> list[str]:
+    """Every module every project has: the essential ones, and what they require.
+
+    Only the first half is declared. A module an essential one requires is
+    just as impossible to decline — the requirement check refuses it — so a
+    listing saying what a project may decline has to say that too.
+    """
+    return required_closure([spec.id for spec in specs if spec.essential], specs)
+
+
+def standing(module: str, specs: list[ModuleSpec]) -> list[str]:
+    """Every module one module can count on being there, itself included.
+
+    What it requires, what those require in turn, and every module every
+    project has — the set a declaration may name without wrapping the mention
+    in a :class:`~lup.harness.models.WhereTaken`.
+    """
+    return required_closure([module, *anchored(specs)], specs)
 
 
 def scaffold_selection(
