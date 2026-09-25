@@ -26,7 +26,7 @@ demonstration here:
   source omits from a fallback source (``fill_missing_snippets``)
   inside the tool
 - Extraction — ``fetch_example`` distills a fetched page down to a
-  focused answer through a nested ``query()`` call (``extract_answer``)
+  focused answer through a nested ``ask()`` call (``extract_answer``)
   when the caller passes ``extract`` (see docs/orchestration.md § Nested Agent)
 
 Tool descriptions are the agent's only documentation for each tool.
