@@ -328,14 +328,18 @@ def select_codex_home(
     profile: str | None = None,
     store: CodexWorktreeHomeStore | None = None,
 ) -> CodexHomeSelection:
-    """Prefer explicit homes, otherwise prepare the worktree-scoped default."""
+    """Prefer explicit homes, otherwise prepare the worktree-scoped default.
+
+    A home the environment names is read the way Codex reads it: an empty
+    ``CODEX_HOME`` names none, and Codex falls back to its default rather
+    than resolving it. Taken as a path, it is ``.`` — whichever directory
+    the caller happens to stand in — and a session routed there has its
+    policy plugin installed into that directory as though it were a home.
+    """
     if explicit_home is not None:
         return CodexHomeSelection(path=explicit_home, isolated=False)
-    if CODEX_LOGIN.config_home_env in environment:
-        return CodexHomeSelection(
-            path=Path(environment[CODEX_LOGIN.config_home_env]),
-            isolated=False,
-        )
+    if named := environment.get(CODEX_LOGIN.config_home_env):
+        return CodexHomeSelection(path=Path(named), isolated=False)
     active_store = store or CodexWorktreeHomeStore()
     return CodexHomeSelection(
         path=active_store.prepare(worktree, profile),
