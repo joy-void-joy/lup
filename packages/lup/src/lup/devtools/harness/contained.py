@@ -66,6 +66,7 @@ from lup.sandbox.rail import (
     hold_pruning_across,
     repository_layout,
     worker_lease,
+    working_trees,
 )
 
 
@@ -1520,7 +1521,10 @@ def held_environments(
 ) -> dict[Path, Path]:
     """A host directory per project root the session may sync, created here.
 
-    The session's own checkout and every root declared writable. A read-only
+    The session's own checkout and every root declared writable -- each
+    worktree of one that is a bare repository, which has no tree of its own
+    to sync in, so a clone a launch mounts whole holds its environments where
+    its projects are rather than in its git directory. A read-only
     root is left out deliberately rather than skipped for tidiness: `uv sync`
     writes, so a root nobody may write is one no environment can be built in,
     and binding a directory inside it would advertise a place to sync that
@@ -1557,7 +1561,15 @@ def held_environments(
         (project / name).mkdir(exist_ok=True)
         return directory
 
-    roots = [root, *[item.path for item in accessible if item.writable]]
+    roots = [
+        root,
+        *[
+            tree
+            for item in accessible
+            if item.writable
+            for tree in working_trees(item.path)
+        ],
+    ]
     return {project: prepared(project) for project in dict.fromkeys(roots)}
 
 

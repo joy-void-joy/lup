@@ -344,6 +344,23 @@ def sibling_worktrees(worktree: Path) -> list[Path]:
     return [path for path in found if path != worktree and path.is_dir()]
 
 
+def working_trees(root: Path) -> list[Path]:
+    """The checkouts a declared root is worked in: itself, or a bare one's worktrees.
+
+    A bare repository has no tree of its own, so what a session syncs an
+    environment in, or runs a project's tooling from, is each worktree
+    attached to it -- which is what a launch mounting a clone whole hands
+    over. Anything else answers for itself, a directory git knows nothing of
+    included.
+    """
+    bare = git.out(
+        "-C", str(root), "rev-parse", "--is-bare-repository", _ok_code=[0, 128]
+    )
+    if bare != "true":
+        return [root]
+    return [tree for tree in sibling_worktrees(root) if (tree / ".git").exists()]
+
+
 def lease_for(worktree: Path) -> Lease:
     """The mounts one session needs over the repository it works in.
 

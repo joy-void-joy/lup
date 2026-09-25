@@ -10,6 +10,7 @@ session may sync into has a container-private directory bound at that name.
 from pathlib import Path
 
 from lup.devtools.harness.contained import environment_directory, held_environments
+from lup.execution.shell import git
 from lup.sandbox.rail import AccessibleRoot
 
 NAME = ".venv-contained"
@@ -47,6 +48,37 @@ def test_a_read_only_root_is_held_nowhere(tmp_path: Path) -> None:
 
     assert set(held) == {own}
     assert not (tmp_path / "theirs" / NAME).exists()
+
+
+def test_a_bare_root_is_held_in_each_of_its_worktrees(tmp_path: Path) -> None:
+    """A bare repository has no tree of its own to sync a project in.
+
+    A launch mounts a clone it materialized whole, so the environment belongs
+    in every worktree the clone holds -- the one `refs/<name>` names among
+    them -- and a directory bound inside the git directory would be a mount
+    point nothing syncs into.
+    """
+    own = checkout(tmp_path / "repo")
+    bare = tmp_path / "clone.git"
+    git("init", "-q", "--bare", "-b", "main", str(bare))
+    trees = [bare / "tree" / branch for branch in ("main", "fix")]
+    for tree in trees:
+        git(
+            "-C",
+            str(bare),
+            "worktree",
+            "add",
+            "-q",
+            "--orphan",
+            "-b",
+            tree.name,
+            str(tree),
+        )
+
+    held = held_environments(own, [AccessibleRoot(path=bare)], NAME, tmp_path / "c")
+
+    assert set(held) == {own, *trees}
+    assert not (bare / NAME).exists()
 
 
 def test_each_directory_exists_before_any_argv_names_it(tmp_path: Path) -> None:
