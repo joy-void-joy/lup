@@ -19,7 +19,7 @@ Examples::
 
 import re
 from collections.abc import Iterator
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import tomlkit
 from tomlkit.container import Container
 from tomlkit.items import Comment
@@ -28,6 +28,7 @@ from pydantic import BaseModel
 
 from lup.workspace.paths import project_root
 from lup.devtools.dev.plugin import set_marketplace_name
+from lup.devtools.dev.tracked import tracked_files
 from lup_template.harness.catalog import declared_plugin
 from lup.execution.shell import git
 
@@ -294,13 +295,18 @@ def find_stale_references(root: Path) -> list[str]:
     Covers reference forms the rewriting passes deliberately leave alone —
     docstring prose, path fragments, generated-content templates — so
     nothing dangles silently after a rename.
+
+    Read over what the checkout holds under ``src/`` and ``tests/``, tracked
+    or not yet added, and never what its ignore rules keep out: a scratch
+    tree or a runtime's write journal is nobody's to triage, and a line
+    reported from one sits in front of the lines somebody has to repair.
     """
     scan_files = [
         path
-        for search_dir in [root / "src", root / "tests"]
-        if search_dir.is_dir()
-        for path in sorted(search_dir.rglob("*.py"))
-        if not is_renamer_module(path)
+        for rel in sorted(tracked_files(others=True, suffixes=(".py",), root=root))
+        if PurePosixPath(rel).parts[0] in ["src", "tests"]
+        and (path := root / rel).is_file()
+        and not is_renamer_module(path)
     ]
     pyproject = root / "pyproject.toml"
     if pyproject.is_file():
@@ -329,11 +335,11 @@ these but a directory name. A fork shipping different demonstrations passes
 its own list rather than editing this one."""
 
 SKIPPED_TREES = ["fixtures"]
-"""Directory names a mention scan never descends into, beside the obvious, for
-a caller that does not say. The version-controlled, virtual-environment, and
-bytecode trees are skipped because nothing in them is prose anyone repairs. A
-fixture tree is skipped for the opposite reason: it says `examples/` on
-purpose, as the data a test drives."""
+"""Directory names a mention scan never descends into, for a caller that does
+not say. A fixture tree is held by git like any other and skipped all the
+same, because it says `examples/` on purpose, as the data a test drives. What
+the ignore rules keep out — an environment, a dependency tree, a build's
+output — needs no entry here: the scan reads only what the checkout holds."""
 
 
 def drop_scaffold_demonstrations(
@@ -389,15 +395,21 @@ def surviving_mentions(
     A file inside what was removed is not scanned. It names its own siblings
     constantly and is going with them, so reporting it would bury the handful
     of lines somebody actually has to repair.
+
+    Nor is anything the checkout does not hold. What is scanned is what git
+    lists — tracked, or untracked and not ignored — because the trees its
+    ignore rules keep out are exactly the ones naming a removed directory
+    most often and owned by nobody: a virtual environment's installed
+    packages, a frontend's dependencies, whatever a build left behind.
     """
-    skipped = {".git", ".venv", "__pycache__", *skipped_trees}
     patterns = [mention_pattern(path) for path in removed]
     scanned = [
         path
-        for path in sorted(root.rglob("*"))
-        if path.is_file()
-        and path.suffix in [".py", ".md", ".toml"]
-        and not skipped.intersection(path.parts)
+        for rel in sorted(
+            tracked_files(others=True, suffixes=(".py", ".md", ".toml"), root=root)
+        )
+        if (path := root / rel).is_file()
+        and not any(part in skipped_trees for part in PurePosixPath(rel).parts)
         and not declares_initialization(path)
         and not any(path.is_relative_to(root / going) for going in removed)
     ]
