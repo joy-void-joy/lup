@@ -18,6 +18,7 @@ Examples::
 """
 
 import re
+import shutil
 from collections.abc import Iterator
 from pathlib import Path
 import tomlkit
@@ -273,6 +274,27 @@ def clear_scaffold_flag(path: Path, dry_run: bool) -> list[str]:
     return ["  scaffold flag: cleared — dev check now lists open decisions"]
 
 
+def drop_stale_metadata(
+    root: Path, dry_run: bool, distribution: str = "lup-template"
+) -> list[str]:
+    """Remove the editable install's metadata the old distribution name left.
+
+    setuptools writes ``src/<distribution>.egg-info`` beside the package it
+    installs in editable mode, and the `uv sync` a rename asks for writes one
+    under the new name without removing the old. Both sit on the import path
+    the editable install adds, so ``importlib.metadata`` reads two
+    distributions each registering the ``lup.devtools`` application, and
+    every `lup-devtools` command refuses with "found 2" until the stale one
+    goes. It is an ignored build product, so nothing tracked goes with it.
+    """
+    stale = root / "src" / f"{distribution.replace('-', '_')}.egg-info"
+    if not stale.is_dir():
+        return []
+    if not dry_run:
+        shutil.rmtree(stale)
+    return [f"  {stale.relative_to(root)}: the old name's install metadata, removed"]
+
+
 def rename_cli_app_name(cli_path: Path, new_name: str, dry_run: bool) -> list[str]:
     """Update the Typer app name in the CLI module."""
     if not cli_path.exists():
@@ -473,6 +495,11 @@ def rename_package(
         f"  {c}"
         for c in set_marketplace_name(root, new_name, declared_plugin().name, dry_run)
     )
+
+    typer.echo(
+        "\nInstall metadata:" if dry_run else "Removing stale install metadata..."
+    )
+    all_changes.extend(drop_stale_metadata(root, dry_run))
 
     if dry_run:
         typer.echo("\nDirectory rename:")
