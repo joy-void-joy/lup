@@ -7,7 +7,7 @@ How work is delegated across agents in this project — what runs where, and who
 **Vocabulary:** two kinds of delegated agents look alike and must not be conflated:
 
 - A **native subagent** ("subagent" for short) is dispatched by the harness itself: Claude Code's `Agent`/`Task` tool hands a focused task to a named role defined upfront, inside the main agent's session — shared trace, shared metrics. See [Subagent Pattern](#subagent-pattern).
-- A **nested agent** (also called a *tool-subagent*) runs inside a tool call: the handler opens one independent session via `query()` with an explicit `Client` and folds the result into the tool's response. The harness never sees it — to the calling agent it is just a tool. See [Nested Agent Pattern](#nested-agent-pattern).
+- A **nested agent** (also called a *tool-subagent*) runs inside a tool call: the handler asks an explicitly declared agent of its own for one turn — `await agent.ask(prompt, Model)`, an independent session — and folds the result into the tool's response. The harness never sees it — to the calling agent it is just a tool. See [Nested Agent Pattern](#nested-agent-pattern).
 
 Guidance that says "subagent" unqualified means the native kind; an agent living inside a tool handler is always a nested agent.
 
@@ -42,7 +42,7 @@ Agents produce better output when forced to self-assess before committing. Three
 
 1. **Reflection tool** (`agent/tools/reflect.py`): Domain-customizable self-assessment — confidence, uncertainties, tool audit, process reflection. Runs a nested reviewer agent that returns a structured `ReviewResult` verdict. An explicit skip records approval; a startup error, timeout, or missing verdict returns a recoverable tool error without opening the gate. The template reviewer has read and web-research capabilities and a configurable wall-clock bound enforced across engines.
 2. **Review gate** (`lup.orchestration.reflection`): `ReviewGate`, a verdict-aware `ReflectionGate` — in-memory, or file-backed (fail counter included) when tools run in a subprocess. Approve and warn open the gate; fail keeps it closed so the agent revises and re-reviews; after 3 consecutive fails it opens anyway (escape hatch). Enforced primarily *inside* the `submit_output` handler (`lup.sessions.output`), which rejects submission with a retriable error until the gate opens; `create_reflection_gate()` adds a PreToolUse hook as hardening where the backend supports it. The plain `ReflectionGate` base remains for act-of-reflecting gates (the realtime `sleep` meta-gate).
-3. **Wiring**: The gate rides inside submission — `reflection_submission_gate` (`agent/core.py`) adapts the `ReviewGate` to the `SubmissionGate` carried by the turn's `TurnToolBinding`, so a gated submission is rejected with a retriable message until the reviewer passes (persistent agents gate `sleep` instead). Final output always flows through the turn-bound submission tool — registered by the adapter on every SDK backend — whose `submit_output` handler validates against the turn's output model and persists through the bound `SubmittedOutputStore` (in-memory, or file-backed when tools run in a subprocess). Completion is enforced by the logical turn itself: `ResilientTurn` sends bounded corrective cycles (`CorrectionConfig`, `lup.sessions.middleware`) when a turn ends without a submission, and a turn that still produces none raises `StructuredOutputError` for the orchestration layer — the one-shot counterpart of the relay's missing-sleep message. Those cycles advance on the turn's own task rather than on whichever caller awaits it, so a resilient turn's event stream — one logical stream over every cycle, closing when the result settles — may be consumed before, during, or after `result()`, and a caller that watches a turn as it happens is not thereby waiting on itself. `create_completion_guard` (`lup.policy.hooks`) remains as optional Stop-hook hardening on backends that expose stop hooks.
+3. **Wiring**: The gate rides inside submission — `reflection_submission_gate` (`agent/core.py`) adapts the `ReviewGate` to the `SubmissionGate` carried by the turn's `TurnToolBinding`, so a gated submission is rejected with a retriable message until the reviewer passes (persistent agents gate `sleep` instead). Final output always flows through the turn-bound submission tool — registered by the adapter on every SDK backend — whose `submit_output` handler validates against the turn's output model and persists through the bound `SubmittedOutputStore` (in-memory, or file-backed when tools run in a subprocess). Completion is enforced by the logical turn itself: `ResilientTurn` sends bounded corrective cycles (`CorrectionConfig`, `lup.sessions.middleware`) when a turn ends without a submission, and a turn that still produces none raises `StructuredOutputError` for the orchestration layer — the one-shot counterpart of the relay's missing-sleep message. Those cycles advance on the turn's own task rather than on whichever caller awaits it, so a resilient turn's event stream — one logical stream over every cycle, closing when the result settles — may be consumed before, during, or after the turn is awaited, and a caller that watches a turn as it happens is not thereby waiting on itself. `create_completion_guard` (`lup.policy.hooks`) remains as optional Stop-hook hardening on backends that expose stop hooks.
 
 **Customizing:** The gate in `lup.orchestration.reflection` is domain-neutral and parametric. The reflection tool and `ReflectInput` in `agent/tools/reflect.py` are domain-specific — add fields for your domain. The reviewer prompt should target your domain's common failure modes.
 
@@ -58,7 +58,7 @@ SDK-native delegation: the main agent dispatches a focused task to a named role 
 
 **Library support:** portable harness agents come from the typed harness catalog.
 Application-time delegation uses `create_run_subagent_tool()` only with an
-explicit `SubagentSpec -> Client` recipe; it never infers a provider or
+explicit `SubagentSpec -> Agent` recipe; it never infers a provider or
 reconstructs a native client.
 
 `SubagentSpec.capabilities` declares runtime facilities (`workspace-read`,
@@ -83,13 +83,13 @@ separate from network access for sandboxed commands.
 
 Distinct from **native subagents** (defined upfront and delegated by the
 harness). A **nested agent** — a *tool-subagent* — is a tool that receives or
-builds an explicit independent `Client`, runs one typed query, and
-folds the result into its response.
+builds an explicitly declared agent of its own, asks it for one typed turn,
+and folds the result into its response.
 
 | Aspect     | Native Subagent                   | Nested Agent                        |
 | ---------- | --------------------------------- | ----------------------------------- |
 | Definition | Upfront in `get_subagent_specs()` | On-demand inside a tool handler     |
-| Runtime    | Main agent's session               | Independent factory via `query()`   |
+| Runtime    | Main agent's session               | Independent agent via `ask()`       |
 | Session    | Shared — same trace, same metrics | Isolated — no session persistence   |
 | Return     | SDK `ResultMessage` (structured)  | Scalar result augmented by the tool |
 | Use case   | Specialized long-running work     | Quick generation, review, parsing   |
@@ -97,19 +97,42 @@ folds the result into its response.
 **The augmentation pattern:** The tool handler post-processes the nested agent's output before returning it. The nested agent produces raw material; the tool shapes it into the MCP response:
 
 ```python
+from pydantic import BaseModel, Field
+
+from lup import Claude
+from lup.tools.mcp import lup_tool
+
+
+class ReviewInput(BaseModel):
+    code: str = Field(description="The code to review, verbatim")
+
+
+class ReviewResult(BaseModel):
+    assessment: str
+    issues: list[str]
+
+
+class ReviewOutput(BaseModel):
+    critique: str
+
+
+reviewer = Claude(model="strongest", system_prompt="You review code for quality.")
+
+
 @lup_tool("Review code quality and return structured assessment")
 async def review(params: ReviewInput) -> ReviewOutput:
-    result = await review_factory.query(build_review_prompt(params), ReviewResult)
+    result = await reviewer.ask(f"Review this code:\n\n{params.code}", ReviewResult)
     return ReviewOutput(critique=result.output.assessment)
 ```
 
-**Library support:** `Client.query(prompt, OutputModel)`
-opens one configured session and returns a strict `TurnResult[T]`; it also
-accepts a `TurnInput` or a prepared `turn_request(...)` in place of the prompt. Provider selection,
-tools, limits, and compatible endpoints are validated when the application
-constructs the factory; unsupported settings are never silently dropped.
+**Library support:** `agent.ask(prompt, OutputModel)` opens one session of a
+declared `Claude` or `Codex` agent, takes one turn, closes the session however
+the turn ended, and returns a strict `TurnResult[T]`; the prompt may be a
+string or a `TurnInput`. Provider selection, tools, limits, and compatible
+endpoints are validated when the application declares the agent; unsupported
+settings are never silently dropped.
 
-**Example:** {{ agent_tools_nested_py }} is the dedicated copyable template — a minimal `critique` tool (input model → `query()` → augmented output, exported as `NESTED_TOOLS`, unwired by default). For organic usages, see the reviewer inside `agent/tools/reflect.py` (`run_reviewer`, called from the `review` tool) — an independent one-shot `query()` whose critique the tool folds into its structured output — and the `extract` path of `fetch_example` in `agent/tools/example.py` (`extract_answer`), the same shape applied to data augmentation.
+**Example:** {{ agent_tools_nested_py }} is the dedicated copyable template — a minimal `critique` tool (input model → `ask()` → augmented output, exported as `NESTED_TOOLS`, unwired by default). For organic usages, see the reviewer inside `agent/tools/reflect.py` (`run_reviewer`, called from the `review` tool) — an independent one-shot `ask()` whose critique the tool folds into its structured output — and the `extract` path of `fetch_example` in `agent/tools/example.py` (`extract_answer`), the same shape applied to data augmentation.
 
 **Routing whole tool families:** there is a standing tension between the bitter-lesson instinct — give the agent every tool and let the model decide — and context economy: every schema wired into the main agent occupies its context, and a large enough surface starts deferring schemas on Claude harnesses (see [Deferred Tool Schemas](#deferred-tool-schemas-tool-search)). The settled middle ground is **one delegating tool per family**: instead of serving every data tool to the main agent, expose a single `research` tool whose handler runs a nested agent holding the whole data-gathering family (search, fetch, markets, news). The main context carries one schema and receives structured findings; the specialist schemas — and the reasoning that used them — stay in the nested agent's context. Accept a batch of questions in one call so the handler can fan them out in parallel, and persist findings when later tasks will reuse them. The aib downstream repo (`refs/aib` when linked) carries a full-scale reference: its `research` tool moves ~35 data tools off the main agent, batches questions, resumes prior research sessions for follow-ups, and persists findings to a worldview store.
 
@@ -120,13 +143,13 @@ constructs the factory; unsupported settings are never silently dropped.
 ## Background Agent Pattern
 
 For persistent agents that need parallel processing, a **background agent**
-runs alongside the main agent using an injected configured factory. Immutable
+runs alongside the main agent in one session of an injected agent. Immutable
 Pydantic state is supplied on each wake and rapid wakes are debounced.
 
 | Aspect        | Native Subagent              | Nested Agent                | Background Agent                |
 | ------------- | ---------------------------- | --------------------------- | ------------------------------- |
 | Lifetime      | Per-task (SDK dispatch)      | Per-tool-call               | Session-long                    |
-| Runtime       | Main agent's session         | Independent via `query()`   | Independent configured factory |
+| Runtime       | Main agent's session         | Independent via `ask()`     | Independent injected agent     |
 | Initiation    | Agent dispatches via `Task()`| Tool handler creates on-demand| Wake events trigger turns       |
 | Communication | SDK `ResultMessage`          | Tool return value           | Shared mutable state            |
 | Use case      | Specialized long-running work| Quick generation, review    | Observation, research, execution|
@@ -135,22 +158,24 @@ Pydantic state is supplied on each wake and rapid wakes are debounced.
 
 **Common use cases:**
 - **Observer**: Summarizes conversation history so the main agent has context when earlier messages scroll out of the context window
-- **Researcher**: Fetches and processes external data (with `builtin_tools=["Read", "Grep", "WebFetch"]`) while the main agent continues interacting
+- **Researcher**: Fetches and processes external data (with `native_tools=[NativeToolGroup.READ, NativeToolGroup.WEB]`) while the main agent continues interacting
 - **Executor**: Runs long-running tool calls without blocking the main agent's turns
 
 **Lifecycle:** `start()` spawns an asyncio task. `wake(state)` copies the latest
-typed state. A `state_to_request` callback builds the turn after debounce;
-typed result/error handlers receive the outcome. `stop()` cancels the task and
-session context cleanup aborts an unfinished native turn.
+typed state. After debounce, a `state_to_turn` callback asks the session for
+the turn that state calls for; typed result/error handlers receive the
+outcome. `stop()` cancels the task and session context cleanup aborts an
+unfinished native turn.
 
-**Library support:** `lup.orchestration.background.BackgroundAgent` composes only a
-`Client`, `state_to_request`, typed result/error callbacks, and
+**Library support:** `lup.orchestration.background.BackgroundAgent` composes only an
+`Agent`, `state_to_turn`, typed result/error callbacks, and
 `BackgroundConfig`. See the observer example in
 {{ agent_tools_realtime_py }}.
 
-**Customizing:** The `state_to_request` callback is the main extension point.
-It translates immutable application state into a typed request without knowing
-which provider owns the injected factory.
+**Customizing:** The `state_to_turn` callback is the main extension point.
+It receives the open `Conversation` and the latest immutable state, and returns
+`conversation.ask(prompt, Model)` — naming the output type there keeps the
+result typed, without knowing which provider the injected agent is.
 
 ---
 
@@ -211,7 +236,7 @@ and a consumer has one.
 
 **The cohort owns the wiring.** Delivery works only if the inbox hook is in
 the options the session opened with, so callers pass an `ActorRecipe`
-(`(ActorRef, LupHooksConfig) -> Client`) and the cohort hands it the
+(`(ActorRef, LupHooksConfig) -> Agent`) and the cohort hands it the
 hooks. A recipe that had to fetch them could be written once without them,
 producing an agent that looks spawned and reads nothing anyone sends it.
 
@@ -274,12 +299,24 @@ the application's, so it builds the wrapper with
 `lup.devtools.harness.contained.contained_cli` and names the result:
 
 ```python
-program = contained_cli(
-    run_dir / "enter.sh", image, manifest, workspace, "claude", CLAUDE_LOGIN
-)
-request = SessionRequest(
-    cwd=workspace, containment="outer", contained_program=program
-)
+from pathlib import Path
+
+from lup.devtools.harness.contained import contained_cli
+from lup.harness.image import Image
+from lup.harness.requirements import Manifest
+from lup.providers.claude.login import CLAUDE_LOGIN
+from lup.providers.selection import SessionRequest
+
+
+def contained_request(
+    run_dir: Path, image: Image, manifest: Manifest, workspace: Path
+) -> SessionRequest:
+    program = contained_cli(
+        run_dir / "enter.sh", image, manifest, workspace, "claude", CLAUDE_LOGIN
+    )
+    return SessionRequest(
+        cwd=workspace, containment="outer", contained_program=program
+    )
 ```
 
 Both runtimes take that path where they would have found their own CLI —
@@ -337,6 +374,6 @@ Tools that fetch external data should **enrich it inside the tool** before retur
 2. **Null-filling** — Multi-source fallback pipelines that recover missing fields from alternative endpoints or sibling records (e.g., primary API withholds fields → fallback endpoint fills the gaps).
 3. **Extraction** — Nested agent calls that distill large text blocks into focused answers (see [Nested Agent Pattern](#nested-agent-pattern)).
 
-**Example:** {{ agent_tools_example_py }} is the template for all three forms — `fetch_example` routes known hosts to a specialized handler (`fetch_wiki_article`, domain dispatch) and distills fetched pages through a nested `query()` call (`extract_answer`, extraction); `search_example` recovers missing snippet fields from a fallback source (`fill_missing_snippets`, null-filling).
+**Example:** {{ agent_tools_example_py }} is the template for all three forms — `fetch_example` routes known hosts to a specialized handler (`fetch_wiki_article`, domain dispatch) and distills fetched pages through a nested `ask()` call (`extract_answer`, extraction); `search_example` recovers missing snippet fields from a fallback source (`fill_missing_snippets`, null-filling).
 
-**Customizing:** Domain dispatch routes belong in `agent/tools/`. Build them lazily to avoid circular imports. Null-filling logic lives in API wrappers. Extraction uses `factory.query(request)` (see [Nested Agent Pattern](#nested-agent-pattern)).
+**Customizing:** Domain dispatch routes belong in `agent/tools/`. Build them lazily to avoid circular imports. Null-filling logic lives in API wrappers. Extraction uses `agent.ask(prompt)` on an auxiliary agent (see [Nested Agent Pattern](#nested-agent-pattern)).
