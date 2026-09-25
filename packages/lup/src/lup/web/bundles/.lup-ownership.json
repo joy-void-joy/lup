@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.4.0",
-  "source_digest": "80cb32f5621efc59295fe201cc9d8774c8839a310bd475c1494762c531b6a296",
+  "source_digest": "16c943b6fc665f55dab6429d7bc881ede32aa1d44ff2a156815b8b38334f1668",
   "target_requirements": [
     "bun"
   ],
@@ -42,16 +42,16 @@
       "executable": false
     },
     {
-      "path": "packages/lup/src/lup/web/bundles/reviews/assets/index-CbQ47HX0.js",
+      "path": "packages/lup/src/lup/web/bundles/reviews/assets/index-oHoTyy1A.js",
       "category": "generated",
-      "sha256": "4379620aaeda71d1a1f020ab65cad7ec1dca5dc64d682e92a8e74c71cc5c836f",
-      "semantic_id": "web.reviews.assets/index-CbQ47HX0.js",
+      "sha256": "6c0d3f93d15555354a22560c455c662c19778db0098f7ff3519155ab8ccb7155",
+      "semantic_id": "web.reviews.assets/index-oHoTyy1A.js",
       "executable": false
     },
     {
       "path": "packages/lup/src/lup/web/bundles/reviews/index.html",
       "category": "generated",
-      "sha256": "45e287236d9dd880d6287aecf4573ad0ba034ca917e849696cda8e6e01a04756",
+      "sha256": "a2e6f84acc1ed180c84c445bca7f76e38c55d96a85af7bec0d9fb34188b39b2f",
       "semantic_id": "web.reviews.index.html",
       "executable": false
     },
