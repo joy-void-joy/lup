@@ -16,28 +16,28 @@
     {
       "path": ".codex/agents/tdd-implementer.toml",
       "category": "generated",
-      "sha256": "3932b5c6d628094a2fb106cd51f62a74b976ee14d4e356ac4f09f88d2b4b03c5",
+      "sha256": "c60d6775ca2232d8e72cef9849df1576ba5275e795b45ee9479c33b2af132776",
       "semantic_id": "agent.tdd-implementer",
       "executable": false
     },
     {
       "path": ".codex/agents/trace-explorer.toml",
       "category": "generated",
-      "sha256": "7cfa7def50194f761de5ed22b82e5a00453829e04a26bc843ff18ef0cee14c88",
+      "sha256": "8dfbe276d4ffbc78dce4201ee030114e9a635ca10d28bd4ea8b22ae9aa62e4f1",
       "semantic_id": "agent.trace-explorer",
       "executable": false
     },
     {
       "path": ".codex/agents/version-explorer.toml",
       "category": "generated",
-      "sha256": "f5887a3f048681bfb7d460cbe1f2d7d7c04faa193d8c7f07a09312f959ad1626",
+      "sha256": "622460807c31b8509f3ac019c6e66e66d5a245c9675f98ab28b65f5e86cb8ef1",
       "semantic_id": "agent.version-explorer",
       "executable": false
     },
     {
       "path": ".codex/agents/version-reviewer.toml",
       "category": "generated",
-      "sha256": "ed0ec918e57a3d6af25971419307761a8ec4ed8b7e460e5f27f3bac53ff829a4",
+      "sha256": "bf3d39ccef491c14b6a15eb6ee234b59149e4e9f3eea8ecd1f69d4435d9a258a",
       "semantic_id": "agent.version-reviewer",
       "executable": false
     },
@@ -443,7 +443,7 @@
     {
       "path": ".codex/plugins/lup/skills/brainstorm/SKILL.md",
       "category": "generated",
-      "sha256": "1887eb9e564b10a3b290182a34a4d4df57e8e81ef0688c24f06a74f5d1dac94c",
+      "sha256": "c392729c24abd480fb266b322d7d251516f0f2b60c73a9e859fc76e6a77dadb2",
       "semantic_id": "skill.brainstorm",
       "executable": false
     },

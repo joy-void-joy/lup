@@ -86,7 +86,7 @@
     {
       "path": ".claude/plugins/lup/commands/brainstorm.md",
       "category": "generated",
-      "sha256": "02d0be245a91d59a66e31823258d05e91a77bba09cdcc167577a9fdefc830c91",
+      "sha256": "653d11c4e9f91ff197f404fcdf6888fb8189936b85fb04aa8914286ed4f7e0f7",
       "semantic_id": "skill.brainstorm",
       "executable": false
     },
@@ -772,14 +772,14 @@
     {
       "path": "docs/native-capabilities.md",
       "category": "generated",
-      "sha256": "6f5a57e7524c261db74607931d4c73a214f7d45e3e75b1e912684528042e5e42",
+      "sha256": "cb1078cae05e8bab03802b6086456754201a9349f8993899ddcd5c46c02bae9c",
       "semantic_id": "docs.native-capabilities",
       "executable": false
     },
     {
       "path": "docs/orchestration.md",
       "category": "generated",
-      "sha256": "87c0de378fb12e15d62e99872cc22bbc8f4eaab9feebfdc1a1331e34ba4e80e8",
+      "sha256": "ba882d79f4a421b62a85364afb86550a0e8269e21f56dfdaa61bc15ce5fb4728",
       "semantic_id": "docs.orchestration",
       "executable": false
     },
@@ -800,7 +800,7 @@
     {
       "path": "docs/platform-differentiation.md",
       "category": "generated",
-      "sha256": "7d51bc6172590b090b968c251bb614b8fcdba7ef1935dc7380aea7a01404da7f",
+      "sha256": "cfe8fc705ee3bb84cf961d49b1b87faf562f0cb90f6dd92b9490193eca373eb4",
       "semantic_id": "docs.platform-differentiation",
       "executable": false
     },
