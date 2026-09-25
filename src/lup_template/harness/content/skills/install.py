@@ -16,9 +16,9 @@ because the project installing from declined a module — and the sub-apps only
 """
 
 SPELLING = provenance.Provenance(
-    library_git="git -C <source>",
     project_devtools="uv run --directory <target> lup-devtools",
     library_checkout="<source>",
+    branch_tip="git -C <source> ls-remote origin <branch>",
 )
 """Both checkouts spelled out, because this skill stands in one and writes the other."""
 
@@ -45,7 +45,7 @@ SKILL = models.Skill(
                     "arguments": models.ArgumentsRef(),
                 },
             ),
-            *provenance.branch_probes(SPELLING),
+            *provenance.branch_probes("git -C <source>"),
             models.Passage(
                 module=__name__,
                 name="analyze-the-source",

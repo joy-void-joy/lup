@@ -8,21 +8,71 @@ This command sets up the project identity, renames the source package, and custo
 
 Interview the user about their domain, rename the source package, and generate the appropriate scaffolding.
 
-### The branch you start from is the library you get
+### The commit you start from is the library you get
 
-This checkout is a clone of lup, so the branch it stands on *is* the library
-version the project begins at: `packages/lup/` is that branch's code, and the
-acquisition mode settled in Phase 2 pins that same ref. A feature branch
-carries work the stable branch has not reviewed, and nothing downstream
-announces that. Resolve both before Phase 0, while `origin` still points at lup
-rather than at the project's own repository:
+`packages/lup/` and the copied half — `src/` and `tests/` — are lup at one
+commit, the *base*, and everything Phase 2 settles about lup is taken at it:
+the library pin names a branch holding it, and the upstream checkpoint and the
+scaffold branch `dev update` merges against are both rooted there. Where the
+base is written down depends on how this repository was made. A clone of lup
+carries lup's history, and the base is the commit it stands on. A repository
+made with GitHub's "Use this template" carries none of it: GitHub copies the
+template's files into one fresh root commit, with no parent and no remote
+naming lup, so this checkout's branch and its `origin` are the project's own
+and say nothing about lup. Settle the base before Phase 0, in two commands.
+
+First point the `lup` registration at the repository this project came from.
+`sync.json` ships an entry naming lup's repository, required and mounted
+read-write, which is what gives every session of this project a clone of lup
+to fix upstream defects in, with nothing set up on any machine. A project
+generated from a fork of lup builds on the fork, and GitHub records the
+template a repository was generated from, so ask it once:
+
+```bash
+uv run lup-devtools dev init upstream --dry-run
+uv run lup-devtools dev init upstream
+```
+
+It points the entry at the template where that is another repository, and
+says why it left the entry as shipped otherwise. Where the project already
+pins lup to a repository, the entry follows that pin, so the command prints
+the `dev library git --url` invocation that moves the pin rather than writing
+the entry. Where it cannot ask the forge, it says why: ask the user which
+repository the project was generated from.
+
+The mount takes effect at the next launch. This session opened while the
+checkout was still the scaffold, which owes itself no copy of lup, so it holds
+none; once initialization is done, relaunch and `refs/lup` is lup's working
+tree.
+
+Then read the base out of that repository's history:
+
+```bash
+uv run lup-devtools dev init base
+```
+
+It fetches the registration — cloning it under `~/.cache/lup/sync/` the first
+time — and finds the base in lup's own history: in a clone, the newest commit
+this checkout shares with lup; in a generated repository, the commit whose
+tree the root commit holds exactly. It prints the base in full, how it was
+found, and each branch of lup holding it with how far that branch has moved
+past it. Where no commit holds the root tree exactly — the root commit was
+amended, or the template's history rewritten since — it names the nearest
+commit instead, says so, and exits nonzero: tell the user the base is an
+estimate, and confirm it with them before anything below is taken at it.
+
+A base the default branch does not hold carries work the stable branch has
+not reviewed, and nothing downstream announces that. Where the report says
+so, {{ ask }}. In a clone the stable branch is a `git switch` away: switch now,
+before Phase 0 reads anything, and run `dev init base` again. A generated
+repository holds only what GitHub copied, so there the answer is whether to go
+on from this base at all.
+
+Record the base, and the branch holding it that the answer settles on. The
+base is *the recorded commit* every step below names.
 
 
 <!-- passage: phases -->
-This checkout is the one supplying the library, and `packages/lup/` is whatever
-branch is checked out — so if the answer was the stable branch, `git switch` to
-it now, before Phase 0 reads anything.
-
 ## Phase 0: Check for DESIGN.md
 
 Before starting the interview, check if `DESIGN.md` exists in the project root. If it does:
@@ -186,31 +236,26 @@ This handles directory rename (`src/lup_template/` -> `src/<project>/`), import 
 
 ### After renaming:
 
-#### 1. Point the lup registration at the repository this project came from
+#### 1. Root the scaffold branch at the base
 
-`sync.json` ships an entry naming lup's repository, required and mounted
-read-write, which is what gives every session of this project a clone of lup
-to fix upstream defects in, with nothing set up on any machine. A project
-generated from a fork of lup builds on the fork, and GitHub records the
-template a repository was generated from, so ask it once:
+`dev update` carries upstream's later changes to the copied half in as a git
+merge, and a merge needs an ancestor both sides share: the `lup-scaffold`
+branch, compiled from the copied half at the base and rooted once. Commit what
+the rename and Phase 1.5 left first — the adoption is recorded as a merge, and
+git refuses a merge over a staged change — then root it at the recorded
+commit:
 
 ```bash
-uv run lup-devtools dev init upstream --dry-run
-uv run lup-devtools dev init upstream
+uv run lup-devtools dev scaffold adopt --base <commit>
 ```
 
-It points the entry at the template where that is another repository, and
-says why it left the entry as shipped otherwise. Run it before the next step,
-which pins whichever repository the entry names. Where the project already
-pins lup to a repository, the entry follows that pin, so the command prints
-the `dev library git --url` invocation that moves the pin rather than writing
-the entry. Where it cannot ask the forge, it says why: ask the user which
-repository the project was generated from.
-
-The mount takes effect at the next launch. This session opened while the
-checkout was still the scaffold, which owes itself no copy of lup, so it holds
-none; once initialization is done, relaunch and `refs/lup` is lup's working
-tree.
+Root it now, while the library is still vendored. Once the pin resolves to
+the base itself, an adoption there reads as the mistake it usually is — a base
+equal to the pin gives the first update nothing to carry — and is refused
+unless its reading is restated, where here it is simply the truth. The command
+measures the base against the copied half before writing anything, and
+refuses one the measurement argues against with the reading that argues;
+after an estimated base, that reading is the second opinion to show the user.
 
 #### 2. Declare how the project obtains lup
 
@@ -224,6 +269,15 @@ else separates them.
 <!-- passage: merge-the-guidance -->
 The command prints the `uv sync` and the regeneration it wants next. Run both
 before anything reads the project's types.
+
+A branch that has moved past the base pins past it too: the lock resolves the
+branch's tip, while the copied half is still the base's. Where `dev init base`
+reported the branch ahead, {{ ask }}. Carrying it now is
+`uv run lup-devtools dev update` after the sync, which merges upstream's
+changes to the copied half between the base and the pin onto the branch rooted
+above and regenerates under the library that landed. Starting exactly at the
+base is `dev library git --rev <commit>` instead, and `dev update` whenever
+the project is ready to move.
 
 #### 3. Merge the guidance template into the guidance declaration
 
@@ -260,12 +314,13 @@ runtime is a later removal somebody decides on its own terms.
 
 
 <!-- passage: verify -->
-Never register this project's own checkout as lup's: it stands at the
-recorded commit too, and the review would read the project's own history as
-upstream work. And take the checkpoint at the recorded commit, never at the
-branch's tip: the branch may have advanced since this project was generated,
-and a checkpoint at its tip marks the commits in between as already reviewed
-when the project does not carry them.
+Never register this project's own checkout as lup's: its history is the
+project's — a clone holds the recorded commit as well, a generated repository
+only its own root — and the review would read it as upstream work. And take
+the checkpoint at the recorded commit, never at the branch's tip: the branch
+may have advanced since this project was generated, and a checkpoint at its
+tip marks the commits in between as already reviewed when the project does
+not carry them.
 
 #### 5. Verify
 
