@@ -326,13 +326,21 @@ def literal(value: JsonValue) -> str:
     return visible(json.dumps(value, ensure_ascii=False))
 
 
-def departures(value: object, annotation: object, where: str) -> list[str]:
+# lup: ignore[bare-object] — a type annotation is a form Python names no type
+# for; each is narrowed below by what it is an alias, a row or a generic of
+def departures(value: JsonValue, annotation: object, where: str) -> list[str]:
     """Every way a value departs from the type a generated constant declares.
 
     Rows are held to their row type exactly: a field the type lacks, or one
     it has left out, is a departure rather than something to render around,
-    so a missing field and an empty one can never read alike.
+    so a missing field and an empty one can never read alike. ``where`` is
+    the value's place, spelled the way the refusal names it.
     """
+
+    def beneath(name: str) -> str:
+        """The place of one field, under this value's own."""
+        return f"{where}.{name}" if where else name
+
     shape = (
         annotation.__value__ if isinstance(annotation, TypeAliasType) else annotation
     )
@@ -341,15 +349,17 @@ def departures(value: object, annotation: object, where: str) -> list[str]:
         if not isinstance(value, dict):
             return [f"{where} is not a row"]
         fields = get_type_hints(shape)
-        required: frozenset[str] = vars(shape)["__required_keys__"]
+        required = vars(shape)["__required_keys__"]
         return [
             *[
                 f"{where}[{literal(key)}] is no field of its row"
+                if where
+                else f"{literal(key)} is no constant generation writes"
                 for key in value
                 if key not in fields
             ],
             *[
-                f"{where} lacks {key}"
+                f"{where or 'the module'} lacks {key}"
                 for key in fields
                 if key in required and key not in value
             ],
@@ -357,56 +367,48 @@ def departures(value: object, annotation: object, where: str) -> list[str]:
                 problem
                 for key, field in fields.items()
                 if key in value
-                for problem in departures(value[key], field, f"{where}.{key}")
+                for problem in departures(value[key], field, beneath(key))
             ],
         ]
-    match origin:
-        case _ if origin is list:
-            if not isinstance(value, list):
-                return [f"{where} is not a list"]
-            (item,) = get_args(shape)
-            return [
+    if origin is list:
+        if not isinstance(value, list):
+            return [f"{where} is not a list"]
+        (item,) = get_args(shape)
+        return [
+            problem
+            for index, entry in enumerate(value)
+            for problem in departures(entry, item, f"{where}[{index}]")
+        ]
+    if origin is dict:
+        if not isinstance(value, dict):
+            return [f"{where} is not a mapping"]
+        _, item = get_args(shape)
+        return [
+            *[
+                f"{where}[{literal(key)}] is keyed by something other than text"
+                for key in value
+                if type(key) is not str
+            ],
+            *[
                 problem
-                for index, entry in enumerate(value)
-                for problem in departures(entry, item, f"{where}[{index}]")
-            ]
-        case _ if origin is dict:
-            if not isinstance(value, dict):
-                return [f"{where} is not a mapping"]
-            _, item = get_args(shape)
-            return [
-                *[
-                    f"{where} has a key that is not text"
-                    for key in value
-                    if not isinstance(key, str)
-                ],
-                *[
-                    problem
-                    for key, entry in value.items()
-                    for problem in departures(
-                        entry, item, f"{where}[{literal(str(key))}]"
-                    )
-                ],
-            ]
-        case _ if origin is Literal:
-            allowed = get_args(shape)
-            return (
-                []
-                if any(
-                    type(value) is type(option) and value == option
-                    for option in allowed
-                )
-                else [
-                    f"{where} is none of {', '.join(literal(option) for option in allowed)}"
-                ]
-            )
-        case _ if origin is Union or origin is UnionType:
-            branches = [departures(value, branch, where) for branch in get_args(shape)]
-            return [] if any(not problems for problems in branches) else branches[0]
-        case _ if shape is NoneType:
-            return [] if value is None else [f"{where} is not None"]
-        case _ if shape in (str, int, bool, float):
-            return [] if type(value) is shape else [f"{where} is not {shape.__name__}"]
+                for key, entry in value.items()
+                for problem in departures(entry, item, f"{where}[{literal(key)}]")
+            ],
+        ]
+    if origin is Literal:
+        allowed = get_args(shape)
+        if any(type(value) is type(option) and value == option for option in allowed):
+            return []
+        return [
+            f"{where} is none of {', '.join(literal(option) for option in allowed)}"
+        ]
+    if origin is Union or origin is UnionType:
+        branches = [departures(value, branch, where) for branch in get_args(shape)]
+        return [] if any(not problems for problems in branches) else branches[0]
+    if shape is NoneType:
+        return [] if value is None else [f"{where} is not None"]
+    if shape in (str, int, bool, float):
+        return [] if type(value) is shape else [f"{where} is not {shape.__name__}"]
     raise TypeError(f"{where} is declared as {shape!r}, which no check here reads")
 
 
@@ -417,7 +419,7 @@ def generated_data(path: Path, text: str) -> JsonObject:
     if problems:
         raise ValueError(
             f"{visible(str(path))} holds data generation never writes, so none of "
-            f"it is shown: {'; '.join(problem.lstrip('.') for problem in problems)}"
+            f"it is shown: {'; '.join(problems)}"
         )
     return TypeAdapter(JsonObject).validate_python(data)
 

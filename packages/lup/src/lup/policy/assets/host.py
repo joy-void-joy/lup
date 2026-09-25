@@ -168,18 +168,18 @@ def policy_data_literals(path: Path, text: str | None = None) -> dict:
                 "a literal, which would run when the policy is imported"
             ) from error
 
-    imported = {
+    imported = [
         alias.name
         for statement in tree.body
         if isinstance(statement, ast.ImportFrom)
         for alias in statement.names
-    }
+    ]
     constants = {
         name: value
         for statement in tree.body
         for name, value in assigned(statement).items()
     }
-    shadowed = sorted(imported & set(constants))
+    shadowed = sorted(name for name in constants if name in imported)
     if shadowed:
         raise ValueError(
             f"{path} both imports and assigns {', '.join(shadowed)}, which "
