@@ -35,6 +35,13 @@ from lup.tools.mcp import (
 )
 from lup.tools.native import NativeTools, native_grants
 from lup.providers.claude.native_tools import claude_native_tools, claude_tool_allowed
+from lup.providers.claude.model_choice import (
+    ClaudeModelChoice,
+    claude_effort,
+    claude_model_id,
+    refuse_unsupported_effort,
+)
+from lup.providers.claude.models import ClaudeEffort
 from lup.sessions.recursion import (
     child_recursive_agent_allowance,
     recursive_agent_scope,
@@ -142,10 +149,6 @@ type ClaudePermissionMode = Literal[
 """Claude Code's own words for how much a session may do without asking."""
 
 
-type ClaudeEffort = Literal["low", "medium", "high", "xhigh", "max"]
-"""Claude Code's own reasoning-effort ladder, which starts at ``low``."""
-
-
 class ClaudeSessionConfig(
     BaseModel,
     frozen=True,
@@ -155,7 +158,9 @@ class ClaudeSessionConfig(
 ):
     """Immutable Claude-only provider configuration."""
 
-    model: str | None = None
+    model: ClaudeModelChoice | None = None
+    """A name from Claude Code's catalog, a portable tier, or a custom id."""
+
     system_prompt: str = ""
     coding_harness_preset: bool = True
     native_tools: NativeTools = None
@@ -169,6 +174,8 @@ class ClaudeSessionConfig(
 
     max_thinking_tokens: int | None = SESSION_THINKING_TOKENS
     effort: ClaudeEffort | None = None
+    """How hard the session thinks; ``ultra`` is ``xhigh`` with ultracode on."""
+
     cwd: Path | None = None
     add_dirs: list[Path] = []
     plugin_dirs: list[Path] = []
@@ -204,6 +211,21 @@ class ClaudeSessionConfig(
         ),
     )
     extra_args: dict[str, str | None] = {}  # lup: ignore[dict-str-payload]
+
+    @model_validator(mode="after")
+    def the_model_takes_its_effort(self) -> "ClaudeSessionConfig":
+        """Refuse an effort the catalog says this session's model cannot take.
+
+        Refused where it is declared, because the alternative is quieter and
+        worse: the CLI drops an effort a model lacks, and a session asked to
+        think at ``max`` runs at whatever the model does by default.
+        """
+        refuse_unsupported_effort(self.model, self.effort)
+        return self
+
+    def model_id(self) -> str | None:
+        """The model name the CLI is started with, or None to leave it the CLI's."""
+        return claude_model_id(self.model)
 
     @model_validator(mode="after")
     def enforce_native_authority(self) -> "ClaudeSessionConfig":
@@ -921,7 +943,7 @@ class ClaudeSessionOpener:
 def create_claude(
     options: ClaudeSessionConfig | None = None,
     *,
-    model: str | None = None,
+    model: ClaudeModelChoice | None = None,
     system_prompt: str = "",
     cwd: Path | None = None,
     base_url: str | None = None,
@@ -948,21 +970,27 @@ def create_claude(
     what a local endpoint expects.
     """
     base = options or ClaudeSessionConfig()
-    config = base.model_copy(
-        update={
-            "model": base.model if model is None else model,
-            "system_prompt": system_prompt or base.system_prompt,
-            "cwd": base.cwd if cwd is None else cwd,
-            "native_tools": base.native_tools if native_tools is ... else native_tools,
-            "tool_servers": {
-                **base.tool_servers,
-                **(
-                    {"lup-tools": create_mcp_server("lup-tools", tools=tools)}
-                    if tools is not None
-                    else {}
-                ),
-            },
-        }
+    # Validated again rather than copied as it stands, so a model named here
+    # is refused an effort the base carries by the same check a declaration is.
+    config = ClaudeSessionConfig.model_validate(
+        base.model_copy(
+            update={
+                "model": base.model if model is None else model,
+                "system_prompt": system_prompt or base.system_prompt,
+                "cwd": base.cwd if cwd is None else cwd,
+                "native_tools": base.native_tools
+                if native_tools is ...
+                else native_tools,
+                "tool_servers": {
+                    **base.tool_servers,
+                    **(
+                        {"lup-tools": create_mcp_server("lup-tools", tools=tools)}
+                        if tools is not None
+                        else {}
+                    ),
+                },
+            }
+        )
     )
     if base_url is not None:
         # Imported here rather than above, because `config` imports this module
@@ -1129,8 +1157,9 @@ def build_claude_options(
         if config.coding_harness_preset
         else config.system_prompt or None
     )
+    effort = claude_effort(config.effort) if config.effort is not None else None
     return claude.ClaudeAgentOptions(
-        model=config.model,
+        model=config.model_id(),
         system_prompt=system_prompt,
         tools={"type": "preset", "preset": "claude_code"} if native is None else native,
         allowed_tools=list(dict.fromkeys(allowed)),
@@ -1156,7 +1185,14 @@ def build_claude_options(
         permission_mode=config.permission_mode,
         max_turns=config.max_turns,
         max_thinking_tokens=config.max_thinking_tokens,
-        effort=config.effort,
+        effort=effort.level if effort is not None else None,
+        # The SDK merges its sandbox into this same document, so an effort's
+        # settings and the sandbox's reach the CLI as one `--settings`.
+        settings=(
+            json.dumps(effort.settings)
+            if effort is not None and effort.settings
+            else None
+        ),
         cwd=config.cwd,
         add_dirs=[str(path) for path in config.add_dirs],
         plugins=[

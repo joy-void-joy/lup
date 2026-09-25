@@ -1,17 +1,17 @@
 """Claude Code as one selectable runtime.
 
 Every field of a :class:`~lup.providers.selection.SessionRequest` has a Claude
-spelling, so nothing a caller asks for is dropped here. One is narrowed rather
-than dropped: Claude's effort ladder starts at ``low``, so a request for
-``minimal`` opens at that floor.
+spelling, so nothing a caller asks for is dropped or narrowed here. A model
+only Codex's catalog lists is refused, since Claude Code has no such model.
 """
 
 from lup.policy.identity import POLICY_ROOT_ENV
 from lup.workspace.paths import project_root
 from lup.providers.claude.config_home import workspace_config_environment
 from lup.providers.claude.login import CLAUDE_LOGIN
+from lup.providers.claude.model_choice import claude_model_choice
+from lup.providers.claude.models import ClaudeEffort
 from lup.providers.claude.runtime import (
-    ClaudeEffort,
     ClaudePermissionMode,
     ClaudeSandboxConfig,
     ClaudeSessionConfig,
@@ -39,16 +39,18 @@ CLAUDE_AUTONOMY: dict[SessionAutonomy, ClaudePermissionMode] = {
 # lup: ignore[constant-declaration] — each value is Claude Code's own effort for
 # the degree beside it, over a vocabulary this library closes
 CLAUDE_EFFORT: dict[SessionEffort, ClaudeEffort] = {
-    "minimal": "low",
     "low": "low",
     "medium": "medium",
     "high": "high",
     "xhigh": "xhigh",
     "max": "max",
+    "ultra": "ultra",
 }
 """What Claude Code calls each degree of effort a caller can ask for.
 
-``minimal`` meets ``low`` because Claude's ladder has no rung beneath it."""
+Every rung under its own name: ``ultra`` becomes ``xhigh`` with ultracode on
+only where the session's options are compiled, which is also where a model's
+own catalog row refuses a rung it lacks."""
 
 
 # lup: ignore[constant-declaration] — each value is Claude Code's own sandbox
@@ -91,7 +93,7 @@ def claude_config(request: SessionRequest) -> ClaudeSessionConfig:
     the request's two axes stay two.
     """
     return ClaudeSessionConfig(
-        model=request.model,
+        model=None if request.model is None else claude_model_choice(request.model),
         system_prompt=request.instructions,
         native_tools=request.native_tools,
         allowed_tools=request.allowed_tools,

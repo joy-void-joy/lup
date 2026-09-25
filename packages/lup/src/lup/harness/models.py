@@ -997,7 +997,9 @@ class Agent(SelectableRule, frozen=True):
     description: PortableText = Field(min_length=1, max_length=1024)
     prompt: PromptDocument
     tools: list[ToolName] = []
-    model: ModelTier | None = None
+    model: ModelTier | None = "strongest"
+    """The tier this agent runs on; ``None`` leaves its metadata unsaid."""
+
     color: AgentColor | None = None
 
     def selection_id(self) -> str:

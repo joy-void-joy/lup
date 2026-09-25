@@ -8,6 +8,7 @@ from pathlib import Path
 
 import tomlkit
 from lup.providers.codex.login import CODEX_LOGIN
+from lup.providers.codex.model_choice import codex_model_id
 from lup.providers.codex.subagents import CodexModelTiers
 from lup.providers.drift_prompt import drift_hook
 from lup.providers.peer_delivery import delivery_artifacts, delivery_command
@@ -320,7 +321,7 @@ class CodexSpellings(NativeSpellings):
         return "."
 
     def model_alias(self, tier: ModelTier) -> str | None:
-        return CodexModelTiers().resolve(tier)
+        return codex_model_id(tier, CodexModelTiers())
 
     def tree(self, location: TreeLocation) -> Atom:
         match location:

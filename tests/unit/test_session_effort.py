@@ -6,27 +6,22 @@ The failure this guards against is silent: both adapters already carried an
 application that set one watched it reach nothing and got whatever the
 runtime's own configuration file happened to say. Nothing raised, and the
 value a session actually ran at was only discoverable by reading the provider
-call. Each rung is pinned here because the two ladders differ at both ends,
-and a collapse at either one is exactly the substitution that would otherwise
-go unnoticed.
+call. Each rung is pinned here because a collapse of one rung into another is
+exactly the substitution that would otherwise go unnoticed.
 """
 
 from pathlib import Path
+from typing import get_args
 
 import pytest
 
+from lup.providers.claude.models import ClaudeEffort
 from lup.providers.claude.selection import CLAUDE_EFFORT, claude_config
+from lup.providers.codex.models import CodexEffort
 from lup.providers.codex.selection import CODEX_EFFORT, codex_config
 from lup.providers.selection import SessionEffort, SessionRequest
 
-EVERY_DEGREE: list[SessionEffort] = [
-    "minimal",
-    "low",
-    "medium",
-    "high",
-    "xhigh",
-    "max",
-]
+EVERY_DEGREE: list[SessionEffort] = list(get_args(SessionEffort.__value__))
 
 
 def test_a_request_naming_no_effort_leaves_both_runtimes_unset() -> None:
@@ -38,28 +33,24 @@ def test_a_request_naming_no_effort_leaves_both_runtimes_unset() -> None:
 
 
 @pytest.mark.parametrize("degree", EVERY_DEGREE)
-def test_every_degree_reaches_both_runtimes(degree: SessionEffort) -> None:
-    """A rung that rendered to None would be the silent fall-through itself."""
+def test_every_degree_reaches_both_runtimes_under_its_own_name(
+    degree: SessionEffort,
+) -> None:
+    """Both catalogs list every portable rung, so neither may reinterpret one."""
     request = SessionRequest(cwd=Path("."), effort=degree)
 
-    assert claude_config(request).effort is not None
-    assert codex_config(request).effort is not None
+    assert claude_config(request).effort == degree
+    assert codex_config(request).effort == degree
+    assert CLAUDE_EFFORT[degree] == degree
+    assert CODEX_EFFORT[degree] == degree
 
 
-def test_the_shared_middle_rungs_render_unchanged() -> None:
-    """Both runtimes spell these four themselves, so neither may reinterpret."""
-    for degree in ("low", "medium", "high", "xhigh"):
-        assert CLAUDE_EFFORT[degree] == degree
-        assert CODEX_EFFORT[degree] == degree
-
-
-def test_each_ladder_collapses_only_at_the_end_it_lacks() -> None:
-    """The two documented narrowings, pinned so a third cannot appear quietly."""
-    assert CLAUDE_EFFORT["minimal"] == "low"
-    assert CODEX_EFFORT["max"] == "xhigh"
-
-    assert CODEX_EFFORT["minimal"] == "minimal"
-    assert CLAUDE_EFFORT["max"] == "max"
+def test_the_portable_ladder_is_the_rungs_both_catalogs_share() -> None:
+    """A rung only one runtime lists would be narrowed on the other in silence."""
+    shared = set(get_args(ClaudeEffort.__value__)) & set(
+        get_args(CodexEffort.__value__)
+    )
+    assert set(EVERY_DEGREE) == shared
 
 
 def test_neither_map_leaves_a_degree_unanswered() -> None:
@@ -68,16 +59,16 @@ def test_neither_map_leaves_a_degree_unanswered() -> None:
     assert sorted(CODEX_EFFORT) == sorted(EVERY_DEGREE)
 
 
-def test_the_portable_ladder_never_offers_a_rung_claude_cannot_reason_at() -> None:
-    """Codex's ``none`` is withheld: on Claude it would become ``low`` in silence."""
+def test_nothing_below_low_is_offered() -> None:
+    """``none`` and ``minimal`` left Codex's catalog; neither may linger here."""
     assert "none" not in EVERY_DEGREE
-    assert "none" not in CLAUDE_EFFORT.values()
-    assert "none" not in CODEX_EFFORT.values()
+    assert "minimal" not in EVERY_DEGREE
 
 
-def test_max_effort_is_the_hardest_each_runtime_thinks() -> None:
+def test_ultra_is_the_top_of_the_portable_ladder() -> None:
     """Asking for the ceiling has to land on a ceiling, not near one."""
-    request = SessionRequest(cwd=Path("."), effort="max")
+    request = SessionRequest(cwd=Path("."), effort="ultra")
 
-    assert claude_config(request).effort == "max"
-    assert codex_config(request).effort == "xhigh"
+    assert EVERY_DEGREE[-1] == "ultra"
+    assert claude_config(request).effort == "ultra"
+    assert codex_config(request).effort == "ultra"

@@ -11,11 +11,12 @@ import sys
 
 import pytest
 
-from lup import create_client
+from lup import CustomModel, create_client
 from lup.providers.routing import (
     PROVIDER_ROUTES,
     PrefixModelMatcher,
     ProviderRoute,
+    catalog_provider,
     provider_for,
 )
 from lup.sessions.client import Client
@@ -58,7 +59,7 @@ def test_a_broader_route_written_first_shadows_the_narrower_one() -> None:
 def test_a_model_nothing_claims_names_what_it_knows() -> None:
     """Raised rather than guessed, and the message carries the way forward."""
     with pytest.raises(LookupError) as raised:
-        create_client("llama-3")
+        create_client(CustomModel(id="llama-3"))
 
     assert "llama-3" in str(raised.value)
     assert "provider=" in str(raised.value)
@@ -72,12 +73,34 @@ def test_naming_the_provider_skips_the_table_entirely() -> None:
     case: the id says nothing about the vendor, and the caller does.
     """
     client = create_client(
-        "some-internal-name",
+        CustomModel(id="some-internal-name"),
         provider="claude",
         base_url="http://localhost:4000",
     )
 
     assert isinstance(client, Client)
+
+
+def test_a_catalog_alias_routes_without_a_vendor_prefix() -> None:
+    """``opus`` names no vendor in its spelling; the catalog listing it does."""
+    assert catalog_provider("opus") == "claude"
+    assert catalog_provider("fable") == "claude"
+    assert catalog_provider("gpt-6-astra") == "codex"
+    assert catalog_provider("llama-3") is None
+    assert isinstance(create_client("opus"), Client)
+
+
+def test_a_tier_routes_only_where_the_provider_is_named() -> None:
+    """Every runtime spells every tier, so a tier alone names no vendor."""
+    with pytest.raises(LookupError, match="provider="):
+        create_client("strongest")
+
+    assert isinstance(create_client("strongest", provider="codex"), Client)
+
+
+def test_a_custom_id_still_routes_by_its_prefix() -> None:
+    """Leaving the catalog does not leave the prefix routes behind."""
+    assert isinstance(create_client(CustomModel(id="claude-next")), Client)
 
 
 def test_routing_builds_a_client_for_either_vendor() -> None:

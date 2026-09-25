@@ -31,10 +31,10 @@ the field where silence costs most — a roster that came out too wide fails
 visibly, where a refusal that was dropped leaves the tool callable and
 nothing saying so.
 
-``effort`` is narrowed rather than refused: Codex's ladder ends at ``xhigh``,
-so a request for ``max`` opens at that ceiling. Asking to think as hard as
-possible is answered by the hardest this runtime thinks, which is what was
-wanted; asking for governance it has no way to apply is not.
+``effort`` passes through under its own name: every portable rung is one
+Codex's catalog lists. Which rungs a given model takes is narrower, and a
+rung the model lacks is refused where the session is declared rather than
+narrowed to one it has. A model only Claude's catalog lists is refused too.
 """
 
 from pathlib import Path
@@ -43,10 +43,11 @@ from typing import Literal
 from lup.providers.codex.hooks import codex_hook_approval_policy
 from lup.providers.codex.home import select_codex_home
 from lup.providers.codex.login import CODEX_LOGIN
+from lup.providers.codex.model_choice import codex_model_choice
+from lup.providers.codex.models import CodexEffort
 from lup.providers.codex.native_tools import CodexNativeTools
 from lup.providers.codex.runtime import (
     CODEX_PROGRAM,
-    CodexEffort,
     CodexMcpServerConfig,
     CodexSessionConfig,
     create_codex,
@@ -80,16 +81,17 @@ CODEX_AUTONOMY: dict[SessionAutonomy, CodexSandbox] = {
 # lup: ignore[constant-declaration] — each value is Codex's own effort for the
 # degree beside it, over a vocabulary this library closes
 CODEX_EFFORT: dict[SessionEffort, CodexEffort] = {
-    "minimal": "minimal",
     "low": "low",
     "medium": "medium",
     "high": "high",
     "xhigh": "xhigh",
-    "max": "xhigh",
+    "max": "max",
+    "ultra": "ultra",
 }
 """What Codex calls each degree of effort a caller can ask for.
 
-``max`` meets ``xhigh`` because Codex's ladder has no rung above it."""
+Every rung under its own name, each one Codex's catalog lists; a model whose
+own row lacks one refuses it where the session is declared."""
 
 
 def codex_mcp_server(name: str, server: McpServerEntry) -> CodexMcpServerConfig:
@@ -240,7 +242,7 @@ def codex_config(request: SessionRequest) -> CodexSessionConfig:
             "hosted server/tool names collide in Codex; rename the ambiguous server or tool"
         )
     return CodexSessionConfig(
-        model=request.model,
+        model=None if request.model is None else codex_model_choice(request.model),
         developer_instructions=request.instructions,
         cwd=request.cwd,
         policy_root=project_root(),

@@ -6,11 +6,15 @@ from typing import Literal, assert_never
 from lup.types import ModelTier, SubagentSpec
 
 
-def model_alias(tier: ModelTier) -> Literal["inherit", "opus", "sonnet", "haiku"]:
+def model_alias(
+    tier: ModelTier,
+) -> Literal["inherit", "fable", "opus", "sonnet", "haiku"]:
     """Claude's native aliases, shared by SDK roles and generated agents."""
     match tier:
         case "inherit":
             return "inherit"
+        case "frontier":
+            return "fable"
         case "strongest":
             return "opus"
         case "balanced":
