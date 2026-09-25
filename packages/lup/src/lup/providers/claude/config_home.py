@@ -66,8 +66,9 @@ An account signed in through another OAuth server keeps a document of its
 own, so one home can hold both and the variable decides which a session
 reads."""
 
-CLAUDE_HOME_DIR = ".claude"
-"""The configuration home a session falls back to, named in the user's home."""
+CLAUDE_HOME_DIR = CLAUDE_LOGIN.ambient_home.name
+"""The directory Claude Code reads settings from, in a workspace as in the
+user's home, where it is the configuration home a session falls back to."""
 
 WORKSPACE_SETTINGS = "settings.json"
 """A workspace's own settings, inside the directory Claude reads it from."""
@@ -104,21 +105,6 @@ class ClaudeConfigUnreadable(RuntimeError):
     past every caller written to answer this — the fault report that exists
     to say a run cannot open a session anywhere crashed instead of saying it.
     """
-
-
-def default_config_home() -> Path:
-    """The configuration home a session opens under when none is named.
-
-    The operator's: joined onto this process's home directory, never onto a
-    ``HOME`` a request hands its session. A request changes ``HOME`` for a
-    tool its session runs, and that session must still authenticate as the
-    operator, so the account a derived home is seeded from and linked back
-    to stays the one this program was launched as. Claude Code left to
-    choose would join the request's instead — its own default is joined onto
-    ``os.homedir()``, which reads ``HOME`` — and a homed session is never
-    left that choice, because homing names its configuration home outright.
-    """
-    return Path.home() / CLAUDE_HOME_DIR
 
 
 class ClaudeConfigHome(BaseModel, frozen=True):
@@ -196,7 +182,7 @@ def selected_config_home(environment: EnvVars) -> ClaudeConfigHome:
     One input is deliberately not the environment's: the home directory,
     for the unnamed home and the document beside it, is this process's —
     the operator's — rather than a ``HOME`` the environment carries for a
-    session's tools, for the reason :func:`default_config_home` gives.
+    session's tools, for the reason ``CLAUDE_LOGIN`` gives.
     """
     # lup: defer: an exported empty CLAUDE_CONFIG_DIR is read here as the
     # directory `.`, this process's working directory, with the document
@@ -208,7 +194,7 @@ def selected_config_home(environment: EnvVars) -> ClaudeConfigHome:
     # link pointing at itself. Decide whether an empty value names no home,
     # as Codex's does, or mirror both halves against the session's directory.
     named = environment.get(CLAUDE_CONFIG_DIR)
-    directory = default_config_home() if named is None else Path(named).expanduser()
+    directory = CLAUDE_LOGIN.ambient_home if named is None else Path(named).expanduser()
     legacy = directory / CLAUDE_LEGACY_DOCUMENT
     beside = Path.home() if named is None else directory
     current = beside / home_document(environment)

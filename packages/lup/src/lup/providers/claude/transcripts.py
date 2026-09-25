@@ -23,7 +23,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
-from lup.providers.claude.config_home import default_config_home
+from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.observability.audit import ObservableEventKind
 from lup.observability.native import (
     NativeRecordOrigin,
@@ -332,7 +332,7 @@ class ClaudeTranscripts(NativeTranscripts):
     """Read Claude Code's persisted session records under one configuration home."""
 
     def __init__(self, config_home: Path | None = None) -> None:
-        self.config_home = config_home or default_config_home()
+        self.config_home = config_home or CLAUDE_LOGIN.ambient_home
 
     def roots(self) -> list[Path]:
         return [self.config_home / CLAUDE_SESSIONS_DIR]

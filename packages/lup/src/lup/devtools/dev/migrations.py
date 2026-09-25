@@ -694,6 +694,23 @@ DECLARED: list[Migration] = [
             ),
         ],
     ),
+    Migration(
+        subjects=["default_config_home"],
+        reason=(
+            "three places computed Claude's default configuration home each on "
+            "their own; the login declaration is the one that says it"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Read CLAUDE_LOGIN.ambient_home, from "
+                    "lup.providers.claude.login, wherever default_config_home() "
+                    "was called: the same directory, joined onto this process's "
+                    "home rather than a HOME a session carries."
+                )
+            ),
+        ],
+    ),
 ]
 """Every break this library has taken since its last release, and what to do.
 
