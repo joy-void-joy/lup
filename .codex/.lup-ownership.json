@@ -688,7 +688,7 @@
     {
       "path": ".codex/plugins/lup/skills/upstream/SKILL.md",
       "category": "generated",
-      "sha256": "cdbc4a6b5c31812b44b69c64488c30906f2d129e3dcb0e6d70995722f8f76ca4",
+      "sha256": "328cf71eff2ba412a3b3a42d8720ffe5ce692266b5c212b94df182989c5bca0e",
       "semantic_id": "skill.upstream",
       "executable": false
     },

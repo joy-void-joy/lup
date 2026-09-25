@@ -39,7 +39,11 @@ first launch: the registration `sync.json` ships names lup's repository and
 mounts it `rw`, so the launch clones it under `~/.cache/lup/sync/lup.git`
 where nothing is there yet, attaches a worktree for its default branch, and
 mounts the whole clone -- so a worktree cut in it later is as writable as
-that one. A machine that keeps its own checkout of lup has registered that
+that one. The exception is an inner launch whose runtime's own sandbox cannot
+hold the clone's `config` and `hooks/` read-only inside it: that launch
+admits only the worktrees the clone held when it started, so a new one is
+written from the next launch (`docs/platform-differentiation.md` says which
+runtime). A machine that keeps its own checkout of lup has registered that
 one instead, and `refs/lup` is its working tree. Where the project resolves
 lup from a repository, the registration follows that pin, so the checkout is
 always a clone of the repository the library comes from.
