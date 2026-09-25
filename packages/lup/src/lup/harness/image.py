@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Literal
 
 import sh
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from lup.harness.browser import BrowserBridge
 from lup.harness.clipboard import ClipboardBridge, shim_program
@@ -88,6 +88,143 @@ class CacheVolume(BaseModel, frozen=True):
         return ["-v", f"{self.name}:{self.path}"]
 
 
+def spelled_bytes(size: int) -> str:
+    """A byte count the way a reader weighs one, in binary units."""
+    for power, unit in ((4, "TiB"), (3, "GiB"), (2, "MiB"), (1, "KiB")):
+        if size >= 1024**power:
+            return f"{size / 1024**power:.1f} {unit}"
+    return f"{size} B"
+
+
+class MemoryLimit(BaseModel, frozen=True):
+    """How much memory one session may hold: an amount, or a share of the engine's.
+
+    A share is what a committed declaration can state, because it means the
+    same thing on every machine: three quarters of what this engine can give a
+    container is a sentence two hosts with different memory both honour, where
+    a fixed amount is one machine's fact and belongs in that machine's
+    registry or on one launch's command line.
+
+    Spelled the way the engines spell ``--memory`` — a number with an optional
+    ``b``, ``k``, ``m``, ``g`` or ``t`` in binary units — or as a percentage.
+    Parsed here, once, so the flag, the machine's registry and the declaration
+    cannot come to accept different words.
+    """
+
+    amount: int | None = Field(default=None, gt=0, description="Bytes, fixed")
+    percent: int | None = Field(
+        default=None,
+        ge=1,
+        le=100,
+        description="A share of the memory the container engine can hand out",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    # lup: ignore[bare-object] — pydantic hands a before-hook whatever the
+    # caller wrote, which is the untyped boundary the rule says to narrow at
+    def a_spelling_is_parsed(cls, value: object) -> object:
+        """Accept the engines' own spelling, so a limit is written the one way."""
+        if not isinstance(value, str):
+            return value
+        spelled = value.strip().lower()
+        if spelled.endswith("%"):
+            return {"percent": int(spelled.removesuffix("%"))}
+        powers = {"b": 0, "k": 1, "m": 2, "g": 3, "t": 4}
+        unit = next((unit for unit in powers if spelled.endswith(unit)), "b")
+        number = float(spelled.removesuffix(unit))
+        return {"amount": round(number * 1024 ** powers[unit])}
+
+    @model_validator(mode="after")
+    def one_measure(self) -> "MemoryLimit":
+        """Refuse a limit stating both measures, or neither."""
+        if (self.amount is None) == (self.percent is None):
+            raise ValueError("a memory limit is an amount or a percentage, not both")
+        return self
+
+    def resolved(self, total: int) -> int:
+        """The limit in bytes, given how much the engine can hand out."""
+        if self.amount is not None:
+            return self.amount
+        return total * (self.percent or 0) // 100
+
+    def described(self, total: int) -> str:
+        """The limit as a launch says it, with the share it stands for."""
+        held = spelled_bytes(self.resolved(total))
+        if self.percent is None:
+            return held
+        return f"{held}, {self.percent}% of the engine's {spelled_bytes(total)}"
+
+
+class ContainerPrivileges(BaseModel, frozen=True):
+    """What a session's processes may hold inside the container, and may come to hold.
+
+    Every capability is dropped and then only the ones named here are given
+    back, so a widening is a list somebody wrote rather than a default nobody
+    read. ``new_privileges`` is the other half: whether an exec may raise what
+    a process holds — a setuid-root binary, a file capability — which is how
+    a process that holds nothing would get something anyway. Off, it cannot.
+
+    The default holds nothing and gains nothing, and a session needs neither:
+    it runs as the operator's own uid, whose effective set is already empty.
+    A kind of session that is meant to administer its own container — install
+    system packages through a setuid helper, say — declares what that takes,
+    on the image or on its mode, where a review reads it.
+    """
+
+    capabilities: list[str] = Field(
+        default=[],
+        description=(
+            "Capabilities given back after every one is dropped, spelled as "
+            "the engines spell them without the ``CAP_`` prefix, such as "
+            "``CHOWN`` or ``SETUID``"
+        ),
+    )
+    new_privileges: bool = Field(
+        default=False,
+        description=(
+            "Whether a process may raise its privileges on exec, through a "
+            "setuid binary or a file capability. Off sets the engines' "
+            "``no-new-privileges``"
+        ),
+    )
+
+    @model_validator(mode="after")
+    def capabilities_are_names(self) -> "ContainerPrivileges":
+        """Refuse a capability spelled any way but the engines' bare upper-case name."""
+        misspelled = [
+            name
+            for name in self.capabilities
+            if not name
+            or not all(
+                character.isupper() or character.isdigit() or character == "_"
+                for character in name
+            )
+        ]
+        if misspelled:
+            raise ValueError(
+                f"capabilities are named bare and upper-case, such as CHOWN: {misspelled}"
+            )
+        return self
+
+    def arguments(self) -> list[str]:
+        """The run arguments that set these privileges, in either engine's words."""
+        return [
+            "--cap-drop",
+            "ALL",
+            *[word for name in self.capabilities for word in ("--cap-add", name)],
+            *(
+                []
+                if self.new_privileges
+                else ["--security-opt", "no-new-privileges:true"]
+            ),
+        ]
+
+    def widened(self) -> bool:
+        """Whether this grants anything the default holds back."""
+        return bool(self.capabilities) or self.new_privileges
+
+
 class Registry(BaseModel, frozen=True):
     """A manager that installs by registry name, and the command that drives it.
 
@@ -136,10 +273,33 @@ class ContainerEngine(BaseModel, frozen=True):
     """
 
     binary: str = Field(description="The executable that starts a container")
+    memory_report: str = Field(
+        default="{{.MemTotal}}",
+        description=(
+            "The ``info --format`` template that answers how much memory this "
+            "engine can hand a container, in bytes -- a field each engine "
+            "names differently"
+        ),
+    )
 
     def identity_arguments(self, uid: int, gid: int) -> list[str]:
         """Run the session as this uid and gid, in the words this engine takes."""
         return ["--user", f"{uid}:{gid}"]
+
+    def memory_total(self) -> int | None:
+        """How much memory this engine can hand a container, or nothing it said.
+
+        Asked of the engine rather than read off the host, because the two
+        differ exactly where a share would go wrong: an engine inside a
+        virtual machine hands out the machine's memory, not the laptop's.
+        """
+        try:
+            answered = str(
+                sh.Command(self.binary)("info", "--format", self.memory_report)
+            ).strip()
+        except (sh.CommandNotFound, sh.ErrorReturnCode):
+            return None
+        return int(answered) if answered.isdigit() else None
 
 
 class Docker(ContainerEngine, frozen=True):
@@ -158,6 +318,7 @@ class Podman(ContainerEngine, frozen=True):
     """Podman, which remaps into the subuid range unless told to keep the id."""
 
     binary: str = "podman"
+    memory_report: str = "{{.Host.MemTotal}}"
 
     def identity_arguments(self, uid: int, gid: int) -> list[str]:
         """The portable spelling, plus podman's word for leaving the id alone."""
@@ -671,6 +832,33 @@ class Image(BaseModel, frozen=True):
             "number is a runaway backstop rather than a budget"
         ),
     )
+    privileges: ContainerPrivileges = Field(
+        default=ContainerPrivileges(),
+        description=(
+            "What the session's processes may hold and come to hold. The "
+            "default holds nothing and gains nothing, which is what a session "
+            "running as the operator's own uid needs; a mode may declare its "
+            "own for the sessions launched in it"
+        ),
+    )
+    memory: MemoryLimit | None = Field(
+        default=None,
+        description=(
+            "How much memory the session may hold, as an amount or as a share "
+            "of what the engine can hand out (``75%``); unset is no limit. "
+            "Swap is held to the same figure, so a session at its limit is "
+            "stopped by the engine rather than paging the host into the ground "
+            "-- a limit that swap doubles protects the host from nothing. A "
+            "machine's registry and a launch's ``--memory`` override it. No "
+            "default, because the engines refuse the whole container where the "
+            "memory controller is not delegated -- rootless podman on some "
+            "hosts, kernels booted without it -- and a project that never asked "
+            "for a limit should not find its sessions refused over one. No CPU "
+            "bound sits beside it on purpose: work that renders or compiles "
+            "wants every core, and a starved session is a slow one rather than "
+            "a host brought down"
+        ),
+    )
     trusted_projects: list[Path] = Field(
         default=[],
         description=(
@@ -1015,6 +1203,7 @@ USER $UID:$GID
         gid: int,
         engine: ContainerEngine = Docker(),
         proxy_address: str = "",
+        memory: int | None = None,
     ) -> list[str]:
         """The run arguments a session is started with, mounts excluded.
 
@@ -1061,6 +1250,23 @@ USER $UID:$GID
         test having broken something, and cost a whole bisection of a change
         that was fine. Both engines take the flag and put a real reaper at PID
         1, so the class stops existing rather than being watched for.
+
+        By default every capability is dropped and no process may gain one,
+        the pair the egress proxy already runs under -- see :attr:`privileges`
+        for declaring otherwise. Nothing in a session needs either: the build
+        ends on ``USER`` at the operator's own ids, the run repeats them
+        (podman keeping them unmapped), and the entrypoint only makes and
+        writes files in the config volume before handing over -- a non-root
+        process whose effective set is empty to begin with. What the two
+        flags close is the way back up: the bounding set is what a setuid-root
+        binary would be granted from, and the image was measured carrying
+        thirteen (``su``, ``mount`` and ``passwd`` among them), while
+        ``no-new-privileges`` stops the exec that would do the granting. A
+        device grant is untouched, being the runtime's to inject from outside
+        the container's own capability set.
+
+        ``memory`` is the limit a launch resolved, in bytes, and swap is held
+        to the same figure -- see :attr:`memory`.
         """
         return [
             *engine.identity_arguments(uid, gid),
@@ -1068,6 +1274,12 @@ USER $UID:$GID
             "--init",
             "--pids-limit",
             str(self.pids_limit),
+            *self.privileges.arguments(),
+            *(
+                ["--memory", str(memory), "--memory-swap", str(memory)]
+                if memory is not None
+                else []
+            ),
             *[
                 argument
                 for port in self.published_ports
@@ -1199,6 +1411,7 @@ USER $UID:$GID
         inherited_environment: list[str] | None = None,
         environments: Mapping[Path, Path] | None = None,
         devices: Sequence[Device] = (),
+        memory: int | None = None,
     ) -> list[str]:
         """The whole argv that opens one agent session inside a container.
 
@@ -1260,6 +1473,11 @@ USER $UID:$GID
         Emitted with the mounts because it is the same kind of thing -- the
         boundary, widened by a grant -- and read in the same place by
         whoever reads the argv.
+
+        ``memory`` is the limit this launch resolved, in bytes, and passed
+        for the reason ``devices`` is: a share of memory is a share of what
+        *this* engine can hand out, which the declaration cannot know and a
+        launch asks.
         """
         granted_devices = [
             argument for device in devices for argument in device.arguments()
@@ -1353,7 +1571,7 @@ USER $UID:$GID
             f"{state_volume}:{self.config_home}",
             "-e",
             f"{config_home_env}={self.config_home}",
-            *self.run_arguments(checkout, uid, gid, engine, proxy_address),
+            *self.run_arguments(checkout, uid, gid, engine, proxy_address, memory),
             *[
                 argument
                 for name, value in reaching.items()
