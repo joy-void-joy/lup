@@ -148,9 +148,17 @@ DECLARED: list[Migration] = [
             "DevtoolsDeclarations.modules",
             "Harness.review_inbox",
             "dev questions serve",
+            "review_inbox_session",
+            "ensure_review_inbox",
+            "ReviewInboxService.instance",
+            "serve_review_inbox",
+            "session_argv.services",
         ],
         reason="Browser commands, operator authority and native launch startup follow the optional review-inbox module independently of sandbox",
         steps=[
+            MigrationStep(
+                instruction="Custom callers of session_argv pass services=ExitStack() and keep that stack open through native execution. Direct service users hold with review_inbox_session(root) around the work that needs the inbox; direct ensure_review_inbox callers supply their own ExitStack for leases. Every caller releases its scope on exit or failure. ReviewInboxService includes the required instance identity for safe cleanup. Replace calls to the removed detached serve_review_inbox helper with the session context or the foreground dev questions serve command."
+            ),
             MigrationStep(
                 instruction="Adopt or decline review-inbox in the project module selection independently of sandbox. The scaffold takes undeclined modules; set loads_guidance=True explicitly to load inbox guidance. Core terminal questions remain available when the module is declined."
             ),
@@ -158,7 +166,7 @@ DECLARED: list[Migration] = [
                 instruction="For custom composition, pass the selected ModuleSelection as DevtoolsDeclarations.modules, or pass review_inbox_enabled to create_dev_app. Set Harness.review_inbox from selection.takes(REVIEW_INBOX) and compose the review_inbox.runner_targets and review_inbox.shell_rules helpers with the same selection. dev update merges these declarations for scaffold adopters."
             ),
             MigrationStep(
-                instruction="With review-inbox enabled, run dev questions serve/open/stop and harness claude/codex from an operator terminal; agents may use dev questions status and harness generate all. Single-repository dev questions serve starts or reuses a detached service and returns; use dev questions status, open and stop to manage it. Multiple distinct repositories keep a foreground server. --generate-only starts no inbox, and no stored-data migration is required."
+                instruction="With review-inbox enabled, run dev questions serve/open/stop and harness claude/codex from an operator terminal; agents may use dev questions status and harness generate all. Manual dev questions serve stays in the foreground until Ctrl+C. Native harness sessions share a background inbox; the last session exit or interrupt stops it. dev questions open only opens an existing background inbox; status and stop report or stop it explicitly. Native launch automatically replaces an authenticated pre-ownership service, leaving unrelated listeners alone. --generate-only starts no inbox, and no stored-data migration is required."
             ),
         ],
     ),

@@ -5,24 +5,35 @@ approval queue across repository worktrees. It is independent of the `sandbox`
 module. Declining it removes the browser commands and launch service; the core
 `dev questions list`, `show`, `answer`, `reject`, and `cancel` commands remain.
 
-Native Claude and Codex harness launches start or reuse the inbox service on
-the host. The service persists when a session closes, so the page stays usable
-between launches. `--generate-only` generates artifacts without starting it.
+Native Claude and Codex harness launches start or reuse one background inbox
+per repository on the host. Active harness sessions share it, including sessions
+in sibling worktrees. Closing or interrupting a harness releases its ownership;
+the last session's exit stops the server even while the browser remains open.
+An abruptly terminated launcher also releases ownership. `--generate-only`
+generates artifacts without starting an inbox.
 
-`dev questions status` reports whether the service is available without
-revealing its browser credential. The operator uses `dev questions open` to
-open it, `dev questions stop` to stop it, or `dev questions serve` to start or
-reuse it. Starting, opening, and stopping the service require the operator's
-terminal outside an agent session.
+`dev questions status` reports the background endpoint and active session count
+without revealing its browser credential. Inside an agent session it reports only
+the endpoint advertised by the launcher, without claiming to verify availability.
+The operator uses `dev questions open` to open an existing background inbox or
+`dev questions stop` to stop it explicitly, including while harnesses are active.
+`open` never creates an unattended server; when no background inbox is running,
+start a harness or use `serve`. These operator commands run outside agent sessions.
 
-For one selected repository, `serve` starts or reuses the detached service and
-returns. `--root <checkout>` selects a repository instead of the current one;
-repeating it with distinct repositories runs a foreground inbox over those
-repositories. `--host` selects a loopback address, `--port` selects a preferred
-port with an available-port fallback, and `--no-open` keeps the browser closed.
-`open` starts or recovers the service before opening its page. The service keeps
-its browser assets beside its private state, so deleting the source worktree
-does not make an already running page disappear.
+`dev questions serve` runs a separate foreground server in the current terminal.
+Ctrl+C stops that server; closing a harness does not stop it. `--root <checkout>`
+selects a repository instead of the current one, and repeating it watches the
+selected repositories together. `--host` selects a loopback address, `--port`
+selects the foreground port, and `--no-open` keeps the browser closed. If that
+port is already occupied, use another port or stop the background inbox with
+`dev questions stop` before serving.
+
+Native launches try their preferred port and select an available port if it is
+occupied by another listener. They authenticate a recorded service before reusing
+or stopping it. A recorded service without session ownership is replaced during
+launch; an unrelated or manual listener is left alone. Background services retain
+their browser assets beside private host state, so removing a source worktree
+does not break the page while another harness still owns it.
 
 The page shows complete commands and file changes, pending requests, decision
 history, and requester identity. Approve or reject with an optional note.
@@ -107,7 +118,7 @@ of the authority boundary.
 
 ## Runtime parity
 
-`uv run lup-devtools dev questions serve` provides the same persistent browser
+`uv run lup-devtools dev questions serve` provides the same foreground browser
 inbox for durable review records from either runtime. One operator capability
 protects its queue APIs; the same captured diffs, exact commands, approval and
 rejection notes, and atomic answer transition apply to both. The command that
