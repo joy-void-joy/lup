@@ -85,14 +85,11 @@ class ModuleRow(BaseModel, frozen=True):
         """
         column = f"{self.guidance_resolved:5d}b" if self.guidance_resolved else "     —"
         quiet = "" if self.loads or not self.guidance_resolved else "  (not loaded)"
-        match self.guidance_declared:
-            case declared if declared == self.guidance_resolved:
-                own = ""
-            case 0:
-                own = "  (module declares none)"
-            case declared:
-                own = f"  (module declares {declared}b)"
-        return f"{column}{quiet}{own}"
+        if self.guidance_declared == self.guidance_resolved:
+            return f"{column}{quiet}"
+        if not self.guidance_declared:
+            return f"{column}{quiet}  (module declares none)"
+        return f"{column}{quiet}  (module declares {self.guidance_declared}b)"
 
     def surfaces(self) -> str:
         """What it contributes, counted, with the empty ones left out.
