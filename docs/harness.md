@@ -563,6 +563,141 @@ plugin is never mistaken for the cache. Personal trust state, credentials,
 active run state, and cache contents are never generated or committed. Review
 hook trust with the native hooks surface after generation.
 
+Where a launch runs on the host at all is decided before any of this:
+`lup-launch` shows the operator what changed in the host zone and hands the
+launch an export of what they approved. [trust.md](trust.md) is that wall.
+
+### Launching in a mode
+
+A project declares named kinds of session in `Harness.modes`, each a
+`SessionMode` bundling what it changes from a normal launch, and launches one
+by name: `harness claude --mode free`, `harness codex --mode free`, or through
+the installed launcher, `lup-launch claude --mode free`, which passes the
+mode on intact. A host shim is one line: `exec lup-launch "$runtime" --mode
+free "$@"`. Modes are read from the declaration the launch compiles, never
+from a file a session can write.
+
+A mode dropping the hooks or the scan rules gets a variant plugin compiled
+for the launch into a content-addressed directory outside the checkout and
+mounted read-only; the committed trees never move. Claude Code is pointed at
+it with `--plugin-dir`, which replaces the installed plugin of that name;
+Codex installs it into a home kept for the mode alone. The session is told
+its mode's name and description — `--append-system-prompt` for Claude Code,
+`developer_instructions` for Codex — beside the runtime's own prompt, never
+replacing it. A mode may carry its own always-loaded guidance
+(`SessionMode.guidance`, a `PromptDocument` naming its `source`), rendered
+per runtime with generation's renderer and budget and mounted read-only over
+the committed `.claude/CLAUDE.md` and `AGENTS.md`. A mode setting
+`git_guards=False` has the launcher set `LUP_GIT_GUARDS=off`, and the
+pre-commit guards stand down for that session's commits, saying so.
+
+A mode that switches off something only a container can stand in for — the
+hooks, a runtime's asking or its own sandbox, its own plugin or guidance — is
+refused on the host.
+
+### What a launch resolves, and where each answer came from
+
+Every setting below is answered by the first layer that says anything: the
+launch's own flag, the mode, this machine's `sync.json.local` under
+`session`, then the project's declaration. The banner says each value with
+its origin.
+
+| Setting | Flag | `sync.json.local` `session.` | Mode / project |
+| --- | --- | --- | --- |
+| Network | `--network filtered\|bridge\|host\|none` | `network` | `SessionMode.network` / `Image.egress.mode` |
+| Memory limit | `--memory 12g` or `75%` | `memory` | `SessionMode.memory` / `Image.memory` |
+| Claude Code permission mode | `--permission-mode` | `permission_mode` | `SessionMode.posture` |
+| Codex approvals, reviewer, sandbox | `--approval-policy`, `--approvals-reviewer`, `--sandbox-mode` | `approval_policy`, `approvals_reviewer`, `sandbox_mode` | `SessionMode.posture` |
+| sudo in the container | `--sudo/--no-sudo` | `sudo` | `SessionMode.privileges` / `Image.privileges` |
+| Generated trees read-only | `--hold-generated/--release-generated` | `hold_generated` | `SessionMode.hold_generated` / `Image.held.generated` |
+| A host service's port | `--host-service NAME=PORT` | `services` | `Image.services` |
+
+A posture value that stops a runtime asking or confining — Claude Code's
+`auto` or `bypassPermissions`, Codex's `auto_review` reviewer, `never`, or
+`danger-full-access` — applies from a declared layer only inside the
+container. `LaunchPosture.unattended()` is Claude Code's `auto` and Codex's
+nearest, `on-request` answered by its reviewer agent;
+[platform-differentiation.md](platform-differentiation.md) states how the two
+differ.
+
+### What a contained session is held from
+
+Every container drops every capability and sets `no-new-privileges`; the
+session runs as the operator's uid. On top of that, whatever the mode:
+
+- **The launch record.** `.lup/preflight/`, `.lup/policy-snapshots/` and
+  `.lup/boundary.json` are written on the host and only read inside, so they
+  are mounted read-only. The question relay, review claims, the approvals
+  record and the hooks' corpora stay writable: a gated session's hooks write
+  them.
+- **Its repository's git configuration, and where git looks for it.**
+  `config`, `hooks/` and a `commondir` of `.` (created on the host, and
+  measured to change nothing git does) are read-only, and a linked
+  worktree's `.git` pointer and administrative files with them. A repository
+  already redirected by a planted `commondir` refuses the launch.
+- **The paths to every hold.** Each directory between a read-only mount and
+  the writable mount around it is pinned as a mount point of its own, since a
+  directory holding a read-only mount can otherwise be renamed and replaced.
+- **The policy a gated session runs.** Claude Code's hooks import only the
+  held plugin directory; a Codex session's installed plugin revision is
+  written again on the host from its source and mounted read-only over its
+  place in the home. Hook interpreters start without the user site, and the
+  image puts the session-owned registry directory last on `PATH`.
+
+Two holds a project opts into, because each costs its sessions something:
+
+- **Generated trees** (`Image.held.generated`, overridable per mode and per
+  launch). A session edits the declarations; the next launch compiles them,
+  after the operator approves the change. Regenerating inside fails, and so
+  does any git command that rewrites a generated file in the working tree:
+  checking out a branch whose trees differ, a merge or rebase touching them,
+  a reset or stash restoring them. A mode that must regenerate or use git
+  freely releases them (`hold_generated=False`).
+- **Nested repositories** (`Image.held.repositories`), held as the checkout's
+  own is. Declared rather than found by scanning: a scan reads a tree the
+  session writes, holds a repository only from the launch after it appears —
+  after the session that made it wrote its configuration — and walks every
+  ignored directory at every launch. `create=True` has the host initialize
+  one that is absent.
+
+Held paths cannot be renamed or removed from inside: `.lup/`, `.git`, a
+declared repository and its `.git`, and the directories holding generated
+files when those are held. `git worktree remove`, `move` and `repair` of the
+session's own linked worktree fail for the same reason.
+
+### Administering the container
+
+`Image(sudo=True)` installs sudo with a passwordless rule that keeps the proxy
+variables; `ContainerPrivileges.administering()` gives back the capabilities a
+package manager uses on the container's own files, with new privileges
+allowed. Capabilities reaching past the container — mounts and namespaces,
+the network stack, other processes, the clock, kernel modules — stay dropped
+however they are asked for. A widening is refused on an engine that is not
+rootless, where the container's root is the host's, unless the launch passes
+`--allow-rootful-privileges`. What sudo installs lives until the container
+stops; the image's roster is how to keep it. A gated session's policy still
+asks before `sudo`.
+
+### Host services and companions
+
+A filtered session has no route to the host. A service it must reach there
+is declared in `Image.services` with its port and, optionally, the variable
+the session reads its address from; the launcher relays exactly those over a
+socket per service and the session calls `http://127.0.0.1:<port>`.
+
+`Harness.companions` are processes each launch runs on the host beside the
+session — a preview server, a watcher — started once the launch is cleared to
+open, logged under `~/.cache/lup/companions/`, said in the banner, and
+stopped with everything they started when the session ends.
+
+### What a contained session is not held from
+
+A sibling worktree's `.git` pointer and administrative files stay writable,
+since removing a sibling from inside is ordinary work, so the host's next git
+command in that sibling reads whatever they name. A `.git` planted in any
+subdirectory is a repository to any host tool run there. What a session
+writes to the checkout is content for the host to treat as untrusted.
+
 ### Opening a session the anti-pattern gate leaves alone
 
 `--ignore-antipatterns`, on both launchers, for the sessions where the rules

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "be8b94e409e570384da55c661bdfa49c09ff363dfb9d57988687f2063661676a",
+  "source_digest": "e253844d38b85b5d2a6cb856fcb255b73ff58195f47eb2f8ac095172c656fef6",
   "target_requirements": [
     "claude-code"
   ],
@@ -702,7 +702,7 @@
     {
       "path": "docs/README.md",
       "category": "generated",
-      "sha256": "039dfb4a590931c2f0a2980fabb9ad0f5acd9d207f9a161da9aff3abfd5cf6fa",
+      "sha256": "d7377eecb71fb717fbc226303cbed9ad8fe63f843ad19339480204fe3d3c9a82",
       "semantic_id": "docs.README",
       "executable": false
     },
@@ -751,7 +751,7 @@
     {
       "path": "docs/harness.md",
       "category": "generated",
-      "sha256": "9121d625e4af222fce9fe414e14c46721c4ae1f7fb7df68fa4c45413a9bf6a0f",
+      "sha256": "fe7b5acefa93baa490951023a563f448ace20b71fe627f527cda415b2b34744b",
       "semantic_id": "docs.harness",
       "executable": false
     },

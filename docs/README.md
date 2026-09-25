@@ -21,6 +21,7 @@ Subjects that span the three components, or that are large enough to own a page.
 | [patterns.md](patterns.md) | The recurring code shapes: declaration-plus-renderer, closed-by-construction, the typed-matcher router, and the engine-versus-surface split. |
 | [orchestration.md](orchestration.md) | The delegation catalog: subagent, nested, background, and deferred tools, and when to reach for each. |
 | [permissions.md](permissions.md) | How a shell command, fetch, or edit becomes allow, ask, defer, or deny — and how the generated hooks decide identically without importing the library. |
+| [trust.md](trust.md) | How a launch shows its operator what it would run on the host, and runs only what they approved. |
 | [rules.md](rules.md) | Every executable Lup rule, its matching shape, its diagnostic, and the module that enforces it. |
 | [resolver.md](resolver.md) | How reviewed feedback becomes concerns, worktrees, workers, and an accepted integration branch. |
 | [supervisor.md](supervisor.md) | The local page that watches a resolver run and answers its questions. |

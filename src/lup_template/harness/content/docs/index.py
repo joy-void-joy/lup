@@ -126,6 +126,11 @@ def document(pages: list[models.Document]) -> models.PromptDocument:
                         "ask, defer, or deny — and how the generated hooks "
                         "decide identically without importing the library.",
                     ),
+                    *page.rows(
+                        "docs.trust",
+                        "How a launch shows its operator what it would run on "
+                        "the host, and runs only what they approved.",
+                    ),
                     RULES_REFERENCE,
                     *page.rows(
                         "docs.resolver",
