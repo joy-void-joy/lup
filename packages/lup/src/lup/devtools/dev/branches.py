@@ -967,12 +967,15 @@ def created_from(branch: str) -> str:
     **Evidence, not authority, and empty is unremarkable.** Four ways it says
     nothing, none of them a fault worth reporting:
 
-    - A bare clone does not log ref updates: `core.logAllRefUpdates` defaults
-      to false without a working tree, so a branch cut by running git against
-      the git directory itself carries no entry, while the same command run
-      from one of its worktrees does. A repository kept as a git directory
-      with worktrees beside it — which is how a machine holds several
-      checkouts of one project — is in that case by default.
+    - A bare clone lup did not prepare does not log ref updates:
+      `core.logAllRefUpdates` defaults to false without a working tree, so a
+      branch cut by running git against the git directory itself carries no
+      entry, while the same command run from one of its worktrees does. lup
+      turns the setting on wherever it prepares a bare clone and it is unset
+      (:func:`lup.devtools.dev.records.log_ref_updates`), so this is a clone
+      made some other way, one whose owner set it off, or one only ever
+      prepared from a contained session, which holds the shared config
+      read-only.
     - Reflogs expire, at 90 days for a reachable entry, and the creation is
       the oldest entry a branch has.
     - They are per-clone and never fetched, so nobody else's clone can answer

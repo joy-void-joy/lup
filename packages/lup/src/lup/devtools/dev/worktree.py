@@ -160,8 +160,9 @@ def merge_driver_registered(root: Path | None = None) -> bool:
 def report_a_blocked_registration(root: Path | None = None) -> bool:
     """Name a merge-driver registration this clone cannot make, without stopping.
 
-    Registering the driver is the one config write left in making a worktree,
-    and it is a once-per-clone one: git resolves a driver name from config
+    Registering the driver is a config write left in making a worktree — the
+    other is a bare clone's reflog, :func:`report_a_blocked_reflog`'s — and
+    it is a once-per-clone one: git resolves a driver name from config
     alone, so no repository can ship it and the clone that first cut a
     worktree registered it for every worktree after. A clone that already
     resolves the driver writes nothing here and is not asked about it.
@@ -192,6 +193,39 @@ def report_a_blocked_registration(root: Path | None = None) -> bool:
         "clone, so a merge touching the generated trees resolves as a plain "
         "three-way merge until it is. Register it once from a host terminal: "
         "`uv run lup-devtools git merge-driver`.",
+        err=True,
+    )
+    return True
+
+
+def report_a_blocked_reflog(diagnosed: bool, root: Path | None = None) -> bool:
+    """Name a reflog setting this bare clone cannot take, without stopping.
+
+    The other once-per-clone write to the shared ``config``, and blocked where
+    the merge driver's is: a contained session holds that file read-only, so
+    turning the reflog on is a host's act. ``diagnosed`` is whether
+    :func:`report_a_blocked_registration` already said why the config cannot
+    be written, which is then not said twice. A clone whose reflog is on, or
+    that is not bare, writes nothing here and is not asked about it.
+
+    Answers whether the setting is blocked, so the step is left out rather
+    than reported unfinished on every later run.
+    """
+    if not records.reflog_off(root):
+        return False
+    if not diagnosed:
+        for cleared in clear_stale_config_locks(root):
+            typer.echo(cleared)
+        diagnosis = config_lock_diagnosis(root)
+        if not diagnosis:
+            return False
+        typer.echo(diagnosis, err=True)
+    shared = records.shared_directory(root)
+    typer.echo(
+        "Git's reflog stays off for this bare clone, so a branch cut by running "
+        "git against its git directory names no base git logged. Turn it on "
+        f"once from a host terminal: `git -C {shared} config "
+        "core.logAllRefUpdates true`.",
         err=True,
     )
     return True
@@ -289,6 +323,29 @@ class MergeDriver(SetupStep, frozen=True):
 
     def required(self) -> bool:
         return not self.blocked
+
+
+class LoggedRefUpdates(SetupStep, frozen=True):
+    """Git's own reflog, turned on for a bare clone left at git's default.
+
+    What lets a branch cut by plain git against the git directory itself name
+    its base through :func:`lup.devtools.dev.branches.created_from`, the same
+    as one cut from any worktree. Once per clone, like the merge driver, and
+    never required: the base this command records answers for its own branch
+    either way.
+    """
+
+    def label(self) -> str:
+        return "git's reflog for this bare clone (core.logAllRefUpdates)"
+
+    def satisfied(self) -> bool:
+        return not records.reflog_off()
+
+    def run(self) -> None:
+        records.log_ref_updates()
+
+    def required(self) -> bool:
+        return False
 
 
 class ArmedGitGuards(SetupStep, frozen=True):
@@ -718,6 +775,7 @@ def create(
     """
     refuse_redirected_pointers()
     registration_blocked = report_a_blocked_registration()
+    reflog_blocked = report_a_blocked_reflog(diagnosed=registration_blocked)
     report_a_blocked_arming(guards)
     current_dir = Path.cwd()
 
@@ -778,6 +836,8 @@ def create(
     def setup() -> Iterator[SetupStep]:
         """Everything that has to hold before this worktree can be used."""
         yield MergeDriver(blocked=registration_blocked)
+        if not reflog_blocked:
+            yield LoggedRefUpdates()
         yield ArmedGitGuards(guards=guards, worktree=worktree_path)
         if not no_record:
             yield recorded

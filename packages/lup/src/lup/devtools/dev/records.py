@@ -161,6 +161,34 @@ def shared_directory(cwd: Path | None = None) -> Path:
     return shared_directory_of(cwd if cwd is not None else Path.cwd())
 
 
+def reflog_off(cwd: Path | None = None) -> bool:
+    """Whether git would log no ref updates against this repository's git directory.
+
+    `core.logAllRefUpdates` defaults to false where there is no working tree,
+    so a bare clone logs nothing for a branch cut by running git against the
+    git directory itself — and the first reflog entry is where git records
+    what a branch was cut from. Unset at every scope is the only case
+    answered yes: an explicit value anywhere, off included, is somebody's
+    choice and stays theirs.
+    """
+    shared = ["-C", str(shared_directory(cwd)), "config", "--get"]
+    bare = git.out(*shared, "--bool", "core.bare", _ok_code=[0, 1]) == "true"
+    return bare and not git.out(*shared, "core.logAllRefUpdates", _ok_code=[0, 1])
+
+
+def log_ref_updates(cwd: Path | None = None) -> bool:
+    """Turn git's reflog on for a bare clone left at the default, saying if it did.
+
+    Written to the shared ``config`` because that is the only place git reads
+    it for the git directory itself, and only where :func:`reflog_off` says
+    so — so it is idempotent, and never overrides a value somebody set.
+    """
+    if not reflog_off(cwd):
+        return False
+    git("-C", str(shared_directory(cwd)), "config", "core.logAllRefUpdates", "true")
+    return True
+
+
 def record_location(branch: str) -> PurePosixPath:
     """Where one branch's record sits inside the shared git directory.
 
