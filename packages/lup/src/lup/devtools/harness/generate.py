@@ -321,7 +321,7 @@ def installer_guidance(
     if document is None:
         return []
     settled = document.shipped(
-        frozenset(skill.name for plugin in source.plugins for skill in plugin.skills)
+        [skill for plugin in source.plugins for skill in plugin.skills]
     )
     refused = source.unresolved(
         [InvocationHolder(declaration="installer guidance", parts=settled.parts)]

@@ -229,9 +229,9 @@ def passage_text(module: str, name: str = "") -> str:
 
 
 @cache
-def placed(module: str, name: str = "") -> frozenset[str]:
+def placed(module: str, name: str = "") -> list[str]:
     """Every value name one passage places, read off its template."""
-    return frozenset(
+    return sorted(
         meta.find_undeclared_variables(environment().parse(passage_text(module, name)))
     )
 
@@ -250,7 +250,7 @@ def rendered(module: str, name: str, values: StringMap) -> str:
     as said by the declaration holding it, whether or not a reader ever sees
     it. A pointer nobody renders still ties one module to another.
     """
-    unplaced = sorted(set(values) - placed(module, name))
+    unplaced = [value for value in values if value not in placed(module, name)]
     if unplaced:
         passage = f"the {name!r} passage" if name else "the passage"
         raise ValueError(

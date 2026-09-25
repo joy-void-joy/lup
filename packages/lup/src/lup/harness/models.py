@@ -181,7 +181,7 @@ class SemanticPart(BaseModel, ABC, frozen=True):
         )
         return [*own, *(found for part in self.carried for found in part.issued(here))]
 
-    def shipped(self, skills: frozenset[str]) -> Self:
+    def shipped(self, skills: list["Skill"]) -> Self:
         """This part as it reads where exactly these skills are shipped.
 
         Nothing changes for a part that holds no condition, so that is the
@@ -354,7 +354,7 @@ class Passage(SemanticPart, frozen=True):
         named = f"the {self.name!r} passage" if self.name else "the passage"
         return f"{named} of {self.module}"
 
-    def shipped(self, skills: frozenset[str]) -> Self:
+    def shipped(self, skills: list["Skill"]) -> Self:
         return self.model_copy(
             update={
                 "values": {
@@ -436,12 +436,14 @@ class WhereShipped(SemanticPart, frozen=True):
     def carried(self) -> list["PromptPart"]:
         return list(self.parts) if self.held else []
 
-    def shipped(self, skills: frozenset[str]) -> Self:
+    def shipped(self, skills: list["Skill"]) -> Self:
         """These words where every skill they invoke ships, withheld elsewhere."""
-        needed = {
-            issued.invocation.skill for part in self.parts for issued in part.issued()
-        }
-        if not needed <= skills:
+        names = {skill.name for skill in skills}
+        if any(
+            issued.invocation.skill not in names
+            for part in self.parts
+            for issued in part.issued()
+        ):
             return self.model_copy(update={"held": False})
         return self.model_copy(
             update={"parts": [part.shipped(skills) for part in self.parts]}
@@ -929,7 +931,7 @@ class PromptDocument(BaseModel, frozen=True):
         """
         return [found for part in self.parts for found in part.reached()]
 
-    def shipped(self, skills: frozenset[str]) -> "PromptDocument":
+    def shipped(self, skills: list["Skill"]) -> "PromptDocument":
         """This document as it reads where exactly these skills are shipped."""
         return self.model_copy(
             update={"parts": [part.shipped(skills) for part in self.parts]}

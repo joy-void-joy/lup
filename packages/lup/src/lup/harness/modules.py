@@ -203,7 +203,7 @@ class Module(BaseModel, frozen=True):
     documents: list[DocumentEntry] = []
     """Pages under ``docs/`` whose subject is this module's, unrendered."""
 
-    def shipped(self, skills: frozenset[str]) -> "Module":
+    def shipped(self, skills: list[models.Skill]) -> "Module":
         """This module as it reads beside a roster shipping exactly these skills.
 
         Every :class:`~lup.harness.models.WhereShipped` pointer in its skills,
@@ -237,13 +237,6 @@ class Module(BaseModel, frozen=True):
                 ],
             }
         )
-
-
-def shipped_skills(modules: list[Module]) -> frozenset[str]:
-    """Every skill these modules ship, by the name an invocation reaches it by."""
-    return frozenset(
-        skill.name for module in modules for skill in module.content.skills
-    )
 
 
 class Adoption(BaseModel, frozen=True):
@@ -485,7 +478,7 @@ def adopted(
     if unmet:
         raise ValueError("; ".join(unmet))
     built = [resolved.resolved(entry.build()) for entry in taken]
-    skills = shipped_skills(built)
+    skills = composed_content(built).skills
     return [module.shipped(skills) for module in built]
 
 
@@ -514,9 +507,8 @@ def composed_documents(
     three of them describe. The same roster settles every pointer a page makes
     into another module, the way :func:`adopted` settles the rest.
     """
-    skills = frozenset(skill.name for skill in context.skills)
     return [
-        page.model_copy(update={"document": page.document.shipped(skills)})
+        page.model_copy(update={"document": page.document.shipped(context.skills)})
         for module in modules
         for entry in module.documents
         for page in [entry.build(context)]

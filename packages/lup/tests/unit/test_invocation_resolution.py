@@ -142,14 +142,14 @@ def test_a_pointer_holds_exactly_where_its_skill_ships() -> None:
     sentence = models.Passage(
         module=PASSAGE, name="resolve-pass", values={"resolve_skill": held}
     )
-    withheld = held.shipped(frozenset({"commit"}))
+    withheld = held.shipped([skill("commit")])
     renderer = claude_prompt_renderer()
 
-    assert held.shipped(frozenset({"merge"})) == held
+    assert held.shipped([skill("merge")]) == held
     assert withheld.held is False
     assert withheld.issued() == [] and withheld.reached() == [withheld]
     assert renderer.render(models.PromptDocument(parts=[withheld])).strip() == ""
-    assert sentence.shipped(frozenset()).values["resolve_skill"] == withheld
+    assert sentence.shipped([]).values["resolve_skill"] == withheld
 
 
 def test_a_settled_pointer_passes_and_an_unsettled_one_is_refused() -> None:
@@ -159,7 +159,7 @@ def test_a_settled_pointer_passes_and_an_unsettled_one_is_refused() -> None:
     a pointer to nothing: the part's default is the strict reading.
     """
     words = [models.TextPart(text="Commit.")]
-    settled = skill("kept", *words, pointer_to("merge").shipped(frozenset({"kept"})))
+    settled = skill("kept", *words, pointer_to("merge").shipped([skill("kept")]))
 
     assert harness([settled]).plugins[0].skills == [settled]
     with pytest.raises(ValidationError, match="lup:merge names no skill"):
