@@ -49,6 +49,8 @@ from lup.devtools.resolve.app import create_resolve_app
 from lup.devtools.run.app import create_run_app
 from lup.devtools.setup import Integration, create_setup_app
 from lup.devtools.subapps import SubApp, SubAppSpec
+from lup.harness.content.modules.specs import REVIEW_INBOX
+from lup.harness.modules import ModuleSelection
 from lup.devtools.trace.app import create_trace_app
 from lup.providers.profiles import ProfileDirectory
 from lup.observability.usage.app import UsageEntry
@@ -93,6 +95,9 @@ class DevtoolsDeclarations(BaseModel, frozen=True, arbitrary_types_allowed=True)
 
     integrations: list[Integration] = []
     """External services the setup wizard and dashboard walk an operator through."""
+
+    modules: ModuleSelection = ModuleSelection()
+    """The module selection controlling optional commands during composition."""
 
     usage_entries: list[UsageEntry] = []
     """One entry per backend whose account this project reads usage from.
@@ -277,6 +282,7 @@ LIBRARY_ROSTER = [
             node_classes=declared.node_classes,
             ledger=declared.ledger,
             command_surface=declared.command_surface,
+            review_inbox_enabled=declared.modules.takes(REVIEW_INBOX),
         ),
     ),
     RosterEntry(

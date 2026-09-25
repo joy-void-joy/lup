@@ -58,7 +58,11 @@ from lup_template.harness.composition import (
     profile_directory,
 )
 from lup_template.devtools.setup import INTEGRATIONS
-from lup_template.harness.content.catalog import APPLICATION_SPECS, SUBAPP_SELECTION
+from lup_template.harness.content.catalog import (
+    APPLICATION_SPECS,
+    MODULE_SELECTION,
+    SUBAPP_SELECTION,
+)
 
 
 def assembled_prompt() -> AgentPrompt:
@@ -115,6 +119,7 @@ DECLARATIONS = DevtoolsDeclarations(
         Path("examples"),
     ],
     integrations=INTEGRATIONS,
+    modules=MODULE_SELECTION,
     usage_entries=[claude_usage_entry(), codex_usage_entry()],
     model=(
         ConfiguredModel(name=settings.model, adapter=engine_for_settings())

@@ -67,6 +67,12 @@ def setup_module() -> Module:
     return module()
 
 
+def review_inbox_module() -> Module:
+    from lup.harness.content.modules.review_inbox import module
+
+    return module()
+
+
 def conversation_module() -> Module:
     from lup.harness.content.modules.conversation import module
 
@@ -130,6 +136,7 @@ def library_modules(
         ModuleEntry(spec=specs.VERSION, build=lambda: version_module(layout)),
         ModuleEntry(spec=specs.OBSERVABILITY, build=observability_module),
         ModuleEntry(spec=specs.SANDBOX, build=sandbox_module),
+        ModuleEntry(spec=specs.REVIEW_INBOX, build=review_inbox_module),
         ModuleEntry(spec=specs.SETUP, build=setup_module),
         ModuleEntry(spec=specs.CONVERSATION, build=conversation_module),
         ModuleEntry(

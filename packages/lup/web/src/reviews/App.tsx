@@ -43,8 +43,9 @@ function RequestLink({ summary }: { summary: ReviewSummary }) {
   </div>;
 }
 
-function RequestDetails({ detail, note, sending, fileNavigation, onNote, onAnswer }: {
+function RequestDetails({ detail, queuePath, note, sending, fileNavigation, onNote, onAnswer }: {
   detail: ReviewDetail;
+  queuePath: string | null;
   note: string;
   sending: boolean;
   fileNavigation: RefObject<FileNavigation | null>;
@@ -64,6 +65,10 @@ function RequestDetails({ detail, note, sending, fileNavigation, onNote, onAnswe
     <header className="request-heading">
       <div className="request-title"><span className={`state ${summary.state}`}>{summary.state}</span>
       <h2 ref={heading} tabIndex={-1}>{summary.title}</h2><RequestLink summary={summary} /></div>
+      <dl className="request-location" aria-label="Request location">
+        <dt>Queue checkout</dt><dd><code tabIndex={0}>{queuePath ?? "Checkout not present in the current watch list"}</code></dd>
+        <dt>Operation directory</dt><dd><code tabIndex={0}>{question.operation.cwd}</code></dd>
+      </dl>
       <details className="request-context"><summary>Why approval is needed · {summary.rule || "Request details"}</summary>
       <p className="reason">{summary.reason}</p>
       <dl className="metadata">
@@ -356,7 +361,10 @@ export function App() {
 
   return <div className="inbox">
     <header className="masthead">
-      <div><p className="eyebrow">Lup · operator review</p><h1>Review inbox</h1></div>
+      <div className="masthead-identity"><p className="eyebrow">Lup · operator review</p><h1>Review inbox</h1>
+        {inbox === null ? <p className="watched-checkout">Loading watched checkout…</p> : inbox.roots.length === 1 ? <p className="watched-checkout">Watching queue <code tabIndex={0}>{inbox.roots[0]?.path}</code></p>
+          : <details className="roots"><summary>Watching {inbox.roots.length} checkout queues</summary>{inbox.roots.map((root) => <p key={root.id}><code tabIndex={0}>{root.path}</code></p>)}</details>}
+      </div>
       <div className="connection"><span role="status" className={connection === "Live" ? "live" : "muted"}>{connection}</span>
         <button type="button" aria-expanded={help} aria-controls="shortcut-help" onClick={() => setHelp((value) => !value)}>Keyboard shortcuts</button>
         <button type="button" onClick={() => { refreshAccess(); setRetry((value) => value + 1); }}>Reconnect</button></div>
@@ -387,10 +395,8 @@ export function App() {
           <span className="row-top"><span className={`state ${row.state}`}>{row.state}</span><time>{new Date(row.created).toLocaleTimeString()}</time></span>
           <strong>{row.title}</strong><small>{row.requester}</small>
           {row.total_files > 0 && <small className="review-file-count">{row.paths.length > 0 ? `${row.paths.length} ${row.paths.length === 1 ? "file" : "files"} to review` : "Operation review"} · {row.total_files} submitted</small>}
-          <small className="root-path">{inbox?.roots.find((root) => root.id === row.root_id)?.path}</small>
+          <small className="root-path">Queue: {inbox?.roots.find((root) => root.id === row.root_id)?.path ?? "Checkout unavailable"}</small>
         </button>{row.paths.length > 1 && <details className="queue-files"><summary>{row.paths.length} files to review</summary>{row.paths.map((path) => <code key={path}>{path}</code>)}</details>}</div>)}
-        <details className="roots"><summary>Watched checkouts ({inbox?.roots.length ?? 0})</summary>
-          {inbox?.roots.map((root) => <p key={root.id}><code>{root.path}</code></p>)}</details>
       </aside>
       <main className="stage">
         {inbox?.errors.map((issue) => <p className="notice" role="alert" key={issue.root}>{issue.root}: {issue.message}</p>)}
@@ -405,7 +411,7 @@ export function App() {
           <p>{linkedRows.length > 1 ? "Choose the intended checkout from the queue." : "This page will keep watching for that exact request in the selected repositories."}</p>
           <button type="button" disabled={sending} onClick={() => { setFilter("pending"); select(""); }}>Show pending queue</button>
         </section> : selected === "" ? <section className="welcome"><h2>{pending.length === 0 ? "Queue complete" : "Ready for the next request"}</h2><p>Keep this tab open. New requests appear automatically, with their complete changes and tool inputs.</p></section>
-          : detail?.summary.key === selected ? <RequestDetails key={selected} detail={detail} note={notes[selected] ?? ""} sending={sending} fileNavigation={fileNavigation}
+          : detail?.summary.key === selected ? <RequestDetails key={selected} detail={detail} queuePath={inbox?.roots.find((root) => root.id === detail.summary.root_id)?.path ?? null} note={notes[selected] ?? ""} sending={sending} fileNavigation={fileNavigation}
             onNote={(note) => setNotes((drafts) => ({ ...drafts, [selected]: note }))} onAnswer={answer} />
           : <p className="empty" role="status">Loading request…</p>}
       </main>

@@ -19,7 +19,7 @@ function review(key = "tree-q1") {
     summary: { ...summary, key, id: key === "tree-q1" ? "q1" : key },
     question: {
       fingerprint: `bound-${key}`, resumption: "native_retry", answer: null as null | { approved: boolean; principal: string; note: string },
-      operation: { tool: "apply_patch", payload: { patch: "Complete requested patch" } },
+      operation: { tool: "apply_patch", cwd: "/project", payload: { patch: "Complete requested patch" } },
     },
     files: [{ path: "/project/file.py", operation: "modify", before: "before\n", after: "after\n",
       review_effect: "ask" as ReviewFile["review_effect"], review_reason: "This file requires approval.",
@@ -46,6 +46,7 @@ describe("review inbox page", () => {
   let detail = review();
   let details = new Map<string, ReturnType<typeof review>>();
   let rows = [{ ...summary }];
+  let roots = [root];
   let answerStatus = 200;
   let answerWait: Promise<void> | null = null;
   let detailWait = new Map<string, Promise<void>>();
@@ -53,12 +54,13 @@ describe("review inbox page", () => {
   let stream: ReadableStreamDefaultController<Uint8Array> | null = null;
   let streamingAborted = false;
   let requests: { path: string; method: string; body: unknown; authorization: string | null }[] = [];
-  const inbox = () => ({ roots: [root], reviews: rows, errors: [] });
+  const inbox = () => ({ roots, reviews: rows, errors: [] });
 
   beforeEach(() => {
     detail = review();
     details = new Map([[detail.summary.key, detail]]);
     rows = [{ ...summary }];
+    roots = [root];
     answerStatus = 200;
     answerWait = null;
     detailWait = new Map();
@@ -121,6 +123,63 @@ describe("review inbox page", () => {
     rows.push(item.summary);
     return item;
   }
+
+  test("watched queue, operation directory and foreign target paths are labelled separately", async () => {
+    const file = detail.files[0];
+    if (file === undefined) throw new Error("fixture lacks a file");
+    const checkout = "/projects/live-translator/tree/setup";
+    roots = [{ id: root.id, path: checkout }];
+    detail.question.operation.cwd = "/projects/live-translator/tree/setup";
+    file.path = "/projects/lup/tree/review-inbox/packages/lup/review.py";
+    const page = await open();
+    expect(one(page.root, ".masthead .watched-checkout").textContent).toBe(`Watching queue ${checkout}`);
+    expect([...page.root.querySelectorAll(".request-location dt")].map((node) => node.textContent)).toEqual(["Queue checkout", "Operation directory"]);
+    expect([...page.root.querySelectorAll(".request-location code")].map((node) => node.textContent)).toEqual([checkout, detail.question.operation.cwd]);
+    expect(one(page.root, ".file-target").textContent).toBe(`Target file${file.path}`);
+    expect(one(page.root, ".queue-row .root-path").textContent).toBe(`Queue: ${checkout}`);
+    expect(labelled(page.root, "button", "Approve").closest(".request-inspection")).toBeNull();
+  });
+
+  test("multiple watched checkouts remain visible while selected request identity follows navigation", async () => {
+    const secondRoot = { id: "library", path: "/projects/lup/tree/feature" };
+    roots = [root, secondRoot];
+    const next = addRequest();
+    next.summary.root_id = secondRoot.id;
+    next.question.operation.cwd = "/projects/lup/tree/feature/packages/lup";
+    const page = await open();
+    expect(one(page.root, ".masthead .roots summary").textContent).toBe("Watching 2 checkout queues");
+    expect([...page.root.querySelectorAll(".masthead .roots code")].map((node) => node.textContent)).toEqual([root.path, secondRoot.path]);
+    expect(one(page.root, ".request-location code").textContent).toBe(root.path);
+    await keydown("j", "KeyJ");
+    await keyup("j", "KeyJ");
+    await until(() => page.root.querySelector(".request-location code")?.textContent === secondRoot.path, "the next request's queue checkout");
+    expect([...page.root.querySelectorAll(".request-location code")].map((node) => node.textContent)).toEqual([secondRoot.path, next.question.operation.cwd]);
+    expect(one(page.root, ".masthead .roots summary").textContent).toBe("Watching 2 checkout queues");
+  });
+
+  test("checkout and target identity preserve full literal paths in compact scrollable lines", async () => {
+    const file = detail.files[0];
+    if (file === undefined) throw new Error("fixture lacks a file");
+    const path = `/projects/100%done/日本語 #?%2F/${"nested/".repeat(50)}feature`;
+    roots = [{ id: root.id, path }];
+    detail.question.operation.cwd = path;
+    file.path = `${path}/source.py`;
+    const style = document.createElement("style");
+    style.textContent = await Bun.file(new URL("./styles.css", import.meta.url)).text();
+    document.head.append(style);
+    try {
+      const page = await open();
+      expect(one(page.root, ".watched-checkout code").textContent).toBe(path);
+      expect(one(page.root, ".file-target code").textContent).toBe(file.path);
+      for (const node of page.root.querySelectorAll<HTMLElement>(".watched-checkout code, .request-location code, .file-target code")) {
+        expect(getComputedStyle(node).whiteSpace).toBe("pre");
+        expect(getComputedStyle(node).overflow).toBe("auto");
+        expect(node.tabIndex).toBe(0);
+      }
+    } finally {
+      style.remove();
+    }
+  });
 
   test("an answered request retains notification failure diagnostics when reopened", async () => {
     detail.summary.state = "approved";
@@ -336,7 +395,7 @@ describe("review inbox page", () => {
     expect(one(page.root, ".file-heading > code").textContent).toBe("file.py");
     await click(one<HTMLElement>(page.root, ".file-list button"));
     expect(one(page.root, ".file-heading > code").textContent).toBe("nested/percent%#name.py");
-    expect(one(page.root, ".file-heading .file-prefix code").textContent).toBe(other.path);
+    expect(one(page.root, ".file-target code").textContent).toBe(other.path);
   });
 
   test.each(["/project/100%done/", "/project/literal%20/日本語 #?%2F/"])("file navigation preserves literal directory characters in %s", async (directory) => {
@@ -352,7 +411,7 @@ describe("review inbox page", () => {
     expect(one(page.root, ".file-list li:nth-child(2) code").getAttribute("title")).toBe(other.path);
     await click(one<HTMLElement>(page.root, ".file-list li:nth-child(2) button"));
     expect(one(page.root, ".file-heading > code").textContent).toBe("second%20.py");
-    expect(one(page.root, ".file-heading .file-prefix code").textContent).toBe(other.path);
+    expect(one(page.root, ".file-target code").textContent).toBe(other.path);
   });
 
   test("expanded inspection disclosures stay inside their scroll region and outside the decision footer", async () => {
@@ -747,9 +806,8 @@ describe("review inbox page", () => {
     try {
       const page = await open();
       await click(one<HTMLElement>(page.root, ".file-review summary"));
-      await click(one<HTMLElement>(page.root, ".file-heading .file-prefix summary"));
       expect(one(page.root, ".file-review p").textContent).toBe(file.review_reason);
-      expect(one(page.root, ".file-heading .file-prefix code").textContent).toBe(file.path);
+      expect(one(page.root, ".file-target code").textContent).toBe(file.path);
       const layout = getComputedStyle(one(page.root, ".file-heading"));
       expect(layout.overflow).toBe("auto");
       expect(layout.maxHeight).not.toBe("none");

@@ -30,6 +30,7 @@ from lup.providers.codex.harness_runtime import (
 @pytest.fixture
 def boundary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Mock:
     composition = Mock()
+    composition.recipe.source.review_inbox = False
     composition.recipe.source.image.config_home = "/cfg"
     composition.recipe.source.image.forge.sourced.return_value = ""
     composition.recipe.source.image.clipboard = ClipboardBridge()

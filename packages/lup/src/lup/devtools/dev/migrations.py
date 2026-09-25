@@ -139,6 +139,27 @@ class RenderedMigrations(BaseModel, frozen=True):
 
 DECLARED: list[Migration] = [
     Migration(
+        subjects=[
+            "review-inbox",
+            "create_dev_app",
+            "DevtoolsDeclarations.modules",
+            "Harness.review_inbox",
+            "dev questions serve",
+        ],
+        reason="Browser commands, operator authority and native launch startup follow the optional review-inbox module independently of sandbox",
+        steps=[
+            MigrationStep(
+                instruction="Adopt or decline review-inbox in the project module selection independently of sandbox. The scaffold takes undeclined modules; set loads_guidance=True explicitly to load inbox guidance. Core terminal questions remain available when the module is declined."
+            ),
+            MigrationStep(
+                instruction="For custom composition, pass the selected ModuleSelection as DevtoolsDeclarations.modules, or pass review_inbox_enabled to create_dev_app. Set Harness.review_inbox from selection.takes(REVIEW_INBOX) and compose the review_inbox.runner_targets and review_inbox.shell_rules helpers with the same selection. dev update merges these declarations for scaffold adopters."
+            ),
+            MigrationStep(
+                instruction="With review-inbox enabled, run dev questions serve/open/stop and harness claude/codex from an operator terminal; agents may use dev questions status and harness generate all. Single-repository dev questions serve starts or reuses a detached service and returns; use dev questions status, open and stop to manage it. Multiple distinct repositories keep a foreground server. --generate-only starts no inbox, and no stored-data migration is required."
+            ),
+        ],
+    ),
+    Migration(
         subjects=["tool.pyright.venvPath", "tool.pyright.venv", "pyright_environment"],
         reason=(
             "the scaffold leaves Python environment selection to the project "

@@ -40,7 +40,8 @@ from lup.harness.codescan.boundaries import (
     generated_tree_paths,
     native_import_boundaries,
 )
-from lup.harness.content.modules.specs import RESOLVER
+from lup.harness.content.modules.specs import RESOLVER, REVIEW_INBOX
+from lup.harness.content.modules import review_inbox
 from lup.devtools.dev.check import BunTestRoot, TestRoot, collected_test_roles
 from lup.devtools.dev.library import DISTRIBUTION, VENDORED_ROOT, library_trackers
 from lup.devtools.dev.release import ReleaseSpec
@@ -795,13 +796,15 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
                 "--fix",
                 "--json",
             ],
-            shell_rules=SHELL_RULES,
+            shell_rules=review_inbox.shell_rules(SHELL_RULES, MODULE_SELECTION),
             # This project's toolchain: what `uv run <target>` may reach here
             # without a question, which is nothing any other project inherits.
             # The group places `lup-devtools` outside the sandbox, because
             # every command of it that opens an agent session is unusable
             # confined.
-            runner_targets=RUNNER_TARGETS,
+            runner_targets=review_inbox.runner_targets(
+                RUNNER_TARGETS, MODULE_SELECTION
+            ),
             # What this table has to keep allowing, swept by `dev check`
             # against the table above. Every other measurement of the
             # vocabulary reads the direction a tightening never shows up in.
@@ -885,6 +888,7 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
     return Harness(
         generator_version=version,
         source_evidence={"content": "typed-python"},
+        review_inbox=MODULE_SELECTION.takes(REVIEW_INBOX),
         requirements=manifest(),
         image=agent_image(),
         plugins=[plugin],

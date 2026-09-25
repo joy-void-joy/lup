@@ -15,6 +15,7 @@ from collections.abc import Mapping
 
 from lup.coordination.identity import MEMBER_ENV, NAME_ENV, MemberEnv
 from lup.devtools.launcher import ENVIRONMENT_VARIABLE
+from lup.harness.review_environment import REVIEW_INBOX_URL_ENV
 from lup.sessions.recursion import RecursiveAgentSettings
 from lup.types import EnvVars
 
@@ -48,6 +49,7 @@ LAUNCHER_DECIDED_ENV: list[str] = [
     "GIT_CONFIG_COUNT",
     MEMBER_ENV,
     NAME_ENV,
+    REVIEW_INBOX_URL_ENV,
 ]
 """What a launched process is told about where it is, rather than what it does.
 
@@ -97,7 +99,7 @@ def tool_server_env() -> list[str]:
         for settings in (MemberEnv, RecursiveAgentSettings)
         for field in settings.model_fields.values()
         if isinstance(field.validation_alias, str)
-    ] + [ENVIRONMENT_VARIABLE]
+    ] + [ENVIRONMENT_VARIABLE, REVIEW_INBOX_URL_ENV]
 
 
 def launcher_decided_names(

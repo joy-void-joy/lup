@@ -30,6 +30,7 @@ def composition() -> Mock:
     plugin.marketplace = "test"
     built = Mock()
     built.recipe.source.plugins = [plugin]
+    built.recipe.source.review_inbox = False
     return built
 
 
