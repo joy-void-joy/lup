@@ -62,7 +62,7 @@ def test_a_question_the_dispatcher_reaches_is_parked_in_the_relay(
     parked = relay(tmp_path).questions()
 
     assert [entry.state for entry in parked] == ["pending"]
-    assert "removing a remote ref" in parked[0].reason
+    assert "deleting a remote branch" in parked[0].reason
 
 
 def test_a_parked_question_carries_the_rule_that_asked_it(tmp_path: Path) -> None:
@@ -141,7 +141,7 @@ def test_rejection_stops_retry_and_preserves_the_rule(tmp_path: Path) -> None:
     specific = judged(command, tmp_path)["hookSpecificOutput"]
     assert isinstance(specific, dict) and specific["permissionDecision"] == "deny"
     reason = str(specific["permissionDecisionReason"])
-    assert "rejected" in reason and "removing a remote ref" in reason
+    assert "rejected" in reason and "deleting a remote branch" in reason
     persisted = relay(tmp_path).find(question.id)
     assert persisted is not None and persisted.state == "rejected"
     assert persisted.rule == "shell:git.push"

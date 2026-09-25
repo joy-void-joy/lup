@@ -764,18 +764,79 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="TMPDIR=/etc; echo x > $TMPDIR/passwd", effect="ask"),
     DecisionCase(input="for TMPDIR in /etc; do echo x > $TMPDIR/f; done", effect="ask"),
     # Publishing is how work becomes reviewable, so the verbs that put a
-    # branch and its pull request in front of a reader are ordinary. What
-    # keeps the ask is what a second attempt cannot restore, and what reaches
-    # another person rather than describing your own work.
+    # branch and its pull request in front of a reader are ordinary, and so
+    # is the merge that lands it. What keeps the ask is what a second attempt
+    # cannot restore, and what reaches another person rather than describing
+    # your own work.
     DecisionCase(input="git push", effect="allow"),
-    DecisionCase(input="git push --force origin HEAD", effect="allow"),
-    DecisionCase(input="git push --delete origin feat", effect="ask"),
+    DecisionCase(input="git push -u origin feat", effect="allow"),
+    DecisionCase(input="git merge feat", effect="allow"),
+    DecisionCase(input="git merge --no-ff feat", effect="allow"),
     DecisionCase(input="gh pr create --fill", effect="allow"),
+    DecisionCase(input="gh pr edit 3 --title t", effect="allow"),
     DecisionCase(input="gh pr ready 3", effect="allow"),
     DecisionCase(input="gh pr comment 3 --body hi", effect="allow"),
-    # A merge runs the change into the base branch, which is an event
-    # rather than a state a follow-up restores.
-    DecisionCase(input="gh pr merge 3", effect="ask"),
+    DecisionCase(input="gh pr merge 3", effect="allow"),
+    DecisionCase(input="gh pr merge 3 --squash --delete-branch", effect="allow"),
+    # A merge past the protection the base branch requires overrides the
+    # repository's own posture, and a request nobody declared the repository
+    # of is not the author describing their own work.
+    DecisionCase(input="gh pr merge 3 --admin", effect="ask"),
+    DecisionCase(input="gh pr create --repo other/x --fill", effect="ask"),
+    DecisionCase(input="gh pr create -R other/x --fill", effect="ask"),
+    DecisionCase(input="gh pr edit 3 -R other/x --title t", effect="ask"),
+    # A force is judged by what it can discard. A lease onto a named feature
+    # branch replaces only what this checkout last saw; every other spelling
+    # can overwrite somebody's work: the unconditional flag and the leading
+    # plus (which git lets past a lease), an integration branch, a lease
+    # cancelled by its `--no-` form, or a push that names no branch at all.
+    DecisionCase(input="git push --force-with-lease origin feat", effect="allow"),
+    DecisionCase(input="git push --force-with-lease=feat origin feat", effect="allow"),
+    DecisionCase(input="git push --force-with-lease origin HEAD:feat", effect="allow"),
+    DecisionCase(
+        input="git push -o ci.skip --force-with-lease origin feat", effect="allow"
+    ),
+    DecisionCase(input="git push --force origin feat", effect="ask"),
+    DecisionCase(input="git push -f origin feat", effect="ask"),
+    DecisionCase(input="git push -uf origin feat", effect="ask"),
+    DecisionCase(input="git push --force origin HEAD", effect="ask"),
+    DecisionCase(input="git push origin +feat", effect="ask"),
+    DecisionCase(input="git push --force-with-lease origin +feat", effect="ask"),
+    DecisionCase(input="git push --force --force-with-lease origin feat", effect="ask"),
+    DecisionCase(
+        input="git push --force-with-lease --no-force-with-lease -f origin feat",
+        effect="ask",
+    ),
+    DecisionCase(input="git push --force-with-lease origin main", effect="ask"),
+    DecisionCase(input="git push --force-with-lease origin dev", effect="ask"),
+    DecisionCase(input="git push --force-with-lease origin HEAD:main", effect="ask"),
+    DecisionCase(
+        input="git push --force-with-lease origin feat:refs/heads/dev", effect="ask"
+    ),
+    DecisionCase(input="git push --force-with-lease", effect="ask"),
+    DecisionCase(input="git push --force-with-lease origin", effect="ask"),
+    DecisionCase(input="git push --force-with-lease origin HEAD", effect="ask"),
+    DecisionCase(input="git push -o ci.skip --force-with-lease origin", effect="ask"),
+    DecisionCase(input="git push --force-with-lease --all origin", effect="ask"),
+    # A probe performs nothing, so the force it spells is not asked about.
+    DecisionCase(input="git push --force -n origin main", effect="allow"),
+    # A remote branch deleted is work no later push restores, however the
+    # deletion is spelled; a setting that makes a later plain push force or
+    # mirror is the same question asked early.
+    DecisionCase(input="git push --delete origin feat", effect="ask"),
+    DecisionCase(input="git push -d origin feat", effect="ask"),
+    DecisionCase(input="git push origin :feat", effect="ask"),
+    DecisionCase(input="git push --mirror origin", effect="ask"),
+    DecisionCase(input="git push --prune origin", effect="ask"),
+    DecisionCase(input="gh pr close 3 --delete-branch", effect="ask"),
+    DecisionCase(input="gh pr close 3", effect="allow"),
+    DecisionCase(input="git config remote.origin.mirror true", effect="ask"),
+    DecisionCase(input="git config remote.origin.push +HEAD:main", effect="ask"),
+    DecisionCase(input="git push --receive-pack=x origin feat", effect="ask"),
+    DecisionCase(input="uv run lup-devtools git delete feat", effect="allow"),
+    DecisionCase(input="uv run lup-devtools git delete feat --remote", effect="ask"),
+    DecisionCase(input="uv run lup-devtools git pr push --force", effect="allow"),
+    DecisionCase(input="uv run lup-devtools git pr merge 3", effect="allow"),
     # A review carrying neither verdict is a comment; the two that carry
     # one say something in the caller's name, and saying something else
     # later is not unsaying it.
@@ -1080,7 +1141,8 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="git -C /other log --oneline", effect="allow"),
     DecisionCase(input="git -C ../sibling diff", effect="allow"),
     DecisionCase(input="git -C /tmp/other commit -am x", effect="allow"),
-    DecisionCase(input="git -C /tmp/o merge --abort", effect="ask"),
+    DecisionCase(input="git -C /tmp/o merge --abort", effect="allow"),
+    DecisionCase(input="git -C /tmp/o push --force origin x", effect="ask"),
     DecisionCase(input="git -C /other push --delete origin x", effect="ask"),
     DecisionCase(input="git --git-dir=/tmp/x --work-tree=/tmp add .", effect="allow"),
     DecisionCase(input="git --namespace=other push", effect="ask"),

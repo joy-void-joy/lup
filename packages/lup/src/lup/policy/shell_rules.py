@@ -375,7 +375,10 @@ class ShellSubcommandRule(BaseModel, frozen=True):
     carry the same effects its flags do. ``ask_destinations`` states the same
     downgrade about the first operand that is not a flag, for a subcommand
     that takes a repository there and accepts one spelled out inline as
-    readily as one the remote table holds.
+    readily as one the remote table holds. ``force_flags``, ``lease_flags``
+    and ``protected_refs`` judge a forced update by what it can discard, and
+    ``value_flags`` name the options whose value is the next word, so neither
+    reading takes that value for an operand; the erased row states each.
     """
 
     name: str
@@ -383,6 +386,10 @@ class ShellSubcommandRule(BaseModel, frozen=True):
     refuses: str = ""
     ask_destinations: list[DestinationForm] = []
     ask_refspecs: list[RefspecEffect] = []
+    force_flags: list[str] = []
+    lease_flags: list[str] = []
+    protected_refs: list[str] = []
+    value_flags: list[str] = []
     ask_flags: list[str] = []
     flag_effects: list[EffectRow] = []
     write_flags: list[str] = []
@@ -701,6 +708,9 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
                 operator_only=operation.operator_only,
                 ask_destinations=[],
                 ask_refspecs=[],
+                force_flags=[],
+                lease_flags=[],
+                protected_refs=[],
                 ask_flags=list(operation.ask_flags),
                 flag_effects=list(operation.flag_effects),
                 write_flags=list(operation.write_flags),
@@ -730,6 +740,9 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             operator_only=False,
             ask_destinations=list(subcommand.ask_destinations),
             ask_refspecs=list(subcommand.ask_refspecs),
+            force_flags=list(subcommand.force_flags),
+            lease_flags=list(subcommand.lease_flags),
+            protected_refs=list(subcommand.protected_refs),
             ask_flags=list(subcommand.ask_flags),
             flag_effects=list(subcommand.flag_effects),
             write_flags=list(subcommand.write_flags),
@@ -742,7 +755,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             setting_flags=[],
             guarded_settings=[],
             bare_reads=False,
-            value_flags=[],
+            value_flags=list(subcommand.value_flags),
             directory_flags=[],
             reason=subcommand.reason,
             recovery=subcommand.recovery,
@@ -761,6 +774,9 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             operator_only=False,
             ask_destinations=[],
             ask_refspecs=[],
+            force_flags=[],
+            lease_flags=[],
+            protected_refs=[],
             ask_flags=list(command.ask_flags),
             flag_effects=list(command.flag_effects),
             write_flags=list(command.write_flags),

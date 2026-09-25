@@ -85,6 +85,7 @@ from lup_template.harness.content.image import agent_image
 from lup_template.harness.content.requirements import manifest
 from lup_template.harness.content.shell_vocabulary import (
     EVERYDAY_COMMANDS,
+    INTEGRATION_BRANCHES,
     RUNNER_TARGETS,
     SHELL_RULES,
 )
@@ -393,11 +394,12 @@ def declared_scaffold() -> ScaffoldSource:
 
 
 WORKFLOW = WorkflowSpec(
-    branches=["main", "dev"],
+    branches=list(INTEGRATION_BRANCHES),
     frontend=FrontendSpec(workspace="packages/lup/web", bun_version="1.3.14"),
 )
 """This project's gate: the two-tier model, where `dev` integrates and `main`
-carries what has landed, so both deserve a run of their own. The frontend
+carries what has landed, so both deserve a run of their own -- the branches
+the shell vocabulary declares as the ones other people build on. The frontend
 workspace is the library's, installed first because `dev check` rebuilds the
 bundles it compares against what is committed."""
 

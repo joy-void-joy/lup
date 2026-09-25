@@ -20,7 +20,7 @@ splices extra rules around it::
         *read_only_rules(),
         *judged_ask_rules(),
         *guarded_tool_rules(),
-        git_rule(guard_force_push=False, redirect_checkout=True),
+        git_rule(integration_branches=("main", "dev"), redirect_checkout=True),
         gh_rule(),
         docker_rule(),
         my_own_cli_rule(),
@@ -1056,8 +1056,10 @@ spelling of the same one, and it runs a program just as readily.
 GIT_CONFIG_RETARGETING_KEYS = (
     "remote.*.url",
     "remote.*.pushurl",
+    "remote.*.push",
+    "remote.*.mirror",
 )
-"""The git settings that name which repository a later command talks to.
+"""The git settings that name where a later command's work lands.
 
 A second class beside the executing keys, guarded by the same absence test
 because it answers the same question about a write: is what this sets read
@@ -1067,6 +1069,12 @@ resolves which repository an issue comment, a close, or a pull request is
 about — so a write here moves the whole compensable band of forge operations
 onto a repository nobody approved, without touching one of them.
 
+`remote.<name>.push` and `remote.<name>.mirror` retarget within it: the first
+is the refspec a push naming no branch runs, which a leading plus forces or an
+empty source deletes, and the second makes every push a mirror, deleting each
+remote branch this checkout lacks. Either turns a later plain `git push` into
+the force or the deletion that asks when it is spelled on the command line.
+
 Only the keys that name a destination outright. `remote.pushdefault` and
 `branch.<name>.pushremote` choose among the remotes the table already holds,
 and every way of putting one there — `git remote add`, `git remote rename`,
@@ -1075,8 +1083,17 @@ somebody approved is not the retarget.
 """
 
 
+INTEGRATION_BRANCHES = ("main", "master")
+"""The branches a forced push asks about even under a lease.
+
+The names a forge gives a repository's default branch, which is the one
+branch every project has that other people build on. A project integrating
+through a second long-lived branch names it beside them.
+"""
+
+
 def git_rule(
-    guard_force_push: bool = True,
+    integration_branches: tuple[str, ...] = INTEGRATION_BRANCHES,
     redirect_checkout: bool = False,
     sandbox: SandboxPlacement = "ambient",
     config_executing_keys: tuple[str, ...] = GIT_CONFIG_EXECUTING_KEYS,
@@ -1088,21 +1105,23 @@ def git_rule(
     The judgements a project can reasonably differ on are parameters rather
     than a reason to fork the table.
 
-    ``guard_force_push`` decides whether replacing what a remote ref points
-    at is worth a question. It usually is. A project whose review flow
-    rebases and republishes a branch every round answers no, because there
-    the force is the ordinary case and the ask lands on nearly every push.
-    What removes a ref outright stays guarded either way: no second push
-    restores it.
+    ``integration_branches`` are the branches other people build on, which
+    is what decides whether replacing what a remote ref points at is worth a
+    question. A review flow rebases and republishes its own branch every
+    round, so a force there is the ordinary case -- and under
+    ``--force-with-lease`` it replaces only what this checkout last saw, so
+    it discards nothing anybody else pushed, and allows. Every other force
+    asks: ``--force`` and a refspec's leading plus replace whatever the
+    remote holds, a leased force onto an integration branch rewrites what
+    others built on, and a leased force naming no branch reaches whichever
+    one the checkout stands on. What removes a ref outright asks whatever it
+    names: no second push restores it.
 
-    Both effects are guarded twice over, because push spells each of them
+    Both effects are read twice over, because push spells each of them
     twice: as a flag, and as refspec grammar. ``--delete origin main`` and
     ``origin :refs/heads/main`` remove the same ref, ``--force`` and
     ``+main:main`` replace the same one, and a guard written only as flag
     spellings held the first half of each pair while allowing the second.
-    The parameter therefore moves ``ask_refspecs`` and ``ask_flags``
-    together: an effect this rule asks about is asked about however it was
-    written.
 
     ``redirect_checkout`` decides how ``git checkout`` is met. Off, it asks —
     the branch-switching form is harmless, but ``checkout -- <path>``
@@ -1178,8 +1197,19 @@ def git_rule(
     # exactly what that reading skips. It asks whatever it names, because the
     # flag is legacy — git documents it as relevant only when no repository
     # operand is passed — and a question on an invocation nobody writes costs
-    # less than a second reader for one word.
-    push_flags = ["--delete", "--mirror", "--prune", "--repo"]
+    # less than a second reader for one word. `--mirror` and `--prune` delete
+    # every remote branch this checkout lacks, so they ask beside `--delete`;
+    # `--receive-pack` names the program the far side runs, the question
+    # `fetch --upload-pack` asks from the other direction.
+    push_flags = [
+        "--delete",
+        "-d",
+        "--mirror",
+        "--prune",
+        "--repo",
+        "--receive-pack",
+        "--exec",
+    ]
     guarded = [
         *[
             ShellSubcommandRule(
@@ -1267,19 +1297,23 @@ def git_rule(
             name="push",
             effects=[declare("publishes", scope="branch")],
             ask_destinations=list(push_destinations),
-            ask_refspecs=(["delete", "force"] if guard_force_push else ["delete"]),
-            ask_flags=(
-                [*push_flags, "-f", "--force", "--force-with-lease"]
-                if guard_force_push
-                else push_flags
-            ),
+            ask_refspecs=["delete"],
+            ask_flags=push_flags,
+            force_flags=["-f", "--force"],
+            lease_flags=["--force-with-lease"],
+            protected_refs=list(integration_branches),
+            value_flags=[
+                "-o",
+                "--push-option",
+                "--repo",
+                "--receive-pack",
+                "--exec",
+                "--recurse-submodules",
+            ],
             probe_flags=["-n", "--dry-run"],
             reason=(
-                "rewriting or removing a remote ref, or aiming the push"
-                " elsewhere, requires approval"
-                if guard_force_push
-                else "removing a remote ref, or aiming the push elsewhere,"
-                " requires approval"
+                "deleting a remote branch loses work no later push restores, and"
+                " --repo or --receive-pack redirects the push; each needs approval"
             ),
         ),
         # The same arrival `gh repo clone` is, reached by the other spelling:
@@ -1373,8 +1407,8 @@ def git_rule(
             ],
             guarded_keys=guarded_config,
             reason=(
-                "this git config write can change what program git runs or which"
-                " repository it talks to"
+                "this git config write can change what program git runs, which"
+                " repository it talks to, or what a later push forces or deletes"
             ),
         ),
         ShellSubcommandRule(

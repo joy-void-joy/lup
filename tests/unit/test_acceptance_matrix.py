@@ -90,9 +90,16 @@ def exposed(command: str, unjudged_ambient: UnjudgedAmbient = "ask") -> KernelDe
         ("gh issue comment 3 --body x", "allow"),
         ("gh issue close 3", "allow"),
         ("gh issue reopen 3", "allow"),
+        # Landing a request is the workflow's last step, and a leased force
+        # onto a feature branch replaces only what this checkout last saw.
+        ("gh pr merge 12", "allow"),
+        ("git merge feat", "allow"),
+        ("git push --force-with-lease origin feat", "allow"),
         # Execution, attestation, publication, repository security, and the
         # deletion nested inside an otherwise allowed operation.
-        ("gh pr merge 12", "ask"),
+        ("gh issue create --title x", "ask"),
+        ("gh pr merge 12 --admin", "ask"),
+        ("git push --force-with-lease origin main", "ask"),
         ("gh pr review 12 --approve", "ask"),
         ("gh pr review 12 --request-changes --body x", "ask"),
         ("gh pr close 12 --delete-branch", "ask"),

@@ -14,10 +14,9 @@ a copy of every command the library already judged.
 Two judgements here differ from the library's offered defaults, and both are
 arguments rather than a fork:
 
-``guard_force_push=False`` — this repository's rebase flow republishes a
-branch with ``--force`` every round, so the force is the ordinary case and
-guarding it put an approval question on nearly every push. What removes a
-remote ref outright stays guarded, because no second push restores it.
+``integration_branches=INTEGRATION_BRANCHES`` — this repository integrates on
+``dev`` and lands on ``main``, so a forced push asks about both even under a
+lease, where the library's default names only the forge's default branch.
 
 ``redirect_checkout=True`` — this repository has settled on ``git switch``
 and ``git restore``, so ``checkout`` denies and names them instead of asking.
@@ -39,6 +38,14 @@ from lup.policy.vocabulary import (
     typescript_rule,
 )
 from lup.seams import Selection
+
+INTEGRATION_BRANCHES = ("main", "dev")
+"""The branches other people build on here: `dev` integrates, `main` lands.
+
+A forced push onto either asks even under `--force-with-lease`, and each is
+a branch the gate runs on when it is pushed to, so the workflow reads its
+branches from here rather than keeping a second list in step.
+"""
 
 
 def lup_devtools_rule() -> ShellCommandRule:
@@ -160,7 +167,7 @@ them would stop a step the guidance documents by name.
 SHELL_RULES: Selection[ShellCommandRule] = Selection[ShellCommandRule](
     overrides=[
         lup_devtools_rule(),
-        git_rule(guard_force_push=False, redirect_checkout=True),
+        git_rule(integration_branches=INTEGRATION_BRANCHES, redirect_checkout=True),
         # The TypeScript half of this project's toolchain. Composed here
         # rather than inherited, because whether a project has a JS toolchain
         # at all is that project's fact — and until `bun` is named by some

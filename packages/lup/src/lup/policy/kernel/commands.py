@@ -49,7 +49,9 @@ from .words import (
     git_restore_operands,
     key_matches,
     opaque_argument,
+    operand_words,
     protected_write_target,
+    refspec_destination,
     refspec_effects,
     sed_invocation,
     unread_over_tracked,
@@ -471,6 +473,65 @@ def frozen_restore(
     )
 
 
+def forced_update(row: ShellRuleRow, arguments: list[str]) -> str:
+    """Why a forced update this row judges asks, or ``""`` where it does not.
+
+    What a force can discard is the whole question. An unconditional force --
+    a force flag, or a refspec's leading plus, which git lets override a lease
+    as readily as the flag does -- replaces whatever the remote holds, so it
+    can discard commits somebody else pushed. A lease replaces only what this
+    checkout last saw there, so on a branch of the caller's own it discards
+    nothing anybody else wrote, and that is the one force that allows. On a
+    protected branch the rewrite is itself the loss, since other people have
+    built on what it replaces; and a push naming no branch reaches the current
+    one, which a reader that cannot run git cannot tell apart from those.
+
+    Git applies the last of a lease flag and its `--no-` form, so this reads
+    them in order rather than asking whether one appears.
+    """
+    if not (row["force_flags"] or row["lease_flags"]):
+        return ""
+    lease = next(iter(row["lease_flags"]), "")
+    cancels = [f"--no-{flag.removeprefix('--')}" for flag in row["lease_flags"]]
+    unconditional = next(
+        (
+            word
+            for word in arguments
+            if flag_matches(word, row["force_flags"])
+            or "force" in refspec_effects(word)
+        ),
+        None,
+    )
+    if unconditional is not None:
+        refusal = f"; {lease} would refuse that" if lease else ""
+        return (
+            f"{unconditional} overwrites the remote branch whatever it holds,"
+            f" discarding commits someone else pushed{refusal}"
+        )
+    toggles = [
+        word
+        for word in arguments
+        if flag_matches(word, row["lease_flags"]) or word in cancels
+    ]
+    if not toggles or toggles[-1] in cancels:
+        return ""
+    refspecs = [
+        word
+        for word in operand_words(arguments, row["value_flags"])[1:]
+        if not word.startswith("^")
+    ]
+    named = [refspec_destination(word) for word in refspecs]
+    if not named or "" in named:
+        return (
+            "this forced push names no branch, so it rewrites whichever one the"
+            " checkout is on; name the branch so a shared one is not rewritten"
+        )
+    shared = next((ref for ref in named if ref in row["protected_refs"]), None)
+    if shared is not None:
+        return f"forcing {shared} rewrites a branch other people build on"
+    return ""
+
+
 def apply_command_row(
     row: ShellRuleRow, arguments: list[str], facts: WriteFacts | None = None
 ) -> KernelDecision:
@@ -596,8 +657,14 @@ def apply_command_row(
     # escalation, because an unresolved word could become either. What
     # separates them is what happens next: a write flag names a path, and
     # naming it is what lets the write be judged where every other spelling
-    # of a write is judged rather than by this row's single verdict.
-    guarding = [*row["ask_flags"], *row["write_flags"]]
+    # of a write is judged rather than by this row's single verdict. The force
+    # spellings join them for the opacity test alone: they are judged below.
+    guarding = [
+        *row["ask_flags"],
+        *row["write_flags"],
+        *row["force_flags"],
+        *row["lease_flags"],
+    ]
     # A literal probe flag says the invocation performs nothing, so the flag-
     # and refspec-earned questions below stand down. The opacity bounce stays:
     # an unreadable word could name a destination, and destination grammar is
@@ -637,16 +704,15 @@ def apply_command_row(
                 row, arguments, no_write_facts() if facts is None else facts
             )
     if stated == "allow" and row["ask_destinations"]:
-        # The first word that is not a flag, which is where git reads the
-        # repository from and nowhere else: every later operand is a refspec.
-        # A flag's separate value can land here instead — `-o <option>` — and
-        # a bare option word reads as a remote name, so the miss costs a
-        # question that was not asked rather than one that was owed.
+        # The first operand, which is where git reads the repository from and
+        # nowhere else: every later operand is a refspec. A flag declared as
+        # taking a separate value takes it along, so `-o <option>` never reads
+        # as the repository.
         #
         # No opacity test, on the same grounds as the block below: a row
         # declaring destination forms declares flag effects too, so an
         # unreadable word has already been bounced above.
-        named = next((word for word in arguments if not word.startswith("-")), "")
+        named = next(iter(operand_words(arguments, row["value_flags"])), "")
         form = destination_form(named)
         if form in row["ask_destinations"]:
             return row_verdict(
@@ -675,6 +741,12 @@ def apply_command_row(
                 row["reason"] or f"{carried[0]} would {carried[1]} a ref",
                 arguments=arguments,
             )
+    if stated == "allow" and not probing:
+        # No opacity test of its own either: the force spellings joined the
+        # guarded list above, so an unreadable word has already been bounced.
+        forced = forced_update(row, arguments)
+        if forced:
+            return row_verdict(row, "ask", forced, arguments=arguments)
     # Read after every de-escalation above and before the row's own answer,
     # because it changes what the loss *is* rather than whether the row asks:
     # a scratch grant is still a scratch grant, and a delete reaching outside
