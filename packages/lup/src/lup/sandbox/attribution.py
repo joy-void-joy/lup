@@ -36,16 +36,20 @@ WRITE_REFUSAL_MARKERS: tuple[str, ...] = (
     "Permission denied",
     "Operation not permitted",
     "Device or resource busy",
+    "could not lock config file",
 )
 """How a kernel says a write was refused, in the words a caller will see.
 
 A default rather than a constant: these are what Linux and the tools above it
 say, and a project on another platform -- or one whose toolchain wraps them --
-has different words for the same event. The last is what a bind-mounted
+has different words for the same event. The fourth is what a bind-mounted
 *file* answers: a mount point cannot be unlinked, so a tool that replaces a
 file by renaming over it -- git, every editor that writes atomically --
-reports the mount as busy rather than read-only. Never sufficient alone; the topology
-has to agree before anything is claimed.
+reports the mount as busy rather than read-only. The last is git wrapping
+the same refusal and dropping the errno: `git branch -D` removing a branch's
+section from a read-only `config` says only that it could not lock the
+file, then deletes the branch and exits 0. Never sufficient alone; the
+topology has to agree before anything is claimed.
 """
 
 PROXY_DENIAL_MARKER = "TCP_DENIED"

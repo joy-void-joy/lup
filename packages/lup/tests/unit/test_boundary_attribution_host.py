@@ -12,6 +12,7 @@ outlives the one command it was wrong about.
 import json
 from pathlib import Path
 
+from lup.sandbox.attribution import WRITE_REFUSAL_MARKERS
 from lup.policy.assets.host import (
     boundary_account,
     boundary_description,
@@ -158,3 +159,13 @@ def test_a_push_that_exits_zero_still_carries_its_refusal(tmp_path: Path) -> Non
     assert len(claude) == 1 and "host terminal" in claude[0]
     assert codex == claude
     assert boundary_account(stderr, None) == []
+
+
+def test_a_branch_deletion_that_could_not_lock_config_is_explained() -> None:
+    """Git drops the errno here, deletes the branch, and exits 0."""
+    spoken = boundary_refusal(
+        "error: could not lock config file /repo.git/config\n"
+        "warning: update of config-file failed",
+        {**SHARED, "write_refusals": list(WRITE_REFUSAL_MARKERS)},
+    )
+    assert "host terminal" in spoken
