@@ -709,7 +709,7 @@
     {
       "path": "docs/architecture.md",
       "category": "generated",
-      "sha256": "331356e1138b94a7fd14502e86516416df616887ec4a4afd18d9061de9b78126",
+      "sha256": "d8aed7a9154d50159eb330585db3edc7ea231dd87e67ccbc9df3ee4b96a300c9",
       "semantic_id": "docs.architecture",
       "executable": false
     },
@@ -786,7 +786,7 @@
     {
       "path": "docs/patterns.md",
       "category": "generated",
-      "sha256": "68ac588cbd358ff08b845fbcf2cb507ac4fd6d87dbf455fa34d901cd7672a71a",
+      "sha256": "dcb00b466e2aae36bf3b3b78fe050be1c6f6b0771859f7dd78e0e1083dce0caa",
       "semantic_id": "docs.patterns",
       "executable": false
     },
