@@ -6,8 +6,8 @@ what tells a session how this repository judges an edit would leave a harness
 that generates but cannot be worked in.
 
 Its skills are the ones whose subject is the work itself rather than any
-workflow over it: saying what is left, finding out why something broke, and
-asking the policy what it decides. Its pages are the reference behind that —
+workflow over it: shaping a change before it is built, saying what is left,
+finding out why something broke, and asking the policy what it decides. Its pages are the reference behind that —
 why the seams are where they are, how a permission decision is reached, which
 library answers which need.
 
@@ -33,6 +33,7 @@ from lup.harness.content.docs import (
 )
 from lup.harness.content.docs.catalog import page
 from lup.harness.content.modules.specs import CORE
+from lup.harness.content.skills.brainstorm import skill as build_brainstorm
 from lup.harness.content.skills.debug import skill as build_debug
 from lup.harness.content.skills.hooks import skill as build_hooks
 from lup.harness.content.skills.report import SKILL as SKILL_REPORT
@@ -81,6 +82,7 @@ def module(layout: ApplicationLayout, rules: RuleSelection) -> Module:
         spec=CORE,
         content=ContentRoster(
             skills=[
+                build_brainstorm(layout),
                 build_debug(layout),
                 build_hooks(layout),
                 SKILL_REPORT,

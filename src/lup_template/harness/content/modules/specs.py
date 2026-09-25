@@ -10,8 +10,9 @@ the roster, resolving requirements, and reporting what a module's prose costs
 all happen before anything is built, and none of them should import a skill.
 
 ``template-init`` stays on for an adopter, which is not obvious and is worth
-saying: a project built from this scaffold still calls ``/lup:init``, still
-installs the plugin, and still opens a design conversation. What it drops the
+saying: a project built from this scaffold still calls ``/lup:init`` and
+still installs the plugin. The design conversation is core's and reaches
+every project whatever it took. What it drops the
 moment it is stood up is ``examples`` — a directory composing lup's own
 runtime against lup's own README, plus the test modules driving it, which
 an adopter inherits as a suite it must keep green and will never run. That is
@@ -36,8 +37,8 @@ TEMPLATE_INIT = ModuleSpec(
     id="template-init",
     title="Template init",
     summary=(
-        "Standing a lup project up: designing it, initializing it, installing "
-        "the plugin into it, and restarting one from an explored predecessor."
+        "Standing a lup project up: initializing it, installing the plugin "
+        "into it, and restarting one from an explored predecessor."
     ),
     default_on=True,
 )

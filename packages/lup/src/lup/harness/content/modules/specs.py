@@ -27,8 +27,9 @@ CORE = ModuleSpec(
     id="core",
     title="Core",
     summary=(
-        "Reading a codebase, reporting what is left, debugging, and querying "
-        "the permission policy, with the reference pages behind them."
+        "Reading a codebase, designing a change, reporting what is left, "
+        "debugging, and querying the permission policy, with the reference "
+        "pages behind them."
     ),
     default_on=True,
     # The debug skill reads a session's trace, and the hooks skill ends at

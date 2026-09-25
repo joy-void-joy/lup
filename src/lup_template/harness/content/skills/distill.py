@@ -1,8 +1,8 @@
 """Canonical declaration for the distill skill."""
 
 import lup.harness.models as models
-from lup_template.harness.content.skills.deciding import deciding_parts
-from lup_template.harness.content.skills.discovery import discovery_parts
+from lup.harness.content.skills.deciding import deciding_parts
+from lup.harness.content.skills.discovery import discovery_parts
 
 SKILL = models.Skill(
     id="skill.distill",
