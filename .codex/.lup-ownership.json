@@ -569,14 +569,14 @@
     {
       "path": ".codex/plugins/lup/skills/init/SKILL.md",
       "category": "generated",
-      "sha256": "e9c6cca9603ee28575c450bc9db5cc7eb5bc695ca11a0bcf0566d50326d4384c",
+      "sha256": "aa996325a31ff95fed4e13c9887a6b6a9fec6e9b5ef0e888a5545e3fb38be066",
       "semantic_id": "skill.init",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/skills/install/SKILL.md",
       "category": "generated",
-      "sha256": "c8c407ba1c32a841c3f377f317b2b57267115f13148761c788f209ceac11eba8",
+      "sha256": "c3a7716ddfccd6958793e0889de97629481c131213c1b7759edfcd75770300d8",
       "semantic_id": "skill.install",
       "executable": false
     },
@@ -688,7 +688,7 @@
     {
       "path": ".codex/plugins/lup/skills/upstream/SKILL.md",
       "category": "generated",
-      "sha256": "9ce1aac75cc4c2fdef747a976103af206262d0f5cc205512461b3986f7c8632c",
+      "sha256": "8a6f9691f2f0acd12eff632df4ad5c0cbc7f3c6cfa3cefd8eccf49a9c7d8f8fc",
       "semantic_id": "skill.upstream",
       "executable": false
     },
