@@ -459,7 +459,11 @@ there makes its own composition roots look like foreign importers; where the
 policy that worktree generates differs, a refusal or a question about its
 files carries the same command, and
 `dev policy` shows it beside the verdict. The command is named only where the
-refresh would accept the checkout and change what judges it.
+refresh would accept the checkout and change what judges it. Generation names
+it first: `harness generate` in such a worktree ends on the same command once
+what it wrote differs from what the launch accepted, and
+`dev init rename-package` ends its next steps on it, after the regeneration a
+renamed package needs.
 
 Edit decisions cover protected paths, marker changes, size, the canonical
 anti-pattern audit, and declared import ownership. An edit over the size gate alone is deferred — the hook

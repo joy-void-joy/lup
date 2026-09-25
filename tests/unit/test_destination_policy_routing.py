@@ -12,6 +12,7 @@ import pytest
 import sh
 
 from lup.devtools.dev.policy_explain import verdict_for
+from lup.devtools.harness.drift import policy_refresh_lines
 from lup.devtools.harness.policy_refresh import refresh_destination_policy
 import lup.policy.assets.host as policy_host
 from lup.policy.kernel.decision import KernelDecision
@@ -21,6 +22,7 @@ from lup.policy.rules import EditPolicy
 from lup.policy.kernel.policy_protocol import decision_wire, read_response
 from lup.policy.snapshots import DestinationPolicy, accept_destination_policies
 from lup.sandbox.rail import AccessibleRoot, Lease
+from lup_template.devtools.dev.init import next_steps
 from lup_template.harness.catalog import declared_hook_set
 from tests.unit.repos import initialized_repo
 
@@ -668,6 +670,47 @@ def test_a_sibling_judged_by_the_launch_policy_names_the_operator_refresh(
     preview = verdict_for(str(target), "edit", False, origin, declared_hook_set())
     assert {reading.effect for reading in preview.readings} == {"deny"}
     assert all(command in reading.recovery for reading in preview.readings)
+
+
+def test_regenerating_a_sibling_names_the_refresh_where_the_difference_is_made(
+    tmp_path: Path,
+    runtime: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Generation says it first, before any refusal: the tree it wrote is not in force.
+
+    Nothing is said while the sibling still generates what the launch accepted,
+    and the exact operator command once it does not.
+    """
+    origin, sibling = launched_beside(tmp_path, runtime, monkeypatch)
+    assert policy_refresh_lines(sibling) == []
+
+    regenerated_after_rename(sibling, runtime)
+    lines = policy_refresh_lines(sibling)
+
+    assert lines[-1] == f"  {refresh_request(origin, sibling)}"
+    assert "other than the one this session's edits in it are judged by" in lines[1]
+
+
+def test_the_rename_ends_on_the_refresh_its_session_will_need(
+    tmp_path: Path,
+    runtime: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Renaming inside a sibling hands the operator's step over before regenerating.
+
+    The digest cannot differ yet — nothing has been regenerated — so the step
+    is offered wherever a refresh would reach the checkout, and regenerating is
+    the step before it rather than an afterthought.
+    """
+    origin, sibling = launched_beside(tmp_path, runtime, monkeypatch)
+
+    steps = next_steps(sibling)
+
+    assert steps.index("uv run lup-devtools harness generate all") == 1
+    assert steps[-1].endswith(refresh_request(origin, sibling))
+    monkeypatch.delenv("LUP_BOUNDARY_NONCE")
+    assert not any("policy-refresh" in step for step in next_steps(sibling))
 
 
 def test_the_operator_refresh_puts_the_siblings_own_policy_in_force(

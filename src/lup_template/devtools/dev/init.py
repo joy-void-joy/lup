@@ -29,6 +29,7 @@ from pydantic import BaseModel
 from lup.workspace.paths import project_root
 from lup.devtools.dev.plugin import set_marketplace_name
 from lup.devtools.dev.tracked import tracked_files
+from lup.policy.assets.host import policy_refresh_command, refreshable_checkout
 from lup_template.harness.catalog import declared_plugin
 from lup.execution.shell import git
 
@@ -511,7 +512,33 @@ def rename_package(
             for line in stale:
                 typer.echo(line)
         typer.echo("\nNext steps:")
-        typer.echo("  uv sync")
-        typer.echo("  uv run pyright")
-        typer.echo("  uv run ruff check .")
-        typer.echo("  uv run pytest")
+        for step in next_steps(root):
+            typer.echo(f"  {step}")
+
+
+def next_steps(root: Path) -> list[str]:
+    """What a renamed checkout owes before anything works in it again.
+
+    The generated trees still name the old package until they are
+    regenerated — the hook policy's composition roots among them, so the
+    renamed package's own adapter imports read as foreign — which is why
+    regenerating follows the sync. A session working here from another
+    checkout's launch goes on being judged by the policy it launched with,
+    whatever this checkout then generates, until an operator accepts this
+    one's: where a refresh would reach it, that command is the last step,
+    spelled for the terminal outside the session that has to run it.
+    """
+    checkout = refreshable_checkout(str(root), root)
+    refresh = policy_refresh_command(checkout, root) if checkout else ""
+    return [
+        "uv sync",
+        "uv run lup-devtools harness generate all",
+        "uv run pyright",
+        "uv run ruff check .",
+        "uv run pytest",
+        *(
+            [f"then the operator, from a terminal outside this session: {refresh}"]
+            if refresh
+            else []
+        ),
+    ]

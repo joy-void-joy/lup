@@ -110,6 +110,8 @@ def create_harness_app(
         drift.generate_targets(
             targets.resolve(target, project_root()), repository_wide(target)
         )
+        for line in drift.policy_refresh_lines(project_root()):
+            typer.echo(line)
 
     @app.command("policy-refresh")
     def policy_refresh_command(

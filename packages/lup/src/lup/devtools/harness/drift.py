@@ -19,6 +19,7 @@ import typer
 from pydantic import BaseModel
 
 from lup.formats.banner import REGENERATE_COMMAND
+from lup.policy.assets.host import policy_refresh_request
 from lup.devtools.harness.generate import (
     DeclarationObstruction,
     DriftReport,
@@ -254,6 +255,29 @@ def generate_targets(
         if in_passing and not repository_staleness(write):
             continue
         typer.echo(f"repository artifact ready: {written(write)}")
+
+
+def policy_refresh_lines(checkout: Path) -> list[str]:
+    """The operator's refresh a session needs after regenerating ``checkout``.
+
+    A session judges edits in a checkout by the policy its launch accepted,
+    not by whatever that checkout generates, and regenerating a worktree it
+    works in beside its launch — the first thing after renaming a package
+    there — changes the second and not the first. The refusals that follow
+    name the refresh when they come; generation names it first, where the
+    difference was made. Empty wherever no launch is running, the checkout
+    is the launch's own, or its policy still is the one the launch accepted.
+    """
+    refresh = policy_refresh_request(str(checkout), checkout)
+    if not refresh:
+        return []
+    return [
+        "",
+        "This checkout now generates a policy other than the one this session's "
+        "edits in it are judged by. For its own policy to judge them, ask the "
+        "operator to run, from a terminal outside this session:",
+        f"  {refresh}",
+    ]
 
 
 def inspect_drift(
