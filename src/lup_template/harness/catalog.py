@@ -620,13 +620,13 @@ def dev_project() -> DevProject:
                 call="RuleSelection",
                 keyword="retired",
                 summary="library scan rules this project does not hold itself to",
-                module=Path("src/lup_template/harness/content/catalog.py"),
+                module=Path(LAYOUT.path("harness", "content", "catalog.py")),
             ),
             Seam(
                 call="Image",
                 keyword="tooling",
                 summary="programs this project's work needs inside the image",
-                module=Path("src/lup_template/harness/content/image.py"),
+                module=Path(LAYOUT.path("harness", "content", "image.py")),
             ),
         ],
     )
@@ -777,7 +777,7 @@ def portable_harness(
                 # once and evaporates. The library's half of that policy is
                 # this checkout's to protect only while it is vendored here.
                 *([Path(f"{VENDORED_ROOT}/src/lup/policy")] if library else []),
-                Path("src/lup_template/harness/catalog.py"),
+                Path(LAYOUT.path("harness", "catalog.py")),
             ],
             # lup: template: what each tree in this domain is *for*. A role is
             # how a gate tells a fixture from production and a build product
