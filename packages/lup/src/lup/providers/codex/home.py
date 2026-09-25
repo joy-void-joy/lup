@@ -58,9 +58,11 @@ CODEX_CONFIG_STATE_KEYS = ("marketplaces", "plugins")
 PROJECTS_KEY = "projects"
 
 # lup: ignore[constant-declaration] — Codex's own spelling for the interface's
-# table, and the theme it draws, as its `/theme` writes them
+# table, as its `/theme` writes it
 TUI_KEY = "tui"
+# lup: ignore[constant-declaration] — Codex's own key for the theme drawn
 THEME_KEY = "theme"
+# lup: ignore[constant-declaration] — where Codex reads a theme's file from
 THEMES_DIR = "themes"
 
 # lup: ignore[constant-declaration] — Codex's own word for that decision; a
