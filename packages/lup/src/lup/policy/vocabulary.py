@@ -737,6 +737,24 @@ def devtools_rules() -> list[ShellSubcommandRule]:
                         "part still outstanding."
                     ),
                 ),
+                # Files a GitHub issue on whichever tracker owns the component,
+                # the act `gh issue create` asks about. `--issue N` corrects a
+                # report already filed, which a follow-up restores the way an
+                # edited issue is.
+                ShellOperationRule(
+                    name="report-friction",
+                    effect_class="publication",
+                    reviewer="human_only",
+                    amending_flags=["--issue"],
+                    reason=(
+                        "filing a friction report opens an issue the tracker's"
+                        " watchers are notified of"
+                    ),
+                    recovery=(
+                        "`--issue N` adds to a report already filed instead; "
+                        "`dev issues` lists the open ones."
+                    ),
+                ),
                 # The scaffold's own initialization verb, whose body is
                 # `lup.devtools.dev.origin`: it writes the URL the forge says
                 # this project was generated from into the committed entry.

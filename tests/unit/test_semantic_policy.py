@@ -1347,6 +1347,24 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="gh issue create -R o/r --title x", effect="ask"),
     DecisionCase(input="gh issue edit 3 --title x", effect="allow"),
     DecisionCase(input="gh issue comment 3 --body hi", effect="allow"),
+    # A friction report files an issue too, and one pointed at a report
+    # already filed amends it -- unless the pointer cannot be read.
+    DecisionCase(
+        input="uv run lup-devtools dev report-friction --summary s --component c",
+        effect="ask",
+    ),
+    DecisionCase(
+        input="uv run lup-devtools dev report-friction --summary s --issue 7",
+        effect="allow",
+    ),
+    DecisionCase(
+        input="uv run lup-devtools dev report-friction --summary s --issue=7",
+        effect="allow",
+    ),
+    DecisionCase(
+        input="uv run lup-devtools dev report-friction --summary s --issue $N",
+        effect="ask",
+    ),
     DecisionCase(input="gh issue close 3", effect="allow"),
     DecisionCase(input="gh release create v1", effect="ask"),
     DecisionCase(input="gh secret set TOKEN", effect="ask"),

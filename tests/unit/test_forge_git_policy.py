@@ -78,9 +78,22 @@ DECISIONS = [
     ("gh pr create --repo other/x --title t --body b", "ask", "another repository"),
     ("gh pr create -R other/x --title t --body b", "ask", "another repository"),
     ("gh api repos/other/x/pulls -f title=t", "ask", "nobody declared"),
-    # Filing an issue.
+    # Filing an issue, by gh or by the friction report that files one; the
+    # report pointed at one already filed amends it instead.
     ("gh issue create --title t --body b", "ask", "filing an issue"),
     ("gh api repos/{owner}/{repo}/issues -f title=t", "ask", "filing an issue"),
+    (
+        "uv run lup-devtools dev report-friction --summary s --component c"
+        " --command x --error e --state s --recovery-cost r",
+        "ask",
+        "opens an issue",
+    ),
+    (
+        "uv run lup-devtools dev report-friction --summary s --component c"
+        " --command x --error e --state s --recovery-cost r --issue 7",
+        "allow",
+        "",
+    ),
 ]
 
 
