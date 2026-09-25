@@ -18,6 +18,7 @@ from lup.sandbox.rail import (
     demoted,
     fleet_lease,
     hold_pruning_across,
+    hold_worktree_pruning,
     in_repository,
     lease_for,
     prepared_across,
@@ -907,3 +908,12 @@ def test_readying_passes_over_a_directory_git_does_not_answer_for(
     assert prepared_across([cloned, plain], owned=("lup",)) == []
     assert (repository_layout(cloned).common / "lup").is_dir()
     assert list(plain.iterdir()) == []
+
+
+def test_the_prune_guard_leaves_config_alone_once_it_stands(repository: Path) -> None:
+    """A rewrite of `config` detaches a file bind in every running container."""
+    config = repository_layout(repository / "mine").common / "config"
+    assert hold_worktree_pruning(repository / "mine")
+    placed = config.stat().st_ino
+    assert hold_worktree_pruning(repository / "mine")
+    assert config.stat().st_ino == placed

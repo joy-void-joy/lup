@@ -731,9 +731,17 @@ def hold_worktree_pruning(worktree: Path) -> bool:
     repository rather than only the one that set it. Reports whether it took:
     a repository nobody here may configure is a reason to say so, not a
     reason to fail a launch that is otherwise fine.
+
+    Read before it is written, and written only where it does not already
+    stand. Git rewrites `config` by renaming a lockfile over it, and that
+    rename detaches every file bind held over `config` in a running
+    container -- so a launch that rewrote it unconditionally unbound the
+    read-only `config` of every plain-checkout session already open.
     """
+    asked = ["-C", str(worktree), "config", "gc.worktreePruneExpire"]
     try:
-        git("-C", str(worktree), "config", "gc.worktreePruneExpire", "never")
+        if git.out(*asked, _ok_code=[0, 1]).strip() != "never":
+            git(*asked, "never")
         return True
     except sh.ErrorReturnCode:
         return False
