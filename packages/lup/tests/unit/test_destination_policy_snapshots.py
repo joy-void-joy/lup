@@ -4,8 +4,12 @@ import json
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
+from typer.testing import CliRunner
 
 from lup.devtools.harness import launch
+from lup.devtools.harness.app import create_harness_app
+from lup.devtools.harness.composition import NativeTargets
 from lup.devtools.harness.policy_refresh import refresh_destination_policy
 from lup.devtools.harness.preflight import (
     LaunchSentinels,
@@ -18,7 +22,11 @@ from lup.harness.models import HookSet, Plugin
 from lup.harness.notice import Banner
 from lup.policy.assets.host import policy_snapshot_digest
 from lup.policy.profiles import compile_boundary, measured
-from lup.policy.snapshots import accept_destination_policies, destination_authorities
+from lup.policy.snapshots import (
+    DestinationPolicy,
+    accept_destination_policies,
+    destination_authorities,
+)
 from lup.sandbox.rail import AccessibleRoot, Lease, fleet_lease, repository_layout
 
 
@@ -565,6 +573,121 @@ def test_a_recorded_runtime_outranks_an_operator_naming_another(
     assert (
         refresh_destination_policy(caller, sentinels.nonce, checkout).runtime == "codex"
     )
+
+
+def test_the_command_line_names_only_a_runtime_a_policy_is_generated_for(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A runtime is spelled into the path an evaluator is read from, so it is a choice.
+
+    Named as a path instead, it walks out of the checkout to a tree the
+    session wrote beside it, which a ledger recording no runtime would
+    otherwise have accepted.
+    """
+    monkeypatch.delenv("LUP_BOUNDARY_NONCE", raising=False)
+    bare, caller, sentinels = launched_in_own_repository(tmp_path, runtime="")
+    feature = bare / "tree" / "feature"
+    git(
+        "-C",
+        str(bare),
+        "worktree",
+        "add",
+        "-q",
+        "--orphan",
+        "-b",
+        "feature",
+        str(feature),
+    )
+    (feature / ".x").mkdir()
+    evaluator(bare / "tree" / "elsewhere", "y")
+
+    result = CliRunner().invoke(
+        create_harness_app(NativeTargets(builders={}), []),
+        [
+            "policy-refresh",
+            "--nonce",
+            sentinels.nonce,
+            "--repository",
+            str(feature),
+            "--runtime",
+            "x/../../elsewhere/.y",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "'claude', 'codex'" in result.output
+    ledger = caller / ".lup/preflight" / f"{sentinels.nonce}.json"
+    assert json.loads(ledger.read_text())["destination_policies"] == []
+    assert not (caller / ".lup" / "policy-snapshots").exists()
+
+
+@pytest.mark.parametrize("field", ["runtime", "destination_authorities"])
+def test_a_ledger_naming_a_path_for_its_runtime_accepts_nothing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+) -> None:
+    """The ledger is a file in the checkout the session works in, read as a vocabulary."""
+    monkeypatch.delenv("LUP_BOUNDARY_NONCE", raising=False)
+    bare, caller, sentinels = launched_in_own_repository(tmp_path, runtime="")
+    feature = bare / "tree" / "feature"
+    git(
+        "-C",
+        str(bare),
+        "worktree",
+        "add",
+        "-q",
+        "--orphan",
+        "-b",
+        "feature",
+        str(feature),
+    )
+    evaluator(feature)
+    ledger = caller / ".lup/preflight" / f"{sentinels.nonce}.json"
+    document = json.loads(ledger.read_text())
+    named = "x/../../elsewhere/.y"
+    document[field] = (
+        [named]
+        if field == "runtime"
+        else [
+            json.dumps({"repository": str(bare), "root": str(bare), "runtime": named})
+        ]
+    )
+    ledger.write_text(json.dumps(document))
+    written = ledger.read_text()
+
+    with pytest.raises(ValidationError, match="'claude' or 'codex'"):
+        refresh_destination_policy(caller, sentinels.nonce, feature)
+
+    assert ledger.read_text() == written
+    assert not (caller / ".lup" / "policy-snapshots").exists()
+
+
+def test_acceptance_reads_no_evaluator_tree_the_checkout_does_not_hold(
+    tmp_path: Path,
+) -> None:
+    """Neither a path spelled as a runtime nor a runtime tree linked from elsewhere."""
+    caller = repository(tmp_path / "caller")
+    destination = repository(tmp_path / "destination")
+    evaluator(tmp_path / "elsewhere")
+    row = DestinationPolicy(
+        repository=str(repository_layout(destination).common),
+        checkout=str(destination),
+        writable_roots=[str(destination)],
+        read_only_roots=[],
+    )
+
+    walked = row.accepted(caller, "x/../../elsewhere/.codex")
+    (destination / ".codex").symlink_to(
+        tmp_path / "elsewhere" / ".codex", target_is_directory=True
+    )
+    linked = row.accepted(caller, "codex")
+
+    assert "not a runtime" in walked.error and walked.runtime == ""
+    assert "outside" in linked.error and str(tmp_path / "elsewhere") in linked.error
+    assert not walked.snapshot and not linked.snapshot
+    assert not (caller / ".lup" / "policy-snapshots").exists()
 
 
 def test_submodule_repository_identity_comes_from_git(tmp_path: Path) -> None:

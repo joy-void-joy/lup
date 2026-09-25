@@ -382,7 +382,9 @@ def policy_refresh_request(path_text: str, root: Path | None) -> str:
 
     Where the ledger does not say which runtime the launch opened, every
     runtime's generated tree is compared, so a difference in any of them
-    still counts.
+    still counts. A recorded runtime is spelled into the path compared, so
+    one that is not a single name is read as no record at all rather than
+    followed out of the checkout.
     """
     checkout = refreshable_checkout(path_text, root)
     launch = launch_root(root)
@@ -409,7 +411,11 @@ def policy_refresh_request(path_text: str, root: Path | None) -> str:
         )
 
     boundary = measured_boundary(root)
-    recorded = boundary["runtime"] if "runtime" in boundary else []
+    recorded = [
+        name
+        for name in (boundary["runtime"] if "runtime" in boundary else [])
+        if Path(name).name == name and name not in ("", ".", "..")
+    ]
     runtime = recorded[0] if recorded else "*"
     granted = [
         row

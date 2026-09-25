@@ -692,6 +692,30 @@ def test_regenerating_a_sibling_names_the_refresh_where_the_difference_is_made(
     assert "other than the one this session's edits in it are judged by" in lines[1]
 
 
+def test_a_recorded_runtime_spelling_a_path_is_not_followed_out_of_the_checkout(
+    tmp_path: Path,
+    runtime: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The runtime the ledger records names a tree inside the checkout, or none.
+
+    Spelled as a path, it would compare a tree planted beside the checkout and
+    name a refresh for a difference the checkout never generated.
+    """
+    origin, sibling = launched_beside(tmp_path, runtime, monkeypatch)
+    ledger = origin / ".lup/preflight/routing-test.json"
+    measured = json.loads(ledger.read_text())
+    measured["runtime"] = ["x/../../elsewhere/.y"]
+    ledger.write_text(json.dumps(measured))
+    (sibling / ".x").mkdir()
+    planted = tmp_path / "elsewhere/.y/plugins/lup/hooks"
+    shutil.copytree(Path(f".{runtime}/plugins/lup/hooks"), planted)
+    data = planted / "runtime/policy_data.py"
+    data.write_text(data.read_text() + "\nMAXIMUM_ADDED_LINES = 99\n")
+
+    assert policy_refresh_lines(sibling) == []
+
+
 def test_the_rename_ends_on_the_refresh_its_session_will_need(
     tmp_path: Path,
     runtime: str,

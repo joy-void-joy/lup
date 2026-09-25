@@ -11,21 +11,30 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from lup.devtools.harness.preflight import NONCE_VARIABLE, ledger_path
 from lup.execution.shell import git
-from lup.policy.snapshots import DestinationPolicy, RepositoryPolicyAuthority
+from lup.policy.snapshots import (
+    DestinationPolicy,
+    PolicyRuntime,
+    RepositoryPolicyAuthority,
+)
 from lup.sandbox.rail import repository_layout
 
 
 class PolicyLaunchLedger(BaseModel, extra="allow"):
-    """The grant field plus boundary measurements preserved without reinterpretation."""
+    """The grant field plus boundary measurements preserved without reinterpretation.
+
+    The runtime is read as the closed vocabulary rather than as text: it is
+    spelled into the path an evaluator is accepted from, and the ledger is a
+    file in the checkout the session works in.
+    """
 
     destination_policies: list[str] = []
     destination_authorities: list[str] = []
     writable_roots: list[str] = []
     read_only_roots: list[str] = []
-    runtime: list[str] = []
+    runtime: list[PolicyRuntime] = []
 
     def grant_for(
-        self, checkout: Path, launch: Path, runtime: str = ""
+        self, checkout: Path, launch: Path, runtime: PolicyRuntime | None = None
     ) -> DestinationPolicy:
         """A checkout no grant named, reached through an authority the launch holds.
 
@@ -57,7 +66,7 @@ class PolicyLaunchLedger(BaseModel, extra="allow"):
         if top != checkout:
             raise ValueError(f"Use the canonical Git worktree root: {top}")
         repository = str(repository_layout(checkout).common.resolve())
-        mounted = [
+        mounted: list[PolicyRuntime] = [
             row.runtime
             for row in (
                 RepositoryPolicyAuthority.model_validate_json(encoded)
@@ -80,25 +89,23 @@ class PolicyLaunchLedger(BaseModel, extra="allow"):
             raise ValueError(
                 f"No recorded writable repository authority covers {checkout}; changing repository access requires another launch"
             )
-        match sorted({*self.runtime, *mounted} - {""}), runtime:
-            case [], "":
-                raise ValueError(
-                    "This launch recorded no runtime; name the one it opened with "
-                    "--runtime claude or --runtime codex"
-                )
-            case [], named:
-                launched = named
-            case [recorded], named if named in ("", recorded):
-                launched = recorded
-            case [recorded], named:
-                raise ValueError(
-                    f"This launch opened {recorded}; --runtime {named} names another runtime"
-                )
-            case recorded, _:
-                raise ValueError(
-                    f"This launch's grants name more than one runtime ({', '.join(recorded)}); "
-                    "changing repository access requires another launch"
-                )
+        recorded: list[PolicyRuntime] = [*self.runtime, *mounted]
+        if any(name != recorded[0] for name in recorded):
+            raise ValueError(
+                "This launch's grants name more than one runtime "
+                f"({', '.join(dict.fromkeys(recorded))}); "
+                "changing repository access requires another launch"
+            )
+        launched = recorded[0] if recorded else runtime
+        if launched is None:
+            raise ValueError(
+                "This launch recorded no runtime; name the one it opened with "
+                "--runtime claude or --runtime codex"
+            )
+        if runtime is not None and runtime != launched:
+            raise ValueError(
+                f"This launch opened {launched}; --runtime {runtime} names another runtime"
+            )
         return DestinationPolicy(
             repository=repository,
             checkout=str(checkout),
@@ -109,7 +116,7 @@ class PolicyLaunchLedger(BaseModel, extra="allow"):
 
 
 def refresh_destination_policy(
-    root: Path, nonce: str, repository: Path, runtime: str = ""
+    root: Path, nonce: str, repository: Path, runtime: PolicyRuntime | None = None
 ) -> DestinationPolicy:
     """Replace one accepted snapshot without extending that launch's authority.
 
@@ -149,7 +156,7 @@ def refresh_destination_policy(
         raise ValueError("Destination Git repository identity changed; launch again")
     if not existing.runtime:
         raise ValueError("Launch grant has no runtime identity; launch again")
-    if runtime and runtime != existing.runtime:
+    if runtime is not None and runtime != existing.runtime:
         raise ValueError(
             f"Launch {nonce} accepted {checkout} for {existing.runtime}; "
             f"--runtime {runtime} names another runtime"
@@ -174,7 +181,7 @@ def refresh_destination_policy(
 
 
 def refresh_command(
-    root: Path, nonce: str, repository: Path, runtime: str = ""
+    root: Path, nonce: str, repository: Path, runtime: PolicyRuntime | None = None
 ) -> None:
     """Report the exact destination revision accepted by the operator."""
     try:
