@@ -582,8 +582,10 @@ The inbox titles requests from captured evidence: a file's action and path,
 the number of files, or the command to run. The exact operation, requester,
 rule, reason, command or captured file diff, and recorded answer remain visible.
 The default view includes files that require review and highlights newly
-introduced rule exceptions. Files the policy allows automatically and existing
-exceptions remain available in the full-operation view. Approval still applies
+introduced rule exceptions. Files the policy allows automatically or explicitly
+leaves to the native provider, and existing exceptions, remain available in the
+full-operation view. A captured deferral means Lup requests no approval for that
+file; the native provider still applies its own permissions. Approval still applies
 to the exact complete submission. Where recorded evidence cannot establish a
 file's status, it remains visible rather than being treated as automatically allowed.
 The file navigator shows change counts and supports searching paths. Select

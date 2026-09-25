@@ -584,6 +584,87 @@ describe("review inbox page", () => {
     expect([...page.root.querySelectorAll(".queue-files code")].map((node) => node.textContent)).toEqual(detail.summary.paths);
   });
 
+  test("captured native deferrals stay outside review counts and navigation while unknown files stay visible", async () => {
+    const asked = detail.files[0];
+    const automatic = review().files[0];
+    const deferred = review().files[0];
+    const unknown = review().files[0];
+    if (asked === undefined || automatic === undefined || deferred === undefined || unknown === undefined) throw new Error("fixture lacks files");
+    asked.path = "/project/asked.py";
+    automatic.path = "/project/automatic.py";
+    automatic.review_effect = "allow";
+    automatic.additions = 50;
+    deferred.path = "/project/native.py";
+    deferred.review_effect = "defer";
+    deferred.review_reason = "The native provider applies its own permission policy.";
+    deferred.additions = 100;
+    unknown.path = "/project/unknown.py";
+    unknown.review_effect = "unknown";
+    detail.files = [automatic, asked, deferred, unknown];
+    const page = await open();
+    expect(one(page.root, ".file-heading > code").textContent).toBe("asked.py");
+    expect([...page.root.querySelectorAll(".file-list code")].map((node) => node.textContent)).toEqual(["asked.py", "unknown.py"]);
+    expect(one(page.root, ".file-overview-heading .change-counts").textContent).toBe("+2 −2");
+    await keydown("]", "BracketRight");
+    await keyup("]", "BracketRight");
+    expect(one(page.root, ".file-heading > code").textContent).toBe("unknown.py");
+    expect(one(page.root, ".file-paging > span").textContent).toBe("2 / 2");
+    await keydown("[", "BracketLeft");
+    await keyup("[", "BracketLeft");
+    expect(one(page.root, ".file-heading > code").textContent).toBe("asked.py");
+    await click(labelled(page.root, "button", "Full operation (4)"));
+    expect(page.root.querySelectorAll(".file-list li")).toHaveLength(4);
+    const native = one<HTMLElement>(page.root, ".file-list li:nth-child(3) button");
+    expect(one(native, ".file-review-state").textContent).toBe("Native decision");
+    await click(native);
+    await click(one<HTMLElement>(page.root, ".file-review summary"));
+    expect(one(page.root, ".file-review p").textContent).toBe(`No Lup approval requested; the native provider decides. ${deferred.review_reason}`);
+    await click(labelled(page.root, "button", "Needs review (2)"));
+    expect(one(page.root, ".file-heading > code").textContent).toBe("asked.py");
+    expect(page.root.querySelectorAll(".file-list li")).toHaveLength(2);
+    await click(labelled(page.root, "button", "Approve"));
+    await until(() => requests.some((request) => request.method === "POST"), "the complete operation approval");
+    expect(requests.find((request) => request.method === "POST")?.body).toEqual({ approved: true, note: "", fingerprint: "bound-tree-q1" });
+  });
+
+  test("native-deferred exceptions stay out of review highlights and exception shortcuts", async () => {
+    const file = detail.files[0];
+    const added = file?.hunks[0]?.lines[1];
+    if (file === undefined || added === undefined) throw new Error("fixture lacks its change");
+    const asked = exception({ line: 1, rule_ids: ["asked-rule"], reason: "Needs review", introduced: true });
+    const deferred = exception({ line: 2, rule_ids: ["native-rule"], reason: "Native decision", introduced: true });
+    deferred.review_effect = "defer";
+    deferred.review_reason = "No Lup approval requested.";
+    file.suppressions = [asked, deferred];
+    added.text = "# lup: ignore[asked-rule]\n";
+    added.suppression = true;
+    file.hunks[0]?.lines.push({ kind: "add", text: "# lup: ignore[native-rule]\n", old_line: null, new_line: 2, suppression: true });
+    file.after = `${added.text}# lup: ignore[native-rule]\n`;
+    const page = await open();
+    expect(page.root.querySelectorAll(".diff-line.suppression")).toHaveLength(1);
+    await click(labelled(page.root, "button", "Exceptions (1)"));
+    expect([...page.root.querySelectorAll(".suppression-group summary code")].map((node) => node.textContent)).toEqual(["asked-rule"]);
+    await keydown("n", "KeyN");
+    await keyup("n", "KeyN");
+    const first = one(page.root, ".diff-line.suppression");
+    expect(document.activeElement).toBe(first);
+    await keydown("n", "KeyN");
+    await keyup("n", "KeyN");
+    expect(document.activeElement).toBe(first);
+    await click(labelled(page.root, "button", "After"));
+    expect(one(page.root, ".source-text").textContent).toBe(file.after);
+    expect(page.root.querySelectorAll(".source-line.suppression")).toHaveLength(1);
+    await click(labelled(page.root, "button", "Full operation (1)"));
+    expect([...page.root.querySelectorAll(".suppression-group summary code")].map((node) => node.textContent)).toEqual(["asked-rule", "native-rule"]);
+    expect(page.root.querySelectorAll(".diff-line.suppression")).toHaveLength(2);
+    expect(one(page.root, ".suppression-group:last-child .file-review-state").textContent).toBe("Native decision");
+    await keydown("n", "KeyN");
+    await keyup("n", "KeyN");
+    await keydown("n", "KeyN");
+    await keyup("n", "KeyN");
+    expect(document.activeElement).toBe(one(page.root, ".diff-line:last-child"));
+  });
+
   test("default exceptions show only the asked rules and leave existing directives unhighlighted", async () => {
     const file = detail.files[0];
     const added = file?.hunks[0]?.lines[1];
@@ -680,11 +761,11 @@ describe("review inbox page", () => {
     }
   });
 
-  test("command-level requests show the exact command when every file passes automatically", async () => {
+  test.each(["allow", "defer"] as const)("command-level requests retain the exact command when every file decision is %s", async (effect) => {
     const file = detail.files[0];
     if (file === undefined) throw new Error("fixture lacks a file");
-    file.review_effect = "allow";
-    file.review_reason = "The file edit passes; the command itself requires approval.";
+    file.review_effect = effect;
+    file.review_reason = "No Lup file approval is requested; the command itself requires approval.";
     detail.command = "sed -i 's/before/after/' /project/file.py";
     const page = await open();
     expect(page.root.querySelectorAll(".file-list li")).toHaveLength(0);
