@@ -109,3 +109,24 @@ def test_a_checkout_named_by_path_is_listed_relative_to_itself(
         "src/pkg/mod.py"
     ]
     assert tracked_files(suffixes=(".py",)) == ["pkg/mod.py"]
+
+
+def test_a_path_holding_a_non_ascii_byte_is_listed_as_it_is_spelled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A line listing quotes such a path, and a sweep would then skip it.
+
+    `git ls-files` without `-z` writes `"docs/caf\\303\\251.md"`, quotes and
+    octal escapes included, which matches no suffix and opens no file.
+    """
+    work = tmp_path / "repo"
+    build_conflicted_checkout(work)
+    accented = work / "docs" / "café.md"
+    accented.parent.mkdir()
+    accented.write_text("# Café\n", encoding="utf-8")
+    monkeypatch.chdir(work)
+
+    listed = tracked_files(others=True, suffixes=(".md",))
+
+    assert "docs/café.md" in listed
+    assert (work / listed[listed.index("docs/café.md")]).is_file()
