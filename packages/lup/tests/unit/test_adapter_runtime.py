@@ -122,6 +122,18 @@ def test_claude_session_defaults_and_hooks_reach_native_options(
     assert options.include_partial_messages
 
 
+def test_the_manual_permission_mode_reaches_the_sdk_as_its_default() -> None:
+    """The SDK's literal still spells the CLI's ``manual`` as ``default``."""
+    options = build_claude_options(
+        ClaudeSessionConfig(permission_mode="manual"),
+        binding=lambda: None,
+        resume=None,
+        session_id="18f5debf-499a-42bb-8856-0b39dd59943d",
+    )
+
+    assert options.permission_mode == "default"
+
+
 def test_a_named_plugin_directory_reaches_the_session(tmp_path: Path) -> None:
     """A session names the tree it is judged by, the way a launch does.
 

@@ -29,7 +29,7 @@ from lup.providers.selection import (
 # lup: ignore[constant-declaration] — each value is Claude Code's own permission
 # mode for the autonomy beside it, over a vocabulary this library closes
 CLAUDE_AUTONOMY: dict[SessionAutonomy, ClaudePermissionMode] = {
-    "ask": "default",
+    "ask": "manual",
     "accept_edits": "acceptEdits",
     "plan": "plan",
     "unattended": "bypassPermissions",

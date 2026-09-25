@@ -175,7 +175,7 @@ class Settings(BaseSettings, env_file=(".env", ".env.local"), extra="ignore"):
     )
 
     permission_mode: (
-        Literal["default", "acceptEdits", "plan", "bypassPermissions"] | None
+        Literal["manual", "acceptEdits", "plan", "bypassPermissions"] | None
     ) = Field(
         default=None,
         validation_alias="AGENT_PERMISSION_MODE",

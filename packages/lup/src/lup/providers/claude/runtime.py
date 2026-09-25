@@ -137,9 +137,13 @@ class ClaudeSandboxConfig(BaseModel, frozen=True):
 
 
 type ClaudePermissionMode = Literal[
-    "default", "acceptEdits", "plan", "bypassPermissions", "dontAsk", "auto"
+    "manual", "acceptEdits", "plan", "bypassPermissions", "dontAsk", "auto"
 ]
-"""Claude Code's own words for how much a session may do without asking."""
+"""Claude Code's own words for how much a session may do without asking.
+
+These are the choices ``claude --permission-mode`` lists. The CLI still reads
+``default``, its internal name for ``manual``, which the Agent SDK's own
+literal spells, so :func:`create_claude` hands the SDK that spelling."""
 
 
 type ClaudeEffort = Literal["low", "medium", "high", "xhigh", "max"]
@@ -1153,7 +1157,9 @@ def build_claude_options(
             for spec in config.subagents
         }
         or None,
-        permission_mode=config.permission_mode,
+        permission_mode=(
+            "default" if config.permission_mode == "manual" else config.permission_mode
+        ),
         max_turns=config.max_turns,
         max_thinking_tokens=config.max_thinking_tokens,
         effort=config.effort,
