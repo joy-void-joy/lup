@@ -31,6 +31,9 @@ CORE = ModuleSpec(
         "the permission policy, with the reference pages behind them."
     ),
     default_on=True,
+    # `dev check` is the gate every change answers to, and `dev rules`
+    # and `dev commands` write two of the generated references.
+    foundation=True,
     # The debug skill reads a session's trace, and the hooks skill ends at
     # regenerating the trees: one command tree each, owned elsewhere.
     requires=["observability", "meta"],
@@ -62,6 +65,9 @@ META = ModuleSpec(
         "session runs under, and the walks that move code without losing it."
     ),
     default_on=True,
+    # `harness generate` is what writes every generated file, each of which
+    # names it as the command that regenerates it.
+    foundation=True,
     subapps=["harness"],
 )
 

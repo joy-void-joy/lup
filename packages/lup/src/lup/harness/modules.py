@@ -99,6 +99,19 @@ class ModuleSpec(SelectableRule, frozen=True):
     adopter inherits as a suite it must keep green and will never run.
     """
 
+    foundation: bool = False
+    """Whether every composition stands on this module, so none may decline it.
+
+    The other side of the absence of a choice: a module whose command tree is
+    how the roster itself is generated and checked. Every generated file names
+    the command that regenerates it, and the gate every change answers to is a
+    command too, so declining the module serving them would leave the whole
+    composition pointing at a CLI that no longer has them. Refused when the
+    roster is built rather than modelled as every other module requiring it,
+    because that is what it is: not a subject a module reaches into, but the
+    ground each of them stands on.
+    """
+
     def selection_id(self) -> str:
         return self.id
 
@@ -474,12 +487,21 @@ def adopted(
     """
     resolved = selection or ModuleSelection()
     taken = [entry for entry in entries if resolved.takes(entry.spec)]
-    unmet = unmet_requirements([entry.spec for entry in taken])
+    grounded = [
+        f"module {entry.spec.id!r} is a foundation every composition stands on "
+        "and cannot be declined"
+        for entry in entries
+        if entry.spec.foundation and not resolved.takes(entry.spec)
+    ]
+    unmet = [*grounded, *unmet_requirements([entry.spec for entry in taken])]
     if unmet:
         raise ValueError("; ".join(unmet))
     built = [resolved.resolved(entry.build()) for entry in taken]
-    skills = composed_content(built).skills
-    return [module.shipped(skills) for module in built]
+    roster = models.Shipped(
+        skills=composed_content(built).skills,
+        commands=resolved.subapps([entry.spec for entry in entries]),
+    )
+    return [module.shipped(roster) for module in built]
 
 
 def composed_content(modules: list[Module]) -> models.ContentRoster:

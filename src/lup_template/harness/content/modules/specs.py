@@ -29,6 +29,9 @@ PROJECT = ModuleSpec(
         "expects of a session working in it."
     ),
     default_on=True,
+    # The seat an adopter rewrites rather than declines: the document's
+    # opening, and the `agent` tree the application's own source documents.
+    foundation=True,
     subapps=["agent"],
 )
 
