@@ -333,6 +333,17 @@ def judged_ask_rules(
         JudgedCommand(name="apt", reason="system package changes require approval"),
         JudgedCommand(name="apt-get", reason="system package changes require approval"),
         JudgedCommand(name="pacman", reason="system package changes require approval"),
+        # The AUR helpers wrap pacman and build what they install from a
+        # PKGBUILD nobody here reviewed, so they ask as pacman does; makepkg
+        # is that build on its own, and installs it under `-i`.
+        *(
+            JudgedCommand(name=name, reason="system package changes require approval")
+            for name in ("yay", "paru", "pikaur", "aurman", "trizen")
+        ),
+        JudgedCommand(
+            name="makepkg",
+            reason="building a package runs its PKGBUILD and can install it",
+        ),
         JudgedCommand(name="brew", reason="system package changes require approval"),
         JudgedCommand(name="systemctl", reason="service management requires approval"),
         JudgedCommand(name="crontab", reason="schedule changes require approval"),

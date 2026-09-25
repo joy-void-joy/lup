@@ -1421,6 +1421,18 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="rm -rf src", effect="ask"),
     DecisionCase(input="make test", effect="ask"),
     DecisionCase(input="wget https://x.test/f", effect="ask"),
+    # The AUR helpers install what they build from a PKGBUILD, so they ask
+    # as pacman does, contained or not; makepkg is that build on its own.
+    DecisionCase(input="pacman -S foo", effect="ask", sandboxed=True),
+    DecisionCase(input="yay -S foo", effect="ask"),
+    DecisionCase(input="yay -S foo", effect="ask", sandboxed=True),
+    DecisionCase(input="paru -Syu", effect="ask"),
+    DecisionCase(input="pikaur -S foo", effect="ask", sandboxed=True),
+    DecisionCase(input="aurman -S foo", effect="ask"),
+    DecisionCase(input="trizen -S foo", effect="ask"),
+    DecisionCase(input="makepkg -si", effect="ask"),
+    DecisionCase(input="makepkg -si", effect="ask", sandboxed=True),
+    DecisionCase(input="yay", effect="ask"),
     # Docker: the read-only query surface is judged allow; every form that
     # can mutate containers, images, or the daemon keeps the judged ask.
     DecisionCase(input="docker ps", effect="allow"),
