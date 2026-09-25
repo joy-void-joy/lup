@@ -289,6 +289,8 @@ class SessionDefaults(TypedDict, total=False):
     permission_mode: ClaudePermissionMode
     approval_policy: CodexApprovalPolicy
     sandbox_mode: CodexSandboxMode
+    services: dict[str, int]
+    """The host port each named host service listens on here, where it differs."""
 
 
 @with_config(ConfigDict(extra="allow"))

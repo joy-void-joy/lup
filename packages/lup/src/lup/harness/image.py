@@ -43,6 +43,7 @@ from lup.harness.egress import SessionEgress
 from lup.harness.environment import NON_INTERACTIVE_SHELL_ENV
 from lup.harness.messaging import SessionInboxes
 from lup.harness.requirements import Manifest, Package, PackageManager
+from lup.harness.services import HostServices
 from lup.harness.terminal import TerminalHandoff
 from lup.types import EnvVars, JsonObject
 
@@ -710,6 +711,17 @@ class Image(BaseModel, frozen=True):
             "path is what a member publishes and another container reads back"
         ),
     )
+    services: HostServices = Field(
+        default=HostServices(),
+        description=(
+            "Services on the host's loopback a session reaches by name, each "
+            "relayed through a socket the launcher mounts and a listener on "
+            "the container's own loopback -- the one way to the host a "
+            "filtered session has, and only to what is declared here. A "
+            "machine's registry and a launch's ``--host-service`` move a "
+            "service's host port"
+        ),
+    )
     credential_seed: str = Field(
         default="/opt/lup/credential-seed",
         description=(
@@ -1122,6 +1134,11 @@ fi
 if [ -n "${{{self.forge.token_variable}:-}}" ]; then
   export GH_TOKEN="${self.forge.token_variable}"
 fi
+
+# Each host service the launcher relays, listened for on this container's own
+# loopback and carried to its socket -- the one way a filtered session reaches
+# anything on the host, and only what the launch named.
+{self.services.entrypoint()}
 exec "$@"
 ENTRY
 ENTRYPOINT ["/usr/local/bin/lup-entrypoint"]
@@ -1412,6 +1429,7 @@ USER $UID:$GID
         environments: Mapping[Path, Path] | None = None,
         devices: Sequence[Device] = (),
         memory: int | None = None,
+        services_directory: Path | None = None,
     ) -> list[str]:
         """The whole argv that opens one agent session inside a container.
 
@@ -1478,6 +1496,11 @@ USER $UID:$GID
         for the reason ``devices`` is: a share of memory is a share of what
         *this* engine can hand out, which the declaration cannot know and a
         launch asks.
+
+        ``services_directory`` holds the sockets the launcher relays host
+        services through, mounted where the entrypoint's listeners look; with
+        none, each service's address names its own port on the shared host
+        loopback.
         """
         granted_devices = [
             argument for device in devices for argument in device.arguments()
@@ -1548,6 +1571,14 @@ USER $UID:$GID
             self.forge.environment(rewrites or [], selected, granted, identity)
             | (terminal or {})
             | (boundary or {})
+            | self.services.environment(services_directory is not None)
+        )
+        # The relayed services' sockets, where the entrypoint's listeners
+        # look for them. Writable because a connect is a write on a socket.
+        relaying = (
+            ["-v", f"{services_directory}:{self.services.inside}:rw"]
+            if services_directory is not None
+            else []
         )
         # By name, with no value beside it, which is what both engines read as
         # "take this one from my own environment". The value would otherwise
@@ -1587,6 +1618,7 @@ USER $UID:$GID
             *opening,
             *clipping,
             *nudging,
+            *relaying,
             tag,
         ]
 

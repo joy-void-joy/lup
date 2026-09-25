@@ -1744,6 +1744,27 @@ def contained_argv(
     said.add(image.egress.notice(root.name))
     memory = resolved_memory(image, client, origin_said(origins.memory, "--memory"))
     said.add(memory.notices)
+    # Said only where something is given back: holding nothing and gaining
+    # nothing is what a session is expected to run under, and a line naming
+    # the default every launch is one nobody reads by the tenth.
+    if image.privileges.widened():
+        given = ", ".join(image.privileges.capabilities) or "no capability"
+        gaining = (
+            "; processes may raise their privileges on exec"
+            if image.privileges.new_privileges
+            else ""
+        )
+        said.add(
+            [
+                Notice(
+                    text=(
+                        f"Privileges: {given} given back"
+                        f"{gaining} ({origin_said(origins.privileges, '')})"
+                    ),
+                    urgency="boundary",
+                )
+            ]
+        )
     if state_scope is None:
         said.add(superseded_volume_notice(root, client, existing_volumes(client)))
     # Started before the container rather than beside it, because a pipe with
@@ -1755,6 +1776,17 @@ def contained_argv(
     copying = image.clipboard.serve()
     nudging = image.inboxes.serve()
     handing = image.browser.serve()
+    # The host services this session may reach, relayed by name -- except
+    # where the container already shares the host's loopback, where there is
+    # nothing to carry and a listener would collide with the service itself.
+    relaying = (
+        image.services.serve() if not image.egress.shares_host_loopback() else None
+    )
+    said.add(
+        image.services.notice(
+            relaying is not None, origin_said(origins.services, "--host-service")
+        )
+    )
     said.add(image.clipboard.notice(copying is not None))
     said.add(image.inboxes.notice(nudging is not None))
     said.add(
@@ -1865,6 +1897,7 @@ def contained_argv(
         environments=held_environments(root, accessible, image.project_environment),
         devices=granted_devices.granted,
         memory=memory.limit,
+        services_directory=relaying,
     )
 
 

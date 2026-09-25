@@ -24,7 +24,7 @@ import typer
 from pydantic import BaseModel, ValidationError
 
 from lup.devtools.sync import SessionDefaults
-from lup.harness.image import Image, MemoryLimit
+from lup.harness.image import ContainerPrivileges, Image, MemoryLimit
 from lup.harness.models import Harness, SessionMode
 from lup.harness.notice import Notice
 from lup.harness.posture import (
@@ -106,6 +106,7 @@ class LaunchOverrides(BaseModel, frozen=True):
     permission_mode: ClaudePermissionMode | None = None
     approval_policy: CodexApprovalPolicy | None = None
     sandbox_mode: CodexSandboxMode | None = None
+    services: dict[str, int] = {}
 
 
 class SettingOrigins(BaseModel, frozen=True):
@@ -119,6 +120,8 @@ class SettingOrigins(BaseModel, frozen=True):
 
     network: Origin = "project"
     memory: Origin = "project"
+    services: Origin = "project"
+    privileges: Origin = "project"
 
 
 class SessionSettings(BaseModel, frozen=True):
@@ -130,6 +133,14 @@ class SessionSettings(BaseModel, frozen=True):
     approval_policy: Chosen[CodexApprovalPolicy] | None = None
     sandbox_mode: Chosen[CodexSandboxMode] | None = None
     bash_sandbox: Chosen[bool] | None = None
+    privileges: Chosen[ContainerPrivileges] | None = None
+    services: Chosen[dict[str, int]] | None = None
+    """The host ports named services were moved to, by a machine or a launch.
+
+    One origin for the whole map, the highest layer that moved any of them:
+    a launch's flag moves one service and leaves the machine's say about the
+    rest standing, so the two are merged rather than one replacing the other.
+    """
 
     @classmethod
     def resolved(
@@ -187,10 +198,14 @@ class SessionSettings(BaseModel, frozen=True):
             bash_sandbox=chosen(
                 None, posture.bash_sandbox if posture is not None else None, None
             ),
+            privileges=chosen(
+                None, mode.privileges if mode is not None else None, None
+            ),
+            services=moved_services(harness, defaults.get("services", {}), flags),
         )
 
     def image(self, declared: Image) -> Image:
-        """The declared image with this launch's network and memory in it.
+        """The declared image with this launch's container settings in it.
 
         Everything downstream reads the image, so resolving onto it once is
         what keeps the proxy, the argv and the probe on one answer rather
@@ -202,15 +217,53 @@ class SessionSettings(BaseModel, frozen=True):
                     update={"mode": self.network.value}
                 ),
                 "memory": self.memory.value if self.memory is not None else None,
+                "privileges": (
+                    self.privileges.value
+                    if self.privileges is not None
+                    else declared.privileges
+                ),
+                "services": (
+                    declared.services.with_ports(self.services.value)
+                    if self.services is not None
+                    else declared.services
+                ),
             }
         )
 
     def origins(self) -> SettingOrigins:
-        """Where the container's own two settings came from."""
+        """Where the container's own settings came from."""
         return SettingOrigins(
             network=self.network.origin,
             memory=self.memory.origin if self.memory is not None else "project",
+            services=self.services.origin if self.services is not None else "project",
+            privileges=(
+                self.privileges.origin if self.privileges is not None else "project"
+            ),
         )
+
+
+def moved_services(
+    harness: Harness, machine: dict[str, int], flags: LaunchOverrides
+) -> Chosen[dict[str, int]] | None:
+    """The host ports a machine and a launch moved named services to, merged.
+
+    Checked against the declaration here, before anything is generated, so
+    an override naming no declared service stops the launch in the words of
+    where it was written rather than reaching a relay that does not exist.
+    """
+    moved = {**machine, **flags.services}
+    if not moved:
+        return None
+    try:
+        harness.image.services.with_ports(moved)
+    except ValueError as refusal:
+        where = (
+            "--host-service" if flags.services else "sync.json.local session.services"
+        )
+        raise typer.BadParameter(f"{where}: {refusal}") from refusal
+    return Chosen[dict[str, int]](
+        value=moved, origin="flag" if flags.services else "machine"
+    )
 
 
 def applied[T: str | bool](

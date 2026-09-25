@@ -438,6 +438,22 @@ def create_harness_app(
         """A ``--memory`` value parsed, or refused in the flag's own name."""
         return None if spelled is None else posture.memory_limit(spelled, "--memory")
 
+    def services_asked(spelled: list[str]) -> dict[str, int]:
+        """Each ``--host-service NAME=PORT`` parsed, or refused in the flag's name."""
+
+        def moved(entry: str) -> dict[str, int]:
+            # lup: ignore[string-split] — the flag's own NAME=PORT grammar,
+            # whose one separator is the whole of what there is to parse
+            name, separator, port = entry.partition("=")
+            if not separator or not name or not port.isdigit():
+                raise typer.BadParameter(
+                    f"--host-service {entry!r}: write NAME=PORT, the service's "
+                    "declared name and the port it listens on here"
+                )
+            return {name: int(port)}
+
+        return {name: port for entry in spelled for name, port in moved(entry).items()}
+
     def mode_asked(
         composition: NativeHarnessComposition, name: str | None
     ) -> SessionMode | None:
@@ -579,6 +595,14 @@ def create_harness_app(
                     "the mode's and the machine's",
                 ),
             ] = None,
+            host_service: Annotated[
+                list[str],
+                typer.Option(
+                    "--host-service",
+                    help="A declared host service's port on this host, as "
+                    "NAME=PORT, for this launch (repeatable)",
+                ),
+            ] = [],
             session_mode: Annotated[
                 str | None,
                 typer.Option(
@@ -621,6 +645,7 @@ def create_harness_app(
                     network=network,
                     memory=memory_asked(memory),
                     permission_mode=permission_mode,
+                    services=services_asked(host_service),
                 ),
                 session_mode=mode_asked(composition, session_mode),
             )
@@ -796,6 +821,14 @@ def create_harness_app(
                     "and the machine's",
                 ),
             ] = None,
+            host_service: Annotated[
+                list[str],
+                typer.Option(
+                    "--host-service",
+                    help="A declared host service's port on this host, as "
+                    "NAME=PORT, for this launch (repeatable)",
+                ),
+            ] = [],
             session_mode: Annotated[
                 str | None,
                 typer.Option(
@@ -840,6 +873,7 @@ def create_harness_app(
                     memory=memory_asked(memory),
                     approval_policy=approval_policy,
                     sandbox_mode=sandbox_mode,
+                    services=services_asked(host_service),
                 ),
                 session_mode=mode_asked(composition, session_mode),
             )
