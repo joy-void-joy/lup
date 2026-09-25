@@ -363,7 +363,8 @@ row states its dry-run spelling in `probe_flags`, as a subcommand row does.
 
 ## Fetch scopes
 
-One declared origin table feeds both `WebFetch` and the `curl` screen. A
+One declared origin table — the `HookSet`'s `allowed_fetch` in
+`harness/catalog.py` — feeds both `WebFetch` and the `curl` screen. A
 scope may opt into its subdomains, which also contributes the `*.host`
 wildcard to the OS sandbox network allowlist, so both boundaries admit the
 same set. Declare any origin an agent should be able to read as a fetch
@@ -550,7 +551,9 @@ the host resolves and the shell refuses once it has seen the link move the
 write.
 
 Edit decisions cover protected paths, marker changes, size, the canonical
-anti-pattern audit, and declared import ownership. An edit over the size gate alone is deferred — the hook
+anti-pattern audit, and declared import ownership. A human-owned file
+surfaces every change to it, edit or shell write, as an approval its author
+answers. An edit over the size gate alone is deferred — the hook
 emits no decision, so auto-accept applies while hard gates stay explicit.
 
 Size is counted in *real* changed lines per change block, and an edit of
@@ -714,7 +717,9 @@ their exact command text rather than claiming a predicted file diff.
 
 ## Two markers change a decision
 
-The guidance spells both; this is what each one does.
+A denial that admits one spells it; this is what each one does. Escalation
+is one-off: a wall met again means widening the protected declaration, and a
+command is tried inside the boundary before it asks for the host.
 
 - The escalation marker, as the leading comment line of a shell command,
   names which axis it asks to move — `lup: escalate[decision]: <why>` for a
