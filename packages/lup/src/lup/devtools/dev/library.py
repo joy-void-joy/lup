@@ -51,7 +51,7 @@ from pydantic import BaseModel, Field, ValidationError
 from importlib.metadata import version as installed_version
 from packaging.requirements import Requirement
 
-from lup.workspace.paths import project_root
+from lup.workspace.paths import manifest_table, project_root
 from lup.execution.shell import git
 from lup.devtools.sync import load_projects
 from lup.harness.credential import parse_remote, remote_url, resolved_host
@@ -237,10 +237,15 @@ def read_mode(root: Path) -> LibraryMode:
 
 
 def read_git_source(root: Path) -> GitSource | None:
-    """Return the repository and the ref it is pinned at, when git."""
-    with (root / "pyproject.toml").open("rb") as handle:
-        data = tomllib.load(handle)
-    match data:
+    """Return the repository and the ref it is pinned at, when git.
+
+    Read through :func:`~lup.workspace.paths.manifest_table`, so a manifest
+    that is missing, or that a merge stopped inside, pins nothing rather than
+    raising: the sync registry derives the library's registration from this
+    on every read, and a launch opened to repair a conflicted manifest is the
+    one that must not fail over it.
+    """
+    match manifest_table(root / "pyproject.toml"):
         case {"tool": {"uv": {"sources": {"lup": dict(source)}}}}:
             declared = source
         case _:
