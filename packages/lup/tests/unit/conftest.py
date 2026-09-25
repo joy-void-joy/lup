@@ -8,7 +8,7 @@ import pytest
 
 from lup.workspace import paths
 from lup.providers.codex.login import CODEX_HOME
-from lup.providers.codex.native_tools import CodexNativeTools
+from lup.providers.codex.builtins import CodexBuiltins
 import lup.providers.codex.selection as codex_selection
 from tests.unit.doubles import FakeAppServer
 
@@ -23,7 +23,7 @@ def bundled_model_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
     fixture invented. A test about the catalog overrides this with its own.
     """
     monkeypatch.setattr(
-        CodexNativeTools,
+        CodexBuiltins,
         "model_catalog",
         lambda self, executable, environment, model: {"models": [{"slug": "known"}]},
     )

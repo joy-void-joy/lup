@@ -25,7 +25,7 @@ def installed(directory: Path) -> Path:
 
 def cli_of(config: Claude) -> str | Path | None:
     return build_claude_options(
-        config, binding=lambda: None, resume=None, session_id=None
+        config, servers={}, binding=lambda: None, resume=None, session_id=None
     ).cli_path
 
 

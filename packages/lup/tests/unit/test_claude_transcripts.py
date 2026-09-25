@@ -216,7 +216,7 @@ async def test_a_session_reads_its_history_under_its_own_home(
     write(home, workspace, SESSION, CONVERSATION)
     config = Claude(cwd=workspace, environment=home_environment(home))
     state = ClaudeConversationState(
-        ClaudeSessionOpener(config), config, SessionId(value=SESSION)
+        ClaudeSessionOpener(config), config, {}, SessionId(value=SESSION)
     )
 
     messages = await ClaudeRecord(state).messages()
@@ -229,9 +229,9 @@ async def test_a_new_conversation_reads_empty_and_a_lost_one_refuses(
     tmp_path: Path,
 ) -> None:
     config = Claude(cwd=tmp_path, environment=home_environment(tmp_path / "home"))
-    fresh = ClaudeConversationState(ClaudeSessionOpener(config), config, None)
+    fresh = ClaudeConversationState(ClaudeSessionOpener(config), config, {}, None)
     lost = ClaudeConversationState(
-        ClaudeSessionOpener(config), config, SessionId(value=SESSION)
+        ClaudeSessionOpener(config), config, {}, SessionId(value=SESSION)
     )
 
     assert await ClaudeRecord(fresh).messages() == []

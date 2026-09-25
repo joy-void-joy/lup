@@ -6,22 +6,22 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from lup.providers.claude import Claude
+from lup.mcp import Toolset, hosted_servers, opened_needs
+from lup.providers.claude import Claude, ClaudeTools
 from lup.providers.claude.runtime import ClaudeSessionOpener, build_claude_options
 from lup.providers.codex.app_server import CodexAppServer, RpcMessage
-from lup.providers.codex import Codex
+from lup.providers.codex import Codex, CodexTools
 from lup.providers.codex.runtime import (
     CodexConversationState,
     CodexSessionOpener,
     CodexTurnChannel,
+    codex_serving,
 )
-from lup.providers.claude.native_tools import claude_native_tools
-from lup.providers.codex.native_tools import CodexNativeTools
+from lup.providers.codex.builtins import CodexBuiltins
 from lup.providers.claude.selection import claude_config
 from lup.providers.codex.selection import codex_config
-from lup.providers.selection import SessionRequest
-from lup.tools.native import NativeToolGroup, native_grants
-from lup.tools.mcp import create_mcp_server, lup_tool
+from lup.providers.selection import SessionRequest, SessionTools
+from lup.tools.mcp import LupMcpServerConfig, create_mcp_server, lup_tool
 from lup.types import JsonObject
 
 
@@ -33,34 +33,38 @@ class Value(BaseModel):
     "value", ["Bash(*)", "*", "", "mcp__ambient__tool", "UnknownTool"]
 )
 def test_invalid_and_inherited_native_grants_are_rejected(value: str) -> None:
-    with pytest.raises(ValueError):
-        Claude(native_tools=[value])
-    with pytest.raises(ValueError):
-        Codex(cwd=Path("."), native_tools=[value])
+    with pytest.raises(ValidationError):
+        Claude.model_validate({"tools": {"builtin": [value]}})
+    with pytest.raises(ValidationError):
+        Codex.model_validate({"cwd": ".", "tools": {"builtin": [value]}})
 
 
 def test_a_scalar_does_not_become_a_sequence_of_tool_letters() -> None:
-    with pytest.raises(ValueError, match="sequence"):
-        native_grants("Read")
+    with pytest.raises(ValidationError, match="valid list"):
+        ClaudeTools.model_validate({"builtin": "Read"})
+    with pytest.raises(ValidationError, match="valid list"):
+        CodexTools.model_validate({"builtin": "Bash"})
 
 
-def test_groups_compose_and_exact_grants_stay_exact() -> None:
-    assert claude_native_tools(None) == []
-    assert claude_native_tools([NativeToolGroup.READ, "Write"]) == [
+def test_presets_expand_and_exact_grants_stay_exact() -> None:
+    assert ClaudeTools(builtin="none").roster() == []
+    assert ClaudeTools(builtin="stock").roster() is None
+    assert ClaudeTools().roster() == ["WebFetch", "WebSearch"]
+    assert ClaudeTools(builtin=["Read", "Glob", "Write"]).roster() == [
         "Read",
         "Glob",
-        "Grep",
-        "WebFetch",
-        "WebSearch",
         "Write",
     ]
-    assert claude_native_tools(["Read", "Read"]) == ["Read"]
-    assert CodexNativeTools.compile(["Bash"]).shell
-    assert not CodexNativeTools.compile(["Bash"]).write
-    assert CodexNativeTools.compile([NativeToolGroup.WRITE]).write
-    for grant in ("Read", "Write", "WebFetch", NativeToolGroup.READ):
-        with pytest.raises(ValueError, match="exactly"):
-            CodexNativeTools.compile([grant])
+    assert ClaudeTools(builtin=["Read", "Read"]).roster() == ["Read"]
+    assert CodexBuiltins.compile(["Bash"]).shell
+    assert not CodexBuiltins.compile(["Bash"]).write
+    assert CodexBuiltins.compile(["apply_patch"]).write
+    assert CodexBuiltins.compile("web") == CodexBuiltins(web=True)
+    assert CodexBuiltins.compile("none") == CodexBuiltins()
+    assert CodexBuiltins.compile("stock").all_tools
+    for grant in ("Read", "Write", "WebFetch", "Glob"):
+        with pytest.raises(ValidationError, match="apply_patch"):
+            CodexTools.model_validate({"builtin": [grant]})
 
 
 @pytest.mark.parametrize(
@@ -80,12 +84,16 @@ def test_claude_other_fields_cannot_inject_tools(overrides: JsonObject) -> None:
 
 def test_unsafe_model_copies_are_revalidated_at_each_provider_boundary() -> None:
     copied = Claude().model_copy(update={"allowed_tools": ["Write"]})
-    with pytest.raises(ValidationError, match="outside native_tools"):
+    with pytest.raises(ValidationError, match="outside this session's tools"):
         ClaudeSessionOpener(copied)
-    with pytest.raises(ValidationError, match="outside native_tools"):
-        build_claude_options(copied, binding=lambda: None, resume=None, session_id=None)
-    copied_codex = Codex(cwd=Path(".")).model_copy(update={"native_tools": ["Read"]})
-    with pytest.raises(ValidationError, match="exactly"):
+    with pytest.raises(ValidationError, match="outside this session's tools"):
+        build_claude_options(
+            copied, servers={}, binding=lambda: None, resume=None, session_id=None
+        )
+    copied_codex = Codex(cwd=Path(".")).model_copy(
+        update={"tools": {"builtin": ["Read"]}}
+    )
+    with pytest.raises(ValidationError, match="apply_patch"):
         CodexSessionOpener(copied_codex)
 
 
@@ -114,7 +122,8 @@ async def test_claude_guard_denies_fabricated_tools_but_keeps_explicit_effectful
         return params
 
     options = build_claude_options(
-        Claude(tool_servers={"app": create_mcp_server("app", tools=[record])}),
+        Claude(tools=ClaudeTools(builtin="none", mcp=[Toolset([record], name="app")])),
+        servers={"app": create_mcp_server("app", tools=[record])},
         binding=lambda: None,
         resume="old-session",
         session_id=None,
@@ -171,12 +180,14 @@ async def test_codex_validates_explicit_app_calls_and_rejects_foreign_or_stale_t
         effects.append(params.value)
         return params
 
-    config = codex_config(
-        SessionRequest(
-            cwd=tmp_path, tool_servers={"app": create_mcp_server("app", tools=[record])}
-        )
+    granted = SessionTools(builtin="none", mcp=[Toolset([record], name="app")])
+    config = codex_config(SessionRequest(cwd=tmp_path, tools=granted))
+    serving = codex_serving(
+        hosted_servers(config.tools.mcp, opened_needs(tmp_path, tmp_path, {}))
     )
-    state = CodexConversationState(config, CodexAppServer(Path("codex")), None)
+    state = CodexConversationState(
+        config, CodexAppServer(Path("codex")), None, serving=serving
+    )
     state.thread_id = "thread"
     state.channel = CodexTurnChannel("thread")
     state.channel.turn_id = "turn"
@@ -206,23 +217,34 @@ async def test_codex_validates_explicit_app_calls_and_rejects_foreign_or_stale_t
     assert effects == ["accepted"]
 
 
-def test_selection_preserves_app_tools_under_none_for_both_runtimes() -> None:
+def test_selection_preserves_app_tools_under_none_for_both_runtimes(
+    tmp_path: Path,
+) -> None:
     @lup_tool("Echo one value.")
     async def echo(params: Value) -> Value:
         return params
 
-    server = create_mcp_server("app", tools=[echo])
-    request = SessionRequest(cwd=Path("."), tool_servers={"app": server})
-    assert claude_config(request).tool_servers["app"] is server
-    assert codex_config(request).application_tools["lup_app_app__echo"] is echo
-    assert codex_config(request).writable_roots == []
-    assert (
-        Codex(model="gpt-6-astra", tools=[echo]).applications()["lup_app_echo"] is echo
+    needs = opened_needs(tmp_path, tmp_path, {})
+    server = Toolset([echo], name="app")
+    request = SessionRequest(
+        cwd=Path("."), tools=SessionTools(builtin="none", mcp=[server])
     )
-    assert "lup-tools" in Claude(model="claude-opus-5", tools=[echo]).servers()
+    assert claude_config(request).tools.mcp == [server]
+    served = codex_serving(hosted_servers(codex_config(request).tools.mcp, needs))
+    assert served.applications["lup_app_app__echo"] is echo
+    assert codex_config(request).writable_roots == []
+    codex = Codex(model="gpt-6-astra", tools=CodexTools(mcp=[Toolset([echo])]))
+    applications = codex_serving(hosted_servers(codex.tools.mcp, needs)).applications
+    assert applications["lup_app_tools__echo"] is echo
+    claude = Claude(model="claude-opus-5", tools=ClaudeTools(mcp=[Toolset([echo])]))
+    hosted = hosted_servers(claude.tools.mcp, needs)["tools"]
+    assert isinstance(hosted, LupMcpServerConfig)
+    assert hosted.tool_names == ["echo"]
 
 
-def test_dynamic_tool_names_cannot_shadow_another_explicit_handler() -> None:
+def test_dynamic_tool_names_cannot_shadow_another_explicit_handler(
+    tmp_path: Path,
+) -> None:
     @lup_tool("First handler.", name="c")
     async def first(params: Value) -> Value:
         return params
@@ -231,17 +253,19 @@ def test_dynamic_tool_names_cannot_shadow_another_explicit_handler() -> None:
     async def second(params: Value) -> Value:
         return params
 
+    needs = opened_needs(tmp_path, tmp_path, {})
     request = SessionRequest(
         cwd=Path("."),
-        tool_servers={
-            "a__b": create_mcp_server("a__b", tools=[first]),
-            "a": create_mcp_server("a", tools=[second]),
-        },
+        tools=SessionTools(
+            mcp=[Toolset([first], name="a__b"), Toolset([second], name="a")]
+        ),
     )
     with pytest.raises(ValueError, match="collide"):
-        codex_config(request)
-    with pytest.raises(ValueError, match="unique"):
-        Codex(model="gpt-6-astra", tools=[first, first])
+        codex_serving(hosted_servers(codex_config(request).tools.mcp, needs))
+    with pytest.raises(ValueError, match="uniquely"):
+        CodexTools(mcp=[Toolset([first], name="a"), Toolset([second], name="a")])
+    with pytest.raises(ValueError, match="names a tool twice"):
+        Toolset([first, first])
 
 
 async def test_unknown_inherited_model_is_refused_before_start(
@@ -276,7 +300,7 @@ async def test_failed_or_cancelled_startup_closes_server_and_catalog(
     monkeypatch.setattr(CodexAppServer, "start", start)
     monkeypatch.setattr(CodexAppServer, "close", close)
     monkeypatch.setattr(
-        CodexNativeTools,
+        CodexBuiltins,
         "model_catalog",
         lambda self, executable, environment, model: {"models": [{"slug": "known"}]},
     )

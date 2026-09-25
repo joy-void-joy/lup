@@ -47,7 +47,6 @@ def test_root_exports_only_portable_runtime_conveniences() -> None:
         # The one way to name a model no catalog lists, which every model
         # argument a root agent takes accepts.
         "CustomModel",
-        "NativeToolGroup",
         "SessionId",
         "SessionSummary",
         "Turn",

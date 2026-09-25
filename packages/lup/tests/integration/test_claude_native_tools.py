@@ -11,10 +11,15 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
-from lup.providers.claude import Claude, ClaudeCompatibleEndpoint
+from lup.mcp import Toolset
+from lup.providers.claude import (
+    Claude,
+    ClaudeBuiltinTool,
+    ClaudeCompatibleEndpoint,
+    ClaudeTools,
+)
 from lup.sessions.recursion import MAX_RECURSIVE_AGENT_ENV, recursive_agent_allowance
-from lup.tools.mcp import LupMcpTool, lup_tool
-from lup.tools.native import NativeTools
+from lup.tools.mcp import lup_tool
 from lup.types import JsonObject
 
 pytestmark = pytest.mark.integration
@@ -130,8 +135,7 @@ def configuration(root: Path) -> Claude:
 def inert(
     config: Claude,
     endpoint: "InertMessages",
-    tools: list[LupMcpTool] | None = None,
-    native_tools: NativeTools = None,
+    tools: ClaudeTools = ClaudeTools(builtin="none"),
 ) -> Claude:
     """The declaration pointed at the inert endpoint, with what a test grants."""
     return Claude.model_validate(
@@ -140,8 +144,7 @@ def inert(
                 "endpoint": ClaudeCompatibleEndpoint.model_validate(
                     {"base_url": endpoint.url, "api_key": "inert-probe"}
                 ),
-                "tools": tools or [],
-                "native_tools": native_tools,
+                "tools": tools,
             }
         )
     )
@@ -186,20 +189,20 @@ async def test_claude_explicit_effectful_app_tool_runs_under_none(
     endpoint.call = {
         "type": "tool_use",
         "id": "call_probe",
-        "name": "mcp__lup-tools__record",
+        "name": "mcp__tools__record",
         "input": {"value": "authorized"},
     }
     config = configuration(tmp_path)
     config = config.model_copy(
         update={"environment": {**config.environment, MAX_RECURSIVE_AGENT_ENV: "1"}}
     )
-    client = inert(config, endpoint, tools=[record])
+    granted = ClaudeTools(builtin="none", mcp=[Toolset([record])])
+    client = inert(config, endpoint, tools=granted)
     async with asyncio.timeout(40), client.open() as session:
         await session.ask("Call the declared marker tool.")
     assert marker.read_text() == "authorized"
     assert all(
-        inventory(request) == ["mcp__lup-tools__record"]
-        for request in endpoint.requests
+        inventory(request) == ["mcp__tools__record"] for request in endpoint.requests
     )
     assert not (tmp_path / "ambient-mcp-started").exists()
 
@@ -242,9 +245,9 @@ async def test_claude_fabricated_shell_call_has_no_effect(
 
 @pytest.mark.parametrize("tool", ["Read", "Write", "WebFetch", "Bash"])
 async def test_claude_exact_native_grants_do_not_widen(
-    tmp_path: Path, endpoint: InertMessages, tool: str
+    tmp_path: Path, endpoint: InertMessages, tool: ClaudeBuiltinTool
 ) -> None:
-    client = inert(configuration(tmp_path), endpoint, native_tools=[tool])
+    client = inert(configuration(tmp_path), endpoint, ClaudeTools(builtin=[tool]))
     async with asyncio.timeout(40), client.open() as session:
         await session.ask("Return probe complete.")
     assert endpoint.requests
@@ -265,7 +268,7 @@ async def test_claude_native_delegation_cannot_widen_parent_grant(
             "prompt": "Return probe complete without tools.",
         },
     }
-    client = inert(configuration(tmp_path), endpoint, native_tools=["Agent"])
+    client = inert(configuration(tmp_path), endpoint, ClaudeTools(builtin=["Agent"]))
     async with asyncio.timeout(50), client.open() as session:
         await session.ask("Delegate once to Explore, then report probe complete.")
     assert len(endpoint.requests) >= 3

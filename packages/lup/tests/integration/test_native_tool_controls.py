@@ -14,14 +14,14 @@ import pytest
 import tomlkit
 from pydantic import BaseModel
 
-from lup.providers.codex import Codex, CodexMcpServerConfig
+from lup.mcp import External, Toolset
+from lup.providers.codex import Codex, CodexBuiltinTool, CodexTools
 from lup.providers.codex.runtime import CodexSchemaRebindingError
 from lup.providers.codex.home import CodexWorktreeHomeStore
 from lup.providers.codex.app_server import CodexAppServer
 from lup.sessions.events import SessionId
 from lup.sessions.recursion import MAX_RECURSIVE_AGENT_ENV, recursive_agent_allowance
-from lup.tools.mcp import lup_tool
-from lup.tools.native import NativeTools, NativeToolGroup
+from lup.tools.mcp import RawStdioServerConfig, lup_tool
 from lup.types import JsonObject, JsonValue
 
 pytestmark = pytest.mark.integration
@@ -131,7 +131,9 @@ def endpoint(
 
 
 def configuration(
-    root: Path, endpoint: InertResponses, native_tools: NativeTools = None
+    root: Path,
+    endpoint: InertResponses,
+    tools: CodexTools = CodexTools(builtin="none"),
 ) -> Codex:
     """No credentials, public network endpoints, or user home enter this process."""
     home = root / "home"
@@ -161,7 +163,7 @@ def configuration(
         model="gpt-6-astra",
         model_provider="lup_probe",
         environment={"CODEX_HOME": str(home)},
-        native_tools=native_tools,
+        tools=tools,
     )
 
 
@@ -224,7 +226,7 @@ class ProbeInput(BaseModel):
 async def test_codex_explicit_native_grant_keeps_declared_policy(
     tmp_path: Path, endpoint: InertResponses, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    config = configuration(tmp_path, endpoint, [NativeToolGroup.SHELL])
+    config = configuration(tmp_path, endpoint, CodexTools(builtin=["Bash"]))
     source = tmp_path / ".codex" / "plugins" / "probe"
     manifest = source / ".codex-plugin" / "plugin.json"
     manifest.parent.mkdir(parents=True)
@@ -299,19 +301,19 @@ async def test_codex_explicit_app_tool_executes_under_none(
         "id": "fc_probe",
         "type": "function_call",
         "call_id": "call_probe",
-        "name": "lup_app_record",
+        "name": "lup_app_tools__record",
         "arguments": '{"value":"authorized"}',
     }
-    config = configuration(tmp_path, endpoint)
-    config = config.model_copy(
+    granted = CodexTools(builtin="none", mcp=[Toolset([record])])
+    config = configuration(tmp_path, endpoint, granted)
+    factory = config.model_copy(
         update={"environment": {**config.environment, MAX_RECURSIVE_AGENT_ENV: "1"}}
     )
-    factory = config.model_copy(update={"tools": [record]})
     async with asyncio.timeout(40), factory.open() as session:
         await session.ask("Call the declared marker tool.")
     assert marker.read_text() == "authorized"
     assert all(
-        inventory(request) == ["functions.lup_app_record"]
+        inventory(request) == ["functions.lup_app_tools__record"]
         for request in endpoint.requests
     )
     assert not (tmp_path / "ambient-mcp-started").exists()
@@ -327,11 +329,10 @@ async def test_codex_fork_preserves_explicit_app_tools_under_none(
         marker.write_text(params.value)
         return params
 
+    granted = CodexTools(builtin="none", mcp=[Toolset([record])])
     async with (
         asyncio.timeout(40),
-        configuration(tmp_path, endpoint)
-        .model_copy(update={"tools": [record]})
-        .open() as session,
+        configuration(tmp_path, endpoint, granted).open() as session,
     ):
         await session.ask("Return probe complete.")
         async with session.fork() as fork:
@@ -339,13 +340,13 @@ async def test_codex_fork_preserves_explicit_app_tools_under_none(
                 "id": "fc_probe",
                 "type": "function_call",
                 "call_id": "call_probe",
-                "name": "lup_app_record",
+                "name": "lup_app_tools__record",
                 "arguments": '{"value":"forked"}',
             }
             await fork.ask("Call the declared marker tool.")
     assert marker.read_text() == "forked"
     assert all(
-        inventory(request) == ["functions.lup_app_record"]
+        inventory(request) == ["functions.lup_app_tools__record"]
         for request in endpoint.requests
     )
 
@@ -398,16 +399,17 @@ async def test_codex_resume_refuses_stale_dynamic_tools(
         return params
 
     config = configuration(tmp_path, endpoint)
+    granted = CodexTools(builtin="none", mcp=[Toolset([echo])])
     async with (
         asyncio.timeout(40),
-        config.model_copy(update={"tools": [echo]}).open() as session,
+        config.model_copy(update={"tools": granted}).open() as session,
     ):
         result = await session.ask("Return probe complete.")
         session_id = (
             result.identifiers.session if result.identifiers is not None else None
         )
     assert isinstance(session_id, SessionId)
-    assert inventory(endpoint.requests[-1]) == ["functions.lup_app_echo"]
+    assert inventory(endpoint.requests[-1]) == ["functions.lup_app_tools__echo"]
     # The thread is resumed as the session opens, so a resume that cannot
     # keep its tools is refused there, before any prompt reaches the model.
     with pytest.raises(CodexSchemaRebindingError, match="persisted application/output"):
@@ -419,7 +421,7 @@ async def test_codex_resume_refuses_stale_dynamic_tools(
 async def test_codex_native_grants_can_be_narrowed_on_resume(
     tmp_path: Path, endpoint: InertResponses
 ) -> None:
-    config = configuration(tmp_path, endpoint, [NativeToolGroup.SHELL])
+    config = configuration(tmp_path, endpoint, CodexTools(builtin=["Bash"]))
     async with asyncio.timeout(40), config.open() as session:
         result = await session.ask("Return probe complete.")
         assert result.identifiers is not None
@@ -434,7 +436,9 @@ async def test_codex_native_grants_can_be_narrowed_on_resume(
     }
     async with (
         asyncio.timeout(40),
-        config.model_copy(update={"native_tools": None}).open(resumed) as session,
+        config.model_copy(update={"tools": CodexTools(builtin="none")}).open(
+            resumed
+        ) as session,
     ):
         await session.ask("Return probe complete.")
     assert "functions.exec_command" in inventory(endpoint.requests[0])
@@ -447,22 +451,18 @@ async def test_codex_resume_drops_previous_explicit_mcp_server(
 ) -> None:
     marker = tmp_path / "explicit-mcp-started"
     config = configuration(tmp_path, endpoint)
+    probe = External(
+        name="probe",
+        server=RawStdioServerConfig(
+            command=sys.executable,
+            args=[
+                str(Path(__file__).parents[1] / "fixtures" / "native_mcp_probe.py"),
+                str(marker),
+            ],
+        ),
+    )
     configured = config.model_copy(
-        update={
-            "mcp_servers": {
-                "probe": CodexMcpServerConfig(
-                    command=sys.executable,
-                    args=[
-                        str(
-                            Path(__file__).parents[1]
-                            / "fixtures"
-                            / "native_mcp_probe.py"
-                        ),
-                        str(marker),
-                    ],
-                )
-            }
-        }
+        update={"tools": CodexTools(builtin="none", mcp=[probe])}
     )
     async with asyncio.timeout(40), configured.open() as session:
         result = await session.ask("Return probe complete.")
@@ -500,20 +500,21 @@ async def test_codex_fabricated_patch_does_not_write(
 @pytest.mark.parametrize(
     "grants,expected",
     [
-        ([NativeToolGroup.SHELL], "functions.exec_command"),
-        ([NativeToolGroup.WEB], "web.run"),
-        ([NativeToolGroup.WRITE], "functions.apply_patch"),
+        (["Bash"], "functions.exec_command"),
+        (["WebSearch"], "web.run"),
+        (["apply_patch"], "functions.apply_patch"),
     ],
 )
 async def test_codex_explicit_native_facility_is_advertised(
     tmp_path: Path,
     endpoint: InertResponses,
-    grants: NativeTools,
+    grants: list[CodexBuiltinTool],
     expected: str,
 ) -> None:
+    granted = CodexTools(builtin=grants)
     async with (
         asyncio.timeout(40),
-        configuration(tmp_path, endpoint, grants).open() as session,
+        configuration(tmp_path, endpoint, granted).open() as session,
     ):
         await session.ask("Return probe complete.")
     assert expected in inventory(endpoint.requests[0])

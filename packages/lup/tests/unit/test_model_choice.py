@@ -80,6 +80,7 @@ def test_a_misspelt_model_is_refused_where_it_is_written() -> None:
 def test_ultra_compiles_to_xhigh_with_ultracode_for_the_sdk() -> None:
     options = build_claude_options(
         Claude(model="opus", effort="ultra"),
+        servers={},
         binding=lambda: None,
         resume=None,
         session_id=SESSION,
@@ -94,6 +95,7 @@ def test_every_other_effort_reaches_the_sdk_unchanged_and_alone() -> None:
     for effort in ("low", "medium", "high", "xhigh", "max"):
         options = build_claude_options(
             Claude(model="opus", effort=effort),
+            servers={},
             binding=lambda: None,
             resume=None,
             session_id=SESSION,
@@ -109,7 +111,11 @@ def test_an_unnamed_effort_reaches_the_sdk_as_the_models_default(
     model: ClaudeModel, expected: str
 ) -> None:
     options = build_claude_options(
-        Claude(model=model), binding=lambda: None, resume=None, session_id=SESSION
+        Claude(model=model),
+        servers={},
+        binding=lambda: None,
+        resume=None,
+        session_id=SESSION,
     )
 
     assert options.effort == expected
@@ -119,6 +125,7 @@ def test_an_ultra_session_keeps_its_sandbox_in_the_same_settings() -> None:
     """The SDK merges its sandbox into the settings document it is given."""
     options = build_claude_options(
         Claude(model="opus", effort="ultra", sandbox=ClaudeSandboxConfig()),
+        servers={},
         binding=lambda: None,
         resume=None,
         session_id=SESSION,

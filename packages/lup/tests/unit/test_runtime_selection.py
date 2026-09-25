@@ -25,7 +25,8 @@ from lup.providers.claude.config_home import (
     save_document,
 )
 from lup.providers.claude.login import CLAUDE_CONFIG_DIR, CLAUDE_LOGIN
-from lup.providers.claude import Claude
+from lup.mcp import External, hosted_servers, opened_needs
+from lup.providers.claude import Claude, ClaudeTools
 from lup.providers.claude.selection import (
     CLAUDE_AUTONOMY,
     CLAUDE_CONTAINMENT,
@@ -41,15 +42,16 @@ from lup.providers.codex.selection import (
     CODEX_SANDBOX_WIDTH,
     CODEX_RUNTIME,
     codex_config,
-    codex_mcp_server,
 )
+from lup.providers.codex.runtime import codex_mcp_server, codex_serving
 from lup.policy.hooks import LupHooksConfig
-from lup.tools.mcp import create_mcp_server
+from lup.tools.mcp import create_mcp_server, lup_tool
 from lup.providers.confinement import SessionContainment
 from lup.providers.selection import (
     Runtime,
     SessionAutonomy,
     SessionRequest,
+    SessionTools,
 )
 from lup.sessions.composition import submission_gate_resolver
 from lup.sessions.events import SubmissionDecision
@@ -106,7 +108,7 @@ def test_claude_renders_the_whole_request(tmp_path: Path) -> None:
             cwd=tmp_path,
             autonomy="unattended",
             allowed_tools=["Read"],
-            native_tools=["Read"],
+            tools=SessionTools(builtin="stock"),
             max_turns=3,
             environment={"KEEP": "1"},
             hooks=LupHooksConfig(),
@@ -119,6 +121,7 @@ def test_claude_renders_the_whole_request(tmp_path: Path) -> None:
     assert config.cwd == tmp_path
     assert config.permission_mode == "bypassPermissions"
     assert config.allowed_tools == ["Read"]
+    assert config.tools == ClaudeTools(builtin="stock")
     assert config.max_turns == 3
     assert config.environment["KEEP"] == "1"
     assert CLAUDE_RUNTIME.login.config_home_env in config.environment
@@ -126,14 +129,14 @@ def test_claude_renders_the_whole_request(tmp_path: Path) -> None:
 
 
 def test_codex_renders_what_it_can_spell(tmp_path: Path) -> None:
+    group = External(name="group", server={"command": "uv", "args": ["run", "tools"]})
     config = CODEX_RUNTIME.session_factory(
         SessionRequest(
             model=CustomModel(id="a-model"),
             instructions="be brief",
             cwd=tmp_path,
             autonomy="accept_edits",
-            native_tools=["Bash"],
-            tool_servers={"group": {"command": "uv", "args": ["run", "tools"]}},
+            tools=SessionTools(builtin="stock", mcp=[group]),
         )
     )
 
@@ -142,8 +145,11 @@ def test_codex_renders_what_it_can_spell(tmp_path: Path) -> None:
     assert config.system_prompt == "be brief"
     assert config.sandbox == "workspace-write"
     assert config.writable_roots == [tmp_path]
-    assert config.mcp_servers["group"].command == "uv"
-    assert config.mcp_servers["group"].args == ["run", "tools"]
+    assert config.tools.mcp == [group]
+    needs = opened_needs(tmp_path, tmp_path, {})
+    served = codex_serving(hosted_servers(config.tools.mcp, needs)).servers
+    assert served["group"].command == "uv"
+    assert served["group"].args == ["run", "tools"]
 
 
 @pytest.mark.parametrize(
@@ -159,7 +165,7 @@ def test_codex_refuses_what_it_cannot_govern(
     """A field Codex has no words for is an error, never a silent drop."""
     with pytest.raises(ValueError, match="no session-level"):
         CODEX_RUNTIME.session_factory(
-            SessionRequest(cwd=tmp_path, **request_kwargs)  # pyright: ignore[reportArgumentType]
+            SessionRequest.model_validate({"cwd": tmp_path, **request_kwargs})
         )
 
 
@@ -173,18 +179,28 @@ def test_codex_rejects_a_tool_group_it_cannot_launch() -> None:
         codex_mcp_server("group", {"type": "sse", "url": "https://example.test"})
 
 
+class Echoed(BaseModel):
+    value: str
+
+
 def test_codex_will_not_relaunch_a_hosted_tool_group_as_a_subprocess() -> None:
-    """The refusal that stops a session's own state being answered around.
+    """A hosted group is answered in this process, never started as a subprocess.
 
     A hosted server reads the process hosting it — the context variables
     scoping the session it answers inside, its clients, its caches. Relaunched
     as a subprocess it would not fail: it would answer every call from
     defaults, confidently, and nothing downstream could tell the difference.
-    So the refusal has to say why, or the transport change it looks like is
-    the repair somebody reaches for.
+    So its tools become the thread's dynamic tools, answered here.
     """
-    with pytest.raises(ValueError, match="answer from defaults"):
-        codex_mcp_server("group", create_mcp_server("group"))
+
+    @lup_tool("Echo one value.")
+    async def echo(params: Echoed) -> Echoed:
+        return params
+
+    served = codex_serving({"group": create_mcp_server("group", tools=[echo])})
+
+    assert served.servers == {}
+    assert served.applications == {"lup_app_group__echo": echo}
 
 
 @pytest.mark.parametrize("runtime", [CLAUDE_RUNTIME, CODEX_RUNTIME])
