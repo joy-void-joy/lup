@@ -2840,6 +2840,38 @@ def test_an_unscoped_origin_is_the_runtime_s_to_answer_by_every_route(
             assert generated.effect == effect, (command, sandboxed)
 
 
+def test_loading_a_secrets_file_is_asked_about_as_one(tmp_path: Path) -> None:
+    """`uv run --env-file` loads secrets into the target's environment.
+
+    The question kept, and its reason says what the flag does: it fetches no
+    code, so a reason about fetching external code was describing another
+    flag to whoever had to answer it.
+    """
+    bundled = load_bundled_kernel(tmp_path, "shell")
+    policy = ShellPolicy(SHELL_RULES, runner_targets=FIXTURE_RUNNER_TARGETS)
+    for command in (
+        "uv run --env-file .env python tmp/x.py",
+        "uv run --env-file=.env pytest",
+    ):
+        canonical = policy.decide(ShellCommand(command=command))
+        generated = bundled.decide_shell(
+            command,
+            policy.rules,
+            runner_targets=policy.runner_targets,
+            target_tables=policy.target_tables,
+        )
+        for verdict in (canonical, generated):
+            assert verdict.effect == "ask", command
+            assert "--env-file .env loads a secrets file" in verdict.reason
+            assert "external code" not in verdict.reason
+    mixed = policy.decide(
+        ShellCommand(command="uv run --with requests --env-file .env pytest")
+    )
+    assert mixed.effect == "ask"
+    assert "fetches and runs external code: --with requests" in mixed.reason
+    assert "--env-file .env loads a secrets file" in mixed.reason
+
+
 def test_a_scope_may_cover_every_port_on_one_host() -> None:
     """A local service is the same service at whatever port it was started on.
 

@@ -1587,7 +1587,7 @@ def decide_uv(
                 )
                 if nested.hard:
                     return nested
-        risky = ["-w", "--with", "--with-editable", "--with-requirements", "--env-file"]
+        risky = ["-w", "--with", "--with-editable", "--with-requirements"]
         # Named in the question, because what is being installed is the whole
         # of what an approver weighs: "external code" told them a source was
         # involved and nothing about which one.
@@ -1604,9 +1604,32 @@ def decide_uv(
             for word in words[2:]
             if word.startswith("-w") and word != "-w"
         )
-        if fetched:
+        # A secrets file is not code anybody fetched: it is loaded into the
+        # environment the target runs with, and that is the question to put.
+        loaded = [
+            carried["value"]
+            for position, word in enumerate(words[2:], start=2)
+            if (
+                carried := carried_setting(word, ["--env-file"], words[position + 1 :])
+            )["value"]
+        ]
+        asked = [
+            *(
+                [f"uv run fetches and runs external code: {' '.join(fetched)}"]
+                if fetched
+                else []
+            ),
+            *(
+                f"uv run --env-file {secrets} loads a secrets file into the process"
+                " environment"
+                for secrets in loaded
+            ),
+        ]
+        if asked:
             return KernelDecision(
-                "ask", f"uv run fetches and runs external code: {' '.join(fetched)}"
+                "ask",
+                "; ".join(asked),
+                purpose="sensitive_access" if loaded and not fetched else None,
             )
         redirect = uv_package_source(words[2 : len(words) - len(run_words)])
         if redirect is not None:
