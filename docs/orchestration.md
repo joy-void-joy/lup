@@ -160,7 +160,7 @@ Pydantic state is supplied on each wake and rapid wakes are debounced.
 
 **Common use cases:**
 - **Observer**: Summarizes conversation history so the main agent has context when earlier messages scroll out of the context window
-- **Researcher**: Fetches and processes external data (with `native_tools=[NativeToolGroup.READ, NativeToolGroup.WEB]`) while the main agent continues interacting
+- **Researcher**: Fetches and processes external data (with `tools=ClaudeTools(builtin=["Read", "Glob", "Grep", "WebFetch", "WebSearch"])`) while the main agent continues interacting
 - **Executor**: Runs long-running tool calls without blocking the main agent's turns
 
 **Lifecycle:** `start()` spawns an asyncio task. `wake(state)` copies the latest
