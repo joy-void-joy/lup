@@ -14,12 +14,17 @@ the transport rewrite a contained session gets is computed from.
 """
 
 import json
+import os
+import shlex
+import shutil
+import sys
 from pathlib import Path
 
 import pytest
 import sh
 
 from lup.devtools import sync
+from lup.devtools.dev.policy_explain import verdict_for
 from lup.devtools.harness import launch
 from lup.devtools.harness.policy_refresh import refresh_destination_policy
 from lup.devtools.harness.preflight import (
@@ -40,6 +45,7 @@ from lup.harness.models import Plugin
 from lup.harness.notice import Banner
 from lup.policy.assets.host import destination_policy_binding
 from lup.sandbox.rail import AccessibleRoot, fleet_lease
+from lup_template.harness.catalog import declared_hook_set
 from tests.unit.repos import commit_file, initialized_repo
 
 SHIPPED = sync.load_json(Path("sync.json"))
@@ -138,14 +144,19 @@ def standing_in(monkeypatch: pytest.MonkeyPatch, checkout: Path) -> None:
 
 
 def settled_launch(
-    monkeypatch: pytest.MonkeyPatch, checkout: Path, roots: list[AccessibleRoot]
+    monkeypatch: pytest.MonkeyPatch,
+    checkout: Path,
+    roots: list[AccessibleRoot],
+    sandbox: launch.LaunchSandbox = launch.LaunchSandbox.OUTER,
+    runtime: str = "codex",
 ) -> str:
-    """Settle a Codex launch's boundary from ``checkout`` over ``roots``; its nonce.
+    """Settle a launch's boundary from ``checkout`` over ``roots``; its nonce.
 
     The step a launch takes between resolving its roots and opening the
-    session, which is where the ledger `harness policy-refresh` reads is
-    written: the lease, the policy accepted for every checkout granted, and
-    the repositories a later worktree may be accepted beneath.
+    session, which is where the ledger `harness policy-refresh` and every
+    dispatcher read is written: the lease with its read-only holes, the
+    policy accepted for every checkout granted, and the repositories a later
+    worktree may be accepted beneath.
     """
     monkeypatch.setattr(launch, "project_root", lambda: checkout)
     sentinels = LaunchSentinels()
@@ -160,13 +171,13 @@ def settled_launch(
     )
     launch.settle_boundary(
         plugin,
-        launch.LaunchSandbox.OUTER,
+        sandbox,
         [],
         sentinels,
         {},
         Banner(),
         roots,
-        runtime="codex",
+        runtime=runtime,
     )
     return sentinels.nonce
 
@@ -555,3 +566,259 @@ def test_a_checkout_this_machine_keeps_is_mounted_at_its_working_tree_alone(
     assert [(root.path, root.writable) for root in roots] == [(attached, True)]
     with pytest.raises(ValueError, match="No recorded writable repository authority"):
         refresh_destination_policy(checkout, nonce, beside)
+
+
+POSTURES = {
+    "inner": (launch.LaunchSandbox.INNER, True),
+    "none": (launch.LaunchSandbox.NONE, False),
+}
+"""The host postures, and whether each has the runtime's own sandbox vouched for."""
+
+
+def mounted_clone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, upstream: Path, cache: Path
+) -> tuple[Path, Path, list[AccessibleRoot]]:
+    """A project whose registry mounted lup's cache clone, with both dispatchers.
+
+    The clone is materialized and declared by the registry itself, the way a
+    launch declares it, and carries an armed hook for an in-place rewrite to
+    reach; the generated dispatchers are the ones this checkout ships.
+    """
+    checkout = project(tmp_path, "plain", SHIPPED)
+    standing_in(monkeypatch, checkout)
+    forge_spelling(monkeypatch, SHIPPED_URL, upstream)
+    roots = sync.accessible_roots(lambda _said: None)
+    no_rewrites(monkeypatch)
+    clone = cache / "lup.git"
+    (clone / "hooks").mkdir(exist_ok=True)
+    (clone / "hooks" / "pre-push").write_text("#!/bin/sh\nexit 0\n")
+    for runtime in ("claude", "codex"):
+        shutil.copytree(
+            Path(f".{runtime}/plugins/lup/hooks"),
+            checkout / f".{runtime}/plugins/lup/hooks",
+        )
+    return checkout, clone, roots
+
+
+def dispatched(
+    runtime: str,
+    checkout: Path,
+    call: tuple[str, dict[str, str]],  # lup: ignore[dict-str-payload] — a tool input
+    nonce: str,
+    sandboxed: bool,
+) -> str:
+    """What one runtime's generated dispatcher answers for one tool call."""
+    tool, tool_input = call
+    environment = {
+        name: value for name, value in os.environ.items() if not name.startswith("LUP_")
+    }
+    environment.update(
+        {
+            NONCE_VARIABLE: nonce,
+            ROOT_VARIABLE: str(checkout),
+            "PLUGIN_DATA": str(checkout.parent / f"plugin-data-{runtime}"),
+            **({"LUP_SANDBOX_ACTIVE": "1"} if sandboxed else {}),
+        }
+    )
+    payload = {
+        "session_id": "control-files",
+        "cwd": str(checkout),
+        "hook_event_name": "PreToolUse",
+        "tool_name": tool,
+        "tool_input": tool_input,
+    }
+    result = sh.Command(sys.executable)(
+        "-I",
+        "-S",
+        str(checkout / f".{runtime}/plugins/lup/hooks/scripts/policy.py"),
+        _in=json.dumps(payload),
+        _ok_code=[0, 2],
+        _return_cmd=True,
+        _env=environment,
+        _cwd=str(checkout),
+    )
+    assert isinstance(result, sh.RunningCommand)
+    if result.exit_code == 2:
+        return "deny"
+    if not str(result).strip():
+        return "allow"
+    answer = json.loads(str(result))
+    return answer.get("hookSpecificOutput", {}).get("permissionDecision", "allow")
+
+
+def control_writes(clone: Path, source: Path) -> dict[str, str]:
+    """Every spelling of a write into the clone's `hooks/` and its `config`."""
+    hook = shlex.quote(str(clone / "hooks" / "post-checkout"))
+    armed = shlex.quote(str(clone / "hooks" / "pre-push"))
+    config = shlex.quote(str(clone / "config"))
+    copied = shlex.quote(str(source))
+    return {
+        "redirection": f"echo x > {hook}",
+        "copy": f"cp {copied} {hook}",
+        "move": f"mv {copied} {hook}",
+        "tee": f"echo x | tee {hook}",
+        "in-place sed": f"sed -i 's/exit 0/exit 1/' {armed}",
+        "symlink": f"ln -s {copied} {hook}",
+        "config append": f"printf '[core]\\n\\thooksPath = /x\\n' >> {config}",
+        "config copy": f"cp {copied} {config}",
+    }
+
+
+def git_config_writes(clone: Path) -> dict[str, str]:
+    """The config keys that name a program, set through git itself."""
+    return {
+        "this project": "git config core.hooksPath /x",
+        "the clone": f"git -C {shlex.quote(str(clone))} config core.hooksPath /x",
+        "its worktree": (
+            f"git -C {shlex.quote(str(clone / 'tree' / 'main'))} config alias.x '!sh'"
+        ),
+    }
+
+
+def tool_edits(
+    runtime: str, clone: Path
+) -> list[tuple[str, dict[str, str]]]:  # lup: ignore[dict-str-payload] — tool inputs
+    """The runtime's own file-writing tool, pointed at the hook and the config."""
+    hook = clone / "hooks" / "post-checkout"
+    config = clone / "config"
+    if runtime == "claude":
+        return [
+            ("Write", {"file_path": str(hook), "content": "#!/bin/sh\n"}),
+            ("Write", {"file_path": str(config), "content": "[core]\n"}),
+            (
+                "Edit",
+                {
+                    "file_path": str(config),
+                    "old_string": "[core]",
+                    "new_string": "[core]\n\thooksPath = /x",
+                },
+            ),
+        ]
+    first = config.read_text().splitlines()[0]
+    return [
+        (
+            "apply_patch",
+            {"command": f"*** Begin Patch\n*** Add File: {hook}\n+x\n*** End Patch"},
+        ),
+        (
+            "apply_patch",
+            {
+                "command": f"*** Begin Patch\n*** Update File: {config}\n@@\n"
+                f"-{first}\n+{first}\n+\thooksPath = /x\n*** End Patch"
+            },
+        ),
+    ]
+
+
+@pytest.mark.parametrize("posture", list(POSTURES))
+@pytest.mark.parametrize("runtime", ["claude", "codex"])
+def test_the_mounted_clone_s_config_and_hooks_are_refused_on_a_host_posture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    upstream: Path,
+    cache: Path,
+    runtime: str,
+    posture: str,
+) -> None:
+    """What the container's read-only binds refuse, refused by each dispatcher.
+
+    No container stands behind either posture, so the launch's recorded holes
+    are all there is: every spelling of a write into `hooks/` or `config`
+    is refused, the runtime's own file tools included, a git config write
+    naming a program is never allowed, and reading them stays ordinary work.
+    The clone sits under the machine's temporary root here, a scratch root
+    where a copy is otherwise granted unprompted -- the refusal is the
+    measurement's, so where the clone sits cannot move it.
+    """
+    checkout, clone, roots = mounted_clone(tmp_path, monkeypatch, upstream, cache)
+    sandbox, sandboxed = POSTURES[posture]
+    nonce = settled_launch(monkeypatch, checkout, roots, sandbox, runtime)
+
+    # lup: ignore[dict-str-payload]
+    def answer(call: tuple[str, dict[str, str]]) -> str:
+        return dispatched(runtime, checkout, call, nonce, sandboxed)
+
+    written = {
+        label: answer(("Bash", {"command": command}))
+        for label, command in control_writes(clone, checkout / "pyproject.toml").items()
+    }
+    configured = {
+        label: answer(("Bash", {"command": command}))
+        for label, command in git_config_writes(clone).items()
+    }
+    edited = [answer(call) for call in tool_edits(runtime, clone)]
+    read = [
+        answer(("Bash", {"command": f"cat {shlex.quote(str(clone / 'config'))}"})),
+        answer(("Bash", {"command": f"ls {shlex.quote(str(clone / 'hooks'))}"})),
+    ]
+
+    assert written == dict.fromkeys(written, "deny")
+    assert edited == ["deny"] * len(edited)
+    assert set(configured.values()) <= {"ask", "deny"}
+    assert read == ["allow", "allow"]
+
+
+def test_dev_policy_answers_those_writes_as_the_dispatchers_do(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, upstream: Path, cache: Path
+) -> None:
+    """The preview a session is sent to before spending a turn agrees with them."""
+    checkout, clone, roots = mounted_clone(tmp_path, monkeypatch, upstream, cache)
+    nonce = settled_launch(
+        monkeypatch, checkout, roots, launch.LaunchSandbox.INNER, "claude"
+    )
+    monkeypatch.setenv(NONCE_VARIABLE, nonce)
+    monkeypatch.setenv(ROOT_VARIABLE, str(checkout))
+
+    def effects(subject: str, kind: str) -> set[str]:
+        verdict = verdict_for(subject, kind, False, checkout, declared_hook_set())
+        return {reading.effect for reading in verdict.readings}
+
+    writes = control_writes(clone, checkout / "pyproject.toml")
+    for label, command in writes.items():
+        assert effects(command, "shell") == {"deny"}, label
+    for path in (clone / "hooks" / "post-checkout", clone / "config"):
+        assert effects(str(path), "edit") == {"deny"}
+    for label, command in git_config_writes(clone).items():
+        assert effects(command, "shell") <= {"ask", "deny"}, label
+    assert effects(f"cat {shlex.quote(str(clone / 'config'))}", "shell") == {"allow"}
+
+
+def test_neither_runtime_s_host_sandbox_can_write_the_clone_s_config_or_hooks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, upstream: Path, cache: Path
+) -> None:
+    """The same holes, where the runtime's own sandbox is the wall.
+
+    Claude's widening admits the whole clone and denies the two paths the
+    container binds read-only, since a deny holds inside a wider allow.
+    Codex's cannot hold one inside a root and does not recognise a bare
+    repository, so it admits the clone's worktrees and not its git directory.
+    """
+    checkout, clone, roots = mounted_clone(tmp_path, monkeypatch, upstream, cache)
+    monkeypatch.setattr(launch, "get_tree_dir", lambda: checkout / "tree")
+    plugin = Plugin(
+        id="test.upstream",
+        name="test",
+        marketplace="test",
+        version="1.0.0",
+        description="The launch whose host sandbox is read",
+        skills=[],
+        agents=[],
+        hooks=declared_hook_set(),
+    )
+
+    claude = launch.claude_sandbox_arguments(plugin, launch.LaunchSandbox.INNER, roots)
+    codex = launch.writable_root_arguments(roots)
+
+    filesystem = json.loads(claude[claude.index("--settings") + 1])["sandbox"][
+        "filesystem"
+    ]
+    assert str(clone) in filesystem["allowWrite"]
+    assert sorted(filesystem["denyWrite"]) == [
+        str(clone / "config"),
+        str(clone / "hooks"),
+    ]
+    admitted = json.loads(
+        codex[1].removeprefix("sandbox_workspace_write.writable_roots=")
+    )
+    assert str(clone / "tree" / "main") in admitted
+    assert str(clone) not in admitted
