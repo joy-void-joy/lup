@@ -86,7 +86,7 @@
     {
       "path": ".claude/plugins/lup/commands/brainstorm.md",
       "category": "generated",
-      "sha256": "653d11c4e9f91ff197f404fcdf6888fb8189936b85fb04aa8914286ed4f7e0f7",
+      "sha256": "4110964d7f2af4ffee28f43fb7955dc20aa74c8adaafb2b06589054568da28b6",
       "semantic_id": "skill.brainstorm",
       "executable": false
     },
@@ -275,7 +275,7 @@
     {
       "path": ".claude/plugins/lup/commands/refactor-tools.md",
       "category": "generated",
-      "sha256": "392854e6a44e76b194c3147692f695ad57a4e7582639e877a94e1e8c400c6866",
+      "sha256": "92cf19c3ce1195671c90624d12a610fbb9a1d796c173cd16568287ff0d38ef00",
       "semantic_id": "skill.refactor-tools",
       "executable": false
     },
