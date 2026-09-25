@@ -21,6 +21,7 @@ from lup.harness.credential import (
     EphemeralKeys,
     ForgeToken,
     GitAccess,
+    GitIdentity,
     HttpsTransport,
     InheritedSigning,
     NoCredential,
@@ -234,6 +235,46 @@ def test_a_launcher_environment_is_inherited_by_name(tmp_path: Path) -> None:
 
     index = argv.index("LUP_MAX_RECURSIVE_AGENT")
     assert argv[index - 1] == "-e"
+
+
+def test_the_operator_identity_reaches_the_container_as_variables(
+    tmp_path: Path,
+) -> None:
+    """Author and committer arrive as `-e` pairs, so no session writes `user.*`."""
+    argv = Image().session_arguments(
+        tag="lup-agent:test",
+        checkout=tmp_path,
+        uid=1000,
+        gid=1000,
+        writable={},
+        read_only={},
+        state_volume="lup-cfg-test",
+        config_home_env="CLAUDE_CONFIG_DIR",
+        identity=GitIdentity(name="Some One", email="some@one.invalid"),
+    )
+    passed = {argv[index + 1] for index, word in enumerate(argv) if word == "-e"}
+
+    assert {
+        "GIT_AUTHOR_NAME=Some One",
+        "GIT_AUTHOR_EMAIL=some@one.invalid",
+        "GIT_COMMITTER_NAME=Some One",
+        "GIT_COMMITTER_EMAIL=some@one.invalid",
+    } <= passed
+
+
+def test_the_identity_variables_author_a_commit_with_no_user_configured(
+    tmp_path: Path, only_this_checkout_answers: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What the container runs with: no `user.*` anywhere, and still a commit."""
+    git("-C", str(tmp_path), "init", "-q")
+    who = GitIdentity(name="Some One", email="some@one.invalid").environment()
+    for name, value in who.items():
+        monkeypatch.setenv(name, value)
+
+    git("-C", str(tmp_path), "commit", "-q", "--allow-empty", "-m", "x")
+
+    shown = git.out("-C", str(tmp_path), "log", "-1", "--format=%an <%ae> %cn <%ce>")
+    assert shown.strip() == "Some One <some@one.invalid> Some One <some@one.invalid>"
 
 
 def test_each_credential_says_which_one_it_is_in_one_line() -> None:
@@ -771,12 +812,15 @@ def test_a_commit_made_inside_is_authored_as_the_checkout_authors(
     git("-C", str(tmp_path), "config", "user.name", "Some One")
     git("-C", str(tmp_path), "config", "user.email", "some@one.invalid")
 
-    keys = settled(
-        GitAccess().environment(REWRITE, NOTHING, False, committer(tmp_path))
-    )
+    sent = GitAccess().environment(REWRITE, NOTHING, False, committer(tmp_path))
 
-    assert keys["user.name"] == "Some One"
-    assert keys["user.email"] == "some@one.invalid"
+    assert {name: sent[name] for name in sent if name.startswith("GIT_AUTHOR_")} == {
+        "GIT_AUTHOR_NAME": "Some One",
+        "GIT_AUTHOR_EMAIL": "some@one.invalid",
+    }
+    assert sent["GIT_COMMITTER_NAME"] == "Some One"
+    assert sent["GIT_COMMITTER_EMAIL"] == "some@one.invalid"
+    assert not {"user.name", "user.email"} & settled(sent).keys()
 
 
 def test_half_an_identity_is_no_identity(

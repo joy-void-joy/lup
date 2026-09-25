@@ -182,9 +182,9 @@ class GitIdentity(BaseModel, frozen=True):
     """Who a commit made inside the boundary is authored as.
 
     Read off the host checkout and passed in, for the same reason the remote
-    rewrites are: the file that answers it is `.git/config`, which the
-    container can write, so an identity resolved in there is one the confined
-    thing chose for itself.
+    rewrites are: resolved in there, an identity is one the confined thing
+    chose for itself, and one it would have to write into the shared
+    `config` that the boundary holds read-only.
 
     Sent at all because git has no usable fallback. With nothing configured
     it assembles one from the container's hostname and then refuses to use
@@ -202,12 +202,20 @@ class GitIdentity(BaseModel, frozen=True):
     name: str = Field(description="The author name a contained commit carries")
     email: str = Field(description="The author address a contained commit carries")
 
-    def configuration(self) -> list[GitSetting]:
-        """The two keys git refuses to commit without."""
-        return [
-            GitSetting(key="user.name", value=self.name),
-            GitSetting(key="user.email", value=self.email),
-        ]
+    def environment(self) -> EnvVars:
+        """The author and the committer, as the variables git ranks above config.
+
+        Variables rather than `user.*` keys, because git consults them before
+        any configuration at all: a session never has a reason to write
+        `user.name` into the read-only shared `config`, and a `-c` or an
+        include cannot re-author what it commits.
+        """
+        return {
+            "GIT_AUTHOR_NAME": self.name,
+            "GIT_AUTHOR_EMAIL": self.email,
+            "GIT_COMMITTER_NAME": self.name,
+            "GIT_COMMITTER_EMAIL": self.email,
+        }
 
 
 def committer(root: Path) -> GitIdentity | None:
@@ -1205,15 +1213,14 @@ class GitAccess(BaseModel, frozen=True):
         rewrites: list[RemoteRewrite],
         credential: ForgeCredential,
         granted: bool,
-        identity: GitIdentity | None = None,
     ) -> list[GitSetting]:
         """Every git setting the container starts with, in one list.
 
         The rewrites point each unreachable spelling at the transport this
         session can reach, the credential contributes whatever it needs git
-        to know, the helper answers for the token or refuses in its name, the
-        identity says who a commit is authored as, and the signing member
-        says what it claims.
+        to know, the helper answers for the token or refuses in its name, and
+        the signing member says what it claims. Who a commit is authored as
+        is not a setting: :meth:`GitIdentity.environment` carries it.
 
         Withholding a rewrite unless a token comes with it would reason that
         half this arrangement is worse than none: a remote redirected to
@@ -1226,7 +1233,6 @@ class GitAccess(BaseModel, frozen=True):
         return [
             *[rewrite.setting() for rewrite in rewrites],
             *credential.configuration(),
-            *(identity.configuration() if identity is not None else []),
             *self.signing.configuration(),
             *self.maintenance(),
             self.helper(granted),
@@ -1261,9 +1267,10 @@ class GitAccess(BaseModel, frozen=True):
         :meth:`inherited`, and every value below is a configuration key, a
         path, or the *name* of a variable the container expands itself.
         """
-        settings = self.configuration(rewrites, credential, granted, identity)
+        settings = self.configuration(rewrites, credential, granted)
         return {
             **credential.environment(),
+            **(identity.environment() if identity is not None else {}),
             "GIT_CONFIG_COUNT": str(len(settings)),
             **{
                 name: value
