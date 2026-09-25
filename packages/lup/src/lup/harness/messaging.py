@@ -44,7 +44,10 @@ its own and drops on a mismatch -- so a frame that reached the wrong session is
 refused by it rather than delivered.
 """
 
+import errno
+import hashlib
 import logging
+import socket
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -79,15 +82,45 @@ class SessionInboxes(BaseModel, frozen=True):
         ),
     )
 
-    def socket(self, name: str) -> str:
-        """The inbox path one member binds, named after the member.
+    longest_address: int = Field(
+        default=103,
+        description=(
+            "The longest socket path, in bytes, a placed inbox may take. A "
+            "Unix socket address holds 108 bytes on Linux and 104 on macOS, "
+            "each counting the terminating zero, and the runtime refuses a "
+            "path past about 104 outright -- so the default is the shorter "
+            "platform's, and a name that would run past it is shortened to a "
+            "digest rather than bound somewhere else"
+        ),
+    )
+
+    def socket(self, repository: Path, name: str) -> str:
+        """The inbox path one member of *repository* binds, named after both.
 
         After the member rather than after its process, because the name is
         what the launcher already disambiguates between live sessions in a
-        worktree, and a pid is the one thing that does not survive the
+        repository, and a pid is the one thing that does not survive the
         container boundary this directory exists to cross.
+
+        After the repository too, because that disambiguation reaches no
+        further than its own roster: every repository with a ``main``
+        worktree mints a ``main``, and this directory is the machine's. So the
+        name leads with the repository -- *repository* is the git directory
+        its worktrees share -- as a readable name and a digest of its path,
+        ``<repository>-<digest>--<member>.sock``. A name that would run past
+        :attr:`longest_address` keeps as much of itself as fits and ends in
+        a digest of the whole, so it stays one member's and stays readable;
+        the roster records the placed path, which is the only spelling any
+        peer reads.
         """
-        return str(Path(self.directory) / f"{name}.sock")
+        label = repository.name.removesuffix(".git") or repository.parent.name
+        identity = hashlib.sha256(str(repository).encode()).hexdigest()[:8]
+        stem = f"{label}-{identity}--{name}"
+        room = self.longest_address - len(f"{self.directory}/.sock".encode())
+        whole = hashlib.sha256(stem.encode()).hexdigest()[:16]
+        kept = stem.encode()[: max(room - len(whole) - 1, 0)].decode(errors="ignore")
+        placed = stem if len(stem.encode()) <= room else f"{kept}-{whole}"
+        return str(Path(self.directory) / f"{placed}.sock")
 
     def serve(self) -> Path | None:
         """Make the directory, and answer with it.
@@ -146,3 +179,24 @@ class SessionInboxes(BaseModel, frozen=True):
                 urgency="boundary",
             )
         ]
+
+
+def cleared(address: Path, patience: float = 1.0) -> bool:
+    """Whether a session can bind *address*, removing a socket nobody answers on.
+
+    Asked before a launch names the path, because the runtime refuses a live
+    socket with a message that tells the reader to remove it -- which, for a
+    session still running, would cut it off from every nudge while it went on
+    reporting nothing wrong. So a listener is found by connecting, and left:
+    the answer is ``False`` and the launcher says who holds it. A socket file
+    whose process has gone refuses the connection, and is removed, since
+    nothing reads it and the next session to bind there would otherwise meet
+    it. A connection opened and closed with no frame written is no message,
+    so the probe costs a live session nothing.
+    """
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
+        probe.settimeout(patience)
+        answered = probe.connect_ex(str(address))
+    if answered == errno.ECONNREFUSED and address.is_socket():
+        address.unlink(missing_ok=True)
+    return answered in (errno.ECONNREFUSED, errno.ENOENT)

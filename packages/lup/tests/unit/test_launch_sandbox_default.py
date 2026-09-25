@@ -35,6 +35,7 @@ from lup.devtools.harness.launch import (
 )
 from lup.harness.codescan.common import RuleSelection
 from lup.harness.image import ContainerClient
+from lup.harness.messaging import SessionInboxes
 
 
 def composition() -> Mock:
@@ -44,6 +45,8 @@ def composition() -> Mock:
     built = Mock()
     built.recipe.source.plugins = [plugin]
     built.recipe.source.image.forge.sourced.return_value = ""
+    # Declined, so no launch here binds an inbox on the machine's directory.
+    built.recipe.source.image.inboxes = SessionInboxes(directory="")
     return built
 
 

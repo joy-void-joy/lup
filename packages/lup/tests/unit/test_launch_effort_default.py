@@ -13,6 +13,7 @@ import pytest
 import sh
 
 import lup.devtools.harness.launch as launch
+from lup.harness.messaging import SessionInboxes
 
 
 class Transcript:
@@ -32,6 +33,8 @@ def composition() -> Mock:
     plugin.marketplace = "test"
     built = Mock()
     built.recipe.source.plugins = [plugin]
+    # Declined, so no launch here binds an inbox on the machine's directory.
+    built.recipe.source.image.inboxes = SessionInboxes(directory="")
     return built
 
 
