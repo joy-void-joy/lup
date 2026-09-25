@@ -254,6 +254,25 @@ flag-guarded commands. `find -exec` payloads and `timeout`/`nice` wrappers
 recurse, `sed`/`awk` pass read-only screens, quoted-delimiter heredocs are
 literal data, and `curl` is read-screened within the declared fetch scopes.
 
+### A word nobody can read
+
+A verb or a flag built by an expansion — `$OP`, a `$(...)` result, `set$X`,
+`--ret$X` — names no row as spelled, and the command chooses at run time
+which one it is. So it is judged as every command it could stand for, and
+takes the strictest of their verdicts where that is stricter than the
+spelling earns as written. A verb word could be any row its legible part
+begins, among those the words before it still leave: `uv run lup-devtools
+sync $OP lup /x --mount rw` asks as `sync setup` does, and `dev questions
+$(echo answer) <id>` is refused as the operator-only verb it could be. A
+word whose legible part begins a guarded flag is read as that flag:
+`--ret$X` asks as `--retire` does, and `git -$X status` as the `-c` global.
+The reason names the word and the command it was read as, in one line.
+
+What the legible part rules out is not read in — `sync st$X` can only be
+`sync status` — and a program guarding nothing answers an unread word as it
+always did. A word opening on its expansion in an argument's place keeps
+the abstention above: it could as well be the path or the ref beside it.
+
 ### A write that carries its own content
 
 A redirection is answered by its path, and the reason is that a command
