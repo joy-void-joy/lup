@@ -1046,10 +1046,16 @@ def apply_sandbox_environment(
 CODEX_SANDBOX_OVERRIDES = (
     "-s",
     "--sandbox",
-    "--full-auto",
+    "--approve-for-me",
+    "--not-so-yolo",
     "--yolo",
     "--dangerously-bypass-approvals-and-sandbox",
 )
+"""Every Codex flag by which a caller picks the sandbox itself, aliases included.
+
+``--yolo`` and ``--not-so-yolo`` are the CLI's hidden aliases of the two long
+flags after them. ``--approve-for-me`` names workspace-write on its own, and
+Codex refuses it beside ``--sandbox``, so the launcher cannot add one."""
 
 
 def codex_sandbox_arguments(

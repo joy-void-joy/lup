@@ -72,8 +72,8 @@ TOOLING_INTRO: list[models.PromptPart] = [
     models.Passage(module=__name__, name="tooling"),
 ]
 
-POLICY_JOIN = r"""The policy classifies every shell command against the vocabulary declared in
-`devtools/harness/content/shell_vocabulary.py`, every URL scope, and every edit
+POLICY_JOIN = r"""The policy classifies every shell command against the vocabulary `lup.policy.vocabulary`
+declares and `src/<project>/harness/content/shell_vocabulary.py` adjusts, every URL scope, and every edit
 in a batch. Segments join deny > ask > defer > allow, so a judged deny wins the
 batch and malformed input fails conservatively. Ask is reserved for judged
 risk: an unjudged command denies with a hint naming the

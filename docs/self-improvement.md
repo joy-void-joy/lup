@@ -68,7 +68,7 @@ When the agent fails, the instinct is to patch the prompt. Resist it. Instead, t
 - Listing tools by name in the system prompt (two sources of truth that drift apart)
 - Skipping trace analysis to jump to aggregate statistics
 - Over-engineering initial implementations
-- Making changes in `lup.environment` when `lup.agent` is the right place
+- Making changes in the application's `environment/` package, which carries inputs in and outputs out, when its `agent/` package, which decides, is the right place
 
 **Validation questions for proposed changes:**
 

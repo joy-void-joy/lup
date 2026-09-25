@@ -37,6 +37,22 @@ different revision — which is the stronger claim the roster wanted anyway.
 """
 
 
+def imported_modules(source: Path) -> Iterator[str]:
+    """Every absolute module one source file imports, at any depth.
+
+    A deferred import inside a function is still a dependency of the entry
+    holding it, so the walk does not stop at module scope.
+    """
+    for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
+        match node:
+            case ast.ImportFrom(module=str(name), level=0):
+                yield name
+            case ast.Import(names=aliases):
+                yield from (alias.name for alias in aliases)
+            case _:
+                pass
+
+
 class RosterEntry(BaseModel, frozen=True):
     """One top-level entry, and the authored answer to why it is one."""
 
@@ -195,6 +211,33 @@ class Roster(BaseModel, frozen=True):
             ],
         )
 
+    def imports(self, importer: str, imported: str) -> dict[Path, int]:
+        """How many import statements in each module under one path reach one other.
+
+        ``importer`` is a path inside the package, a directory or a module
+        without its suffix; ``imported`` is a dotted name beneath the package.
+        Only modules holding at least one such statement appear, so the keys
+        are the modules that read it and the values sum to the statements.
+
+        Counted here rather than quoted in the placement prose, because a count
+        written into a sentence was the part of that sentence that fell behind:
+        it named a package that had since moved into another entry.
+        """
+        root = self.source / importer
+        sources = (
+            sorted(root.rglob("*.py")) if root.is_dir() else [root.with_suffix(".py")]
+        )
+        prefix = f"{self.source.name}.{imported}"
+        counts = {
+            source: sum(
+                1
+                for name in imported_modules(source)
+                if name == prefix or name.startswith(f"{prefix}.")
+            )
+            for source in sources
+        }
+        return {source: count for source, count in counts.items() if count}
+
 
 LIBRARY = Roster()
 """This library's own roster, checked against this library's own tree."""
@@ -223,7 +266,21 @@ def document(layout: ApplicationLayout) -> models.PromptDocument:
             models.Passage(
                 module=__name__,
                 name="what-is-left-to-place",
-                values={"value": models.code(layout.path())},
+                values={
+                    "value": models.code(layout.path()),
+                    "resolver_readers": models.counted(
+                        len(LIBRARY.imports("devtools", "resolver"))
+                    ),
+                    "coordination_reach": models.counted(
+                        sum(LIBRARY.imports("resolver", "coordination").values())
+                    ),
+                    "harness_reach": models.counted(
+                        sum(LIBRARY.imports("resolver", "harness").values())
+                    ),
+                    "edit_readers": models.counted(
+                        len(LIBRARY.imports("harness/codescan", "policy.kernel.edit"))
+                    ),
+                },
             ),
         ],
     )

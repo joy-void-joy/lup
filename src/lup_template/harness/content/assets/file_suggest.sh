@@ -9,7 +9,7 @@
 # entries, fuzzy-matched by fzf. A missing refs/ directory or zero matches
 # yields empty output and exit 0.
 #
-# Canonical source: src/lup_template/devtools/harness/content/assets/
+# Canonical source: src/lup_template/harness/content/assets/
 # file_suggest.sh, copied into the plugin tree by
 # `uv run lup-devtools harness generate all` — edit it there.
 

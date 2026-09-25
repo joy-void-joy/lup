@@ -14,9 +14,11 @@ recipes (`claude_generation_recipe` / `codex_generation_recipe` in
 `packages/lup/src/lup/devtools/harness/generate.py`). A per-platform declaration
 layer was considered and rejected: it would let semantic content fork silently,
 whereas the adapter seam forces every difference to be a rendering decision
-over the same declarations. `compile_claude` / `compile_codex` enforce that:
-`reject_rendered_invocations` refuses native invocation sigils in canonical
-text, and `reject_native_prose` refuses any word an adapter would have spelled
+over the same declarations. Two checks enforce that. Every prose field a tree
+renders is `PortableText`, whose validator (`portable_prose` in
+`packages/lup/src/lup/harness/models.py`) refuses a native invocation sigil
+where the author writes it; and `compile_claude` / `compile_codex` call
+`reject_native_prose`, which refuses any word an adapter would have spelled
 — so a difference cannot hide in prose.
 
 That second check writes down no vocabulary of its own. It asks each
@@ -114,7 +116,7 @@ Every family in `.claude/` vs `.codex/`/`.agents/`, with an explicit decision.
 | Skills (39) | `commands/*.md` | `skills/*/SKILL.md` | Parity — same 39 declarations, native formats. |
 | Agents (4) | `plugins/lup/agents/*.md` | `.codex/agents/*.toml` | Parity — same 4 declarations, native formats. |
 | Plugin manifest | `.claude-plugin/plugin.json` + marketplace | `.codex-plugin/plugin.json` + `.agents/plugins/marketplace.json` | Parity — native schemas. |
-| Hooks (`hooks.json`, `scripts/policy.py`, `runtime/kernel.py`, `runtime/policy_data.py`, `runtime/evidence.json`) | Structured decisions, edit inspection, autonomous identities | Structured native permission decisions, per-file patch inspection, explicit review-queue approval for exact retries, declared identities from the environment or native payload | Shared semantic kernel and edit gates; approval presentation differs as stated above. Pending native permission events are never approval evidence. |
+| Hooks (`hooks.json`, `scripts/policy.py`, `runtime/kernel/`, `runtime/policy_data.py`, `runtime/evidence.json`) | Structured decisions, edit inspection, autonomous identities | Structured native permission decisions, per-file patch inspection, explicit review-queue approval for exact retries, declared identities from the environment or native payload | Shared semantic kernel and edit gates; approval presentation differs as stated above. Pending native permission events are never approval evidence. |
 | Guidance | `.claude/CLAUDE.md` | `AGENTS.md` + `.codex/config.toml` | Parity — one document, native locations. |
 | Ownership proof | `.claude/.lup-ownership.json` | `.codex/.lup-ownership.json` | Parity — same mechanism per tree. |
 | Template guidance | `TEMPLATE_CLAUDE.md` | `TEMPLATE_AGENTS.md` | Parity — shared portable sections, platform slices per flavor. |

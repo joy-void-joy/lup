@@ -3377,7 +3377,8 @@ def test_codex_sandbox_arguments_defer_to_a_caller_envelope() -> None:
         ["--sandbox=read-only"],
         ["-s", "read-only"],
         ["--yolo"],
-        ["--full-auto"],
+        ["--approve-for-me"],
+        ["--not-so-yolo"],
         ["--dangerously-bypass-approvals-and-sandbox"],
     ]
     for extra_args in caller_forms:

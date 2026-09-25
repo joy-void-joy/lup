@@ -15,12 +15,12 @@ import asyncio
 from pydantic import AnyHttpUrl, BaseModel, Field
 
 from lup import create_claude
+from lup.harness.models import HookSet
 from lup.providers.claude.hooks import CLAUDE_SEMANTICS
 from lup.providers.claude.runtime import ClaudeSandboxConfig, ClaudeSessionConfig
 from lup.policy.hooks import LupHooksConfig
 from lup.policy.enforcement import SemanticToolPolicy, create_policy_hooks
 from lup.policy.rules import ShellPolicy, UrlScope
-from lup_template.harness.catalog import declared_hook_set
 
 # lup: ignore[constant-declaration] — the one origin this example allows, which
 # is the example's subject rather than a value to pass in
@@ -44,10 +44,21 @@ class Summary(BaseModel, frozen=True):
     summary: str = Field(min_length=1)
 
 
+def declared_hook_set() -> HookSet:
+    """This example's policy declaration, taking lup's shell vocabulary as shipped.
+
+    An empty ``shell_rules`` selection is the library's default vocabulary
+    unchanged. A project states only where it judges differently — a command
+    it adds, one it retires — and the declaration layers that over the
+    defaults, the same resolution its generated dispatchers read.
+    """
+    return HookSet(id="semantic-policy-shell", policy_ids=["shell"])
+
+
 def policy_hooks() -> LupHooksConfig:
     """Enforce the shell lattice, scoped by the same declared origins.
 
-    The vocabulary is this project's own: read-only commands allow,
+    The vocabulary is the declaration's: read-only commands allow,
     destructive ones ask, and anything the lattice cannot judge denies with
     the recipe for reshaping or escalating it.
     """

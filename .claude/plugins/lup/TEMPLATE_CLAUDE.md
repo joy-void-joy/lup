@@ -581,12 +581,12 @@ Each repo names its plugin **marketplace** after the project — the plugin entr
 ## Permission Hooks
 
 Permissions come from the canonical semantic policies in `lup.policy` and the
-application-owned `HookSet` in `devtools/harness/catalog.py`. Harness generation
+application-owned `HookSet` in `src/<project>/harness/catalog.py`. Harness generation
 compiles one hermetic dispatcher and dependency-free runtime for each native
 plugin. Do not edit generated policy files directly.
 
-The policy classifies every shell command against the vocabulary declared in
-`devtools/harness/content/shell_vocabulary.py`, every URL scope, and every edit
+The policy classifies every shell command against the vocabulary `lup.policy.vocabulary`
+declares and `src/<project>/harness/content/shell_vocabulary.py` adjusts, every URL scope, and every edit
 in a batch. Segments join deny > ask > defer > allow, so a judged deny wins the
 batch and malformed input fails conservatively. Ask is reserved for judged
 risk: an unjudged command denies with a hint naming the

@@ -1,9 +1,12 @@
 """Local native-executable launching and its request/status vocabulary.
 
 Defines the ``ProcessLauncher`` seam and implements it for everything that
-must run a native CLI: devtools harness launch and doctor flows and the
-resolver's git and skill invocations. Its request and status models live here
-because launchers are their only producers.
+runs a native executable and reads back what it printed: the resolver's git
+operations and verification commands, and the base-freshness probe a launch
+settles. An interactive session is not one of them; the native launchers in
+:mod:`lup.devtools.harness.launch` hand the terminal to the CLI instead. Its
+request and status models live here because launchers are their only
+producers.
 """
 
 import os

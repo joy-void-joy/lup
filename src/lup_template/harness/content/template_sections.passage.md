@@ -615,7 +615,7 @@ When proposing changes:
 ## Permission Hooks
 
 Permissions come from the canonical semantic policies in `lup.policy` and the
-application-owned `HookSet` in `devtools/harness/catalog.py`. Harness generation
+application-owned `HookSet` in `src/<project>/harness/catalog.py`. Harness generation
 compiles one hermetic dispatcher and dependency-free runtime for each native
 plugin. Do not edit generated policy files directly.
 

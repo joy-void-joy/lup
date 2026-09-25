@@ -184,8 +184,11 @@ Python to a launched native plugin.
    preimage and applies a conflict-free proposal atomically, then saves the
    manifest. Stale proposals are rejected.
 6. **Launch** — `lup.providers.*.harness_runtime` probes native CLI
-   capabilities, and `lup.harness.process` launches the native CLI with the
-   non-interactive defaults from `lup.harness.environment`.
+   capabilities, and `lup.devtools.harness.launch` runs the native CLI in the
+   foreground of the launching terminal, over the non-interactive defaults
+   from `lup.harness.environment`. `lup.harness.process` is the
+   captured-output launcher seam the resolver and the base-freshness probe run
+   `git` and verification commands through.
 
 Generation orchestration takes a frozen `GenerationRecipe` holding the desired
 tree, current-tree reader, ownership location, and target requirements. Only
@@ -193,23 +196,38 @@ the CLI composition root maps a user-facing target name to a concrete recipe:
 adding a third target supplies another recipe rather than a branch in
 reconciliation or materialization.
 
-Each harness module owns one concern. The CLI half lives in
-`packages/lup/src/lup/devtools/harness/` and the declarations it compiles in
-`packages/lup/src/lup/harness/content/`; `catalog.py` is this repository's,
-because its whole job is to be this project's own harness:
+Each harness module owns one concern. The declarations lup ships live in
+`packages/lup/src/lup/harness/content/`, and the root of the declaration
+graph is {{ harness_catalog_py }}, assembling them and
+{{ harness_content_directory }} into a `Harness` — this repository's rather
+than lup's, because its whole job is to be this project's own harness. The CLI
+half lives in `packages/lup/src/lup/devtools/harness/`:
 
 - `app.py` — Typer wiring only; every command body lives elsewhere
-- `catalog.py` — declaration-graph root assembling `content/` into a `Harness`
-- `content/` — the declaration leaves (skills, agents, documents, assets)
 - `composition.py` — builders wiring concrete adapter capabilities, and the
   target roster a CLI selector names
 - `generate.py` — recipes, drift inspection, and atomic materialization
 - `drift.py` — console drift reporting for `generate` and `check`
 - `reconcile.py` — drift classification and the source-patch flow
-- `doctor.py` — runtime evidence against the `evidence.py` ledger
+- `doctor.py` — runtime evidence against the `lup.harness.evidence` ledger
 - `resolve.py` — persisted-resolver glue: broker, snapshots, factories
 - `launch.py` — the shared preflight a launcher opens a session past
   (generation, runtime probes, base freshness) and the native launchers
+- `preflight.py` — minting a launch's boundary, measuring it, and writing it
+  down for the session
+- `contained.py` — opening a native session inside the container the project
+  declares
+- `settings.py` — rendering a runtime's project settings from what the
+  harness declares
+- `accretion.py` — what the boundary has been widened for, and which of it
+  nobody uses
+- `policy_refresh.py` — accepting changed destination policy bytes for a
+  live, already granted launch
+- `profile_app.py` — the command tree over whichever origin holds a
+  project's runtime accounts
+- `sandbox.py` — exercising the Python sandbox through its container and
+  persistent REPL
+- `generated_paths.py` — which file each typed declaration compiles to
 
 ## What the plugin ships
 
@@ -347,8 +365,8 @@ uv run lup-devtools harness check all
 ```
 
 Inspect `hooks/runtime/policy_data.py` in both generated trees. The rows should
-change while `hooks/runtime/kernel.py` stays identical: configuration is
-generated data, policy control flow is one copied module.
+change while `hooks/runtime/kernel/` stays identical: configuration is
+generated data, policy control flow is one copied package.
 
 ### Change the shell classification
 

@@ -34,21 +34,32 @@ from lup import (
 )
 ```
 
-The shortest useful program imports everything it uses:
+The shortest useful program imports and declares everything it uses:
 
 ```python
+import asyncio
+
+from pydantic import BaseModel
+
 from lup import create_claude
 
-client = create_claude(model="claude-opus-5", system_prompt="Be concise.")
-result = await client.query("summarize", Summary)
-summary = result.output
+
+class Summary(BaseModel):
+    summary: str
+
+
+async def main() -> None:
+    client = create_claude(model="claude-opus-5", system_prompt="Be concise.")
+    result = await client.query("Summarize why typed boundaries help.", Summary)
+    print(result.output.summary)
+
+
+asyncio.run(main())
 ```
 
 The constructors are why the root is worth importing. Everything else here is
-vocabulary — a name to annotate against — and vocabulary alone builds nothing,
-which an earlier edition of this section demonstrated by accident: it listed
-eight nouns and then reached for two names it had never imported, so the
-shortest useful program did not run.
+vocabulary — a name to annotate against — and vocabulary alone builds nothing:
+the typed result is a Pydantic model the program declares itself.
 
 `client.query(...)` opens a session, takes one turn, and always closes it. For
 anything with more than one turn, open a session and start turns on it — the
@@ -265,11 +276,12 @@ records; `dag.py` validates and orders the concern graph; `state.py` persists
 it atomically under a file lock; `run.py` names the one live state a run
 holds, with the lock and the observer that guard it; `orchestrator.py` owns
 every git side effect (leases, worktrees, commits, dependency bases);
-`mailbox.py` carries questions and answers as files so any door can write
-while the run holds its lease. Each phase is a collaborator over those rather
-than a method on one class: `questions.py` publishes and promotes,
-the `actors` package holds the population and one durable session per member,
-`turns.py` puts the prompts
+`mailbox.py` binds `lup.coordination.mailbox`, which carries questions and
+answers as files so any door can write while the run holds its lease, to the
+resolver's own question type. Each phase is a collaborator over those rather
+than a method on one class: `questions.py` publishes and promotes; the
+population is `lup.coordination.cohort`, holding one durable session per
+member through `lup.coordination.sessions`; `turns.py` puts the prompts
 to them, `joins.py` brings branches together and settles what that breaks,
 `verification.py` runs one tree through the verification set, and
 `execution.py` drives one concern's revision loop. `core.py` composes them
@@ -316,37 +328,48 @@ of the four kinds it is: a foundation that imports nothing here, a subject,
 the one vendor boundary, or tooling.
 
 `resolver` is the entry the downward question is hardest on, because
-everything that drives it is tooling: eight modules across
-`devtools/harness/`, `devtools/supervisor/`, `devtools/dev/` and
-`devtools/report/` read its journal, its state repository, its question
-mailbox and its lease table. What keeps it a sibling of the subjects rather
-than a package inside one is what it imports. Twenty-four of its import lines
-reach `orchestration.actors` and fifteen reach `harness`, so neither subject
-contains it, and what it answers — reviewed concerns driven over a DAG of
-branches, each on its own branch in a leased worktree — is a question neither
-of them answers.
+everything that drives it is tooling: {{ resolver_readers }} modules under
+`devtools/` read its journal, its state repository, its question mailbox and
+its lease table. What keeps it a sibling of the subjects rather than a package
+inside one is what it imports. Of its import lines, {{ coordination_reach }}
+reach `coordination`, where its actors, their durable sessions and the shared
+question mailbox live, and {{ harness_reach }} reach `harness`, so neither
+subject contains it, and what it answers — reviewed concerns driven over a DAG
+of branches, each on its own branch in a leased worktree — is a question
+neither of them answers.
 
-Five two-way edges between entries survive the sort. Four are placement
-questions still open; the fifth is the shape of a guarantee.
+Ten two-way edges between entries survive the sort. Nine are placement
+questions still open; the tenth is the shape of a guarantee.
 
 | pair | what closes the loop |
 |---|---|
-| `client` ↔ `providers` | the front door's routing constructor reaches both providers, lazily, inside `create_client` |
-| `client` ↔ `sessions` | six session modules hold a `Client`, and the front door reads the turn vocabulary |
-| `devtools` ↔ `harness` | three utilities the library needs — `git`, the clipboard probes, a launcher's default environment — live under the tooling half |
-| `devtools` ↔ `sandbox` | the same `git`, reached from the container's mount rail |
+| `tools` ↔ `coordination` | `tools/toolsets.py`, the registry every tool group is assembled from, reaches coordination's wake path and its peer and relay tools, which coordination declares in `tools.mcp`'s vocabulary |
+| `tools` ↔ `ledger` | the same registry reaches the ledger's models, store and tools, which the ledger declares in `tools.mcp` |
+| `tools` ↔ `orchestration` | the same registry reaches the review gate and the realtime relay, which declare their tools in `tools.mcp` |
+| `tools` ↔ `sandbox` | the same registry reaches the container, which declares its tools in `tools.mcp` |
+| `tools` ↔ `devtools` | the same registry reaches the Pyright oracle's language-server lookup under the tooling half, lazily, inside the code-intelligence group; the oracle and the resolver's command glue read `tools.lsp`, `tools.mcp` and `tools.native` back |
+| `devtools` ↔ `harness` | utilities the library needs live under the tooling half — the clipboard probes, a launcher's default environment, `gh`, the sub-app roster, and the report and upstream-report models two pages render |
+| `coordination` ↔ `ledger` | the ledger names who acted by coordination's `ActorRef` and member identity and renders its tasks, while coordination's hand-offs, delegations and tasks are ledger records written through `LedgerStore` |
+| `coordination` ↔ `observability` | the cohort and its durable sessions write `observability`'s journal, whose session record names its actor by coordination's `ActorRef` |
+| `observability` ↔ `workspace` | the sweep walks `workspace`'s run history and parses its timestamps, and that history and the notes are built from `observability`'s session recorder and metrics |
 
-The last two have one shape: a symbol two subjects share, sitting inside one
-of them. Each closes by moving that symbol below both, which is what
-`lup.formats.banner` already did for the do-not-edit banner the policy bundle and
-harness both write. The first two are the front door deliberately knowing
-about what it opens; whether a lazily-imported provider counts as an edge at
-all is the question to answer before an acyclicity check is written, and
-answering it by choosing a walker that does not look inside a function would
-be hiding it rather than settling it.
+The first five have one shape: a registry sitting in the package that
+everything it registers already imports. Every tool group is declared in
+`tools.mcp`'s vocabulary, and `tools/toolsets.py` assembles them all, so the
+edge closes by moving the assembly above what it assembles. The last four have
+the shape the do-not-edit banner had: vocabulary both sides speak — an actor
+reference, a journal record, a history reader, a clipboard probe — sitting
+inside one of them, which closes by moving it below both, as
+`lup.formats.banner` already did for the banner the policy bundle and harness
+both write. `tools` ↔ `devtools` also carries the question the rest of the
+table assumes an answer to: its one import back is deferred inside a function,
+and whether a deferred import counts as an edge at all is the question to
+answer before an acyclicity check is written — answering it by choosing a
+walker that does not look inside a function would be hiding it rather than
+settling it.
 
 `harness` ↔ `policy` is the one that stays, because breaking it would break
-what `policy` is for. Nine of `codescan`'s modules read `policy.kernel.edit`
+what `policy` is for. Of `codescan`'s modules, {{ edit_readers }} read `policy.kernel.edit`
 — the tokenizer, the AST walkers, and the match-site finders that the
 compiled hook script carries — and `policy` reads `codescan`'s anti-pattern
 table back. That is not an accident of where the utilities happened to be
@@ -398,8 +421,9 @@ pass the resulting `Client` everywhere else. `seam-boundary` will tell
 you when a second site appears.
 
 **Compose capabilities rather than configuring an object.** Timeouts, budgets,
-retries, persistence, and tracing are `DecoratingSessionFactory` layers you
-add individually, not fields on a client.
+retries, persistence, and tracing are whole-turn decorators that
+`lup.sessions.middleware.decorated_session_factory` wraps around a `Client`,
+each added by passing its own config, not fields on a client.
 
 **Let typed output be the only output.** Bind a Pydantic type to the turn and
 read `TurnResult.output`. A missing submission raises a typed error carrying

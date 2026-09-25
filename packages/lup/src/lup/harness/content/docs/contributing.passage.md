@@ -488,8 +488,9 @@ and both halves are reviewed together. What to look for:
 
 - A prompt change should be understandable from its content module alone.
 - A policy-data change should trace to the `HookSet` or a canonical rule
-  object — and `hooks/runtime/kernel.py` should be byte-identical to the
-  canonical kernel, with configuration confined to `policy_data.py`.
+  object — and `hooks/runtime/kernel/` should be byte-identical to the
+  canonical `lup.policy.kernel` package, with configuration confined to
+  `policy_data.py`.
 - Both native trees change when a portable declaration does; only the owning
   tree changes for an adapter-private renderer change.
 - `.lup-ownership.json` is generated proof, not hand-authored metadata.
