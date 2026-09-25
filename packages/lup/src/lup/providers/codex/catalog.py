@@ -2,7 +2,7 @@
 
 ``codex debug models --bundled`` prints the catalog the CLI ships: every
 model slug and the reasoning efforts each advertises. It is the same catalog
-:meth:`~lup.providers.codex.native_tools.CodexNativeTools.model_catalog`
+:meth:`~lup.providers.codex.builtins.CodexBuiltins.model_catalog`
 bounds a session's tools against, read with the same flag, so the lineup lup
 types a Codex model against is the one a session opened through it accepts.
 

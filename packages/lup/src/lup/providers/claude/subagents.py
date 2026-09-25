@@ -1,9 +1,14 @@
 """Compile portable delegated roles into Claude's model and tool vocabulary."""
 
 from collections.abc import Iterator
-from typing import Literal, assert_never
+from typing import TYPE_CHECKING, Literal, assert_never
+
+from pydantic import TypeAdapter
 
 from lup.types import ModelTier, SubagentSpec
+
+if TYPE_CHECKING:
+    from lup.providers.claude import ClaudeBuiltinTool
 
 
 def model_alias(
@@ -53,3 +58,15 @@ def subagent_tools(spec: SubagentSpec) -> list[str]:
             yield grant
 
     return list(dict.fromkeys(native_tools()))
+
+
+def subagent_builtins(spec: SubagentSpec) -> list["ClaudeBuiltinTool"]:
+    """A role's tools as the exact built-in roster a session of its own starts with.
+
+    For a role opened as a session rather than delegated to inside one, whose
+    tools are that session's whole grant. A name Claude Code does not ship is
+    refused here, where the role is compiled, rather than granted to nothing.
+    """
+    from lup.providers.claude import ClaudeBuiltinTool
+
+    return TypeAdapter(list[ClaudeBuiltinTool]).validate_python(subagent_tools(spec))

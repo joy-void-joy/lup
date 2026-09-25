@@ -37,7 +37,6 @@ from lup.sessions.events import (
     TurnResult,
 )
 from lup.sessions.surface import Agent, Conversation, Turn
-from lup.tools.native import NativeToolGroup
 from lup.types import CustomModel
 
 if TYPE_CHECKING:
@@ -76,7 +75,6 @@ __all__ = [  # lup: ignore[all-export] -- the package-root public API
     "Codex",
     "Conversation",
     "CustomModel",
-    "NativeToolGroup",
     "SessionId",
     "SessionSummary",
     "Turn",

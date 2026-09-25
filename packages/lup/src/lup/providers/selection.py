@@ -20,8 +20,8 @@ from typing import Literal, Self
 from pydantic import BaseModel, Field, model_validator
 
 from lup.policy.hooks import LupHooksConfig
-from lup.tools.mcp import McpServerEntry
-from lup.tools.native import NativeTools, native_grants
+from lup.tools.builtin import BuiltinPreset
+from lup.mcp import ToolServer, uniquely_named
 from lup.sessions.surface import Agent
 from lup.providers.claude.models import ClaudeModel
 from lup.providers.codex.models import CodexModel
@@ -60,6 +60,26 @@ not know it.
 """
 
 
+class SessionTools(
+    BaseModel, frozen=True, extra="forbid", arbitrary_types_allowed=True
+):
+    """The tools a request asks for, in the vocabulary every runtime answers.
+
+    Built-ins by preset alone: an exact tool name is one runtime's spelling,
+    so a request naming one could only be opened by that runtime. A caller
+    that needs exact names declares that runtime's own agent instead.
+    """
+
+    builtin: BuiltinPreset = "web"
+    mcp: list[ToolServer] = []
+
+    @model_validator(mode="after")
+    def servers_are_named_apart(self) -> Self:
+        """Refuse two servers under one name, which would address one tool twice."""
+        uniquely_named(self.mcp)
+        return self
+
+
 class SessionRequest(
     BaseModel,
     frozen=True,
@@ -95,12 +115,14 @@ class SessionRequest(
         ),
     )
 
-    native_tools: NativeTools = None
+    tools: SessionTools = SessionTools()
+    """The built-in tools and MCP servers a session is given; the web alone unset."""
+
     allowed_tools: list[str] = []
     disallowed_tools: list[str] = []
     """The tools this session may not call, whoever else would admit them.
 
-    The third of three fields that read alike. ``native_tools`` is the roster a
+    The third of three fields that read alike. ``tools`` is the roster a
     session is given, ``allowed_tools`` the part of it that runs without
     being asked about, and this one a refusal that outranks both — which is
     what lets a caller say "everything except this" without enumerating
@@ -108,7 +130,6 @@ class SessionRequest(
     restated whenever that reach grows; a refusal keeps naming the same tool.
     """
 
-    tool_servers: dict[str, McpServerEntry] = {}
     max_turns: int | None = None
     max_thinking_tokens: int | None = None
     environment: EnvVars = {}
@@ -136,7 +157,6 @@ class SessionRequest(
         built a wrapper nothing starts, which reads as containment until
         somebody checks what the session actually ran in.
         """
-        native_grants(self.native_tools)
         match self.containment, self.contained_program:
             case "outer", None:
                 raise ValueError(

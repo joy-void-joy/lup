@@ -50,6 +50,7 @@ from pydantic import AnyHttpUrl, BaseModel, Field, SecretStr, model_validator
 
 from lup.policy.enforcement import SandboxPosture
 from lup.policy.hooks import LupHooksConfig
+from lup.mcp import ToolServer, server_grants, uniquely_named
 from lup.providers.claude.model_choice import (
     ClaudeModelChoice,
     claude_default_effort,
@@ -57,7 +58,6 @@ from lup.providers.claude.model_choice import (
     refuse_unsupported_effort,
 )
 from lup.providers.claude.models import ClaudeEffort
-from lup.providers.claude.native_tools import claude_native_tools, claude_tool_allowed
 from lup.sessions.capabilities import ConversationRecord, ForkSession, SessionEngine
 from lup.sessions.events import (
     AnyTurnBlock,
@@ -74,14 +74,85 @@ from lup.sessions.events import (
 )
 from lup.sessions.layers import SessionLayers
 from lup.sessions.turns import LazyTurn, turn_input
-from lup.tools.mcp import LupMcpTool, McpServerEntry, create_mcp_server
-from lup.tools.native import NativeTools, native_grants
+from lup.tools.builtin import BuiltinPreset
 from lup.types import EnvVars, SubagentSpec
 
 SESSION_THINKING_TOKENS = 128_000 - 1
 
 type ClaudeSettingSource = Literal["user", "project", "local"]
 """One filesystem settings source the CLI may load for a session."""
+
+
+type ClaudeBuiltinTool = Literal[
+    "Read",
+    "Glob",
+    "Grep",
+    "WebFetch",
+    "WebSearch",
+    "Write",
+    "Edit",
+    "NotebookEdit",
+    "Bash",
+    "TaskOutput",
+    "TaskStop",
+    "Agent",
+    "Task",
+    "Skill",
+    "TodoWrite",
+    "TaskCreate",
+    "TaskUpdate",
+    "TaskGet",
+    "TaskList",
+    "AskUserQuestion",
+    "EnterPlanMode",
+    "ExitPlanMode",
+    "ListMcpResources",
+    "ReadMcpResource",
+    "Monitor",
+]
+"""A tool Claude Code ships, by the name the CLI and its permission rules use."""
+
+
+class ClaudeTools(BaseModel, frozen=True, extra="forbid", arbitrary_types_allowed=True):
+    """What a Claude session may call: which built-ins, and which MCP servers.
+
+    ``"stock"`` is Claude Code's own ``claude_code`` preset — everything the
+    CLI ships, and the coding system prompt that teaches it. Every narrower
+    grant is an exact roster the session is started with and held to, so a
+    tool outside it is refused when it is called rather than trusted not to
+    be.
+    """
+
+    builtin: BuiltinPreset | list[ClaudeBuiltinTool] = "web"
+    """Claude Code's own tools: a preset, or exactly the ones named."""
+
+    mcp: list[ToolServer] = []
+    """The MCP servers every session carries, each hosted or started as declared."""
+
+    @model_validator(mode="after")
+    def servers_are_named_apart(self) -> Self:
+        """Refuse two servers under one name, which would address one tool twice."""
+        uniquely_named(self.mcp)
+        return self
+
+    def roster(self) -> list[ClaudeBuiltinTool] | None:
+        """The built-ins a session starts with, or None for Claude Code's preset."""
+        match self.builtin:
+            case "stock":
+                return None
+            case "web":
+                return ["WebFetch", "WebSearch"]
+            case "none":
+                return []
+            case list():
+                return list(dict.fromkeys(self.builtin))
+
+    def grants(self, name: str) -> bool:
+        """Whether a tool named ``name`` is within this grant, as declared."""
+        roster = self.roster()
+        if not name.startswith("mcp__"):
+            return roster is None or name in roster
+        return server_grants(name, self.mcp)
 
 
 class ClaudeSandboxConfig(BaseModel, frozen=True):
@@ -150,10 +221,6 @@ class ClaudeCompatibleEndpoint(BaseModel, frozen=True):
 # include it, or the hook denies the very tool the turn requires.
 # lup: ignore[constant-declaration] — the qualified name Claude Code composes
 SUBMISSION_TOOL = "mcp__lup-output__submit_output"
-
-# lup: ignore[constant-declaration] — the server name the adapter hosts a
-# declaration's own tools under, which its allowlist spells as well
-TOOLS_SERVER = "lup-tools"
 
 
 class ClaudeTurn[T: BaseModel | None]:
@@ -261,14 +328,13 @@ class Claude(
     """A name from Claude Code's catalog, a portable tier, or a custom id."""
 
     system_prompt: str = ""
-    coding_harness_preset: bool = True
-    native_tools: NativeTools = None
-    tools: list[LupMcpTool] = []
-    """Application tools, served to every session on an in-process server."""
+    """Standing instructions, appended to Claude Code's own under ``stock`` tools."""
+
+    tools: ClaudeTools = ClaudeTools()
+    """Which built-ins and MCP servers every session carries; the web alone unset."""
 
     allowed_tools: list[str] = []
     disallowed_tools: list[str] = []
-    tool_servers: dict[str, McpServerEntry] = {}
     permission_mode: ClaudePermissionMode | None = "bypassPermissions"
     max_turns: int | None = None
     delta_streaming: bool = True
@@ -352,28 +418,19 @@ class Claude(
             return self.effort
         return claude_default_effort(self.model)
 
-    def servers(self) -> dict[str, McpServerEntry]:
-        """Every tool server a session opens with: the declared ones, and ``tools``."""
-        if not self.tools:
-            return dict(self.tool_servers)
-        hosted = create_mcp_server(TOOLS_SERVER, tools=self.tools)
-        return {**self.tool_servers, TOOLS_SERVER: hosted}
-
     @model_validator(mode="after")
-    def enforce_native_authority(self) -> Self:
-        """Keep permissions, settings and delegated roles within the grant."""
+    def enforce_tool_authority(self) -> Self:
+        """Keep permissions, settings and delegated roles within the tools granted."""
         from lup.providers.claude.subagents import subagent_tools
 
-        native_grants(self.native_tools)
-        roster = claude_native_tools(self.native_tools)
-        servers = self.servers()
         if self.setting_sources:
             raise ValueError(
-                "session native_tools cannot inherit setting_sources; declare hooks and tool_servers explicitly"
+                "a session cannot inherit setting_sources; declare its hooks and tools explicitly"
             )
-        if self.plugin_dirs and roster is not None:
+        if self.plugin_dirs and self.tools.builtin != "stock":
             raise ValueError(
-                "plugin_dirs can introduce delegated authority and require NativeToolGroup.ALL"
+                "plugin_dirs can introduce delegated authority and require "
+                "tools=ClaudeTools(builtin='stock')"
             )
         for argument, value in self.extra_args.items():
             if argument not in {
@@ -383,22 +440,22 @@ class Claude(
                 "verbose",
             }:
                 raise ValueError(
-                    f"extra_args {argument!r} may override native_tools; use a declared session field"
+                    f"extra_args {argument!r} may override tools; use a declared session field"
                 )
             if argument == "strict-mcp-config" and value is not None:
                 raise ValueError("strict-mcp-config cannot be overridden")
         for name in self.allowed_tools:
             if name == SUBMISSION_TOOL:
                 continue
-            if not claude_tool_allowed(name, roster, servers):
+            if not self.tools.grants(name):
                 raise ValueError(
-                    f"allowed_tools {name!r} is outside native_tools and explicit tool_servers"
+                    f"allowed_tools {name!r} is outside this session's tools"
                 )
         for role in self.subagents:
             for name in subagent_tools(role):
-                if not claude_tool_allowed(name, roster, servers):
+                if not self.tools.grants(name):
                     raise ValueError(
-                        f"subagent {role.name!r} tool {name!r} exceeds session native_tools"
+                        f"subagent {role.name!r} tool {name!r} exceeds this session's tools"
                     )
         return self
 
