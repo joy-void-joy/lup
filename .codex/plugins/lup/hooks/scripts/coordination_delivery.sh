@@ -14,4 +14,4 @@ inbox="$root/inbox/session-$LUP_COORDINATION_MEMBER"
 [ -d "$inbox" ] || exit 0
 set -- "$inbox"/*.json
 [ -e "$1" ] || exit 0
-exec python3 "${0%/*}/../runtime/coordination_delivery.py" "$root" "$LUP_COORDINATION_MEMBER"
+exec python3 -s "${0%/*}/../runtime/coordination_delivery.py" "$root" "$LUP_COORDINATION_MEMBER"
