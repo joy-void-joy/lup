@@ -146,7 +146,7 @@ def provider_factory(
     model: str | None,
     system_prompt: str,
     cwd: Path,
-    builtin: BuiltinPreset = "web",
+    builtin: BuiltinPreset = "none",
     mcp: list[ToolServer] | None = None,
     allowed_tools: list[str] | None = None,
     hooks: LupHooksConfig | None = None,
