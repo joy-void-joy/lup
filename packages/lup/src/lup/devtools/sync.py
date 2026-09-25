@@ -758,15 +758,28 @@ def record_checkpoint(proj: ProjectEntry, found: Upstream, commit: str) -> None:
     )
 
 
+def kept_checkout(proj: ProjectEntry) -> Path | None:
+    """The checkout this machine keeps for a registration, where it named one.
+
+    A ``path`` that is on disk, which is the one answer that outranks the
+    cache: a registration whose path has gone is looked for where a URL one
+    is. Asked by every reader that has to agree on which of the two a
+    registration is -- locating it, materializing it, and deciding how much
+    of it a launch mounts -- so the three cannot come to disagree.
+    """
+    path = proj.get("path", "")
+    return Path(path) if path and Path(path).exists() else None
+
+
 def existing_upstream(proj: ProjectEntry) -> Upstream | None:
     """Where this registration already is, WITHOUT cloning or fetching.
 
     Read-only counterpart to :func:`ensure_local` — for status reporting that
     must never mutate the working tree or hit the network.
     """
-    path = proj.get("path", "")
-    if path and Path(path).exists():
-        return registered_upstream(proj, Path(path))
+    kept = kept_checkout(proj)
+    if kept is not None:
+        return registered_upstream(proj, kept)
     repository = cached_clone(proj["name"])
     if repository is None:
         return None
@@ -1337,14 +1350,12 @@ def ensure_local(
     Progress and error text goes through ``report`` so callers rendering
     tables can defer the messages instead of interleaving them mid-table.
     """
-    path = proj.get("path", "")
+    kept = kept_checkout(proj)
     name = proj["name"]
-    if path and Path(path).exists():
-        found = registered_upstream(proj, Path(path), report)
-        if proj.get("review_from", "remote") == "remote" and remote_url(
-            Path(path), "origin"
-        ):
-            refresh(name, Path(path), report)
+    if kept is not None:
+        found = registered_upstream(proj, kept, report)
+        if proj.get("review_from", "remote") == "remote" and remote_url(kept, "origin"):
+            refresh(name, kept, report)
         ensure_ref_symlink(name, str(found.checkout))
         return found
 
