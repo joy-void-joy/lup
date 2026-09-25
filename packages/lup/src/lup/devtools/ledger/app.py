@@ -49,8 +49,19 @@ from lup.types import JsonObject
 from pathlib import Path
 from pydantic import TypeAdapter, ValidationError
 from lup.ledger.store import LedgerLayout
+from lup.devtools.subapps import SubAppSpec
 from lup.workspace.edition import shared_git_directory
 from lup.workspace.paths import project_root
+
+SUBAPP_SPEC = SubAppSpec(
+    name="ledger", help="Read and preserve the notes this repository has recorded"
+)
+"""What this tree is called, reachable without building it.
+
+The roster mounts the tree under this name, and it is the tree a writeup's
+banner names as what regenerates it — which is how the roster knows a project
+retiring it has no writeup to write.
+"""
 
 SNAPSHOT_BRANCH = "lup/ledger"
 """The branch a snapshot lands on: the record's own, never the code's.

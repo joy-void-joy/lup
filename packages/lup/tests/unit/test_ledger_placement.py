@@ -4,15 +4,20 @@ and every reader folds both into one log with one id space."""
 
 from pathlib import Path
 from typing import Literal
+from unittest import mock
 
 import pytest
 from pydantic import ValidationError
+import typer
 from typer.testing import CliRunner
 
 import lup.devtools.ledger.app as ledger_app
 from lup.coordination.refs import ActorRef
 from lup.coordination.tasks import Blocks, Task
-from lup.devtools.roster import writeup_writers
+from lup.devtools.dev.declarations import DevDeclarations
+from lup.devtools.harness.composition import NativeTargets
+from lup.devtools.roster import DevtoolsDeclarations, RosterEntry, writeup_writers
+from lup.devtools.subapps import SubAppSpec
 from lup.execution.shell import git
 from lup.ledger.journal import LedgerStore
 from lup.ledger.migrate import migrate, misplaced
@@ -440,3 +445,44 @@ def test_a_writeup_is_a_repository_writer_only_over_committed_kinds(
     # The stamp counts the kinds the document renders and nothing else.
     assert "1 node(s), 0 edge(s)" in text
     assert write(tmp_path, check=True) == written
+
+
+def test_a_roster_without_the_ledger_writes_no_writeup() -> None:
+    """A writeup names the ledger's tree as what regenerates it.
+
+    Written where that tree is retired, the file would tell its reader to run
+    a command nothing serves — and the sweep generation runs after writing
+    would refuse the file generation had just written.
+    """
+
+    def unread() -> DevDeclarations:
+        raise AssertionError("nothing under test reads the dev declaration")
+
+    over_tasks = Writeup(
+        name="tasks",
+        path="docs/tasks.md",
+        source="tests",
+        parts=[Listing(heading="Tasks", of="coordination:task")],
+    )
+    declared = DevtoolsDeclarations(
+        dev=unread,
+        targets=NativeTargets(builders={}),
+        repository_writers=[],
+        node_classes=[Task],
+        writeups=[over_tasks],
+        ledger=LAYOUT,
+    )
+    handed: list[int] = []
+
+    def build(wired: DevtoolsDeclarations) -> typer.Typer:
+        handed.append(len(wired.writers()))
+        return typer.Typer()
+
+    probe = RosterEntry(
+        spec=SubAppSpec(name="probe", help="Reads writers"), build=build
+    )
+    with mock.patch("lup.devtools.roster.LIBRARY_ROSTER", [probe]):
+        declared.roster()
+        declared.roster([ledger_app.SUBAPP_SPEC.name])
+
+    assert handed == [1, 0]
