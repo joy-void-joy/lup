@@ -86,7 +86,7 @@ from lup.orchestration.realtime.models import (
 )
 from lup.orchestration.realtime.scheduler import Scheduler, SleepResult
 from lup.orchestration.reflection import ReflectionGate
-from lup.sessions.capabilities import Session
+from lup.sessions.capabilities import SessionEngine
 from lup.sessions.events import turn_request
 from lup.observability.trace import TraceLogger
 
@@ -615,7 +615,7 @@ def default_wake_message(result: SleepResult) -> str:
 
 
 async def run_relay_session(
-    conversation: Session,
+    conversation: SessionEngine,
     *,
     scheduler: Scheduler,
     mailbox: RealtimeMailbox,

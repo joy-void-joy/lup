@@ -116,13 +116,13 @@ from lup.resolver.state import (
     StateCorruptionError,
     StateTransitionError,
 )
-from lup.sessions.capabilities import Session
+from lup.sessions.capabilities import SessionEngine
 from lup.sessions.client import Client
 from lup.sessions.composition import is_output_model
 from lup.sessions.events import (
     SessionHandle,
     SessionId,
-    TurnHandle,
+    StartedTurn,
     TurnRequest,
 )
 from lup.types import JsonObject, JsonValue
@@ -787,7 +787,7 @@ def merger_draining_after_one_parent(
     return recipe
 
 
-class ResolverTestSession(Session):
+class ResolverTestSession(SessionEngine):
     def __init__(
         self, root: Path, response: ResolverResponse, joining: JoinDriver | None = None
     ) -> None:
@@ -798,7 +798,7 @@ class ResolverTestSession(Session):
 
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
+    ) -> StartedTurn[T]:
         output_type = request.output_type
         if not is_output_model(output_type):
             raise AssertionError("resolver turns must request typed output")
@@ -816,7 +816,7 @@ class ResolverTestSession(Session):
             output,
             identifiers(f"resolver-{self.root.name}", f"turn-{self.sequence}"),
         )
-        return TurnHandle[T](turn=StaticTurn(result))
+        return StartedTurn[T](turn=StaticTurn(result))
 
 
 def resolver_test_factory(
@@ -4940,7 +4940,7 @@ class PromptRecordingSession(ResolverTestSession):
 
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
+    ) -> StartedTurn[T]:
         self.log.append(request.input.text)
         return await super().start(request)
 

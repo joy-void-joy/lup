@@ -12,10 +12,10 @@ from lup.sessions.capabilities import (
     EventStream,
     ForkSession,
     Interrupt,
-    Session,
+    SessionEngine,
     Steer,
     SubmittedOutputStore,
-    Turn,
+    TurnEngine,
 )
 from lup.types import (
     JsonObject,
@@ -483,11 +483,11 @@ class SessionHandle(BaseModel, frozen=True, arbitrary_types_allowed=True):
     the behavioural surface over these seams.
     """
 
-    session: Session
+    session: SessionEngine
     fork: ForkSession | None = None
 
 
-class TurnHandle[T: BaseModel | None](
+class StartedTurn[T: BaseModel | None](
     BaseModel, frozen=True, arbitrary_types_allowed=True
 ):
     """Transparent composition of an accepted turn's capabilities.
@@ -497,7 +497,7 @@ class TurnHandle[T: BaseModel | None](
     surface that should have owned shared behaviour.
     """
 
-    turn: Turn[T]
+    turn: TurnEngine[T]
     events: EventStream | None = None
     interrupt: Interrupt | None = None
     steer: Steer | None = None

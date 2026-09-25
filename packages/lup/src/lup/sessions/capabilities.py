@@ -14,7 +14,7 @@ if TYPE_CHECKING:
         LiveTurnEvent,
         SessionHandle,
         TurnEvent,
-        TurnHandle,
+        StartedTurn,
         TurnId,
         TurnInput,
         TurnRequest,
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     )
 
 
-class Session(ABC):
+class SessionEngine(ABC):
     """Start one acknowledged turn in a conversation.
 
     An injected engine with no consumer-facing surface. It reaches consumers
@@ -45,11 +45,11 @@ class Session(ABC):
     @abstractmethod
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
+    ) -> StartedTurn[T]:
         """Bind the request and return its accepted native turn."""
 
 
-class Turn[T: BaseModel | None](ABC):
+class TurnEngine[T: BaseModel | None](ABC):
     """Resolve one accepted logical turn."""
 
     @abstractmethod

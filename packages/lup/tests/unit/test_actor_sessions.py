@@ -12,13 +12,13 @@ from lup.coordination.mailbox import AnswerDoor
 from lup.coordination.refs import ActorRef
 from lup.coordination.sessions import ActorInbox, ActorRecord, ActorSession
 from lup.resolver.journal import Journal
-from lup.sessions.capabilities import Session
+from lup.sessions.capabilities import SessionEngine
 from lup.sessions.errors import ProviderTurnError, TurnFailure
 from lup.sessions.client import Client
 from lup.sessions.events import (
     SessionHandle,
     SessionId,
-    TurnHandle,
+    StartedTurn,
     TurnInput,
     TurnRequest,
     TurnResult,
@@ -30,7 +30,7 @@ from tests.unit.doubles import StaticTurn, identifiers, session_factory
 FRESH = "fresh-session"
 
 
-class ResumeRefusingSession(Session):
+class ResumeRefusingSession(SessionEngine):
     """Refuse every turn opened against a resumed conversation."""
 
     def __init__(self, resumed: bool) -> None:
@@ -38,7 +38,7 @@ class ResumeRefusingSession(Session):
 
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
+    ) -> StartedTurn[T]:
         if self.resumed:
             raise ProviderTurnError(
                 TurnFailure(message="No conversation found with session ID")
@@ -53,7 +53,7 @@ class ResumeRefusingSession(Session):
                 "identifiers": identifiers(session=FRESH),
             }
         )
-        return TurnHandle[T](turn=StaticTurn(result))
+        return StartedTurn[T](turn=StaticTurn(result))
 
 
 def refusing_factory() -> tuple[Client, list[SessionId | None]]:
@@ -79,7 +79,7 @@ def worker_session(
     return ActorSession(actor, factory, Journal(tmp_path), record), opened
 
 
-class RecordingSession(Session):
+class RecordingSession(SessionEngine):
     """Accept every turn, keeping the input each one was actually given."""
 
     def __init__(self) -> None:
@@ -87,7 +87,7 @@ class RecordingSession(Session):
 
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
+    ) -> StartedTurn[T]:
         self.delivered.append(request.input.text)
         result = TurnResult[T].model_validate(
             {
@@ -99,7 +99,7 @@ class RecordingSession(Session):
                 "identifiers": identifiers(),
             }
         )
-        return TurnHandle[T](turn=StaticTurn(result))
+        return StartedTurn[T](turn=StaticTurn(result))
 
 
 def mailed_session(

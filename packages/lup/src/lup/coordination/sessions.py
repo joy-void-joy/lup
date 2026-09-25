@@ -52,7 +52,7 @@ from lup.sessions.events import (
     SessionHandle,
     SessionId,
     TurnEvent,
-    TurnHandle,
+    StartedTurn,
     TurnRequest,
     TurnResult,
 )
@@ -295,7 +295,7 @@ class ActorSession:
 
     async def started[T: BaseModel | None](
         self, handle: SessionHandle, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
+    ) -> StartedTurn[T]:
         """Begin a turn, forgetting a conversation the provider no longer has.
 
         A recorded session is a claim that the provider still holds that

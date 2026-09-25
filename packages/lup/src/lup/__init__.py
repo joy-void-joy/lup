@@ -42,7 +42,7 @@ from lup.tools.native import NativeToolGroup as NativeToolGroup, NativeTools
 from lup.sessions.events import (
     SessionHandle,
     SessionId,
-    TurnHandle,
+    StartedTurn,
     TurnId,
     TurnInput,
     TurnRequest,
@@ -165,7 +165,7 @@ __all__ = [  # lup: ignore[all-export] -- the package-root public API
     "Provider",
     "SessionHandle",
     "SessionId",
-    "TurnHandle",
+    "StartedTurn",
     "TurnId",
     "TurnInput",
     "TurnRequest",

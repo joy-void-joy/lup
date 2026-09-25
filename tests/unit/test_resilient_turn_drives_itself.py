@@ -22,14 +22,14 @@ from datetime import timedelta
 import pytest
 from pydantic import BaseModel
 
-from lup.sessions.capabilities import EventStream, Session, Turn
+from lup.sessions.capabilities import EventStream, SessionEngine, TurnEngine
 from lup.sessions.errors import StructuredOutputError, TurnFailure
 from lup.sessions.client import Client
 from lup.sessions.events import (
     MessageCompletedEvent,
     SessionHandle,
     SessionId,
-    TurnHandle,
+    StartedTurn,
     TurnId,
     TurnIdentifiers,
     TurnMessage,
@@ -74,7 +74,7 @@ class ScriptedStream(EventStream):
         return self.iterate()
 
 
-class ScriptedTurn(Turn[Answer | None]):
+class ScriptedTurn(TurnEngine[Answer | None]):
     """A native turn that submits its scripted output, or admits it did not."""
 
     def __init__(self, messages: list[TurnMessage], output: Answer | None) -> None:
@@ -100,7 +100,7 @@ class ScriptedTurn(Turn[Answer | None]):
         )
 
 
-class ScriptedSession(Session):
+class ScriptedSession(SessionEngine):
     """A session whose successive turns are scripted in advance."""
 
     def __init__(self, script: list[tuple[list[TurnMessage], Answer | None]]) -> None:
@@ -109,11 +109,11 @@ class ScriptedSession(Session):
 
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
+    ) -> StartedTurn[T]:
         self.attempts.append(request)  # pyright: ignore[reportArgumentType]
         step = min(len(self.attempts) - 1, len(self.script) - 1)
         messages, output = self.script[step]
-        handle = TurnHandle[Answer | None](
+        handle = StartedTurn[Answer | None](
             turn=ScriptedTurn(messages, output), events=ScriptedStream(messages)
         )
         return handle  # pyright: ignore[reportReturnType]

@@ -46,7 +46,7 @@ from lup.tools.mcp import LupMcpTool, ServerCompanion, ToolResponse, running_com
 from lup.sessions.composition import AcceptedTurn, CompletedTurn, ComposedSession
 from lup.sessions.capabilities import (
     EventStream,
-    Session,
+    SessionEngine,
     ForkSession,
     Interrupt,
     Steer,
@@ -75,7 +75,7 @@ from lup.sessions.events import (
     TurnId,
     TurnInput,
     TurnRequest,
-    TurnHandle,
+    StartedTurn,
     TurnMessage,
     TurnToolCallBlock,
     TurnToolResultBlock,
@@ -1105,17 +1105,17 @@ class CodexConversationState:
             self.channel.fail(error)
 
 
-class CodexHookSession(Session):
+class CodexHookSession(SessionEngine):
     """Reset Stop state once per logical turn, preserving it across native retries."""
 
-    def __init__(self, state: CodexConversationState, inner: Session) -> None:
+    def __init__(self, state: CodexConversationState, inner: SessionEngine) -> None:
         self.state = state
         self.inner = inner
         self.lock = asyncio.Lock()
 
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
+    ) -> StartedTurn[T]:
         if self.lock.locked():
             raise TurnAlreadyActiveError("a logical Codex turn is already active")
         await self.lock.acquire()
@@ -1128,7 +1128,7 @@ class CodexHookSession(Session):
         finally:
             if not accepted:
                 self.lock.release()
-        return TurnHandle[T](
+        return StartedTurn[T](
             turn=SerializedTurn(handle.turn, self.lock),
             events=handle.events,
             interrupt=handle.interrupt,

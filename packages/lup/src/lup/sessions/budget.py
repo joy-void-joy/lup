@@ -25,12 +25,12 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from lup.sessions.capabilities import Session, Turn
+from lup.sessions.capabilities import SessionEngine, TurnEngine
 from lup.sessions.client import Client
 from lup.sessions.events import (
     SessionHandle,
     SessionId,
-    TurnHandle,
+    StartedTurn,
     TurnRequest,
     TurnResult,
 )
@@ -136,7 +136,7 @@ class FinancialBudgetStore:
         return max(1.0, reset - epoch + 1.0)
 
 
-class FinancialBudgetTurn[T: BaseModel | None](Turn[T]):
+class FinancialBudgetTurn[T: BaseModel | None](TurnEngine[T]):
     """Charge a completed turn exactly once, and keep its result.
 
     A caller may await the same turn twice; the completed result is held so
@@ -145,7 +145,7 @@ class FinancialBudgetTurn[T: BaseModel | None](Turn[T]):
 
     def __init__(
         self,
-        inner: Turn[T],
+        inner: TurnEngine[T],
         store: FinancialBudgetStore,
         sink: BudgetSink,
         now: EpochProvider,
@@ -176,7 +176,7 @@ class FinancialBudgetTurn[T: BaseModel | None](Turn[T]):
         return result
 
 
-class FinancialBudgetSession(Session):
+class FinancialBudgetSession(SessionEngine):
     """Hold new work at the door while the period is spent out.
 
     Checked before starting rather than after charging, because a turn already
@@ -186,7 +186,7 @@ class FinancialBudgetSession(Session):
 
     def __init__(
         self,
-        inner: Session,
+        inner: SessionEngine,
         store: FinancialBudgetStore,
         sink: BudgetSink,
         sleeper: BudgetSleeper,
@@ -219,10 +219,10 @@ class FinancialBudgetSession(Session):
 
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
+    ) -> StartedTurn[T]:
         await self.wait_for_allowance()
         handle = await self.inner.start(request)
-        return TurnHandle[T](
+        return StartedTurn[T](
             turn=FinancialBudgetTurn(handle.turn, self.store, self.sink, self.now),
             events=handle.events,
             interrupt=handle.interrupt,

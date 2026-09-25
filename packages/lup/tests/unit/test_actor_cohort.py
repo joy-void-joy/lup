@@ -19,10 +19,10 @@ from lup.coordination.refs import ActorRef
 
 from lup.coordination.roster import Delivery, Roster
 from lup.policy.hooks import LupHooksConfig
-from lup.sessions.capabilities import Session, Turn
+from lup.sessions.capabilities import SessionEngine, TurnEngine
 from lup.sessions.client import Client
 from lup.sessions.events import (
-    TurnHandle,
+    StartedTurn,
     TurnInput,
     TurnRequest,
     TurnResult,
@@ -37,7 +37,7 @@ class Finding(BaseModel):
     summary: str = ""
 
 
-class HeldTurn[T: BaseModel | None](Turn[T]):
+class HeldTurn[T: BaseModel | None](TurnEngine[T]):
     """A turn that finishes when the test says so, or fails as it was told."""
 
     def __init__(
@@ -58,7 +58,7 @@ class HeldTurn[T: BaseModel | None](Turn[T]):
         return self.value
 
 
-class HeldSession(Session):
+class HeldSession(SessionEngine):
     """A session whose turn the test controls, keeping the hooks it opened with.
 
     Holding the turn open is what lets a test steer a spawn that is still
@@ -78,12 +78,12 @@ class HeldSession(Session):
 
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
+    ) -> StartedTurn[T]:
         output_type = request.output_type
         if output_type is None or not issubclass(output_type, BaseModel):
             raise AssertionError("these turns request typed output")
         output = output_type.model_validate({"summary": self.summary})
-        return TurnHandle[T](turn=HeldTurn(turn_result(output), self.hold, self.fails))
+        return StartedTurn[T](turn=HeldTurn(turn_result(output), self.hold, self.fails))
 
 
 def recipe_for(session: HeldSession) -> ActorRecipe:

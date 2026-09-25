@@ -42,7 +42,7 @@ from lup.observability.sweep import index_notes
 from lup.observability.trace import TraceEvent, TraceLogger
 from lup.providers.claude.transcripts import ClaudeTranscripts
 from lup.sessions.client import Client
-from lup.sessions.events import SessionHandle, SessionId, TurnHandle, TurnRequest
+from lup.sessions.events import SessionHandle, SessionId, StartedTurn, TurnRequest
 from lup.tools.mcp import ToolError
 from lup.workspace.history import save_session
 from lup.workspace.notes import setup_notes
@@ -55,12 +55,12 @@ class Result(BaseModel):
     summary: str
 
 
-class IdleSession(capabilities.Session):
+class IdleSession(capabilities.SessionEngine):
     """A session nothing starts a turn on: the factory around it is the subject."""
 
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
+    ) -> StartedTurn[T]:
         raise NotImplementedError(f"no turn is started here: {request}")
 
 

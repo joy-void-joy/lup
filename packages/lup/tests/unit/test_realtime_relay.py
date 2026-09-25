@@ -40,10 +40,10 @@ from lup.orchestration.realtime.relay import (
 )
 from lup.orchestration.realtime.scheduler import Scheduler
 from lup.orchestration.reflection import ReflectionGate
-from lup.sessions.capabilities import Session, Turn
+from lup.sessions.capabilities import SessionEngine, TurnEngine
 from lup.sessions.events import (
     SessionId,
-    TurnHandle,
+    StartedTurn,
     TurnId,
     TurnIdentifiers,
     TurnRequest,
@@ -386,7 +386,7 @@ class AgentTurn:
             await asyncio.sleep(self.pause_seconds)
 
 
-class FakeTurn(Turn[None]):
+class FakeTurn(TurnEngine[None]):
     """Resolve one scripted relay turn."""
 
     def __init__(self, conversation: "FakeConversation", index: int) -> None:
@@ -408,7 +408,7 @@ class FakeTurn(Turn[None]):
         )
 
 
-class FakeConversation(Session):
+class FakeConversation(SessionEngine):
     """Session stand-in that plays scripted turns."""
 
     def __init__(self, turns: list[AgentTurn]) -> None:
@@ -420,10 +420,10 @@ class FakeConversation(Session):
 
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
+    ) -> StartedTurn[T]:
         self.prompts.append(request.input.text)
-        handle = TurnHandle[None](turn=FakeTurn(self, len(self.prompts) - 1))
-        return cast("TurnHandle[T]", handle)  # lup: ignore[cast] — generic test double
+        handle = StartedTurn[None](turn=FakeTurn(self, len(self.prompts) - 1))
+        return cast("StartedTurn[T]", handle)  # lup: ignore[cast] — generic test double
 
 
 META = ("meta", {"thought": "assessed"})

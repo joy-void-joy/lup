@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from rich.console import Console
 
-    from lup.sessions.capabilities import Session
+    from lup.sessions.capabilities import SessionEngine
     from lup.sessions.client import Client
     from lup.sessions.events import TurnResult
 
@@ -78,7 +78,7 @@ class Interrupted(Exception):
 
 
 async def send_interruptible(
-    conv: "Session",
+    conv: "SessionEngine",
     prompt: str,
     console: "Console",
 ) -> "TurnResult[None]":

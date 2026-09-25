@@ -37,7 +37,7 @@ from pydantic import BaseModel, Field, TypeAdapter
 from lup.channels.stream import Stream
 from lup.observability.journal import ChainedWriter, Journal, JournalRecord, last_record
 from lup.sessions.composition import is_output_model
-from lup.sessions.capabilities import EventStream, Session, Turn
+from lup.sessions.capabilities import EventStream, SessionEngine, TurnEngine
 from lup.sessions.errors import DeltaStreamingDisabled, TurnError
 from lup.sessions.client import Client
 from lup.sessions.events import (
@@ -50,7 +50,7 @@ from lup.sessions.events import (
     SessionId,
     TurnCompletedEvent,
     TurnEvent,
-    TurnHandle,
+    StartedTurn,
     TurnMessage,
     TurnRequest,
     TurnResult,
@@ -772,12 +772,12 @@ class JournalEventStream(EventStream):
             yield event
 
 
-class JournalTurn[T: BaseModel | None](Turn[T]):
+class JournalTurn[T: BaseModel | None](TurnEngine[T]):
     """Persist the terminal result or complete failure of one logical turn."""
 
     def __init__(
         self,
-        inner: Turn[T],
+        inner: TurnEngine[T],
         journal: TraceJournal,
         event_stream: JournalEventStream | None,
     ) -> None:
@@ -834,16 +834,16 @@ class JournalTurn[T: BaseModel | None](Turn[T]):
         return result
 
 
-class JournalSession(Session):
+class JournalSession(SessionEngine):
     """Record turn input and attach lossless event/result journaling."""
 
-    def __init__(self, inner: Session, journal: TraceJournal) -> None:
+    def __init__(self, inner: SessionEngine, journal: TraceJournal) -> None:
         self.inner = inner
         self.journal = journal
 
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
+    ) -> StartedTurn[T]:
         self.journal.emit(
             "turn_input",
             {
@@ -862,7 +862,7 @@ class JournalSession(Session):
             if handle.events is not None
             else None
         )
-        return TurnHandle[T](
+        return StartedTurn[T](
             turn=JournalTurn(handle.turn, self.journal, event_stream),
             events=event_stream,
             interrupt=handle.interrupt,

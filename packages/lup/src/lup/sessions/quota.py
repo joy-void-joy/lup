@@ -22,13 +22,13 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from lup.sessions.capabilities import Session, Turn
+from lup.sessions.capabilities import SessionEngine, TurnEngine
 from lup.sessions.errors import QuotaExceededError
 from lup.sessions.client import Client
 from lup.sessions.events import (
     SessionHandle,
     SessionId,
-    TurnHandle,
+    StartedTurn,
     TurnRequest,
     TurnResult,
 )
@@ -65,14 +65,14 @@ def utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-class QuotaWaitingTurn[T: BaseModel | None](Turn[T]):
+class QuotaWaitingTurn[T: BaseModel | None](TurnEngine[T]):
     """Retry the identical request on the identical session after reset."""
 
     def __init__(
         self,
-        session: Session,
+        session: SessionEngine,
         request: TurnRequest[T],
-        handle: TurnHandle[T],
+        handle: StartedTurn[T],
         config: QuotaWaitConfig,
         sink: QuotaWaitSink,
         sleeper: QuotaSleeper,
@@ -126,12 +126,12 @@ class QuotaWaitingTurn[T: BaseModel | None](Turn[T]):
                 self.handle = await self.session.start(self.request)
 
 
-class QuotaWaitingSession(Session):
+class QuotaWaitingSession(SessionEngine):
     """Attach allowance waiting to every turn started on a session."""
 
     def __init__(
         self,
-        inner: Session,
+        inner: SessionEngine,
         config: QuotaWaitConfig,
         sink: QuotaWaitSink,
         sleeper: QuotaSleeper,
@@ -145,9 +145,9 @@ class QuotaWaitingSession(Session):
 
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
+    ) -> StartedTurn[T]:
         handle = await self.inner.start(request)
-        return TurnHandle[T](
+        return StartedTurn[T](
             turn=QuotaWaitingTurn(
                 self.inner,
                 request,

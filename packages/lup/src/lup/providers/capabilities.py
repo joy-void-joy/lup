@@ -1,7 +1,7 @@
 """Versioned evidence-backed runtime capability matrix.
 
 The table describes capabilities supplied in ``SessionHandle`` and
-``TurnHandle`` values. Unsupported capabilities are absent; diagnostics never
+``StartedTurn`` values. Unsupported capabilities are absent; diagnostics never
 invoke operations and catch an unsupported-operation exception.
 
 It sits beside the adapters rather than in an application because that is

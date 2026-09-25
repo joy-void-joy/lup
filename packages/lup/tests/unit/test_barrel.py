@@ -47,7 +47,7 @@ def test_root_exports_only_portable_runtime_conveniences() -> None:
         "Provider",
         "SessionHandle",
         "SessionId",
-        "TurnHandle",
+        "StartedTurn",
         "TurnId",
         "TurnInput",
         "TurnRequest",

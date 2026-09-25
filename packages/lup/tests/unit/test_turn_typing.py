@@ -14,11 +14,11 @@ from typing import assert_type
 import pytest
 from pydantic import BaseModel
 
-from lup.sessions.capabilities import Session, Turn
+from lup.sessions.capabilities import SessionEngine, TurnEngine
 from lup.sessions.client import Client
 from lup.sessions.events import (
     SessionId,
-    TurnHandle,
+    StartedTurn,
     TurnId,
     TurnIdentifiers,
     TurnInput,
@@ -40,7 +40,7 @@ class Summary(BaseModel, frozen=True):
     title: str = "pinned"
 
 
-class StubTurn[T: BaseModel | None](Turn[T]):
+class StubTurn[T: BaseModel | None](TurnEngine[T]):
     """Complete immediately, submitting an instance of the requested model."""
 
     def __init__(self, request: TurnRequest[T]) -> None:
@@ -63,7 +63,7 @@ class StubTurn[T: BaseModel | None](Turn[T]):
         )
 
 
-class StubSession(Session):
+class StubSession(SessionEngine):
     """Record the text every turn was started with."""
 
     def __init__(self) -> None:
@@ -71,9 +71,9 @@ class StubSession(Session):
 
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
+    ) -> StartedTurn[T]:
         self.prompts.append(request.input.text)
-        return TurnHandle[T](turn=StubTurn(request))
+        return StartedTurn[T](turn=StubTurn(request))
 
     def factory(self) -> Client:
         """A factory whose every opened session is this one."""

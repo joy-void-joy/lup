@@ -12,13 +12,13 @@ from lup_template.agent import prompts
 from lup.orchestration.reflection import ReviewGate
 from lup_template.agent.config import aux_model, engine_for_settings, settings
 from lup_template.agent.core import reflection_submission_gate
-from lup.sessions.capabilities import Session, Turn
+from lup.sessions.capabilities import SessionEngine, TurnEngine
 from lup.sessions.client import Client
 from lup.sessions.events import (
     SessionHandle,
     SessionId,
     TurnBlock,
-    TurnHandle,
+    StartedTurn,
     TurnId,
     TurnIdentifiers,
     TurnRequest,
@@ -184,7 +184,7 @@ async def test_reflection_gate_is_the_typed_submission_gate() -> None:
     assert (await gate(output)).accepted
 
 
-class StaticTurn[T: BaseModel | None](Turn[T]):
+class StaticTurn[T: BaseModel | None](TurnEngine[T]):
     def __init__(self, result: TurnResult[T]) -> None:
         self.value = result
 
@@ -192,7 +192,7 @@ class StaticTurn[T: BaseModel | None](Turn[T]):
         return self.value
 
 
-class StaticSession(Session):
+class StaticSession(SessionEngine):
     """Complete every turn with the same successful canned result."""
 
     def __init__(self, blocks: list[TurnBlock]) -> None:
@@ -200,7 +200,7 @@ class StaticSession(Session):
 
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
+    ) -> StartedTurn[T]:
         result = TurnResult[T].model_validate(
             {
                 "output": None,
@@ -214,7 +214,7 @@ class StaticSession(Session):
                 ),
             }
         )
-        return TurnHandle[T](turn=StaticTurn(result))
+        return StartedTurn[T](turn=StaticTurn(result))
 
 
 def static_session_factory(blocks: list[TurnBlock]) -> Client:

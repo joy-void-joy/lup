@@ -46,9 +46,9 @@ from lup.resolver.questions import QuestionBroker
 from lup.resolver.run import ResolveRun
 from lup.resolver.state import ResolverStateRepository
 from lup.resolver.turns import TurnRunner
-from lup.sessions.capabilities import Session
+from lup.sessions.capabilities import SessionEngine
 from lup.sessions.client import Client
-from lup.sessions.events import TurnHandle, TurnRequest
+from lup.sessions.events import StartedTurn, TurnRequest
 from tests.unit.doubles import session_factory
 
 NEW_DEVTOOLS = PathRule(
@@ -160,12 +160,12 @@ def human_grants(desk: QuestionBroker, concern_id: str, value: str) -> None:
     desk.promote_offers()
 
 
-class IdleSession(Session):
+class IdleSession(SessionEngine):
     """A session for tests that open one and never take a turn on it."""
 
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
+    ) -> StartedTurn[T]:
         raise AssertionError("this test opens sessions but takes no turn")
 
 

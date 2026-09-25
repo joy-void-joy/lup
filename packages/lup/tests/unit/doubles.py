@@ -39,7 +39,7 @@ from lup.providers.codex.app_server import (
     RpcSuccess,
 )
 from lup.harness.process import ExitStatus, LaunchRequest, ProcessLauncher
-from lup.sessions.capabilities import Session, Turn
+from lup.sessions.capabilities import SessionEngine, TurnEngine
 from lup.sessions.client import Client
 from lup.sessions.events import (
     SessionHandle,
@@ -131,7 +131,7 @@ def turn_result[T: BaseModel | None](
     )
 
 
-class StaticTurn[T: BaseModel | None](Turn[T]):
+class StaticTurn[T: BaseModel | None](TurnEngine[T]):
     """A turn that has already finished, holding the result it will report."""
 
     def __init__(self, result: TurnResult[T]) -> None:
@@ -141,7 +141,7 @@ class StaticTurn[T: BaseModel | None](Turn[T]):
         return self.value
 
 
-def session_factory(session: Session) -> Client:
+def session_factory(session: SessionEngine) -> Client:
     """A factory whose every opened session is the one given."""
 
     @asynccontextmanager

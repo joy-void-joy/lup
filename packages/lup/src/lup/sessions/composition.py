@@ -9,10 +9,10 @@ from pydantic import BaseModel, Field
 from lup.sessions.capabilities import (
     EventStream,
     Interrupt,
-    Session,
+    SessionEngine,
     Steer,
     SubmittedOutputStore,
-    Turn,
+    TurnEngine,
     TurnToolBinder,
 )
 from lup.sessions.errors import (
@@ -25,7 +25,7 @@ from lup.sessions.errors import (
 )
 from lup.sessions.events import (
     AnyTurnBlock,
-    TurnHandle,
+    StartedTurn,
     TurnIdentifiers,
     TurnMessage,
     TurnRequest,
@@ -112,7 +112,7 @@ def refusal_of(blocks: list[AnyTurnBlock], tool: str) -> str | None:
     )
 
 
-class ComposedTurn[T: BaseModel | None](Turn[T]):
+class ComposedTurn[T: BaseModel | None](TurnEngine[T]):
     """Assemble native completion and the turn-local validated submission."""
 
     def __init__(
@@ -215,7 +215,7 @@ class ComposedTurn[T: BaseModel | None](Turn[T]):
             self.finished()
 
 
-class ComposedSession(Session):
+class ComposedSession(SessionEngine):
     """Enforce binding-before-acceptance and one active turn."""
 
     def __init__(
@@ -237,7 +237,7 @@ class ComposedSession(Session):
 
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
+    ) -> StartedTurn[T]:
         if self.active:
             raise TurnAlreadyActiveError("session already has an active turn")
         self.active = True
@@ -274,7 +274,7 @@ class ComposedSession(Session):
         turn = ComposedTurn[T](
             accepted, request, store, finished, lifecycle, self.submission_tool
         )
-        return TurnHandle[T](
+        return StartedTurn[T](
             turn=turn,
             events=accepted.events,
             interrupt=accepted.interrupt,
