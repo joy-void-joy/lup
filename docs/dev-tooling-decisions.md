@@ -146,9 +146,10 @@ trust decisions remain personal and survive generation.
 Context: Provider-native output schemas and an MCP submission tool can diverge
 or race when both are active.
 
-Decision: Bind one fresh `submit_output` tool and store per typed turn. Validate
-the Pydantic value and optional submission gate before persistence. Do not
-enable a second native structured-output mechanism on the same turn.
+Decision: Carry each typed turn's schema by exactly one mechanism: on Claude a
+fresh `submit_output` tool and store, on Codex the turn's own strict
+`outputSchema`. Validate the Pydantic value and optional submission gate before
+persistence. Do not enable a second structured-output mechanism on the same turn.
 
 Consequences: A typed result has one validation history and one ownership
 boundary. Missing or incompatible submission raises a typed error rather than
@@ -156,12 +157,15 @@ appearing as an empty success.
 
 ## ADR-011: Keep runtime capabilities independent
 
-Context: A broad client/options object couples provider construction, optional
-turn behavior, wrappers, routing, profiles, and background scheduling.
+Context: An object holding optional turn behavior, routing, profiles, and
+background scheduling couples each of them to every other. Provider
+construction and wrappers are the exception, one declaration per agent;
+ADR-017 records why, and supersedes this record's rejection of them.
 
-Decision: Use narrow one-to-three-method contracts, immutable capability
-handles, explicit factory recipes, config transforms, and concrete decorators.
-Unsupported behavior is absent from the handle.
+Decision: Use narrow one-to-three-method contracts beneath provider session
+and turn types that carry exactly their provider's capabilities, explicit
+factory recipes, config transforms, and concrete decorators an agent declares
+in its `layers`. Unsupported behavior is absent from the provider's type.
 
 Consequences: Applications compose only the capabilities they need. A third
 adapter implements contracts without joining a shared provider registry, and
@@ -301,5 +305,33 @@ into the generated reference. `dev guidance` reports the per-heading weights,
 because a single number says a cut is needed and nothing about where. A
 project with a thinner scaffold, or none, states its own share through the
 report's `headroom` parameter rather than forking the default.
+
+## ADR-017: Make the agent declaration its own client
+
+Context: ADR-011 rejected one object holding provider construction and
+wrappers, so an application built a configuration, passed it to a
+constructor, and held the client the constructor returned. The options a
+constructor took were spelled again as fields of the configuration it filled,
+two lists to keep in step, and a reader hovering the constructor saw its
+parameters rather than the configuration's fields and what each one meant. Three shapes were weighed: the provider
+declarations as the client, constructor functions whose keyword arguments are
+an `Unpack`ed `TypedDict`, and keeping both.
+
+Decision: `Claude(...)` and `Codex(...)` are frozen Pydantic models declaring
+one agent whole, and each runs what it declares: `ask()` takes a one-shot
+turn and `open()` opens a session, with no constructor, client class, or
+second parameter list beside them. Wrappers are a field of the declaration,
+`layers`, a `SessionLayers`, rather than a factory stacked around a client.
+This supersedes ADR-011's rejection for construction and wrappers only;
+optional turn behavior, routing, profiles, and background scheduling remain
+the separate capabilities ADR-011 decided.
+
+Consequences: Every option is one field, shown on hover and in completion
+with its own documentation and validated where the agent is declared, and no
+constructor signature has to be kept in step with a configuration. An
+`Unpack`ed `TypedDict` would still have paired each keyword with the field it
+fills, and keeping both shapes would have kept both lists. Transforms, profile
+selection, and routes rewrite or return declarations rather than clients, and
+`layered()` lays further layers over an agent its caller did not declare.
 
 [README.md](README.md) indexes every guide these decisions govern.

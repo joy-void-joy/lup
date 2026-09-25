@@ -9,7 +9,7 @@
     {
       "path": ".claude/CLAUDE.md",
       "category": "generated",
-      "sha256": "79f6f16bfeaa8247531a92ac4ab0f625affaea6e2150761bc34a1f6c288822bc",
+      "sha256": "bf8b27dda1276170638139fb5e981d0cd0d1b03aa5b7dfb844a1e2d80567a75c",
       "semantic_id": "harness.guidance",
       "executable": false
     },
@@ -37,7 +37,7 @@
     {
       "path": ".claude/plugins/lup/TEMPLATE_CLAUDE.md",
       "category": "generated",
-      "sha256": "d38b91f5aeca0b0ac610f0e848fbb4dc8fc2e19d089362ded348d0ed0175b8e7",
+      "sha256": "b58751711f0156ec4ba418727a0677b443816e471c68ccf5fd8a7916368c3901",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -86,7 +86,7 @@
     {
       "path": ".claude/plugins/lup/commands/brainstorm.md",
       "category": "generated",
-      "sha256": "653d11c4e9f91ff197f404fcdf6888fb8189936b85fb04aa8914286ed4f7e0f7",
+      "sha256": "4110964d7f2af4ffee28f43fb7955dc20aa74c8adaafb2b06589054568da28b6",
       "semantic_id": "skill.brainstorm",
       "executable": false
     },
@@ -275,7 +275,7 @@
     {
       "path": ".claude/plugins/lup/commands/refactor-tools.md",
       "category": "generated",
-      "sha256": "392854e6a44e76b194c3147692f695ad57a4e7582639e877a94e1e8c400c6866",
+      "sha256": "92cf19c3ce1195671c90624d12a610fbb9a1d796c173cd16568287ff0d38ef00",
       "semantic_id": "skill.refactor-tools",
       "executable": false
     },
@@ -709,7 +709,7 @@
     {
       "path": "docs/architecture.md",
       "category": "generated",
-      "sha256": "331356e1138b94a7fd14502e86516416df616887ec4a4afd18d9061de9b78126",
+      "sha256": "a8736495eb2ecef207f94f9bcc81507450124d46d6a6f93efaf9e8c10abe4d7d",
       "semantic_id": "docs.architecture",
       "executable": false
     },
@@ -723,14 +723,14 @@
     {
       "path": "docs/conventions.md",
       "category": "generated",
-      "sha256": "a6b155b20e8fd57754defada27b31940cf9365df15cbb4c7176133a1d51890f0",
+      "sha256": "7875053b7e056dfc58b5f35881515ed47b73b1af07fdb314727144028107b8bb",
       "semantic_id": "docs.conventions",
       "executable": false
     },
     {
       "path": "docs/coordination.md",
       "category": "generated",
-      "sha256": "8a674554b6c45eec1b8771b7f7d946e489eafe0b915c45ad0021d299e50f0215",
+      "sha256": "972244c855eb7f20b83b973ff9f97a7c22e9c5928dcc3679e6b54cf5b36a05da",
       "semantic_id": "docs.coordination",
       "executable": false
     },
@@ -744,7 +744,7 @@
     {
       "path": "docs/dev-tooling-decisions.md",
       "category": "generated",
-      "sha256": "2d4d85da193f6e6d457febee71cc83cf78e9f802313dfdc6eeda0ae2aefed7e1",
+      "sha256": "4a271a224c6d63ac791c5ba30354a524db58bb2b2e34d26b3b79a9c7383ad86f",
       "semantic_id": "docs.dev-tooling-decisions",
       "executable": false
     },
@@ -765,28 +765,28 @@
     {
       "path": "docs/library.md",
       "category": "generated",
-      "sha256": "afe756983a7e4697935ab6dbda2825f0d92488f02d2d48e170333e2ab8cafeb5",
+      "sha256": "c8576887eaebcbcad52da5fb4330f6338385a91c560dd675f484abd3cb9531c1",
       "semantic_id": "docs.library",
       "executable": false
     },
     {
       "path": "docs/native-capabilities.md",
       "category": "generated",
-      "sha256": "cb1078cae05e8bab03802b6086456754201a9349f8993899ddcd5c46c02bae9c",
+      "sha256": "54934356911b1024e200e268a77b93794f8acbbd9243dfe9d6c341954f5f3cee",
       "semantic_id": "docs.native-capabilities",
       "executable": false
     },
     {
       "path": "docs/orchestration.md",
       "category": "generated",
-      "sha256": "ba882d79f4a421b62a85364afb86550a0e8269e21f56dfdaa61bc15ce5fb4728",
+      "sha256": "56310fc7967f4723e4823a5386fbf6b2618786061f2550ba4d68a353590dfc57",
       "semantic_id": "docs.orchestration",
       "executable": false
     },
     {
       "path": "docs/patterns.md",
       "category": "generated",
-      "sha256": "68ac588cbd358ff08b845fbcf2cb507ac4fd6d87dbf455fa34d901cd7672a71a",
+      "sha256": "dcb00b466e2aae36bf3b3b78fe050be1c6f6b0771859f7dd78e0e1083dce0caa",
       "semantic_id": "docs.patterns",
       "executable": false
     },
@@ -800,7 +800,7 @@
     {
       "path": "docs/platform-differentiation.md",
       "category": "generated",
-      "sha256": "cfe8fc705ee3bb84cf961d49b1b87faf562f0cb90f6dd92b9490193eca373eb4",
+      "sha256": "625f4c5931b13fe99668338d9993052abbda81e5f17a81ea2747c16150fde5f2",
       "semantic_id": "docs.platform-differentiation",
       "executable": false
     },
@@ -835,14 +835,14 @@
     {
       "path": "docs/supervisor.md",
       "category": "generated",
-      "sha256": "753b4cd4aab2cb446c17ff958f8e0f2022ab9609d3325c3ca08065ef49e49678",
+      "sha256": "bc4a962fbcfaeda14e405c2fa2313c04aa66c610ecc44d71f11675538c5b4d45",
       "semantic_id": "docs.supervisor",
       "executable": false
     },
     {
       "path": "docs/template.md",
       "category": "generated",
-      "sha256": "2991a86c1c3e31205678e07c6be857faa28e7649aba407c5e3ea9520bbd78591",
+      "sha256": "c6636d3c899fff906f629ffa160d72372aa78bad54138e3580c5744962bc95f6",
       "semantic_id": "docs.template",
       "executable": false
     },

@@ -71,12 +71,12 @@ consumer would otherwise reach past a missing surface to reach.
 is the previous section seen from the consumer's side: `ModelMatcher` is the
 engine, `ExactModelMatcher` and `PrefixModelMatcher` fill it, and nobody
 outside the router calls `matches`. Callers hold the router and ask
-`resolve`. `Client` (`packages/lup/src/lup/sessions/client.py`) is the
-same arrangement one level up — a plain class parametrized by a single
-`SessionOpener`, which adapters, wrappers, and tests each supply differently.
-The engine there is a callable rather than an ABC, which is the point: what
-makes something a surface is that it holds shared behaviour, not what kind of
-seam sits behind it.
+`resolve`. `ClaudeSession` (`packages/lup/src/lup/providers/claude/__init__.py`)
+and `CodexSession` are the same arrangement one level up — plain classes
+composed over a `SessionEngine`, which the adapter fills, the agent's declared
+layers wrap, and a test's double replaces. A caller asks the session for a
+turn and never holds the engine the turn starts itself through; the agent's
+own `ask` homes the rest: open a conversation, take one turn, close it.
 
 What goes wrong without the surface is that the shared behaviour has nowhere
 to live. When the seam is all there is, every consumer writes the part the
@@ -88,34 +88,29 @@ implementation swappable anyway.
 
 `ProfileResolver` (`packages/lup/src/lup/providers/config.py`) is what that
 looks like caught in the act. The seam resolves a profile name to a
-`ConfigTransform`, but every consumer wants the configured session, so both
+`ConfigTransform`, but every consumer wants the configured agent, so both
 `ClaudeProfileResolver` and `CodexProfileResolver` grew the same
-resolve-apply-construct method on the side — the same four lines twice, in
+resolve-then-apply method on the side — the same four lines twice, in
 two adapters that must never learn about each other. `ProfileSelector` is
-that behaviour given a home: one plain class parametrized by the resolver and
-by the factory builder its provider supplies.
+that behaviour given a home: one plain class parametrized by the resolver,
+handing back the transformed declaration, which opens its own sessions.
 
 Two kinds of seam are exempt, for two different reasons that meet at the same
-question: is there shared behaviour with no home? A frozen value that only
-carries capabilities is a transparent carrier rather than a caller-facing
-surface, so reaching through one is conforming — `handle.session.start(...)`
-and `turn.turn.result()` go through `SessionHandle` and `TurnHandle`
-(`packages/lup/src/lup/sessions/events.py`), which hold seams and no behaviour
-of their own. `ConfigTransform` is the same answer for a pure function over
-config: nothing to home, so applications stack transforms directly.
+question: is there shared behaviour with no home? A pure function over config
+has none: `ConfigTransform` holds nothing a surface could gather, so
+applications stack transforms directly.
 
 The second is a seam that is genuinely engine-only: implemented and injected,
 never held. `TurnToolBinder` and `SubmittedOutputStore`
 (`packages/lup/src/lup/sessions/capabilities.py`) are filled by adapters and
-handed to `ComposedSession`, which is itself the surface. `Session` is the
-case worth reading twice, because it qualifies without being handle-only: a
-driver takes one as a parameter and runs a turn inside its own concern —
-signal handling in `send_interruptible`, a mailbox in `run_relay_session` —
-and those two share only start-then-result, which `Client.query`
-already homes. Both drivers hold a handle and narrow to `.session` on
-purpose: taking the whole handle would fold them under the carrier exemption
-instead, but a driver that only starts turns should not also demand `fork`.
-Injected, not held, either way. Say that in the ABC's own docstring, where
+handed to `ComposedSession`, which binds through them. `SessionEngine` is the
+same: every provider's session and every declared layer is composed over one,
+and nothing a program holds is one. A driver that runs a turn inside its own
+concern — signal handling in `send_interruptible`, a mailbox in
+`run_relay_session` — takes a `Conversation` rather than an engine, and asks
+it for a turn like any other caller: the protocol carries only what both
+providers answer, so neither driver demands a `fork` or `steer` it never
+uses. Say that a seam is engine-only in the ABC's own docstring, where
 the next reader is already looking. A marker or a
 rule cannot carry it: composing an ABC and holding one are spelled
 identically at the import site, so a check would flag every composing class or

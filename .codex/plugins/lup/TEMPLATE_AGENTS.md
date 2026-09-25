@@ -282,7 +282,7 @@ Declining is a **first-class outcome, not a failure**: a module this domain has 
 
 One pattern here is not a module, because it is this template's own wiring rather than a subject lup ships: the **commit loop** (`environment/cli` auto-commit) is kept when each run yields a data artifact worth versioning per session, and dropped when the agent is interactive or produces no per-session artifact worth a checkpoint.
 
-The same logic governs native subagents (harness-dispatched roles sharing the main session), background agents, and nested agents (tool-subagents opened inside a tool handler via `query()`): wire them only where the domain needs that shape. When unsure, start without the pattern and add it when a real need appears — adding later is cheap; dead scaffolding the agent feels obliged to use is not.
+The same logic governs native subagents (harness-dispatched roles sharing the main session), background agents, and nested agents (tool-subagents opened inside a tool handler via `ask()`): wire them only where the domain needs that shape. When unsure, start without the pattern and add it when a real need appears — adding later is cheap; dead scaffolding the agent feels obliged to use is not.
 
 ---
 
@@ -393,7 +393,7 @@ describing a directory most projects never have.
 
 ## Primary Libraries
 
-- **lup**: The runtime this project composes against, and it is provider-neutral. `Client` opens a `Session`; a `TurnRequest` carries the prompt and the type the answer must arrive as; a strict `TurnResult[T]` hands back `.output` already validated. `Client.query(prompt, Model)` is the whole of a one-shot.
+- **lup**: The runtime this project composes against. `Claude` and `Codex` each declare an agent that opens its own sessions; `ask` is the only verb, putting the prompt and the type the answer must arrive as; a strict `TurnResult[T]` hands back `.output` already validated. `await agent.ask(prompt, Model)` is the whole of a one-shot.
 - **pydantic**: For data validation and settings
 - **pydantic-settings**: For configuration (not dotenv)
 
@@ -413,9 +413,9 @@ State the tier, not a model id. A declaration says what the role needs and each 
 - **Never silently swallow exceptions** -- no `except ...: pass`, no `contextlib.suppress`; log with `logger.exception()`, handle meaningfully, or re-raise. Catch-all `except Exception` is fine at boundaries (task loops, subagent delegation) that do so; bare `except:` and `except BaseException` are never fine
 - **Every function must specify input and output types**
 - **Never use `Any`, `dict[str, Any]`, or `dict[str, object]`** -- these erase type information and defeat static analysis. Which typed stand-in replaces one depends on where the dict came from, and [docs/conventions.md](docs/conventions.md) carries the row for each
-- **Provider SDKs are the adapter's, not yours**: application code composes against `lup`'s provider-neutral runtime — `Client`, `Session`, `TurnRequest`, `TurnResult` — and never imports a provider SDK. Each SDK is one adapter's dependency behind an extra, so importing it here pins the application to one runtime and trips `seam-boundary` outside a composition root that names it.
+- **Provider SDKs are the adapter's, not yours**: application code composes against `lup`'s runtime — `Claude`, `Codex`, `Agent`, `Conversation`, `Turn`, `TurnResult` — and never imports a provider SDK. Each SDK is one adapter's dependency behind an extra, so importing it here pins the application to one runtime and trips `seam-boundary` outside a composition root that names it.
 - **Use Python 3.12+ generics syntax**: `class A[T]`, not `Generic[T]`
-- Never manually parse an agent's output -- ask for it as a type. `TurnRequest(output_type=Model)` binds that turn's own `submit_output` to the schema, and `TurnResult[Model].output` arrives validated
+- Never manually parse an agent's output -- ask for it as a type. `ask(prompt, Model)` binds that turn's output to the schema, and `TurnResult[Model].output` arrives validated
 - **Never use `# type: ignore`** -- Ask the user how to properly fix type errors
 - **`# lup: ignore` escape hatch** -- When `Any` or another anti-pattern is genuinely needed (untyped library boundaries, MCP), add an inline ignore to request user approval. Prefer the typed, pyright-style `# lup: ignore[rule-id]` so a site silences exactly the rule it needs and still trips the others; the bare `# lup: ignore` stays valid but the auditor flags it as untyped. A standalone ignore in the first 10 lines applies file-wide. Each rule id is shown in its deny message; the generated `docs/rules.md` (`uv run lup-devtools dev rules`) indexes every rule family with the `lup.harness.codescan` module that defines it.
 - **Use Pydantic BaseModel instead of dataclasses**

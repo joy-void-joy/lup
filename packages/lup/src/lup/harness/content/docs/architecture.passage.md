@@ -7,31 +7,36 @@ with another capability through multiple inheritance. Small callbacks remain
 typed callables. `lup.harness.codescan.capabilities` enforces the mechanical shape
 across resolved project imports with the audited `abc-capability` rule.
 
-Rich behavior is explicit data flow. `SessionHandle` contains a `Session` and
-an optional `ForkSession`; `TurnHandle[T]` contains a `Turn[T]` and optional
-live events, interrupt, and steer capabilities. These frozen Pydantic values
-do not implement behavior or hide a provider. Unsupported behavior is absent.
-
-Reaching a capability through a handle is one of the two stated exceptions to
-the engine-versus-surface split (`docs/patterns.md`), and the criterion is
-behavior: a frozen value that only carries capabilities is a transparent
-carrier, not a caller-facing surface, so there is nothing for a composing
-class to home. `handle.session.start(...)` and `turn.turn.result()` are
-conforming. `Client` is the behavioral surface over these seams.
+Rich behavior is explicit composition. Each provider's session and turn are
+plain classes holding exactly what that provider supports: `CodexTurn` has
+`steer`, and `ClaudeTurn` has no such method rather than one set to `None`.
+A `ClaudeSession` or `CodexSession` is composed over a `SessionEngine`, a
+`ConversationRecord`, and a `ForkSession`, and its turns start themselves
+through the engine. Code naming no provider holds the structural `Agent`,
+`Conversation`, and `Turn` protocols of `lup.sessions.surface`, which ask
+only for what both providers answer.
 
 The runtime sequence is:
 
-1. an application builds a validated Claude or Codex config;
-2. immutable profile/endpoint transforms run before factory construction;
-3. `Client.open()` owns provider resources;
-4. `Session.start()` creates a fresh output store, finishes tool binding, and
-   waits for native turn acknowledgement;
-5. `Turn.result()` returns one strict `TurnResult[T]` or raises a typed error
-   carrying all available blocks, usage, duration, identifiers, and validation
-   history.
+1. an application declares a `Claude` or `Codex` agent, a frozen and
+   validated model whose construction loads no SDK;
+2. immutable profile and endpoint transforms rewrite that declaration;
+3. `agent.open()` loads the adapter's runtime, owns its resources, and wraps the
+   session in the agent's declared `SessionLayers`;
+4. `session.ask(prompt, Model)` returns a turn that has not started; the first
+   await, iteration, `events()`, `live()`, or `interrupt()` starts it once,
+   which creates a fresh output store, finishes tool binding, and waits for
+   native turn acknowledgement;
+5. awaiting the turn returns one strict `TurnResult[T]` or raises a typed
+   error carrying all available blocks, usage, duration, identifiers, and
+   validation history.
+
+`agent.ask(prompt, Model)` is steps 3 to 5 at once: open, one turn, and close
+however that turn ended.
 
 Timeout, budget, recovery, correction, serialization, observation, and
-persistence are concrete decorators around these boundaries. Completed replay
+persistence are concrete decorators around these boundaries, declared on the
+agent as its `layers` rather than stacked around it by hand. Completed replay
 is derived from `TurnResult.blocks`; only a native feed implements
 `EventStream`.
 
@@ -50,16 +55,23 @@ value. [harness.md](harness.md) walks that pipeline, and
 [platform-differentiation.md](platform-differentiation.md) records every
 difference the seam admits.
 
-## Structured output has one mechanism
+## Structured output has one contract
 
-Each typed turn binds `submit_output` to its Pydantic schema and a fresh
-store; native structured-output modes remain off. Validation and an optional
-reflection gate run before persistence. A missing submission cannot be
-represented as a successful typed result.
+A typed turn is asked for a Pydantic model, and its result either carries a
+validated instance of it or the turn raises. Each adapter carries the schema
+the way its runtime can hold it: on Claude the turn binds `submit_output` to
+the schema and a fresh store, with native structured output off; on Codex the
+schema rides the turn's own strict `outputSchema`, or an `output_json` string
+carrier where the schema falls outside the strict subset. Either way the same
+Pydantic validation and optional reflection gate run before persistence, and a
+missing submission cannot be represented as a successful typed result.
 
-## Factories are chosen, never inferred
+## Agents are chosen, never inferred
 
-Applications choose factories explicitly. Immutable `ModelRoute` values may
+Applications name the agent they declare, `Claude(...)` or `Codex(...)`, and
+its `model` takes that runtime's catalog of names, a portable tier such as
+`strongest`, or a `CustomModel(id=...)` that leaves the catalog on purpose, so
+a misspelt id fails where it is written. Immutable `ModelRoute` values may
 select configured recipes, but model names never trigger optional SDK imports
 at module import time and unknown models fail closed.
 
