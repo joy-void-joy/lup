@@ -850,6 +850,28 @@ def devtools_rules() -> list[ShellSubcommandRule]:
                 ),
             ],
         ),
+        # Deleting a branch takes origin's copy along only once it is spent --
+        # its commits reachable from the integration branch -- which loses
+        # nothing. `--remote` deletes that copy whatever it holds, which is
+        # the remote-branch deletion `git push --delete` asks about.
+        ShellSubcommandRule(
+            name="git",
+            operations=[
+                ShellOperationRule(
+                    name="delete",
+                    ask_flags=["--remote"],
+                    probe_flags=["--dry-run", "-n"],
+                    reason=(
+                        "`--remote` deletes origin's copy of the branch even where"
+                        " it holds commits no other branch has"
+                    ),
+                    recovery=(
+                        "Without `--remote`, origin's copy goes only once the"
+                        " integration branch holds its commits."
+                    ),
+                ),
+            ],
+        ),
     ]
 
 

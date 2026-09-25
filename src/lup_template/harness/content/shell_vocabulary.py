@@ -80,7 +80,8 @@ def lup_devtools_rule() -> ShellCommandRule:
     # lup's own verb table is carried for the one thing this spelling needs of
     # it: an operator-only verb stays a refusal no marker escalates. Every
     # other verb it judges is refused here for its spelling, so each sub-app
-    # tells the agent the route rather than a verdict about the verb.
+    # tells the agent the route rather than a verdict about the verb. `git` is
+    # stated once, below, where its conflict workflow is the one exception.
     routed = [
         judged.model_copy(
             update={
@@ -93,6 +94,7 @@ def lup_devtools_rule() -> ShellCommandRule:
             }
         )
         for judged in devtools_rules()
+        if judged.name != "git"
     ]
     return ShellCommandRule(
         name="lup-devtools",
