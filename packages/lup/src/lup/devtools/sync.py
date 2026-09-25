@@ -136,6 +136,7 @@ from lup.harness.toolchain import (
     granted_device_requirement,
 )
 from lup.policy.assets.host import launched, measured_boundary
+from lup.sandbox.pointers import root_refusal
 from lup.sandbox.rail import AccessibleRoot
 
 if TYPE_CHECKING:
@@ -771,6 +772,28 @@ def kept_checkout(proj: ProjectEntry) -> Path | None:
     return Path(path) if path and Path(path).exists() else None
 
 
+def refuse_redirected_location(
+    location: Path, report: Callable[[str], None] = typer.echo
+) -> Path:
+    """This registration's location, once host git is known to be safe there.
+
+    Asked before any git runs in it, since every git that follows -- the
+    `rev-parse` locating it, the `fetch` refreshing it, the `log` a review
+    reads, which honours `gpg.program` -- reads the config its pointers lead
+    to. A checkout mounted writable into a launch is one a contained session
+    could have redirected, and this is the host reading it afterwards.
+
+    Anchored on the location as the registry or the cache names it, never
+    through its own pointer: a bare clone on its own path, a worktree on the
+    `tree/` holding it. One that cannot be anchored that way is refused with
+    the reason rather than passed over.
+    """
+    if message := root_refusal(location):
+        report(message)
+        raise typer.Exit(1)
+    return location
+
+
 def existing_upstream(proj: ProjectEntry) -> Upstream | None:
     """Where this registration already is, WITHOUT cloning or fetching.
 
@@ -779,10 +802,11 @@ def existing_upstream(proj: ProjectEntry) -> Upstream | None:
     """
     kept = kept_checkout(proj)
     if kept is not None:
-        return registered_upstream(proj, kept)
+        return registered_upstream(proj, refuse_redirected_location(kept))
     repository = cached_clone(proj["name"])
     if repository is None:
         return None
+    refuse_redirected_location(repository)
     require_registered_origin(proj, repository, typer.echo)
     return clone_upstream(proj, repository)
 
@@ -1385,7 +1409,9 @@ def ensure_local(
     kept = kept_checkout(proj)
     name = proj["name"]
     if kept is not None:
-        found = registered_upstream(proj, kept, report)
+        found = registered_upstream(
+            proj, refuse_redirected_location(kept, report), report
+        )
         if proj.get("review_from", "remote") == "remote" and remote_url(kept, "origin"):
             refresh(name, kept, report)
         ensure_ref_symlink(name, str(found.checkout))
@@ -1400,6 +1426,7 @@ def ensure_local(
         repository = bare_path(name)
         clone_bare(url, repository, report)
     else:
+        refuse_redirected_location(repository, report)
         require_registered_origin(proj, repository, report)
         refresh(name, repository, report)
 
@@ -1869,7 +1896,7 @@ def set_remote(
         )
     cached = cached_clone(name) if "path" not in proj else None
     if cached is not None:
-        retransported(cached, url)
+        retransported(refuse_redirected_location(cached), url)
     if proj.get("required") and cached_clone(name) is None:
         typer.echo(f"  Run: uv run lup-devtools sync fetch {name}")
 

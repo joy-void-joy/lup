@@ -58,6 +58,7 @@ from lup.policy.boundary import BoundaryPreflight
 from lup.policy.identity import POLICY_ROOT_ENV
 from lup.policy.profiles import compile_boundary, depended_on, measured
 from lup.policy.snapshots import accept_destination_policies, destination_authorities
+from lup.sandbox.pointers import fleet_refusal
 from lup.sandbox.rail import (
     AccessibleRoot,
     accessible_lease,
@@ -1554,6 +1555,11 @@ def settle_boundary(
     """
     root = project_root()
     declared = plugin.hooks or HookSet(id="hooks.absent", policy_ids=[])
+    # Before the lease asks git anything about these roots, on either posture:
+    # a root whose pointer moved, or that cannot be anchored without reading
+    # one, is refused here rather than mounted and read through.
+    if refused := fleet_refusal([root, *(item.path for item in accessible)]):
+        raise typer.BadParameter(refused)
     lease = fleet_lease(root, accessible=accessible)
     boundary = compile_boundary(
         declared,

@@ -25,8 +25,7 @@ from lup.web.build import dependencies_behind, restore_dependencies
 from lup.devtools.layout import find_tree_dir, get_tree_dir
 from lup.devtools.clipboard import copy_to_clipboard
 from lup.execution.shell import git
-from lup.sandbox.pointers import pointer_drift, refusal
-from lup.sandbox.rail import in_repository, repository_layout
+from lup.sandbox.pointers import own_common, pointer_drift, refusal, tree_checkouts
 from lup.devtools.utils import (
     attributed_stderr,
     clear_stale_config_locks,
@@ -672,20 +671,20 @@ def refuse_redirected_pointers() -> None:
     """Refuse before host git acts on a worktree whose pointer was moved.
 
     Anchored on the layout's shared directory -- the bare root or main
-    checkout, whose own `.git` is a real directory no container can redirect
-    to a gitdir it built -- never on a worktree pointer, which is itself what
-    an escape rewrites. A layout with no ``tree/`` has no sibling worktree to
-    redirect, and one that is no repository nothing to verify: both no-op, so
-    this is safe to call before any host git command rather than only the
-    worktree ones.
+    checkout holding ``tree/``, found by what it holds rather than by asking
+    git, which would follow a `commondir` planted there -- never on a worktree
+    pointer, which is itself what an escape rewrites. Every directory in
+    ``tree/`` is followed from its own `.git` as well as found through the
+    entries, so rewriting an entry's back-pointer hides nothing. A layout with
+    no ``tree/`` has no sibling worktree to redirect, and one whose holder is
+    no repository nothing to verify: both no-op, so this is safe to call before
+    any host git command rather than only the worktree ones.
     """
     tree = find_tree_dir()
-    if tree is None:
+    common = own_common(tree.parent) if tree is not None else None
+    if tree is None or common is None:
         return
-    root = tree.parent
-    if not in_repository(root):
-        return
-    if message := refusal(pointer_drift(repository_layout(root).common)):
+    if message := refusal(pointer_drift(common, tree_checkouts(tree))):
         typer.echo(message, err=True)
         raise typer.Exit(1)
 

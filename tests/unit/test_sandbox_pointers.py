@@ -180,6 +180,7 @@ def test_the_worktree_lifecycle_refuses_a_redirected_pointer(
     from lup.devtools.dev import worktree
 
     common = common_of(repository)
+    (common / "tree").mkdir()
     monkeypatch.setattr(worktree, "find_tree_dir", lambda: common / "tree")
     worktree.refuse_redirected_pointers()
 
