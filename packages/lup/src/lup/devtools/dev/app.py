@@ -660,7 +660,13 @@ def create_dev_app(
         # retiring all of them has to name the ones already retired too, or
         # the answer would silently exclude what a previous answer dropped.
         shipped = [rule.id for rule in all_rules()]
-        for line in answers.settled(catalog, shipped, project.seams):
+        try:
+            settled = answers.settled(catalog, shipped, project.seams)
+        except ValueError as refused:
+            # A seam that cannot be written into — never written down, or
+            # naming a module that is not there — says why and where.
+            raise typer.BadParameter(str(refused)) from refused
+        for line in settled:
             typer.echo(line)
 
     @app.command("refutations")
