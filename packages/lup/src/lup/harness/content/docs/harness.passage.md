@@ -25,6 +25,14 @@ the drift check as a git pre-commit hook, so omitted generated output is
 refused before the commit exists rather than minutes later in CI.
 [quality-pipeline.md](quality-pipeline.md) maps all three layers.
 
+`--sandbox` chooses the wall a session opens behind: `outer`, the verified
+container; `inner`, the runtime's own sandbox on the host; or `none`, the
+semantic policy alone. A launch naming none opens under `outer`, and where no
+Docker or Podman client is found it falls back to `inner` with one warning,
+which names what to install for the container and says that `--sandbox inner`
+chooses the host without the warning. Only the default falls back: an
+explicit `--sandbox outer` with no client is refused.
+
 ## Startup checks and container images
 
 Both launchers build a container image when no image matches the rendered
@@ -40,7 +48,7 @@ Requirements declare where they are needed:
 | `host` | On the machine running the launcher |
 | `image` | Inside the session container |
 | `both` | In both environments |
-| `session` | Inside the container for a normal launch; on the host with `--sandbox inner` or `--sandbox none` |
+| `session` | Inside the container for a normal launch; on the host with `--sandbox inner` or `--sandbox none`, and for a launch naming no `--sandbox` on a host with no Docker or Podman client |
 
 The allowed shell commands are a `session` requirement. Missing `tree` or
 `yq` on the host does not warn during a container launch when the image

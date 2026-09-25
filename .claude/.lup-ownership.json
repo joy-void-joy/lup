@@ -751,7 +751,7 @@
     {
       "path": "docs/harness.md",
       "category": "generated",
-      "sha256": "9121d625e4af222fce9fe414e14c46721c4ae1f7fb7df68fa4c45413a9bf6a0f",
+      "sha256": "ee51149c02eb956b879c296145be6642becaff40f51120a306618f998aa6bec3",
       "semantic_id": "docs.harness",
       "executable": false
     },
@@ -793,7 +793,7 @@
     {
       "path": "docs/permissions.md",
       "category": "generated",
-      "sha256": "96222c87d511d03f89de9a8d89195361d1cf1f1e79fc45c91cc383615b5e7da9",
+      "sha256": "6b255591aa1d8bde6cb170030da205021e6a530f1056062cc24dcbc52b8880ee",
       "semantic_id": "docs.permissions",
       "executable": false
     },
