@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from itertools import dropwhile
 from json import dumps
 from pathlib import Path, PurePath, PurePosixPath
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal, Self
 
 from pydantic import (
     AfterValidator,
@@ -179,6 +179,15 @@ class SemanticPart(BaseModel, ABC, frozen=True):
         """
         return None
 
+    def given(self, taken: list[str]) -> Self:
+        """This part as a project that took *taken* modules reads it.
+
+        Most parts are what they are whatever a project took, so this answers
+        with the part itself; one holding parts that need a module the project
+        declined answers without them. See :class:`WhereTaken`.
+        """
+        return self
+
 
 class TextPart(SemanticPart, frozen=True):
     type: Literal["text"] = "text"
@@ -302,7 +311,18 @@ class Passage(SemanticPart, frozen=True):
 
     @property
     def carried(self) -> list["PromptPart"]:
-        return list(self.values.values())
+        return [
+            found for value in self.values.values() for found in [value, *value.carried]
+        ]
+
+    def given(self, taken: list[str]) -> Self:
+        return self.model_copy(
+            update={
+                "values": {
+                    name: value.given(taken) for name, value in self.values.items()
+                }
+            }
+        )
 
     @property
     def text_payload(self) -> str:
@@ -690,6 +710,41 @@ class ArgumentsRef(SemanticPart, frozen=True):
         return True
 
 
+class WhereTaken(SemanticPart, frozen=True):
+    """Parts that exist only in a project that took one other module.
+
+    A module's content may name what another module contributes only where it
+    stands on that module: through ``requires``, or here. Adoption resolves
+    each of these against the modules a project took — kept whole where the
+    named one is there, emptied where it is not — so a sentence pointing at
+    the resolver never reaches a project that declined it, and nothing
+    downstream of adoption has to know a selection exists.
+
+    Unresolved, it renders what it holds: content read without a selection is
+    content read as if everything were taken, which is what a roster built
+    for a listing or a census is.
+    """
+
+    type: Literal["where_taken"] = "where_taken"
+    module: str = Field(min_length=1)
+    """The module these parts need, by id."""
+
+    parts: list["PromptPart"] = []
+    """What renders where that module is taken, in reading order."""
+
+    def spell(self, renderer: "PromptRenderer") -> str:
+        return "".join(part.spell(renderer) for part in self.parts)
+
+    @property
+    def carried(self) -> list["PromptPart"]:
+        return [found for part in self.parts for found in [part, *part.carried]]
+
+    def given(self, taken: list[str]) -> Self:
+        """Keep these parts where their module is taken, and none where it is not."""
+        kept = [part.given(taken) for part in self.parts]
+        return self.model_copy(update={"parts": kept if self.module in taken else []})
+
+
 type PromptPart = Annotated[
     TextPart
     | Passage
@@ -711,7 +766,8 @@ type PromptPart = Annotated[
     | NestedRun
     | CommandInvocation
     | ResolverEntry
-    | ArgumentsRef,
+    | ArgumentsRef
+    | WhereTaken,
     Discriminator("type"),
 ]
 
@@ -758,6 +814,12 @@ class PromptDocument(BaseModel, frozen=True):
         """
         return sum(document_byte_size(text) for text in self.prose())
 
+    def given(self, taken: list[str]) -> "PromptDocument":
+        """This document as a project that took *taken* modules reads it."""
+        return self.model_copy(
+            update={"parts": [part.given(taken) for part in self.parts]}
+        )
+
 
 class Document(SelectableRule, frozen=True):
     """One generated repository document and where it renders.
@@ -779,6 +841,10 @@ class Document(SelectableRule, frozen=True):
 
     def selection_id(self) -> str:
         return self.semantic_id
+
+    def given(self, taken: list[str]) -> "Document":
+        """This page as a project that took *taken* modules reads it."""
+        return self.model_copy(update={"document": self.document.given(taken)})
 
 
 class GuidanceBudget(BaseModel, frozen=True):
@@ -936,6 +1002,10 @@ class Skill(SelectableRule, frozen=True):
     def selection_id(self) -> str:
         return self.id
 
+    def given(self, taken: list[str]) -> "Skill":
+        """This skill as a project that took *taken* modules reads it."""
+        return self.model_copy(update={"prompt": self.prompt.given(taken)})
+
     @model_validator(mode="after")
     def coherent_arguments(self) -> "Skill":
         names = [argument.name for argument in self.arguments]
@@ -1004,6 +1074,10 @@ class Agent(SelectableRule, frozen=True):
 
     def selection_id(self) -> str:
         return self.id
+
+    def given(self, taken: list[str]) -> "Agent":
+        """This agent as a project that took *taken* modules reads it."""
+        return self.model_copy(update={"prompt": self.prompt.given(taken)})
 
 
 class ContentSelection(BaseModel, frozen=True):
@@ -1114,6 +1188,12 @@ class GuidanceSection(SelectableRule, frozen=True):
     def selection_id(self) -> str:
         return self.id
 
+    def given(self, taken: list[str]) -> "GuidanceSection":
+        """This section as a project that took *taken* modules reads it."""
+        return self.model_copy(
+            update={"parts": [part.given(taken) for part in self.parts]}
+        )
+
     @property
     def text(self) -> str:
         """The portable prose this section carries, for a weigher or a search."""
@@ -1168,6 +1248,13 @@ class ContentRoster(BaseModel, frozen=True):
         return ContentRoster(
             skills=selection.over_skills().over(self.skills),
             agents=selection.over_agents().over(self.agents),
+        )
+
+    def given(self, taken: list[str]) -> "ContentRoster":
+        """Every declaration here as a project that took *taken* modules reads it."""
+        return ContentRoster(
+            skills=[skill.given(taken) for skill in self.skills],
+            agents=[agent.given(taken) for agent in self.agents],
         )
 
 

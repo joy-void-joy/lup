@@ -99,6 +99,7 @@ from lup.harness.models import (
     RelocateSession,
     NestedRun,
     WatchOutput,
+    WhereTaken,
     CommandInvocation,
     RequestApproval,
     ResolverEntry,
@@ -886,6 +887,15 @@ PART_CONTRACT: dict[str, PartExpectation] = {
             items=[BulletItem(lead=ProseStrong(text="Open notes"), text="a | b")]
         ),
         diverges=False,
+    ),
+    # Parts that exist only where one other module is taken render as what
+    # they hold, so they diverge exactly where what they hold does.
+    "WhereTaken": PartExpectation(
+        part=WhereTaken(
+            module="git-workflow",
+            parts=[SkillInvocation(plugin="lup", skill="merge")],
+        ),
+        diverges=True,
     ),
 }
 """Every prompt part, with the cross-runtime promise its renderings make."""

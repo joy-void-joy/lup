@@ -25,6 +25,11 @@ a project that has the subject.
 nothing, so the gap is caught either way — but it is caught at the end and it
 names the skill, and an operator who declined a module is owed the answer in
 the vocabulary they decided in. ``requires`` gives it, before anything builds.
+A mention that is incidental rather than needed — a pointer to the resolver's
+page from a guide that works without it — is wrapped in
+:class:`~lup.harness.models.WhereTaken` instead, and adoption drops it where
+that module was declined. `dev check` holds every module to one or the other,
+so declining a module never breaks one that did not say it needed it.
 """
 
 from collections.abc import Callable
@@ -195,6 +200,13 @@ class DocumentEntry(SelectableRule, frozen=True, arbitrary_types_allowed=True):
     def selection_id(self) -> str:
         return self.semantic_id
 
+    def given(self, taken: list[str]) -> "DocumentEntry":
+        """This page as a project that took *taken* modules renders it."""
+        build = self.build
+        return self.model_copy(
+            update={"build": lambda context: build(context).given(taken)}
+        )
+
 
 class Module(BaseModel, frozen=True):
     """One module as adopted: what it is, and everything it *declares*.
@@ -220,6 +232,21 @@ class Module(BaseModel, frozen=True):
 
     documents: list[DocumentEntry] = []
     """Pages under ``docs/`` whose subject is this module's, unrendered."""
+
+    def given(self, taken: list[str]) -> "Module":
+        """This module as a project that took *taken* modules reads it.
+
+        Every surface carrying prose is resolved, so a
+        :class:`~lup.harness.models.WhereTaken` naming a module the project
+        declined leaves nothing behind in a skill, a section, or a page.
+        """
+        return self.model_copy(
+            update={
+                "content": self.content.given(taken),
+                "guidance": [section.given(taken) for section in self.guidance],
+                "documents": [entry.given(taken) for entry in self.documents],
+            }
+        )
 
 
 class Adoption(BaseModel, frozen=True):
@@ -503,14 +530,24 @@ def adopted(
     The requirement check runs before any builder, which is what keeps a
     declined subject from costing an import: a module reaching into one the
     project does not have is answered here rather than by whichever
-    declaration first fails to resolve.
+    declaration first fails to resolve. An essential module declined is
+    refused in the same breath, since every other module stands on it.
+
+    Each module is then read as a project with exactly these modules reads
+    it, so a mention another module's content wrapped in
+    :class:`~lup.harness.models.WhereTaken` survives only where the module it
+    names was taken too.
     """
     resolved = selection or ModuleSelection()
     taken = [entry for entry in entries if resolved.takes(entry.spec)]
-    unmet = unmet_requirements([entry.spec for entry in taken])
+    unmet = [
+        *declined_essentials([entry.spec for entry in entries], resolved),
+        *unmet_requirements([entry.spec for entry in taken]),
+    ]
     if unmet:
         raise ValueError("; ".join(unmet))
-    return [resolved.resolved(entry.build()) for entry in taken]
+    ids = [entry.spec.id for entry in taken]
+    return [resolved.resolved(entry.build()).given(ids) for entry in taken]
 
 
 def composed_content(modules: list[Module]) -> models.ContentRoster:
