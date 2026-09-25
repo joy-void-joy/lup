@@ -108,8 +108,13 @@ def test_declared_tooling_is_the_images_alone_and_not_the_manifests() -> None:
 
 
 def test_globally_installed_executables_are_reachable_by_directory() -> None:
-    """Measured: linking the CLI by name left `tsc` installed and unreachable."""
-    assert "ENV PATH=/opt/bun/bin:$PATH" in Image().dockerfile(Manifest())
+    """Measured: linking the CLI by name left `tsc` installed and unreachable.
+
+    Last on the path, since the session owns the directory: a name the
+    system answers, such as the interpreter a hook is started with, keeps
+    the system's answer.
+    """
+    assert "ENV PATH=$PATH:/opt/bun/bin" in Image().dockerfile(Manifest())
 
 
 def test_the_registry_root_is_reachable_by_the_user_the_session_runs_as() -> None:

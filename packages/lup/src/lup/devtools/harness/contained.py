@@ -56,6 +56,7 @@ from lup.harness.devices import (
 from lup.harness.egress import PROXY_LABEL, SessionEgress
 from lup.harness.image import (
     ContainerEngine,
+    ContainerPrivileges,
     Image,
     SessionStreams,
     detected_client,
@@ -806,6 +807,31 @@ def record_boundary(
     )
 
 
+def refuse_rootful_widening(
+    privileges: ContainerPrivileges,
+    engine: ContainerEngine,
+    rootful: bool,
+    origins: SettingOrigins = SettingOrigins(),
+) -> None:
+    """Refuse widened privileges on an engine whose container root is the host's.
+
+    Rootless, the container's root is the operator's subordinate uid and
+    holds nothing on the host, which is what makes handing it capabilities
+    and sudo a question about the container alone. On a rootful engine it
+    is the host's root with only what the container drops between them, so
+    a launch widening that says so by name, with the flag that accepts it.
+    """
+    if not privileges.widened() or rootful or engine.rootless():
+        return
+    raise typer.BadParameter(
+        f"This session's privileges widen what its processes hold "
+        f"({origin_said(origins.privileges, '--sudo')}), and {engine.binary} "
+        "here is not rootless, so the container's root would be this host's "
+        "root. Run a rootless engine, or accept it for this launch with "
+        "--allow-rootful-privileges."
+    )
+
+
 def launch_record(root: Path) -> list[Path]:
     """What a launch writes under ``.lup/`` for its session's gates to believe.
 
@@ -851,6 +877,7 @@ def container_lease(
     image: Image,
     lease: Lease,
     read_only: dict[Path, str] = {},
+    origins: SettingOrigins = SettingOrigins(),
 ) -> ContainerLease:
     """Everything a container mounts from the host: its lease, the launch's own, and every hold.
 
@@ -931,7 +958,18 @@ def container_lease(
 
     def generated() -> Lease:
         """The generated trees, file by file and plugin by plugin, where asked for."""
+        where = origin_said(origins.generated, "--hold-generated")
         if not image.held.generated:
+            # Said only where somebody released them: writable is what a
+            # project holding nothing expects, and a line saying so every
+            # launch would be read once.
+            if origins.generated != "project":
+                said.append(
+                    Notice(
+                        text=f"Generated trees: writable in this session ({where})",
+                        urgency="boundary",
+                    )
+                )
             return Lease()
         try:
             owned = generated_artifacts(root).held()
@@ -940,8 +978,8 @@ def container_lease(
         said.append(
             Notice(
                 text=(
-                    "Generated trees: read-only in this session; edit the "
-                    "declarations, and the next launch compiles them"
+                    f"Generated trees: read-only in this session ({where}); edit "
+                    "the declarations, and the next launch compiles them"
                 ),
                 urgency="boundary",
             )
@@ -1822,6 +1860,7 @@ def contained_argv(
     state_scope: NativeHomeScope | None = None,
     origins: SettingOrigins = SettingOrigins(),
     read_only: dict[Path, str] = {},
+    rootful: bool = False,
 ) -> list[str]:
     """The argv that opens a session in this project's container.
 
@@ -1927,10 +1966,13 @@ def contained_argv(
     # Said only where something is given back: holding nothing and gaining
     # nothing is what a session is expected to run under, and a line naming
     # the default every launch is one nobody reads by the tenth.
+    refuse_rootful_widening(image.privileges, client, rootful, origins)
     if image.privileges.widened():
         given = ", ".join(image.privileges.capabilities) or "no capability"
         gaining = (
-            "; processes may raise their privileges on exec"
+            "; passwordless sudo to the container's root"
+            if image.privileges.sudo
+            else "; processes may raise their privileges on exec"
             if image.privileges.new_privileges
             else ""
         )
@@ -1977,6 +2019,7 @@ def contained_argv(
         image,
         lease if lease is not None else fleet_lease(root, accessible),
         read_only,
+        origins,
     )
     lease = held.lease
     said.add(held.notices)

@@ -27,7 +27,9 @@ from pathlib import Path
 from typing import Literal
 
 import sh
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError, model_validator
+
+from jinja2 import Environment, StrictUndefined
 
 from lup.harness.browser import BrowserBridge
 from lup.harness.clipboard import ClipboardBridge, shim_program
@@ -190,6 +192,95 @@ class ContainerPrivileges(BaseModel, frozen=True):
             "``no-new-privileges``"
         ),
     )
+    sudo: bool = Field(
+        default=False,
+        description=(
+            "Whether the session's user may run anything as the container's "
+            "root through ``sudo``, without a password. Needs "
+            "``new_privileges``, since sudo is a setuid binary, and an image "
+            "that installs it. What root may then do is still bounded by "
+            "``capabilities``"
+        ),
+    )
+
+    @model_validator(mode="after")
+    def sudo_can_raise(self) -> "ContainerPrivileges":
+        """Refuse sudo where no exec may raise privileges, which would leave it inert."""
+        if self.sudo and not self.new_privileges:
+            raise ValueError(
+                "sudo runs as a setuid binary, which no-new-privileges stops; "
+                "declare new_privileges=True beside it"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def keeps_the_outward_reach_dropped(self) -> "ContainerPrivileges":
+        """Refuse a capability that reaches past the container's own files.
+
+        Root inside a rootless container is an unprivileged uid on the host,
+        and what it may reach is what these capabilities would widen: mounts
+        and namespaces, the network stack, other processes' memory, the
+        clock, kernel modules, files by handle rather than by path. None of
+        them is what installing a package or owning a file takes, so none is
+        given back however a mode asks.
+        """
+        outward = [
+            "SYS_ADMIN",
+            "SYS_MODULE",
+            "SYS_RAWIO",
+            "SYS_PTRACE",
+            "SYS_TIME",
+            "SYS_BOOT",
+            "NET_ADMIN",
+            "NET_RAW",
+            "MAC_ADMIN",
+            "MAC_OVERRIDE",
+            "BPF",
+            "PERFMON",
+            "DAC_READ_SEARCH",
+            "SYSLOG",
+            "AUDIT_CONTROL",
+            "LINUX_IMMUTABLE",
+        ]
+        reaching = [name for name in self.capabilities if name in outward]
+        if reaching:
+            raise ValueError(
+                f"capabilities reaching past the container stay dropped: {reaching}"
+            )
+        return self
+
+    @classmethod
+    def administering(cls) -> "ContainerPrivileges":
+        """What administering the container's own system takes: sudo, and the file capabilities.
+
+        Root through passwordless sudo, holding what a package manager uses
+        on the container's own filesystem: owning and moving files it does
+        not own (``CHOWN``, ``DAC_OVERRIDE``, ``FOWNER``, ``FSETID``),
+        switching user (``SETUID``, ``SETGID``, which sudo and pacman's
+        download user both do), signalling its own processes (``KILL``),
+        running install scriptlets in a chroot, as pacman does even for the
+        root it runs in (``SYS_CHROOT``), restoring the file capabilities a
+        package ships (``SETFCAP``), and writing the audit record sudo keeps
+        (``AUDIT_WRITE``). Every one is in both engines' own default set;
+        what that set adds beyond — ``MKNOD``, ``NET_RAW``, ``SETPCAP``,
+        ``NET_BIND_SERVICE`` — stays dropped.
+        """
+        return cls(
+            capabilities=[
+                "AUDIT_WRITE",
+                "CHOWN",
+                "DAC_OVERRIDE",
+                "FOWNER",
+                "FSETID",
+                "KILL",
+                "SETFCAP",
+                "SETGID",
+                "SETUID",
+                "SYS_CHROOT",
+            ],
+            new_privileges=True,
+            sudo=True,
+        )
 
     @model_validator(mode="after")
     def capabilities_are_names(self) -> "ContainerPrivileges":
@@ -224,7 +315,7 @@ class ContainerPrivileges(BaseModel, frozen=True):
 
     def widened(self) -> bool:
         """Whether this grants anything the default holds back."""
-        return bool(self.capabilities) or self.new_privileges
+        return bool(self.capabilities) or self.new_privileges or self.sudo
 
 
 class Registry(BaseModel, frozen=True):
@@ -303,6 +394,16 @@ class ContainerEngine(BaseModel, frozen=True):
             return None
         return int(answered) if answered.isdigit() else None
 
+    def rootless(self) -> bool:
+        """Whether this engine runs as an unprivileged host user.
+
+        Where it does, the container's root is that user's subordinate uid
+        on the host and holds nothing there; where it does not, it is the
+        host's root, held back only by what the container drops. Unanswered
+        is not rootless, since the answer is what a widening rests on.
+        """
+        return False
+
 
 class Docker(ContainerEngine, frozen=True):
     """Docker, which maps container uids to host uids without being told.
@@ -315,6 +416,20 @@ class Docker(ContainerEngine, frozen=True):
 
     binary: str = "docker"
 
+    def rootless(self) -> bool:
+        """Whether the daemon lists ``rootless`` among its security options."""
+        try:
+            answered = str(
+                sh.Command(self.binary)("info", "--format", "{{json .SecurityOptions}}")
+            )
+            options = TypeAdapter(list[str]).validate_json(answered)
+        except (sh.CommandNotFound, sh.ErrorReturnCode, ValidationError):
+            return False
+        return any(
+            option == "name=rootless" or option.startswith("name=rootless,")
+            for option in options
+        )
+
 
 class Podman(ContainerEngine, frozen=True):
     """Podman, which remaps into the subuid range unless told to keep the id."""
@@ -325,6 +440,18 @@ class Podman(ContainerEngine, frozen=True):
     def identity_arguments(self, uid: int, gid: int) -> list[str]:
         """The portable spelling, plus podman's word for leaving the id alone."""
         return [*super().identity_arguments(uid, gid), "--userns=keep-id"]
+
+    def rootless(self) -> bool:
+        """Whether podman reports itself rootless, as it does per invoking user."""
+        try:
+            answered = str(
+                sh.Command(self.binary)(
+                    "info", "--format", "{{.Host.Security.Rootless}}"
+                )
+            ).strip()
+        except (sh.CommandNotFound, sh.ErrorReturnCode):
+            return False
+        return answered == "true"
 
 
 def reported_version(name: str) -> str:
@@ -907,6 +1034,19 @@ class Image(BaseModel, frozen=True):
             "a host brought down"
         ),
     )
+    sudo: bool = Field(
+        default=False,
+        description=(
+            "Install sudo with a passwordless rule for whichever uid the "
+            "session runs as, so a session whose privileges allow it can "
+            "administer the container: install a system package, say. The rule "
+            "keeps the proxy variables across it, since the package manager "
+            "reaches its mirrors through the proxy like everything else. The "
+            "image only makes it possible; a session's privileges decide "
+            "whether it works. What it installs lives until the container "
+            "stops, and the image's own roster is how to keep one"
+        ),
+    )
     held: HeldPaths = Field(
         default=HeldPaths(),
         description=(
@@ -1031,44 +1171,11 @@ class Image(BaseModel, frozen=True):
         mount, at its own absolute path, for the reason
         ``same_path_mount_requirement`` explains.
         """
-        installed = " \\\n        ".join(
-            item.name for item in self.obtained_by(manifest, "pacman")
-        )
-        generated = self.terminal.generated()
-        locales = (
-            "\n# The locales the terminal handoff carries, compiled so that an\n"
-            "# operator's own `LANG` names one that exists here. A forwarded\n"
-            "# locale glibc cannot find is answered by falling back to ASCII and\n"
-            "# warning once per program, which costs a session its box drawing\n"
-            "# and blames neither the image nor the launch.\n"
-            "RUN printf '%s\\n' \\\n        "
-            + " \\\n        ".join(f"'{item.line()}'" for item in generated)
-            + " >> /etc/locale.gen \\\n    && locale-gen\n"
-            if generated
-            else ""
-        )
-        registry_layers = "".join(
-            f"\n# The {registry.manager} half of the toolchain, "
-            f"pinned and integrity-checked.\n"
-            f"RUN {registry.command} "
-            f"{' '.join(item.requested() for item in obtained)}\n"
+        registries = [
+            registry
             for registry in self.registries
-            if (obtained := self.obtained_by(manifest, registry.manager))
-        )
-        script_layer = "".join(
-            f"\n# {item.name}: no manager packages this, so it installs by a shell\n"
-            f"# line that checks what it fetched against a declared digest:\n"
-            f"# {item.digest}\n"
-            f"RUN {item.command}\n"
-            for item in self.obtained_by(manifest, "script")
-        )
-        agent_clis = " ".join(item.requested() for item in self.agent_clis)
-        opening = self.browser.script(self.egress.shares_host_loopback())
-        clipping = shim_program()
-        seeding = (Path(__file__).parent / "assets" / "credential_seed.py").read_text(
-            encoding="utf-8"
-        )
-        shim_names = " ".join(self.clipboard.shims)
+            if self.obtained_by(manifest, registry.manager)
+        ]
         # Quoted, because `ENV name=value` takes whitespace as separating
         # *more* pairs: an unquoted `GIT_SSH_COMMAND=ssh -o BatchMode=yes`
         # makes `-o` a name with no value and the whole file unparseable.
@@ -1078,183 +1185,43 @@ class Image(BaseModel, frozen=True):
         exported = "ENV " + " \\\n    ".join(
             f"{name}={json.dumps(value)}" for name, value in self.environment().items()
         )
-        volumes = "VOLUME " + json.dumps([cache.path for cache in self.caches])
-        seed = json.dumps(self.seed_configuration(), indent=2)
-        return f"""\
-# Generated from the project's Manifest. Edit the declaration, not this file.
-FROM {self.base}
-
-# Pin the archive before anything resolves against it, so every layer below
-# sees one snapshot rather than whichever mirror answered first.
-RUN printf '%s\\n' \\
-        'Server=https://archive.archlinux.org/repos/{self.snapshot}/$repo/os/$arch' \\
-        > /etc/pacman.d/mirrorlist \\
-    && pacman -Syu --noconfirm
-
-# The OS toolchain, from the same roster the host preflight exercises. Signed
-# by the distribution and verified before it unpacks.
-RUN pacman -S --noconfirm --needed \\
-        {installed} \\
-    && pacman -Scc --noconfirm
-{locales}
-# Where the registry manager installs, declared before it installs anything.
-# Outside any home directory: this build runs as root and the session runs as
-# the host's uid, and root's home is mode 750 -- so a global toolchain left
-# there is installed into a directory the session cannot enter, which reads
-# as the tool having failed to install rather than as a permission.
-#
-# On PATH as a directory rather than each tool linked by name, because a list
-# of names goes stale the moment a package is added, leaving a tool like
-# `tsc` installed and unreachable.
-ENV BUN_INSTALL={self.registry_root}
-ENV PATH={self.registry_bin()}:$PATH
-{registry_layers}{script_layer}
-# Trust, seeded where a fresh config home will find it. A workspace this
-# image was built for is one the operator already decided to run, but an
-# unseeded config home does not know that: it discards the declared
-# `permissions.allow` with a notice and continues, so the policy is off and
-# nothing failed. Seeded at start rather than baked into the config home,
-# because that directory is a mount and a mount hides whatever the image put
-# beneath it.
-COPY <<'SEED' /opt/lup/trust-seed.json
-{seed}
-SEED
-COPY <<'ENTRY' /usr/local/bin/lup-entrypoint
-#!/bin/sh
-set -e
-config={self.config_home}
-mkdir -p "$config"
-# Said here because here is where the evidence is. A config volume filled
-# under one user-namespace mapping and mounted under another belongs to a uid
-# this session is not, and the shell's own report of that is `Permission
-# denied` on a path -- which names neither the volume nor the mapping, and
-# reads as a broken image. Nothing on the host can ask this reliably: the
-# volume's directory is not always stat-able from outside, so a launcher's
-# check would be silent exactly when it mattered.
-if [ ! -w "$config" ]; then
-  echo "lup: $config is not writable by uid $(id -u)." >&2
-  echo "lup: the volume mounted there was filled by a different uid, which" >&2
-  echo "lup: happens when this project's container engine or its user" >&2
-  echo "lup: namespace mapping changed since the volume was created." >&2
-  echo "lup: remove that volume and the next launch recreates it." >&2
-  exit 1
-fi
-if [ ! -f "$config/.claude.json" ]; then
-  cp /opt/lup/trust-seed.json "$config/.claude.json"
-fi
-# The checkout this container was started against is the one the operator
-# chose when they wrote the mount and the workdir, so it is trusted here
-# rather than enumerated at build time. Building the list from a directory
-# listing was tried: it baked thirty-one host paths into the image, granted
-# trust to directories that were not checkouts, and rebuilt the layer every
-# time a worktree appeared or went. The repository the checkout belongs to
-# is trusted beside it: a linked worktree's project is its main repository
-# to the runtime, which asked for exactly that path and dropped the declared
-# permissions with a notice when the worktree alone was trusted. Merged on
-# every start rather than written once, because the document outlives the
-# image in its volume, and a runtime that moves where it looks would
-# otherwise meet a file nothing amends.
-repository=$(git -C "$PWD" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || printf '%s' "$PWD")
-case "$repository" in */.git) repository=${{repository%/.git}} ;; esac
-jq --arg here "$PWD" --arg repository "$repository" \\
-   '.projects[$here] = ((.projects[$here] // {{}}) + {{"hasTrustDialogAccepted": true}})
-    | .projects[$repository] = ((.projects[$repository] // {{}}) + {{"hasTrustDialogAccepted": true}})' \\
-   "$config/.claude.json" > "$config/.claude.json.lup" \\
-  && mv "$config/.claude.json.lup" "$config/.claude.json"
-# A selected host login is applied once per change. Native renewal remains
-# container-private, and unrelated records in a shared credential file survive.
-if [ -n "${{LUP_CREDENTIAL_NAME:-}}" ]; then
-  python3 /opt/lup/credential-seed.py {self.credential_seed} "$config/$LUP_CREDENTIAL_NAME" \\
-    --keys "${{LUP_CREDENTIAL_KEYS:-[]}}" --renewable "${{LUP_CREDENTIAL_RENEWABLE:-}}"
-fi
-
-# One credential, two consumers. The token crosses the boundary by name --
-# `-e {self.forge.token_variable}` with no value, so it never appears in the
-# argv that starts this container and never reaches anything reading `ps` --
-# and `gh` reads a variable of its own. Derived in here rather than passed as
-# a second `-e`, because the launcher would have to hold the value to pass
-# it, which is the thing being avoided.
-if [ -n "${{{self.forge.token_variable}:-}}" ]; then
-  export GH_TOKEN="${self.forge.token_variable}"
-fi
-
-# Each host service the launcher relays, listened for on this container's own
-# loopback and carried to its socket -- the one way a filtered session reaches
-# anything on the host, and only what the launch named.
-{self.services.entrypoint()}
-exec "$@"
-ENTRY
-ENTRYPOINT ["/usr/local/bin/lup-entrypoint"]
-
-COPY <<'CREDENTIAL' /opt/lup/credential-seed.py
-{seeding}
-CREDENTIAL
-
-# What `BROWSER` names, so a sign-in inside can reach a browser outside. The
-# pipe it writes to is mounted per launch; with nothing mounted the script
-# prints the URL and returns, which is what the flow falls back to.
-COPY <<'OPEN' {self.browser.opener}
-{opening}
-OPEN
-
-# Every name a clipboard is asked for by, pointed at one program that speaks
-# to the broker in the launcher. The socket is mounted per launch; with none
-# mounted each shim exits non-zero, which is what "this machine has no
-# clipboard" already looked like to every caller.
-COPY <<'CLIP' /usr/local/bin/clipboard_shim.py
-{clipping}
-CLIP
-COPY <<'X11' /usr/local/bin/lup-clipboard-x11
-{self.clipboard.native_program()}
-X11
-# One layer marks every program above executable and links the clipboard
-# names: each is a metadata change, and a layer per file is a layer for
-# nothing.
-RUN chmod +x /usr/local/bin/lup-entrypoint {self.browser.opener} \\
-        /usr/local/bin/clipboard_shim.py /usr/local/bin/lup-clipboard-x11 \\
-    && ln -sf /usr/local/bin/clipboard_shim.py /usr/local/bin/lup-clipboard \\
-    && for name in {shim_names}; do \\
-        ln -sf /usr/local/bin/lup-clipboard "/usr/local/bin/$name"; \\
-    done
-
-# The identity the session runs as. Supplied at build time from the host's own
-# uid/gid, because a bind mount carries numbers rather than names: a container
-# that ran as its own root would leave root-owned files in the host checkout.
-#
-# Every directory the build wrote to as root and the session has to reach is
-# handed over here, the registry root included. Leaving that one out is how a
-# pinned toolchain ends up installed and unreachable, reported by whatever
-# tried to run it rather than by the layer that misplaced it.
-#
-# The project environment is not among them and cannot be: it is a name
-# relative to each project root, so it has no path here to create. The run
-# binds a host directory over it instead, which arrives owned by the host uid
-# this build is handing everything else to.
-ARG UID=1000
-ARG GID=1000
-RUN groupadd -g $GID agent 2>/dev/null || true \\
-    && useradd -u $UID -g $GID -m -s /bin/bash agent 2>/dev/null || true \\
-    && mkdir -p {self.registry_root} \\
-        {" ".join(c.path for c in self.caches)} \\
-    && chown -R $UID:$GID {self.registry_root} \\
-        {" ".join(c.path for c in self.caches)}
-
-{exported}
-
-{volumes}
-
-# Every agent runtime the harness launches, from the registry at the version
-# the launch resolved (or the declaration pinned) rather than an install
-# script, so what lands is what was rendered and the layer the run mounts
-# read-only cannot be rewritten by a self-update. The last layer, because it
-# is the one that changes most: a release lands most days, and every layer
-# below an install is rebuilt with it. Handed to the session's uid in the
-# same layer, since a chown in a later one copies every file it touches.
-RUN bun add -g {agent_clis} \\
-    && chown -R $UID:$GID {self.registry_root}
-
-USER $UID:$GID
-"""
+        assets = Path(__file__).parent / "assets"
+        template = Environment(
+            undefined=StrictUndefined, keep_trailing_newline=True, trim_blocks=True
+        ).from_string((assets / "Dockerfile.jinja").read_text(encoding="utf-8"))
+        return template.render(
+            base=self.base,
+            snapshot=self.snapshot,
+            installed=[item.name for item in self.obtained_by(manifest, "pacman")],
+            locales=[item.line() for item in self.terminal.generated()],
+            registry_root=self.registry_root,
+            registry_bin=self.registry_bin(),
+            registries=registries,
+            obtained={
+                registry.manager: [
+                    item.requested()
+                    for item in self.obtained_by(manifest, registry.manager)
+                ]
+                for registry in registries
+            },
+            scripts=self.obtained_by(manifest, "script"),
+            seed=json.dumps(self.seed_configuration(), indent=2),
+            config_home=self.config_home,
+            credential_seed=self.credential_seed,
+            token_variable=self.forge.token_variable,
+            services_entrypoint=self.services.entrypoint(),
+            seeding=(assets / "credential_seed.py").read_text(encoding="utf-8"),
+            opener=self.browser.opener,
+            opening=self.browser.script(self.egress.shares_host_loopback()),
+            clipping=shim_program(),
+            clipboard_native=self.clipboard.native_program(),
+            shims=self.clipboard.shims,
+            caches=[cache.path for cache in self.caches],
+            sudo=self.sudo,
+            exported=exported,
+            volumes="VOLUME " + json.dumps([cache.path for cache in self.caches]),
+            agent_clis=[item.requested() for item in self.agent_clis],
+        )
 
     def run_arguments(
         self,

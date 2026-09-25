@@ -70,6 +70,7 @@ lup = ["py.typed"]
 "lup.providers.claude" = ["assets/*.py"]
 "lup.providers.codex" = ["assets/*.py"]
 "lup.policy" = ["assets/*.py"]
+"lup.harness" = ["assets/*.jinja"]
 "lup.devtools.dev" = ["*.css"]
 "lup.web" = ["bundles/.lup-ownership.json", "bundles/*/*", "bundles/*/assets/*"]
 

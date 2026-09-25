@@ -52,3 +52,22 @@ def test_launch_authority_writes_remain_protected(path: str) -> None:
 
     assert decision.effect == "ask"
     assert "protected" in decision.rule
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["sudo pacman -S --noconfirm figlet", "sudo -n true", "cd /tmp && sudo ls"],
+)
+def test_a_normal_session_is_asked_before_it_uses_sudo(command: str) -> None:
+    """The container may grant sudo; in a gated session the policy still asks first."""
+    hooks = declared_hook_set()
+    policy = ShellPolicy(
+        hooks.resolved_shell_rules(),
+        runner_targets=list(hooks.runner_targets),
+        sandbox_active=True,
+    )
+
+    decision = policy.decide(ShellCommand(command=command))
+
+    assert decision.effect == "ask"
+    assert "privilege escalation" in decision.reason

@@ -293,6 +293,10 @@ class SessionDefaults(TypedDict, total=False):
     sandbox_mode: CodexSandboxMode
     services: dict[str, int]
     """The host port each named host service listens on here, where it differs."""
+    sudo: bool
+    """Whether sessions here may administer their container through sudo."""
+    hold_generated: bool
+    """Whether sessions here see the generated trees read-only."""
 
 
 @with_config(ConfigDict(extra="allow"))

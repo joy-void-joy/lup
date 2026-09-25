@@ -1861,6 +1861,14 @@ class SessionMode(BaseModel, frozen=True):
     memory: MemoryLimit | None = None
     """The container's memory limit for this kind of session, over the image's."""
 
+    hold_generated: bool | None = None
+    """Whether this kind of session sees the generated trees read-only, over the image's.
+
+    Unset keeps the image's ``held.generated``. ``False`` releases them for
+    sessions of this kind — to regenerate, or to use git freely over them —
+    where the next launch's review of the host zone is what sees the result,
+    as it sees every other change a session makes there."""
+
     privileges: ContainerPrivileges | None = None
     """What this kind of session's processes may hold, over the image's.
 
@@ -2289,6 +2297,20 @@ class Harness(BaseModel, frozen=True):
         ]
         if unknown_agents:
             raise ValueError(f"delegations name unknown agents: {unknown_agents}")
+
+        administering = [
+            named
+            for named, privileges in [
+                ("the image", self.image.privileges),
+                *[(f"the {mode.name} mode", mode.privileges) for mode in self.modes],
+            ]
+            if privileges is not None and privileges.sudo
+        ]
+        if administering and not self.image.sudo:
+            raise ValueError(
+                f"{', '.join(administering)} asks for sudo, which the image does "
+                "not install; declare Image(sudo=True)"
+            )
 
         for named, document in [
             ("always-loaded guidance", self.guidance),

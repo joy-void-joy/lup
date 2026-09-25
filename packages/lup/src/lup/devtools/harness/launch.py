@@ -918,6 +918,7 @@ def report_inside_requirements(
         accessible=accessible_roots(),
         devices=granted_devices(),
         origins=settings.origins(),
+        rootful=settings.rootful,
     )
     # The same values on both sides of one call, which is the whole of what a
     # placement probe asks. Injected into the argv above and handed to the
@@ -1884,6 +1885,7 @@ def session_argv(
         devices=[*devices, *granted_devices(told)],
         state_scope=state_scope,
         origins=settings.origins() if settings is not None else SettingOrigins(),
+        rootful=settings.rootful if settings is not None else False,
     )
     # Verified on the way in, rather than asserted. This is §6's whole point
     # and the launch is where it has to happen: the boundary was built two

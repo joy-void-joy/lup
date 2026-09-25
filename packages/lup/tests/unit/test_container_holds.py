@@ -23,7 +23,9 @@ import typer
 
 from lup.devtools.harness.contained import container_lease, launch_record
 from lup.execution.shell import git
+from lup.devtools.harness.posture import LaunchOverrides, SessionSettings
 from lup.harness.image import HeldPaths, Image
+from lup.harness.models import Harness, PromptDocument, SessionMode
 from lup.harness.ownership import OWNERSHIP_FILENAME, OwnedArtifact, OwnershipManifest
 from lup.sandbox.rail import Lease, NestedRepository, demoted, lease_for, rooted
 
@@ -260,10 +262,19 @@ def test_an_absent_declared_repository_holds_nothing_and_says_so(
 
 
 def generated_tree(root: Path) -> None:
-    """Generated files and the proof listing them, beside one file the proof does not list."""
+    """Generated files and the proof listing them, beside one file the proof does not list.
+
+    The hook layout mirrors the real plugin's: the dispatcher the hooks run
+    on every call, and beside it the runtime the dispatcher imports — the
+    rule data and the kernel — which is the tree a session must not be able
+    to rewrite while the policy is judging it.
+    """
     listed = [
         ".claude/plugins/sample/skills/one/SKILL.md",
         ".claude/plugins/sample/hooks/hooks.json",
+        ".claude/plugins/sample/hooks/scripts/policy.py",
+        ".claude/plugins/sample/hooks/runtime/policy_data.py",
+        ".claude/plugins/sample/hooks/runtime/kernel/decision.py",
         ".claude/CLAUDE.md",
         ".claude/settings.json",
         "docs/guide.md",
@@ -360,3 +371,210 @@ def test_rooting_pins_every_directory_between_a_hold_and_its_mount(
 
     assert sorted(lease.pinned) == [tmp_path / "a", tmp_path / "a" / "b"]
     assert lease.read_only == {held: held.as_posix()}
+
+
+def studio_checkout(root: Path) -> Path:
+    """A project shaped like one that makes things: a studio, a package, a works repo."""
+    committed(root)
+    studio = root / "studio"
+    studio.mkdir()
+    (studio / "pyproject.toml").write_text(
+        '[project]\nname = "studio"\nversion = "0"\n', encoding="utf-8"
+    )
+    (studio / "package.json").write_text('{"name": "studio"}\n', encoding="utf-8")
+    (studio / "app.py").write_text("print('drawn')\n", encoding="utf-8")
+    (root / "src" / "package").mkdir()
+    (root / "src" / "package" / "__init__.py").write_text("", encoding="utf-8")
+    committed(root / "works")
+    generated_tree(root)
+    return root
+
+
+PROJECT_IMAGE = Image(
+    held=HeldPaths(
+        generated=True, repositories=[NestedRepository(path=PurePosixPath("works"))]
+    )
+)
+"""A project that holds its generated trees in normal sessions, and a works repo."""
+
+
+def free_image() -> Image:
+    """The project's image as a launch in its free mode resolves it."""
+    harness = Harness(
+        generator_version="0",
+        plugins=[],
+        guidance=PromptDocument(parts=[]),
+        image=PROJECT_IMAGE,
+        modes=[
+            SessionMode(
+                name="free",
+                description="Making something, the container its only wall.",
+                hooks=False,
+                scan_rules=False,
+                hold_generated=False,
+            )
+        ],
+    )
+    settings = SessionSettings.resolved(
+        harness, None, LaunchOverrides(), harness.mode("free")
+    )
+    return settings.image(harness.image)
+
+
+@mounted
+def test_a_free_session_does_its_work_without_meeting_a_wall(tmp_path: Path) -> None:
+    """Every write the work takes lands; the container's holds are all it meets.
+
+    Package managers are stood in for by the files they write, since a
+    namespace has no network: ``uv add --project studio`` rewrites the
+    project, its lock and its environment, ``bun add`` the manifest, its
+    lock and ``node_modules``. The free mode releases the generated trees the
+    project holds in normal sessions, so regenerating lands too; the next
+    launch's review is what sees the result.
+    """
+    root = studio_checkout(tmp_path / "project")
+    studio, works = root / "studio", root / "works"
+    plugin = root / ".claude" / "plugins" / "sample"
+    lease = session_lease(root, free_image())
+    python = shutil.which("python3") or "python3"
+
+    work = {
+        "edit and run the studio": (
+            f"echo \"print('redrawn')\" > {studio}/app.py && "
+            f"{python} {studio}/app.py > {studio}/out.txt"
+        ),
+        "uv add --project studio": (
+            f"echo 'dependencies = [\"x\"]' >> {studio}/pyproject.toml && "
+            f"echo lock > {studio}/uv.lock && mkdir -p {studio}/.venv/lib && "
+            f"echo x > {studio}/.venv/lib/x.py"
+        ),
+        "bun add": (
+            f"echo '{{\"dependencies\": {{}}}}' > {studio}/package.json && "
+            f"echo lock > {studio}/bun.lock && mkdir -p {studio}/node_modules/x && "
+            f"echo x > {studio}/node_modules/x/index.js"
+        ),
+        "write in the package, reviewed at the next launch": (
+            f"echo 'VALUE = 1' > {root}/src/package/new.py"
+        ),
+        "regenerate the trees": (
+            f"echo regenerated > {plugin}/skills/one/SKILL.md && "
+            f"echo regenerated > {root}/.claude/CLAUDE.md && "
+            f"echo regenerated > {root}/docs/guide.md"
+        ),
+        "commit by path in the works repository": (
+            f"echo piece > {works}/piece.txt && git -C {works} add piece.txt && "
+            f"git -C {works} commit -qm piece -- piece.txt"
+        ),
+        "keep notes and scratch anywhere else": (
+            f"mkdir -p {root}/tmp && echo notes > {root}/tmp/notes.md"
+        ),
+    }
+
+    refused = [name for name, command in work.items() if not inside(lease, command)]
+
+    assert refused == []
+    assert (studio / "out.txt").read_text(encoding="utf-8") == "redrawn\n"
+    assert git.lines("-C", str(works), "log", "--format=%s") == ["piece", "first"]
+
+
+def test_what_a_free_session_is_held_from_is_exactly_the_container_walls(
+    tmp_path: Path,
+) -> None:
+    """Named one by one, so a hold that crept in would be a failing line here.
+
+    The launch record, and the git configuration of the checkout and of the
+    works repository with the directories holding them: nothing a free
+    session's work writes.
+    """
+    root = studio_checkout(tmp_path / "project")
+
+    lease = session_lease(root, free_image())
+
+    assert sorted(
+        Path(inside).relative_to(root).as_posix() for inside in lease.read_only.values()
+    ) == [
+        ".git/commondir",
+        ".git/config",
+        ".git/hooks",
+        ".lup/boundary.json",
+        ".lup/policy-snapshots",
+        ".lup/preflight",
+        "works/.git/commondir",
+        "works/.git/config",
+        "works/.git/hooks",
+    ]
+    assert sorted(path.relative_to(root).as_posix() for path in lease.pinned) == [
+        ".git",
+        ".lup",
+        "works",
+        "works/.git",
+    ]
+
+
+def test_a_normal_session_of_the_same_project_holds_its_generated_trees(
+    tmp_path: Path,
+) -> None:
+    """What the free mode released is held again in a normal launch."""
+    root = studio_checkout(tmp_path / "project")
+
+    held = {
+        Path(inside).relative_to(root).as_posix()
+        for inside in session_lease(root, PROJECT_IMAGE).read_only.values()
+    }
+
+    assert {
+        ".claude/.lup-ownership.json",
+        ".claude/CLAUDE.md",
+        ".claude/plugins/sample",
+        ".claude/settings.json",
+        "docs/guide.md",
+    } <= held
+
+
+@mounted
+def test_a_normal_session_cannot_rewrite_the_policy_that_judges_it(
+    checkout: Path,
+) -> None:
+    """Edit the sources and regenerate, and the live policy would change — held, it cannot.
+
+    The dispatcher runs from the plugin directory and imports its rule data
+    and kernel from the runtime beside it, on every call. Held read-only,
+    every one of those is a write the container refuses, so a regeneration
+    inside the session cannot move the policy it runs under.
+    """
+    generated_tree(checkout)
+    lease = session_lease(checkout, Image(held=HeldPaths(generated=True)))
+    plugin = checkout / ".claude" / "plugins" / "sample"
+
+    for judged in [
+        plugin / "hooks" / "scripts" / "policy.py",
+        plugin / "hooks" / "runtime" / "policy_data.py",
+        plugin / "hooks" / "runtime" / "kernel" / "decision.py",
+    ]:
+        assert not inside(lease, f"echo x >> {judged}")
+    assert not inside(lease, f"echo x > {plugin}/hooks/runtime/planted.py")
+
+
+def test_a_claude_dispatcher_imports_only_from_its_held_plugin(tmp_path: Path) -> None:
+    """The one path the running hook adds is inside the plugin the trees hold.
+
+    Read off the generated dispatcher rather than argued: it inserts exactly
+    one directory on ``sys.path`` and imports the rest of what it needs from
+    there, so if that directory is under the held plugin, nothing it loads at
+    call time is a session's to rewrite. The user site is closed separately,
+    with ``-s`` on the interpreter the shim starts.
+    """
+    from lup.harness.ownership import generated_artifacts
+    from lup_template.harness.catalog import portable_harness
+
+    root = Path(__file__).resolve().parents[4]
+    dispatcher = (
+        root / ".claude" / "plugins" / "lup" / "hooks" / "scripts" / "policy.py"
+    ).read_text(encoding="utf-8")
+    inserts = [line for line in dispatcher.splitlines() if "sys.path.insert" in line]
+
+    assert inserts == ['sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))']
+    plugin = Path(".claude/plugins") / portable_harness().plugins[0].name
+    held = generated_artifacts(root).held()
+    assert plugin in held
+    assert Path(".claude/plugins/lup/hooks/scripts/policy.py").is_relative_to(plugin)

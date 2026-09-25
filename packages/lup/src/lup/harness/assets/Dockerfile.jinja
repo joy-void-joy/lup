@@ -1,0 +1,218 @@
+# Generated from the project's Manifest. Edit the declaration, not this file.
+FROM {{ base }}
+
+# Pin the archive before anything resolves against it, so every layer below
+# sees one snapshot rather than whichever mirror answered first.
+RUN printf '%s\n' \
+        'Server=https://archive.archlinux.org/repos/{{ snapshot }}/$repo/os/$arch' \
+        > /etc/pacman.d/mirrorlist \
+    && pacman -Syu --noconfirm
+
+# The OS toolchain, from the same roster the host preflight exercises. Signed
+# by the distribution and verified before it unpacks.
+RUN pacman -S --noconfirm --needed \
+{% for name in installed %}
+        {{ name }} \
+{% endfor %}
+    && pacman -Scc --noconfirm
+{% if locales %}
+
+# The locales the terminal handoff carries, compiled so that an
+# operator's own `LANG` names one that exists here. A forwarded
+# locale glibc cannot find is answered by falling back to ASCII and
+# warning once per program, which costs a session its box drawing
+# and blames neither the image nor the launch.
+RUN printf '%s\n' \
+        {% for line in locales %}'{{ line }}'{% if not loop.last %} \
+        {% endif %}{% endfor %} >> /etc/locale.gen \
+    && locale-gen
+{% endif %}
+
+# Where the registry manager installs, declared before it installs anything.
+# Outside any home directory: this build runs as root and the session runs as
+# the host's uid, and root's home is mode 750 -- so a global toolchain left
+# there is installed into a directory the session cannot enter, which reads
+# as the tool having failed to install rather than as a permission.
+#
+# On PATH as a directory rather than each tool linked by name, because a list
+# of names goes stale the moment a package is added, leaving a tool like
+# `tsc` installed and unreachable. After the system's directories rather than
+# before them: the session owns this one, and a name the system already
+# answers -- the shell and interpreter the plugin's hooks are started with
+# among them -- keeps the system's answer whatever is installed here.
+ENV BUN_INSTALL={{ registry_root }}
+ENV PATH=$PATH:{{ registry_bin }}
+{% for registry in registries %}
+
+# The {{ registry.manager }} half of the toolchain, pinned and integrity-checked.
+RUN {{ registry.command }} {{ obtained[registry.manager] | join(" ") }}
+{% endfor %}
+{% for script in scripts %}
+
+# {{ script.name }}: no manager packages this, so it installs by a shell
+# line that checks what it fetched against a declared digest:
+# {{ script.digest }}
+RUN {{ script.command }}
+{% endfor %}
+
+# Trust, seeded where a fresh config home will find it. A workspace this
+# image was built for is one the operator already decided to run, but an
+# unseeded config home does not know that: it discards the declared
+# `permissions.allow` with a notice and continues, so the policy is off and
+# nothing failed. Seeded at start rather than baked into the config home,
+# because that directory is a mount and a mount hides whatever the image put
+# beneath it.
+COPY <<'SEED' /opt/lup/trust-seed.json
+{{ seed }}
+SEED
+COPY <<'ENTRY' /usr/local/bin/lup-entrypoint
+#!/bin/sh
+set -e
+config={{ config_home }}
+mkdir -p "$config"
+# Said here because here is where the evidence is. A config volume filled
+# under one user-namespace mapping and mounted under another belongs to a uid
+# this session is not, and the shell's own report of that is `Permission
+# denied` on a path -- which names neither the volume nor the mapping, and
+# reads as a broken image. Nothing on the host can ask this reliably: the
+# volume's directory is not always stat-able from outside, so a launcher's
+# check would be silent exactly when it mattered.
+if [ ! -w "$config" ]; then
+  echo "lup: $config is not writable by uid $(id -u)." >&2
+  echo "lup: the volume mounted there was filled by a different uid, which" >&2
+  echo "lup: happens when this project's container engine or its user" >&2
+  echo "lup: namespace mapping changed since the volume was created." >&2
+  echo "lup: remove that volume and the next launch recreates it." >&2
+  exit 1
+fi
+if [ ! -f "$config/.claude.json" ]; then
+  cp /opt/lup/trust-seed.json "$config/.claude.json"
+fi
+# The checkout this container was started against is the one the operator
+# chose when they wrote the mount and the workdir, so it is trusted here
+# rather than enumerated at build time. Building the list from a directory
+# listing was tried: it baked thirty-one host paths into the image, granted
+# trust to directories that were not checkouts, and rebuilt the layer every
+# time a worktree appeared or went. The repository the checkout belongs to
+# is trusted beside it: a linked worktree's project is its main repository
+# to the runtime, which asked for exactly that path and dropped the declared
+# permissions with a notice when the worktree alone was trusted. Merged on
+# every start rather than written once, because the document outlives the
+# image in its volume, and a runtime that moves where it looks would
+# otherwise meet a file nothing amends.
+repository=$(git -C "$PWD" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || printf '%s' "$PWD")
+case "$repository" in */.git) repository=${repository%/.git} ;; esac
+jq --arg here "$PWD" --arg repository "$repository" \
+   '.projects[$here] = ((.projects[$here] // {}) + {"hasTrustDialogAccepted": true})
+    | .projects[$repository] = ((.projects[$repository] // {}) + {"hasTrustDialogAccepted": true})' \
+   "$config/.claude.json" > "$config/.claude.json.lup" \
+  && mv "$config/.claude.json.lup" "$config/.claude.json"
+# A selected host login is applied once per change. Native renewal remains
+# container-private, and unrelated records in a shared credential file survive.
+if [ -n "${LUP_CREDENTIAL_NAME:-}" ]; then
+  python3 /opt/lup/credential-seed.py {{ credential_seed }} "$config/$LUP_CREDENTIAL_NAME" \
+    --keys "${LUP_CREDENTIAL_KEYS:-[]}" --renewable "${LUP_CREDENTIAL_RENEWABLE:-}"
+fi
+
+# One credential, two consumers. The token crosses the boundary by name --
+# `-e {{ token_variable }}` with no value, so it never appears in the
+# argv that starts this container and never reaches anything reading `ps` --
+# and `gh` reads a variable of its own. Derived in here rather than passed as
+# a second `-e`, because the launcher would have to hold the value to pass
+# it, which is the thing being avoided.
+if [ -n "${{ '{' ~ token_variable ~ ':-}' }}" ]; then
+  export GH_TOKEN="${{ token_variable }}"
+fi
+
+# Each host service the launcher relays, listened for on this container's own
+# loopback and carried to its socket -- the one way a filtered session reaches
+# anything on the host, and only what the launch named.
+{{ services_entrypoint }}
+exec "$@"
+ENTRY
+ENTRYPOINT ["/usr/local/bin/lup-entrypoint"]
+
+COPY <<'CREDENTIAL' /opt/lup/credential-seed.py
+{{ seeding }}
+CREDENTIAL
+
+# What `BROWSER` names, so a sign-in inside can reach a browser outside. The
+# pipe it writes to is mounted per launch; with nothing mounted the script
+# prints the URL and returns, which is what the flow falls back to.
+COPY <<'OPEN' {{ opener }}
+{{ opening }}
+OPEN
+
+# Every name a clipboard is asked for by, pointed at one program that speaks
+# to the broker in the launcher. The socket is mounted per launch; with none
+# mounted each shim exits non-zero, which is what "this machine has no
+# clipboard" already looked like to every caller.
+COPY <<'CLIP' /usr/local/bin/clipboard_shim.py
+{{ clipping }}
+CLIP
+COPY <<'X11' /usr/local/bin/lup-clipboard-x11
+{{ clipboard_native }}
+X11
+# One layer marks every program above executable and links the clipboard
+# names: each is a metadata change, and a layer per file is a layer for
+# nothing.
+RUN chmod +x /usr/local/bin/lup-entrypoint {{ opener }} \
+        /usr/local/bin/clipboard_shim.py /usr/local/bin/lup-clipboard-x11 \
+    && ln -sf /usr/local/bin/clipboard_shim.py /usr/local/bin/lup-clipboard \
+    && for name in {{ shims | join(" ") }}; do \
+        ln -sf /usr/local/bin/lup-clipboard "/usr/local/bin/$name"; \
+    done
+
+# The identity the session runs as. Supplied at build time from the host's own
+# uid/gid, because a bind mount carries numbers rather than names: a container
+# that ran as its own root would leave root-owned files in the host checkout.
+#
+# Every directory the build wrote to as root and the session has to reach is
+# handed over here, the registry root included. Leaving that one out is how a
+# pinned toolchain ends up installed and unreachable, reported by whatever
+# tried to run it rather than by the layer that misplaced it.
+#
+# The project environment is not among them and cannot be: it is a name
+# relative to each project root, so it has no path here to create. The run
+# binds a host directory over it instead, which arrives owned by the host uid
+# this build is handing everything else to.
+ARG UID=1000
+ARG GID=1000
+RUN groupadd -g $GID agent 2>/dev/null || true \
+    && useradd -u $UID -g $GID -m -s /bin/bash agent 2>/dev/null || true \
+    && mkdir -p {{ registry_root }} \
+        {{ caches | join(" ") }} \
+    && chown -R $UID:$GID {{ registry_root }} \
+        {{ caches | join(" ") }}
+{% if sudo %}
+
+# sudo for the uid the session runs as, which the layer above named, and
+# without a password: the image makes administering the container possible,
+# and each launch's privileges decide whether it works -- no-new-privileges
+# stops a setuid binary, and the capabilities given back bound what root may
+# do. The proxy variables are kept across it, since a package manager reaches
+# its mirrors the way the session does.
+RUN pacman -S --noconfirm --needed sudo \
+    && pacman -Scc --noconfirm \
+    && printf '%s\n' \
+        'Defaults env_keep += "http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy NO_PROXY"' \
+        'ALL ALL=(ALL:ALL) NOPASSWD: ALL' \
+        > /etc/sudoers.d/lup-session \
+    && chmod 0440 /etc/sudoers.d/lup-session
+{% endif %}
+
+{{ exported }}
+
+{{ volumes }}
+
+# Every agent runtime the harness launches, from the registry at the version
+# the launch resolved (or the declaration pinned) rather than an install
+# script, so what lands is what was rendered and the layer the run mounts
+# read-only cannot be rewritten by a self-update. The last layer, because it
+# is the one that changes most: a release lands most days, and every layer
+# below an install is rebuilt with it. Handed to the session's uid in the
+# same layer, since a chown in a later one copies every file it touches.
+RUN bun add -g {{ agent_clis | join(" ") }} \
+    && chown -R $UID:$GID {{ registry_root }}
+
+USER $UID:$GID

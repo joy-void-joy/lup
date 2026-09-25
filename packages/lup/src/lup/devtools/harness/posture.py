@@ -109,6 +109,13 @@ class LaunchOverrides(BaseModel, frozen=True):
     approvals_reviewer: CodexApprovalsReviewer | None = None
     sandbox_mode: CodexSandboxMode | None = None
     services: dict[str, int] = {}
+    sudo: bool | None = None
+    rootful: bool = False
+    """Whether this launch accepts widened privileges on an engine that is not rootless.
+
+    A flag and nothing else, because it is a judgement about this machine's
+    engine that a declaration shared by every machine cannot make."""
+    hold_generated: bool | None = None
 
 
 class SettingOrigins(BaseModel, frozen=True):
@@ -124,6 +131,7 @@ class SettingOrigins(BaseModel, frozen=True):
     memory: Origin = "project"
     services: Origin = "project"
     privileges: Origin = "project"
+    generated: Origin = "project"
 
 
 class SessionSettings(BaseModel, frozen=True):
@@ -137,6 +145,14 @@ class SessionSettings(BaseModel, frozen=True):
     sandbox_mode: Chosen[CodexSandboxMode] | None = None
     bash_sandbox: Chosen[bool] | None = None
     privileges: Chosen[ContainerPrivileges] | None = None
+    hold_generated: Chosen[bool] | None = None
+    """Whether the generated trees are read-only in the container.
+
+    Unset only where nothing resolved it, a settings object built by hand;
+    a launch always resolves it, from the image's own declaration at least.
+    """
+    rootful: bool = False
+    """Whether this launch accepted widened privileges on an engine that is not rootless."""
     services: Chosen[dict[str, int]] | None = None
     """The host ports named services were moved to, by a machine or a launch.
 
@@ -206,9 +222,21 @@ class SessionSettings(BaseModel, frozen=True):
             bash_sandbox=chosen(
                 None, posture.bash_sandbox if posture is not None else None, None
             ),
-            privileges=chosen(
-                None, mode.privileges if mode is not None else None, None
+            privileges=administered(
+                harness,
+                chosen(
+                    administering(flags.sudo),
+                    mode.privileges if mode is not None else None,
+                    administering(defaults.get("sudo")),
+                ),
             ),
+            hold_generated=settled(
+                flags.hold_generated,
+                mode.hold_generated if mode is not None else None,
+                defaults.get("hold_generated"),
+                harness.image.held.generated,
+            ),
+            rootful=flags.rootful,
             services=moved_services(harness, defaults.get("services", {}), flags),
         )
 
@@ -235,6 +263,15 @@ class SessionSettings(BaseModel, frozen=True):
                     if self.services is not None
                     else declared.services
                 ),
+                "held": declared.held.model_copy(
+                    update={
+                        "generated": (
+                            self.hold_generated.value
+                            if self.hold_generated is not None
+                            else declared.held.generated
+                        )
+                    }
+                ),
             }
         )
 
@@ -247,7 +284,45 @@ class SessionSettings(BaseModel, frozen=True):
             privileges=(
                 self.privileges.origin if self.privileges is not None else "project"
             ),
+            generated=(
+                self.hold_generated.origin
+                if self.hold_generated is not None
+                else "project"
+            ),
         )
+
+
+def administering(sudo: bool | None) -> ContainerPrivileges | None:
+    """The privileges a flag or a machine's yes-or-no about sudo stands for.
+
+    Yes is :meth:`~lup.harness.image.ContainerPrivileges.administering`, no
+    is the default that holds nothing, and unsaid leaves the next layer to
+    answer.
+    """
+    match sudo:
+        case True:
+            return ContainerPrivileges.administering()
+        case False:
+            return ContainerPrivileges()
+        case None:
+            return None
+
+
+def administered(
+    harness: Harness, privileges: Chosen[ContainerPrivileges] | None
+) -> Chosen[ContainerPrivileges] | None:
+    """These privileges, refused where they ask for sudo the image does not install.
+
+    Checked before anything is built, in the words of where the ask came
+    from, since a session told it may administer its container and then
+    finding no sudo there is a launch that said one thing and did another.
+    """
+    if privileges is None or not privileges.value.sudo or harness.image.sudo:
+        return privileges
+    raise typer.BadParameter(
+        f"sudo ({privileges.said('--sudo')}): this project's image installs no "
+        "sudo. Declare Image(sudo=True) to install it"
+    )
 
 
 def moved_services(

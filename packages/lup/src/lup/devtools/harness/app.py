@@ -596,6 +596,30 @@ def create_harness_app(
                     "the mode's and the machine's",
                 ),
             ] = None,
+            sudo: Annotated[
+                bool | None,
+                typer.Option(
+                    "--sudo/--no-sudo",
+                    help="Let this session administer its container through "
+                    "passwordless sudo, or not, over the mode's and the machine's",
+                ),
+            ] = None,
+            allow_rootful_privileges: Annotated[
+                bool,
+                typer.Option(
+                    "--allow-rootful-privileges",
+                    help="Accept widened privileges on an engine that is not "
+                    "rootless, where the container's root is this host's root",
+                ),
+            ] = False,
+            hold_generated: Annotated[
+                bool | None,
+                typer.Option(
+                    "--hold-generated/--release-generated",
+                    help="Hold the generated trees read-only in this session, or "
+                    "release them, over the mode's, the machine's and the image's",
+                ),
+            ] = None,
             host_service: Annotated[
                 list[str],
                 typer.Option(
@@ -647,6 +671,9 @@ def create_harness_app(
                     memory=memory_asked(memory),
                     permission_mode=permission_mode,
                     services=services_asked(host_service),
+                    sudo=sudo,
+                    rootful=allow_rootful_privileges,
+                    hold_generated=hold_generated,
                 ),
                 session_mode=mode_asked(composition, session_mode),
             )
@@ -831,6 +858,30 @@ def create_harness_app(
                     "and the machine's",
                 ),
             ] = None,
+            sudo: Annotated[
+                bool | None,
+                typer.Option(
+                    "--sudo/--no-sudo",
+                    help="Let this session administer its container through "
+                    "passwordless sudo, or not, over the mode's and the machine's",
+                ),
+            ] = None,
+            allow_rootful_privileges: Annotated[
+                bool,
+                typer.Option(
+                    "--allow-rootful-privileges",
+                    help="Accept widened privileges on an engine that is not "
+                    "rootless, where the container's root is this host's root",
+                ),
+            ] = False,
+            hold_generated: Annotated[
+                bool | None,
+                typer.Option(
+                    "--hold-generated/--release-generated",
+                    help="Hold the generated trees read-only in this session, or "
+                    "release them, over the mode's, the machine's and the image's",
+                ),
+            ] = None,
             host_service: Annotated[
                 list[str],
                 typer.Option(
@@ -885,6 +936,9 @@ def create_harness_app(
                     approvals_reviewer=approvals_reviewer,
                     sandbox_mode=sandbox_mode,
                     services=services_asked(host_service),
+                    sudo=sudo,
+                    rootful=allow_rootful_privileges,
+                    hold_generated=hold_generated,
                 ),
                 session_mode=mode_asked(composition, session_mode),
             )
