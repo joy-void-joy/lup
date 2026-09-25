@@ -25,6 +25,8 @@ from lup.web.build import dependencies_behind, restore_dependencies
 from lup.devtools.layout import get_tree_dir
 from lup.devtools.clipboard import copy_to_clipboard
 from lup.execution.shell import git
+from lup.sandbox.pointers import pointer_drift, refusal
+from lup.sandbox.rail import in_repository, repository_layout
 from lup.devtools.utils import (
     attributed_stderr,
     clear_stale_config_locks,
@@ -666,6 +668,22 @@ def register_worktree(name: str, worktree_path: Path, base_branch: str | None) -
         raise typer.Exit(1)
 
 
+def refuse_redirected_pointers() -> None:
+    """Refuse before host git acts on a worktree whose pointer was moved.
+
+    Anchored on the layout's shared directory -- the bare root or main
+    checkout, whose own `.git` is a real directory no container can redirect
+    to a gitdir it built -- never on a worktree pointer, which is itself what
+    an escape rewrites. Where the layout is no repository, nothing is verified.
+    """
+    root = get_tree_dir().parent
+    if not in_repository(root):
+        return
+    if message := refusal(pointer_drift(repository_layout(root).common)):
+        typer.echo(message, err=True)
+        raise typer.Exit(1)
+
+
 def create(
     name: str,
     no_sync: bool,
@@ -692,6 +710,7 @@ def create(
     is given its remote by the first push that carries something, which is
     `git pr push` and which the pre-push guard judges.
     """
+    refuse_redirected_pointers()
     registration_blocked = report_a_blocked_registration()
     report_a_blocked_arming(guards)
     current_dir = Path.cwd()
@@ -828,6 +847,7 @@ class WorktreeEntry(BaseModel):
 
 def list_worktrees() -> None:
     """List all git worktrees with branch and status info."""
+    refuse_redirected_pointers()
     entries: list[WorktreeEntry] = []  # lup: ignore[empty-collection] — record fold
     current = WorktreeEntry()
 
@@ -905,6 +925,7 @@ def remove(name: str, force: bool) -> None:
     Where the shared directory as a whole is unwritable, git says so and the
     failure is attributed to the mount that caused it.
     """
+    refuse_redirected_pointers()
     path = Path(name)
 
     if not path.is_absolute():
