@@ -34,29 +34,44 @@ tree compiled from lup's own declarations — is lup's.
 
 ## 2. Open a worktree in the lup checkout
 
-`refs/lup` is the registration `sync` materializes, and a session reaches it
-when the project is registered with a writable mount. Cut the branch there,
-not here:
+`refs/lup` is lup's working tree, and a session holds it read-write from its
+first launch: the registration `sync.json` ships names lup's repository and
+mounts it `rw`, so the launch clones it under `~/.cache/lup/sync/lup.git`
+where nothing is there yet, attaches a worktree, and mounts that. A machine
+that keeps its own checkout of lup has registered that one instead, and
+`refs/lup` is its working tree. Where the project resolves lup from a
+repository, the registration follows that pin, so the checkout is always a
+clone of the repository the library comes from.
+
+Cut the branch there, not here, from lup's integration branch:
 
 ```bash
-uv run --directory refs/lup/tree/<branch> lup-devtools git worktree create fix-<name>
+git -C refs/lup fetch origin dev:dev
+uv run --directory refs/lup lup-devtools git worktree create fix-<name> --base dev
 ```
 
-If `refs/lup` does not resolve, this machine has not answered the requirement
-`sync.json` declares. `uv run lup-devtools sync status` names what is missing
-and the command for it: `sync remote lup <url>` for the URL this machine
-fetches from, `sync setup lup /path/to/repo` for a checkout it already has,
-then `sync fetch lup`. Both write `sync.json.local`, which is a protected
-edit: put it to the user rather than writing it. A registration the tracked
-file does not mount is tracked for review and not for writing, and widening
-that is a tracked edit and the user's too.
+The fetch brings the clone's `dev` level with lup's: a clone's own branches
+stand where it was made, because the launch and `sync` refresh only its
+remote-tracking refs. Git refuses it where `dev` is checked out in a worktree
+of that clone -- somebody's own checkout, whose `dev` is theirs to move -- and
+the branch is cut from theirs then. The second command prints the new
+worktree's path; the steps below call it `<fix>`.
+
+If `refs/lup` does not resolve, the launch could not place lup and said why
+as the session opened; `uv run lup-devtools sync status` names it again with
+the command that answers it. A machine that reaches lup over another
+transport records it with `sync remote lup <url>`, and one that keeps its own
+checkout with `sync setup lup /path/to/repo --mount rw`. Both write
+`sync.json.local`, which is a protected edit: put it to the user rather than
+writing it. Mounts are built at launch, so either takes effect at the next
+one.
 
 ## 3. Make the change under lup's gate
 
 Edit in that worktree, and run **lup's** gate there rather than this project's:
 
 ```bash
-uv run --directory refs/lup/tree/fix-<name> lup-devtools dev check
+uv run --directory <fix> lup-devtools dev check
 ```
 
 An explicitly granted destination worktree is judged by its own generated
@@ -67,7 +82,12 @@ or a `refs/` symlink alone supplies no repository policy grant.
 Generate both native trees in a newly created worktree before editing it.
 When the launch explicitly mounted the writable bare lup repository, an
 operator can accept that worktree's policy without restarting this session.
-From the adopter checkout, the operator runs:
+The registration mounts lup's worktree rather than that bare half, so a launch
+that should accept `<fix>` names it as well: `--mount <bare>`, where
+`git -C refs/lup rev-parse --path-format=absolute --git-common-dir` prints
+`<bare>`. Until then an edit in `<fix>` is judged by this project's policy as
+another repository's file, not by lup's. From the adopter checkout, the
+operator runs:
 
 ```bash
 uv run lup-devtools harness policy-refresh --nonce <launch-nonce> --repository <canonical-worktree-path>
@@ -87,7 +107,27 @@ Two conventions of lup's that are easy to miss from outside it:
 - Generated trees are regenerated, never hand-edited:
   `harness generate all` before the gate.
 
-Commit there with `$lup:commit`, and push the branch.
+Commit there with `$lup:commit`, then push the branch and open its pull
+request against lup's `dev`:
+
+```bash
+uv run --directory <fix> lup-devtools git pr push
+uv run --directory <fix> lup-devtools git pr create --base dev --title "<what it fixes>" --body-file <notes>
+```
+
+The two need different credentials, and the launch said which it lent. The
+push travels on the transport credential: inside the container the clone's
+https remote is rewritten onto the ssh agent or key the launch lent, or kept
+for a token, so it goes out as whichever the operator pushes lup with. A host
+posture (`--sandbox inner` or `none`) rewrites nothing, so there the clone's
+own origin decides; a machine that pushes lup over ssh says so once with
+`sync remote lup <ssh url>`, which repoints the clone it already has. The
+pull request is the forge API's, which only a token answers -- the one in
+`LUP_GIT_TOKEN`, or the forge client's own login where the project declared
+that source. `git pr create` refuses without one and says so; then the branch
+is pushed and nothing is lost, so hand the user the same request to open from
+a terminal that holds the credential:
+`gh pr create --repo <owner>/lup --base dev --head fix-<name>`.
 
 ## 4. Run this project on the fix
 

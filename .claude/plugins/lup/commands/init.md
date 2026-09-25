@@ -199,7 +199,33 @@ This handles directory rename (`src/lup_template/` -> `src/<project>/`), import 
 
 ### After renaming:
 
-#### 1. Declare how the project obtains lup
+#### 1. Point the lup registration at the repository this project came from
+
+`sync.json` ships an entry naming lup's repository, required and mounted
+read-write, which is what gives every session of this project a clone of lup
+to fix upstream defects in, with nothing set up on any machine. A project
+generated from a fork of lup builds on the fork, and GitHub records the
+template a repository was generated from, so ask it once:
+
+```bash
+uv run lup-devtools dev init upstream --dry-run
+uv run lup-devtools dev init upstream
+```
+
+It points the entry at the template where that is another repository, and
+says why it left the entry as shipped otherwise. Run it before the next step,
+which pins whichever repository the entry names. Where the project already
+pins lup to a repository, the entry follows that pin, so the command prints
+the `dev library git --url` invocation that moves the pin rather than writing
+the entry. Where it cannot ask the forge, it says why: ask the user which
+repository the project was generated from.
+
+The mount takes effect at the next launch. This session opened while the
+checkout was still the scaffold, which owes itself no copy of lup, so it holds
+none; once initialization is done, relaunch and `refs/lup` is lup's working
+tree.
+
+#### 2. Declare how the project obtains lup
 
 The template ships the library vendored under `packages/lup/`, which makes the
 project a fork of it. The rename is what allows leaving that mode: `dev library`
@@ -252,7 +278,7 @@ session API. Name them in the requirement (`lup[claude,codex,docker]`).
 The command prints the `uv sync` and the regeneration it wants next. Run both
 before anything reads the project's types.
 
-#### 2. Merge the guidance template into the guidance declaration
+#### 3. Merge the guidance template into the guidance declaration
 
 The merge lands in `src/<project>/harness/content/guidance.py`, never in a tree's guidance file (.claude/CLAUDE.md under Claude Code, AGENTS.md under Codex): those are generation's outputs, and an edit made directly to one is undone the next time the harness runs. Take the sections from that tree's template flavor (.claude/plugins/lup/TEMPLATE_CLAUDE.md under Claude Code, .codex/plugins/lup/TEMPLATE_AGENTS.md under Codex), covering every tree the project commits:
 
@@ -283,21 +309,27 @@ Which runtimes the project carries is not a choice made here: every tree
 arrives with the clone, and generation writes each one it finds. Dropping a
 runtime is a later removal somebody decides on its own terms.
 
-#### 3. Initialize upstream sync
+#### 4. Initialize upstream sync
 
-Baseline the upstream checkpoint at *the recorded commit*. Register the
-selected branch, fetch it, and record the exact commit already consumed:
+Baseline the upstream checkpoint at *the recorded commit*. The `lup` entry
+`sync.json` ships already names lup's repository -- or, where the project
+resolves lup from a repository, follows that pin -- so nothing has to be
+registered first. Fetch it, which clones it under `~/.cache/lup/sync/lup.git`
+the first time, and record the exact commit already consumed:
 
 ```
-uv run lup-devtools sync setup lup <lup-checkout> --branch <branch>
 uv run lup-devtools sync fetch lup
 uv run lup-devtools sync mark-synced lup --at <commit>
 ```
 
-`setup` records the checkout and branch. Review reads the fetched upstream
-ref, preserving any work in the checkout. The checkpoint is shared by all
-worktrees of this consuming repository. `--synced` is appropriate only when
-the selected review ref itself is exactly the commit already consumed.
+Review reads the fetched upstream ref, so work anybody does in that clone
+stays out of it, and the checkpoint is shared by all worktrees of this
+consuming repository. The ref is the pinned branch where there is one and
+the repository's default branch otherwise. To review another, or to use a
+checkout this machine already keeps instead of the clone, register it:
+`uv run lup-devtools sync setup lup <lup-checkout> --branch <branch>`
+-- `--synced` there is right only when that ref itself is exactly the commit
+already consumed.
 
 A project that already consumed the library, and knows which commit it took, names it rather than moving a checkout to stand on it:
 
@@ -306,19 +338,14 @@ uv run lup-devtools sync mark-synced lup --at <commit>
 ```
 
 That is the case an adoption mid-stream is always in — the code is already here, and what is missing is only the record of how far it reached. Without the commit, marking synced claims every commit that landed afterward as reviewed, which is the one thing the checkpoint exists to prevent.
-That checkout is one you provide: clone the library beside the project, then
-`git switch --detach <commit>` it to the recorded commit. Not this project's
-own checkout — it stands at that commit too, and naming it makes the review
-read the project's own history as upstream work. Any clone standing at that
-commit serves, as long as it is not one somebody is working in: a checkout
-that moves under the review is one whose history the review misreads.
+Never register this project's own checkout as lup's: it stands at the
+recorded commit too, and the review would read the project's own history as
+upstream work. And take the checkpoint at the recorded commit, never at the
+branch's tip: the branch may have advanced since this project was generated,
+and a checkpoint at its tip marks the commits in between as already reviewed
+when the project does not carry them.
 
-A recorded path is read in place and never fetched, so whichever checkout you
-name is the one to update before a review. The branch may also have advanced
-since this project was cloned, and a checkpoint taken from its tip marks the
-commits in between as already reviewed when the project does not carry them.
-
-#### 4. Verify
+#### 5. Verify
 
 ```bash
 uv sync

@@ -54,19 +54,25 @@ session API. Name them in the requirement (`lup[claude,codex,docker]`).
 
 
 <!-- passage: upstream-checkpoint -->
-Baseline the upstream checkpoint at *the recorded commit*. Register the
-selected branch, fetch it, and record the exact commit already consumed:
+Baseline the upstream checkpoint at *the recorded commit*. The `lup` entry
+`sync.json` ships already names lup's repository -- or, where the project
+resolves lup from a repository, follows that pin -- so nothing has to be
+registered first. Fetch it, which clones it under `~/.cache/lup/sync/lup.git`
+the first time, and record the exact commit already consumed:
 
 ```
-{{ project_devtools }} sync setup lup {{ library_checkout }} --branch <branch>
 {{ project_devtools }} sync fetch lup
 {{ project_devtools }} sync mark-synced lup --at <commit>
 ```
 
-`setup` records the checkout and branch. Review reads the fetched upstream
-ref, preserving any work in the checkout. The checkpoint is shared by all
-worktrees of this consuming repository. `--synced` is appropriate only when
-the selected review ref itself is exactly the commit already consumed.
+Review reads the fetched upstream ref, so work anybody does in that clone
+stays out of it, and the checkpoint is shared by all worktrees of this
+consuming repository. The ref is the pinned branch where there is one and
+the repository's default branch otherwise. To review another, or to use a
+checkout this machine already keeps instead of the clone, register it:
+`{{ project_devtools }} sync setup lup {{ library_checkout }} --branch <branch>`
+-- `--synced` there is right only when that ref itself is exactly the commit
+already consumed.
 
 A project that already consumed the library, and knows which commit it took, names it rather than moving a checkout to stand on it:
 

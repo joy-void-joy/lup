@@ -365,19 +365,25 @@ Steps 1-4, 6 and 7 repeat per selected tree; step 5 is tree-independent.
 7. Guidance file — .claude/CLAUDE.md under Claude Code, AGENTS.md under Codex — section-level merge from that tree's template flavor (read template → use `<!-- section: ... -->` markers to identify merge units → adapt for target → compare sections → add missing ones → leave existing untouched)
 8. **Hand off to generation**: everything written in steps 1-4, 6 and 7 becomes a generated artifact once the target's harness runs. From here on, the target edits its declarations under `src/<project>/harness/content/` and regenerates with `uv run lup-devtools harness generate all`; the installed files are outputs, and a hand edit to one is reverted the next time generation runs. Say so explicitly in the Phase 7 report.
 9. **Initialize upstream sync**, which comes last because it records what the previous eight steps installed:
-Baseline the upstream checkpoint at *the recorded commit*. Register the
-selected branch, fetch it, and record the exact commit already consumed:
+Baseline the upstream checkpoint at *the recorded commit*. The `lup` entry
+`sync.json` ships already names lup's repository -- or, where the project
+resolves lup from a repository, follows that pin -- so nothing has to be
+registered first. Fetch it, which clones it under `~/.cache/lup/sync/lup.git`
+the first time, and record the exact commit already consumed:
 
 ```
-uv run --directory <target> lup-devtools sync setup lup <source> --branch <branch>
 uv run --directory <target> lup-devtools sync fetch lup
 uv run --directory <target> lup-devtools sync mark-synced lup --at <commit>
 ```
 
-`setup` records the checkout and branch. Review reads the fetched upstream
-ref, preserving any work in the checkout. The checkpoint is shared by all
-worktrees of this consuming repository. `--synced` is appropriate only when
-the selected review ref itself is exactly the commit already consumed.
+Review reads the fetched upstream ref, so work anybody does in that clone
+stays out of it, and the checkpoint is shared by all worktrees of this
+consuming repository. The ref is the pinned branch where there is one and
+the repository's default branch otherwise. To review another, or to use a
+checkout this machine already keeps instead of the clone, register it:
+`uv run --directory <target> lup-devtools sync setup lup <source> --branch <branch>`
+-- `--synced` there is right only when that ref itself is exactly the commit
+already consumed.
 
 A project that already consumed the library, and knows which commit it took, names it rather than moving a checkout to stand on it:
 
