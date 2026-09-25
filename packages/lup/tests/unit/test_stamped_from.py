@@ -25,6 +25,7 @@ from pydantic import BaseModel
 import lup.devtools.dev.origin as origin
 from lup.devtools import sync
 from lup.devtools.dev.scaffold import extracted
+from lup.devtools.utils import short_sha
 from lup.execution.shell import git
 from tests.unit.test_ledger_placement import committed, repository
 from tests.unit.test_scaffold import wrote
@@ -237,7 +238,7 @@ def test_the_report_names_the_base_and_the_branches_holding_it(
 
     printed = capsys.readouterr().out
     assert f"Base: {lup.stamped}  serve two" in printed
-    assert f"main (default): 1 commit(s) past it, at {lup.tip[:7]}" in printed
+    assert f"main (default): 1 commit(s) past it, at {short_sha(lup.tip)}" in printed
 
 
 @pytest.mark.parametrize("layout", ["bare", "plain"])
