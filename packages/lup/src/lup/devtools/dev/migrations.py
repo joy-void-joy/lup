@@ -185,8 +185,27 @@ DECLARED: list[Migration] = [
             MigrationStep(
                 instruction=(
                     "Pass write_command_reference the project's DevProject as "
-                    "project=, and installer_guidance the Harness it ships beside "
-                    "as source=; both are keyword-only."
+                    "project= and its ReleaseSpec as release=, and "
+                    "installer_guidance the Harness it ships beside as source= "
+                    "and the command groups its CLI serves as commands=; all "
+                    "are keyword-only."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=["unjudged_roots", "run_checks"],
+        reason=(
+            "the documented-commands sweep reads no changelog, and reads the "
+            "vendored library only where the CLI serves every group it ships"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Pass unjudged_roots the CLI's admits and the project's "
+                    "ReleaseSpec after the checkout. Pass run_checks the "
+                    "ReleaseSpec as release= where it took release_tag_prefix=, "
+                    "which it never read."
                 )
             ),
         ],

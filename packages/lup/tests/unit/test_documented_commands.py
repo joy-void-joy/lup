@@ -18,6 +18,7 @@ from lup.devtools.dev.documented import (
     unjudged_roots,
     written_commands,
 )
+from lup.devtools.dev.release import ReleaseSpec
 from lup.devtools.project import DevProject
 from lup.harness.coverage import ContentRoot, ModuleCoverage
 from lup.harness.models import CommandInvocation
@@ -199,7 +200,8 @@ def test_prose_is_judged_where_it_renders_and_nowhere_it_does_not(
     Its declaration tree is compiled into the generated trees, which are read in
     full — so a module the project took is judged there, once, and a module it
     declined renders nowhere. A vendored library is lup's code, judged in lup;
-    only the checkout that authors it, the scaffold, reads it here.
+    only the checkout that authors it, the scaffold, reads it here. And a
+    changelog is history: it names the commands a release had, not ones to run.
     """
     stray = "Run `uv run lup-devtools resolve start` to begin.\n"
     checkout_writing(
@@ -210,33 +212,82 @@ def test_prose_is_judged_where_it_renders_and_nowhere_it_does_not(
             "packages/lup/src/lup/devtools/resolve/app.py": f'"""{stray}"""\n',
             ".claude/plugins/lup/skills/land/SKILL.md": stray,
             "src/adopter/devtools/main.py": f'"""{stray}"""\n',
+            "CHANGELOG.md": f"## 0.1.0\n\n{stray}",
         },
     )
     monkeypatch.chdir(tmp_path / "adopter")
     unjudged = unjudged_roots(
-        project_declaring("src/adopter/harness/content"), tmp_path / "adopter"
+        project_declaring("src/adopter/harness/content"),
+        tmp_path / "adopter",
+        serving_everything,
+        ReleaseSpec(),
     )
 
     judged = sorted(mention.file for mention in written_commands(unjudged))
 
-    assert unjudged == ["src/adopter/harness/content/", "packages/lup/"]
+    assert unjudged == [
+        "src/adopter/harness/content/",
+        "packages/lup/",
+        "CHANGELOG.md",
+    ]
     assert judged == [
         ".claude/plugins/lup/skills/land/SKILL.md",
         "src/adopter/devtools/main.py",
     ]
 
 
-def test_the_scaffold_reads_the_library_it_authors(tmp_path: Path) -> None:
-    """While the template flag stands, `packages/lup/` is this checkout's own code."""
+def serving_everything(words: list[str]) -> bool:
+    """A CLI serving every command group the library ships, and anything else."""
+    return True
+
+
+def declining_sync(words: list[str]) -> bool:
+    """A CLI whose project declined the module serving `sync`."""
+    return words[0] != "sync"
+
+
+def scaffold(work: Path) -> Path:
+    """A checkout the template flag says is the library's own repository."""
     checkout_writing(
-        tmp_path / "scaffold",
+        work,
         {
             "pyproject.toml": "[project]\nname = 'scaffold'\n\n[tool.lup]\ntemplate = true\n"
         },
     )
+    return work
 
+
+def test_the_scaffold_reads_the_library_it_authors(tmp_path: Path) -> None:
+    """While the template flag stands, `packages/lup/` is this checkout's own code."""
     unjudged = unjudged_roots(
-        project_declaring("packages/lup/src/lup/harness/content"), tmp_path / "scaffold"
+        project_declaring("packages/lup/src/lup/harness/content"),
+        scaffold(tmp_path / "scaffold"),
+        serving_everything,
+        ReleaseSpec(),
     )
 
-    assert unjudged == ["packages/lup/src/lup/harness/content/"]
+    assert unjudged == ["packages/lup/src/lup/harness/content/", "CHANGELOG.md"]
+
+
+def test_a_scaffold_that_declined_a_module_leaves_the_library_to_lup(
+    tmp_path: Path,
+) -> None:
+    """An adoption under way no longer serves what the library was written against.
+
+    Initialization declines modules while the template flag still stands, and
+    regenerates straight after: judging the library there refused its own
+    docstrings about the module just declined — `sync status` in the module
+    serving `sync` — before the adopter had renamed anything.
+    """
+    unjudged = unjudged_roots(
+        project_declaring("packages/lup/src/lup/harness/content"),
+        scaffold(tmp_path / "scaffold"),
+        declining_sync,
+        ReleaseSpec(),
+    )
+
+    assert unjudged == [
+        "packages/lup/src/lup/harness/content/",
+        "packages/lup/",
+        "CHANGELOG.md",
+    ]

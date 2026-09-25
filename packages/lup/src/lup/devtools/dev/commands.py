@@ -32,6 +32,7 @@ from typer._click.core import Command as ClickCommand
 from typer.core import TyperGroup
 
 from lup.devtools.dev.documented import refuse_unresolved_commands, unjudged_roots
+from lup.devtools.dev.release import ReleaseSpec
 from lup.devtools.project import DevProject
 import lup.harness.models as models
 from lup.providers.harness import claude_prompt_renderer
@@ -291,6 +292,7 @@ def write_command_reference(
     root: Path | None = None,
     *,
     project: DevProject,
+    release: ReleaseSpec,
     check: bool = False,
 ) -> Path:
     """Write or verify the generated command reference, and what names a command.
@@ -310,7 +312,8 @@ def write_command_reference(
         COMMAND_REFERENCE_COMMAND,
         check=check,
     )
+    admits = CommandSurface.of(app).admits
     refuse_unresolved_commands(
-        CommandSurface.of(app).admits, unjudged_roots(project, checkout)
+        admits, unjudged_roots(project, checkout, admits, release)
     )
     return written

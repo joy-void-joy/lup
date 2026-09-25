@@ -32,6 +32,7 @@ from collections.abc import Callable, Sequence
 from pydantic import BaseModel
 
 from lup.devtools.dev.library import VENDORED_ROOT
+from lup.devtools.dev.release import ReleaseSpec
 from lup.devtools.dev.tracked import tracked_files
 from lup.devtools.project import DevProject
 from lup.workspace.paths import is_template_scaffold
@@ -79,22 +80,45 @@ class WrittenCommand(BaseModel, frozen=True):
         ]
 
 
-def unjudged_roots(project: DevProject, root: Path) -> list[str]:
-    """The trees whose written commands are answered elsewhere, as path prefixes.
+def unjudged_roots(
+    project: DevProject,
+    root: Path,
+    admits: Callable[[list[str]], bool],
+    release: ReleaseSpec,
+) -> list[str]:
+    """What the sweep does not read as instruction, as path prefixes.
 
-    Two kinds, each judged where it reaches a reader rather than where it is
-    written. A content-declaration tree is prose compiled into the generated
+    The release's changelog is history rather than instruction: each note
+    records the commands as they existed at that release, which a rename
+    since, or a project declining the module that served one, does not make
+    wrong — and nobody rewrites a release to make it right. Its migration
+    notes are folded in from declarations the sweep reads in the repository
+    declaring them, so what a release tells a consumer to run is judged while
+    it is still current.
+
+    The rest are trees of two kinds, each judged where it reaches a reader
+    rather than where it is written. A content-declaration tree is prose compiled into the generated
     trees, which the sweep reads in full: a module this project took is
     judged there against the CLI that serves it, and a module it declined
     renders nowhere, so its own prose naming its own commands is no reader's
     instruction and no blocker. A vendored library is another repository's
-    code, written against a CLI serving every module it ships and judged in
-    the repository that authors it — so it is read only while this checkout
-    is that repository, which is what the template flag says.
+    code, written against a CLI serving every command group it ships and
+    judged in the repository that authors it — so it is read only while this
+    checkout is that repository: the template scaffold, whose CLI ``admits``
+    every one of those groups. A scaffold that declined a module is an
+    adoption under way, and judging the library there would refuse its own
+    words about the very module that was just declined.
     """
+    # Imported where it is asked: the roster wires the `dev` tree, whose gate
+    # imports this module, so importing it above would close that loop.
+    from lup.devtools.roster import LIBRARY_SPECS
+
+    authoring = is_template_scaffold(root) and all(
+        admits([spec.name]) for spec in LIBRARY_SPECS
+    )
     declared = [f"{entry.directory.as_posix()}/" for entry in project.coverage.roots]
-    vendored = [] if is_template_scaffold(root) else [f"{VENDORED_ROOT}/"]
-    return [*declared, *vendored]
+    vendored = [] if authoring else [f"{VENDORED_ROOT}/"]
+    return [*declared, *vendored, release.changelog]
 
 
 def written_commands(unjudged: Sequence[str] = ()) -> list[WrittenCommand]:

@@ -453,6 +453,7 @@ def create_dev_app(
             scaffold_source=declarations.scaffold,
             spread=declarations.spread,
             migration_base=check.named_gate_base(base) if base is not None else None,
+            release=declarations.release,
         )
 
     # -- test command --

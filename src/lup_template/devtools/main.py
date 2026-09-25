@@ -85,8 +85,13 @@ def command_reference(root: Path | None = None, *, check: bool = False) -> Path:
     because that is the only module that has the whole CLI — a writer declared
     beside the other two would have to import this one, which nothing does.
     """
+    declared = dev.declared()
     return write_command_reference(
-        app, root, project=dev.declared().project, check=check
+        app,
+        root,
+        project=declared.project,
+        release=declared.release,
+        check=check,
     )
 
 

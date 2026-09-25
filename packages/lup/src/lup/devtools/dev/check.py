@@ -47,6 +47,7 @@ from lup.devtools.dev.cites import sweep_cites
 from lup.devtools.dev.comments import FoundComment, scan_tracked
 from lup.devtools.dev.commands import CommandSurface
 from lup.devtools.dev.documented import unjudged_roots, unresolved
+from lup.devtools.dev.release import ReleaseSpec
 from lup.ledger.models import LedgerNode
 from lup.ledger.store import LedgerLayout
 from lup.devtools.dev.environment import foreign_installs
@@ -977,6 +978,7 @@ def scan_reports(
     scaffold_source: ScaffoldSource | None = None,
     spread: Spread | None = None,
     migration_base: str | None = None,
+    release: ReleaseSpec = ReleaseSpec(),
 ) -> list[CheckReport]:
     """Every check the gate answers itself, in the order it reports them.
 
@@ -1192,12 +1194,13 @@ def scan_reports(
         # including the one in the hooks workflow's own step 7, and each was
         # written beside the command it named — which is why neither the author
         # nor any reviewer caught it and a session typing it did.
+        surface = command_surface() if command_surface else None
         written = (
             unresolved(
-                command_surface().admits,
-                unjudged_roots(project, project_root()),
+                surface.admits,
+                unjudged_roots(project, project_root(), surface.admits, release),
             )
-            if command_surface
+            if surface is not None
             else []
         )
         yield CheckReport(
@@ -1400,7 +1403,7 @@ def run_checks(
     scaffold_source: ScaffoldSource | None = None,
     spread: Spread | None = None,
     migration_base: str | None = None,
-    release_tag_prefix: str = "v",
+    release: ReleaseSpec = ReleaseSpec(),
 ) -> None:
     """Run ruff format, ruff check, pyright, pytest, and this gate's own sweeps.
 
@@ -1442,6 +1445,7 @@ def run_checks(
             scaffold_source=scaffold_source,
             spread=spread,
             migration_base=migration_base,
+            release=release,
         )
 
         if fix:
