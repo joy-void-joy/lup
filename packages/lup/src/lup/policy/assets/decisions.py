@@ -43,6 +43,7 @@ from host import (
     granted_allowances,
     managed_script_roots,
     outside_this_project,
+    own_policies,
     patch_write_targets,
     peer_store,
     policy_refresh_request,
@@ -91,7 +92,9 @@ from kernel.lex import (
 )
 from kernel.rows import (
     DisplacedTargetRow,
+    EditTablesRow,
     ResolutionRow,
+    generated_edit_tables,
     RewriteReading,
     RewrittenDocumentRow,
     UnproducedDocumentRow,
@@ -117,6 +120,7 @@ from policy_data import (
     PATH_RULES,
     PEER_POLICY,
     POLICY_ROOT_ENV,
+    POLICY_RUNTIME,
     RECOVERABLE_TARGET_LIMIT,
     REFUSED_TOOLS,
     RUNNER_TARGET_TABLES,
@@ -702,7 +706,39 @@ def edit_decision(
     )
     if decision.effect not in ("ask", "deny"):
         return decision
-    return unaccepted_policy(decision, policy_refresh_request(path, cwd))
+    refresh = policy_refresh_request(path, cwd, POLICY_RUNTIME)
+    try:
+        own = [
+            local_edit_decision(
+                path,
+                before,
+                after,
+                path_exists,
+                autonomous,
+                operation,
+                cwd,
+                tables=generated_edit_tables(data),
+            )
+            for data in (own_policies(path, cwd, POLICY_RUNTIME) if refresh else [])
+        ]
+    except Exception:
+        # Advice only: a policy whose tables will not read is no answer, and
+        # the command stands beside the verdict as it would have.
+        own = []
+    return unaccepted_policy(decision, refresh, own)
+
+
+def launch_edit_tables() -> EditTablesRow:
+    """The tables this launch's own policy judges an edit by."""
+    return EditTablesRow(
+        path_rules=PATH_RULES,
+        antipattern_rows=ANTI_PATTERN_ROWS,
+        path_roles=PATH_ROLES,
+        maximum_added_lines=MAXIMUM_ADDED_LINES,
+        acceptance_guard=ACCEPTANCE_GUARD,
+        edit_rules=EDIT_RULES,
+        import_boundaries=IMPORT_BOUNDARIES,
+    )
 
 
 def local_edit_decision(
@@ -715,8 +751,12 @@ def local_edit_decision(
     cwd: Path | None = None,
     allowances: list[str] | None = None,
     resolve_external: bool = True,
+    tables: EditTablesRow | None = None,
 ) -> KernelDecision:
     """Judge one file's before and after against the declared edit policy.
+
+    ``tables`` are another generated policy's, read to learn what it would
+    decide here; unnamed, they are this launch's own.
 
     The path is relativized against the worktree holding it rather than the
     directory the runtime started in, because every repo-relative rule matches
@@ -742,9 +782,11 @@ def local_edit_decision(
     """
     outside_this_repository = foreign_repository(path_text, cwd)
     beyond_this_project = outside_this_project(path_text, cwd)
+    policy = tables or launch_edit_tables()
     suffix = Path(path_text).suffix.lower()
     python_source = suffix in (".py", ".pyi")
-    rows = ANTI_PATTERN_ROWS[suffix] if suffix in ANTI_PATTERN_ROWS else []
+    patterns = policy["antipattern_rows"]
+    rows = patterns[suffix] if suffix in patterns else []
     # A checker is not started for a file this policy has already decided it
     # has nothing to say about. It would resolve another repository's imports
     # against another repository's environment to answer a rule that will not
@@ -762,10 +804,10 @@ def local_edit_decision(
         before,
         after,
         path_exists=path_exists,
-        path_rules=PATH_RULES,
+        path_rules=policy["path_rules"],
         antipattern_rows=rows,
-        path_roles=PATH_ROLES,
-        maximum_added_lines=MAXIMUM_ADDED_LINES,
+        path_roles=policy["path_roles"],
+        maximum_added_lines=policy["maximum_added_lines"],
         autonomous=autonomous,
         allowances=(
             granted_allowances(ALLOWANCE_GRANTS_ENV, KNOWN_ALLOWANCES)
@@ -773,12 +815,12 @@ def local_edit_decision(
             else allowances
         ),
         python_source=python_source,
-        acceptance_guard=ACCEPTANCE_GUARD,
+        acceptance_guard=policy["acceptance_guard"],
         resolution=resolution,
         suffix=suffix,
         operation=operation,
-        edit_rules=EDIT_RULES,
-        import_boundaries=IMPORT_BOUNDARIES,
+        edit_rules=policy["edit_rules"],
+        import_boundaries=policy["import_boundaries"],
         foreign=outside_this_repository,
         outside_project=beyond_this_project,
         displaced=next(
@@ -790,7 +832,7 @@ def local_edit_decision(
                             [path_text], cwd
                         ).items()
                     ],
-                    PATH_ROLES,
+                    policy["path_roles"],
                 )
             ),
             None,

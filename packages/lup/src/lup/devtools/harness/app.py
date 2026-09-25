@@ -41,6 +41,7 @@ from lup.harness.models import Resumption
 from lup.harness.notice import Banner
 from lup.harness.releases import resolved_agent_clis
 from lup.harness.requirements import Manifest
+from lup.policy.snapshots import PolicyRuntime
 from lup.providers.profiles import ProfileDirectory
 from lup.devtools.harness.drift import RepositoryWriter
 from lup.workspace.paths import project_root
@@ -125,14 +126,25 @@ def create_harness_app(
             ),
         ],
         runtime: Annotated[
-            str,
+            PolicyRuntime | None,
             typer.Option(
                 help="Runtime the launch opened, for a launch ledger that records none"
             ),
-        ] = "",
+        ] = None,
+        yes: Annotated[
+            bool,
+            typer.Option(
+                "--yes",
+                help="Accept without asking, after showing what accepting changes",
+            ),
+        ] = False,
     ) -> None:
-        """Accept changed destination policy from an independent operator terminal."""
-        policy_refresh.refresh_command(project_root(), nonce, repository, runtime)
+        """Accept changed destination policy from an independent operator terminal.
+
+        Shows how the checkout's generated policy differs from the one judging
+        it now, then asks before accepting it.
+        """
+        policy_refresh.refresh_command(project_root(), nonce, repository, runtime, yes)
 
     @app.command("check")
     def check_command(

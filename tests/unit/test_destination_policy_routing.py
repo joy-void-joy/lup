@@ -7,6 +7,7 @@ import shlex
 import sys
 from pathlib import Path
 from subprocess import TimeoutExpired
+from unittest.mock import Mock
 
 import pytest
 import sh
@@ -641,11 +642,18 @@ def launched_beside(
 
 
 def regenerated_after_rename(sibling: Path, runtime: str) -> None:
-    """The worktree's policy as generation writes it once the package is renamed."""
+    """The worktree's policy as generation writes it once the package is renamed.
+
+    Its import boundary names the renamed package's composition root among
+    its owners, assigned as the literal generation writes -- nothing but data,
+    which is all a refresh reads.
+    """
     data = sibling / f".{runtime}/plugins/lup/hooks/runtime/policy_data.py"
+    boundaries = policy_host.policy_data_literals(data)["IMPORT_BOUNDARIES"]
+    boundaries[0]["owners"].append("src/adlib/harness/")
     data.write_text(
         data.read_text()
-        + '\nIMPORT_BOUNDARIES[0]["owners"].append("src/adlib/harness/")\n'
+        + f"\nIMPORT_BOUNDARIES: list[ImportBoundaryRow] = {boundaries!r}\n"
     )
 
 
@@ -692,6 +700,30 @@ def test_regenerating_a_sibling_names_the_refresh_where_the_difference_is_made(
     assert "other than the one this session's edits in it are judged by" in lines[1]
 
 
+def test_a_recorded_runtime_spelling_a_path_is_not_followed_out_of_the_checkout(
+    tmp_path: Path,
+    runtime: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The runtime the ledger records names a tree inside the checkout, or none.
+
+    Spelled as a path, it would compare a tree planted beside the checkout and
+    name a refresh for a difference the checkout never generated.
+    """
+    origin, sibling = launched_beside(tmp_path, runtime, monkeypatch)
+    ledger = origin / ".lup/preflight/routing-test.json"
+    measured = json.loads(ledger.read_text())
+    measured["runtime"] = ["x/../../elsewhere/.y"]
+    ledger.write_text(json.dumps(measured))
+    (sibling / ".x").mkdir()
+    planted = tmp_path / "elsewhere/.y/plugins/lup/hooks"
+    shutil.copytree(Path(f".{runtime}/plugins/lup/hooks"), planted)
+    data = planted / "runtime/policy_data.py"
+    data.write_text(data.read_text() + "\nMAXIMUM_ADDED_LINES = 99\n")
+
+    assert policy_refresh_lines(sibling) == []
+
+
 def test_the_rename_ends_on_the_refresh_its_session_will_need(
     tmp_path: Path,
     runtime: str,
@@ -713,12 +745,23 @@ def test_the_rename_ends_on_the_refresh_its_session_will_need(
     assert not any("policy-refresh" in step for step in next_steps(sibling))
 
 
+def disowned_readme(sibling: Path, runtime: str) -> None:
+    """The worktree's policy as generation writes it once README.md is disowned."""
+    data = sibling / f".{runtime}/plugins/lup/hooks/runtime/policy_data.py"
+    rules = [
+        row
+        for row in policy_host.policy_data_literals(data)["PATH_RULES"]
+        if row["value"] != "README.md"
+    ]
+    data.write_text(data.read_text() + f"\nPATH_RULES: list[PathRuleRow] = {rules!r}\n")
+
+
 def test_a_question_the_launch_policy_asks_carries_the_refresh_on_every_runtime(
     tmp_path: Path,
     runtime: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A human-owned file asks, and the question keeps the operator's refresh.
+    """A file the worktree disowned asks, and the question keeps the refresh.
 
     One runtime asks natively and hands the recovery over beside the question;
     the other turns every question into a review queue refusal, which must
@@ -726,7 +769,7 @@ def test_a_question_the_launch_policy_asks_carries_the_refresh_on_every_runtime(
     """
     origin, sibling = launched_beside(tmp_path, runtime, monkeypatch)
     (sibling / "README.md").write_text("before\n")
-    regenerated_after_rename(sibling, runtime)
+    disowned_readme(sibling, runtime)
 
     effect, detail = native_edit(origin, sibling / "README.md", runtime)
 
@@ -734,6 +777,134 @@ def test_a_question_the_launch_policy_asks_carries_the_refresh_on_every_runtime(
     assert refresh_request(origin, sibling) in detail
     if runtime == "codex":
         assert "questions show" in detail
+
+
+def test_a_question_both_policies_ask_hands_over_no_refresh(
+    tmp_path: Path,
+    runtime: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The worktree's own policy differs, but not about this file.
+
+    README.md is human-owned under both, so accepting the worktree's policy
+    would put the same question: the command would change nothing its reader
+    meets, and a verdict carrying it sends an operator to do nothing.
+    """
+    origin, sibling = launched_beside(tmp_path, runtime, monkeypatch)
+    (sibling / "README.md").write_text("before\n")
+    regenerated_after_rename(sibling, runtime)
+    assert policy_refresh_lines(sibling)
+
+    effect, detail = native_edit(origin, sibling / "README.md", runtime)
+    preview = verdict_for(
+        str(sibling / "README.md"), "edit", False, origin, declared_hook_set()
+    )
+
+    assert effect == ("ask" if runtime == "claude" else "deny")
+    assert "README.md is human-authored" in detail
+    assert "policy-refresh" not in detail
+    assert not any("policy-refresh" in reading.recovery for reading in preview.readings)
+
+
+def test_a_ledger_recording_no_runtime_has_the_command_name_the_dispatchers(
+    tmp_path: Path,
+    runtime: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A launch that predates recording its runtime cannot say which tree to accept.
+
+    The refresh refuses to guess there, so the dispatcher asking -- compiled
+    for one runtime -- spells it into the command it hands over.
+    """
+    origin, sibling = launched_beside(tmp_path, runtime, monkeypatch)
+    ledger = origin / ".lup/preflight/routing-test.json"
+    measured = json.loads(ledger.read_text())
+    measured["runtime"] = []
+    ledger.write_text(json.dumps(measured))
+    regenerated_after_rename(sibling, runtime)
+    target = sibling / "src" / "adlib" / "harness" / "composition.py"
+
+    effect, detail = native_edit(origin, target, runtime, "VALUE = 1", "VALUE = 2")
+
+    assert effect == "deny"
+    assert f"{refresh_request(origin, sibling)} --runtime {runtime}" in detail
+
+
+def failing_worktree_listing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Git on PATH, except that its worktree listing will not decode.
+
+    Only the refresh lookup lists worktrees, so the verdict it rides beside is
+    reached exactly as it would be while the lookup raises, in a dispatcher's
+    process and in this one alike.
+    """
+    real = shutil.which("git")
+    assert real is not None
+    shim = tmp_path / "shim"
+    shim.mkdir()
+    git = shim / "git"
+    git.write_text(
+        "#!/bin/sh\n"
+        'case "$*" in *"worktree list"*) printf \'\\377\\376\\n\'; exit 0 ;; esac\n'
+        f'exec {shlex.quote(real)} "$@"\n'
+    )
+    git.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{shim}{os.pathsep}{os.environ['PATH']}")
+
+
+@pytest.mark.parametrize(
+    "edited, before, after, reason",
+    [
+        ("src/adlib/harness/composition.py", "VALUE = 1", "VALUE = 2", "seam-boundary"),
+        ("README.md", "before", "after", "README.md is human-authored"),
+    ],
+)
+def test_a_refresh_lookup_that_raises_leaves_the_verdict_the_launch_policy_reached(
+    tmp_path: Path,
+    runtime: str,
+    monkeypatch: pytest.MonkeyPatch,
+    edited: str,
+    before: str,
+    after: str,
+    reason: str,
+) -> None:
+    """The advice rides beside a verdict that stands without it, on either runtime.
+
+    A lookup that raises must turn neither a refusal nor a question into the
+    dispatcher's own failure -- a question on one runtime, a crash refusal on
+    the other -- so both arrive with their own reason and without the command.
+    """
+    origin, sibling = launched_beside(tmp_path, runtime, monkeypatch)
+    (sibling / "README.md").write_text("before\n")
+    regenerated_after_rename(sibling, runtime)
+    failing_worktree_listing(tmp_path, monkeypatch)
+
+    effect, detail = native_edit(origin, sibling / edited, runtime, before, after)
+
+    asked = edited == "README.md" and runtime == "claude"
+    assert effect == ("ask" if asked else "deny")
+    assert reason in detail
+    assert "policy-refresh" not in detail
+
+
+def test_a_refresh_lookup_that_times_out_leaves_the_previewed_verdict_as_it_was(
+    tmp_path: Path,
+    runtime: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """In process, where `dev policy` previews what a session is handed."""
+    origin, sibling = launched_beside(tmp_path, runtime, monkeypatch)
+    regenerated_after_rename(sibling, runtime)
+    target = sibling / "src" / "adlib" / "harness" / "composition.py"
+
+    def timed_out(checkout: str, _launch: str) -> str:
+        raise TimeoutExpired(["git", "-C", checkout, "worktree", "list"], 5)
+
+    monkeypatch.setattr(policy_host, "worktree_refusal", timed_out)
+    preview = verdict_for(str(target), "edit", False, origin, declared_hook_set())
+
+    assert {reading.effect for reading in preview.readings} == {"deny"}
+    assert all("seam-boundary" in reading.reason for reading in preview.readings)
+    assert not any("policy-refresh" in reading.recovery for reading in preview.readings)
 
 
 def test_the_operator_refresh_puts_the_siblings_own_policy_in_force(
@@ -746,8 +917,14 @@ def test_the_operator_refresh_puts_the_siblings_own_policy_in_force(
     target = sibling / "src" / "adlib" / "harness" / "composition.py"
     assert native_edit(origin, target, runtime, "VALUE = 1", "VALUE = 2")[0] == "deny"
     monkeypatch.delenv("LUP_BOUNDARY_NONCE")
-    accepted = refresh_destination_policy(origin, "routing-test", sibling)
+    approve = Mock(return_value=True)
+    accepted = refresh_destination_policy(origin, "routing-test", sibling, approve)
     monkeypatch.setenv("LUP_BOUNDARY_NONCE", "routing-test")
+    (preview,) = approve.call_args.args
+    (boundary,) = [
+        change for change in preview.changes if change.name == "IMPORT_BOUNDARIES"
+    ]
+    assert any("src/adlib/harness/" in entry for entry in boundary.added)
 
     effect, detail = native_edit(origin, target, runtime, "VALUE = 1", "VALUE = 2")
 

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Literal
+from typing import Literal, TypeGuard, get_args
 
 import sh
 from pydantic import BaseModel
@@ -11,12 +11,58 @@ from lup.execution.shell import git
 from lup.policy.assets.host import policy_snapshot_digest, policy_snapshot_files
 from lup.sandbox.rail import AccessibleRoot, Lease, repository_layout, sibling_worktrees
 
+PolicyRuntime = Literal["claude", "codex"]
+"""A native runtime a checkout generates a destination evaluator for.
+
+Closed rather than any string, because the name is spelled into a path --
+``.{runtime}/plugins`` beneath the checkout -- and a string arriving from a
+command line or a ledger could spell a directory outside it. Declared as a
+plain alias because the command line takes it as a choice, and the CLI library
+reads a ``Literal`` but not a ``type`` statement wrapping one.
+"""
+
+
+def policy_runtime(name: str) -> TypeGuard[PolicyRuntime]:
+    """Whether a name is one of the runtimes a destination evaluator exists for."""
+    return name in get_args(PolicyRuntime)
+
+
+def evaluator_source(checkout: Path, runtime: PolicyRuntime) -> Path:
+    """The one generated tree holding a checkout's evaluator for a runtime.
+
+    Refused, saying what to do, where there is not exactly one, and where the
+    one there is is not the checkout's own: a tree resolving outside the
+    checkout, or reached through a symlink inside it, holds bytes the checkout
+    does not, and accepting it would run them as the checkout's policy.
+    """
+    candidates = list(
+        (checkout / f".{runtime}" / "plugins").glob(
+            "*/hooks/scripts/policy_evaluator.py"
+        )
+    )
+    if len(candidates) != 1:
+        raise ValueError(
+            f"Expected one generated {runtime} destination policy evaluator "
+            f"in {checkout}; found {len(candidates)}. Run "
+            "`uv run lup-devtools harness generate all` there, then refresh "
+            "this launch's accepted policy snapshot."
+        )
+    source = candidates[0].parent.parent
+    if not source.resolve().is_relative_to(checkout.resolve()):
+        raise ValueError(
+            f"Destination policy source {source} resolves to {source.resolve()}, "
+            f"outside {checkout}; only a tree the checkout itself holds is accepted"
+        )
+    if any(path.is_symlink() for path in [source, *source.parents]):
+        raise ValueError(f"Destination policy source has a symlink: {source}")
+    return source
+
 
 class DestinationPolicy(BaseModel, frozen=True, extra="forbid"):
     """A checkout and evaluator the operator's launch explicitly made reachable."""
 
     protocol: Literal[1] = 1
-    runtime: str = ""
+    runtime: PolicyRuntime | Literal[""] = ""
     repository: str
     checkout: str
     writable_roots: list[str]
@@ -26,31 +72,39 @@ class DestinationPolicy(BaseModel, frozen=True, extra="forbid"):
     digest: str = ""
     error: str = ""
 
-    def accepted(self, root: Path, runtime: str) -> "DestinationPolicy":
-        """Copy only verified source into a content-addressed launch snapshot."""
-        checkout = Path(self.checkout)
-        candidates = list(
-            (checkout / f".{runtime}" / "plugins").glob(
-                "*/hooks/scripts/policy_evaluator.py"
-            )
-        )
-        if len(candidates) != 1:
+    def accepted(
+        self, root: Path, runtime: str, reviewed: str = ""
+    ) -> "DestinationPolicy":
+        """Copy only verified source into a content-addressed launch snapshot.
+
+        ``runtime`` arrives from a launch or a ledger, and it is spelled into
+        the path the evaluator is looked for at, so a name that is not a
+        runtime is refused before anything is read.
+
+        ``reviewed`` is the digest an operator was shown, where one was: the
+        bytes accepted are then exactly those, and a checkout that changed
+        after it was shown is refused before anything is copied.
+        """
+        if not policy_runtime(runtime):
             return self.model_copy(
                 update={
                     "error": (
-                        f"Expected one generated {runtime} destination policy evaluator "
-                        f"in {checkout}; found {len(candidates)}. Run "
-                        "`uv run lup-devtools harness generate all` there, then refresh "
-                        "this launch's accepted policy snapshot."
-                    ),
-                    "runtime": runtime,
+                        f"{runtime!r} is not a runtime a destination policy is "
+                        f"generated for; name one of {', '.join(get_args(PolicyRuntime))}"
+                    )
                 }
             )
-        source = candidates[0].parent.parent
         try:
-            if any(path.is_symlink() for path in [source, *source.parents]):
-                raise ValueError(f"Destination policy source has a symlink: {source}")
+            source = evaluator_source(Path(self.checkout), runtime)
+        except ValueError as error:
+            return self.model_copy(update={"error": str(error), "runtime": runtime})
+        try:
             digest = policy_snapshot_digest(source)
+            if reviewed and digest != reviewed:
+                raise ValueError(
+                    f"{source} changed after it was shown; run the refresh again "
+                    "to see what it holds now"
+                )
             destination = root / ".lup" / "policy-snapshots" / digest
             destination.parent.mkdir(parents=True, exist_ok=True)
             if not destination.exists():
@@ -105,13 +159,19 @@ class RepositoryPolicyAuthority(BaseModel, frozen=True, extra="forbid"):
 
     repository: str
     root: str
-    runtime: str
+    runtime: PolicyRuntime
 
 
 def destination_authorities(
     accessible: list[AccessibleRoot], runtime: str
 ) -> list[RepositoryPolicyAuthority]:
-    """Retain original explicit repository roots, never mounts inferred from Git."""
+    """Retain original explicit repository roots, never mounts inferred from Git.
+
+    None for a launch whose runtime generates no destination evaluator: every
+    row would name a tree a refresh could never accept.
+    """
+    if not policy_runtime(runtime):
+        return []
 
     def authority(declared: AccessibleRoot) -> RepositoryPolicyAuthority | None:
         if not declared.writable or not declared.path.is_dir():

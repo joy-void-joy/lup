@@ -422,14 +422,42 @@ original explicit writable bare-repository mount holding it, with the same Git
 common directory, or the launch checkout's own repository, whose shared
 directory every launch leases writable. Under either, the deepest measured
 root over the worktree must be writable, so a sibling under a read-only mount
-or outside every measured root stays refused. The ledger records the runtime
-the launch opened, which selects the evaluator accepted; for a ledger that
-records none, `--runtime` names it. It never discovers unrelated nested
-repositories or extends the launch's filesystem grants. The requester cannot
-run this operator action, and the authority ledger and accepted snapshots are
-protected edit paths. These records prevent accidental inheritance and stale
-policy execution; they are mutable local bookkeeping, not authentication
-against a hostile process with the same filesystem authority.
+or outside every measured root stays refused. The launch repository reaches no
+further than its own lease, which the command recomputes from Git rather than
+reading back: a worktree inside its shared directory, or a checkout the launch
+leased as a mount of its own, never one only some other writable mount holds.
+Either authority accepts only a worktree Git registered — an entry under the
+shared directory's `worktrees/` whose `gitdir` names the checkout's `.git`,
+which names that entry back — and never the launch checkout itself, nor a
+checkout nested inside another checkout of its repository, whose policy would
+judge a hole cut out of that tree. Nor one checking out a branch another
+worktree already has out, which Git refuses without `--force`; that is Git's
+own invariant rather than proof of where the entry came from, since a session
+can write every file `git worktree add` writes, and the preview below is the
+control for what it cannot rule out. The ledger records the runtime the launch
+opened, which selects the evaluator accepted; for a ledger that records none,
+`--runtime` names it, as `claude` or `codex` and nothing else, since it is
+spelled into the path the evaluator is read from. It never discovers
+unrelated nested repositories or extends the launch's filesystem grants. The
+requester cannot run this operator action, and the authority ledger and
+accepted snapshots are protected edit paths. These records prevent accidental
+inheritance and stale policy execution; they are mutable local bookkeeping,
+not authentication against a hostile process with the same filesystem
+authority.
+
+Before it writes anything, the command shows the operator what accepting
+changes, against the policy that judges the checkout now — the snapshot its
+grant accepted, or else the launch checkout's own — and asks. Both
+`policy_data.py` files are read as data without running either, since the one
+being accepted was written by the session asking: each named constant, from
+protected paths, path roles and anti-pattern rows through import boundaries,
+shell and fetch rules, sandbox-excluded commands, refused tools and autonomous
+identities, lists the entries accepting removes and adds, one line each, and
+every evaluator file whose code differs is named, because accepting runs it. A
+`policy_data.py` holding anything generation never writes is refused rather
+than shown. `--yes` accepts without asking, after showing the same preview; a
+declined question writes nothing, and what is accepted is exactly the bytes
+shown — a checkout regenerated in between is refused, to be shown again.
 
 A verdict reached under a policy the destination does not hold says so, and
 names the command with this launch's real nonce and paths —
@@ -439,10 +467,14 @@ away from its accepted snapshot is refused with it as the recovery. A worktree
 no grant names — cut in the launch's own repository, or beneath an explicitly
 mounted one — is judged by the launch checkout's policy, so a package renamed
 there makes its own composition roots look like foreign importers; where the
-policy that worktree generates differs, a refusal or a question about its
-files carries the same command, and
+policy that worktree generates would decide a refusal or a question about one
+of its files otherwise, the verdict carries the same command, and
 `dev policy` shows it beside the verdict. The command is named only where the
-refresh would accept the checkout and change what judges it. Generation names
+refresh would accept the checkout and change the verdict at hand: a file both
+policies own a question about — a human-owned README — carries none, which is
+read from the worktree's generated tables as data, never by running them. A
+launch whose ledger records no runtime has the command name the asking
+dispatcher's, since the refresh will not guess which tree to accept. Generation names
 it first: `harness generate` in such a worktree ends on the same command once
 what it wrote differs from what the launch accepted, and
 `dev init rename-package` ends its next steps on it, after the regeneration a

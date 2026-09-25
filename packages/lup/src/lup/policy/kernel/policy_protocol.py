@@ -193,7 +193,9 @@ def routing_failure(reason: str, refresh: str = "") -> KernelDecision:
     )
 
 
-def unaccepted_policy(decision: KernelDecision, refresh: str) -> KernelDecision:
+def unaccepted_policy(
+    decision: KernelDecision, refresh: str, own: list[KernelDecision] | None = None
+) -> KernelDecision:
     """A verdict the launch's policy reached about a checkout generating another.
 
     A worktree no grant names is judged by the policy the session launched
@@ -203,8 +205,18 @@ def unaccepted_policy(decision: KernelDecision, refresh: str) -> KernelDecision:
     renamed there is a foreign import here -- so it says whose policy judged,
     and hands over the command that would change that. Only a question or a
     refusal says so; an allowance has nothing to recover from.
+
+    ``own`` is what each policy that checkout generates would decide here.
+    Where every one reaches this same verdict -- a human-owned file both ask
+    about -- the command would change nothing a reader meets, so none is
+    handed over. Where there is no such answer the command stands.
     """
     if not refresh or decision.effect not in ("ask", "deny"):
+        return decision
+    if own and all(
+        (verdict.effect, verdict.reason) == (decision.effect, decision.reason)
+        for verdict in own
+    ):
         return decision
     return decision.advising(
         "This edit was judged by the policy this session launched with, not by "

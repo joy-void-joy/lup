@@ -689,6 +689,42 @@ class EditRuleRow(TypedDict):
     reason: str
 
 
+class EditTablesRow(TypedDict):
+    """The tables one generated policy judges an edit by.
+
+    Named together because a verdict is re-read against another policy's
+    tables: a worktree judged by the launch's policy asks what the policy it
+    generates for itself would say, from that policy's literals, before it
+    hands over the operator's command that would put it in force.
+    """
+
+    path_rules: list[PathRuleRow]
+    antipattern_rows: dict[str, list[AntiPatternRow]]
+    path_roles: list[PathRoleRow]
+    maximum_added_lines: int
+    acceptance_guard: AcceptanceGuardRow | None
+    edit_rules: list[EditRuleRow]
+    import_boundaries: list[ImportBoundaryRow]
+
+
+def generated_edit_tables(data: dict) -> EditTablesRow:
+    """The tables a checkout's generated policy holds, from its literals by name.
+
+    A name missing is a policy generation never wrote, and raises rather than
+    borrowing the launch's value: a verdict read half from each policy would
+    be neither's.
+    """
+    return EditTablesRow(
+        path_rules=data["PATH_RULES"],
+        antipattern_rows=data["ANTI_PATTERN_ROWS"],
+        path_roles=data["PATH_ROLES"],
+        maximum_added_lines=data["MAXIMUM_ADDED_LINES"],
+        acceptance_guard=data["ACCEPTANCE_GUARD"],
+        edit_rules=data["EDIT_RULES"],
+        import_boundaries=data["IMPORT_BOUNDARIES"],
+    )
+
+
 class PeerPolicyRow(TypedDict):
     """Where this project's sessions find each other, and what a sender is told.
 

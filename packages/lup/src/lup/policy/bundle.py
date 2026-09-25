@@ -599,12 +599,19 @@ def render_policy_data(
     repair_command: list[str],
     rules: RuleSet | None = None,
     import_boundaries: list[ImportBoundary] | None = None,
+    runtime: str,
 ) -> str:
     """Render one plugin's canonical policy rows without executable logic.
 
     ``rules`` is the table compiled for the runtime this plugin belongs to, so
     a rule whose message names a native tool ships each tree the words that
     tree can act on. Omitting it renders the runtime-neutral table.
+
+    ``runtime`` names that runtime as a launch records it, which is also the
+    name of the tree this plugin sits in. A dispatcher judging a worktree by
+    the policy its session launched with reads it to find the same runtime's
+    tree in that worktree, and to spell the operator's ``--runtime`` for a
+    launch whose ledger recorded none.
     """
     body = "\n\n".join(
         [
@@ -638,6 +645,7 @@ def render_policy_data(
             + peer_policy_literal(erase_peer_policy(peer_policy)),
             "AUTONOMOUS_AGENT_IDENTITIES: list[str] = "
             + string_rows_literal(autonomous_agent_identities),
+            "POLICY_RUNTIME = " + json.dumps(runtime),
             "AGENT_IDENTITY_ENV = " + json.dumps(AGENT_IDENTITY_ENV),
             "POLICY_ROOT_ENV = " + json.dumps(POLICY_ROOT_ENV),
             "ALLOWANCE_GRANTS_ENV = " + json.dumps(ALLOWANCE_GRANTS_ENV),
