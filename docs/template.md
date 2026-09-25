@@ -108,7 +108,7 @@ is the only nudge this page gives about writing one.
 | `subagents.py` | Portable `SubagentSpec` declarations: capabilities, exact tool grants, model tiers. | Adding specs to `ALL_SPECS`. |
 | `tool_policy.py` | Which tools are available given the configuration — a missing API key bans its tools rather than failing at call time. | Adding an exclusion for each new conditional dependency. |
 | `config.py` | Pydantic settings from `.env` and `.env.local`: model, budget, turn cap, sandbox, paths. | Adding settings, never reading the environment directly elsewhere. |
-| `core.py` | `provider_factory()` — the **one** place a concrete adapter is named. | Rarely. Everything downstream takes the portable `Client` it returns. |
+| `core.py` | `provider_factory()` — the **one** place a concrete adapter is named. | Rarely. Everything downstream takes the portable `Agent` it returns. |
 
 That last row is the load-bearing one. `seam-boundary` permits a concrete
 adapter import in `agent/core.py` and a short list of other composition roots,
@@ -139,10 +139,20 @@ the SDK; everything else is loaded through pydantic-settings in
 # AGENT_MODEL=claude-opus-5
 # AGENT_MAX_BUDGET_USD=5.00
 # AGENT_MAX_TURNS=50
+# AGENT_REASONING_EFFORT=high   # low through ultra, on both backends
+# CODEX_EFFORT=xhigh            # overrides AGENT_REASONING_EFFORT on Codex/OpenAI
 # AGENT_SANDBOX_ENABLED=false   # run without Docker (disables code execution tools)
 # AGENT_NOTES_PATH=./notes      # relocate session data
 # AGENT_LOGS_PATH=./logs        # relocate trace logs
 ```
+
+With `AGENT_REASONING_EFFORT` and `CODEX_EFFORT` both unset, a session takes
+the model's default effort: `xhigh` clamped to the model's catalog row — the
+first of `xhigh`, `high`, `medium`, `low` the row takes, none for a model
+whose row lists no effort, and `xhigh` for a model with no row. The agent's
+`resolved_effort()`, beside `model_id()`, answers which one a session gets,
+and an effort named that the model lacks is refused where the agent is
+declared.
 
 ## `devtools/` — the development CLI
 

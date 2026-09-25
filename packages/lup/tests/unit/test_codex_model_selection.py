@@ -1,4 +1,4 @@
-"""A model and its reasoning effort travel together or not at all.
+"""A model never travels without the reasoning effort that goes with it.
 
 The home a Codex session opens against is seeded from the operator's own
 configuration, so it holds the model *they* chose and the effort they chose for
@@ -13,14 +13,14 @@ died with `'max' is not supported with the 'gpt-5.5' model`.
 
 from pathlib import Path
 
-from lup.providers.codex.runtime import CodexSessionConfig
+from lup.providers.codex import Codex
 
 CWD = Path("/repo")
 
 
-def test_naming_neither_inherits_a_pair_that_was_chosen_together() -> None:
-    """The home's model and the home's effort are coherent; leave them alone."""
-    assert CodexSessionConfig(cwd=CWD).model_selection() == {}
+def test_naming_neither_sends_the_default_effort_over_the_homes_model() -> None:
+    """An inherited model has no catalog row, so its default is ``xhigh``."""
+    assert Codex(cwd=CWD).model_selection() == {"effort": "xhigh"}
 
 
 def test_a_named_model_never_travels_without_an_effort() -> None:
@@ -29,27 +29,23 @@ def test_a_named_model_never_travels_without_an_effort() -> None:
     Before this, only the model went and the home's effort rode beside it —
     a pair nobody chose and neither side could be blamed for.
     """
-    selected = CodexSessionConfig(cwd=CWD, model="gpt-5.5").model_selection()
-
-    assert selected == {"model": "gpt-5.5", "effort": "medium"}
-
-
-def test_the_callers_own_effort_wins_over_the_paired_default() -> None:
-    """A caller who knows what their model should spend is never second-guessed."""
-    selected = CodexSessionConfig(
-        cwd=CWD, model="gpt-5.5", effort="xhigh"
-    ).model_selection()
+    selected = Codex(cwd=CWD, model="gpt-5.5").model_selection()
 
     assert selected == {"model": "gpt-5.5", "effort": "xhigh"}
 
 
-def test_the_paired_default_is_overridable_rather_than_frozen() -> None:
-    """It is a judgement, so it is a field default and not a constant."""
-    selected = CodexSessionConfig(
-        cwd=CWD, model="gpt-5.5", paired_effort="high"
-    ).model_selection()
+def test_the_callers_own_effort_wins_over_the_default() -> None:
+    """A caller who knows what their model should spend is never second-guessed."""
+    selected = Codex(cwd=CWD, model="gpt-5.5", effort="high").model_selection()
 
-    assert selected["effort"] == "high"
+    assert selected == {"model": "gpt-5.5", "effort": "high"}
+
+
+def test_a_forwarded_none_still_pairs_the_default() -> None:
+    """A caller passing an unset setting through gets the default, not no effort."""
+    selected = Codex(cwd=CWD, model="gpt-5.5", effort=None).model_selection()
+
+    assert selected == {"model": "gpt-5.5", "effort": "xhigh"}
 
 
 def test_an_effort_alone_still_travels_alone() -> None:
@@ -58,7 +54,7 @@ def test_an_effort_alone_still_travels_alone() -> None:
     Only the reverse direction was broken: an effort names no model, so nothing
     about it can disagree with one.
     """
-    selected = CodexSessionConfig(cwd=CWD, effort="low").model_selection()
+    selected = Codex(cwd=CWD, effort="low").model_selection()
 
     assert selected == {"effort": "low"}
 
@@ -71,7 +67,7 @@ def test_the_pair_that_broke_the_probe_can_no_longer_be_assembled() -> None:
     caller or this default chose, so the home's cannot reach the wire beside a
     model it never saw.
     """
-    selected = CodexSessionConfig(cwd=CWD, model="gpt-5.5").model_selection()
+    selected = Codex(cwd=CWD, model="gpt-5.5").model_selection()
 
     assert "effort" in selected
     assert selected["effort"] != "max"

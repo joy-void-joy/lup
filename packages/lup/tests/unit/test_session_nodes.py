@@ -11,8 +11,6 @@ kind before anything reaches the blob store.
 import asyncio
 import json
 import logging
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
@@ -34,19 +32,20 @@ from lup.observability.sessions import (
     OutputOf,
     Session,
     SessionRecorder,
-    recorded_session_factory,
+    CloseRecordingWrapper,
     session_recorder,
     spelled_under,
 )
 from lup.observability.sweep import index_notes
 from lup.observability.trace import TraceEvent, TraceLogger
 from lup.providers.claude.transcripts import ClaudeTranscripts
-from lup.sessions.client import Client
-from lup.sessions.events import SessionHandle, SessionId, TurnHandle, TurnRequest
+from lup.sessions.layers import SessionLayers
+from lup.sessions.events import StartedTurn, TurnRequest
 from lup.tools.mcp import ToolError
 from lup.workspace.history import save_session
 from lup.workspace.notes import setup_notes
 from lup.workspace.paths import parse_timestamp
+from tests.unit.doubles import EngineAgent, agent_over
 
 AUTHOR = ActorRef(kind="test", id="t")
 
@@ -55,24 +54,18 @@ class Result(BaseModel):
     summary: str
 
 
-class IdleSession(capabilities.Session):
+class IdleSession(capabilities.SessionEngine):
     """A session nothing starts a turn on: the factory around it is the subject."""
 
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
+    ) -> StartedTurn[T]:
         raise NotImplementedError(f"no turn is started here: {request}")
 
 
-def idle_factory() -> Client:
-    @asynccontextmanager
-    async def open_session(
-        resume: SessionId | None = None,
-    ) -> AsyncGenerator[SessionHandle]:
-        del resume
-        yield SessionHandle(session=IdleSession())
-
-    return Client(open_session)
+def idle_agent() -> EngineAgent:
+    """An agent whose sessions nobody starts a turn on: the layers are the subject."""
+    return agent_over(IdleSession())
 
 
 def recorder_at(root: Path) -> SessionRecorder:
@@ -97,7 +90,9 @@ async def test_opening_and_closing_a_session_records_then_amends_one_node(
     assert opened.ended is None and opened.outcome == ""
     assert store.standing(opened).label == "open"
 
-    factory = recorded_session_factory(idle_factory(), recorder, notes.record)
+    factory = idle_agent().layered(
+        SessionLayers(wrappers=[CloseRecordingWrapper(recorder, notes.record)])
+    )
     async with factory.open():
         notes.trace_log.write_text("# Trace\n", encoding="utf-8")
 
@@ -118,7 +113,13 @@ async def test_standing_reads_open_then_fresh_stale_and_missing(
     assert notes.record is not None
     assert store.standing(notes.record).label == "open"
 
-    async with recorded_session_factory(idle_factory(), recorder, notes.record).open():
+    async with (
+        idle_agent()
+        .layered(
+            SessionLayers(wrappers=[CloseRecordingWrapper(recorder, notes.record)])
+        )
+        .open()
+    ):
         notes.trace_log.write_text("one\n", encoding="utf-8")
 
     [closed] = store.read(Session)
@@ -157,7 +158,9 @@ async def test_a_session_that_raises_closes_as_failed_or_interrupted(
     recorder = recorder_at(tmp_lup_project)
     notes = setup_notes("s1", recorder=recorder, runtime="fake")
     assert notes.record is not None
-    factory = recorded_session_factory(idle_factory(), recorder, notes.record)
+    factory = idle_agent().layered(
+        SessionLayers(wrappers=[CloseRecordingWrapper(recorder, notes.record)])
+    )
 
     with pytest.raises(RuntimeError):
         async with factory.open():

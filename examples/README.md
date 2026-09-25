@@ -46,6 +46,6 @@ Both make a real model call. Their enforcement is checked without one by
 `tests/unit/test_policy_examples.py`, which drives each example's own
 session configuration through the hooks the SDK would invoke.
 
-Each composition keeps provider construction at the application boundary.
-The query, wrappers, background scheduler, and router depend only on narrow
-runtime contracts once the factory has been built.
+Each composition declares its agent at the application boundary. The
+one-shot `ask`, the declared layers, the background scheduler, and the router
+depend only on narrow runtime contracts once the agent is declared.

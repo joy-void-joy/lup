@@ -67,6 +67,7 @@ from pydantic import BaseModel, Field
 from lup.harness.codescan.boundaries import (
     ASSEMBLY_RULE,
     CONSTANT_DECLARATION_RULE,
+    FRONT_DOOR_RULE,
     KERNEL_IMPORTS_RULE,
     LIBRARY_DEFAULT_RULE,
     NATIVE_SPELLING_RULE,
@@ -410,7 +411,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         # Flags a string-keyed dict/Mapping only when the VALUE is a scalar/
         # payload type (str, int, float, bool, bytes, complex, or a union that
         # opens with one). Concrete class and callable value types are left
-        # alone: `dict[str, Client]`, `dict[str, LupMcpTool]`, `dict[str,
+        # alone: `dict[str, Agent]`, `dict[str, LupMcpTool]`, `dict[str,
         # Callable[...]]` are registries/routers whose open, data-driven key
         # set IS the point. The smell is a CLOSED, enumerable key set with a
         # scalar value (config-shaped) — that wants a BaseModel or
@@ -437,7 +438,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
             # A registry: the value is a concrete class, and the open key set
             # keyed by external data is the whole point.
             RuleExample(
-                code="def render(fields: dict[str, Client]) -> None: ...",
+                code="def render(fields: dict[str, Agent]) -> None: ...",
                 verdict="cleared",
             ),
             RuleExample(
@@ -454,7 +455,7 @@ PORTABLE_PYTHON_ANTI_PATTERNS: list[AntiPattern] = [
         "lup.formats.banner, ModelRouter in lup.providers.routing) where they are a "
         "dispatch table; and EnvVars or StringMap from lup.types where the names are "
         "owned outside this repository. Concrete class/callable value types "
-        "(dict[str, Client]) are already accepted and JsonValue covers arbitrary JSON. "
+        "(dict[str, Agent]) are already accepted and JsonValue covers arbitrary JSON. "
         "Where the keys are open and none of those names them, "
         "`# lup: ignore[dict-str-payload]` carries the reason they are open",
     ),
@@ -1560,6 +1561,7 @@ PROJECT_RULES: list[ProjectRule] = [
     CHAIN_RULE,
     SEAM_RULE,
     ASSEMBLY_RULE,
+    FRONT_DOOR_RULE,
     NATIVE_SPELLING_RULE,
     KERNEL_IMPORTS_RULE,
     LIBRARY_DEFAULT_RULE,

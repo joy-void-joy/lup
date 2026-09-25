@@ -20,17 +20,19 @@ declares a public API:
 
 ```python
 from lup import (
-    create_claude,    # open Claude sessions, configured
-    create_codex,     # open Codex sessions, configured
-    create_client,    # route a model id to whichever serves it
-    NativeToolGroup,  # explicit groups of built-in tool authority
-    Client,   # what a constructor returns
-    SessionHandle,    # an opened session, plus optional fork capability
-    TurnHandle,       # an accepted turn, plus optional events/interrupt/steer
-    TurnInput,        # portable user input
-    TurnRequest,      # what to run, and the type to come back
+    Claude,           # a Claude Code agent, declared whole; it opens its sessions
+    Codex,            # a Codex agent, declared whole; it opens its threads
+    Agent,            # what either declaration answers, for code naming neither
+    Conversation,     # an open session of either
+    Turn,             # one turn of either: awaitable, iterable over its blocks
     TurnResult,       # a validated, typed result
-    turn_request,     # request factory
+    TurnInput,        # portable user input
+    TurnMessage,      # one message of a conversation's history
+    SessionId,        # the provider's identity for a conversation; resumes it
+    SessionSummary,   # one conversation the provider has on record
+    TurnId,           # the provider's identity for one turn; a fork is cut at it
+    CustomModel,      # a model id outside the runtime's catalog, on purpose
+    NativeToolGroup,  # explicit groups of built-in tool authority
 )
 ```
 
@@ -41,7 +43,7 @@ import asyncio
 
 from pydantic import BaseModel
 
-from lup import create_claude
+from lup import Claude
 
 
 class Summary(BaseModel):
@@ -49,56 +51,136 @@ class Summary(BaseModel):
 
 
 async def main() -> None:
-    client = create_claude(model="claude-opus-5", system_prompt="Be concise.")
-    result = await client.query("Summarize why typed boundaries help.", Summary)
+    agent = Claude(model="opus", system_prompt="Be concise.")
+    result = await agent.ask("Summarize why typed boundaries help.", Summary)
     print(result.output.summary)
 
 
 asyncio.run(main())
 ```
 
-The constructors are why the root is worth importing. Everything else here is
-vocabulary — a name to annotate against — and vocabulary alone builds nothing:
-the typed result is a Pydantic model the program declares itself.
+`Claude` and `Codex` are why the root is worth importing. Each is a frozen
+Pydantic model declaring one agent whole — model, prompt, tools, permissions,
+workspace, and the layers its sessions are wrapped in — and each is also what
+opens those sessions: there is no client to build from a declaration.
+Everything else here is vocabulary, a name to annotate against, and vocabulary
+alone builds nothing: the typed result is a Pydantic model the program
+declares itself.
 
-`client.query(...)` opens a session, takes one turn, and always closes it. For
-anything with more than one turn, open a session and start turns on it — the
-same contracts, held longer.
+### Asking
 
-`create_client(model=...)` is the third route, for a caller holding a model id
-who does not also want to know which vendor owns which prefix:
+`ask` is the only verb. On an agent it is a one-shot: `agent.ask(prompt,
+Model)` opens a session, takes one turn, closes the session however the turn
+ended, and returns `TurnResult[Model]`; asked without a model it returns
+`TurnResult[None]`. For more than one turn, open a session and ask it:
 
 ```python
-from lup import create_client
+from pydantic import BaseModel
 
-client = create_client("gpt-5.5")           # routed by prefix
-client = create_client("house-model", provider="claude")   # said outright
+from lup import Claude
+
+
+class Plan(BaseModel):
+    steps: list[str]
+
+
+async def plan(agent: Claude) -> Plan:
+    async with agent.open() as session:
+        await session.ask("Draft a plan for the migration.")
+        turn = session.ask("Now give that plan as steps.", Plan)
+        async for block in turn:
+            if (text := block.text_payload) is not None:
+                print(text)
+        result = await turn
+        return result.output
 ```
 
-It is deliberately narrower than the two named constructors, and that is the
-whole reason all three exist. Dispatch cannot carry typed provider options:
-`create_claude(options=ClaudeSessionConfig(...))` type-checks, and no annotation
-means "whichever config the model turns out to select". So the common arguments
-route, the whole declaration does not, and neither pretends to be the other. A
-model no prefix claims raises rather than guessing — a guess opens a session
-against the wrong vendor and fails later, in that vendor's vocabulary.
+A turn starts the first time anything asks for it — an `await`, an iteration,
+`events()`, `live()`, `interrupt()`, or on Codex `steer()` — and starts once
+however many ask; awaiting it after iterating returns the same result. Its
+output model is bound before the provider accepts the prompt — Claude's
+submission tool, Codex's `outputSchema` — so no turn runs ahead of the schema
+it has to answer in.
 
-All three resolve their adapter on first access, so `import lup` costs roughly
-80 ms and pulls neither provider SDK. Naming a constructor imports its adapter;
-opening a session is what finally reaches the vendor's own package.
+| Ask the turn | For |
+| --- | --- |
+| `await turn` | The `TurnResult[T]`: `output`, `blocks`, `messages`, `usage`, `duration`, `identifiers` |
+| `async for block in turn` | Each completed block, in the order they finished |
+| `turn.events()` | Every durable event: turn and block starts, block and message completions, the turn's end |
+| `turn.live()` | The durable events and the deltas between them |
+| `await turn.interrupt()` | Stop the turn, returning once it has stopped |
+| `await turn.steer(prompt)` | Add input to the running turn without starting another — `CodexTurn` only |
+
+`live()` on a Claude agent declared with `delta_streaming=False` raises
+`DeltaStreamingDisabled` rather than yielding a turn that only looks quiet.
+
+A capability a provider lacks is absent from its type, never present and
+`None`: `ClaudeTurn` has no `steer`, because Claude takes no input into a
+running turn, so the call fails in the type checker rather than at run time.
+`ClaudeSession`, `ClaudeTurn`, `CodexSession`, and `CodexTurn` are named from
+`lup.providers.claude` and `lup.providers.codex`, each of which holds every
+part of its provider a program writes. Code that works over either provider
+names the `Agent`, `Conversation`, and `Turn` protocols instead, and asks
+only for what both answer.
+
+### Conversations outlive the process
+
+`session.id` is the provider's own identity for a conversation, and it
+resumes it. `agent.sessions()` lists what the provider has on record for the
+agent's workspace, newest first — conversations a terminal started as well as
+the ones this library did:
+
+```python
+from lup import Codex
+
+
+async def last_conversation(agent: Codex) -> None:
+    past = await agent.sessions()
+    async with agent.open(resume=past[0].id) as session:
+        for message in await session.history():
+            texts = [text for block in message.blocks if (text := block.text_payload)]
+            print(message.role, texts)
+```
+
+`history()` reads the provider's own record — Claude Code's transcripts,
+Codex's thread — normalized into the same `TurnMessage` and block types a turn
+yields. `session.fork(at=result.identifiers.turn)` opens an independent
+conversation carrying this one's history through that turn, or everything so
+far with `at` unset; nothing asked of either reaches the other.
+
+### Models and effort
+
+`model` takes a name from the runtime's own catalog, a `Literal`, so a typo
+fails in the type checker; a portable tier — `frontier`, `strongest`,
+`balanced`, `fast` — that each adapter spells in its own lineup; or
+`CustomModel(id=...)` for an id the catalog does not list, such as a
+compatible endpoint's own model. `effort` climbs `low`, `medium`, `high`,
+`xhigh`, `max`, `ultra`, and an effort the catalog says the model cannot take
+is refused where the agent is declared rather than dropped by the CLI.
+
+A caller holding nothing but a model id asks `catalog_provider(model)`
+(`lup.providers.routing`) which runtime's catalog lists it, then declares that
+agent: dispatch cannot carry typed provider options, so it answers the
+question and leaves the declaration to the caller.
+
+Both declarations resolve on first access, so `import lup` pulls neither
+adapter nor either provider SDK. Naming `Claude` or `Codex` imports its
+adapter — several hundred modules, the MCP tooling its tools are declared in —
+and still no SDK: opening a session is what finally loads Claude's SDK or
+starts Codex's app-server.
 
 ## Native tools
 
-`native_tools` defaults to `None` on all three constructors, `SessionRequest`,
-and both provider session configs. `None` and an empty sequence grant no
+`native_tools` defaults to `None` on `Claude`, `Codex`, and `SessionRequest`.
+`None` and an empty sequence grant no
 built-in tools and inherit no ambient tool inventory. A caller opts in with
 `NativeToolGroup` values or exact names supported by its provider:
 
 ```python
-from lup import NativeToolGroup, create_claude, create_codex
+from lup import Claude, Codex, NativeToolGroup
 
-reader = create_claude(native_tools=[NativeToolGroup.READ])
-executor = create_codex(native_tools=[NativeToolGroup.SHELL])
+reader = Claude(native_tools=[NativeToolGroup.READ])
+executor = Codex(native_tools=[NativeToolGroup.SHELL])
 ```
 
 The groups are `READ`, `WEB`, `WRITE`, `SHELL`, and `ALL`. `ALL` explicitly
@@ -115,13 +197,14 @@ Permission patterns such as `Bash(*)` are not native tool identities.
 | `NativeToolGroup.SHELL` | `Bash`, `TaskOutput`, `TaskStop` | Shell execution |
 | Exact names | Includes `Read`, `WebFetch`, `Write`, `Bash` | `Bash`, `WebSearch`, `apply_patch`; `Read`, `Write`, and `WebFetch` are rejected |
 
-The constructor's `tools=[...]` argument supplies application `@lup_tool`
+The declaration's `tools=[...]` field supplies application `@lup_tool`
 handlers independently. Those handlers still work with `native_tools=None`:
 Claude hosts them through MCP, and Codex dispatches them through its in-process
-dynamic-tool handlers. `tool_servers` remains the explicit MCP-server
-declaration. Typed submission remains available with no native tools.
-`allowed_tools` controls automatic approval within the declared authority;
-`disallowed_tools` narrows it. Neither adds an undeclared tool.
+dynamic-tool handlers. `tool_servers` on `Claude` and `mcp_servers` on `Codex`
+remain the explicit MCP-server declarations. Typed output remains available
+with no native tools. On `Claude`, `allowed_tools` controls automatic approval
+within the declared authority and `disallowed_tools` narrows it; neither adds
+an undeclared tool.
 
 Explicit session hooks remain attached when native tools are granted. Codex
 enables the verified declared project policy plugin for an explicit native grant while keeping
@@ -133,11 +216,12 @@ Codex requires the selected model to appear in its native model catalog so
 the adapter can bound the tool metadata attached to model requests. An unknown
 explicit or inherited model is rejected before input.
 
-A Codex thread's dynamic tool and submission schemas are fixed at thread
-creation. Resume requires matching application tools and submission schemas;
-native grants may narrow on resume. Start a fresh session when application
-tools or output schemas require another dynamic binding.
-The adapter rejects an incompatible resume before sending user input.
+A Codex thread's application tools are fixed at thread creation. Resume
+requires the same set; native grants may narrow on resume. Start a fresh
+session when application tools require another dynamic binding. The adapter
+rejects an incompatible resume before sending user input. Typed output does
+not ride that channel — each turn carries its own `outputSchema` — so the
+model a turn is asked for may change from one turn to the next.
 
 ## Layering
 
@@ -208,26 +292,32 @@ pull provider-neutral code into the tooling layer.
 
 ### `sessions` — how one turn runs
 
-The engine. `capabilities.py` declares the lifecycle seams — open a session,
-start a turn, await a result — as one-to-three-method capabilities.
-`events.py` holds the shared turn vocabulary: opaque `SessionId`/`TurnId`,
-the `TurnBlock` union (`TurnTextBlock`, `TurnThinkingBlock`,
-`TurnToolCallBlock`, `TurnToolResultBlock`), and the generic
-`TurnRequest[T]`/`TurnResult[T]`.
+The engine. `surface.py` declares what a program holds over either provider:
+the `Agent`, `Conversation`, and `Turn` protocols. `capabilities.py` declares
+the seams beneath them — start a turn, resolve it, stream its events,
+interrupt, steer, fork, read the provider's record — as one-to-three-method
+capabilities, and `turns.py` holds the turn that starts itself through them
+the first time anything asks. `events.py` holds the shared turn vocabulary:
+opaque `SessionId`/`TurnId`, the `TurnBlock` union (`TurnTextBlock`,
+`TurnThinkingBlock`, `TurnToolCallBlock`, `TurnToolResultBlock`,
+`TurnNativeActivityBlock`), `TurnMessage`, `SessionSummary`, and the generic
+`TurnResult[T]`.
 
-Everything optional is a decorator or an absent capability, never a flag:
-`middleware.py` layers timeouts, budgets, retries, correction, tracing, usage,
-and display around a factory; `output.py` binds a fresh `submit_output` tool
-and store to each typed turn; `budget.py` and `quota.py` are the two opposite
-kinds of "no more work" it applies.
+Everything optional is a layer or an absent capability, never a flag:
+`middleware.py` holds the turn decorators — timeouts, budgets, retries,
+correction, tracing, usage, and display — and `layers.py` the `SessionLayers`
+an agent declares them in, beside the session wrappers that go around them;
+`output.py` binds a fresh `submit_output` tool and store to each typed turn;
+`budget.py` and `quota.py` are the two opposite kinds of "no more work" it
+applies.
 
 Everything about *which* runtime answers moved out to `providers`, and
 everything about running work *over* a session moved out to
 `orchestration` — a turn engine that also held routing, profile trees and a
 background agent was three subjects sharing one name.
 
-Unsupported behavior is *absent* from the handle rather than present and
-raising. If `TurnHandle.steer` is `None`, that backend cannot steer.
+Unsupported behavior is *absent* from a provider's type rather than present
+and raising: `CodexTurn` has `steer`, and `ClaudeTurn` has no such method.
 
 ### `harness` — declaration to disk
 
@@ -289,7 +379,10 @@ and owns only the sequence.{{ resolver_lifecycle }}
 
 ### `providers` — the vendor edge
 
-`providers/claude/` and `providers/codex/` each implement the same four seams:
+`providers/claude/` and `providers/codex/` each hold, in the package itself,
+everything a program writes with that provider — the `Claude` or `Codex`
+declaration, its session and turn classes, and the vocabulary they take — so
+a program names nothing deeper. Behind that each implements the same four seams:
 `runtime.py` (open sessions behind the runtime contracts), `harness.py`
 (render the declaration into that runtime's tree), `harness_runtime.py`
 (probe the installed CLI for evidence), and `native.py` (decode hook payloads
@@ -298,8 +391,9 @@ renderers into whole-tree compilers.
 
 Each also carries what only it needs: Claude a personal account registry that
 `providers/profile_tree.py` answers with the directories a project keeps instead,
-Codex a
-typed JSON-RPC transport to `codex app-server`. Neither is mirrored for
+and a reader of the transcripts Claude Code keeps, which `history()` and
+`sessions()` answer from; Codex a typed JSON-RPC transport to
+`codex app-server`, which answers both itself. Neither is mirrored for
 symmetry's sake. [platform-differentiation.md](platform-differentiation.md)
 is the map of every difference.
 
@@ -416,16 +510,36 @@ leaves it by doing so rather than by being argued about here.
 The library is the dependency; your application is the composition root. That
 inversion is the whole design, and it has three practical consequences.
 
-**Name the provider exactly once.** Choose an adapter factory in one function,
-pass the resulting `Client` everywhere else. `seam-boundary` will tell
-you when a second site appears.
+**Name the provider exactly once.** Declare the agent — `Claude(...)` or
+`Codex(...)` — in one function, and hand it everywhere else as an `Agent`, so
+the code that asks it works unchanged when the declaration changes provider.
+`seam-boundary` refuses an import of `lup.providers.claude` or
+`lup.providers.codex` outside a composition root, which keeps a provider's
+own parts where it is named.
 
-**Compose capabilities rather than configuring an object.** Timeouts, budgets,
-retries, persistence, and tracing are whole-turn decorators that
-`lup.sessions.middleware.decorated_session_factory` wraps around a `Client`,
-each added by passing its own config, not fields on a client.
+**Declare layers rather than wrapping by hand.** Timeouts, budgets, retries,
+correction, persistence, and tracing are whole-turn decorators, each taking
+its own config; an agent lists them in its `layers`, and every session it
+opens is wrapped in them in the library's one stated order:
 
-**Let typed output be the only output.** Bind a Pydantic type to the turn and
+```python
+from lup import Claude
+from lup.sessions.layers import SessionLayers
+from lup.sessions.middleware import RecoveryConfig, TimeoutConfig
+
+agent = Claude(
+    model="strongest",
+    layers=SessionLayers(
+        timeout=TimeoutConfig(seconds=600), recovery=RecoveryConfig(retries=2)
+    ),
+)
+```
+
+Code holding an agent it did not declare lays more on with
+`agent.layered(SessionLayers(...))`, the fields it sets winning, without
+knowing which provider it holds.
+
+**Let typed output be the only output.** Pass a Pydantic model to `ask` and
 read `TurnResult.output`. A missing submission raises a typed error carrying
 the blocks, usage, duration, and validation history — it cannot arrive as an
 empty success.

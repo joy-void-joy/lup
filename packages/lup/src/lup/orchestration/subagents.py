@@ -22,7 +22,7 @@ from collections.abc import Callable
 from pydantic import BaseModel, Field
 
 from lup.tools.mcp import LupMcpTool, ToolError, lup_tool
-from lup.sessions.client import Client
+from lup.sessions.surface import Agent
 from lup.types import SubagentSpec
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ class RunSubagentOutput(BaseModel):
 def create_run_subagent_tool(
     specs: list[SubagentSpec],
     *,
-    factory_recipe: Callable[[SubagentSpec], Client],
+    factory_recipe: Callable[[SubagentSpec], Agent],
 ) -> LupMcpTool:
     """Create the run_subagent tool from the shared spec list.
 
@@ -82,7 +82,7 @@ def create_run_subagent_tool(
             ) from exc
 
         logger.info("Delegating to subagent %r", spec.name)
-        response = await factory.query(validated.task)
+        response = await factory.ask(validated.task)
         text = "\n\n".join(
             text
             for block in response.blocks

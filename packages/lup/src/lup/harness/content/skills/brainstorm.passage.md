@@ -32,12 +32,15 @@ for them by name, and read the module when a question gets specific.
 
 ### The runtime, and what one run is
 
-A session is opened by a **`Client`**, which hands back a `Session`;
-a turn is a **`TurnRequest`** carrying the prompt and the Pydantic type the
-answer must arrive as, and it comes back as a strict **`TurnResult[T]`** whose
-`.output` is already validated. Each typed turn binds its own `submit_output`
-tool to that schema, so structured output is enforced rather than parsed.
-`Client.query(prompt, Model)` is the whole of it for a one-shot.
+An agent is declared whole, as one frozen model per runtime — model, prompt,
+tools, permissions, workspace — and the declaration is what opens its
+sessions. **`ask`** is the only verb: a turn puts the prompt and the Pydantic
+type the answer must arrive as, and comes back as a strict
+**`TurnResult[T]`** whose `.output` is already validated, so structured
+output is enforced rather than parsed. `await agent.ask(prompt, Model)` is the
+whole of it for a one-shot; `async with agent.open() as session` holds a
+conversation whose turns are `session.ask(...)`, and `agent.open(resume=...)`
+takes one back up later.
 
 The first design question is therefore what one *run* is: a single typed turn,
 a conversation over one session, or a process that outlives any of them.
@@ -58,9 +61,9 @@ early because they reach both:
 
 ### What wraps a session
 
-`decorated_session_factory` layers behavior around whatever factory it is
-given — budget, timeout, correction, display, persistence, tracing. These are
-composition choices rather than code to write, so "what happens when it costs
+An agent's `layers` (a `SessionLayers`) wrap every session it opens — budget,
+timeout, correction, display, persistence, tracing. These are declaration
+choices rather than code to write, so "what happens when it costs
 too much / takes too long / has to be recorded" is answered by naming layers.
 
 ### Tools
@@ -102,7 +105,7 @@ is better than one that inherits all of them.
 When the conversation gets specific enough, show the user what they will be
 customizing. These are the files that matter:
 
-- {{ agent_core_py }} — composition: how a factory is built and wrapped
+- {{ agent_core_py }} — composition: how the agent is declared and layered
 - {{ agent_toolsets_py }} — the tool-group registry, the one place a group is added
 - {{ agent_tools_example_py }} — the worked tool pattern
 - {{ agent_tools_nested_py }} — the copyable nested-agent template

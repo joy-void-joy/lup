@@ -26,7 +26,7 @@ demonstration here:
   source omits from a fallback source (``fill_missing_snippets``)
   inside the tool
 - Extraction — ``fetch_example`` distills a fetched page down to a
-  focused answer through a nested ``query()`` call (``extract_answer``)
+  focused answer through a nested ``ask()`` call (``extract_answer``)
   when the caller passes ``extract`` (see docs/orchestration.md § Nested Agent)
 
 Tool descriptions are the agent's only documentation for each tool.
@@ -216,7 +216,7 @@ async def extract_answer(content: str, question: str) -> str:
             "not contain one."
         ),
     )
-    result = await factory.query(f"Question: {question}\n\nDocument:\n{content}")
+    result = await factory.ask(f"Question: {question}\n\nDocument:\n{content}")
     text = "\n\n".join(
         text for block in result.blocks if (text := block.text_payload) is not None
     )

@@ -24,12 +24,21 @@ from lup.providers.selection import SessionEffort, SessionRequest
 EVERY_DEGREE: list[SessionEffort] = list(get_args(SessionEffort.__value__))
 
 
-def test_a_request_naming_no_effort_leaves_both_runtimes_unset() -> None:
-    """Absence has to stay absent, or every session gains an opinion."""
+def test_a_request_naming_no_effort_takes_the_models_default() -> None:
+    """Absence is the model's default, not whatever a settings file says."""
     request = SessionRequest(cwd=Path("."))
 
-    assert claude_config(request).effort is None
-    assert codex_config(request).effort is None
+    assert claude_config(request).resolved_effort() == "xhigh"
+    assert codex_config(request).resolved_effort() == "xhigh"
+
+
+def test_the_default_is_clamped_to_what_the_rendered_model_takes() -> None:
+    """``claude-opus-4-6`` stops at ``max`` with no ``xhigh``; haiku takes none."""
+    below = SessionRequest(cwd=Path("."), model="claude-opus-4-6")
+    none = SessionRequest(cwd=Path("."), model="haiku")
+
+    assert claude_config(below).resolved_effort() == "high"
+    assert claude_config(none).resolved_effort() is None
 
 
 @pytest.mark.parametrize("degree", EVERY_DEGREE)

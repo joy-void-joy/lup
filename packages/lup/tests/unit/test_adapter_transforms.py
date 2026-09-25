@@ -25,9 +25,9 @@ from typing import TypeAliasType, get_args
 import pytest
 from pydantic import AnyHttpUrl, BaseModel, SecretStr
 
+from lup.providers.claude import ClaudeCompatibleEndpoint
 from lup.providers.claude.config import (
     ClaudeCompatibilityTransform,
-    ClaudeCompatibleEndpoint,
     ClaudeProfileRegistry,
     ClaudeProfileResolver,
     ClaudeProfileSelection,
@@ -47,10 +47,10 @@ from lup.providers.claude.native import (
     ClaudeWriteOperation,
     parse_claude_before_tool,
 )
-from lup.providers.claude.runtime import ClaudeSessionConfig
+from lup.providers.claude import Claude
+from lup.providers.codex import CodexCompatibleEndpoint
 from lup.providers.codex.config import (
     CodexCompatibilityTransform,
-    CodexCompatibleEndpoint,
     CodexProfileRegistry,
     CodexProfileResolver,
     CodexProfileSelection,
@@ -69,7 +69,7 @@ from lup.providers.codex.native import (
     CodexUnknownOperation,
     parse_codex_before_tool,
 )
-from lup.providers.codex.runtime import CodexSessionConfig
+from lup.providers.codex import Codex
 from lup.policy.models import (
     BeforeTool,
     EditBatch,
@@ -81,7 +81,6 @@ from lup.policy.models import (
     UnknownTool,
 )
 from lup.providers.config import ProfileSelector
-from lup.sessions.client import Client
 from lup.providers.routing import (
     ExactModelMatcher,
     ModelRoute,
@@ -89,7 +88,6 @@ from lup.providers.routing import (
     PrefixModelMatcher,
 )
 from lup.types import CustomModel, JsonObject
-from tests.unit.test_background_runtime import RecordingOpener
 
 
 class DecoderArm(BaseModel, frozen=True):
@@ -215,9 +213,7 @@ def test_claude_profile_precedence_and_immutability(tmp_path: Path) -> None:
         default=ClaudeProfileSelection(config_directory=tmp_path / "default"),
     )
     resolver = ClaudeProfileResolver(registry)
-    original = ClaudeSessionConfig(
-        model=CustomModel(id="claude"), environment={"KEEP": "1"}
-    )
+    original = Claude(model=CustomModel(id="claude"), environment={"KEEP": "1"})
 
     active = resolver.resolve(None).apply(original)
     explicit = resolver.resolve("explicit").apply(original)
@@ -238,9 +234,7 @@ def test_an_unnamed_claude_profile_leaves_the_home_its_environment_selects() -> 
     directory opened every session on a document the account never wrote.
     Codex's default names no home either."""
     resolver = ClaudeProfileResolver(ClaudeProfileRegistry())
-    original = ClaudeSessionConfig(
-        model=CustomModel(id="claude"), environment={"KEEP": "1"}
-    )
+    original = Claude(model=CustomModel(id="claude"), environment={"KEEP": "1"})
 
     configured = resolver.resolve(None).apply(original)
 
@@ -248,31 +242,17 @@ def test_an_unnamed_claude_profile_leaves_the_home_its_environment_selects() -> 
     assert configured.environment["KEEP"] == "1"
 
 
-class RecordingBuilder:
-    """Capture the configuration a selector hands to its factory builder."""
-
-    def __init__(self) -> None:
-        self.config: ClaudeSessionConfig | None = None
-
-    def build(self, config: ClaudeSessionConfig) -> Client:
-        self.config = config
-        return Client(RecordingOpener().session_context)
-
-
-def test_profile_selector_resolves_applies_then_constructs(tmp_path: Path) -> None:
+def test_profile_selector_resolves_and_applies_to_the_agent(tmp_path: Path) -> None:
     registry = ClaudeProfileRegistry(
         profiles={"work": ClaudeProfileSelection(config_directory=tmp_path / "work")}
     )
-    builder = RecordingBuilder()
-    selector = ProfileSelector(ClaudeProfileResolver(registry), builder.build)
-    base = ClaudeSessionConfig(
-        model=CustomModel(id="claude"), environment={"KEEP": "1"}
-    )
-    selector.session_factory(base, "work")
+    selector = ProfileSelector(ClaudeProfileResolver(registry))
+    base = Claude(model=CustomModel(id="claude"), environment={"KEEP": "1"})
 
-    assert builder.config is not None
-    assert builder.config.environment["CLAUDE_CONFIG_DIR"] == str(tmp_path / "work")
-    assert builder.config.environment["KEEP"] == "1"
+    selected = selector.session_factory(base, "work")
+
+    assert selected.environment["CLAUDE_CONFIG_DIR"] == str(tmp_path / "work")
+    assert selected.environment["KEEP"] == "1"
     assert "CLAUDE_CONFIG_DIR" not in base.environment
 
 
@@ -284,11 +264,9 @@ def test_adapter_selectors_expose_the_resolved_transform(tmp_path: Path) -> None
         CodexProfileRegistry(default=CodexProfileSelection(codex_home=tmp_path))
     )
 
-    claude_config = claude.transform().apply(
-        ClaudeSessionConfig(model=CustomModel(id="claude"))
-    )
+    claude_config = claude.transform().apply(Claude(model=CustomModel(id="claude")))
     codex_config = codex.transform().apply(
-        CodexSessionConfig(model=CustomModel(id="gpt"), cwd=tmp_path)
+        Codex(model=CustomModel(id="gpt"), cwd=tmp_path)
     )
 
     assert claude_config.environment["CLAUDE_CONFIG_DIR"] == str(tmp_path)
@@ -296,9 +274,7 @@ def test_adapter_selectors_expose_the_resolved_transform(tmp_path: Path) -> None
 
 
 def test_claude_compatible_endpoint_owns_auth_and_aliases() -> None:
-    original = ClaudeSessionConfig(
-        model=CustomModel(id="served-model"), environment={"KEEP": "1"}
-    )
+    original = Claude(model=CustomModel(id="served-model"), environment={"KEEP": "1"})
     transformed = ClaudeCompatibilityTransform(
         ClaudeCompatibleEndpoint(
             base_url=AnyHttpUrl("http://localhost:8000/v1"),
@@ -327,7 +303,7 @@ def test_codex_named_overlay_refusal_preserves_the_input_home(tmp_path: Path) ->
             active="work",
         )
     )
-    original = CodexSessionConfig(model=CustomModel(id="gpt"), cwd=tmp_path)
+    original = Codex(model=CustomModel(id="gpt"), cwd=tmp_path)
     with pytest.raises(ValueError, match="app-server cannot select named profiles"):
         resolver.resolve(None).apply(original)
     assert original.named_profile is None
@@ -337,7 +313,7 @@ def test_codex_named_overlay_refusal_preserves_the_input_home(tmp_path: Path) ->
 def test_codex_compatible_endpoint_uses_structured_provider_config(
     tmp_path: Path,
 ) -> None:
-    original = CodexSessionConfig(model=CustomModel(id="local"), cwd=tmp_path)
+    original = Codex(model=CustomModel(id="local"), cwd=tmp_path)
     transformed = CodexCompatibilityTransform(
         CodexCompatibleEndpoint(
             identifier="local_provider",
@@ -362,8 +338,8 @@ def test_codex_compatible_endpoint_uses_structured_provider_config(
 
 
 def test_model_router_uses_explicit_recipe_then_first_match() -> None:
-    broad = Client(RecordingOpener().session_context)
-    exact = Client(RecordingOpener().session_context)
+    broad = Claude(model=CustomModel(id="broad"))
+    exact = Claude(model=CustomModel(id="exact"))
     router = ModelRouter(
         [
             ModelRoute(

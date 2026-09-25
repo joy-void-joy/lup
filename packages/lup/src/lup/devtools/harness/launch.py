@@ -27,12 +27,14 @@ from lup.providers.profiles import DefaultHomeProfile, ProfileDirectory
 from lup.devtools.harness.contained import contained_argv
 from lup.providers.claude.confinement import CLAUDE_SANDBOX_OFF
 from lup.providers.claude.model_choice import (
+    claude_default_effort,
     claude_effort,
     claude_effort_named,
     listed_claude_model,
     refuse_unsupported_effort as refuse_claude_effort,
 )
 from lup.providers.codex.model_choice import (
+    codex_default_effort,
     codex_effort_arguments,
     codex_effort_named,
     listed_codex_model,
@@ -1871,12 +1873,16 @@ def launch_claude(
     )
     # Refused before anything is generated or checkpointed: an effort the
     # model's catalog row lacks would be dropped by the CLI without a word.
+    # Unnamed, it is the model's default, the one a session declared in code
+    # takes, rather than whatever the CLI's own settings say.
+    listed = None if selected_model is None else listed_claude_model(selected_model)
     try:
-        chosen_effort = None if effort is None else claude_effort_named(effort)
-        refuse_claude_effort(
-            None if selected_model is None else listed_claude_model(selected_model),
-            chosen_effort,
+        chosen_effort = (
+            claude_default_effort(listed)
+            if effort is None
+            else claude_effort_named(effort)
         )
+        refuse_claude_effort(listed, chosen_effort)
     except ValueError as refusal:
         raise typer.BadParameter(str(refusal)) from refusal
     compiled_effort = None if chosen_effort is None else claude_effort(chosen_effort)
@@ -2104,14 +2110,21 @@ def launch_codex(
         raise typer.BadParameter(contradiction)
     selected_model = model or (mode.native_model("codex") if mode is not None else None)
     # Refused before anything is generated or checkpointed: the API refuses an
-    # effort the model lacks with a 400 that names neither.
+    # effort the model lacks with a 400 that names neither. Unnamed, it is the
+    # model's default, the one a session declared in code takes, rather than
+    # whatever the home's configuration says — except under a named profile
+    # with no model named over it, which chose its model and effort together.
+    listed = None if selected_model is None else listed_codex_model(selected_model)
+    profiled = profile is not None and selected_model is None
     try:
-        chosen_effort = None if effort is None else codex_effort_named(effort)
-        refuse_codex_effort(
-            None if selected_model is None else listed_codex_model(selected_model),
-            chosen_effort,
-            CodexModelTiers(),
+        chosen_effort = (
+            codex_effort_named(effort)
+            if effort is not None
+            else None
+            if profiled
+            else codex_default_effort(listed, CodexModelTiers())
         )
+        refuse_codex_effort(listed, chosen_effort, CodexModelTiers())
     except ValueError as refusal:
         raise typer.BadParameter(str(refusal)) from refusal
     if checkpoint is not None and not generate_only:

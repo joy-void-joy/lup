@@ -73,7 +73,6 @@ from lup.resolver.questions import QuestionBroker
 from lup.resolver.run import ResolveRun, ResolverInvariantError
 from lup.resolver.turns import TurnRunner
 from lup.resolver.verification import Verifier
-from lup.sessions.events import TurnInput, turn_request
 
 
 def asked_rulings(
@@ -813,7 +812,7 @@ class Joiner:
             "omit it when it does not."
         )
         result = await self.runner.reviewer_round(
-            reviewer, worktree, turn_request(TurnInput(text=prompt), ReviewReport)
+            reviewer, worktree, prompt, ReviewReport
         )
         unknown = [
             label for label in result.output.criteria_met if label not in declared
@@ -828,7 +827,8 @@ class Joiner:
             result = await self.runner.reviewer_round(
                 reviewer,
                 worktree,
-                turn_request(TurnInput(text=correction), ReviewReport),
+                correction,
+                ReviewReport,
             )
         met = {identifier: True for identifier in result.output.criteria_met}
         lost = [

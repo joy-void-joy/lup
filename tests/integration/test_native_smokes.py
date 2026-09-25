@@ -19,12 +19,9 @@ import sh
 from pydantic import BaseModel, Field
 
 from lup.providers.claude.harness import ClaudeSpellings
-from lup.providers.claude.runtime import (
-    ClaudeSessionConfig,
-    create_claude,
-)
+from lup.providers.claude import Claude
 from lup.providers.codex.harness_runtime import CodexPluginInstaller, PluginCacheConfig
-from lup.providers.codex.runtime import CodexSessionConfig, create_codex
+from lup.providers.codex import Codex
 from lup.harness.process import LocalProcessLauncher
 from lup.resolver.core import ResolverCore
 from lup.tools.mcp import create_mcp_server, server_tool_names
@@ -41,8 +38,8 @@ from lup.resolver.models import (
     VerificationCommand,
     WorkerContext,
 )
-from lup.sessions.client import Client
-from lup.sessions.events import TurnTextBlock, turn_request
+from lup.sessions.surface import Agent
+from lup.sessions.events import TurnTextBlock
 
 pytestmark = pytest.mark.integration
 
@@ -52,19 +49,14 @@ CODEX_SMOKE_MODEL = "gpt-5.5"
 
 async def test_fresh_claude_session_completes_one_turn(tmp_path: Path) -> None:
     """A fresh native session id survives one complete turn."""
-    factory = create_claude(
-        ClaudeSessionConfig(
-            model=CLAUDE_SMOKE_MODEL,
-            system_prompt="Answer in one short sentence.",
-            cwd=tmp_path,
-            max_turns=1,
-        )
+    agent = Claude(
+        model=CLAUDE_SMOKE_MODEL,
+        system_prompt="Answer in one short sentence.",
+        cwd=tmp_path,
+        max_turns=1,
     )
-    async with factory.open() as handle:
-        accepted = await handle.session.start(
-            turn_request("Reply with the single word: ready")
-        )
-        result = await accepted.turn.result()
+    async with agent.open() as session:
+        result = await session.ask("Reply with the single word: ready")
 
     assert result.identifiers.session.value
     assert result.identifiers.turn.value
@@ -81,23 +73,17 @@ class SmokeSubmission(BaseModel):
 
 async def test_codex_turn_start_carries_a_native_output_schema(tmp_path: Path) -> None:
     """A typed binding survives the installed app-server schema."""
-    factory = create_codex(
-        CodexSessionConfig(
-            model=CODEX_SMOKE_MODEL,
-            developer_instructions="Follow the submission instruction exactly.",
-            cwd=tmp_path,
-            sandbox="read-only",
-            approval_policy="never",
-        )
+    agent = Codex(
+        model=CODEX_SMOKE_MODEL,
+        system_prompt="Follow the submission instruction exactly.",
+        cwd=tmp_path,
+        sandbox="read-only",
+        approval_policy="never",
     )
-    async with factory.open() as handle:
-        accepted = await handle.session.start(
-            turn_request(
-                ("Return a JSON object with message set to 'smoke ok'."),
-                SmokeSubmission,
-            )
+    async with agent.open() as session:
+        result = await session.ask(
+            "Return a JSON object with message set to 'smoke ok'.", SmokeSubmission
         )
-        result = await accepted.turn.result()
 
     assert result.output.message
     assert result.identifiers.session.value
@@ -120,29 +106,20 @@ async def test_a_claude_session_carries_context_across_same_schema_turns(
     starts each one cold. Nothing here resumes anything — the same live
     connection has to carry the first turn's word into the second.
     """
-    factory = create_claude(
-        ClaudeSessionConfig(
-            model=CLAUDE_SMOKE_MODEL,
-            system_prompt="Call the submission tool. Never ask a question.",
-            cwd=tmp_path,
-        )
+    agent = Claude(
+        model=CLAUDE_SMOKE_MODEL,
+        system_prompt="Call the submission tool. Never ask a question.",
+        cwd=tmp_path,
     )
-    async with factory.open() as handle:
-        first = await handle.session.start(
-            turn_request(
-                "Remember the word BATHYSPHERE. Submit it as recalled.",
-                RecallSubmission,
-            )
+    async with agent.open() as session:
+        opening = await session.ask(
+            "Remember the word BATHYSPHERE. Submit it as recalled.", RecallSubmission
         )
-        opening = await first.turn.result()
-        second = await handle.session.start(
-            turn_request(
-                "Submit the word I asked you to remember, as recalled. "
-                "Do not guess a new one.",
-                RecallSubmission,
-            )
+        result = await session.ask(
+            "Submit the word I asked you to remember, as recalled. "
+            "Do not guess a new one.",
+            RecallSubmission,
         )
-        result = await second.turn.result()
 
     assert "bathysphere" in opening.output.recalled.lower()
     # Carried by the conversation, not restated in the prompt above.
@@ -210,7 +187,7 @@ async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) ->
     launcher = LocalProcessLauncher()
     run_id = "smoke-run"
 
-    def worker_factory(context: WorkerContext) -> Client:
+    def worker_factory(context: WorkerContext) -> Agent:
         server = create_mcp_server(
             "resolver",
             tools=create_question_tools(
@@ -221,30 +198,26 @@ async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) ->
                 wake=core.wake,
             ),
         )
-        return create_claude(
-            ClaudeSessionConfig(
-                model=CLAUDE_SMOKE_MODEL,
-                system_prompt="Execute the persisted Lup resolver assignment.",
-                native_tools=["all"],
-                cwd=context.root,
-                add_dirs=[context.root],
-                tool_servers={"resolver": server},
-                allowed_tools=[
-                    f"mcp__resolver__{name}" for name in server_tool_names(server)
-                ],
-            )
+        return Claude(
+            model=CLAUDE_SMOKE_MODEL,
+            system_prompt="Execute the persisted Lup resolver assignment.",
+            native_tools=["all"],
+            cwd=context.root,
+            add_dirs=[context.root],
+            tool_servers={"resolver": server},
+            allowed_tools=[
+                f"mcp__resolver__{name}" for name in server_tool_names(server)
+            ],
         )
 
-    def reviewer_factory(context: ReviewerContext) -> Client:
-        return create_claude(
-            ClaudeSessionConfig(
-                model=CLAUDE_SMOKE_MODEL,
-                system_prompt="Independently review the persisted resolver change.",
-                native_tools=["read", "shell"],
-                cwd=context.root,
-                add_dirs=[context.root],
-                hooks=context.hooks,
-            )
+    def reviewer_factory(context: ReviewerContext) -> Agent:
+        return Claude(
+            model=CLAUDE_SMOKE_MODEL,
+            system_prompt="Independently review the persisted resolver change.",
+            native_tools=["read", "shell"],
+            cwd=context.root,
+            add_dirs=[context.root],
+            hooks=context.hooks,
         )
 
     from lup_template.harness.catalog import portable_harness

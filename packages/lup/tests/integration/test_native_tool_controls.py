@@ -14,15 +14,11 @@ import pytest
 import tomlkit
 from pydantic import BaseModel
 
-from lup.providers.codex.runtime import (
-    CodexSchemaRebindingError,
-    CodexMcpServerConfig,
-    CodexSessionConfig,
-    create_codex,
-)
+from lup.providers.codex import Codex, CodexMcpServerConfig
+from lup.providers.codex.runtime import CodexSchemaRebindingError
 from lup.providers.codex.home import CodexWorktreeHomeStore
 from lup.providers.codex.app_server import CodexAppServer
-from lup.sessions.events import SessionId, turn_request
+from lup.sessions.events import SessionId
 from lup.sessions.recursion import MAX_RECURSIVE_AGENT_ENV, recursive_agent_allowance
 from lup.tools.mcp import lup_tool
 from lup.tools.native import NativeTools, NativeToolGroup
@@ -136,7 +132,7 @@ def endpoint(
 
 def configuration(
     root: Path, endpoint: InertResponses, native_tools: NativeTools = None
-) -> CodexSessionConfig:
+) -> Codex:
     """No credentials, public network endpoints, or user home enter this process."""
     home = root / "home"
     home.mkdir(exist_ok=True)
@@ -160,7 +156,7 @@ def configuration(
         "mcp_servers": {"ambient": {"command": "touch", "args": [str(marker)]}},
     }
     (home / "config.toml").write_text(tomlkit.dumps(config))
-    return CodexSessionConfig(
+    return Codex(
         cwd=root,
         model="gpt-6-astra",
         model_provider="lup_probe",
@@ -213,10 +209,9 @@ def inventory(request: JsonObject) -> list[str]:
 async def test_codex_none_has_no_inventory_or_ambient_server(
     tmp_path: Path, endpoint: InertResponses
 ) -> None:
-    factory = create_codex(configuration(tmp_path, endpoint))
-    async with asyncio.timeout(40), factory.open() as handle:
-        turn = await handle.session.start(turn_request("Return probe complete."))
-        await turn.turn.result()
+    factory = configuration(tmp_path, endpoint)
+    async with asyncio.timeout(40), factory.open() as session:
+        await session.ask("Return probe complete.")
     assert endpoint.requests
     assert all(inventory(request) == [] for request in endpoint.requests)
     assert not (tmp_path / "ambient-mcp-started").exists()
@@ -282,9 +277,8 @@ async def test_codex_explicit_native_grant_keeps_declared_policy(
         "name": "exec_command",
         "arguments": '{"cmd":"printf forbidden-native-output"}',
     }
-    async with asyncio.timeout(60), create_codex(config).open() as handle:
-        turn = await handle.session.start(turn_request("Return probe complete."))
-        await turn.turn.result()
+    async with asyncio.timeout(60), config.open() as session:
+        await session.ask("Return probe complete.")
     assert marker.read_text() == "called"
     assert "inert policy refused native call" in json.dumps(endpoint.requests)
     assert not (tmp_path / "ambient-mcp-started").exists()
@@ -312,12 +306,9 @@ async def test_codex_explicit_app_tool_executes_under_none(
     config = config.model_copy(
         update={"environment": {**config.environment, MAX_RECURSIVE_AGENT_ENV: "1"}}
     )
-    factory = create_codex(config, tools=[record])
-    async with asyncio.timeout(40), factory.open() as handle:
-        turn = await handle.session.start(
-            turn_request("Call the declared marker tool.")
-        )
-        await turn.turn.result()
+    factory = config.model_copy(update={"tools": [record]})
+    async with asyncio.timeout(40), factory.open() as session:
+        await session.ask("Call the declared marker tool.")
     assert marker.read_text() == "authorized"
     assert all(
         inventory(request) == ["functions.lup_app_record"]
@@ -338,14 +329,12 @@ async def test_codex_fork_preserves_explicit_app_tools_under_none(
 
     async with (
         asyncio.timeout(40),
-        create_codex(
-            configuration(tmp_path, endpoint), tools=[record]
-        ).open() as handle,
+        configuration(tmp_path, endpoint)
+        .model_copy(update={"tools": [record]})
+        .open() as session,
     ):
-        turn = await handle.session.start(turn_request("Return probe complete."))
-        await turn.turn.result()
-        assert handle.fork is not None
-        async with handle.fork.fork() as fork:
+        await session.ask("Return probe complete.")
+        async with session.fork() as fork:
             endpoint.call = {
                 "id": "fc_probe",
                 "type": "function_call",
@@ -353,10 +342,7 @@ async def test_codex_fork_preserves_explicit_app_tools_under_none(
                 "name": "lup_app_record",
                 "arguments": '{"value":"forked"}',
             }
-            turn = await fork.session.start(
-                turn_request("Call the declared marker tool.")
-            )
-            await turn.turn.result()
+            await fork.ask("Call the declared marker tool.")
     assert marker.read_text() == "forked"
     assert all(
         inventory(request) == ["functions.lup_app_record"]
@@ -376,12 +362,9 @@ async def test_codex_typed_submission_remains_available_under_none(
     }
     async with (
         asyncio.timeout(40),
-        create_codex(configuration(tmp_path, endpoint)).open() as handle,
+        configuration(tmp_path, endpoint).open() as session,
     ):
-        turn = await handle.session.start(
-            turn_request("Submit the typed value.", ProbeInput)
-        )
-        result = await turn.turn.result()
+        result = await session.ask("Submit the typed value.", ProbeInput)
     assert result.output == ProbeInput(value="typed")
     assert all(
         inventory(request) == ["functions.submit_output"]
@@ -400,10 +383,9 @@ async def test_codex_fabricated_shell_does_not_execute(
         "name": "exec_command",
         "arguments": json.dumps({"cmd": f"touch {marker}"}),
     }
-    factory = create_codex(configuration(tmp_path, endpoint))
-    async with asyncio.timeout(40), factory.open() as handle:
-        turn = await handle.session.start(turn_request("Return probe complete."))
-        await turn.turn.result()
+    factory = configuration(tmp_path, endpoint)
+    async with asyncio.timeout(40), factory.open() as session:
+        await session.ask("Return probe complete.")
     assert not marker.exists()
     assert all(inventory(request) == [] for request in endpoint.requests)
 
@@ -416,19 +398,21 @@ async def test_codex_resume_refuses_stale_dynamic_tools(
         return params
 
     config = configuration(tmp_path, endpoint)
-    async with asyncio.timeout(40), create_codex(config, tools=[echo]).open() as handle:
-        turn = await handle.session.start(turn_request("Return probe complete."))
-        result = await turn.turn.result()
+    async with (
+        asyncio.timeout(40),
+        config.model_copy(update={"tools": [echo]}).open() as session,
+    ):
+        result = await session.ask("Return probe complete.")
         session_id = (
             result.identifiers.session if result.identifiers is not None else None
         )
     assert isinstance(session_id, SessionId)
     assert inventory(endpoint.requests[-1]) == ["functions.lup_app_echo"]
-    async with asyncio.timeout(40), create_codex(config).open(session_id) as handle:
-        with pytest.raises(
-            CodexSchemaRebindingError, match="persisted application/output"
-        ):
-            await handle.session.start(turn_request("Return probe complete."))
+    # The thread is resumed as the session opens, so a resume that cannot
+    # keep its tools is refused there, before any prompt reaches the model.
+    with pytest.raises(CodexSchemaRebindingError, match="persisted application/output"):
+        async with asyncio.timeout(40), config.open(session_id):
+            pytest.fail("a session whose tools changed must not open")
     assert len(endpoint.requests) == 1
 
 
@@ -436,11 +420,10 @@ async def test_codex_native_grants_can_be_narrowed_on_resume(
     tmp_path: Path, endpoint: InertResponses
 ) -> None:
     config = configuration(tmp_path, endpoint, [NativeToolGroup.SHELL])
-    async with asyncio.timeout(40), create_codex(config).open() as handle:
-        turn = await handle.session.start(turn_request("Return probe complete."))
-        result = await turn.turn.result()
+    async with asyncio.timeout(40), config.open() as session:
+        result = await session.ask("Return probe complete.")
         assert result.identifiers is not None
-        session = result.identifiers.session
+        resumed = result.identifiers.session
     marker = tmp_path / "forbidden-effect"
     endpoint.call = {
         "id": "fc_probe",
@@ -451,10 +434,9 @@ async def test_codex_native_grants_can_be_narrowed_on_resume(
     }
     async with (
         asyncio.timeout(40),
-        create_codex(config, native_tools=None).open(session) as handle,
+        config.model_copy(update={"native_tools": None}).open(resumed) as session,
     ):
-        turn = await handle.session.start(turn_request("Return probe complete."))
-        await turn.turn.result()
+        await session.ask("Return probe complete.")
     assert "functions.exec_command" in inventory(endpoint.requests[0])
     assert all(inventory(request) == [] for request in endpoint.requests[1:])
     assert not marker.exists()
@@ -482,16 +464,14 @@ async def test_codex_resume_drops_previous_explicit_mcp_server(
             }
         }
     )
-    async with asyncio.timeout(40), create_codex(configured).open() as handle:
-        turn = await handle.session.start(turn_request("Return probe complete."))
-        result = await turn.turn.result()
+    async with asyncio.timeout(40), configured.open() as session:
+        result = await session.ask("Return probe complete.")
         assert result.identifiers is not None
-        session = result.identifiers.session
+        resumed = result.identifiers.session
     assert marker.read_text() == "started"
     marker.unlink()
-    async with asyncio.timeout(40), create_codex(config).open(session) as handle:
-        turn = await handle.session.start(turn_request("Return probe complete."))
-        await turn.turn.result()
+    async with asyncio.timeout(40), config.open(resumed) as session:
+        await session.ask("Return probe complete.")
     assert not marker.exists()
     assert "tool_search" in inventory(endpoint.requests[0])
     assert all(inventory(request) == [] for request in endpoint.requests[1:])
@@ -510,10 +490,9 @@ async def test_codex_fabricated_patch_does_not_write(
     }
     async with (
         asyncio.timeout(40),
-        create_codex(configuration(tmp_path, endpoint)).open() as handle,
+        configuration(tmp_path, endpoint).open() as session,
     ):
-        turn = await handle.session.start(turn_request("Return probe complete."))
-        await turn.turn.result()
+        await session.ask("Return probe complete.")
     assert not marker.exists()
     assert all(inventory(request) == [] for request in endpoint.requests)
 
@@ -534,9 +513,8 @@ async def test_codex_explicit_native_facility_is_advertised(
 ) -> None:
     async with (
         asyncio.timeout(40),
-        create_codex(configuration(tmp_path, endpoint, grants)).open() as handle,
+        configuration(tmp_path, endpoint, grants).open() as session,
     ):
-        turn = await handle.session.start(turn_request("Return probe complete."))
-        await turn.turn.result()
+        await session.ask("Return probe complete.")
     assert expected in inventory(endpoint.requests[0])
     assert not (tmp_path / "ambient-mcp-started").exists()

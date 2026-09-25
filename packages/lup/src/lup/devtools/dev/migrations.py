@@ -246,6 +246,387 @@ DECLARED: list[Migration] = [
             ),
         ],
     ),
+    Migration(
+        subjects=[
+            "create_claude",
+            "create_codex",
+            "CONSTRUCTORS",
+            "Client",
+            "Client.__init__",
+            "Client.open",
+            "Client.query",
+        ],
+        reason=(
+            "a provider's declaration is its agent: Claude and Codex open "
+            "sessions and ask turns themselves, so a constructor function "
+            "building a Client around a config, and a Client holding nothing "
+            "but that opener, stood between a caller and the one object doing "
+            "the work"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Declare the agent directly: create_claude(ClaudeSessionConfig"
+                    "(model=..., ...)) is Claude(model=..., ...), and "
+                    "create_codex(CodexSessionConfig(...)) is Codex(...), both "
+                    "importable from lup."
+                )
+            ),
+            MigrationStep(
+                instruction=(
+                    "Ask where you queried: await client.query(prompt, Output) is "
+                    "await agent.ask(prompt, Output), and client.open(resume) is "
+                    "agent.open(resume=...), yielding a ClaudeSession or "
+                    "CodexSession. Code naming no provider annotates Agent from "
+                    "lup, and a hand-built Client(opener) implements that "
+                    "protocol's open, ask, sessions and layered instead."
+                )
+            ),
+            MigrationStep(
+                instruction=(
+                    "Read lup.AGENTS where lup.CONSTRUCTORS was read: it maps "
+                    "Claude and Codex to the modules defining them."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "create_client",
+            "ProviderRoute",
+            "ProviderRoute.provider",
+            "ProviderRoute.matcher",
+            "PROVIDER_ROUTES",
+            "provider_for",
+        ],
+        reason=(
+            "routing a model id to its provider served only create_client, "
+            "whose common arguments could never carry either provider's typed "
+            "options; choosing Claude or Codex is that routing, and holds them all"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Name the provider by the agent you declare: "
+                    "create_client(model, system_prompt=..., cwd=...) is "
+                    "Claude(model=..., system_prompt=..., cwd=...) or Codex(...) "
+                    "with the same arguments. Its base_url and api_key are "
+                    "endpoint=ClaudeCompatibleEndpoint(base_url=..., api_key=...) "
+                    "from lup.providers.claude, or CodexCompatibleEndpoint from "
+                    "lup.providers.codex."
+                )
+            ),
+            MigrationStep(
+                instruction=(
+                    "Ask catalog_provider(model) in lup.providers.routing where "
+                    "code needs which runtime's catalog lists a name; an id "
+                    "neither catalog lists is CustomModel(id=...) on whichever "
+                    "agent serves it."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "ActorSession.started",
+            "StateToRequest",
+        ],
+        reason=(
+            "the actor and background loops take a Conversation and ask it, so "
+            "the names built on starting a TurnRequest went with that verb"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Take an actor's turn with ActorSession.turn(prompt, Output), "
+                    "which reopens on a fresh conversation where the recorded one "
+                    "is lost, as started did; ActorSession.taken(conversation, "
+                    "prompt, Output, seen) is one attempt on a given conversation."
+                )
+            ),
+            MigrationStep(
+                instruction=(
+                    "Construct BackgroundAgent(agent, state_to_turn, ...) with a "
+                    "StateToTurn from lup.orchestration.background: where a "
+                    "StateToRequest returned turn_request(prompt_for(state), "
+                    "Output), the StateToTurn is lambda session, state: "
+                    "session.ask(prompt_for(state), Output)."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "SessionHandle",
+            "SessionHandle.session",
+            "SessionHandle.fork",
+            "TurnHandle",
+            "TurnHandle.turn",
+            "TurnHandle.events",
+            "TurnHandle.interrupt",
+            "TurnHandle.steer",
+            "turn_request",
+            "Session.start",
+            "Turn.result",
+        ],
+        reason=(
+            "a session and a turn are each one object carrying every capability "
+            "its provider has, rather than a handle of optional capabilities "
+            "around an engine a caller started with a request built by hand"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Ask the session: handle.session.start(turn_request(prompt, "
+                    "Output)) is session.ask(prompt, Output), where session is "
+                    "what agent.open() yields. The Turn it returns starts when "
+                    "first awaited or iterated."
+                )
+            ),
+            MigrationStep(
+                instruction=(
+                    "Use the turn itself: await turn.turn.result() is await turn; "
+                    "turn.events and turn.interrupt are the methods turn.events(), "
+                    "turn.live() and await turn.interrupt(); turn.steer is await "
+                    "turn.steer(input), on a CodexTurn only."
+                )
+            ),
+            MigrationStep(
+                instruction=(
+                    "Fork from the session: handle.fork(at) is "
+                    "session.fork(at=turn_id), an async context manager yielding "
+                    "the branch as a session of the same provider."
+                )
+            ),
+            MigrationStep(
+                instruction=(
+                    "Implement an engine against SessionEngine and TurnEngine in "
+                    "lup.sessions.capabilities, whose start and result are "
+                    "Session.start and Turn.result under the engine's names; the "
+                    "public Turn and Conversation are the surface over them."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "decorated_session_factory",
+            "journal_session_factory",
+            "recorded_session_factory",
+            "financial_budget_session_factory",
+            "quota_waiting_session_factory",
+        ],
+        reason=(
+            "what wraps a session is part of the agent's declaration, its "
+            "layers, so a wrapper no longer rebuilds a client around the one it "
+            "was handed"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Lay the turn decorators on the agent: "
+                    "decorated_session_factory(client, timeout=..., budget=...) is "
+                    "agent.layered(SessionLayers(timeout=..., budget=...)), or "
+                    "layers=SessionLayers(...) where the agent is declared. "
+                    "SessionLayers, in lup.sessions.layers, takes the same keyword "
+                    "arguments, serialized included."
+                )
+            ),
+            MigrationStep(
+                instruction=(
+                    "Add a whole-session wrapper to SessionLayers(wrappers=[...]), "
+                    "innermost first: journal_session_factory(client, journal) is "
+                    "JournalWrapper(journal) from lup.observability.audit; "
+                    "recorded_session_factory(client, recorder, session) is "
+                    "CloseRecordingWrapper(recorder, session) from "
+                    "lup.observability.sessions; financial_budget_session_factory"
+                    "(client, config, sink) is FinancialBudgetWrapper(config, sink) "
+                    "from lup.sessions.budget; and quota_waiting_session_factory"
+                    "(client, config, sink) is QuotaWaitWrapper(config, sink) from "
+                    "lup.sessions.quota."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=["claude_session", "codex_session", "ConfiguredFactory"],
+        reason=(
+            "a rendered request is already the agent that opens its sessions, "
+            "so no factory step follows rendering, and a profile selector "
+            "applies its profile to that agent rather than building one"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Render with claude_config(request) from "
+                    "lup.providers.claude.selection or codex_config(request) from "
+                    "lup.providers.codex.selection, which return the Claude or "
+                    "Codex that claude_session and codex_session wrapped; "
+                    "runtime.session_factory(request) still renders for a "
+                    "selected Runtime."
+                )
+            ),
+            MigrationStep(
+                instruction=(
+                    "Construct ProfileSelector(resolver) without a build "
+                    "function: selector.session_factory(base, name) returns base, "
+                    "the agent, with the selected profile applied."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "ClaudeFork.open_fork",
+            "CodexFork.open_fork",
+            "ClaudeSessionOpener.create_state",
+            "ClaudeSessionOpener.build_options",
+        ],
+        reason=(
+            "a fork is its provider's opener opening a branch, at any turn the "
+            "session took, and a Claude conversation's state builds its own "
+            "options, so the helpers that did either half went"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Fork through fork(at) on ClaudeFork or CodexFork, which "
+                    "session.fork(at=...) reaches: it opens the branch as a "
+                    "ClaudeSession or CodexSession."
+                )
+            ),
+            MigrationStep(
+                instruction=(
+                    "Construct ClaudeConversationState(opener, config, resume) "
+                    "from lup.providers.claude.runtime where create_state(resume) "
+                    "was called, and read its options() where build_options(...) "
+                    "was."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "ClaudeSessionConfig",
+            "ClaudeSessionConfig.model",
+            "ClaudeSessionConfig.system_prompt",
+            "ClaudeSessionConfig.coding_harness_preset",
+            "ClaudeSessionConfig.native_tools",
+            "ClaudeSessionConfig.allowed_tools",
+            "ClaudeSessionConfig.disallowed_tools",
+            "ClaudeSessionConfig.tool_servers",
+            "ClaudeSessionConfig.permission_mode",
+            "ClaudeSessionConfig.max_turns",
+            "ClaudeSessionConfig.delta_streaming",
+            "ClaudeSessionConfig.max_thinking_tokens",
+            "ClaudeSessionConfig.effort",
+            "ClaudeSessionConfig.cwd",
+            "ClaudeSessionConfig.add_dirs",
+            "ClaudeSessionConfig.plugin_dirs",
+            "ClaudeSessionConfig.environment",
+            "ClaudeSessionConfig.sandbox",
+            "ClaudeSessionConfig.hooks",
+            "ClaudeSessionConfig.submission_gate_resolver",
+            "ClaudeSessionConfig.subagents",
+            "ClaudeSessionConfig.max_buffer_size",
+            "ClaudeSessionConfig.stderr_tail_lines",
+            "ClaudeSessionConfig.setting_sources",
+            "ClaudeSessionConfig.cli_path",
+            "ClaudeSessionConfig.extra_args",
+            "ClaudeSessionConfig.the_model_takes_its_effort",
+            "ClaudeSessionConfig.model_id",
+            "ClaudeSessionConfig.enforce_native_authority",
+        ],
+        reason=(
+            "the declaration and the agent it opened were two objects saying "
+            "one thing; Claude is both, so every field and validator of the "
+            "config lives on it"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Construct Claude(...), from lup or lup.providers.claude, "
+                    "wherever ClaudeSessionConfig(...) was built: every field "
+                    "keeps its name and type, and model_id(), "
+                    "the_model_takes_its_effort and enforce_native_authority move "
+                    "with them."
+                )
+            ),
+            MigrationStep(
+                instruction=(
+                    "Read an unset effort as the model's default rather than the "
+                    "CLI's: xhigh where the model's catalog row takes it, the "
+                    "row's highest rung below xhigh otherwise, and none for a "
+                    "model taking no effort; resolved_effort() answers which rung "
+                    "a session starts at. Pass effort=... where a session should "
+                    "think at another."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "CodexSessionConfig",
+            "CodexSessionConfig.model",
+            "CodexSessionConfig.model_tiers",
+            "CodexSessionConfig.developer_instructions",
+            "CodexSessionConfig.cwd",
+            "CodexSessionConfig.policy_root",
+            "CodexSessionConfig.executable",
+            "CodexSessionConfig.containment",
+            "CodexSessionConfig.named_profile",
+            "CodexSessionConfig.model_provider",
+            "CodexSessionConfig.provider_config",
+            "CodexSessionConfig.sandbox",
+            "CodexSessionConfig.approval_policy",
+            "CodexSessionConfig.hooks",
+            "CodexSessionConfig.effort",
+            "CodexSessionConfig.paired_effort",
+            "CodexSessionConfig.environment",
+            "CodexSessionConfig.submission_gate_resolver",
+            "CodexSessionConfig.correction",
+            "CodexSessionConfig.continuation",
+            "CodexSessionConfig.mcp_servers",
+            "CodexSessionConfig.writable_roots",
+            "CodexSessionConfig.delegated_tools",
+            "CodexSessionConfig.native_tools",
+            "CodexSessionConfig.application_tools",
+            "CodexSessionConfig.companions",
+            "CodexSessionConfig.reject_unanswerable_approvals",
+            "CodexSessionConfig.validated_for_app_server",
+            "CodexSessionConfig.model_selection",
+            "CodexSessionConfig.model_id",
+            "CodexSessionConfig.the_model_takes_its_effort",
+            "CodexSessionConfig.native_capabilities",
+        ],
+        reason=(
+            "the declaration and the agent it opened were two objects saying "
+            "one thing; Codex is both, so every field and validator of the "
+            "config lives on it, its standing instructions under the name "
+            "Claude gives them"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Construct Codex(...), from lup or lup.providers.codex, "
+                    "wherever CodexSessionConfig(...) was built: "
+                    "developer_instructions=... is system_prompt=..., "
+                    "paired_effort is gone, and every other field, validator and "
+                    "method keeps its name and type."
+                )
+            ),
+            MigrationStep(
+                instruction=(
+                    "Pass effort=... where paired_effort=... was passed: an unset "
+                    "effort is the model's default, xhigh where its catalog row "
+                    "takes it and the row's highest rung below xhigh otherwise, "
+                    "sent beside a named model and alone over an inherited one, "
+                    "so no session inherits its home's effort any more; "
+                    "resolved_effort() answers which rung is sent."
+                )
+            ),
+        ],
+    ),
 ]
 """Every break this library has taken since its last release, and what to do.
 

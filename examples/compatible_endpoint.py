@@ -1,10 +1,11 @@
-"""Point the Claude client at an Anthropic-compatible local endpoint."""
+"""Point a Claude agent at an Anthropic-compatible local endpoint."""
 
 import asyncio
 
-from pydantic import BaseModel, Field
+from pydantic import AnyHttpUrl, BaseModel, Field
 
-from lup import CustomModel, create_claude
+from lup import Claude, CustomModel
+from lup.providers.claude import ClaudeCompatibleEndpoint
 
 
 class Summary(BaseModel, frozen=True):
@@ -14,17 +15,17 @@ class Summary(BaseModel, frozen=True):
 
 
 async def main() -> None:
-    # The endpoint is a constructor argument rather than a transform to
-    # choreograph: naming a base URL is the whole of pointing a client
+    # The endpoint is a field of the agent rather than a transform to
+    # choreograph: naming a base URL is the whole of pointing an agent
     # somewhere else, and an omitted key sends the placeholder credential a
     # local endpoint expects. The endpoint's own model id is outside Claude
     # Code's catalog, so it is named as one on purpose.
-    client = create_claude(
+    agent = Claude(
         model=CustomModel(id="local-model"),
         system_prompt="Submit a concise structured summary.",
-        base_url="http://localhost:4000",
+        endpoint=ClaudeCompatibleEndpoint(base_url=AnyHttpUrl("http://localhost:4000")),
     )
-    result = await client.query("Confirm the compatible endpoint.", Summary)
+    result = await agent.ask("Confirm the compatible endpoint.", Summary)
     print(result.output.summary)
 
 

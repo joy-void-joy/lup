@@ -14,10 +14,10 @@ import asyncio
 
 from pydantic import AnyHttpUrl, BaseModel, Field
 
-from lup import create_claude
+from lup import Claude
 from lup.harness.models import HookSet
 from lup.providers.claude.hooks import CLAUDE_SEMANTICS
-from lup.providers.claude.runtime import ClaudeSandboxConfig, ClaudeSessionConfig
+from lup.providers.claude import ClaudeSandboxConfig
 from lup.policy.hooks import LupHooksConfig
 from lup.policy.enforcement import SemanticToolPolicy, create_policy_hooks
 from lup.policy.rules import ShellPolicy, UrlScope
@@ -74,9 +74,9 @@ def policy_hooks() -> LupHooksConfig:
     )
 
 
-def session_config() -> ClaudeSessionConfig:
-    """Carry the enforcing hooks into the session the factory will open."""
-    return ClaudeSessionConfig(
+def session_config() -> Claude:
+    """Carry the enforcing hooks into every session this agent opens."""
+    return Claude(
         model="claude-opus-5",
         native_tools=["Bash"],
         system_prompt="Run what you are asked to run and report what happened.",
@@ -86,8 +86,7 @@ def session_config() -> ClaudeSessionConfig:
 
 
 async def main() -> None:
-    client = create_claude(session_config())
-    result = await client.query(
+    result = await session_config().ask(
         f"Run `{DENIED_COMMAND}` and summarize the output.",
         Summary,
     )

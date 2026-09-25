@@ -5,14 +5,14 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from lup import create_claude
+from lup import Claude
+from lup.sessions.layers import SessionLayers
 from lup.sessions.middleware import (
     BudgetConfig,
     CorrectionConfig,
     PersistenceConfig,
     RecoveryConfig,
     TimeoutConfig,
-    decorated_session_factory,
 )
 from lup.types import Usage
 
@@ -29,20 +29,19 @@ def reported_cost(usage: Usage) -> float:
 
 
 async def main() -> None:
-    native = create_claude(
+    agent = Claude(
         model="claude-opus-5",
         system_prompt="Submit a concise structured result.",
+        layers=SessionLayers(
+            timeout=TimeoutConfig(seconds=120),
+            budget=BudgetConfig(maximum_usd=1.0, usage_cost=reported_cost),
+            recovery=RecoveryConfig(retries=1),
+            correction=CorrectionConfig(cycles=1),
+            persistence=PersistenceConfig(directory=Path("tmp/example-results")),
+            serialized=True,
+        ),
     )
-    factory = decorated_session_factory(
-        native,
-        timeout=TimeoutConfig(seconds=120),
-        budget=BudgetConfig(maximum_usd=1.0, usage_cost=reported_cost),
-        recovery=RecoveryConfig(retries=1),
-        correction=CorrectionConfig(cycles=1),
-        persistence=PersistenceConfig(directory=Path("tmp/example-results")),
-        serialized=True,
-    )
-    result = await factory.query("Explain this wrapper stack.", Summary)
+    result = await agent.ask("Explain this wrapper stack.", Summary)
     print(result.output.summary)
 
 

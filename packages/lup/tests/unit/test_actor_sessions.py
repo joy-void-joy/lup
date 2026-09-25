@@ -1,7 +1,5 @@
 """What an actor does when the provider has lost its conversation."""
 
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
 
@@ -12,25 +10,38 @@ from lup.coordination.mailbox import AnswerDoor
 from lup.coordination.refs import ActorRef
 from lup.coordination.sessions import ActorInbox, ActorRecord, ActorSession
 from lup.resolver.journal import Journal
-from lup.sessions.capabilities import Session
+from lup.sessions.capabilities import SessionEngine
 from lup.sessions.errors import ProviderTurnError, TurnFailure
-from lup.sessions.client import Client
 from lup.sessions.events import (
-    SessionHandle,
     SessionId,
-    TurnHandle,
-    TurnInput,
+    StartedTurn,
     TurnRequest,
     TurnResult,
 )
 from lup.types import Usage
 
-from tests.unit.doubles import StaticTurn, identifiers, session_factory
+from tests.unit.doubles import (
+    IgnoredInterrupt,
+    SilentStream,
+    StaticTurn,
+    identifiers,
+    EngineAgent,
+    agent_over,
+)
 
 FRESH = "fresh-session"
 
 
-class ResumeRefusingSession(Session):
+class Delivered(BaseModel):
+    """What these turns submit: nothing but that they finished."""
+
+
+def submitted[T: BaseModel | None](request: TurnRequest[T]) -> BaseModel | None:
+    """The output a finished turn reports: the requested model, or nothing."""
+    return request.output_type() if request.output_type is not None else None
+
+
+class ResumeRefusingSession(SessionEngine):
     """Refuse every turn opened against a resumed conversation."""
 
     def __init__(self, resumed: bool) -> None:
@@ -38,14 +49,14 @@ class ResumeRefusingSession(Session):
 
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
+    ) -> StartedTurn[T]:
         if self.resumed:
             raise ProviderTurnError(
                 TurnFailure(message="No conversation found with session ID")
             )
         result = TurnResult[T].model_validate(
             {
-                "output": request.output_type,
+                "output": submitted(request),
                 "messages": [],
                 "blocks": [],
                 "usage": Usage(),
@@ -53,21 +64,22 @@ class ResumeRefusingSession(Session):
                 "identifiers": identifiers(session=FRESH),
             }
         )
-        return TurnHandle[T](turn=StaticTurn(result))
+        return StartedTurn[T](
+            turn=StaticTurn(result),
+            events=SilentStream(),
+            interrupt=IgnoredInterrupt(),
+        )
 
 
-def refusing_factory() -> tuple[Client, list[SessionId | None]]:
-    """A factory that refuses a resume, recording what each open asked for."""
+def refusing_factory() -> tuple[EngineAgent, list[SessionId | None]]:
+    """An agent that refuses a resume, recording what each open asked for."""
     opened: list[SessionId | None] = []
 
-    @asynccontextmanager
-    async def open_session(
-        resume: SessionId | None = None,
-    ) -> AsyncGenerator[SessionHandle]:
+    def engine(resume: SessionId | None) -> ResumeRefusingSession:
         opened.append(resume)
-        yield SessionHandle(session=ResumeRefusingSession(resume is not None))
+        return ResumeRefusingSession(resume is not None)
 
-    return Client(open_session), opened
+    return EngineAgent(engine), opened
 
 
 def worker_session(
@@ -79,7 +91,7 @@ def worker_session(
     return ActorSession(actor, factory, Journal(tmp_path), record), opened
 
 
-class RecordingSession(Session):
+class RecordingSession(SessionEngine):
     """Accept every turn, keeping the input each one was actually given."""
 
     def __init__(self) -> None:
@@ -87,11 +99,11 @@ class RecordingSession(Session):
 
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
+    ) -> StartedTurn[T]:
         self.delivered.append(request.input.text)
         result = TurnResult[T].model_validate(
             {
-                "output": request.output_type,
+                "output": submitted(request),
                 "messages": [],
                 "blocks": [],
                 "usage": Usage(),
@@ -99,7 +111,11 @@ class RecordingSession(Session):
                 "identifiers": identifiers(),
             }
         )
-        return TurnHandle[T](turn=StaticTurn(result))
+        return StartedTurn[T](
+            turn=StaticTurn(result),
+            events=SilentStream(),
+            interrupt=IgnoredInterrupt(),
+        )
 
 
 def mailed_session(
@@ -110,7 +126,7 @@ def mailed_session(
     actor = ActorRef(kind="worker", id="a-concern")
     journal = Journal(tmp_path)
     inbox = ActorInbox(ActorMail(tmp_path), journal, actor)
-    session = ActorSession(actor, session_factory(recording), journal, None, inbox)
+    session = ActorSession(actor, agent_over(recording), journal, None, inbox)
     return session, inbox, recording
 
 
@@ -128,8 +144,8 @@ async def test_mail_heads_the_next_turn_and_is_carried_once(tmp_path: Path) -> N
     session, inbox, recording = mailed_session(tmp_path)
     post(tmp_path, "the sibling already renamed that")
 
-    await session.turn(TurnRequest(input=TurnInput(text="go"), output_type=None))
-    await session.turn(TurnRequest(input=TurnInput(text="go on"), output_type=None))
+    await session.turn("go", Delivered)
+    await session.turn("go on", Delivered)
 
     assert recording.delivered == [
         "[agent] the sibling already renamed that\n\ngo",
@@ -167,9 +183,7 @@ async def test_a_lost_conversation_continues_on_a_fresh_session(
         tmp_path, ActorRecord(actor=actor, session=SessionId(value="gone"))
     )
 
-    result = await session.turn(
-        TurnRequest(input=TurnInput(text="go"), output_type=None)
-    )
+    result = await session.turn("go", Delivered)
 
     assert opened == [SessionId(value="gone"), None]
     assert result.identifiers.session == SessionId(value=FRESH)
@@ -184,9 +198,7 @@ async def test_an_actor_with_nothing_to_forget_still_raises(tmp_path: Path) -> N
     )
     await session.close()
 
-    result = await session.turn(
-        TurnRequest(input=TurnInput(text="go"), output_type=None)
-    )
+    result = await session.turn("go", Delivered)
 
     assert opened == [SessionId(value="gone"), None]
     assert result.identifiers.session == SessionId(value=FRESH)

@@ -22,12 +22,13 @@ from pydantic import BaseModel, Field, model_validator
 from lup.policy.hooks import LupHooksConfig
 from lup.tools.mcp import McpServerEntry
 from lup.tools.native import NativeTools, native_grants
-from lup.sessions.client import Client
+from lup.sessions.surface import Agent
 from lup.providers.claude.models import ClaudeModel
 from lup.providers.codex.models import CodexModel
 from lup.providers.login import ProviderLogin
 from lup.sessions.events import SubmissionGateResolver
 from lup.types import CustomModel, EnvVars, ModelTier
+from lup.providers.confinement import SessionContainment
 
 type SessionAutonomy = Literal["ask", "accept_edits", "plan", "unattended"]
 """How much a session may do before it stops to ask.
@@ -59,30 +60,6 @@ not know it.
 """
 
 
-type SessionContainment = Literal["outer", "inner", "none"]
-"""Which wall a session is opened behind.
-
-The launcher's three words, in the same order and with the same meanings
-:class:`~lup.devtools.harness.launch.LaunchSandbox` gives them, because the
-two are one question asked at two moments -- what a launched session opens
-under, and what a session an application opens through :class:`~lup.Client`
-opens under. A caller holding one vocabulary per entry point would be holding
-two names for one wall.
-
-``outer`` is the container: the runtime is started as the program
-``contained_program`` names, and that runtime's own sandbox stands down
-inside it, because a wall that has to be weakened to start nested is worth
-less than saying plainly which wall is load-bearing. ``inner`` is the
-runtime's own sandbox, established wherever the session runs. ``none`` is
-neither, and is what every request meant before this field existed.
-
-Independent of :data:`SessionAutonomy`, which says how much a session may do
-before it stops to ask. One runtime spells the two with two fields and the
-other with one, which is a rendering problem each adapter settles in its own
-words -- not a reason for a caller to state a boundary as an autonomy.
-"""
-
-
 class SessionRequest(
     BaseModel,
     frozen=True,
@@ -99,6 +76,9 @@ class SessionRequest(
     cwd: Path | None = None
     autonomy: SessionAutonomy | None = None
     effort: SessionEffort | None = None
+    """How hard the session thinks. Unset, it is the rendered model's own
+    default: ``xhigh`` where that runtime's catalog row takes it, and the row's
+    highest rung below ``xhigh`` otherwise."""
 
     containment: SessionContainment = "none"
     """Which wall this session is opened behind, defaulting to the one it had."""
@@ -171,8 +151,8 @@ class SessionRequest(
         return self
 
 
-type SessionOpener = Callable[[SessionRequest], Client]
-"""Render one request into the configured session factory of one runtime."""
+type SessionOpener = Callable[[SessionRequest], Agent]
+"""Render one request into the agent of one runtime that opens its sessions."""
 
 type WorkspaceHome = Callable[[EnvVars, Path], EnvVars]
 """Give one workspace's sessions a configuration home of their own.
@@ -214,8 +194,8 @@ class Runtime(BaseModel, frozen=True, arbitrary_types_allowed=True):
     open: SessionOpener
     workspace_home: WorkspaceHome
 
-    def session_factory(self, request: SessionRequest) -> Client:
-        """Open a session factory for this runtime from a portable request."""
+    def session_factory(self, request: SessionRequest) -> Agent:
+        """The agent this runtime renders a portable request into."""
         return self.open(self.homed(SessionRequest.model_validate(request)))
 
     def homed(self, request: SessionRequest) -> SessionRequest:

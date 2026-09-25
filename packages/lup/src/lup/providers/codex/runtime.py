@@ -1,4 +1,4 @@
-"""Codex app-server Client with live optional turn capabilities."""
+"""Codex sessions opened over app-server, with live turn capabilities."""
 
 import asyncio
 from functools import partial
@@ -6,14 +6,13 @@ import json
 import logging
 from collections.abc import AsyncGenerator, AsyncIterator, Iterator, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from time import perf_counter
 from tempfile import TemporaryDirectory
-from types import EllipsisType
 from typing import Literal
 
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import BaseModel, Field, ValidationError
 
 from lup.execution.threads import run_sync
 from lup.providers.codex.app_server import (
@@ -28,25 +27,17 @@ from lup.providers.codex.hooks import (
     codex_hook_approval_policy,
 )
 from lup.providers.codex.home import CodexWorktreeHomeStore, install_declared_policy
-from lup.providers.selection import SessionContainment
 from lup.providers.codex.login import CODEX_HOME, native_home
 from lup.providers.codex.output import CodexOutputContract, codex_output_contract
-from lup.providers.codex.model_choice import (
-    CodexModelChoice,
-    codex_model_id,
-    refuse_unsupported_effort,
-)
-from lup.providers.codex.models import CodexEffort
-from lup.providers.codex.subagents import CodexModelTiers, CodexSubagentTools
+from lup.providers.codex import Codex, CodexSession
 from lup.policy.hooks import LupHookInput, LupHookOutput, LupHooksConfig
 from lup.policy.identity import POLICY_ROOT_ENV
-from lup.providers.codex.native_tools import CodexNativeTools
-from lup.tools.native import NativeTools
-from lup.tools.mcp import LupMcpTool, ServerCompanion, ToolResponse, running_companions
+from lup.tools.mcp import ToolResponse, running_companions
 from lup.sessions.composition import AcceptedTurn, CompletedTurn, ComposedSession
 from lup.sessions.capabilities import (
+    ConversationRecord,
     EventStream,
-    Session,
+    SessionEngine,
     ForkSession,
     Interrupt,
     Steer,
@@ -55,18 +46,16 @@ from lup.sessions.capabilities import (
 from lup.sessions.errors import ProviderTurnError, StructuredOutputError
 from lup.sessions.errors import TurnFailure, TurnInterruptedError, ValidationAttempt
 from lup.sessions.errors import UnsupportedCapability
-from lup.sessions.middleware import CorrectionConfig, DecoratingSession
+from lup.sessions.middleware import DecoratingSession
 from lup.sessions.errors import TurnAlreadyActiveError
 from lup.sessions.middleware import SerializedTurn
-from lup.sessions.client import Client
 from lup.sessions.events import (
     BlockCompletedEvent,
     BlockDeltaEvent,
     LiveTurnEvent,
     MessageCompletedEvent,
-    SessionHandle,
     SessionId,
-    SubmissionGateResolver,
+    SessionSummary,
     AnyTurnBlock,
     TurnCompletedEvent,
     TurnEvent,
@@ -75,7 +64,7 @@ from lup.sessions.events import (
     TurnId,
     TurnInput,
     TurnRequest,
-    TurnHandle,
+    StartedTurn,
     TurnMessage,
     TurnToolCallBlock,
     TurnToolResultBlock,
@@ -87,206 +76,16 @@ from lup.sessions.recursion import (
     recursive_agent_scope,
 )
 from lup.sessions.transcript import fold_transcript
-from lup.types import EnvVars, JsonObject, JsonValue, Usage
+from lup.types import JsonObject, JsonValue, Usage
 
+# lup: ignore[constant-declaration] — the thread sources Codex names, the
+# ones a person or a program started rather than one a thread spawned
+LISTED_THREAD_SOURCES = ("cli", "vscode", "exec", "appServer")
+"""Which of Codex's thread sources a listing of a workspace's sessions shows.
 
-CODEX_PROGRAM = Path("codex")
-"""The program a Codex session is started as when nothing names another.
-
-Named once because two places read it: the field default below, and the
-caller that falls back to it when a request asked for no container to enter.
-Spelled twice, the fallback would be a second opinion about what this
-runtime is called.
-"""
-
-
-class CodexSessionConfig(
-    BaseModel,
-    frozen=True,
-    arbitrary_types_allowed=True,
-    extra="forbid",
-    revalidate_instances="always",
-):
-    """Immutable Codex-only app-server configuration."""
-
-    model: CodexModelChoice | None = None
-    """A slug from Codex's catalog, a portable tier, or a custom id."""
-
-    model_tiers: CodexModelTiers = CodexModelTiers()
-    """The slug each portable tier selects, for an account or endpoint whose
-    lineup differs from the one lup ships as default."""
-
-    developer_instructions: str = ""
-    cwd: Path
-    policy_root: Path | None = None
-    """Application project declaring policy; direct callers default to cwd."""
-    executable: Path = CODEX_PROGRAM
-    containment: SessionContainment = "none"
-    """The boundary owning this executable's home; outer wrappers prepare theirs."""
-    named_profile: str | None = None
-    model_provider: str | None = None
-    provider_config: JsonObject | None = None
-    sandbox: Literal["read-only", "workspace-write", "danger-full-access"] | None = None
-    # The app-server's own wire spellings, passed through by thread_parameters.
-    approval_policy: Literal["untrusted", "on-request", "granular", "never"] | None = (
-        None
-    )
-    hooks: LupHooksConfig | None = None
-    effort: CodexEffort | None = None
-    """What this session asks the model to spend, or None to leave it to the home.
-
-    ``None`` means inherit, which is right only while the *model* is also
-    inherited. Where a model is named, :attr:`paired_effort` answers instead —
-    see :meth:`model_selection` for why the two cannot travel apart. Which
-    rungs a model accepts is its catalog row's answer, and a rung outside it
-    is refused where this is declared.
-    """
-
-    paired_effort: CodexEffort = "medium"
-    """The effort a named model carries when the caller names none.
-
-    A judgement, so it is an overridable default rather than a constant: a
-    caller who knows what their model should spend says so and this is never
-    read. What it must not be is *absent*, because absence is what let a
-    caller's model reach the API beside a stranger's effort.
-    """
-
-    environment: EnvVars = {}
-    submission_gate_resolver: SubmissionGateResolver | None = None
-    correction: CorrectionConfig = CorrectionConfig()
-    continuation: CorrectionConfig = CorrectionConfig(
-        instruction="Continue according to the Stop hook feedback."
-    )
-    mcp_servers: dict[str, "CodexMcpServerConfig"] = {}
-    writable_roots: list[Path] = []
-    delegated_tools: CodexSubagentTools | None = None
-    native_tools: NativeTools = None
-    application_tools: dict[str, LupMcpTool] = {}
-    companions: list[ServerCompanion] = []
-
-    @model_validator(mode="after")
-    def reject_unanswerable_approvals(self) -> "CodexSessionConfig":
-        """Refuse a thread that would ask questions this session cannot answer.
-
-        An approval policy that asks makes the app-server send approval
-        requests back here, and only declared hooks answer them. Without
-        those the transport refuses every request as unhandled, which stalls
-        the turn on its first command — so the combination is rejected at
-        construction instead of at the first act.
-        """
-        if self.containment == "outer" and self.executable == CODEX_PROGRAM:
-            raise ValueError(
-                "outer containment requires the prepared container executable"
-            )
-        CodexNativeTools.compile(self.native_tools)
-        for key in self.provider_config or {}:
-            if key not in {"model_provider", "model_providers"}:
-                raise ValueError(
-                    f"provider_config {key!r} is outside provider endpoint declarations and explicit session authority; use native_tools or tool_servers"
-                )
-        for name in self.application_tools:
-            if (
-                not name.startswith("lup_app_")
-                or not name.isascii()
-                or not all(char.isalnum() or char in "_-" for char in name)
-                or len(name) > 64
-            ):
-                raise ValueError(f"invalid or reserved application tool name {name!r}")
-        if self.delegated_tools is not None and self.native_tools:
-            raise ValueError(
-                "delegated_tools and native_tools are alternative authority declarations"
-            )
-        if self.delegated_tools is not None and (
-            self.sandbox != "read-only" or self.approval_policy != "never"
-        ):
-            raise ValueError(
-                "delegated tools require read-only sandbox and never approvals"
-            )
-        if self.delegated_tools is not None and (
-            self.mcp_servers or self.writable_roots
-        ):
-            raise ValueError(
-                "delegated tool capabilities do not grant MCP servers or writable roots"
-            )
-        if self.approval_policy not in {None, "never"} and self.hooks is None:
-            raise ValueError(
-                f"approval_policy {self.approval_policy!r} makes the app-server "
-                "ask this session for decisions; supply hooks to answer them, "
-                "or use 'never'"
-            )
-        return self
-
-    def validated_for_app_server(self) -> "CodexSessionConfig":
-        """Refuse native capabilities before any process starts, without payloads."""
-        if self.named_profile is not None:
-            raise UnsupportedCapability(
-                "Codex app-server cannot select named profiles or apply all startup "
-                "settings through thread configuration. Configure the intended "
-                "CODEX_HOME/config.toml before opening, or supply explicit supported "
-                "session settings. Interactive Codex launches support named profiles."
-            )
-        return self
-
-    def model_selection(self) -> JsonObject:
-        """The model and the effort that goes with it — both, or neither.
-
-        A model and its reasoning effort are one choice, and the home this
-        session opens against already holds an answer to both: it is seeded
-        from the operator's own configuration, so it carries the model *they*
-        chose and the effort they chose for it.
-
-        Naming only the model therefore does not select a model. It selects
-        half of somebody else's pair, and the API is the first thing to notice
-        — ``'max' is not supported with the 'gpt-5.5' model``, a 400 before the
-        turn does anything, naming neither the home nor the caller. Every
-        Codex session Lup opened through a named model was one home edit away
-        from it.
-
-        So the two travel together. Naming neither inherits a pair that was
-        chosen together and is therefore coherent; naming a model sends an
-        effort beside it, the caller's where they gave one and
-        :attr:`paired_effort` where they did not.
-        """
-        model = self.model_id()
-        if model is None:
-            return {} if self.effort is None else {"effort": self.effort}
-        return {"model": model, "effort": self.effort or self.paired_effort}
-
-    def model_id(self) -> str | None:
-        """The slug the app-server is asked for, or None to inherit the home's."""
-        return codex_model_id(self.model, self.model_tiers)
-
-    @model_validator(mode="after")
-    def the_model_takes_its_effort(self) -> "CodexSessionConfig":
-        """Refuse an effort the catalog says this session's model cannot take.
-
-        The effort checked is the one :meth:`model_selection` would send — the
-        paired one where the caller named none — because a model is never
-        sent alone, and a paired rung the model lacks fails the same 400.
-        """
-        refuse_unsupported_effort(
-            self.model, self.effort or self.paired_effort, self.model_tiers
-        )
-        return self
-
-    def native_capabilities(self) -> CodexNativeTools:
-        """Resolve explicit delegated facilities through the same startup bounds."""
-        if self.delegated_tools is not None:
-            return CodexNativeTools(
-                shell=self.delegated_tools.workspace_read,
-                images=self.delegated_tools.workspace_read,
-                web=self.delegated_tools.web_search,
-            )
-        return CodexNativeTools.compile(self.native_tools)
-
-
-class CodexMcpServerConfig(BaseModel, frozen=True):
-    """One project tool group served to Codex over an explicit subprocess."""
-
-    command: str
-    args: list[str] = []
-    env: EnvVars = {}
-    required: bool = True
+Subagent threads are their parent's to show, so they are left out; left
+unnamed, the app-server would narrow to its interactive sources and drop
+the ones a program opened."""
 
 
 class CodexThreadRef(BaseModel, frozen=True):
@@ -349,6 +148,52 @@ class CodexTurnRef(BaseModel, frozen=True):
 
 class CodexThreadResponse(BaseModel, frozen=True):
     thread: CodexThreadRef
+
+
+class CodexRecordedTurn(BaseModel, frozen=True, extra="ignore"):
+    """One turn as ``thread/read`` returns it: its items, in order."""
+
+    id: str
+    items: list[JsonObject] = []
+
+
+class CodexRecordedThread(BaseModel, frozen=True, extra="ignore"):
+    id: str
+    turns: list[CodexRecordedTurn] = []
+
+
+class CodexThreadReadResponse(BaseModel, frozen=True):
+    thread: CodexRecordedThread
+
+
+class CodexListedThread(BaseModel, frozen=True, extra="ignore"):
+    """One thread as ``thread/list`` returns it, for the fields a listing shows."""
+
+    id: str
+    name: str | None = None
+    preview: str = ""
+    cwd: str | None = None
+    created_at: int | None = Field(default=None, alias="createdAt")
+    updated_at: int = Field(alias="updatedAt")
+
+    def summary(self) -> SessionSummary:
+        return SessionSummary(
+            id=SessionId(value=self.id),
+            title=self.name,
+            preview=self.preview,
+            cwd=Path(self.cwd) if self.cwd is not None else None,
+            created_at=(
+                datetime.fromtimestamp(self.created_at, tz=UTC)
+                if self.created_at is not None
+                else None
+            ),
+            updated_at=datetime.fromtimestamp(self.updated_at, tz=UTC),
+        )
+
+
+class CodexThreadPage(BaseModel, frozen=True, extra="ignore"):
+    data: list[CodexListedThread] = []
+    next_cursor: str | None = Field(default=None, alias="nextCursor")
 
 
 class CodexTurnResponse(BaseModel, frozen=True):
@@ -539,19 +384,25 @@ class CodexTurnChannel:
                 "item": item,
             } if isinstance(item, dict):
                 completed = decode_completed_item(item)
-                for block in completed:
-                    self.blocks.append(block)
-                    self.emit(
-                        BlockCompletedEvent(identifiers=self.identifiers(), block=block)
-                    )
+                role = message_role(item)
+                # The prompt joins the transcript and not the turn's blocks:
+                # a turn's blocks are what it produced, which is all a Claude
+                # turn's blocks ever are, and a final answer read from the
+                # last text block must not find the question instead.
+                if role != "user":
+                    for block in completed:
+                        self.blocks.append(block)
+                        self.emit(
+                            BlockCompletedEvent(
+                                identifiers=self.identifiers(), block=block
+                            )
+                        )
                 if completed:
                     self.emit(
                         MessageCompletedEvent(
                             identifiers=self.identifiers(),
                             message=TurnMessage(
-                                role=message_role(item),
-                                blocks=completed,
-                                native=item,
+                                role=role, blocks=completed, native=item
                             ),
                         )
                     )
@@ -647,14 +498,18 @@ class CodexConversationState:
 
     def __init__(
         self,
-        config: CodexSessionConfig,
+        config: Codex,
         server: CodexAppServer,
         resume: SessionId | None,
         policy_plugin: str | None = None,
         models: dict[str, JsonObject] | None = None,
         fork_from: SessionId | None = None,
+        fork_at: TurnId | None = None,
+        opener: "CodexSessionOpener | None" = None,
     ) -> None:
-        self.config = CodexSessionConfig.model_validate(config)
+        self.config = Codex.model_validate(config)
+        self.opener = opener or CodexSessionOpener(self.config)
+        self.fork_at = fork_at
         self.server = server
         self.resume = resume
         self.thread_id: str | None = None
@@ -681,7 +536,8 @@ class CodexConversationState:
             )
         inherited = CodexConfigReadResponse.model_validate(
             await self.server.request(
-                "config/read", {"cwd": str(self.config.cwd), "includeLayers": False}
+                "config/read",
+                {"cwd": str(self.config.workspace()), "includeLayers": False},
             )
         )
         self.inherited_servers = list(inherited.config.mcp_servers)
@@ -698,11 +554,13 @@ class CodexConversationState:
         if self.resume is not None or self.fork_from is not None:
             prior = self.resume or self.fork_from
             assert prior is not None
-            if self.config.application_tools:
+            if self.config.applications():
                 await self.validate_persisted_tools(prior)
             params = self.thread_parameters()
             params.pop("dynamicTools", None)
             params["threadId"] = prior.value
+            if self.resume is None and self.fork_at is not None:
+                params["lastTurnId"] = self.fork_at.value
             result = await self.server.request(
                 "thread/resume" if self.resume else "thread/fork", params
             )
@@ -741,8 +599,8 @@ class CodexConversationState:
     def thread_parameters(self) -> JsonObject:
         """Preserve configured thread behavior for new and resumed threads."""
         params: JsonObject = {
-            "cwd": str(self.config.cwd),
-            "developerInstructions": self.config.developer_instructions,
+            "cwd": str(self.config.workspace()),
+            "developerInstructions": self.config.system_prompt,
         }
         # One half of the pair `model_selection` settles; its other half rides
         # `turn/start`, which is the only reason they are written apart.
@@ -775,7 +633,7 @@ class CodexConversationState:
                 "description": tool.description,
                 "inputSchema": tool.input_schema,
             }
-            for name, tool in self.config.application_tools.items()
+            for name, tool in self.config.applications().items()
         ]
         # Only a session declaring application tools binds the thread-scoped
         # channel; typed output rides `outputSchema` on each turn instead.
@@ -881,7 +739,7 @@ class CodexConversationState:
                         await responder.evaluate(
                             LupHookInput(
                                 event="Stop",
-                                cwd=str(self.config.cwd),
+                                cwd=str(self.config.workspace()),
                                 stop_hook_active=stop_hook_active,
                             )
                         )
@@ -944,7 +802,7 @@ class CodexConversationState:
                                     tool_name=block.name,
                                     tool_input=block.arguments,
                                     tool_result=results.get(block.id, ""),
-                                    cwd=str(self.config.cwd),
+                                    cwd=str(self.config.workspace()),
                                 )
                             )
                             if not await responder.deliver(outputs):
@@ -972,7 +830,7 @@ class CodexConversationState:
                 ],
                 "success": False,
             }
-        if call.tool not in self.config.application_tools:
+        if call.tool not in self.config.applications():
             return {
                 "contentItems": [
                     {
@@ -994,9 +852,9 @@ class CodexConversationState:
                 "success": False,
             }
         try:
-            result: ToolResponse = await self.config.application_tools[
-                call.tool
-            ].handler(call.arguments)
+            result: ToolResponse = await self.config.applications()[call.tool].handler(
+                call.arguments
+            )
         except Exception as error:
             logging.getLogger(__name__).exception(
                 "application tool %s failed", call.tool
@@ -1104,18 +962,38 @@ class CodexConversationState:
         if self.channel is not None:
             self.channel.fail(error)
 
+    def thread(self) -> str:
+        """The thread this session holds, which it has from the moment it opens."""
+        if self.thread_id is None:
+            raise RuntimeError("this Codex session has not started its thread")
+        return self.thread_id
 
-class CodexHookSession(Session):
+    async def recorded(self) -> list[TurnMessage]:
+        """Every item of the thread, as the app-server reads its rollout back."""
+        response = CodexThreadReadResponse.model_validate(
+            await self.server.request(
+                "thread/read", {"threadId": self.thread(), "includeTurns": True}
+            )
+        )
+        return [
+            message
+            for turn in response.thread.turns
+            for item in turn.items
+            if (message := recorded_message(item)) is not None
+        ]
+
+
+class CodexHookSession(SessionEngine):
     """Reset Stop state once per logical turn, preserving it across native retries."""
 
-    def __init__(self, state: CodexConversationState, inner: Session) -> None:
+    def __init__(self, state: CodexConversationState, inner: SessionEngine) -> None:
         self.state = state
         self.inner = inner
         self.lock = asyncio.Lock()
 
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
+    ) -> StartedTurn[T]:
         if self.lock.locked():
             raise TurnAlreadyActiveError("a logical Codex turn is already active")
         await self.lock.acquire()
@@ -1128,7 +1006,7 @@ class CodexHookSession(Session):
         finally:
             if not accepted:
                 self.lock.release()
-        return TurnHandle[T](
+        return StartedTurn[T](
             turn=SerializedTurn(handle.turn, self.lock),
             events=handle.events,
             interrupt=handle.interrupt,
@@ -1176,23 +1054,31 @@ class CodexSteer(Steer):
         )
 
 
-class CodexFork(ForkSession):
+class CodexRecord(ConversationRecord):
+    """This thread as Codex keeps it: its id and its items."""
+
+    def __init__(self, state: CodexConversationState) -> None:
+        self.state = state
+
+    def identity(self) -> SessionId:
+        return SessionId(value=self.state.thread())
+
+    async def messages(self) -> list[TurnMessage]:
+        return await self.state.recorded()
+
+
+class CodexFork(ForkSession[CodexSession]):
+    """Branch this thread into a new one through ``thread/fork``."""
+
     def __init__(self, state: CodexConversationState) -> None:
         self.state = state
 
     def fork(
         self, at: TurnId | None = None
-    ) -> AbstractAsyncContextManager[SessionHandle]:
-        return self.open_fork(at)
-
-    @asynccontextmanager
-    async def open_fork(self, at: TurnId | None) -> AsyncGenerator[SessionHandle]:
-        if at is not None:
-            raise ValueError("Codex thread/fork can only fork the latest thread state")
-        thread_id = await self.state.ensure_thread()
-        opener = CodexSessionOpener(self.state.config)
-        async with opener.open_session(fork_from=SessionId(value=thread_id)) as handle:
-            yield handle
+    ) -> AbstractAsyncContextManager[CodexSession]:
+        return self.state.opener.open_session(
+            fork_from=SessionId(value=self.state.thread()), fork_at=at
+        )
 
 
 class CodexSessionOpener:
@@ -1204,41 +1090,45 @@ class CodexSessionOpener:
     Lifecycle observers leave the selected approval policy untouched.
     """
 
-    def __init__(self, config: CodexSessionConfig) -> None:
+    def __init__(self, config: Codex) -> None:
         # Re-validated first, because model_copy skips every validator and a
         # copy is how an unsupported grant reaches this boundary unchecked.
-        self.config = CodexSessionConfig.model_validate(
-            config
-        ).validated_for_app_server()
+        self.config = Codex.model_validate(config).validated_for_app_server()
 
     @asynccontextmanager
     async def open_session(
-        self, resume: SessionId | None = None, *, fork_from: SessionId | None = None
-    ) -> AsyncGenerator[SessionHandle]:
+        self,
+        resume: SessionId | None = None,
+        *,
+        fork_from: SessionId | None = None,
+        fork_at: TurnId | None = None,
+    ) -> AsyncGenerator[CodexSession]:
         approval = codex_hook_approval_policy(self.config.hooks)
         if approval == "on-request" and self.config.approval_policy in {None, "never"}:
             raise UnsupportedCapability(
                 "Native approval-scoped PreToolUse hooks require an explicit asking "
                 "approval_policy; use 'on-request' so the app-server can call them."
             )
+        compiled = self.compiled()
         # Installed here rather than where the home is named: installing runs
         # a package manager, and a home is named wherever a request is merely
         # described. A session that opened without the policy it was meant to
         # run under is indistinguishable from one running under it, so a
         # failure is raised rather than warned past.
-        allowance = child_recursive_agent_allowance(self.config.environment)
-        environment = allowance.environment(self.config.environment)
-        config = self.config.model_copy(
+        allowance = child_recursive_agent_allowance(compiled.environment)
+        environment = allowance.environment(compiled.environment)
+        config = compiled.model_copy(
             update={
+                "cwd": compiled.workspace(),
                 "environment": {
                     **environment,
-                    POLICY_ROOT_ENV: str(self.config.policy_root or self.config.cwd),
+                    POLICY_ROOT_ENV: str(compiled.policy_root or compiled.workspace()),
                 },
                 "mcp_servers": {
                     name: server.model_copy(
                         update={"env": allowance.environment(server.env)}
                     )
-                    for name, server in self.config.mcp_servers.items()
+                    for name, server in compiled.mcp_servers.items()
                 },
             }
         )
@@ -1252,9 +1142,9 @@ class CodexSessionOpener:
                 partial(
                     install_declared_policy,
                     home,
-                    config.policy_root or config.cwd,
+                    config.policy_root or config.workspace(),
                     seed=CodexWorktreeHomeStore().derived(home),
-                    workspace=config.cwd,
+                    workspace=config.workspace(),
                     executable=config.executable,
                     environment=effective,
                 )
@@ -1268,52 +1158,14 @@ class CodexSessionOpener:
             environment=config.environment,
             arguments=native.arguments(),
         )
-        catalog = await asyncio.to_thread(
-            native.model_catalog,
-            config.executable,
-            config.environment,
-            config.model_id(),
-        )
-        # Beside the session's own home, so a contained launch can read the
-        # catalog it is pointed at; the home is the launch's to create when
-        # policy installation has not already made it.
-        catalog_home = (
-            Path(config.environment[CODEX_HOME])
-            if CODEX_HOME in config.environment
-            else None
-        )
-        if catalog_home is not None:
-            catalog_home.mkdir(mode=0o700, parents=True, exist_ok=True)
-        directory = TemporaryDirectory(prefix="lup-native-", dir=catalog_home)
-        catalog_path = Path(directory.name) / "models.json"
-        catalog_path.write_text(json.dumps(catalog))
-        server.arguments.extend(
-            ["--config", f"model_catalog_json={json.dumps(str(catalog_path))}"]
-        )
-        try:
-            with recursive_agent_scope(allowance):
-                await server.start()
-        except (Exception, asyncio.CancelledError):
-            try:
-                await server.close()
-            finally:
-                directory.cleanup()
-            raise
         state = CodexConversationState(
             config,
             server,
             resume,
             policy_plugin.selector if policy_plugin else None,
-            {
-                item["slug"]: item
-                for item in catalog["models"]
-                if isinstance(item, dict)
-                and "slug" in item
-                and isinstance(item["slug"], str)
-            }
-            if isinstance(catalog["models"], list)
-            else {},
             fork_from=fork_from,
+            fork_at=fork_at,
+            opener=self,
         )
         session = ComposedSession(
             state.start_turn,
@@ -1329,84 +1181,112 @@ class CodexSessionOpener:
             continuation=config.continuation,
             persistence=None,
         )
-        with recursive_agent_scope(allowance):
-            async with running_companions(config.companions):
-                try:
-                    yield SessionHandle(
-                        session=CodexHookSession(state, corrected),
-                        fork=CodexFork(state),
-                    )
-                finally:
-                    try:
-                        await corrected.close()
-                    finally:
+
+        @asynccontextmanager
+        async def process() -> AsyncGenerator[SessionEngine]:
+            """The app-server's whole life: started, its thread opened, closed."""
+            catalog = await asyncio.to_thread(
+                native.model_catalog,
+                config.executable,
+                config.environment,
+                config.model_id(),
+            )
+            state.models = (
+                {
+                    item["slug"]: item
+                    for item in catalog["models"]
+                    if isinstance(item, dict)
+                    and "slug" in item
+                    and isinstance(item["slug"], str)
+                }
+                if isinstance(catalog["models"], list)
+                else {}
+            )
+            # Beside the session's own home, so a contained launch can read the
+            # catalog it is pointed at; the home is the launch's to create when
+            # policy installation has not already made it.
+            catalog_home = (
+                Path(config.environment[CODEX_HOME])
+                if CODEX_HOME in config.environment
+                else None
+            )
+            if catalog_home is not None:
+                catalog_home.mkdir(mode=0o700, parents=True, exist_ok=True)
+            directory = TemporaryDirectory(prefix="lup-native-", dir=catalog_home)
+            try:
+                catalog_path = Path(directory.name) / "models.json"
+                catalog_path.write_text(json.dumps(catalog))
+                server.arguments.extend(
+                    ["--config", f"model_catalog_json={json.dumps(str(catalog_path))}"]
+                )
+                with recursive_agent_scope(allowance):
+                    await server.start()
+                    async with running_companions(config.companions):
                         try:
-                            await server.close()
+                            await state.ensure_thread()
+                            yield CodexHookSession(state, corrected)
                         finally:
-                            directory.cleanup()
+                            await corrected.close()
+            finally:
+                try:
+                    await server.close()
+                finally:
+                    directory.cleanup()
+
+        async with config.layers.around(process(), resume or fork_from) as engine:
+            yield CodexSession(engine, CodexRecord(state), CodexFork(state))
+
+    def compiled(self) -> Codex:
+        """The declaration as its sessions open with it.
+
+        A compatible endpoint becomes the provider definition and credential
+        the thread is configured with, here rather than at declaration, so an
+        agent can be copied and changed before it is built.
+        """
+        if self.config.endpoint is None:
+            return self.config
+        from lup.providers.codex.config import CodexCompatibilityTransform
+
+        return CodexCompatibilityTransform(self.config.endpoint).apply(self.config)
 
 
-def create_codex(
-    options: CodexSessionConfig | None = None,
-    *,
-    model: CodexModelChoice | None = None,
-    system_prompt: str = "",
-    cwd: Path | None = None,
-    base_url: str | None = None,
-    api_key: str | None = None,
-    native_tools: NativeTools | EllipsisType = ...,
-    tools: Sequence[LupMcpTool] | None = None,
-) -> Client:
-    """Open Codex sessions, configured by argument or by whole declaration.
+async def codex_sessions(declared: Codex) -> list[SessionSummary]:
+    """The threads Codex keeps for an agent's workspace, newest first.
 
-    The same two shapes :func:`lup.providers.claude.runtime.create_claude` takes,
-    for the same reason: a reader meeting the library names arguments, and a
-    composition that already holds a declaration passes it positionally.
-
-    ``system_prompt`` is the shared spelling across both constructors, and this
-    provider's configuration calls the same thing ``developer_instructions``.
-    The translation happens here rather than at the call, so a reader moving
-    between providers keeps one argument list -- which is the whole reason the
-    constructors share one.
-
-    ``cwd`` is resolved at call time rather than defaulted at import, because
-    this configuration requires one and the honest default is where the caller
-    is standing when it asks -- read at import, a library loaded before a
-    process changed directory would open every session somewhere else.
+    Asked of an app-server started under the environment the agent's sessions
+    run with, so the home it reads is the one they write to. It starts no
+    thread and installs nothing: listing is a read.
     """
-    if tools is not None and len({tool.name for tool in tools}) != len(tools):
-        raise ValueError("application tool names must be unique")
-    base = options or CodexSessionConfig(cwd=Path.cwd())
-    # Validated again rather than copied as it stands, so a model named here
-    # is refused an effort the base carries by the same check a declaration is.
-    config = CodexSessionConfig.model_validate(
-        base.model_copy(
-            update={
-                "model": base.model if model is None else model,
-                "developer_instructions": system_prompt or base.developer_instructions,
-                "cwd": base.cwd if cwd is None else cwd,
-                "native_tools": base.native_tools
-                if native_tools is ...
-                else native_tools,
-                "application_tools": base.application_tools
-                if tools is None
-                else {f"lup_app_{tool.name}": tool for tool in tools},
-            }
-        )
-    )
-    if base_url is not None:
-        # Imported inside the call for the reason the Claude constructor gives:
-        # `config` imports this module, so naming it above closes the cycle.
-        from lup.providers.codex.config import (
-            CodexCompatibilityTransform,
-            CodexCompatibleEndpoint,
-        )
+    config = declared.validated_for_app_server()
+    environment = native_environment(config.environment)
+    if config.containment != "outer":
+        environment = {**environment, CODEX_HOME: str(native_home(environment))}
+    server = CodexAppServer(config.executable, environment=environment)
+    await server.start()
 
-        endpoint = CodexCompatibleEndpoint.model_validate(
-            {"base_url": base_url, "api_key": api_key}
-        )
-        config = CodexCompatibilityTransform(endpoint).apply(config)
-    return Client(CodexSessionOpener(config).open_session)
+    async def pages() -> AsyncIterator[CodexThreadPage]:
+        cursor: str | None = None
+        while True:
+            params: JsonObject = {
+                "cwd": str(config.workspace()),
+                "sourceKinds": list(LISTED_THREAD_SOURCES),
+            }
+            if cursor is not None:
+                params["cursor"] = cursor
+            page = CodexThreadPage.model_validate(
+                await server.request("thread/list", params)
+            )
+            yield page
+            if page.next_cursor is None:
+                return
+            cursor = page.next_cursor
+
+    try:
+        listed = [thread async for page in pages() for thread in page.data]
+    finally:
+        await server.close()
+    summaries = [thread.summary() for thread in listed]
+    return sorted(summaries, key=lambda summary: summary.updated_at, reverse=True)
 
 
 async def submit_completed_output(
@@ -1444,6 +1324,14 @@ async def submit_completed_output(
             validation_history=[ValidationAttempt(message=message)],
         )
     )
+
+
+def recorded_message(item: JsonObject) -> TurnMessage | None:
+    """One item of a thread's record as the message a live turn made of it."""
+    blocks = decode_completed_item(item)
+    if not blocks:
+        return None
+    return TurnMessage(role=message_role(item), blocks=blocks, native=item)
 
 
 def decode_usage(payload: JsonObject) -> Usage:
@@ -1490,6 +1378,15 @@ def message_role(payload: JsonObject) -> Literal["user", "assistant", "tool", "s
             return "assistant"
 
 
+def prompt_text(part: JsonValue) -> str | None:
+    """The words one part of a prompt carries, where it is words at all."""
+    match part:
+        case {"type": "text", "text": str(words)}:
+            return words
+        case _:
+            return None
+
+
 def decode_completed_item(payload: JsonObject) -> list[AnyTurnBlock]:
     """Decode one typed completed app-server item into canonical blocks."""
     from lup.sessions.events import (
@@ -1504,6 +1401,17 @@ def decode_completed_item(payload: JsonObject) -> list[AnyTurnBlock]:
     match payload:
         case {"type": "agentMessage", "text": str(text)}:
             return [TurnTextBlock(text=text)]
+        case {"type": "userMessage", "content": list(content)}:
+            said: list[AnyTurnBlock] = [
+                TurnTextBlock(text=words)
+                for part in content
+                if (words := prompt_text(part)) is not None
+            ]
+            return said or [
+                TurnNativeActivityBlock(
+                    provider="codex", activity=native.activity, payload=payload
+                )
+            ]
         case {"type": "reasoning"}:
             reasoning = CodexReasoningItem.model_validate(payload)
             return [

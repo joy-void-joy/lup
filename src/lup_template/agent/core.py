@@ -1,54 +1,37 @@
 """Application composition roots over Lup's provider-neutral runtime."""
 
 import logging
-from collections.abc import AsyncGenerator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from pydantic import AnyHttpUrl, BaseModel, SecretStr, TypeAdapter, ValidationError
+from pydantic import AnyHttpUrl, BaseModel, SecretStr
 
-from lup.providers.claude.config import (
-    ClaudeCompatibilityTransform,
-    ClaudeCompatibleEndpoint,
-)
+from lup.providers.claude import ClaudeCompatibleEndpoint
+from lup.providers.claude.config import ClaudeCompatibilityTransform
 from lup.providers.claude.model_choice import ClaudeModelChoice, claude_model_choice
-from lup.providers.claude.models import ClaudeEffort
-from lup.providers.claude.runtime import (
-    SESSION_THINKING_TOKENS,
-    ClaudeSandboxConfig,
-    ClaudeSessionConfig,
-    create_claude,
-)
+from lup.providers.claude import Claude, ClaudeSandboxConfig, SESSION_THINKING_TOKENS
 from lup.tools.native import NativeToolGroup, NativeTools
 from lup.providers.claude.subagents import subagent_tools as claude_subagent_tools
-from lup.providers.codex.config import (
-    CodexCompatibilityTransform,
-    CodexCompatibleEndpoint,
-)
+from lup.providers.codex import CodexCompatibleEndpoint
+from lup.providers.codex.config import CodexCompatibilityTransform
 from lup.providers.codex.model_choice import CodexModelChoice, codex_model_choice
-from lup.providers.codex.models import CodexEffort
-from lup.providers.codex.runtime import (
-    CodexMcpServerConfig,
-    CodexSessionConfig,
-    create_codex,
-)
+from lup.providers.codex import Codex, CodexMcpServerConfig
 from lup.providers.codex.subagents import CodexSubagentTools
 from lup.providers.codex.subagents import subagent_tools as codex_subagent_tools
 from lup.providers.codex.selection import codex_config
 from lup.providers.selection import SessionRequest
-from lup.sessions.client import Client
+from lup.sessions.layers import CleanupWrapper, SessionLayers
+from lup.sessions.surface import Agent
 from lup.sessions.composition import submission_gate_resolver
 from lup.policy.hooks import LupHooksConfig
 from lup.sessions.events import (
-    SessionHandle,
     SessionId,
     SubmissionDecision,
     SubmissionGate,
     SubmissionGateResolver,
     TurnResult,
-    turn_request,
 )
 from lup.observability.cost import per_mtok_usage_cost
 from lup.sessions.middleware import (
@@ -60,7 +43,6 @@ from lup.sessions.middleware import (
     TimeoutConfig,
     TraceRecord,
     TracingConfig,
-    decorated_session_factory,
 )
 from lup.tools.mcp import McpServerEntry
 from lup.observability.metrics import (
@@ -69,8 +51,8 @@ from lup.observability.metrics import (
     reset_metrics,
 )
 from lup.observability.sessions import (
+    CloseRecordingWrapper,
     SessionRecorder,
-    recorded_session_factory,
     session_recorder,
 )
 from lup.observability.trace import TraceLogger
@@ -109,29 +91,13 @@ class PersistentSessionResult(BaseModel):
 
 
 class SessionBuild(BaseModel, frozen=True, arbitrary_types_allowed=True):
-    """Configured provider-neutral factory and its application workspace."""
+    """The configured provider-neutral agent and its application workspace."""
 
-    factory: Client
+    factory: Agent
     notes: NotesConfig
     trace_logger: TraceLogger
     recorder: SessionRecorder | None = None
     """Where this session's record and its outputs are indexed, or nothing."""
-
-
-def cleaning_session_factory(inner: Client, cleanup: Callable[[], None]) -> Client:
-    """Run one application resource cleanup after every opened session."""
-
-    @asynccontextmanager
-    async def open_cleaned(
-        resume: SessionId | None = None,
-    ) -> AsyncGenerator[SessionHandle]:
-        try:
-            async with inner.open(resume) as handle:
-                yield handle
-        finally:
-            cleanup()
-
-    return Client(open_cleaned)
 
 
 def reflection_submission_gate(gate: "ReviewGate") -> SubmissionGate[AgentOutput]:
@@ -190,11 +156,11 @@ def provider_factory(
     thinking_budget: int | None = None,
     max_turns: int | None = None,
     role: SubagentSpec | None = None,
-) -> Client:
+) -> Agent:
     """The one application-owned provider selection boundary.
 
     Native identifiers are intentionally confined to this concrete composition
-    root. Every caller above it receives only a configured ``Client``.
+    root. Every caller above it receives only a configured ``Agent``.
     """
     engine = engine_for_settings(model)
     logger.info(
@@ -226,7 +192,7 @@ def provider_factory(
             if compat_base_url() is not None:
                 raise ValueError("AGENT_MODEL is required for a compatible endpoint")
             claude_model = "strongest"
-        config = ClaudeSessionConfig(
+        config = Claude(
             model=claude_model,
             system_prompt=system_prompt,
             coding_harness_preset=coding_harness_preset,
@@ -256,7 +222,7 @@ def provider_factory(
                 if session_defaults
                 else None
             ),
-            effort=normalize_claude_effort(settings.reasoning_effort),
+            effort=settings.reasoning_effort,
             cwd=cwd,
             add_dirs=add_dirs or list(settings.extra_dirs),
             environment=(
@@ -282,7 +248,7 @@ def provider_factory(
                     ),
                 )
             ).apply(config)
-        return create_claude(config)
+        return config
 
     if engine in ("codex", "openai", "openai-compat"):
         unsupported = [
@@ -340,9 +306,9 @@ def provider_factory(
         )
         if applications.mcp_servers.keys() & (codex_mcp_servers or {}).keys():
             raise ValueError("tool_servers and codex_mcp_servers name the same server")
-        config = CodexSessionConfig(
+        config = Codex(
             model=codex_model,
-            developer_instructions=system_prompt,
+            system_prompt=system_prompt,
             cwd=cwd,
             sandbox=(
                 "read-only"
@@ -359,9 +325,7 @@ def provider_factory(
                 or ("on-request" if hooks is not None else "never")
             ),
             hooks=hooks,
-            effort=normalize_codex_effort(
-                settings.codex_effort or settings.reasoning_effort
-            ),
+            effort=settings.codex_effort or settings.reasoning_effort,
             submission_gate_resolver=submission_gate,
             mcp_servers={**applications.mcp_servers, **(codex_mcp_servers or {})},
             application_tools=applications.application_tools,
@@ -387,19 +351,9 @@ def provider_factory(
                     ),
                 )
             ).apply(config)
-        return create_codex(config)
+        return config
 
     raise ValueError(f"unsupported engine {engine!r}")
-
-
-def normalize_claude_effort(value: str | None) -> ClaudeEffort | None:
-    """Validate the application setting against Claude's effort ladder."""
-    if value is None:
-        return None
-    try:
-        return TypeAdapter(ClaudeEffort).validate_python(value)
-    except ValidationError as error:
-        raise ValueError(f"unsupported Claude reasoning effort {value!r}") from error
 
 
 def normalize_codex_sandbox(
@@ -449,25 +403,15 @@ def normalize_codex_approval(
     )
 
 
-def normalize_codex_effort(value: str | None) -> CodexEffort | None:
-    """Validate the application setting against Codex's effort ladder."""
-    if value is None:
-        return None
-    try:
-        return TypeAdapter(CodexEffort).validate_python(value)
-    except ValidationError as error:
-        raise ValueError(f"unsupported Codex reasoning effort {value!r}") from error
-
-
 def decorate_factory(
-    factory: Client,
+    agent: Agent,
     *,
     notes: NotesConfig | None = None,
     trace_logger: TraceLogger | None = None,
     timeout_seconds: float | None = None,
     model: str | None = None,
-) -> Client:
-    """Apply complete-logical-turn governance in its explicit order."""
+) -> Agent:
+    """Lay complete-logical-turn governance over the agent, in its explicit order."""
     usage_cost = build_usage_cost(model)
     budget = None
     if settings.max_budget_usd is not None:
@@ -520,14 +464,15 @@ def decorate_factory(
         persistence = PersistenceConfig(directory=notes.trace_log.parent / "turns")
         tracing = TracingConfig(sink=trace_result)
         display = DisplayConfig(sink=display_result)
-    return decorated_session_factory(
-        factory,
-        timeout=timeout,
-        budget=budget,
-        correction=CorrectionConfig(cycles=2),
-        persistence=persistence,
-        tracing=tracing,
-        display=display,
+    return agent.layered(
+        SessionLayers(
+            timeout=timeout,
+            budget=budget,
+            correction=CorrectionConfig(cycles=2),
+            persistence=persistence,
+            tracing=tracing,
+            display=display,
+        )
     )
 
 
@@ -614,7 +559,7 @@ def build_session_factory(
             tool_servers = dict(
                 policy.get_mcp_servers(*registered(toolset, groups, policy))
             )
-            from lup.providers.claude.runtime import SUBMISSION_TOOL
+            from lup.providers.claude import SUBMISSION_TOOL
 
             allowed_tools = policy.get_allowed_tools(
                 tool_servers,
@@ -708,11 +653,15 @@ def build_session_factory(
                 and settings.sandbox_enabled
                 and engine in ("codex", "openai", "openai-compat")
             ):
-                factory = cleaning_session_factory(
-                    factory, codex_sandbox_cleanup(notes)
+                factory = factory.layered(
+                    SessionLayers(
+                        wrappers=[CleanupWrapper(codex_sandbox_cleanup(notes))]
+                    )
                 )
         case _:
-            factory = cleaning_session_factory(factory, sandbox.stop)
+            factory = factory.layered(
+                SessionLayers(wrappers=[CleanupWrapper(sandbox.stop)])
+            )
     trace_logger = TraceLogger(
         trace_path=notes.trace_log,
         title=f"Session {session_id}",
@@ -726,7 +675,9 @@ def build_session_factory(
     # Outermost, so the session's record closes after every other wrapper has
     # run and the trace it pins is the one the tracing sink finished writing.
     if recorder is not None and notes.record is not None:
-        decorated = recorded_session_factory(decorated, recorder, notes.record)
+        decorated = decorated.layered(
+            SessionLayers(wrappers=[CloseRecordingWrapper(recorder, notes.record)])
+        )
     return SessionBuild(
         factory=decorated,
         notes=notes,
@@ -744,8 +695,8 @@ def build_auxiliary_factory(
     thinking_budget: int | None = None,
     max_turns: int | None = None,
     timeout_seconds: float | None = None,
-) -> Client:
-    """Build a one-shot nested/reviewer factory through the same route.
+) -> Agent:
+    """Build a one-shot nested/reviewer agent through the same route.
 
     A nested agent's bounds are the caller's: it is one query with a job, so
     the turn cap and thinking budget belong to whoever declared that job
@@ -778,7 +729,7 @@ def build_auxiliary_factory(
     )
 
 
-def build_subagent_factory(spec: SubagentSpec) -> Client:
+def build_subagent_factory(spec: SubagentSpec) -> Agent:
     """Compile a declared role through the same engine as its parent session."""
     return decorate_factory(
         provider_factory(
@@ -880,9 +831,8 @@ async def run_agent(
     identifier = session_id or datetime.now().strftime("%Y%m%d_%H%M%S")
     reset_metrics()
     build = build_session_factory(identifier, task_id)
-    async with build.factory.open(resume) as handle:
-        turn = await handle.session.start(turn_request(task, AgentOutput))
-        result = await turn.turn.result()
+    async with build.factory.open(resume) as session:
+        result = await session.ask(task, AgentOutput)
     log_metrics_summary()
     projected = application_result(
         result,
@@ -926,9 +876,9 @@ async def run_persistent_agent(
     relay_gate = ReflectionGate(
         flag_path=build.notes.trace_log.with_suffix(".reflection")
     )
-    async with build.factory.open() as handle:
+    async with build.factory.open() as session:
         turns = await run_relay_session(
-            handle.session,
+            session,
             scheduler=scheduler,
             mailbox=mailbox,
             initial_prompt=task,

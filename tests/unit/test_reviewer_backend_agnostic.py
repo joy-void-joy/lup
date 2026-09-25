@@ -11,18 +11,18 @@ from lup_template.agent import core
 from lup_template.agent.tools import reflect
 
 
-class StubClient:
-    """A client that records the one turn the reviewer runs on it.
+class StubAgent:
+    """An agent that records the one turn the reviewer asks of it.
 
-    Stands in for `Client` structurally rather than by subclassing it: what
-    the reviewer needs is `query`, and a stub that answered more than that
+    Stands in for `Agent` structurally rather than by implementing it: what
+    the reviewer needs is `ask`, and a stub that answered more than that
     would be asserting the reviewer stays inside a surface it never touches.
     """
 
     def __init__(self, requested: dict[str, object]) -> None:
         self.requested = requested
 
-    async def query(self, prompt: object, output_type: object = None) -> object:
+    async def ask(self, prompt: object, output_type: object = None) -> object:
         self.requested.update(factory=self, prompt=prompt, output_type=output_type)
         return SimpleNamespace(
             output=ReviewResult(verdict=ReviewVerdict.approve, assessment="critique")
@@ -44,10 +44,10 @@ async def test_reviewer_uses_explicit_factory_and_typed_request(
     built: dict[str, object] = {}
     requested: dict[str, object] = {}
 
-    # A stub client rather than a patched module function: dispatch is the
-    # method now, so what the reviewer is handed is what answers it, and the
+    # A stub agent rather than a patched module function: dispatch is the
+    # agent's `ask`, so what the reviewer is handed is what answers it, and the
     # test intercepts by supplying that rather than by reaching around it.
-    marker = StubClient(requested)
+    marker = StubAgent(requested)
 
     def build(**kwargs: object) -> object:
         built.update(kwargs)
@@ -74,7 +74,7 @@ async def test_reviewer_factory_shape_does_not_depend_on_model_family(
 
     def build(**kwargs: object) -> object:
         calls.append(kwargs)
-        return StubClient({})
+        return StubAgent({})
 
     monkeypatch.setattr(core, "build_auxiliary_factory", build)
 

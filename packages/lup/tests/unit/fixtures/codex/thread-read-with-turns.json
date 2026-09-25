@@ -1,0 +1,79 @@
+{
+  "thread": {
+    "id": "01a0d654-8892-7203-8a7d-d61383130d4e",
+    "environments": [
+      {
+        "environmentId": "local",
+        "cwd": "/work/codex-kit",
+        "runtimeWorkspaceRoots": [
+          "/work/codex-kit"
+        ]
+      }
+    ],
+    "extra": null,
+    "sessionId": "01a0d654-8892-7203-8a7d-d61383130d4e",
+    "forkedFromId": null,
+    "parentThreadId": null,
+    "preview": "Reply with the single word: pong",
+    "ephemeral": false,
+    "section": null,
+    "sectionEnteredAt": null,
+    "projectId": null,
+    "historyMode": "paginated",
+    "modelProvider": "openai",
+    "model": "gpt-6-astra",
+    "reasoningEffort": "medium",
+    "createdAt": 1790302259,
+    "updatedAt": 1790302263,
+    "recencyAt": 1790302260,
+    "status": {
+      "type": "idle"
+    },
+    "path": "/codex-home/sessions/2026/09/25/rollout-2026-09-25T04-10-59-01a0d654-8892-7203-8a7d-d61383130d4e.jsonl",
+    "cwd": "/work/codex-kit",
+    "cliVersion": "0.156.1",
+    "originator": "lup",
+    "source": "vscode",
+    "canAcceptDirectInput": true,
+    "threadSource": null,
+    "agentNickname": null,
+    "agentRole": null,
+    "gitInfo": null,
+    "name": null,
+    "daybreakEnabled": null,
+    "turns": [
+      {
+        "id": "01a0d654-8aa8-7572-991f-b1ca47a49997",
+        "items": [
+          {
+            "type": "userMessage",
+            "id": "01a0d654-8fd1-7fa2-af48-f786c374899c",
+            "clientId": null,
+            "content": [
+              {
+                "type": "text",
+                "text": "Reply with the single word: pong",
+                "text_elements": []
+              }
+            ]
+          },
+          {
+            "type": "agentMessage",
+            "id": "msg_04d6167b26573c0a016ab5d85fcf8c87d285f870c54560d9c3",
+            "text": "pong",
+            "phase": "final_answer",
+            "memoryCitation": null,
+            "delivery": null,
+            "questions": null
+          }
+        ],
+        "itemsView": "full",
+        "status": "completed",
+        "error": null,
+        "startedAt": 1790302259,
+        "completedAt": 1790302263,
+        "durationMs": 3775
+      }
+    ]
+  }
+}

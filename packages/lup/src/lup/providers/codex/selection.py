@@ -46,19 +46,13 @@ from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.model_choice import codex_model_choice
 from lup.providers.codex.models import CodexEffort
 from lup.providers.codex.native_tools import CodexNativeTools
-from lup.providers.codex.runtime import (
-    CODEX_PROGRAM,
-    CodexMcpServerConfig,
-    CodexSessionConfig,
-    create_codex,
-)
+from lup.providers.codex import CODEX_PROGRAM, Codex, CodexMcpServerConfig
 from lup.tools.mcp import LupMcpServerConfig, McpServerEntry, RawStdioServerConfig
-from lup.sessions.client import Client
 from lup.sessions.errors import UnsupportedCapability
+from lup.providers.confinement import SessionContainment
 from lup.providers.selection import (
     Runtime,
     SessionAutonomy,
-    SessionContainment,
     SessionEffort,
     SessionRequest,
 )
@@ -187,7 +181,7 @@ def codex_sandbox(request: SessionRequest) -> CodexSandbox | None:
     return min(asked, key=CODEX_SANDBOX_WIDTH.index, default=None)
 
 
-def codex_config(request: SessionRequest) -> CodexSessionConfig:
+def codex_config(request: SessionRequest) -> Codex:
     """Render a portable request into Codex's own session configuration.
 
     Rendering is separate from building so an application can stack a
@@ -241,9 +235,9 @@ def codex_config(request: SessionRequest) -> CodexSessionConfig:
         raise ValueError(
             "hosted server/tool names collide in Codex; rename the ambiguous server or tool"
         )
-    return CodexSessionConfig(
+    return Codex(
         model=None if request.model is None else codex_model_choice(request.model),
-        developer_instructions=request.instructions,
+        system_prompt=request.instructions,
         cwd=request.cwd,
         policy_root=project_root(),
         sandbox=codex_sandbox(request),
@@ -274,11 +268,6 @@ def codex_config(request: SessionRequest) -> CodexSessionConfig:
     )
 
 
-def codex_session(request: SessionRequest) -> Client:
-    """Render a portable request into a configured Codex session factory."""
-    return create_codex(codex_config(request))
-
-
 def codex_workspace_home(environment: EnvVars, workspace: Path) -> EnvVars:
     """Give one workspace's Codex sessions a home of their own.
 
@@ -299,7 +288,7 @@ def codex_workspace_home(environment: EnvVars, workspace: Path) -> EnvVars:
 CODEX_RUNTIME = Runtime(
     name="Codex",
     login=CODEX_LOGIN,
-    open=codex_session,
+    open=codex_config,
     workspace_home=codex_workspace_home,
 )
 """Codex, as the single value an application assigns to select it."""

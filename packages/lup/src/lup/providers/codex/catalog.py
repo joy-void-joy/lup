@@ -18,7 +18,7 @@ import sh
 from pydantic import BaseModel
 
 from lup.providers.catalog import CatalogModel, ModelCatalog
-from lup.providers.codex.runtime import CODEX_PROGRAM
+from lup.providers.codex import CODEX_PROGRAM
 
 
 class CodexReasoningLevel(BaseModel, frozen=True, extra="ignore"):

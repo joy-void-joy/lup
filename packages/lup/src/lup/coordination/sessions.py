@@ -1,7 +1,7 @@
 """One durable session per actor, opened once and kept while the run moves.
 
-A caller reaching for :meth:`lup.sessions.client.Client.query` opens a session, takes
-one turn and closes it. Nine separate symptoms sit downstream of that one
+A caller reaching for an agent's one-shot ``ask`` opens a session, takes one
+turn and closes it. Nine separate symptoms sit downstream of that one
 fact in the resolver: a park discards the whole turn, a reviewer re-reads its
 concern cold each round, a merger never sees the parent it joined last, and
 the same question is answered four times because each turn re-derives it
@@ -14,9 +14,9 @@ multi-turn shape is not unusual — :class:`lup.orchestration.background.Backgro
 already holds one session open across many turns — the one-shot convenience
 is simply the easier reach.
 
-``query()`` stays in the library. It is the legitimate one-shot convenience
-and ``examples/one_shot.py`` uses it; what an actor buys over it is being
-reachable while it works.
+The one-shot ``ask`` stays in the library. It is the legitimate one-shot
+convenience and ``examples/one_shot.py`` uses it; what an actor buys over it
+is being reachable while it works.
 """
 
 import asyncio
@@ -47,15 +47,8 @@ from lup.policy.hooks import (
 )
 from lup.observability.journal import JournalRecord
 from lup.sessions.errors import ProviderTurnError
-from lup.sessions.client import Client
-from lup.sessions.events import (
-    SessionHandle,
-    SessionId,
-    TurnEvent,
-    TurnHandle,
-    TurnRequest,
-    TurnResult,
-)
+from lup.sessions.events import SessionId, TurnEvent, TurnResult
+from lup.sessions.surface import Agent, Conversation, Turn
 
 logger = logging.getLogger(__name__)
 
@@ -122,16 +115,32 @@ def schema_digest(output_type: type[BaseModel] | type[None] | None) -> str | Non
     return hashlib.sha256(schema.encode("utf-8")).hexdigest()
 
 
+class TurnSeen:
+    """Whether a turn got as far as its first event, which is being accepted."""
+
+    def __init__(self) -> None:
+        self.accepted = False
+
+
 async def record_turn(
-    journal: ActorJournal, actor: ActorRef, events: AsyncIterator[TurnEvent]
+    journal: ActorJournal,
+    actor: ActorRef,
+    events: AsyncIterator[TurnEvent],
+    seen: TurnSeen,
 ) -> None:
     """Drain one turn's durable events into the journal as they arrive.
 
     Taking the durable view rather than the live one keeps the journal a
-    record of what happened rather than of what was being typed.
+    record of what happened rather than of what was being typed. A turn that
+    fails ends its events with the failure, which awaiting the turn raises to
+    its caller; recording stops there rather than raising it twice.
     """
-    async for event in events:
-        journal.append(actor, event)
+    try:
+        async for event in events:
+            seen.accepted = True
+            journal.append(actor, event)
+    except Exception:
+        logger.debug("%s stopped recording a failed turn", actor.label(), exc_info=True)
 
 
 class ActorInbox:
@@ -270,52 +279,77 @@ class ActorSession:
     def __init__(
         self,
         actor: ActorRef,
-        factory: Client,
+        agent: Agent,
         journal: ActorJournal,
         record: ActorRecord | None = None,
         inbox: ActorInbox | None = None,
     ) -> None:
         self.actor = actor
-        self.factory = factory
+        self.agent = agent
         self.journal = journal
         self.inbox = inbox
         self.record = record or ActorRecord(actor=actor)
         self.stack = AsyncExitStack()
-        self.handle: SessionHandle | None = None
+        self.conversation: Conversation | None = None
         self.pending: list[str] = []
         self.collected: ActorDelivery | None = None
 
-    async def opened(self) -> SessionHandle:
+    async def opened(self) -> Conversation:
         """Open this actor's session once, resuming where one was persisted."""
-        if self.handle is None:
-            self.handle = await self.stack.enter_async_context(
-                self.factory.open(resume=self.record.session)
+        if self.conversation is None:
+            self.conversation = await self.stack.enter_async_context(
+                self.agent.open(resume=self.record.session)
             )
-        return self.handle
+        return self.conversation
 
-    async def started[T: BaseModel | None](
-        self, handle: SessionHandle, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
-        """Begin a turn, forgetting a conversation the provider no longer has.
+    async def taken[T: BaseModel](
+        self, conversation: Conversation, prompt: str, output: type[T], seen: TurnSeen
+    ) -> TurnResult[T]:
+        """One turn on ``conversation``, its events drained as they happen.
+
+        The events are drained concurrently with awaiting the result rather
+        than afterwards: a watcher that only saw a turn once it finished would
+        be a log rather than a trace. The drain is awaited before this
+        returns or raises, so ``seen`` has settled by then.
+        """
+        turn: Turn[T] = conversation.ask(prompt, output)
+        drain = asyncio.create_task(
+            record_turn(self.journal, self.actor, turn.events(), seen)
+        )
+        try:
+            return await turn
+        finally:
+            await drain
+
+    async def turn[T: BaseModel](self, prompt: str, output: type[T]) -> TurnResult[T]:
+        """Take one turn on this actor's session, recording it as it happens.
 
         A recorded session is a claim that the provider still holds that
         conversation, and neither runtime guarantees it: a transcript can be
         pruned, and a runtime that does not persist one never wrote it. Ending
         a run over lost context rather than over the work is the worse
-        failure, so the actor reopens without the resume and takes its turn on
-        a fresh conversation — the loss recorded rather than passed off as
-        continuity.
+        failure, so a turn the provider refused before accepting it — one
+        that reached no event — is taken again on a fresh conversation, the
+        loss recorded rather than passed off as continuity.
         """
-        delivered = self.with_pending(request)
+        self.check_schema(output)
+        self.collect_inbox()
+        delivered = self.with_pending(prompt)
+        seen = TurnSeen()
         try:
-            return await handle.session.start(delivered)
+            result = await self.taken(await self.opened(), delivered, output, seen)
         except ProviderTurnError as error:
             # A host fault is not lost context. Reopening would meet the same
             # dead credential, and the attempt costs the resume point: the
             # record is cleared before the retry, so a run interrupted here
             # would resume every actor on a fresh conversation having
-            # forgotten the one it was holding.
-            if self.record.session is None or error.failure.environmental:
+            # forgotten the one it was holding. A turn that was accepted
+            # failed on its own account, and is not retried here either.
+            if (
+                seen.accepted
+                or self.record.session is None
+                or error.failure.environmental
+            ):
                 raise
             logger.exception(
                 "%s could not resume session %s; continuing on a fresh one",
@@ -324,36 +358,9 @@ class ActorSession:
             )
             self.record = self.record.model_copy(update={"session": None})
             await self.close()
-            return await (await self.opened()).session.start(delivered)
-
-    async def turn[T: BaseModel | None](self, request: TurnRequest[T]) -> TurnResult[T]:
-        """Take one turn on this actor's session, recording it as it happens.
-
-        The events are drained concurrently with awaiting the result rather
-        than afterwards. An adapter fills its queue from its own task and the
-        queue is unbounded, so a reader cannot deadlock a turn — and a
-        watcher that only saw a turn once it finished would be a log rather
-        than a trace.
-        """
-        self.check_schema(request)
-        self.collect_inbox()
-        handle = await self.opened()
-        started = await self.started(handle, request)
-        drain = (
-            asyncio.create_task(
-                record_turn(self.journal, self.actor, started.events.events())
+            result = await self.taken(
+                await self.opened(), delivered, output, TurnSeen()
             )
-            if started.events is not None
-            else None
-        )
-        try:
-            result = await started.turn.result()
-        finally:
-            if drain is not None:
-                # The adapter closes its queue in a `finally`, so the drain
-                # terminates on the failure path too and awaiting it here
-                # cannot outlive the turn that fed it.
-                await drain
         self.record = self.record.model_copy(
             update={"session": result.identifiers.session}
         )
@@ -415,9 +422,7 @@ class ActorSession:
         )
         return [f"Standing for everyone working here:\n{lines}"]
 
-    def with_pending[T: BaseModel | None](
-        self, request: TurnRequest[T]
-    ) -> TurnRequest[T]:
+    def with_pending(self, prompt: str) -> str:
         """Put whatever was volunteered between turns at the head of this one.
 
         Ahead of the prompt rather than after it, because a message that
@@ -430,17 +435,15 @@ class ActorSession:
         """
         standing = self.standing_context()
         if not self.pending and not standing:
-            return request
-        delivered = "\n\n".join([*standing, *self.pending, request.input.text])
+            return prompt
+        delivered = "\n\n".join([*standing, *self.pending, prompt])
         self.pending.clear()
         if self.inbox is not None and self.collected is not None:
             self.inbox.commit(self.collected)
             self.collected = None
-        return request.model_copy(
-            update={"input": request.input.model_copy(update={"text": delivered})}
-        )
+        return delivered
 
-    def check_schema[T: BaseModel | None](self, request: TurnRequest[T]) -> None:
+    def check_schema(self, output: type[BaseModel]) -> None:
         """Refuse a resumed actor whose submission schema no longer matches.
 
         Per submission type, because being asked for a second one is ordinary
@@ -449,10 +452,10 @@ class ActorSession:
         actor has answered before whose shape has since moved, which is the
         park-across-a-code-change this guard was built for.
         """
-        digest = schema_digest(request.output_type)
-        if request.output_type is None or digest is None:
+        digest = schema_digest(output)
+        if digest is None:
             return
-        named = request.output_type.__name__
+        named = output.__name__
         seen = self.record.schema_digests
         if named in seen and seen[named] != digest:
             raise ActorSchemaChangedError(
@@ -469,4 +472,4 @@ class ActorSession:
 
     async def close(self) -> None:
         await self.stack.aclose()
-        self.handle = None
+        self.conversation = None

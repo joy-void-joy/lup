@@ -11,14 +11,13 @@ from uuid import UUID
 import pytest
 from pydantic import BaseModel, Field, ValidationError
 
+from lup.providers.claude import Claude, SESSION_THINKING_TOKENS
 from lup.providers.claude.runtime import (
-    SESSION_THINKING_TOKENS,
     ClaudeConversationState,
     ClaudeFork,
-    ClaudeSessionConfig,
+    ClaudeRecord,
     ClaudeSessionOpener,
     ClaudeTurnToolBinder,
-    SubmissionBindingSource,
     attach_cli_stderr,
     build_claude_options,
     build_submission_server,
@@ -30,10 +29,9 @@ from lup.providers.claude.runtime import (
     needs_a_person,
 )
 from lup.providers.codex.app_server import CodexAppServer, RpcMessage, RpcNotification
+from lup.providers.codex import Codex, CodexMcpServerConfig
 from lup.providers.codex.runtime import (
     CodexConversationState,
-    CodexMcpServerConfig,
-    CodexSessionConfig,
     CodexSteer,
     CodexTurnChannel,
     CodexTurnToolBinder,
@@ -76,7 +74,12 @@ from lup.types import Usage
 from tests.unit.test_adapter_transforms import arm_labels, decoder_arms
 
 if TYPE_CHECKING:
-    import claude_agent_sdk as claude
+    pass
+
+
+def claude_state(config: Claude) -> ClaudeConversationState:
+    """Conversation state for a new session, built the way the opener builds it."""
+    return ClaudeConversationState(ClaudeSessionOpener(config), config, None)
 
 
 class FirstOutput(BaseModel):
@@ -88,9 +91,7 @@ class SecondOutput(BaseModel):
 
 
 def test_fresh_claude_session_uses_cli_valid_uuid() -> None:
-    state = ClaudeConversationState(
-        ClaudeSessionOpener(ClaudeSessionConfig(model=CustomModel(id="claude"))), None
-    )
+    state = claude_state(Claude(model=CustomModel(id="claude")))
 
     assert str(UUID(state.session_id)) == state.session_id
 
@@ -100,7 +101,7 @@ def test_claude_session_defaults_and_hooks_reach_native_options(
 ) -> None:
     hooks = create_permission_hooks([tmp_path / "rw"], [tmp_path / "ro"])
     options = build_claude_options(
-        ClaudeSessionConfig(
+        Claude(
             model=CustomModel(id="claude"),
             system_prompt="Project rules",
             hooks=hooks,
@@ -125,7 +126,7 @@ def test_claude_session_defaults_and_hooks_reach_native_options(
 def test_the_manual_permission_mode_reaches_the_sdk_as_its_default() -> None:
     """The SDK's literal still spells the CLI's ``manual`` as ``default``."""
     options = build_claude_options(
-        ClaudeSessionConfig(permission_mode="manual"),
+        Claude(permission_mode="manual"),
         binding=lambda: None,
         resume=None,
         session_id="18f5debf-499a-42bb-8856-0b39dd59943d",
@@ -146,7 +147,7 @@ def test_a_named_plugin_directory_reaches_the_session(tmp_path: Path) -> None:
     """
     lease = tmp_path / "lease" / ".claude" / "plugins" / "lup"
     options = build_claude_options(
-        ClaudeSessionConfig(
+        Claude(
             model=CustomModel(id="claude"),
             cwd=tmp_path / "lease",
             plugin_dirs=[lease],
@@ -160,7 +161,7 @@ def test_a_named_plugin_directory_reaches_the_session(tmp_path: Path) -> None:
     assert options.plugins == [{"type": "local", "path": str(lease)}]
 
     unnamed = build_claude_options(
-        ClaudeSessionConfig(model=CustomModel(id="claude")),
+        Claude(model=CustomModel(id="claude")),
         binding=lambda: None,
         resume=None,
         session_id="18f5debf-499a-42bb-8856-0b39dd59943d",
@@ -170,7 +171,7 @@ def test_a_named_plugin_directory_reaches_the_session(tmp_path: Path) -> None:
 
 def test_claude_isolation_knobs_reach_native_options() -> None:
     options = build_claude_options(
-        ClaudeSessionConfig(
+        Claude(
             model=CustomModel(id="claude"),
             max_buffer_size=500 * 1024 * 1024,
             setting_sources=[],
@@ -191,7 +192,7 @@ def test_claude_isolation_knobs_reach_native_options() -> None:
 
 def test_claude_isolation_knobs_default_to_no_inherited_tools() -> None:
     options = build_claude_options(
-        ClaudeSessionConfig(model=CustomModel(id="claude")),
+        Claude(model=CustomModel(id="claude")),
         binding=lambda: None,
         resume=None,
         session_id="18f5debf-499a-42bb-8856-0b39dd59943d",
@@ -204,37 +205,10 @@ def test_claude_isolation_knobs_default_to_no_inherited_tools() -> None:
     assert options.extra_args == {}
 
 
-def test_claude_opener_builds_options_through_an_overridable_seam() -> None:
-    class IsolatedOpener(ClaudeSessionOpener):
-        def build_options(
-            self,
-            *,
-            binding: SubmissionBindingSource,
-            resume: str | None,
-            session_id: str | None,
-        ) -> "claude.ClaudeAgentOptions":
-            options = super().build_options(
-                binding=binding, resume=resume, session_id=session_id
-            )
-            options.max_buffer_size = 4096
-            return options
-
-    opener = IsolatedOpener(ClaudeSessionConfig(model=CustomModel(id="claude")))
-    state = opener.create_state(None)
-    options = state.opener.build_options(
-        binding=lambda: None, resume=None, session_id=state.session_id
-    )
-
-    assert state.opener is opener
-    assert options.max_buffer_size == 4096
-
-
 def test_a_dead_cli_explains_itself_instead_of_pointing_at_stderr() -> None:
     from claude_agent_sdk import ProcessError
 
-    state = ClaudeSessionOpener(
-        ClaudeSessionConfig(model=CustomModel(id="claude"))
-    ).create_state(None)
+    state = claude_state(Claude(model=CustomModel(id="claude")))
     for line in ("loading plugin lup@local", "error: marketplace 'local' not found"):
         state.stderr_lines.append(line)
 
@@ -270,8 +244,8 @@ def test_only_the_sdk_s_process_error_is_rewritten() -> None:
 
 
 def test_the_captured_tail_is_bounded_by_configuration() -> None:
-    config = ClaudeSessionConfig(model=CustomModel(id="claude"), stderr_tail_lines=2)
-    state = ClaudeSessionOpener(config).create_state(None)
+    config = Claude(model=CustomModel(id="claude"), stderr_tail_lines=2)
+    state = claude_state(config)
 
     for line in ("first", "second", "third"):
         state.stderr_lines.append(line)
@@ -282,7 +256,7 @@ def test_the_captured_tail_is_bounded_by_configuration() -> None:
 
 def test_claude_native_subagents_and_reported_cost_are_preserved() -> None:
     options = build_claude_options(
-        ClaudeSessionConfig(
+        Claude(
             model=CustomModel(id="claude"),
             subagents=[
                 SubagentSpec(
@@ -308,7 +282,7 @@ def test_claude_native_subagents_and_reported_cost_are_preserved() -> None:
 def test_codex_thread_config_contains_project_mcp_and_writable_roots(
     tmp_path: Path,
 ) -> None:
-    config = CodexSessionConfig(
+    config = Codex(
         model=CustomModel(id="gpt"),
         cwd=tmp_path,
         mcp_servers={
@@ -340,7 +314,7 @@ def test_codex_thread_config_contains_project_mcp_and_writable_roots(
 
 
 def test_codex_thread_config_uses_app_server_approval_spelling(tmp_path: Path) -> None:
-    config = CodexSessionConfig(
+    config = Codex(
         cwd=tmp_path,
         approval_policy="on-request",
         native_tools=[NativeToolGroup.SHELL],
@@ -354,7 +328,7 @@ async def test_thread_parameters_omit_model_for_the_native_default(
     tmp_path: Path,
 ) -> None:
     state = CodexConversationState(
-        CodexSessionConfig(cwd=tmp_path), CodexAppServer(Path("codex")), None
+        Codex(cwd=tmp_path), CodexAppServer(Path("codex")), None
     )
 
     assert "model" not in state.thread_parameters()
@@ -363,7 +337,7 @@ async def test_thread_parameters_omit_model_for_the_native_default(
 async def test_mcp_elicitation_accepts_composed_servers_declines_others(
     tmp_path: Path,
 ) -> None:
-    config = CodexSessionConfig(
+    config = Codex(
         model=CustomModel(id="gpt"),
         cwd=tmp_path,
         mcp_servers={"notes": CodexMcpServerConfig(command="uv")},
@@ -539,9 +513,7 @@ async def test_claude_partial_events_are_live_and_completed_replay_is_preserved(
             )
 
     monkeypatch.setattr(claude, "ClaudeSDKClient", FixtureClient)
-    state = ClaudeConversationState(
-        ClaudeSessionOpener(ClaudeSessionConfig(model=CustomModel(id="claude"))), None
-    )
+    state = claude_state(Claude(model=CustomModel(id="claude")))
 
     accepted = await state.start_turn("hello")
     assert accepted.events is not None
@@ -612,9 +584,7 @@ async def test_claude_adopts_the_session_id_the_cli_persists(
             )
 
     monkeypatch.setattr(claude, "ClaudeSDKClient", InitReportingClient)
-    state = ClaudeConversationState(
-        ClaudeSessionOpener(ClaudeSessionConfig(model=CustomModel(id="claude"))), None
-    )
+    state = claude_state(Claude(model=CustomModel(id="claude")))
     minted = state.session_id
 
     accepted = await state.start_turn("hello")
@@ -669,9 +639,7 @@ async def test_an_interrupted_claude_turn_is_not_a_retryable_provider_failure(
             )
 
     monkeypatch.setattr(claude, "ClaudeSDKClient", InterruptibleClient)
-    state = ClaudeConversationState(
-        ClaudeSessionOpener(ClaudeSessionConfig(model=CustomModel(id="claude"))), None
-    )
+    state = claude_state(Claude(model=CustomModel(id="claude")))
 
     unasked = await state.start_turn("hello")
     with pytest.raises(ProviderTurnError):
@@ -750,9 +718,7 @@ async def test_the_durable_view_is_the_live_one_without_its_deltas(
             )
 
     monkeypatch.setattr(claude, "ClaudeSDKClient", FixtureClient)
-    state = ClaudeConversationState(
-        ClaudeSessionOpener(ClaudeSessionConfig(model=CustomModel(id="claude"))), None
-    )
+    state = claude_state(Claude(model=CustomModel(id="claude")))
 
     accepted = await state.start_turn("hello")
     assert accepted.events is not None
@@ -774,37 +740,79 @@ async def test_the_durable_view_is_the_live_one_without_its_deltas(
 
 
 @pytest.mark.asyncio
-async def test_claude_latest_turn_fork_preserves_a_typed_session_handle(
+async def test_a_claude_fork_branches_the_parent_under_an_id_of_its_own(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import claude_agent_sdk as claude
+    """The CLI makes the branch, resuming the parent with its fork flags.
 
+    So the new transcript is filed under the session's own home, which the
+    SDK's file-copying fork cannot promise: it reads only this process's
+    environment for where transcripts live.
+    """
+    state = claude_state(Claude(model=CustomModel(id="claude"), cwd=tmp_path))
+    state.recorded = True
+
+    async with ClaudeFork(state).fork() as forked:
+        assert isinstance(forked.record, ClaudeRecord)
+        options = forked.record.state.options()
+
+    assert forked.id.value != state.session_id
+    assert options.resume == state.session_id
+    assert options.fork_session is True
+    assert options.session_id == forked.id.value
+    assert options.resume_session_at is None
+
+
+@pytest.mark.asyncio
+async def test_a_claude_fork_at_a_turn_keeps_that_turn_s_last_message() -> None:
+    state = claude_state(Claude(model=CustomModel(id="claude")))
+    state.recorded = True
+    state.turn_points[TurnId(value="the-turn")] = "the-last-message"
+
+    async with ClaudeFork(state).fork(TurnId(value="the-turn")) as forked:
+        assert isinstance(forked.record, ClaudeRecord)
+        options = forked.record.state.options()
+
+    assert options.resume_session_at == "the-last-message"
+
+
+def test_a_claude_fork_refuses_a_turn_the_session_never_took() -> None:
+    state = claude_state(Claude(model=CustomModel(id="claude")))
+    state.recorded = True
+
+    with pytest.raises(ValueError, match="not one this session took"):
+        ClaudeFork(state).fork(TurnId(value="elsewhere"))
+
+
+def test_a_conversation_with_no_turn_has_nothing_to_fork() -> None:
+    state = claude_state(Claude(model=CustomModel(id="claude")))
+
+    with pytest.raises(ValueError, match="nothing to fork"):
+        ClaudeFork(state).fork()
+
+
+def test_a_new_claude_conversation_is_started_under_the_id_it_answers() -> None:
+    """Dictated rather than waited for, so ``id`` holds from the moment it opens."""
+    state = claude_state(Claude(model=CustomModel(id="claude")))
+
+    options = state.options()
+
+    assert options.session_id == state.session_id
+    assert options.resume is None
+    assert options.fork_session is False
+
+
+def test_a_resumed_claude_conversation_names_nothing_new() -> None:
+    config = Claude(model=CustomModel(id="claude"))
     state = ClaudeConversationState(
-        ClaudeSessionOpener(
-            ClaudeSessionConfig(model=CustomModel(id="claude"), cwd=tmp_path)
-        ),
-        None,
+        ClaudeSessionOpener(config), config, SessionId(value="resumed-id")
     )
 
-    def fork_session(
-        session_id: str,
-        directory: str | None = None,
-        up_to_message_id: str | None = None,
-        title: str | None = None,
-    ) -> claude.ForkSessionResult:
-        assert session_id == state.session_id
-        assert directory == str(tmp_path)
-        assert up_to_message_id is None
-        assert title is None
-        return claude.ForkSessionResult(
-            session_id="18f5debf-499a-42bb-8856-0b39dd59943d"
-        )
+    options = state.options()
 
-    monkeypatch.setattr(claude, "fork_session", fork_session)
-
-    async with ClaudeFork(state).fork() as handle:
-        assert handle.fork is not None
+    assert state.session_id == "resumed-id"
+    assert options.resume == "resumed-id"
+    assert options.session_id is None
 
 
 @pytest.mark.asyncio
@@ -827,9 +835,7 @@ async def test_claude_binder_refreshes_same_schema_turns_without_reconnecting(
             disconnects += 1
 
     monkeypatch.setattr(claude, "ClaudeSDKClient", RecordingClient)
-    state = ClaudeConversationState(
-        ClaudeSessionOpener(ClaudeSessionConfig(model=CustomModel(id="claude"))), None
-    )
+    state = claude_state(Claude(model=CustomModel(id="claude")))
     binder = ClaudeTurnToolBinder(state)
 
     def submission_tool_is_bound() -> bool:
@@ -922,9 +928,7 @@ async def test_claude_submission_server_serves_the_binding_installed_now() -> No
     """A connection outlives the turn that opened it, so its tool must too."""
     from mcp import Client
 
-    state = ClaudeConversationState(
-        ClaudeSessionOpener(ClaudeSessionConfig(model=CustomModel(id="claude"))), None
-    )
+    state = claude_state(Claude(model=CustomModel(id="claude")))
     binder = ClaudeTurnToolBinder(state)
 
     opening_store = InMemorySubmittedOutputStore()
@@ -954,7 +958,7 @@ async def test_codex_binder_refreshes_each_schema_without_replacing_the_thread(
     tmp_path: Path,
 ) -> None:
     state = CodexConversationState(
-        CodexSessionConfig(model=CustomModel(id="gpt"), cwd=tmp_path),
+        Codex(model=CustomModel(id="gpt"), cwd=tmp_path),
         CodexAppServer(Path("codex")),
         None,
     )
@@ -989,7 +993,7 @@ async def test_codex_steer_targets_the_active_turn(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     state = CodexConversationState(
-        CodexSessionConfig(model=CustomModel(id="gpt"), cwd=tmp_path),
+        Codex(model=CustomModel(id="gpt"), cwd=tmp_path),
         CodexAppServer(Path("codex")),
         None,
     )
@@ -1066,10 +1070,10 @@ async def test_closing_a_session_settles_the_reader_before_the_transport(
         return clients[-1]
 
     monkeypatch.setattr(claude, "ClaudeSDKClient", track)
-    opener = ClaudeSessionOpener(ClaudeSessionConfig(model=CustomModel(id="claude")))
+    opener = ClaudeSessionOpener(Claude(model=CustomModel(id="claude")))
 
-    async with opener.open_session() as handle:
-        await handle.session.start(TurnRequest(input=TurnInput(text="hello")))
+    async with opener.open_session() as session:
+        await session.engine.start(TurnRequest(input=TurnInput(text="hello")))
         # An unfinished turn is torn down with its reader suspended inside the
         # response generator, so wait until it is actually there.
         await clients[-1].reading.wait()
@@ -1302,6 +1306,19 @@ COMPLETED_ITEM_CASES = [
         arm="(type=agentMessage, text)",
         payload={"type": "agentMessage", "text": "hello"},
         blocks=[TurnTextBlock(text="hello")],
+    ),
+    CompletedItemCase(
+        name="userMessage",
+        arm="(type=userMessage, content)",
+        payload={
+            "type": "userMessage",
+            "id": "prompt",
+            "content": [
+                {"type": "text", "text": "Reply with pong", "text_elements": []},
+                {"type": "image", "url": "file:///shot.png"},
+            ],
+        },
+        blocks=[TurnTextBlock(text="Reply with pong")],
     ),
     CompletedItemCase(
         name="reasoning",

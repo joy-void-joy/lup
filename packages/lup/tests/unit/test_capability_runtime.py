@@ -2,8 +2,6 @@
 
 import asyncio
 
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
 
@@ -11,11 +9,8 @@ import pytest
 from pydantic import BaseModel
 
 from lup.providers.codex.app_server import CodexAppServer, RpcNotification
-from lup.providers.codex.runtime import (
-    CodexConversationState,
-    CodexSessionConfig,
-    CodexTurnChannel,
-)
+from lup.providers.codex import Codex
+from lup.providers.codex.runtime import CodexConversationState, CodexTurnChannel
 from lup.providers.codex.hooks import (
     CODEX_SEMANTICS,
     COMMAND_APPROVAL,
@@ -36,7 +31,7 @@ from lup.sessions.composition import (
     submission_gate_resolver,
 )
 from lup.sessions.capabilities import Interrupt, TurnToolBinder
-from lup.sessions.client import Client
+from lup.sessions.layers import CleanupWrapper, SessionLayers
 from lup.sessions.errors import (
     ProviderTurnError,
     StructuredOutputError,
@@ -45,17 +40,21 @@ from lup.sessions.errors import (
     TurnInterruptedError,
 )
 from lup.sessions.events import (
-    SessionHandle,
     SessionId,
     TurnIdentifiers,
     TurnId,
     TurnTextBlock,
     TurnToolBinding,
-    turn_request,
 )
 from lup.sessions.output import FileSubmittedOutputStore, submit_output
 from lup.sessions.output import InMemorySubmittedOutputStore
 from lup.types import CustomModel
+from tests.unit.doubles import (
+    EngineAgent,
+    IgnoredInterrupt,
+    SilentStream,
+    request_for,
+)
 
 
 class OutputA(BaseModel, frozen=True):
@@ -113,12 +112,13 @@ def accepted_turn(sequence: int, interrupt: Interrupt | None = None) -> Accepted
             turn=TurnId(value=f"turn-{sequence}"),
         ),
         complete=complete,
-        interrupt=interrupt,
+        events=SilentStream(),
+        interrupt=interrupt or IgnoredInterrupt(),
     )
 
 
 @pytest.mark.asyncio
-async def test_factory_query_runs_one_typed_turn_and_closes_the_session() -> None:
+async def test_a_one_shot_ask_runs_one_typed_turn_and_closes_the_session() -> None:
     binder = RecordingBinder()
     closed: list[bool] = []
 
@@ -127,22 +127,16 @@ async def test_factory_query_runs_one_typed_turn_and_closes_the_session() -> Non
         binder.current.store.write(OutputA(value=7))
         return accepted_turn(1)
 
-    @asynccontextmanager
-    async def open_session(
-        _resume: SessionId | None = None,
-    ) -> AsyncGenerator[SessionHandle]:
-        try:
-            yield SessionHandle(session=ComposedSession(start, binder))
-        finally:
-            closed.append(True)
+    agent = EngineAgent(
+        lambda _resume: ComposedSession(start, binder),
+        SessionLayers(wrappers=[CleanupWrapper(lambda: closed.append(True))]),
+    )
 
-    factory = Client(open_session)
-
-    result = await factory.query(turn_request("a", OutputA))
-    aliased = await factory.query(turn_request("a", OutputA))
+    result = await agent.ask("a", OutputA)
+    again = await agent.ask("a", OutputA)
 
     assert result.output.value == 7
-    assert aliased.output.value == result.output.value
+    assert again.output.value == result.output.value
     assert closed == [True, True]
 
 
@@ -167,25 +161,25 @@ async def test_schema_transitions_get_fresh_turn_local_stores() -> None:
         gate_resolver=submission_gate_resolver(OutputA, gate),
     )
 
-    prose = await session.start(turn_request("none"))
+    prose = await session.start(request_for("none"))
     assert binder.current is None
     assert (await prose.turn.result()).output is None
 
-    first = await session.start(turn_request("a1", OutputA))
+    first = await session.start(request_for("a1", OutputA))
     assert binder.current is not None
     binder.current.store.write(OutputA(value=1))
     assert (await first.turn.result()).output == OutputA(value=1)
 
-    second = await session.start(turn_request("a2", OutputA))
+    second = await session.start(request_for("a2", OutputA))
     assert binder.current is not None
     binder.current.store.write(OutputA(value=2))
     assert (await second.turn.result()).output == OutputA(value=2)
 
-    third = await session.start(turn_request("b", OutputB))
+    third = await session.start(request_for("b", OutputB))
     assert binder.current is not None
     binder.current.store.write(OutputB(label="done"))
     assert (await third.turn.result()).output == OutputB(label="done")
-    final_prose = await session.start(turn_request("none again"))
+    final_prose = await session.start(request_for("none again"))
     assert binder.current is None
     assert (await final_prose.turn.result()).output is None
     assert len(binder.stores) == len(dict.fromkeys(binder.stores)) == 3
@@ -199,7 +193,7 @@ async def test_missing_submission_never_produces_success() -> None:
         return accepted_turn(1)
 
     session = ComposedSession(start, binder)
-    handle = await session.start(turn_request("typed", OutputA))
+    handle = await session.start(request_for("typed", OutputA))
     assert binder.current is not None
     rejected = await submit_output(binder.current, {"value": "wrong"})
     assert not rejected.accepted
@@ -232,8 +226,10 @@ async def test_post_completion_failure_preserves_partial_evidence() -> None:
                 turn=TurnId(value="turn-partial"),
             ),
             complete=complete,
+            events=SilentStream(),
+            interrupt=IgnoredInterrupt(),
         ),
-        turn_request("typed", OutputA),
+        request_for("typed", OutputA),
         BrokenStore(),
         lambda: None,
         TurnLifecycle(),
@@ -256,13 +252,13 @@ async def test_session_reserves_one_turn_until_result() -> None:
         return accepted_turn(1)
 
     session = ComposedSession(start, binder)
-    first = await session.start(turn_request("first"))
+    first = await session.start(request_for("first"))
 
     with pytest.raises(TurnAlreadyActiveError):
-        await session.start(turn_request("second"))
+        await session.start(request_for("second"))
 
     await first.turn.result()
-    second = await session.start(turn_request("second"))
+    second = await session.start(request_for("second"))
     await second.turn.result()
 
 
@@ -275,7 +271,7 @@ async def test_abort_interrupts_and_marks_unfinished_result() -> None:
         return accepted_turn(1, interrupt)
 
     session = ComposedSession(start, binder)
-    handle = await session.start(turn_request("work"))
+    handle = await session.start(request_for("work"))
     await session.abort_active()
 
     assert interrupt.calls == 1
@@ -292,7 +288,7 @@ async def test_abort_is_idempotent() -> None:
         return accepted_turn(1, interrupt)
 
     session = ComposedSession(start, binder)
-    handle = await session.start(turn_request("work"))
+    handle = await session.start(request_for("work"))
     await session.abort_active()
     await session.abort_active()
 
@@ -312,14 +308,14 @@ async def test_stale_aborted_turn_cannot_release_newer_turn() -> None:
         return accepted_turn(sequence)
 
     session = ComposedSession(start, binder)
-    stale = await session.start(turn_request("stale"))
+    stale = await session.start(request_for("stale"))
     await session.abort_active()
-    current = await session.start(turn_request("current"))
+    current = await session.start(request_for("current"))
 
     with pytest.raises(TurnAbortedError):
         await stale.turn.result()
     with pytest.raises(TurnAlreadyActiveError):
-        await session.start(turn_request("must wait"))
+        await session.start(request_for("must wait"))
 
     await current.turn.result()
 
@@ -340,7 +336,7 @@ async def test_abort_during_provider_exception_is_reported_as_aborted() -> None:
         return accepted.model_copy(update={"complete": complete})
 
     session = ComposedSession(start, binder)
-    handle = await session.start(turn_request("work"))
+    handle = await session.start(request_for("work"))
     result = asyncio.create_task(handle.turn.result())
     await completion_started.wait()
     await session.abort_active()
@@ -361,7 +357,7 @@ async def test_cancelled_acceptance_releases_session_reservation() -> None:
         raise AssertionError("unreachable")
 
     session = ComposedSession(start, binder)
-    task = asyncio.create_task(session.start(turn_request("cancel")))
+    task = asyncio.create_task(session.start(request_for("cancel")))
     await entered.wait()
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -402,7 +398,7 @@ async def test_app_server_eof_fails_current_turn_with_partial_evidence(
 ) -> None:
     server = CodexAppServer(Path("codex"))
     state = CodexConversationState(
-        CodexSessionConfig(model=CustomModel(id="gpt"), cwd=tmp_path), server, None
+        Codex(model=CustomModel(id="gpt"), cwd=tmp_path), server, None
     )
     channel = CodexTurnChannel("session")
     channel.turn_id = "turn"
@@ -423,14 +419,12 @@ async def test_app_server_eof_fails_current_turn_with_partial_evidence(
 def test_codex_config_rejects_approvals_nothing_would_answer(tmp_path: Path) -> None:
     """An asking policy with no hooks stalls the turn on its first command."""
     with pytest.raises(ValueError, match="supply hooks to answer them"):
-        CodexSessionConfig(
-            model=CustomModel(id="gpt"), cwd=tmp_path, approval_policy="on-request"
-        )
+        Codex(model=CustomModel(id="gpt"), cwd=tmp_path, approval_policy="on-request")
 
 
 def test_codex_config_accepts_approvals_its_hooks_can_answer(tmp_path: Path) -> None:
     """Declared hooks are what makes an asking policy answerable."""
-    config = CodexSessionConfig(
+    config = Codex(
         model=CustomModel(id="gpt"),
         cwd=tmp_path,
         approval_policy="on-request",
@@ -565,6 +559,6 @@ async def test_request_gate_is_bound_before_native_acceptance() -> None:
         binder,
         gate_resolver=submission_gate_resolver(OutputA, gate),
     )
-    handle = await session.start(turn_request("gated", OutputA))
+    handle = await session.start(request_for("gated", OutputA))
 
     assert (await handle.turn.result()).output == OutputA(value=2)

@@ -43,7 +43,7 @@ two kinds through the same writers.
 import asyncio
 import logging
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Literal, Self
@@ -57,8 +57,8 @@ from lup.ledger.journal import LedgerStore
 from lup.ledger.kinds import kind_of
 from lup.ledger.models import LedgerEdge, LedgerNode, Standing, Surroundings
 from lup.ledger.store import LedgerLayout
-from lup.sessions.client import Client
-from lup.sessions.events import SessionHandle, SessionId
+from lup.sessions.capabilities import SessionEngine, SessionWrapper
+from lup.sessions.events import SessionId
 
 logger = logging.getLogger(__name__)
 
@@ -402,10 +402,8 @@ def session_recorder(
     return SessionRecorder(LedgerStore(root, author, layout))
 
 
-def recorded_session_factory(
-    inner: Client, recorder: SessionRecorder, session: Session
-) -> Client:
-    """Amend the session's record when every opened session closes, however it closes.
+class CloseRecordingWrapper(SessionWrapper):
+    """Amend the session's record when the session closes, however it closes.
 
     Wired by the composition that opened the session directory with a
     recorder — the scaffold's ``build_session_factory`` — outermost, so the
@@ -415,19 +413,28 @@ def recorded_session_factory(
     ``failed``; the exception goes on to the caller either way.
     """
 
+    def __init__(self, recorder: SessionRecorder, session: Session) -> None:
+        self.recorder = recorder
+        self.session = session
+
+    def around(
+        self,
+        opened: AbstractAsyncContextManager[SessionEngine],
+        resume: SessionId | None,
+    ) -> AbstractAsyncContextManager[SessionEngine]:
+        return self.recorded(opened)
+
     @asynccontextmanager
-    async def open_recorded(
-        resume: SessionId | None = None,
-    ) -> AsyncGenerator[SessionHandle]:
+    async def recorded(
+        self, opened: AbstractAsyncContextManager[SessionEngine]
+    ) -> AsyncGenerator[SessionEngine]:
         outcome: Outcome = "failed"
         try:
-            async with inner.open(resume) as handle:
-                yield handle
+            async with opened as inner:
+                yield inner
             outcome = "completed"
         except (asyncio.CancelledError, KeyboardInterrupt):
             outcome = "interrupted"
             raise
         finally:
-            recorder.closed(session, outcome)
-
-    return Client(open_recorded)
+            self.recorder.closed(self.session, outcome)

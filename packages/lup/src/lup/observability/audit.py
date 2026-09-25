@@ -26,7 +26,7 @@ import hashlib
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator, AsyncIterator, Iterator, Sequence
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -37,20 +37,23 @@ from pydantic import BaseModel, Field, TypeAdapter
 from lup.channels.stream import Stream
 from lup.observability.journal import ChainedWriter, Journal, JournalRecord, last_record
 from lup.sessions.composition import is_output_model
-from lup.sessions.capabilities import EventStream, Session, Turn
+from lup.sessions.capabilities import (
+    EventStream,
+    SessionEngine,
+    SessionWrapper,
+    TurnEngine,
+)
 from lup.sessions.errors import DeltaStreamingDisabled, TurnError
-from lup.sessions.client import Client
 from lup.sessions.events import (
     BlockCompletedEvent,
     BlockDeltaEvent,
     BlockStartedEvent,
     LiveTurnEvent,
     MessageCompletedEvent,
-    SessionHandle,
     SessionId,
     TurnCompletedEvent,
     TurnEvent,
-    TurnHandle,
+    StartedTurn,
     TurnMessage,
     TurnRequest,
     TurnResult,
@@ -772,14 +775,14 @@ class JournalEventStream(EventStream):
             yield event
 
 
-class JournalTurn[T: BaseModel | None](Turn[T]):
+class JournalTurn[T: BaseModel | None](TurnEngine[T]):
     """Persist the terminal result or complete failure of one logical turn."""
 
     def __init__(
         self,
-        inner: Turn[T],
+        inner: TurnEngine[T],
         journal: TraceJournal,
-        event_stream: JournalEventStream | None,
+        event_stream: JournalEventStream,
     ) -> None:
         self.inner = inner
         self.journal = journal
@@ -790,8 +793,7 @@ class JournalTurn[T: BaseModel | None](Turn[T]):
             result = await self.inner.result()
         except TurnError as error:
             failure = error.failure
-            if self.event_stream is not None:
-                await self.event_stream.wait()
+            await self.event_stream.wait()
             identifiers = failure.identifiers
             self.journal.emit(
                 "error",
@@ -811,8 +813,7 @@ class JournalTurn[T: BaseModel | None](Turn[T]):
                 turn_id=(identifiers.turn.value if identifiers is not None else None),
             )
             raise
-        if self.event_stream is not None:
-            await self.event_stream.wait()
+        await self.event_stream.wait()
         self.journal.emit(
             "turn_result",
             {
@@ -834,16 +835,16 @@ class JournalTurn[T: BaseModel | None](Turn[T]):
         return result
 
 
-class JournalSession(Session):
+class JournalSession(SessionEngine):
     """Record turn input and attach lossless event/result journaling."""
 
-    def __init__(self, inner: Session, journal: TraceJournal) -> None:
+    def __init__(self, inner: SessionEngine, journal: TraceJournal) -> None:
         self.inner = inner
         self.journal = journal
 
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
+    ) -> StartedTurn[T]:
         self.journal.emit(
             "turn_input",
             {
@@ -857,12 +858,8 @@ class JournalSession(Session):
         )
         handle = await self.inner.start(request)
         mirrored: asyncio.Queue[LiveTurnEvent | None] = asyncio.Queue()
-        event_stream = (
-            JournalEventStream(handle.events, self.journal, mirrored)
-            if handle.events is not None
-            else None
-        )
-        return TurnHandle[T](
+        event_stream = JournalEventStream(handle.events, self.journal, mirrored)
+        return StartedTurn[T](
             turn=JournalTurn(handle.turn, self.journal, event_stream),
             events=event_stream,
             interrupt=handle.interrupt,
@@ -870,27 +867,38 @@ class JournalSession(Session):
         )
 
 
-def journal_session_factory(inner: Client, journal: TraceJournal) -> Client:
-    """Give every session opened by ``inner`` the canonical observable journal."""
+class JournalWrapper(SessionWrapper):
+    """Give every turn of a session the canonical observable journal.
+
+    The session's opening and close are recorded around it, so a session
+    that failed to open is in the journal as well as one that ran.
+    """
+
+    def __init__(self, journal: TraceJournal) -> None:
+        self.journal = journal
+
+    def around(
+        self,
+        opened: AbstractAsyncContextManager[SessionEngine],
+        resume: SessionId | None,
+    ) -> AbstractAsyncContextManager[SessionEngine]:
+        return self.journaled(opened, resume)
 
     @asynccontextmanager
-    async def open_journaled(
-        resume: SessionId | None = None,
-    ) -> AsyncGenerator[SessionHandle]:
-        journal.emit(
+    async def journaled(
+        self,
+        opened: AbstractAsyncContextManager[SessionEngine],
+        resume: SessionId | None,
+    ) -> AsyncGenerator[SessionEngine]:
+        self.journal.emit(
             "session_start",
             {"resume_session_id": resume.value if resume is not None else None},
         )
         try:
-            async with inner.open(resume) as handle:
-                yield SessionHandle(
-                    session=JournalSession(handle.session, journal),
-                    fork=handle.fork,
-                )
+            async with opened as inner:
+                yield JournalSession(inner, self.journal)
         except Exception as error:
-            journal.emit("error", {"message": str(error)})
+            self.journal.emit("error", {"message": str(error)})
             raise
         finally:
-            journal.emit("session_end")
-
-    return Client(open_journaled)
+            self.journal.emit("session_end")

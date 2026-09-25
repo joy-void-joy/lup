@@ -12,12 +12,10 @@ from lup.policy.hooks import LupHookInput, LupHookMatcher, LupHookOutput, LupHoo
 
 from lup.providers.codex.app_server import CodexAppServer, RpcMessage, RpcNotification
 from lup.providers.codex.output import CodexJsonEnvelope, codex_output_contract
+from lup.providers.codex import Codex, CodexMcpServerConfig
 from lup.providers.codex.runtime import (
     CodexConversationState,
-    CodexMcpServerConfig,
-    CodexSessionConfig,
     CodexTurnChannel,
-    create_codex,
     decode_completed_item,
 )
 from lup.providers.codex.selection import codex_config
@@ -27,7 +25,7 @@ from lup.sessions.errors import (
     TurnInterruptedError,
     UnsupportedCapability,
 )
-from lup.sessions.events import SessionId, SubmissionDecision, TurnInput, turn_request
+from lup.sessions.events import SessionId, SubmissionDecision
 from lup.sessions.events import AnyTurnBlock, TurnNativeActivityBlock, TurnThinkingBlock
 from lup.sessions.events import TurnResult
 from pydantic import TypeAdapter
@@ -75,19 +73,14 @@ async def test_enveloped_output_corrects_json_and_gates_without_losing_defaults(
             )
         return SubmissionDecision(accepted=True)
 
-    config = CodexSessionConfig(
-        cwd=tmp_path, submission_gate_resolver=lambda _output: gate
-    )
-    async with create_codex(config).open(resume) as handle:
-        accepted = await handle.session.start(turn_request("score", FlexibleAnswer))
-        result = await accepted.turn.result()
+    config = Codex(cwd=tmp_path, submission_gate_resolver=lambda _output: gate)
+    async with config.open(resume) as session:
+        result = await session.ask("score", FlexibleAnswer)
         assert result.output == FlexibleAnswer(scores={"arbitrary/key": 2})
         assert result.usage.output_tokens == 6
         assert len(result.messages) == 3
-        direct = await handle.session.start(turn_request("answer", Answer))
-        assert (await direct.turn.result()).output == Answer(answer="direct")
-        untyped = await handle.session.start(turn_request("continue"))
-        assert (await untyped.turn.result()).output is None
+        assert (await session.ask("answer", Answer)).output == Answer(answer="direct")
+        assert (await session.ask("continue")).output is None
     turns = [
         params for method, params in scripted_codex.requests if method == "turn/start"
     ]
@@ -233,16 +226,15 @@ async def test_envelope_stop_then_gate_correction_share_one_logical_continuation
             accepted=value.scores["key"] == 2, message="Use score two"
         )
 
-    config = CodexSessionConfig(
+    config = Codex(
         cwd=tmp_path,
         hooks=LupHooksConfig(stop=[LupHookMatcher(hook=stop)]),
         submission_gate_resolver=lambda _output: gate,
     )
-    async with create_codex(config).open() as handle:
-        accepted = await handle.session.start(turn_request("score", FlexibleAnswer))
-        assert accepted.events is not None
-        events = [event async for event in accepted.events.events()]
-        result = await accepted.turn.result()
+    async with config.open() as session:
+        turn = session.ask("score", FlexibleAnswer)
+        events = [event async for event in turn.events()]
+        result = await turn
         assert result.output == FlexibleAnswer(scores={"key": 2})
         assert result.usage.output_tokens == 6
         assert result.duration.total_seconds() == 0.03
@@ -254,8 +246,7 @@ async def test_envelope_stop_then_gate_correction_share_one_logical_continuation
             "turn-2",
             "turn-3",
         }
-        fresh = await handle.session.start(turn_request("another logical turn"))
-        await fresh.turn.result()
+        await session.ask("another logical turn")
     assert gated == [1, 2]
     assert receipts == [2]
     assert stop_active == [False, True, True, False]
@@ -316,16 +307,15 @@ async def test_late_tool_feedback_preserves_envelope_until_accepted_continuation
         gated.append(value.scores["key"])
         return SubmissionDecision(accepted=True)
 
-    config = CodexSessionConfig(
+    config = Codex(
         cwd=tmp_path,
         hooks=LupHooksConfig(
             post_tool_use=[LupHookMatcher(matcher="^ShellCommand$", hook=after)]
         ),
         submission_gate_resolver=lambda _output: gate,
     )
-    async with create_codex(config).open() as handle:
-        accepted = await handle.session.start(turn_request("score", FlexibleAnswer))
-        result = await accepted.turn.result()
+    async with config.open() as session:
+        result = await session.ask("score", FlexibleAnswer)
     assert result.output == FlexibleAnswer(scores={"key": 2})
     assert result.usage.output_tokens == 4
     assert len(result.messages) == 3
@@ -347,13 +337,10 @@ async def test_output_schema_is_per_turn_across_untyped_and_changed_types(
 ) -> None:
     server = scripted_codex
     server.answers.extend(['{"answer":"first"}', "untyped", '{"score":7}'])
-    async with create_codex(CodexSessionConfig(cwd=tmp_path)).open(resume) as handle:
-        first = await handle.session.start(turn_request("answer", Answer))
-        assert (await first.turn.result()).output == Answer(answer="first")
-        second = await handle.session.start(turn_request("continue"))
-        assert (await second.turn.result()).output is None
-        third = await handle.session.start(turn_request("score", Score))
-        assert (await third.turn.result()).output == Score(score=7)
+    async with Codex(cwd=tmp_path).open(resume) as session:
+        assert (await session.ask("answer", Answer)).output == Answer(answer="first")
+        assert (await session.ask("continue")).output is None
+        assert (await session.ask("score", Score)).output == Score(score=7)
     thread_requests = [
         (method, params)
         for method, params in server.requests
@@ -385,14 +372,11 @@ async def test_gate_feedback_corrects_output_and_keeps_all_events_and_usage(
             accepted=value.answer == "accepted", message="Use the exact answer accepted"
         )
 
-    config = CodexSessionConfig(
-        cwd=tmp_path, submission_gate_resolver=lambda _output: gate
-    )
-    async with create_codex(config).open() as handle:
-        accepted = await handle.session.start(turn_request("answer", Answer))
-        assert accepted.events is not None
-        events = [event async for event in accepted.events.events()]
-        result = await accepted.turn.result()
+    config = Codex(cwd=tmp_path, submission_gate_resolver=lambda _output: gate)
+    async with config.open() as session:
+        turn = session.ask("answer", Answer)
+        events = [event async for event in turn.events()]
+        result = await turn
     assert result.output == Answer(answer="accepted")
     assert result.usage.input_tokens == 8
     assert result.usage.output_tokens == 4
@@ -413,11 +397,10 @@ async def test_exhausted_validation_keeps_each_attempt_and_usage(
 ) -> None:
     server = scripted_codex
     server.answers.extend(["not JSON", '{"wrong":"shape"}'])
-    config = CodexSessionConfig(cwd=tmp_path, correction=CorrectionConfig(cycles=1))
-    async with create_codex(config).open() as handle:
-        accepted = await handle.session.start(turn_request("answer", Answer))
+    config = Codex(cwd=tmp_path, correction=CorrectionConfig(cycles=1))
+    async with config.open() as session:
         with pytest.raises(StructuredOutputError) as raised:
-            await accepted.turn.result()
+            await session.ask("answer", Answer)
     assert len(raised.value.failure.validation_history) == 2
     assert len(raised.value.failure.messages) == 2
     assert "valid JSON" in raised.value.failure.validation_history[0].message
@@ -432,15 +415,15 @@ async def test_correcting_turn_steers_and_interrupts_the_current_native_turn(
 ) -> None:
     server = scripted_codex
     server.answers.extend(['{"wrong":"shape"}', None])
-    async with create_codex(CodexSessionConfig(cwd=tmp_path)).open() as handle:
-        accepted = await handle.session.start(turn_request("answer", Answer))
+    async with Codex(cwd=tmp_path).open() as session:
+        turn = session.ask("answer", Answer)
+        pending = asyncio.ensure_future(turn)
         assert await server.started.get() == "turn-1"
         assert await asyncio.wait_for(server.started.get(), timeout=1) == "turn-2"
-        assert accepted.steer is not None and accepted.interrupt is not None
-        await accepted.steer.steer(TurnInput(text="Use the answer field"))
-        await accepted.interrupt.interrupt()
+        await turn.steer("Use the answer field")
+        await turn.interrupt()
         with pytest.raises(TurnInterruptedError):
-            await accepted.turn.result()
+            await pending
     assert (
         "turn/steer",
         {
@@ -467,15 +450,13 @@ async def test_session_close_cancels_a_pending_submission_gate(
         finally:
             canceled.set()
 
-    config = CodexSessionConfig(
-        cwd=tmp_path, submission_gate_resolver=lambda _output: gate
-    )
-    async with create_codex(config).open() as handle:
-        accepted = await handle.session.start(turn_request("answer", Answer))
+    config = Codex(cwd=tmp_path, submission_gate_resolver=lambda _output: gate)
+    async with config.open() as session:
+        pending = asyncio.ensure_future(session.ask("answer", Answer))
         await asyncio.wait_for(entered.wait(), timeout=1)
     assert canceled.is_set()
     with pytest.raises(asyncio.CancelledError):
-        await accepted.turn.result()
+        await pending
 
 
 @pytest.mark.parametrize("limit", ["max_turns", "max_thinking_tokens"])
@@ -499,7 +480,7 @@ async def test_interactive_mcp_elicitations_are_never_accepted_as_tool_approval(
     tmp_path: Path, params: JsonObject
 ) -> None:
     state = CodexConversationState(
-        CodexSessionConfig(
+        Codex(
             cwd=tmp_path, mcp_servers={"tools": CodexMcpServerConfig(command="tools")}
         ),
         CodexAppServer(Path("codex")),
@@ -518,7 +499,7 @@ async def test_interactive_mcp_elicitations_are_never_accepted_as_tool_approval(
 
 async def test_mcp_approval_from_another_thread_is_declined(tmp_path: Path) -> None:
     state = CodexConversationState(
-        CodexSessionConfig(
+        Codex(
             cwd=tmp_path, mcp_servers={"tools": CodexMcpServerConfig(command="tools")}
         ),
         CodexAppServer(Path("codex")),

@@ -24,7 +24,7 @@ Lup's canonical vocabulary and must never be widened by an adapter.
 Subagents are one of several agent shapes — ``docs/orchestration.md`` is
 the full catalog. Where the siblings live:
 
-- Nested agents: a one-shot :meth:`lup.sessions.client.Client.query` inside a
+- Nested agents: an agent's one-shot ``ask`` inside a
   tool handler; the reviewer in ``agent/tools/reflect.py`` is the
   exemplar
 - Background agents: :class:`lup.orchestration.background.BackgroundAgent`, with

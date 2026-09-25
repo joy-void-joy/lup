@@ -11,11 +11,8 @@ from lup.coordination.sessions import ActorInbox, create_inbox_hooks
 from lup.policy.hooks import LupHookInput, LupHookMatcher, LupHookOutput, LupHooksConfig
 from lup.providers.codex.app_server import CodexAppServer, RpcMessage, RpcNotification
 from lup.providers.codex.hooks import COMMAND_APPROVAL
-from lup.providers.codex.runtime import (
-    CodexConversationState,
-    CodexSessionConfig,
-    CodexTurnChannel,
-)
+from lup.providers.codex import Codex
+from lup.providers.codex.runtime import CodexConversationState, CodexTurnChannel
 from lup.resolver.journal import Journal
 from lup.types import JsonObject, JsonValue
 
@@ -40,7 +37,7 @@ def delivery_state(
         ActorMail(tmp_path), Journal(tmp_path), ActorRef(kind="worker", id="delivery")
     )
     server = RecordingServer()
-    config = CodexSessionConfig(cwd=tmp_path, hooks=create_inbox_hooks(inbox))
+    config = Codex(cwd=tmp_path, hooks=create_inbox_hooks(inbox))
     state = CodexConversationState(config, server, None)
     state.thread_id = "thread"
     state.channel = CodexTurnChannel("thread")
@@ -140,4 +137,4 @@ def test_lifecycle_hooks_are_accepted(tmp_path: Path, event: str) -> None:
         return LupHookOutput(decision="allow")
 
     hooks = LupHooksConfig.model_validate({event: [LupHookMatcher(hook=callback)]})
-    assert CodexSessionConfig(cwd=tmp_path, hooks=hooks).hooks is not None
+    assert Codex(cwd=tmp_path, hooks=hooks).hooks is not None

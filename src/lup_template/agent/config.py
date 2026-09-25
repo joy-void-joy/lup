@@ -22,6 +22,7 @@ from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode
 
 from lup.providers.routing import catalog_provider
+from lup.providers.selection import SessionEffort
 
 logger = logging.getLogger(__name__)
 
@@ -121,10 +122,15 @@ class Settings(BaseSettings, env_file=(".env", ".env.local"), extra="ignore"):
         description="Codex sandbox mode: read_only, workspace_write, danger_full_access",
     )
 
-    codex_effort: str | None = Field(
+    codex_effort: SessionEffort | None = Field(
         default=None,
         validation_alias="CODEX_EFFORT",
-        description="Codex reasoning effort: none, minimal, low, medium, high, xhigh",
+        description=(
+            "Codex reasoning effort: low, medium, high, xhigh, max or ultra. "
+            "Unset, AGENT_REASONING_EFFORT, and unset too, the model's default: "
+            "xhigh where its catalog row takes it, its highest rung below "
+            "otherwise"
+        ),
     )
 
     codex_approval_policy: str | None = Field(
@@ -151,14 +157,16 @@ class Settings(BaseSettings, env_file=(".env", ".env.local"), extra="ignore"):
         description="USD per million cached input tokens (defaults to the input rate)",
     )
 
-    reasoning_effort: str | None = Field(
+    reasoning_effort: SessionEffort | None = Field(
         default=None,
         validation_alias="AGENT_REASONING_EFFORT",
         description=(
             "Backend-agnostic reasoning effort: low, medium, high, xhigh, "
             "max or ultra, on both backends. Which of them a model takes is "
-            "its catalog's answer, and a level the model lacks is refused "
-            "(CODEX_EFFORT overrides this on Codex/OpenAI backends)."
+            "its catalog's answer, and a level the model lacks is refused; "
+            "unset, the model's default is xhigh where its row takes it and "
+            "its highest rung below otherwise (CODEX_EFFORT overrides this on "
+            "Codex/OpenAI backends)."
         ),
     )
 

@@ -12,44 +12,35 @@ from pydantic import BaseModel
 if TYPE_CHECKING:
     from lup.sessions.events import (
         LiveTurnEvent,
-        SessionHandle,
+        SessionId,
         TurnEvent,
-        TurnHandle,
+        StartedTurn,
         TurnId,
         TurnInput,
+        TurnMessage,
         TurnRequest,
         TurnResult,
         TurnToolBinding,
     )
 
 
-class Session(ABC):
+class SessionEngine(ABC):
     """Start one acknowledged turn in a conversation.
 
-    An injected engine with no consumer-facing surface. It reaches consumers
-    two ways, neither of them holding: carried transparently by
-    ``SessionHandle``, and injected as a parameter into a driver that runs one
-    turn inside its own concern — ``send_interruptible`` around signal
-    handling, ``run_relay_session`` around a mailbox. Those two share only
-    start-then-result, which ``Client.query`` already homes for
-    callers that want it, so there is no further shared behaviour for a
-    composing surface to hold.
-
-    Both drivers do hold a ``SessionHandle`` and narrow to ``.session`` on
-    purpose. Taking the handle instead would fold them under the transparent
-    carrier above and retire this paragraph, but a driver that only starts
-    turns should not also demand ``fork``; the narrow parameter is the reason
-    this exemption exists rather than an oversight that created it.
+    An injected engine with no consumer-facing surface: a provider's session
+    class is composed over one, and every wrapper a session is layered with
+    is one around another. Nothing a program holds is one — a program asks a
+    session for a turn, and the turn starts itself through this.
     """
 
     @abstractmethod
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
+    ) -> StartedTurn[T]:
         """Bind the request and return its accepted native turn."""
 
 
-class Turn[T: BaseModel | None](ABC):
+class TurnEngine[T: BaseModel | None](ABC):
     """Resolve one accepted logical turn."""
 
     @abstractmethod
@@ -100,14 +91,34 @@ class Steer(ABC):
         """Append input without creating a second turn."""
 
 
-class ForkSession(ABC):
-    """Fork a conversation at an optional completed turn."""
+class ForkSession[S](ABC):
+    """Fork a conversation at an optional completed turn.
+
+    Generic over the session it opens, because a fork is a session of the same
+    provider as the one it branched from, and a caller holding a provider's
+    session should get that provider's session back.
+    """
 
     @abstractmethod
-    def fork(
-        self, at: TurnId | None = None
-    ) -> AbstractAsyncContextManager[SessionHandle]:
+    def fork(self, at: TurnId | None = None) -> AbstractAsyncContextManager[S]:
         """Open the fork as an independent session."""
+
+
+class ConversationRecord(ABC):
+    """What the provider itself holds about one conversation.
+
+    Read from the provider's own record rather than kept here, so a
+    conversation resumed from another process, or begun outside this library,
+    reads the same as one this session took every turn of.
+    """
+
+    @abstractmethod
+    def identity(self) -> SessionId:
+        """The provider's identity for the conversation, which resumes it."""
+
+    @abstractmethod
+    async def messages(self) -> list[TurnMessage]:
+        """Every message of the conversation, in the order the provider holds them."""
 
 
 class SubmittedOutputStore(ABC):
@@ -139,3 +150,22 @@ class TurnToolBinder(ABC):
     @abstractmethod
     async def bind[T: BaseModel](self, binding: TurnToolBinding[T] | None) -> None:
         """Finish binding before native turn input is accepted."""
+
+
+class SessionWrapper(ABC):
+    """Wrap one opened session: its lifetime, and every turn started on it.
+
+    What a journal, a spending ceiling, an allowance wait or a cleanup is to a
+    session. Each is handed the context that opens the session beneath it,
+    not yet entered, so it sees an open fail as well as succeed and can act
+    when the session closes however it closes. It answers with the context a
+    caller enters instead, yielding the engine beneath or one wrapping it.
+    """
+
+    @abstractmethod
+    def around(
+        self,
+        opened: AbstractAsyncContextManager[SessionEngine],
+        resume: SessionId | None,
+    ) -> AbstractAsyncContextManager[SessionEngine]:
+        """The context opening the session beneath this wrapper, wrapped."""

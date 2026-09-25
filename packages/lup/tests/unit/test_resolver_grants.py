@@ -46,10 +46,10 @@ from lup.resolver.questions import QuestionBroker
 from lup.resolver.run import ResolveRun
 from lup.resolver.state import ResolverStateRepository
 from lup.resolver.turns import TurnRunner
-from lup.sessions.capabilities import Session
-from lup.sessions.client import Client
-from lup.sessions.events import TurnHandle, TurnRequest
-from tests.unit.doubles import session_factory
+from lup.sessions.capabilities import SessionEngine
+from lup.sessions.surface import Agent
+from lup.sessions.events import StartedTurn, TurnRequest
+from tests.unit.doubles import agent_over
 
 NEW_DEVTOOLS = PathRule(
     kind="new_devtools",
@@ -160,12 +160,12 @@ def human_grants(desk: QuestionBroker, concern_id: str, value: str) -> None:
     desk.promote_offers()
 
 
-class IdleSession(Session):
+class IdleSession(SessionEngine):
     """A session for tests that open one and never take a turn on it."""
 
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
+    ) -> StartedTurn[T]:
         raise AssertionError("this test opens sessions but takes no turn")
 
 
@@ -180,9 +180,9 @@ class RecordingRecipe:
     def __init__(self) -> None:
         self.opened: list[WorkerContext] = []
 
-    def __call__(self, context: WorkerContext) -> Client:
+    def __call__(self, context: WorkerContext) -> Agent:
         self.opened.append(context)
-        return session_factory(IdleSession())
+        return agent_over(IdleSession())
 
 
 def turn_runner(desk: QuestionBroker, recipe: RecordingRecipe) -> TurnRunner:
@@ -197,7 +197,7 @@ def turn_runner(desk: QuestionBroker, recipe: RecordingRecipe) -> TurnRunner:
         ),
         desk.mailbox,
         recipe,
-        lambda _context: session_factory(IdleSession()),
+        lambda _context: agent_over(IdleSession()),
         LiteralRenderer(),
         desk.grants,
     )

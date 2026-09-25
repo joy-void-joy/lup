@@ -3,8 +3,7 @@
 import asyncio
 import hashlib
 import logging
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import timedelta
 from pathlib import Path
 
@@ -15,12 +14,13 @@ from lup.sessions.composition import is_output_model
 from lup.sessions.capabilities import (
     EventStream,
     Interrupt,
-    Session,
+    SessionEngine,
     Steer,
-    Turn,
+    TurnEngine,
 )
 from lup.sessions.errors import (
     BudgetExceededError,
+    DeltaStreamingDisabled,
     ProviderTurnError,
     StructuredOutputError,
     TurnError,
@@ -29,12 +29,9 @@ from lup.sessions.errors import (
     TurnContinuationError,
     ValidationAttempt,
 )
-from lup.sessions.client import Client
 from lup.sessions.events import (
-    SessionHandle,
-    SessionId,
     AnyTurnBlock,
-    TurnHandle,
+    StartedTurn,
     TurnIdentifiers,
     LiveTurnEvent,
     TurnEvent,
@@ -134,12 +131,10 @@ class SwitchingInterrupt(Interrupt):
     """Delegate interruption to the currently active native retry attempt."""
 
     def __init__(self, current: Interrupt) -> None:
-        self.current: Interrupt | None = current
+        self.current = current
 
     async def interrupt(self) -> None:
-        current = self.current
-        if current is not None:
-            await current.interrupt()
+        await self.current.interrupt()
 
 
 class SwitchingSteer(Steer):
@@ -171,9 +166,8 @@ class SwitchingEventStream(EventStream):
         self.closed = False
         self.consumed = False
 
-    def switch(self, current: EventStream | None) -> None:
-        if current is not None:
-            self.pending.append(current)
+    def switch(self, current: EventStream) -> None:
+        self.pending.append(current)
         self.changed.set()
 
     def close(self) -> None:
@@ -184,11 +178,21 @@ class SwitchingEventStream(EventStream):
         if self.consumed:
             raise RuntimeError("logical live event stream can only be consumed once")
         self.consumed = True
+        yielded = False
         while True:
             if self.pending:
-                current = self.pending.pop(0)
-                view = current.live() if deltas else current.events()
+                current = self.pending[0]
+                try:
+                    view = current.live() if deltas else current.events()
+                except DeltaStreamingDisabled:
+                    # Refused before anything was read, so the durable view
+                    # is still whole: a reader falling back to it gets every
+                    # stream rather than a stream already spent on the refusal.
+                    self.consumed = yielded
+                    raise
+                self.pending.pop(0)
                 async for event in view:
+                    yielded = True
                     yield event
                 continue
             if self.closed:
@@ -210,15 +214,15 @@ class SwitchingEventStream(EventStream):
         return self.iterate(deltas=True)
 
 
-class TimeoutTurn[T: BaseModel | None](Turn[T]):
+class TimeoutTurn[T: BaseModel | None](TurnEngine[T]):
     """Apply the acceptance-time deadline to the remaining result operation."""
 
     def __init__(
         self,
-        inner: Turn[T],
+        inner: TurnEngine[T],
         config: TimeoutConfig,
         deadline: float,
-        interrupt: Interrupt | None,
+        interrupt: Interrupt,
     ) -> None:
         self.inner = inner
         self.config = config
@@ -231,11 +235,10 @@ class TimeoutTurn[T: BaseModel | None](Turn[T]):
                 return await self.inner.result()
         except TimeoutError as error:
             message = f"turn exceeded {self.config.seconds:g} seconds"
-            if self.interrupt is not None:
-                try:
-                    await self.interrupt.interrupt()
-                except Exception as interrupt_error:
-                    message += f"; interruption also failed: {interrupt_error}"
+            try:
+                await self.interrupt.interrupt()
+            except Exception as interrupt_error:
+                message += f"; interruption also failed: {interrupt_error}"
             raise TurnTimeoutError(
                 TurnFailure(
                     message=message,
@@ -244,10 +247,10 @@ class TimeoutTurn[T: BaseModel | None](Turn[T]):
             ) from error
 
 
-class BudgetTurn[T: BaseModel | None](Turn[T]):
+class BudgetTurn[T: BaseModel | None](TurnEngine[T]):
     """Reject a completed result whose complete accumulated usage is over budget."""
 
-    def __init__(self, inner: Turn[T], config: BudgetConfig) -> None:
+    def __init__(self, inner: TurnEngine[T], config: BudgetConfig) -> None:
         self.inner = inner
         self.config = config
 
@@ -287,7 +290,7 @@ def read_outcome(settled: asyncio.Task[object]) -> None:
         logger.debug("resilient turn failed: %r", failure)
 
 
-class ResilientTurn[T: BaseModel | None](Turn[T]):
+class ResilientTurn[T: BaseModel | None](TurnEngine[T]):
     """Coordinate provider retries and output corrections across one logical turn.
 
     The turn advances on its own task rather than on whichever caller happens
@@ -300,13 +303,13 @@ class ResilientTurn[T: BaseModel | None](Turn[T]):
 
     def __init__(
         self,
-        inner: Turn[T],
-        session: Session,
+        inner: TurnEngine[T],
+        session: SessionEngine,
         request: TurnRequest[T],
         recovery: RecoveryConfig | None,
         correction: CorrectionConfig | None,
-        interrupt: SwitchingInterrupt | None,
-        events: SwitchingEventStream | None,
+        interrupt: SwitchingInterrupt,
+        events: SwitchingEventStream,
         steer: SwitchingSteer | None,
         continuation: CorrectionConfig | None = None,
     ) -> None:
@@ -382,16 +385,13 @@ class ResilientTurn[T: BaseModel | None](Turn[T]):
                         TurnFailure(message=str(error)), failures
                     )
                     raise ProviderTurnError(failure) from error
-                if self.interrupt is not None:
-                    self.interrupt.current = handle.interrupt
-                if self.events is not None:
-                    self.events.switch(handle.events)
+                self.interrupt.current = handle.interrupt
+                self.events.switch(handle.events)
                 if self.steer is not None:
                     self.steer.current = handle.steer
                 current = handle.turn
         finally:
-            if self.events is not None:
-                self.events.close()
+            self.events.close()
 
 
 def correction_request[T: BaseModel | None](
@@ -413,10 +413,10 @@ def correction_request[T: BaseModel | None](
     )
 
 
-class SerializedTurn[T: BaseModel | None](Turn[T]):
+class SerializedTurn[T: BaseModel | None](TurnEngine[T]):
     """Release one queued-session slot after any terminal result outcome."""
 
-    def __init__(self, inner: Turn[T], lock: asyncio.Lock) -> None:
+    def __init__(self, inner: TurnEngine[T], lock: asyncio.Lock) -> None:
         self.inner = inner
         self.lock = lock
         self.released = False
@@ -430,10 +430,10 @@ class SerializedTurn[T: BaseModel | None](Turn[T]):
                 self.lock.release()
 
 
-class PersistingTurn[T: BaseModel | None](Turn[T]):
+class PersistingTurn[T: BaseModel | None](TurnEngine[T]):
     """Atomically persist only successful typed turn results."""
 
-    def __init__(self, inner: Turn[T], config: PersistenceConfig) -> None:
+    def __init__(self, inner: TurnEngine[T], config: PersistenceConfig) -> None:
         self.inner = inner
         self.config = config
 
@@ -451,10 +451,10 @@ class PersistingTurn[T: BaseModel | None](Turn[T]):
         return result
 
 
-class TracingTurn[T: BaseModel | None](Turn[T]):
+class TracingTurn[T: BaseModel | None](TurnEngine[T]):
     """Trace exactly one terminal outcome after all bounded cycles finish."""
 
-    def __init__(self, inner: Turn[T], config: TracingConfig) -> None:
+    def __init__(self, inner: TurnEngine[T], config: TracingConfig) -> None:
         self.inner = inner
         self.config = config
 
@@ -482,10 +482,10 @@ class TracingTurn[T: BaseModel | None](Turn[T]):
         return result
 
 
-class UsageTurn[T: BaseModel | None](Turn[T]):
+class UsageTurn[T: BaseModel | None](TurnEngine[T]):
     """Report normalized usage after the whole logical turn succeeds."""
 
-    def __init__(self, inner: Turn[T], config: UsageConfig) -> None:
+    def __init__(self, inner: TurnEngine[T], config: UsageConfig) -> None:
         self.inner = inner
         self.config = config
 
@@ -519,10 +519,10 @@ class UsageTurn[T: BaseModel | None](Turn[T]):
         return result
 
 
-class DisplayTurn[T: BaseModel | None](Turn[T]):
+class DisplayTurn[T: BaseModel | None](TurnEngine[T]):
     """Display completed replay without pretending it is a live stream."""
 
-    def __init__(self, inner: Turn[T], config: DisplayConfig) -> None:
+    def __init__(self, inner: TurnEngine[T], config: DisplayConfig) -> None:
         self.inner = inner
         self.config = config
 
@@ -541,12 +541,12 @@ class DisplayTurn[T: BaseModel | None](Turn[T]):
         return result
 
 
-class DecoratingSession(Session):
+class DecoratingSession(SessionEngine):
     """Decorate accepted turns in an explicit, documented order."""
 
     def __init__(
         self,
-        inner: Session,
+        inner: SessionEngine,
         timeout: TimeoutConfig | None,
         budget: BudgetConfig | None,
         recovery: RecoveryConfig | None,
@@ -572,7 +572,7 @@ class DecoratingSession(Session):
 
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
+    ) -> StartedTurn[T]:
         deadline: float | None = None
         if self.timeout is None:
             handle = await self.inner.start(request)
@@ -591,29 +591,21 @@ class DecoratingSession(Session):
                         duration=timedelta(seconds=self.timeout.seconds),
                     )
                 ) from error
-        turn: Turn[T] = handle.turn
+        turn: TurnEngine[T] = handle.turn
         correction = self.correction if is_output_model(request.output_type) else None
-        logical_interrupt = (
-            SwitchingInterrupt(handle.interrupt)
-            if handle.interrupt is not None
-            else None
-        )
+        logical_interrupt = SwitchingInterrupt(handle.interrupt)
         resilient = (
             self.recovery is not None
             or correction is not None
             or self.continuation is not None
         )
-        logical_events = (
-            SwitchingEventStream(handle.events)
-            if resilient and handle.events is not None
-            else None
-        )
+        logical_events = SwitchingEventStream(handle.events) if resilient else None
         logical_steer = (
             SwitchingSteer(handle.steer)
             if resilient and handle.steer is not None
             else None
         )
-        if resilient:
+        if logical_events is not None:
             turn = ResilientTurn(
                 turn,
                 self.inner,
@@ -628,12 +620,7 @@ class DecoratingSession(Session):
             self.pending.add(turn.settling)
             turn.settling.add_done_callback(self.pending.discard)
         if self.timeout is not None and deadline is not None:
-            turn = TimeoutTurn(
-                turn,
-                self.timeout,
-                deadline,
-                logical_interrupt or handle.interrupt,
-            )
+            turn = TimeoutTurn(turn, self.timeout, deadline, logical_interrupt)
         if self.budget is not None:
             turn = BudgetTurn(turn, self.budget)
         if self.persistence is not None:
@@ -644,10 +631,10 @@ class DecoratingSession(Session):
             turn = UsageTurn(turn, self.usage)
         if self.tracing is not None:
             turn = TracingTurn(turn, self.tracing)
-        return TurnHandle[T](
+        return StartedTurn[T](
             turn=turn,
             events=logical_events or handle.events,
-            interrupt=logical_interrupt or handle.interrupt,
+            interrupt=logical_interrupt,
             steer=logical_steer or handle.steer,
         )
 
@@ -658,16 +645,16 @@ class DecoratingSession(Session):
         await asyncio.gather(*self.pending, return_exceptions=True)
 
 
-class SerializedSession(Session):
+class SerializedSession(SessionEngine):
     """Queue independent turns only when callers explicitly request serialization."""
 
-    def __init__(self, inner: Session) -> None:
+    def __init__(self, inner: SessionEngine) -> None:
         self.inner = inner
         self.lock = asyncio.Lock()
 
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
+    ) -> StartedTurn[T]:
         await self.lock.acquire()
         accepted = False
         try:
@@ -676,55 +663,12 @@ class SerializedSession(Session):
         finally:
             if not accepted and self.lock.locked():
                 self.lock.release()
-        return TurnHandle[T](
+        return StartedTurn[T](
             turn=SerializedTurn(handle.turn, self.lock),
             events=handle.events,
             interrupt=handle.interrupt,
             steer=handle.steer,
         )
-
-
-# Each config is one decorator's own settings, and no one of them is the
-# subject: what this does is compose them into a session, which belongs to
-# neither the configs nor the factory alone.
-def decorated_session_factory(
-    inner: Client,
-    *,
-    timeout: TimeoutConfig | None = None,
-    budget: BudgetConfig | None = None,
-    recovery: RecoveryConfig | None = None,
-    correction: CorrectionConfig | None = None,
-    continuation: CorrectionConfig | None = None,
-    persistence: PersistenceConfig | None = None,
-    tracing: TracingConfig | None = None,
-    usage: UsageConfig | None = None,
-    display: DisplayConfig | None = None,
-    serialized: bool = False,
-) -> Client:
-    """Apply configured whole-turn decorators to every opened session."""
-
-    @asynccontextmanager
-    async def open_decorated(
-        resume: SessionId | None = None,
-    ) -> AsyncGenerator[SessionHandle]:
-        async with inner.open(resume) as handle:
-            session: Session = DecoratingSession(
-                handle.session,
-                timeout=timeout,
-                budget=budget,
-                recovery=recovery,
-                correction=correction,
-                continuation=continuation,
-                persistence=persistence,
-                tracing=tracing,
-                usage=usage,
-                display=display,
-            )
-            if serialized:
-                session = SerializedSession(session)
-            yield SessionHandle(session=session, fork=handle.fork)
-
-    return Client(open_decorated)
 
 
 def failure_from_result[T: BaseModel | None](

@@ -1,8 +1,8 @@
 # Resolver supervisor
 
-A resolver run drives nested agents through `query()`, so the harness never
-sees them and the operator has nothing to watch. `ConsoleResolverObserver`
-narrates each durable transition, but a narrated run is still not a
+A resolver run drives nested agents through sessions it opens and asks
+itself, so the harness never sees them and the operator has nothing to
+watch. `ConsoleResolverObserver` narrates each durable transition, but a narrated run is still not a
 supervisable one: concern-level state has no shape in a terminal, a dozen
 open questions are not a form, and a parked run needs `jq` to read.
 

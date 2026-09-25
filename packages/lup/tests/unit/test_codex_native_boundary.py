@@ -15,7 +15,8 @@ from lup.providers.codex.harness_runtime import (
     PluginCacheEvidence,
 )
 from lup.providers.codex.native_tools import CodexNativeTools
-from lup.providers.codex.runtime import CodexSessionConfig, CodexSessionOpener
+from lup.providers.codex import Codex
+from lup.providers.codex.runtime import CodexSessionOpener
 
 
 class Invocation(BaseModel):
@@ -48,6 +49,10 @@ else:
         if "id" not in request:
             continue
         result = {}
+        if request["method"] == "config/read":
+            result = {"config": {}}
+        if request["method"] == "thread/start":
+            result = {"thread": {"id": "thread-1"}}
         if request["method"] == "hooks/list":
             if os.environ["LUP_NATIVE_PROBE_HOOK_FAILURE"] == "yes":
                 print(json.dumps({"id": request["id"], "error": {
@@ -105,7 +110,7 @@ async def test_readiness_and_session_use_the_selected_executable_and_environment
     record = tmp_path / "invocations.jsonl"
     workspace = tmp_path / "scratch"
     workspace.mkdir()
-    config = CodexSessionConfig(
+    config = Codex(
         cwd=workspace,
         policy_root=project,
         executable=Path("codex") if use_path else executable,

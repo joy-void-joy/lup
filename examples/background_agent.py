@@ -4,7 +4,7 @@ import asyncio
 
 from pydantic import BaseModel, Field
 
-from lup import TurnRequest, TurnResult, create_claude, turn_request
+from lup import Claude, Conversation, Turn, TurnResult
 from lup.orchestration.background import BackgroundAgent, BackgroundConfig
 from lup.sessions.errors import TurnError
 
@@ -20,12 +20,14 @@ class DraftState(BaseModel, frozen=True):
 
     text: str
 
-    def request(self) -> TurnRequest[Summary]:
-        return turn_request(f"Summarize the latest draft:\n\n{self.text}", Summary)
+
+def summarize(session: Conversation, state: DraftState) -> Turn[Summary]:
+    """Put the latest state to the session, asked as one typed turn."""
+    return session.ask(f"Summarize the latest draft:\n\n{state.text}", Summary)
 
 
 async def main() -> None:
-    client = create_claude(
+    agent = Claude(
         model="claude-opus-5",
         system_prompt="Submit a concise structured summary.",
     )
@@ -37,21 +39,21 @@ async def main() -> None:
     async def failed(error: TurnError) -> None:
         completion.set_exception(error)
 
-    agent = BackgroundAgent[DraftState, Summary](
-        client,
-        DraftState.request,
+    background = BackgroundAgent[DraftState, Summary](
+        agent,
+        summarize,
         completed,
         failed,
         BackgroundConfig(debounce_seconds=0.1),
     )
-    await agent.start()
+    await background.start()
     try:
-        agent.wake(DraftState(text="First draft"))
-        agent.wake(DraftState(text="Second draft replaces the first"))
+        background.wake(DraftState(text="First draft"))
+        background.wake(DraftState(text="Second draft replaces the first"))
         result = await completion
         print(result.output.summary)
     finally:
-        await agent.stop()
+        await background.stop()
 
 
 if __name__ == "__main__":

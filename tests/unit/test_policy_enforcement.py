@@ -15,7 +15,7 @@ from pydantic import AnyHttpUrl, ValidationError
 from lup.providers.claude.harness import CLAUDE_DISPATCHER
 from lup.providers.claude.hooks import CLAUDE_SEMANTICS
 from lup.providers.claude.native import ClaudeDecisionRenderer
-from lup.providers.claude.runtime import ClaudeSandboxConfig
+from lup.providers.claude import ClaudeSandboxConfig
 from lup.providers.codex.native import CodexDecisionRenderer
 from lup.devtools.harness.resolve import worker_policy_hooks
 from lup.policy.hooks import LupHookInput, LupHookOutput

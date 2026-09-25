@@ -40,10 +40,10 @@ from lup.orchestration.realtime.relay import (
 )
 from lup.orchestration.realtime.scheduler import Scheduler
 from lup.orchestration.reflection import ReflectionGate
-from lup.sessions.capabilities import Session, Turn
+from lup.sessions.capabilities import SessionEngine, TurnEngine
 from lup.sessions.events import (
     SessionId,
-    TurnHandle,
+    StartedTurn,
     TurnId,
     TurnIdentifiers,
     TurnRequest,
@@ -51,6 +51,7 @@ from lup.sessions.events import (
 )
 from lup.observability.trace import TraceLogger
 from lup.types import JsonObject, Usage
+from tests.unit.doubles import IgnoredInterrupt, SilentStream, conversation_over
 
 
 def tool_map(
@@ -386,7 +387,7 @@ class AgentTurn:
             await asyncio.sleep(self.pause_seconds)
 
 
-class FakeTurn(Turn[None]):
+class FakeTurn(TurnEngine[None]):
     """Resolve one scripted relay turn."""
 
     def __init__(self, conversation: "FakeConversation", index: int) -> None:
@@ -408,7 +409,7 @@ class FakeTurn(Turn[None]):
         )
 
 
-class FakeConversation(Session):
+class FakeConversation(SessionEngine):
     """Session stand-in that plays scripted turns."""
 
     def __init__(self, turns: list[AgentTurn]) -> None:
@@ -420,10 +421,14 @@ class FakeConversation(Session):
 
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
+    ) -> StartedTurn[T]:
         self.prompts.append(request.input.text)
-        handle = TurnHandle[None](turn=FakeTurn(self, len(self.prompts) - 1))
-        return cast("TurnHandle[T]", handle)  # lup: ignore[cast] — generic test double
+        handle = StartedTurn[None](
+            turn=FakeTurn(self, len(self.prompts) - 1),
+            events=SilentStream(),
+            interrupt=IgnoredInterrupt(),
+        )
+        return cast("StartedTurn[T]", handle)  # lup: ignore[cast] — generic test double
 
 
 META = ("meta", {"thought": "assessed"})
@@ -451,7 +456,7 @@ class TestRelaySession:
         )
 
         turns = await run_relay_session(
-            conversation,
+            conversation_over(conversation),
             scheduler=scheduler,
             mailbox=RealtimeMailbox(tmp_path),
             initial_prompt="[session start]",
@@ -484,7 +489,7 @@ class TestRelaySession:
         )
 
         turns = await run_relay_session(
-            conversation,
+            conversation_over(conversation),
             scheduler=Scheduler(on_action=on_action),
             mailbox=RealtimeMailbox(tmp_path),
             initial_prompt="[session start]",
@@ -528,7 +533,7 @@ class TestRelaySession:
         )
 
         await run_relay_session(
-            conversation,
+            conversation_over(conversation),
             scheduler=Scheduler(on_action=on_action),
             mailbox=RealtimeMailbox(tmp_path),
             initial_prompt="[session start]",
@@ -549,7 +554,7 @@ class TestRelaySession:
         conversation = FakeConversation([AgentTurn(tools, []) for _ in range(5)])
 
         turns = await run_relay_session(
-            conversation,
+            conversation_over(conversation),
             scheduler=Scheduler(on_action=on_action),
             mailbox=RealtimeMailbox(tmp_path),
             initial_prompt="[session start]",
@@ -591,7 +596,7 @@ class TestRelaySession:
         )
 
         await run_relay_session(
-            conversation,
+            conversation_over(conversation),
             scheduler=scheduler,
             mailbox=RealtimeMailbox(tmp_path),
             initial_prompt="[session start]",
@@ -624,7 +629,7 @@ class TestRelaySession:
         )
 
         turns = await run_relay_session(
-            conversation,
+            conversation_over(conversation),
             scheduler=Scheduler(on_action=on_action),
             mailbox=RealtimeMailbox(tmp_path),
             initial_prompt="[session start]",

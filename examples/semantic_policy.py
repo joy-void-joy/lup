@@ -14,9 +14,8 @@ import asyncio
 
 from pydantic import AnyHttpUrl, BaseModel, Field
 
-from lup import create_claude
+from lup import Claude
 from lup.providers.claude.hooks import CLAUDE_SEMANTICS
-from lup.providers.claude.runtime import ClaudeSessionConfig
 from lup.policy.hooks import LupHooksConfig
 from lup.policy.enforcement import SemanticToolPolicy, create_policy_hooks
 from lup.policy.rules import FetchPolicy, UrlScope
@@ -52,9 +51,9 @@ def policy_hooks() -> LupHooksConfig:
     )
 
 
-def session_config() -> ClaudeSessionConfig:
-    """Carry the enforcing hooks into the session the factory will open."""
-    return ClaudeSessionConfig(
+def session_config() -> Claude:
+    """Carry the enforcing hooks into every session this agent opens."""
+    return Claude(
         model="claude-opus-5",
         native_tools=["WebFetch"],
         system_prompt="Fetch what you are asked for and report what happened.",
@@ -63,8 +62,7 @@ def session_config() -> ClaudeSessionConfig:
 
 
 async def main() -> None:
-    client = create_claude(session_config())
-    result = await client.query(
+    result = await session_config().ask(
         f"Fetch {DENIED_URL} and summarize the page.",
         Summary,
     )

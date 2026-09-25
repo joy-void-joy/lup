@@ -3,7 +3,6 @@
 import asyncio
 from collections import Counter
 from collections.abc import Awaitable, Callable
-from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 import pytest
@@ -28,12 +27,15 @@ from lup.resolver.join_tools import (
     create_join_tools,
 )
 from tests.unit.doubles import (
+    IgnoredInterrupt,
+    SilentStream,
     FailingLauncher,
     ScriptedLauncher,
     StaticTurn,
     identifiers,
     out,
-    session_factory,
+    EngineAgent,
+    agent_over,
     turn_result,
 )
 from lup.coordination.mailbox import (
@@ -116,13 +118,12 @@ from lup.resolver.state import (
     StateCorruptionError,
     StateTransitionError,
 )
-from lup.sessions.capabilities import Session
-from lup.sessions.client import Client
+from lup.sessions.capabilities import SessionEngine
+from lup.sessions.surface import Agent
 from lup.sessions.composition import is_output_model
 from lup.sessions.events import (
-    SessionHandle,
     SessionId,
-    TurnHandle,
+    StartedTurn,
     TurnRequest,
 )
 from lup.types import JsonObject, JsonValue
@@ -651,13 +652,11 @@ def missing_branch_launcher() -> ScriptedLauncher:
     return ScriptedLauncher(default=out(code=1))
 
 
-def unused_session_factory() -> Client:
-    def refuse(
-        resume: SessionId | None = None,
-    ) -> AbstractAsyncContextManager[SessionHandle]:
+def unused_session_factory() -> Agent:
+    def refuse(resume: SessionId | None) -> SessionEngine:
         raise AssertionError(f"session factory should not be opened: {resume}")
 
-    return Client(refuse)
+    return EngineAgent(refuse)
 
 
 class UnusedInvocationRenderer(SkillInvocationRenderer):
@@ -724,7 +723,7 @@ def recording_worker_recipe(
     launcher: ProcessLauncher,
     response: ResolverResponse,
     log: list[str],
-) -> Callable[[WorkerContext], Client]:
+) -> Callable[[WorkerContext], Agent]:
     """``worker_recipe``, for the tests that also read back every prompt."""
 
     def run_dir() -> Path:
@@ -733,8 +732,8 @@ def recording_worker_recipe(
             raise AssertionError(f"expected one run under {state_root}, found {runs}")
         return runs[0]
 
-    def recipe(context: WorkerContext) -> Client:
-        return session_factory(
+    def recipe(context: WorkerContext) -> Agent:
+        return agent_over(
             PromptRecordingSession(
                 context.root,
                 response,
@@ -752,7 +751,7 @@ def recording_worker_recipe(
 
 def merger_draining_after_one_parent(
     run_dir: Path, launcher: ProcessLauncher, response: ResolverResponse
-) -> Callable[[WorkerContext], Client]:
+) -> Callable[[WorkerContext], Agent]:
     """A merger that lands one parent, then finds the run asked to stop.
 
     The drain arrives mid-sequence rather than before the join, because
@@ -760,7 +759,7 @@ def merger_draining_after_one_parent(
     before a session is opened, which exercises a different path.
     """
 
-    def recipe(context: WorkerContext) -> Client:
+    def recipe(context: WorkerContext) -> Agent:
         if context.actor.kind != "merger":
             return resolver_test_factory(context.root, response)
         tools = {
@@ -787,7 +786,7 @@ def merger_draining_after_one_parent(
     return recipe
 
 
-class ResolverTestSession(Session):
+class ResolverTestSession(SessionEngine):
     def __init__(
         self, root: Path, response: ResolverResponse, joining: JoinDriver | None = None
     ) -> None:
@@ -798,7 +797,7 @@ class ResolverTestSession(Session):
 
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
+    ) -> StartedTurn[T]:
         output_type = request.output_type
         if not is_output_model(output_type):
             raise AssertionError("resolver turns must request typed output")
@@ -816,20 +815,24 @@ class ResolverTestSession(Session):
             output,
             identifiers(f"resolver-{self.root.name}", f"turn-{self.sequence}"),
         )
-        return TurnHandle[T](turn=StaticTurn(result))
+        return StartedTurn[T](
+            turn=StaticTurn(result),
+            events=SilentStream(),
+            interrupt=IgnoredInterrupt(),
+        )
 
 
 def resolver_test_factory(
     root: Path, response: ResolverResponse, joining: JoinDriver | None = None
-) -> Client:
-    return session_factory(ResolverTestSession(root, response, joining))
+) -> Agent:
+    return agent_over(ResolverTestSession(root, response, joining))
 
 
 def worker_recipe(
     state_root: Path,
     launcher: ProcessLauncher,
     response: ResolverResponse,
-) -> Callable[[WorkerContext], Client]:
+) -> Callable[[WorkerContext], Agent]:
     """The worker factory a test core gets, with a merger that drives its join.
 
     One recipe opens both a concern's worker and the merger that joins into
@@ -847,7 +850,7 @@ def worker_recipe(
             raise AssertionError(f"expected one run under {state_root}, found {runs}")
         return runs[0]
 
-    def recipe(context: WorkerContext) -> Client:
+    def recipe(context: WorkerContext) -> Agent:
         return resolver_test_factory(
             context.root,
             response,
@@ -4875,7 +4878,7 @@ async def test_a_granted_allowance_reaches_the_sessions_launched_next(
 
     granting = worker_recipe(tmp_path / "state", launcher, worker_response)
 
-    def recording_worker_factory(context: WorkerContext) -> Client:
+    def recording_worker_factory(context: WorkerContext) -> Agent:
         carried.append(context.grants.granted())
         return granting(context)
 
@@ -4940,7 +4943,7 @@ class PromptRecordingSession(ResolverTestSession):
 
     async def start[T: BaseModel | None](
         self, request: TurnRequest[T]
-    ) -> TurnHandle[T]:
+    ) -> StartedTurn[T]:
         self.log.append(request.input.text)
         return await super().start(request)
 
@@ -4966,7 +4969,7 @@ def recheck_core(
         ),
         resolve_spec(),
         worker_recipe(tmp_path / "state", recording_launcher(), reviewer_response),
-        lambda context: session_factory(
+        lambda context: agent_over(
             PromptRecordingSession(context.root, reviewer_response, log)
         ),
         LiteralInvocationRenderer(),
@@ -5641,7 +5644,7 @@ async def test_a_round_that_commits_nothing_neither_charges_nor_reviews_an_empty
         ),
         resolve_spec(),
         worker_recipe(tmp_path / "state", launcher, worker_response),
-        lambda context: session_factory(
+        lambda context: agent_over(
             PromptRecordingSession(context.root, reviewer_response, reviewer_prompts)
         ),
         LiteralInvocationRenderer(),
@@ -5709,7 +5712,7 @@ async def test_review_prompt_names_the_range_and_the_rulings(tmp_path: Path) -> 
         ),
         resolve_spec(),
         worker_recipe(tmp_path / "state", launcher, worker_response),
-        lambda context: session_factory(
+        lambda context: agent_over(
             PromptRecordingSession(context.root, reviewer_response, reviewer_prompts)
         ),
         LiteralInvocationRenderer(),
@@ -5762,7 +5765,7 @@ async def test_plan_prompt_states_the_marker_stripping_rule(tmp_path: Path) -> N
         ),
         resolve_spec(),
         worker_recipe(tmp_path / "state", recording_launcher(), planner_response),
-        lambda context: session_factory(
+        lambda context: agent_over(
             PromptRecordingSession(context.root, planner_response, log)
         ),
         LiteralInvocationRenderer(),

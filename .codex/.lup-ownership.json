@@ -58,7 +58,7 @@
     {
       "path": ".codex/plugins/lup/TEMPLATE_AGENTS.md",
       "category": "generated",
-      "sha256": "1a06d5431d7eda1a3efd2256ef6fed512527d34f953c39ef2513aebe1dd30ec7",
+      "sha256": "27fb828a17772a356d338eee04aa793d2ec2693645691a649ef87abade9930a9",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -352,7 +352,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "b6ca854cb3aff2c816b8751d19def5ebab21fb9c3612c134132615d0ada19f4f",
+      "sha256": "c6779329e2cb99467c6e3c054d6a65e3c6356d74570617fa5028d8a9c07066a1",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -443,7 +443,7 @@
     {
       "path": ".codex/plugins/lup/skills/brainstorm/SKILL.md",
       "category": "generated",
-      "sha256": "5d98f3b489d25e82692c5d5f9e24c5eeb823ab0e1b065112c9d0149280224f0c",
+      "sha256": "1eae3cce9f094a0b4ff1e55872dc9c020af3ef407b80e8c38dc81ee2c851954f",
       "semantic_id": "skill.brainstorm",
       "executable": false
     },
@@ -632,7 +632,7 @@
     {
       "path": ".codex/plugins/lup/skills/refactor-tools/SKILL.md",
       "category": "generated",
-      "sha256": "4bcc4f933d3f75285fb96b1e2725fc5adf311916ea432aa1050160d12d09f05e",
+      "sha256": "ab92e7fc7eaa86e33b3e5aedcb3806f79fc5539e9665341a4345808c1b1e0426",
       "semantic_id": "skill.refactor-tools",
       "executable": false
     },
@@ -709,7 +709,7 @@
     {
       "path": "AGENTS.md",
       "category": "generated",
-      "sha256": "ccaa5653c46596c23bc057ace0411dcbd85a58ec71c66dd6e880a99a4967c252",
+      "sha256": "defb44999fbcd96f6e8efd25267d5a7279d56575e8571ca868578c1ed95a7a00",
       "semantic_id": "harness.guidance",
       "executable": false
     }

@@ -95,7 +95,7 @@ class SessionResult[OutputT: BaseModel](BaseModel):
     sdk_session_id: str | None = Field(
         default=None,
         description="Provider-native session id — pass it as SessionId to "
-        "Client.open(); None when the provider reported none",
+        "an agent's open(resume=...); None when the provider reported none",
     )
     timestamp: str
     output: OutputT

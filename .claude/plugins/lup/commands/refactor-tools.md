@@ -17,13 +17,13 @@ Before cataloging individual tools, map the **end-to-end flow**:
    the unit the permission policy can withhold whole.
 
 2. Read `src/lup_template/agent/core.py` to understand:
-   - How a session is opened: which `Client` is built, and which
-     wrapper layers `decorated_session_factory` puts around it (budget,
+   - How a session is opened: which runtime's agent is declared, and which
+     `SessionLayers` wrap the sessions that declaration opens (budget,
      timeout, correction, display, persistence, tracing)
    - How the registered groups become servers, and which run in-process
      versus in a subprocess
-   - What one turn asks for — the `TurnRequest`, its `output_type`, and the
-     `effort` and `autonomy` it carries
+   - What one turn asks for — the prompt and output model passed to `ask`,
+     and the `effort` and `autonomy` its session is declared with
    - How the final output is produced and returned
 
 3. Read `src/lup_template/agent/tool_policy.py` to understand:

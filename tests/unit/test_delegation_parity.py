@@ -1,18 +1,25 @@
 """Invoke served delegated roles through each real application composition."""
 
 from pathlib import Path
-from types import SimpleNamespace
+from datetime import timedelta
 from typing import Literal
 
 import pytest
-from pydantic import TypeAdapter
+from pydantic import BaseModel, TypeAdapter
 
-from lup.providers.claude.runtime import ClaudeSessionConfig, build_claude_options
-from lup.providers.codex.runtime import CodexSessionConfig
+from lup.providers.claude import Claude
+from lup.providers.claude.runtime import build_claude_options
+from lup.providers.codex import Codex
 from lup.orchestration.reflection import ReviewResult, ReviewVerdict
-from lup.sessions.client import Client
-from lup.sessions.events import TurnTextBlock
-from lup.types import SubagentSpec
+from lup.sessions.events import (
+    SessionId,
+    TurnId,
+    TurnIdentifiers,
+    TurnInput,
+    TurnResult,
+    TurnTextBlock,
+)
+from lup.types import SubagentSpec, Usage
 from lup.workspace.context import SessionContext
 from lup_template.agent import core
 from lup_template.agent.config import Settings, settings
@@ -20,21 +27,34 @@ from lup_template.agent.subagents import get_subagent_specs
 from lup_template.agent.tools import reflect
 from lup_template.devtools.agent.inspect_agent import InspectPayload, run_inspect
 from lup_template.devtools.agent.serve import collect_tools_by_server
-from tests.unit.test_template_fixes import static_session_factory
 
 
 @pytest.fixture
 def configured(
     monkeypatch: pytest.MonkeyPatch,
-) -> list[ClaudeSessionConfig | CodexSessionConfig]:
-    captured: list[ClaudeSessionConfig | CodexSessionConfig] = []
+) -> list[Claude | Codex]:
+    captured: list[Claude | Codex] = []
 
-    def capture(config: ClaudeSessionConfig | CodexSessionConfig) -> Client:
-        captured.append(config)
-        return static_session_factory([TurnTextBlock(text="verified findings")])
+    async def answer(
+        agent: Claude | Codex,
+        prompt: str | TurnInput,
+        output: type[BaseModel] | None = None,
+    ) -> TurnResult[None]:
+        """Answer a one-shot ask without a session, keeping who was asked."""
+        captured.append(agent)
+        return TurnResult[None](
+            output=None,
+            messages=[],
+            blocks=[TurnTextBlock(text="verified findings")],
+            usage=Usage(),
+            duration=timedelta(),
+            identifiers=TurnIdentifiers(
+                session=SessionId(value="delegated"), turn=TurnId(value="once")
+            ),
+        )
 
-    monkeypatch.setattr(core, "create_claude", capture)
-    monkeypatch.setattr(core, "create_codex", capture)
+    monkeypatch.setattr(Claude, "ask", answer)
+    monkeypatch.setattr(Codex, "ask", answer)
     for name in (
         "model",
         "aux_model",
@@ -58,7 +78,7 @@ def configured(
 async def test_served_roles_execute_on_the_selected_engine(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    configured: list[ClaudeSessionConfig | CodexSessionConfig],
+    configured: list[Claude | Codex],
     engine: Literal["claude", "codex"],
     name: str,
 ) -> None:
@@ -73,7 +93,7 @@ async def test_served_roles_execute_on_the_selected_engine(
     assert len(configured) == 1
     config = configured[0]
     if engine == "claude":
-        assert isinstance(config, ClaudeSessionConfig)
+        assert isinstance(config, Claude)
         assert config.model_id() == "opus"
         assert config.native_tools == [
             "Read",
@@ -84,7 +104,7 @@ async def test_served_roles_execute_on_the_selected_engine(
         assert config.allowed_tools == config.native_tools
         assert config.setting_sources == []
     else:
-        assert isinstance(config, CodexSessionConfig)
+        assert isinstance(config, Codex)
         assert config.model_id() == "gpt-5.6-sol"
         assert config.sandbox == "read-only"
         assert config.approval_policy == "never"
@@ -95,7 +115,7 @@ async def test_served_roles_execute_on_the_selected_engine(
 
 def test_native_and_served_claude_roles_share_the_compiler() -> None:
     options = build_claude_options(
-        ClaudeSessionConfig(subagents=get_subagent_specs(), native_tools=["all"]),
+        Claude(subagents=get_subagent_specs(), native_tools=["all"]),
         binding=lambda: None,
         resume=None,
         session_id=None,
@@ -129,23 +149,24 @@ def test_inspect_exposes_capabilities_separately_from_exact_grants(
     "engine,expected", [("claude", "opus"), ("codex", "gpt-5.6-sol")]
 )
 def test_explicit_engine_without_model_selects_native_strongest(
-    configured: list[ClaudeSessionConfig | CodexSessionConfig],
+    configured: list[Claude | Codex],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     engine: str,
     expected: str,
 ) -> None:
     monkeypatch.setattr(settings, "agent_sdk", engine)
-    core.provider_factory(model=None, system_prompt="", cwd=tmp_path)
-    assert configured[0].model == "strongest"
-    assert configured[0].model_id() == expected
+    agent = core.provider_factory(model=None, system_prompt="", cwd=tmp_path)
+    assert isinstance(agent, Claude | Codex)
+    assert agent.model == "strongest"
+    assert agent.model_id() == expected
 
 
 @pytest.mark.parametrize(
     "engine,expected", [("claude", "opus"), ("codex", "gpt-5.6-sol")]
 )
 def test_unconfigured_model_default_cannot_pin_another_provider(
-    configured: list[ClaudeSessionConfig | CodexSessionConfig],
+    configured: list[Claude | Codex],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     engine: str,
@@ -157,34 +178,35 @@ def test_unconfigured_model_default_cannot_pin_another_provider(
     monkeypatch.delenv("AGENT_MODEL", raising=False)
     monkeypatch.setattr(settings, "model", DefaultSettings().model)
     monkeypatch.setattr(settings, "agent_sdk", engine)
-    core.provider_factory(model=settings.model, system_prompt="", cwd=tmp_path)
-    assert configured[0].model_id() == expected
+    agent = core.provider_factory(model=settings.model, system_prompt="", cwd=tmp_path)
+    assert isinstance(agent, Claude | Codex)
+    assert agent.model_id() == expected
 
 
 def test_codex_does_not_widen_role_to_session_sandbox(
-    configured: list[ClaudeSessionConfig | CodexSessionConfig],
+    configured: list[Claude | Codex],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(settings, "agent_sdk", "codex")
     monkeypatch.setattr(settings, "codex_sandbox", "danger_full_access")
-    core.build_subagent_factory(get_subagent_specs()[0])
-    assert isinstance(configured[0], CodexSessionConfig)
-    assert configured[0].sandbox == "read-only"
+    agent = core.build_subagent_factory(get_subagent_specs()[0])
+    assert isinstance(agent, Codex)
+    assert agent.sandbox == "read-only"
 
 
 def test_model_override_routes_when_no_engine_is_explicit(
-    configured: list[ClaudeSessionConfig | CodexSessionConfig],
+    configured: list[Claude | Codex],
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(settings, "agent_sdk", None)
     monkeypatch.setattr(settings, "model", "claude-opus-5")
-    core.provider_factory(model="gpt-6-astra", system_prompt="", cwd=tmp_path)
-    assert isinstance(configured[0], CodexSessionConfig)
+    agent = core.provider_factory(model="gpt-6-astra", system_prompt="", cwd=tmp_path)
+    assert isinstance(agent, Codex)
 
 
 def test_codex_explicit_role_turn_cap_is_not_ignored(
-    configured: list[ClaudeSessionConfig | CodexSessionConfig],
+    configured: list[Claude | Codex],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(settings, "agent_sdk", "codex")
@@ -193,26 +215,40 @@ def test_codex_explicit_role_turn_cap_is_not_ignored(
     )
     with pytest.raises(ValueError, match="max_turns"):
         core.build_subagent_factory(spec)
-    assert configured == []
 
 
 @pytest.mark.parametrize("engine", ["claude", "codex"])
 async def test_reviewer_compiles_on_both_engines(
-    configured: list[ClaudeSessionConfig | CodexSessionConfig],
+    configured: list[Claude | Codex],
     monkeypatch: pytest.MonkeyPatch,
     engine: str,
 ) -> None:
     monkeypatch.setattr(settings, "agent_sdk", engine)
 
-    async def answered(
-        _self: Client, prompt: str, output_type: type[ReviewResult]
-    ) -> SimpleNamespace:
-        assert output_type is ReviewResult
-        return SimpleNamespace(
-            output=ReviewResult(verdict=ReviewVerdict.approve, assessment=prompt)
+    async def reviewed(
+        agent: Claude | Codex,
+        prompt: str | TurnInput,
+        output: type[BaseModel] | None = None,
+    ) -> TurnResult[ReviewResult]:
+        """Review without a session, keeping which agent was asked."""
+        assert output is ReviewResult
+        configured.append(agent)
+        return TurnResult[ReviewResult](
+            output=ReviewResult(
+                verdict=ReviewVerdict.approve,
+                assessment=prompt if isinstance(prompt, str) else prompt.text,
+            ),
+            messages=[],
+            blocks=[],
+            usage=Usage(),
+            duration=timedelta(),
+            identifiers=TurnIdentifiers(
+                session=SessionId(value="reviewed"), turn=TurnId(value="once")
+            ),
         )
 
-    monkeypatch.setattr(Client, "query", answered)
+    monkeypatch.setattr(Claude, "ask", reviewed)
+    monkeypatch.setattr(Codex, "ask", reviewed)
     result = await reflect.run_reviewer(
         reflect.ReflectInput(
             assessment="Evidence checked",
@@ -227,13 +263,13 @@ async def test_reviewer_compiles_on_both_engines(
     assert len(configured) == 1
     config = configured[0]
     if engine == "codex":
-        assert isinstance(config, CodexSessionConfig)
+        assert isinstance(config, Codex)
         assert config.delegated_tools is not None
         assert (
             config.delegated_tools.workspace_read and config.delegated_tools.web_search
         )
     else:
-        assert isinstance(config, ClaudeSessionConfig)
+        assert isinstance(config, Claude)
         assert config.native_tools == ["Read", "Glob", "Grep", "WebSearch", "WebFetch"]
 
 

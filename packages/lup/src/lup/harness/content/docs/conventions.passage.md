@@ -8,7 +8,7 @@ disagree, the guidance is the statement of intent and this is only its index.
 
 | Library | What it is for |
 | --- | --- |
-| `lup` | The runtime an application composes against, and it is provider-neutral: `Client` opens a `Session`, a `TurnRequest` carries the prompt and the type the answer must arrive as, and a strict `TurnResult[T]` hands back `.output` already validated. `Client.query(prompt, Model)` is the whole of a one-shot. |
+| `lup` | The runtime an application composes against. `Claude` and `Codex` each declare one agent as a frozen model, and `ask` is the only verb: `await agent.ask(prompt, Model)` is the whole of a one-shot, `session.ask(...)` a turn of the conversation `async with agent.open() as session` holds, and the strict `TurnResult[T]` either resolves to hands back `.output` already validated. Code naming no provider holds the `Agent`, `Conversation` and `Turn` protocols instead. |
 | [pydantic](https://docs.pydantic.dev/) | Validation, and every model we declare. |
 | [pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/) | Configuration, in place of dotenv. |
 
@@ -30,13 +30,13 @@ type replaces one depends on where the dict came from:
 | An MCP tool's output | The `BaseModel` the handler returns; the decorator serializes it |
 | A hook's input | `LupHookInput` from `lup.policy.hooks` |
 | A hook's return value | `LupHookOutput`, built by `allow_hook` / `ask_hook` / `deny_hook` / `block_hook` |
-| A structured turn result | `TurnResult[Model].output`, already validated against the turn's `output_type` |
+| A structured turn result | `TurnResult[Model].output`, already validated against the model the turn was asked for |
 
 The neutral types to prefer over a hand-rolled shape are lup's own:
 `LupHookMatcher` and `LupHooksConfig` for registration, `LupMcpTool` and
 `LupMcpServerConfig` for tools and the servers they group into,
-`ClaudeSessionConfig` / `CodexSessionConfig` for what one runtime's session
-takes. Each adapter translates its backend's native identities onto these, so
+`Claude` / `Codex` for everything one runtime's agent is declared with. Each
+adapter translates its backend's native identities onto these, so
 one vocabulary reads across hooks, policy, and harness declarations.
 
 ## Tool input schemas
@@ -69,7 +69,7 @@ structured data means the structured API was missed:
 | Web pages | `trafilatura` for the text, `beautifulsoup4` for the DOM |
 | XML | `xml.etree.ElementTree`, or `lxml` |
 | JSON | `json.loads()` |
-| A completed turn | `TurnResult.output` for the typed answer; filter `TurnResult.blocks` by type and attribute for the prose |
+| A completed turn | `TurnResult.output` for the typed answer; each block's `text_payload` over `TurnResult.blocks` for the prose |
 | Dates | Parse to `datetime`; never compare the strings |
 | URLs | `urllib.parse` |
 | Filesystem paths | `pathlib.Path`, never concatenation |

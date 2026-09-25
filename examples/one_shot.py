@@ -4,7 +4,7 @@ import asyncio
 
 from pydantic import BaseModel, Field
 
-from lup import create_claude
+from lup import Claude
 
 
 class Summary(BaseModel, frozen=True):
@@ -14,11 +14,11 @@ class Summary(BaseModel, frozen=True):
 
 
 async def main() -> None:
-    client = create_claude(
+    agent = Claude(
         model="claude-opus-5",
         system_prompt="Return a concise summary through submit_output.",
     )
-    result = await client.query("Summarize why typed boundaries help.", Summary)
+    result = await agent.ask("Summarize why typed boundaries help.", Summary)
     print(result.output.model_dump_json(indent=2))
 
 
