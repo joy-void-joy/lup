@@ -621,11 +621,19 @@ a repository is the act of trust; a workspace outside that stops the run rather
 than degrading it.
 
 `CLAUDE_CONFIG_DIR` selects which profile all of this reads and writes. Where it
-is set, the document is `.config.json` inside the named directory; where it is
-unset, the document is `~/.claude.json` beside the home rather than in it, and
-the derived homes still land under `~/.claude`. Both spellings matter for an
-interactive fix: accepting a trust dialog in a shell that does not export the
-same variable writes to a different profile and appears to do nothing.
+is set, the document is `.claude.json` inside the named directory; where it is
+unset, it is `~/.claude.json` beside `~/.claude` rather than in it, so naming
+`~/.claude` outright selects a different document than naming nothing.
+`CLAUDE_CODE_CUSTOM_OAUTH_URL` renames it `.claude-custom-oauth.json` in the
+same place. Ahead of all of these, a `.config.json` inside the home is read
+wherever one exists — the document's first name, which Claude Code still
+honours and never creates, and which wins however empty it is. A derived home
+lives in the checkout, under `.lup/sessions/`, whichever profile it was derived
+from: it keeps a document of its own under the current name, seeded from
+whichever document the profile is read from, and never a `.config.json`.
+Every one of these spellings matters for an interactive fix: accepting a trust
+dialog in a shell that does not export the same variables writes to a different
+document and appears to do nothing.
 ### Reviewing a session's edits in an editor
 
 Reviewing a whole-file write in a terminal is reading a wall of text and
