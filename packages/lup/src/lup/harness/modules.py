@@ -40,6 +40,7 @@ from pydantic import BaseModel
 import lup.harness.models as models
 from lup.devtools.subapps import SubAppSpec
 from lup.harness.content.application import ApplicationLayout
+from lup.harness.requirements import Manifest
 from lup.seams import SelectableRule, Selection
 
 
@@ -109,6 +110,18 @@ class ModuleSpec(SelectableRule, frozen=True):
     Beside :attr:`subapps` and for the same reason: a session composing its
     servers reads names, and building a module to learn them would make every
     launch import every subject the project happens to hold.
+    """
+
+    requirements: list[str] = []
+    """External programs only this module's subject needs, by capability.
+
+    Named, like the command trees and tool groups, because the requirement
+    itself is the project's to declare — which constructor, which client,
+    which recovery — and a module only says that its subject is why one is
+    there. A requirement some module claims is asked of a machine only where a
+    module claiming it is taken; one no module claims is the project's own and
+    always asked. So a project that declined the sandbox is not told, at every
+    launch, that a container runtime it has no use for is missing.
     """
 
     scaffold_only: bool = False
@@ -406,6 +419,44 @@ class ModuleSelection(BaseModel, frozen=True):
             for group in spec.tool_groups
             if group not in self.adoption(spec.id).tool_groups
         ]
+
+    def withheld_tool_groups(self, specs: list[ModuleSpec]) -> list[str]:
+        """Every tool group a module offers that this project's sessions are not.
+
+        The other side of :meth:`tool_groups`, for the declaration that lists a
+        project's groups by builder: a group no module claims is the project's
+        own and stays, so what a session loses is exactly what was declined.
+        """
+        offered = self.tool_groups(specs)
+        return [
+            group
+            for spec in specs
+            for group in spec.tool_groups
+            if group not in offered
+        ]
+
+    def requirements(self, manifest: Manifest, specs: list[ModuleSpec]) -> Manifest:
+        """What this project asks of a machine, less what only declined modules need.
+
+        A requirement is kept where no module claims it — the project's own —
+        or where a module claiming it is taken. Narrowed here rather than where
+        the manifest is written, so a module declined in the catalog stops
+        costing a machine its programs without anybody editing the roster of
+        requirements to match.
+        """
+        claimed = [name for spec in specs for name in spec.requirements]
+        needed = [
+            name for spec in specs if self.takes(spec) for name in spec.requirements
+        ]
+        return manifest.model_copy(
+            update={
+                "requirements": [
+                    item
+                    for item in manifest.requirements
+                    if item.capability not in claimed or item.capability in needed
+                ]
+            }
+        )
 
 
 class ModuleEntry(BaseModel, frozen=True, arbitrary_types_allowed=True):
