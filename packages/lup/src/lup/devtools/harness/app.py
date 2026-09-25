@@ -454,7 +454,8 @@ def create_harness_app(
                     "--effort",
                     help="Reasoning effort: low, medium, high, xhigh, max, or "
                     "ultra (xhigh with ultracode on); refused where the "
-                    "model's catalog row lacks it",
+                    "model's catalog row lacks it. Default: xhigh, or the "
+                    "row's highest rung below it",
                 ),
             ] = None,
             generate_only: Annotated[
@@ -629,7 +630,8 @@ def create_harness_app(
                 typer.Option(
                     "--effort",
                     help="Reasoning effort: low, medium, high, xhigh, max, or "
-                    "ultra; refused where the model's catalog row lacks it",
+                    "ultra; refused where the model's catalog row lacks it. "
+                    "Default: xhigh, or the row's highest rung below it",
                 ),
             ] = None,
             generate_only: Annotated[
