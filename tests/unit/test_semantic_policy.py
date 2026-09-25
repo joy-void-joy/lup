@@ -2906,6 +2906,10 @@ def test_redirecting_over_a_file_costs_what_deleting_it_costs(
         "dev questions answer abc --as operator",
         "dev questions reject abc --as operator",
         "dev questions serve --no-open --root /example",
+        "dev questions open",
+        "dev questions stop",
+        "harness claude",
+        "harness codex",
         "harness policy-refresh",
     ],
 )
@@ -2969,7 +2973,7 @@ def test_a_requester_cannot_start_the_operator_review_inbox(runner: str) -> None
             )
         )
         assert decision.effect == "deny"
-        assert "cannot mint operator credentials" in decision.reason
+        assert "cannot mint or access operator credentials" in decision.reason
         assert "outside the agent session" in decision.recovery
 
 

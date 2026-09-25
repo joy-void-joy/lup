@@ -14,6 +14,9 @@ import pytest
 import lup.harness.models as models
 import lup.harness.modules as modules
 from lup.harness.content.application import ApplicationLayout
+from lup.harness.codescan.common import RuleSelection
+from lup.harness.content.modules.catalog import library_modules
+from lup.harness.content.modules.specs import REVIEW_INBOX, SANDBOX
 from lup.seams import Selection
 
 
@@ -349,3 +352,79 @@ def test_a_requirement_a_project_took_is_met() -> None:
     )
 
     assert "epsilon" in [module.spec.id for module in taken]
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("sandbox", [False, True])
+def test_review_inbox_selection_is_independent_of_sandbox(
+    enabled: bool, sandbox: bool
+) -> None:
+    entries = library_modules(CONTEXT.layout, RuleSelection())
+    selection = modules.ModuleSelection(
+        adoptions=[
+            modules.Adoption(module=REVIEW_INBOX.id, taken=enabled),
+            modules.Adoption(module=SANDBOX.id, taken=sandbox),
+        ]
+    )
+    taken = modules.adopted(entries, selection)
+
+    assert (REVIEW_INBOX.id in [item.spec.id for item in taken]) is enabled
+    assert (SANDBOX.id in [item.spec.id for item in taken]) is sandbox
+    assert (
+        "review-inbox"
+        in [item.id for item in modules.composed_guidance(taken, selection)]
+    ) is enabled
+    assert (
+        "docs.review-inbox"
+        in [page.semantic_id for item in taken for page in item.documents]
+    ) is enabled
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_review_inbox_module_controls_only_browser_commands(enabled: bool) -> None:
+    from typer.core import TyperGroup
+    from typer.main import get_command
+
+    from lup_template.devtools.main import DECLARATIONS
+
+    selection = modules.ModuleSelection(
+        adoptions=[modules.Adoption(module=REVIEW_INBOX.id, taken=enabled)]
+    )
+    declared = DECLARATIONS.model_copy(update={"modules": selection})
+    dev = next(item for item in declared.roster() if item.spec.name == "dev")
+    command = get_command(dev.app)
+    assert isinstance(command, TyperGroup)
+    questions = command.commands["questions"]
+    assert isinstance(questions, TyperGroup)
+
+    assert {"list", "show", "answer", "reject", "cancel"} <= set(questions.commands)
+    for browser_command in ("serve", "status", "open", "stop"):
+        assert (browser_command in questions.commands) is enabled
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_review_inbox_capability_and_policy_share_module_selection(
+    monkeypatch: pytest.MonkeyPatch, enabled: bool
+) -> None:
+    from lup_template.harness import catalog
+
+    selection = modules.ModuleSelection(
+        adoptions=[modules.Adoption(module=REVIEW_INBOX.id, taken=enabled)]
+    )
+    monkeypatch.setattr(catalog, "MODULE_SELECTION", selection)
+    harness = catalog.portable_harness()
+    target = next(
+        rule
+        for rule in harness.declared_hooks.runner_targets
+        if rule.name == "lup-devtools"
+    )
+    assert harness.review_inbox is enabled
+    assert len(target.subcommands) == len({rule.name for rule in target.subcommands})
+    guarded = {
+        operation.name
+        for rule in target.subcommands
+        if rule.name == "harness"
+        for operation in rule.operations
+        if operation.operator_only
+    }
+    assert ({"claude", "codex"} <= guarded) is enabled

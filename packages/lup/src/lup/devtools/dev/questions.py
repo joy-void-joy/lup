@@ -1000,7 +1000,12 @@ class ReviewStore(BaseModel, frozen=True):
 
 
 def review_app(
-    url: str, token: str, roots: tuple[Path, ...], *, discover: bool = False
+    url: str,
+    token: str,
+    roots: tuple[Path, ...],
+    *,
+    discover: bool = False,
+    bundles: Path | None = None,
 ) -> "FastAPI":
     """Build an authenticated browser surface over the durable review queues."""
     from fastapi import BackgroundTasks, Request
@@ -1017,7 +1022,11 @@ def review_app(
 
     if discover:
         roots = tuple(dict.fromkeys(anchor(root) for root in roots))
-    app = bundle_app("Review inbox", url, "reviews")
+    app = (
+        bundle_app("Review inbox", url, "reviews")
+        if bundles is None
+        else bundle_app("Review inbox", url, "reviews", bundles=bundles)
+    )
     store = ReviewStore(roots=roots, discover=discover)
 
     @app.middleware("http")
@@ -1094,11 +1103,12 @@ def review_roots(root: Path, additional: list[Path]) -> tuple[Path, ...]:
     return selected
 
 
-def create_questions_app(root: Path) -> typer.Typer:
+def create_questions_app(
+    root: Path, *, review_inbox_enabled: bool = True
+) -> typer.Typer:
     """Wire the reviewer's surface over one checkout's relay."""
     app = typer.Typer(no_args_is_help=True)
 
-    @app.command("serve")
     def serve_cmd(
         selected_roots: list[Path] | None = typer.Option(
             None,
@@ -1112,6 +1122,9 @@ def create_questions_app(root: Path) -> typer.Typer:
         ),
     ) -> None:
         """Keep an operator browser inbox open across the selected worktrees."""
+        from lup.devtools.dev.review_service import require_review_operator
+
+        require_review_operator()
         import uvicorn
 
         from lup.web.loopback import refuse_non_loopback
@@ -1122,6 +1135,11 @@ def create_questions_app(root: Path) -> typer.Typer:
                 path.resolve(strict=True) for path in (selected_roots or [root])
             )
         )
+        repositories = {repository_layout(path).common.resolve() for path in roots}
+        if len(repositories) == 1:
+            from lup.devtools.dev.review_service import serve_review_inbox
+
+            return serve_review_inbox(roots[0], host, port, open_page)
         authority = f"[{host}]" if ":" in host else host
         url = f"http://{authority}" if port == 80 else f"http://{authority}:{port}"
         token = secrets.token_urlsafe(32)
@@ -1131,6 +1149,12 @@ def create_questions_app(root: Path) -> typer.Typer:
         if open_page:
             webbrowser.open(browser_url)
         uvicorn.run(app, host=host, port=port, access_log=False)
+
+    if review_inbox_enabled:
+        from lup.devtools.dev.review_service import register_review_service_commands
+
+        register_review_service_commands(app, root)
+        app.command("serve")(serve_cmd)
 
     @app.command("list")
     def list_cmd(

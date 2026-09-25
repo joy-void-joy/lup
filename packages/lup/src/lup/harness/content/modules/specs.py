@@ -110,6 +110,16 @@ SANDBOX = ModuleSpec(
     tool_groups=["sandbox"],
 )
 
+REVIEW_INBOX = ModuleSpec(
+    id="review-inbox",
+    title="Review inbox",
+    summary=(
+        "An operator browser inbox for reviewing pending approvals across "
+        "worktrees, kept available by native harness launches."
+    ),
+    requires=["core"],
+)
+
 SETUP = ModuleSpec(
     id="setup",
     title="Setup",
@@ -245,6 +255,7 @@ LIBRARY_SPECS = [
     VERSION,
     OBSERVABILITY,
     SANDBOX,
+    REVIEW_INBOX,
     SETUP,
     CONVERSATION,
     FEEDBACK_LOOP,

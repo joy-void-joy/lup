@@ -37,6 +37,7 @@ from lup.devtools.dev.review_notifications import (
     ReviewNotification,
     ReviewNotifications,
 )
+from lup.devtools.dev.review_service import ReviewOperatorEnvironment
 from lup.policy.operations import Operation
 from lup.policy.relay import PersistentQuestion, QuestionRelay
 from lup.policy.review import ReviewedFile
@@ -52,6 +53,9 @@ ANSWER_HEADERS: Final = {**AUTHORIZATION, "Origin": BASE_URL}
 @pytest.fixture(autouse=True)
 def isolated_bundle(monkeypatch: pytest.MonkeyPatch) -> None:
     """Exercise the real Host guard without making API tests build JavaScript."""
+    for field in ReviewOperatorEnvironment.model_fields.values():
+        if isinstance(field.validation_alias, str):
+            monkeypatch.delenv(field.validation_alias, raising=False)
 
     def build(title: str, url: str, surface: str) -> FastAPI:
         assert surface == "reviews"
@@ -755,7 +759,7 @@ def test_root_discovery_keeps_only_named_repositories_and_their_worktrees(
 
 @pytest.mark.parametrize("open_page", [False, True])
 @pytest.mark.parametrize(
-    "selected_names", [(), ("additional",), ("additional", "other", "additional")]
+    "selected_names", [("current", "other"), ("additional", "other", "additional")]
 )
 @pytest.mark.parametrize(
     ("requested_port", "expected_url"), [(8765, BASE_URL), (80, "http://127.0.0.1")]
@@ -781,14 +785,19 @@ async def test_cli_serves_selected_roots_and_keeps_the_token_out_of_public_pages
         )
     ]
     for root in roots:
-        (root / ".git").mkdir(parents=True)
+        git_repository(root)
     entries = {root.name: parked(root, f"{root.name}-question") for root in roots}
     watched = selected_names or ("current",)
     entry = entries[watched[0]]
+
+    def discover(root: Path) -> list[Path]:
+        checkout = root.parent if root.name == ".git" else root
+        return [checkout, checkout.with_name(f"{checkout.name}-sibling")]
+
     monkeypatch.setattr(
         questions,
         "sibling_worktrees",
-        lambda root: [root, root.with_name(f"{root.name}-sibling")],
+        discover,
     )
     served: list[FastAPI] = []
     opened: list[str] = []

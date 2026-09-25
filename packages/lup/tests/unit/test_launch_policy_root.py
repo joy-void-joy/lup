@@ -38,6 +38,7 @@ def test_interactive_launch_replaces_inherited_policy_root_and_forwards_it(
     contained = Mock(return_value=["podman", "run", "-it", "image"])
     monkeypatch.setattr(launch, "contained_argv", contained)
     composition = Mock()
+    composition.recipe.source.review_inbox = False
     composition.recipe.source.image.config_home = "/cfg"
     composition.recipe.source.image.forge.sourced.return_value = ""
     composition.recipe.source.image.clipboard = ClipboardBridge()

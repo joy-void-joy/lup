@@ -39,6 +39,7 @@ from lup.providers.codex.transcripts import CodexTranscripts
 from lup.coordination.identity import MEMBER_ENV, NAME_ENV, LaunchedMember
 from lup.coordination.repository import launched_member
 from lup.harness.environment import non_interactive_environment
+from lup.harness.review_environment import REVIEW_INBOX_URL_ENV
 from lup.harness.models import HookSet, NativeName, Plugin, Resumption
 from lup.policy.boundary import BoundaryPreflight
 from lup.policy.identity import POLICY_ROOT_ENV
@@ -1502,6 +1503,28 @@ def session_argv(
     ended.
     """
     banner = cleared.banner
+    environment.pop(REVIEW_INBOX_URL_ENV, None)
+
+    def ready_inbox() -> None:
+        """Open only the selected host service before announcing launch readiness."""
+        if not composition.recipe.source.review_inbox:
+            return
+        from lup.devtools.dev.review_service import ensure_review_inbox
+
+        inbox = ensure_review_inbox(composition.recipe.root)
+        environment[REVIEW_INBOX_URL_ENV] = inbox.endpoint
+        banner.add([Notice(text=f"Review inbox: {inbox.endpoint}", urgency="detail")])
+        if inbox.started and not inbox.browser_opened:
+            banner.add(
+                [
+                    Notice(
+                        text="Open the review inbox from your operator terminal: "
+                        "uv run lup-devtools dev questions open",
+                        urgency="detail",
+                    )
+                ]
+            )
+
     # Minted where both runtimes pass through, so a session's coordination
     # identity is a fact about having been launched rather than about which
     # CLI was launched. Exported rather than derived because the session's
@@ -1565,6 +1588,7 @@ def session_argv(
             accessible,
             runtime=cli,
         )
+        ready_inbox()
         say_opening(cleared, cleared.findings, transcript)
         return [cli, *arguments]
     harness = composition.recipe.source
@@ -1598,6 +1622,7 @@ def session_argv(
             MEMBER_ENV,
             NAME_ENV,
             POLICY_ROOT_ENV,
+            *([REVIEW_INBOX_URL_ENV] if composition.recipe.source.review_inbox else []),
         ],
         banner=banner,
         sentinels=sentinels,
@@ -1651,6 +1676,7 @@ def session_argv(
         accessible,
         runtime=cli,
     )
+    ready_inbox()
     say_opening(cleared, measured_here, transcript)
     native = harness.image.clipboard.wrap(
         [cli, *arguments], composition.clipboard_transport

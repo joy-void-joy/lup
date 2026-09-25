@@ -1870,6 +1870,12 @@ class Harness(BaseModel, frozen=True):
     a spec is here: a project that declined the resolver module ships no
     worker, review or merge skill, and must not have to declare a spec
     naming skills it does not have."""
+    review_inbox: bool = False
+    """Whether native launches keep this project's operator review inbox available.
+
+    Independent of session containment; a harness that declares no inbox opens
+    no review service and imports none of its web dependencies.
+    """
     requirements: Manifest = Manifest()
     """The external programs this project needs, exercised before a launch.
 

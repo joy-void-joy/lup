@@ -91,6 +91,7 @@ def create_dev_app(
     node_classes: list[type[LedgerNode]] | None = None,
     ledger: LedgerLayout = LedgerLayout(),
     command_surface: Callable[[], CommandSurface] | None = None,
+    review_inbox_enabled: bool = False,
 ) -> typer.Typer:
     """Wire the dev command tree over what one repository declares about itself."""
     app = typer.Typer(no_args_is_help=True)
@@ -128,7 +129,9 @@ def create_dev_app(
         help="Pydantic configuration census and equivalence",
     )
     app.add_typer(
-        questions_mod.create_questions_app(Path.cwd()),
+        questions_mod.create_questions_app(
+            Path.cwd(), review_inbox_enabled=review_inbox_enabled
+        ),
         name="questions",
         help="The parked asks a reviewer answers, and what each is waiting on",
     )

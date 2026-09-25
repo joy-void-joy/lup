@@ -687,16 +687,6 @@ def review_queue_rules(
                     )
                     for action in ("answer", "reject")
                 ],
-                ShellOperationRule(
-                    name="serve",
-                    parents=["questions"],
-                    operator_only=True,
-                    reason="a requesting agent cannot mint operator credentials for the review inbox",
-                    recovery=(
-                        "The operator must start `uv run lup-devtools dev questions serve` "
-                        "from a terminal outside the agent session."
-                    ),
-                ),
                 # Retiring deletes the note and the words it was written in,
                 # which is the one step of the verify-solved pass nothing can
                 # undo: a claim wrongly retired takes the concern with it,
@@ -731,6 +721,44 @@ def review_queue_rules(
                     reason="a requesting agent cannot accept replacement destination policy",
                     recovery="The operator must refresh from a terminal outside the agent session.",
                 )
+            ],
+        ),
+    ]
+
+
+def review_inbox_rules() -> list[ShellSubcommandRule]:
+    """Reserve browser authority and the launches that open it for the operator."""
+    return [
+        ShellSubcommandRule(
+            name="dev",
+            operations=[
+                ShellOperationRule(
+                    name=action,
+                    parents=["questions"],
+                    operator_only=True,
+                    reason="a requesting agent cannot mint or access operator credentials for the review inbox",
+                    recovery=(
+                        "The operator must manage the review inbox from a terminal "
+                        "outside the agent session."
+                    ),
+                )
+                for action in ("serve", "open", "stop")
+            ],
+        ),
+        ShellSubcommandRule(
+            name="harness",
+            operations=[
+                ShellOperationRule(
+                    name=runtime,
+                    operator_only=True,
+                    reason="a requesting agent cannot launch an operator review inbox through a native harness",
+                    recovery=(
+                        "The operator must launch the harness from a terminal outside "
+                        "the agent session. To generate artifacts without opening a "
+                        "session, use `uv run lup-devtools harness generate all`."
+                    ),
+                )
+                for runtime in ("claude", "codex")
             ],
         ),
     ]

@@ -165,6 +165,7 @@ def test_session_authentication_uses_the_same_execution_boundary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     composition = Mock()
+    composition.recipe.source.review_inbox = False
     composition.recipe.source.image.config_home = "/cfg"
     composition.recipe.source.image.forge.sourced.return_value = ""
     composition.recipe.source.image.clipboard = ClipboardBridge()
