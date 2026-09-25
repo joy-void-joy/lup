@@ -52,18 +52,35 @@ CodexApprovalPolicy = Literal["on-request", "never"]
 CodexSandboxMode = Literal["read-only", "workspace-write", "danger-full-access"]
 """Codex's own sandbox, as ``--sandbox`` spells it."""
 
+CodexApprovalsReviewer = Literal["user", "auto_review"]
+"""Who answers Codex's approval requests, as its ``approvals_reviewer`` key spells it.
+
+``auto_review`` routes each request that needs approval through a reviewer
+agent instead of the person; Codex 0.156.1 also parses
+``guardian_subagent``, which its documentation does not list, so it is left
+out here."""
+
 
 def unconfining(value: str | bool) -> bool:
     """Whether a posture value stops a runtime asking or confining on its own.
 
     These are the values only a container may stand in for: Claude Code's
     ``auto``, where a classifier answers in place of a person, and
-    ``bypassPermissions``, where nothing does; Codex never asking; Codex's own
-    sandbox switched off; Claude Code's Bash sandbox switched off. Everything
-    else leaves the runtime's own asking or its own sandbox standing.
+    ``bypassPermissions``, where nothing does; Codex's ``auto_review``, where
+    a reviewer agent answers in place of a person, and Codex never asking;
+    Codex's own sandbox switched off; Claude Code's Bash sandbox switched
+    off. Everything else leaves the runtime's own asking or its own sandbox
+    standing.
     """
     match value:
-        case "auto" | "bypassPermissions" | "never" | "danger-full-access" | False:
+        case (
+            "auto"
+            | "bypassPermissions"
+            | "auto_review"
+            | "never"
+            | "danger-full-access"
+            | False
+        ):
             return True
         case _:
             return False
@@ -100,6 +117,14 @@ class LaunchPosture(BaseModel, frozen=True):
             "model ask when it judges it should, ``never`` never asks"
         ),
     )
+    approvals_reviewer: CodexApprovalsReviewer | None = Field(
+        default=None,
+        description=(
+            "Who answers what Codex asks under ``on-request``: ``auto_review`` "
+            "has a reviewer agent approve or refuse each request in place of "
+            "a person, the nearest thing Codex has to Claude Code's ``auto``"
+        ),
+    )
     sandbox_mode: CodexSandboxMode | None = Field(
         default=None,
         description=(
@@ -121,18 +146,28 @@ class LaunchPosture(BaseModel, frozen=True):
 
     @classmethod
     def unattended(cls) -> "LaunchPosture":
-        """A session nothing asks, in each runtime's own words for it.
+        """A session no person is asked in: each runtime's own reviewer answers instead.
 
-        Claude Code's ``auto``, whose classifier answers in place of a person,
-        with its own Bash sandbox off, and Codex's nearest equivalent — it has
-        no such mode — which is never asking with its own sandbox off, the
-        pairing its documentation names for a container that provides the
-        isolation. Both are meant for the inside of a container, which is the
-        only place a declared posture is applied.
+        Claude Code's ``auto``, whose classifier approves or refuses each
+        action, with its own Bash sandbox off. Codex has no such mode; its
+        nearest is ``on-request`` with ``approvals_reviewer = "auto_review"``,
+        where a reviewer agent answers each request that needs approval —
+        https://learn.chatgpt.com/docs/agent-approvals-security — with its own
+        sandbox off, as that page asks where the container is the boundary.
+
+        The two are not the same reach, and the difference is Codex's to
+        state: a Codex request needs approval only when the sandbox would
+        stop it, so with no sandbox left the reviewer sees side-effecting app
+        and tool calls and permission requests, while Claude Code's
+        classifier sees every action not already allowed. Codex's own
+        sandbox cannot be kept to close that gap: ``workspace-write`` cuts
+        the network the session's proxy is reached over. Both are meant for
+        the inside of a container, the only place a declared posture applies.
         """
         return cls(
             permission_mode="auto",
-            approval_policy="never",
+            approval_policy="on-request",
+            approvals_reviewer="auto_review",
             sandbox_mode="danger-full-access",
             bash_sandbox=False,
         )

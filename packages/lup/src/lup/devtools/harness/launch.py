@@ -73,6 +73,7 @@ from lup.harness.notice import Banner, Notice
 from lup.harness.posture import (
     ClaudePermissionMode,
     CodexApprovalPolicy,
+    CodexApprovalsReviewer,
     CodexSandboxMode,
 )
 from lup.harness.requirements import (
@@ -1458,6 +1459,35 @@ def codex_approval_arguments(
     return ["--ask-for-approval", chosen_policy.value]
 
 
+def codex_reviewer_arguments(
+    reviewer: Chosen[CodexApprovalsReviewer] | None,
+    contained: bool,
+    extra_args: list[str],
+) -> list[str]:
+    """Who answers Codex's approval requests for this launch, where anybody says.
+
+    Spelled as configuration because Codex has no flag for it alone:
+    ``--approve-for-me`` names the reviewer and forces ``workspace-write``
+    with it, which inside the container cuts the network the proxy is
+    reached over. A caller who spelled the key, that flag, or the flag
+    that drops approvals altogether has said it in Codex's own words.
+    """
+    chosen_reviewer = applied(reviewer, contained)
+    caller = [
+        word
+        for word in extra_args
+        if word.startswith("approvals_reviewer=")
+        or word
+        in ("--approve-for-me", "--dangerously-bypass-approvals-and-sandbox", "--yolo")
+    ]
+    if chosen_reviewer is None or caller:
+        return []
+    return [
+        "-c",
+        "approvals_reviewer=" + tomlkit.string(chosen_reviewer.value).as_string(),
+    ]
+
+
 def posture_notices(
     plugin: Plugin,
     settings: SessionSettings,
@@ -1495,13 +1525,22 @@ def posture_notices(
                 "Permission mode",
             )
         case "codex":
-            spoken = permission_notices(
-                settings.approval_policy,
-                contained,
-                "Codex",
-                "--approval-policy",
-                "Approval policy",
-            )
+            spoken = [
+                *permission_notices(
+                    settings.approval_policy,
+                    contained,
+                    "Codex",
+                    "--approval-policy",
+                    "Approval policy",
+                ),
+                *permission_notices(
+                    settings.approvals_reviewer,
+                    contained,
+                    "Codex",
+                    "--approvals-reviewer",
+                    "Approvals reviewer",
+                ),
+            ]
     return [*ungated, *spoken]
 
 
@@ -2308,6 +2347,9 @@ def launch_codex(
         ),
         *codex_approval_arguments(
             settings.approval_policy, sandbox.contained(), extra_args
+        ),
+        *codex_reviewer_arguments(
+            settings.approvals_reviewer, sandbox.contained(), extra_args
         ),
         # The line naming the mode, as developer instructions this session is
         # given beside the runtime's own, which it does not replace.

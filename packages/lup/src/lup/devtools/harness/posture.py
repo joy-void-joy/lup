@@ -30,6 +30,7 @@ from lup.harness.notice import Notice
 from lup.harness.posture import (
     ClaudePermissionMode,
     CodexApprovalPolicy,
+    CodexApprovalsReviewer,
     CodexSandboxMode,
     unconfining,
 )
@@ -105,6 +106,7 @@ class LaunchOverrides(BaseModel, frozen=True):
     memory: MemoryLimit | None = None
     permission_mode: ClaudePermissionMode | None = None
     approval_policy: CodexApprovalPolicy | None = None
+    approvals_reviewer: CodexApprovalsReviewer | None = None
     sandbox_mode: CodexSandboxMode | None = None
     services: dict[str, int] = {}
 
@@ -131,6 +133,7 @@ class SessionSettings(BaseModel, frozen=True):
     memory: Chosen[MemoryLimit] | None = None
     permission_mode: Chosen[ClaudePermissionMode] | None = None
     approval_policy: Chosen[CodexApprovalPolicy] | None = None
+    approvals_reviewer: Chosen[CodexApprovalsReviewer] | None = None
     sandbox_mode: Chosen[CodexSandboxMode] | None = None
     bash_sandbox: Chosen[bool] | None = None
     privileges: Chosen[ContainerPrivileges] | None = None
@@ -189,6 +192,11 @@ class SessionSettings(BaseModel, frozen=True):
                 flags.approval_policy,
                 posture.approval_policy if posture is not None else None,
                 defaults.get("approval_policy"),
+            ),
+            approvals_reviewer=chosen(
+                flags.approvals_reviewer,
+                posture.approvals_reviewer if posture is not None else None,
+                defaults.get("approvals_reviewer"),
             ),
             sandbox_mode=chosen(
                 flags.sandbox_mode,

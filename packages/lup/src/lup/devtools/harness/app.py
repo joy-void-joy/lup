@@ -43,6 +43,7 @@ from lup.harness.notice import Banner
 from lup.harness.posture import (
     ClaudePermissionMode,
     CodexApprovalPolicy,
+    CodexApprovalsReviewer,
     CodexSandboxMode,
 )
 from lup.harness.releases import resolved_agent_clis
@@ -813,6 +814,15 @@ def create_harness_app(
                     "over the machine's default and the project's",
                 ),
             ] = None,
+            approvals_reviewer: Annotated[
+                CodexApprovalsReviewer | None,
+                typer.Option(
+                    "--approvals-reviewer",
+                    help="Who answers Codex's approval requests for this launch: "
+                    "you, or its reviewer agent (auto_review), over the mode's "
+                    "and the machine's",
+                ),
+            ] = None,
             sandbox_mode: Annotated[
                 CodexSandboxMode | None,
                 typer.Option(
@@ -872,6 +882,7 @@ def create_harness_app(
                     network=network,
                     memory=memory_asked(memory),
                     approval_policy=approval_policy,
+                    approvals_reviewer=approvals_reviewer,
                     sandbox_mode=sandbox_mode,
                     services=services_asked(host_service),
                 ),

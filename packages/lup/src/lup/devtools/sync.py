@@ -114,6 +114,7 @@ from lup.harness.devices import Device, registered_devices
 from lup.harness.posture import (
     ClaudePermissionMode,
     CodexApprovalPolicy,
+    CodexApprovalsReviewer,
     CodexSandboxMode,
 )
 from lup.harness.requirements import Finding, Manifest
@@ -288,6 +289,7 @@ class SessionDefaults(TypedDict, total=False):
     memory: str
     permission_mode: ClaudePermissionMode
     approval_policy: CodexApprovalPolicy
+    approvals_reviewer: CodexApprovalsReviewer
     sandbox_mode: CodexSandboxMode
     services: dict[str, int]
     """The host port each named host service listens on here, where it differs."""
