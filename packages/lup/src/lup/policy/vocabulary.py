@@ -668,8 +668,36 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
     ]
 
 
-def review_queue_rules() -> list[ShellSubcommandRule]:
-    """Accepting review decisions or replacement policy is an operator action."""
+def devtools_rules() -> list[ShellSubcommandRule]:
+    """The verbs of lup's own toolchain that a person answers, not the session.
+
+    Two kinds, which differ in who the person is. Answering the review queue
+    and accepting replacement policy are the operator's, from a terminal
+    outside the session, so the requester is refused outright rather than
+    asked. Retiring a claim and widening what a later launch reaches are
+    questions for whoever is watching.
+
+    The widening is the registry's. `sync.json` and `sync.json.local` are
+    protected edit roots because a registration there decides what a session
+    may mount, at which mode, and cloned from which repository -- and a
+    command writing the same key unasked is the confined session choosing
+    what confines it by another spelling. So every writer that can add or
+    move a mount, change the repository a registration names, or grant a
+    device asks the way an edit of that file does, and a launcher flag that
+    lends the one session it opens a folder or a device asks as well. Each
+    reason is the one line an approver reads, naming what widens.
+
+    What only reads or keeps books stays allowed: `sync status`, `fetch`,
+    `log`, `diff` and `mark-synced`; `sync revoke`, which only narrows; `dev
+    library git` without `--url`, whose pin keeps the repository it names;
+    and every dry run, which writes nothing.
+    """
+    registry_write = declare("writes_path", scope="protected", write="overwrite")
+    registry_recovery = (
+        "A registration decides what every later launch reaches, so widening "
+        "one is the user's call: `sync status` shows what each reaches now, and "
+        "where nobody can approve this, report the command for the user to run."
+    )
     return [
         ShellSubcommandRule(
             name="dev",
@@ -707,6 +735,46 @@ def review_queue_rules() -> list[ShellSubcommandRule]:
                         "part still outstanding."
                     ),
                 ),
+                # The scaffold's own initialization verb, whose body is
+                # `lup.devtools.dev.origin`: it writes the URL the forge says
+                # this project was generated from into the committed entry.
+                ShellOperationRule(
+                    name="upstream",
+                    parents=["init"],
+                    effects=[registry_write],
+                    probe_flags=["--dry-run", "-n"],
+                    reason=(
+                        "rewrites the URL of the committed lup registration, the "
+                        "repository every later launch clones and mounts under it"
+                    ),
+                    recovery=(
+                        "`--dry-run` prints the URL it would write and writes "
+                        "nothing; where nobody can approve the write, report that "
+                        "URL for the user."
+                    ),
+                ),
+                # The library's registration takes its URL from the git pin
+                # wherever there is one (`lup.devtools.sync.completed`), so
+                # repointing the pin repoints the registration. Without `--url`
+                # the pin keeps the repository it names and only the ref moves,
+                # and `dev library use` returns the registration to the URL the
+                # registry files already declare -- neither widens anything.
+                ShellOperationRule(
+                    name="git",
+                    parents=["library"],
+                    ask_flags=["--url"],
+                    flag_effects=[registry_write],
+                    probe_flags=["--dry-run", "-n"],
+                    reason=(
+                        "the lup registration follows this pin, so `--url` names "
+                        "the repository every later launch clones and mounts under it"
+                    ),
+                    recovery=(
+                        "Without `--url` the pin keeps the repository it names and "
+                        "only the ref moves; `--dry-run` shows the change without "
+                        "writing it."
+                    ),
+                ),
             ],
         ),
         ShellSubcommandRule(
@@ -717,7 +785,67 @@ def review_queue_rules() -> list[ShellSubcommandRule]:
                     operator_only=True,
                     reason="a requesting agent cannot accept replacement destination policy",
                     recovery="The operator must refresh from a terminal outside the agent session.",
-                )
+                ),
+                # A launch from inside a session opens a session of its own, and
+                # these flags lend it what no registration names -- for that one
+                # launch, the widening a registration makes for every launch
+                # after it. `--generate-only` launches nothing, so lends nothing.
+                *[
+                    ShellOperationRule(
+                        name=launcher,
+                        ask_flags=["--mount", "--mount-ro", "--device"],
+                        flag_effects=[
+                            declare("mutates_environment", scope="launch boundary")
+                        ],
+                        probe_flags=["--generate-only"],
+                        reason=(
+                            "`--mount`, `--mount-ro` and `--device` hand a host "
+                            "folder or device to the session this launches"
+                        ),
+                        recovery=(
+                            "`--generate-only` generates without launching. A "
+                            "session that needs another folder or device is the "
+                            "user's to open, from their own terminal."
+                        ),
+                    )
+                    for launcher in ("claude", "codex")
+                ],
+            ],
+        ),
+        ShellSubcommandRule(
+            name="sync",
+            operations=[
+                # With or without `--mount` on the line: a registration that
+                # already carries one -- the lup entry every scaffold ships --
+                # opens whatever path this names at the next launch.
+                ShellOperationRule(
+                    name="setup",
+                    effects=[registry_write],
+                    reason=(
+                        "the path a registration names is what its mount opens to "
+                        "every later launch, at the mode `--mount` gives or its "
+                        "declaration already carries"
+                    ),
+                    recovery=registry_recovery,
+                ),
+                ShellOperationRule(
+                    name="remote",
+                    effects=[registry_write],
+                    reason=(
+                        "a registration's remote is the repository every later "
+                        "launch clones and mounts under its name"
+                    ),
+                    recovery=registry_recovery,
+                ),
+                ShellOperationRule(
+                    name="grant",
+                    effects=[registry_write],
+                    reason=(
+                        "a device grant hands that host device to every session "
+                        "later launched on this machine"
+                    ),
+                    recovery=registry_recovery,
+                ),
             ],
         ),
     ]
@@ -781,7 +909,7 @@ def runner_target_rules(
         RunnerTargetRule(
             name=name,
             effects=[declare("runs_declared_target")],
-            subcommands=review_queue_rules() if name == "lup-devtools" else [],
+            subcommands=devtools_rules() if name == "lup-devtools" else [],
         )
         for name in (*ambient, *session_opening, *also)
     ]

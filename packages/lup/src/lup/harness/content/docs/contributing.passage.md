@@ -184,8 +184,10 @@ checkout at that mode, with its shared git directory and its sibling
 worktrees, which is what lets a session commit in it. Without the
 key the project is tracked for review and nothing more, and the symlink
 dangles inside the container the way an unmounted path does. The key is why
-both registry files are protected edit roots: writing one widens the
-boundary. A tracked mount binds nothing until this machine says where the
+both registry files are protected edit roots, and why every command writing
+one asks the same question: writing one widens the boundary
+([permissions.md](permissions.md) lists the writers). A tracked mount binds
+nothing until this machine says where the
 project is, and a tracked `"required": true` is what makes that absence a
 report with the command that answers it rather than a workflow that cannot
 start.

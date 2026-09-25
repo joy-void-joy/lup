@@ -313,6 +313,34 @@ through this same classifier, so `ENV_VAR=constant git status` is approved
 without a prompt. Security-sensitive assignments preserve the prompt, and a
 malformed assignment is refused as an unknown command.
 
+### A write that widens a later launch
+
+`sync.json` and `sync.json.local` are protected edit roots because a
+registration there decides what a session may mount, at which mode, and
+cloned from which repository. A command writing the same key without the
+question would be the confined session choosing what confines it by another
+spelling, so each writer asks what an edit of the file asks, and its reason
+names what widens. `lup.policy.vocabulary.devtools_rules` declares them beside
+the operator-only review verbs:
+
+- `sync setup`, with or without `--mount`: the path it registers is what the
+  registration's mount opens, and the lup entry every scaffold ships already
+  carries one.
+- `sync remote`: the repository a registration clones and mounts.
+- `sync grant`: a host device every later launch on this machine is handed.
+- `dev init upstream`: the URL of the committed lup registration.
+- `dev library git --url`: the pin the lup registration follows.
+- `harness claude` or `harness codex` with `--mount`, `--mount-ro` or
+  `--device`: the one session a launch made from inside a session opens.
+
+What only reads or keeps books is the ordinary work it was: `sync status`,
+`fetch`, `log`, `diff` and `mark-synced`; `sync revoke`, which only narrows;
+`dev library git` without `--url`, which keeps the repository the pin names;
+`dev library use`, which returns the registration to the URL the registry
+files declare; and every dry run, which writes nothing — `--dry-run` or `-n`
+on the two writers taking one, `--generate-only` on a launcher. An operation
+row states its dry-run spelling in `probe_flags`, as a subcommand row does.
+
 ## Fetch scopes
 
 One declared origin table feeds both `WebFetch` and the `curl` screen. A
