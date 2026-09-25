@@ -144,9 +144,10 @@ trust decisions remain personal and survive generation.
 Context: Provider-native output schemas and an MCP submission tool can diverge
 or race when both are active.
 
-Decision: Bind one fresh `submit_output` tool and store per typed turn. Validate
-the Pydantic value and optional submission gate before persistence. Do not
-enable a second native structured-output mechanism on the same turn.
+Decision: Carry each typed turn's schema by exactly one mechanism: on Claude a
+fresh `submit_output` tool and store, on Codex the turn's own strict
+`outputSchema`. Validate the Pydantic value and optional submission gate before
+persistence. Do not enable a second structured-output mechanism on the same turn.
 
 Consequences: A typed result has one validation history and one ownership
 boundary. Missing or incompatible submission raises a typed error rather than
@@ -157,9 +158,10 @@ appearing as an empty success.
 Context: A broad client/options object couples provider construction, optional
 turn behavior, wrappers, routing, profiles, and background scheduling.
 
-Decision: Use narrow one-to-three-method contracts, immutable capability
-handles, explicit factory recipes, config transforms, and concrete decorators.
-Unsupported behavior is absent from the handle.
+Decision: Use narrow one-to-three-method contracts beneath provider session
+and turn types that carry exactly their provider's capabilities, explicit
+factory recipes, config transforms, and concrete decorators. Unsupported
+behavior is absent from the provider's type.
 
 Consequences: Applications compose only the capabilities they need. A third
 adapter implements contracts without joining a shared provider registry, and
