@@ -1,8 +1,8 @@
 """Refusing a tool per session, asked for portably and rendered by each runtime.
 
 Three fields on a request read alike and do different things, which is the
-whole reason this one is worth pinning. ``native_tools`` is the roster a session is
-given and bounds built-ins only; ``allowed_tools`` is auto-approval within
+whole reason this one is worth pinning. ``tools`` is the roster a session is
+given, its built-ins by preset; ``allowed_tools`` is auto-approval within
 that roster and its own SDK docs say it restricts nothing; ``disallowed_tools``
 is the one the SDK documents as removal — "removed from the model's context
 and cannot be used, even if they would otherwise be allowed" — and it is not
@@ -22,7 +22,7 @@ import pytest
 from lup.providers.claude.runtime import build_claude_options
 from lup.providers.claude.selection import claude_config
 from lup.providers.codex.selection import codex_config
-from lup.providers.selection import SessionRequest
+from lup.providers.selection import SessionRequest, SessionTools
 
 
 def test_a_request_naming_no_refusal_leaves_claude_blocking_nothing() -> None:
@@ -41,6 +41,7 @@ def test_a_refusal_reaches_the_provider_call() -> None:
     """Rendering into our own config is half the trip; the SDK options are the rest."""
     options = build_claude_options(
         claude_config(SessionRequest(cwd=Path("."), disallowed_tools=["Bash"])),
+        servers={},
         binding=lambda: None,
         resume=None,
         session_id=None,
@@ -53,12 +54,12 @@ def test_a_refusal_names_a_tool_no_roster_mentions() -> None:
     """The point of a block list is naming what a roster never enumerated."""
     request = SessionRequest(
         cwd=Path("."),
-        native_tools=["Read"],
+        tools=SessionTools(builtin="web"),
         disallowed_tools=["mcp__research__research"],
     )
     config = claude_config(request)
 
-    assert config.native_tools == ["Read"]
+    assert config.tools.roster() == ["WebFetch", "WebSearch"]
     assert config.disallowed_tools == ["mcp__research__research"]
 
 
@@ -67,15 +68,15 @@ def test_the_three_tool_fields_stay_independent() -> None:
     config = claude_config(
         SessionRequest(
             cwd=Path("."),
-            native_tools=["Read", "Bash"],
-            allowed_tools=["Read"],
-            disallowed_tools=["Bash"],
+            tools=SessionTools(builtin="web"),
+            allowed_tools=["WebFetch"],
+            disallowed_tools=["WebSearch"],
         )
     )
 
-    assert config.native_tools == ["Read", "Bash"]
-    assert config.allowed_tools == ["Read"]
-    assert config.disallowed_tools == ["Bash"]
+    assert config.tools.roster() == ["WebFetch", "WebSearch"]
+    assert config.allowed_tools == ["WebFetch"]
+    assert config.disallowed_tools == ["WebSearch"]
 
 
 def test_codex_refuses_a_refusal_it_cannot_apply_per_session() -> None:
@@ -95,7 +96,6 @@ def test_codex_names_every_field_it_refuses_at_once() -> None:
     """One message per session, or a caller fixes four fields in four attempts."""
     request = SessionRequest(
         cwd=Path("."),
-        native_tools=["Read"],
         allowed_tools=["Read"],
         disallowed_tools=["Bash"],
     )

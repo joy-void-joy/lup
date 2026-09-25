@@ -67,7 +67,7 @@ from lup.policy.hooks import (
     allow_hook,
 )
 from lup.providers.codex.home import CodexWorktreeHomeStore
-from lup.providers.codex import Codex
+from lup.providers.codex import Codex, CodexTools
 from lup.sessions.surface import Agent
 from lup.workspace.paths import find_project_root
 
@@ -172,7 +172,7 @@ def answering_session(cwd: Path, watch: ApprovalWatch) -> Codex:
         system_prompt=INSTRUCTIONS,
         cwd=cwd,
         sandbox="workspace-write",
-        native_tools=["Bash"],
+        tools=CodexTools(builtin=["Bash"]),
         approval_policy="on-request",
         hooks=watch.hooks(),
     )
@@ -191,7 +191,7 @@ def quiet_session(cwd: Path) -> Codex:
         system_prompt=INSTRUCTIONS,
         cwd=cwd,
         sandbox="danger-full-access",
-        native_tools=["Bash"],
+        tools=CodexTools(builtin=["Bash"]),
         approval_policy="never",
     )
 

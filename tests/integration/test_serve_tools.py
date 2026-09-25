@@ -1,9 +1,9 @@
 # lup: ignore[dict-str-payload, os-environ, set-shape]
 # Test fixtures and assertions construct these shapes deliberately.
-"""Round-trip test of the serve-tools subprocess with session-context env.
+"""Round-trip test of the ``tools serve`` subprocess with session-context env.
 
-This is the wiring the Codex/OpenAI adapters depend on: tools are
-constructed in a separate process from relayed env vars, the reflection gate
+This is the wiring the Codex/OpenAI adapters depend on: each declared server
+is started in a process of its own from relayed env vars, the reflection gate
 crosses the process boundary through a flag file, and review plus metrics
 artifacts land in the session directory where the parent process reads them.
 Typed output is bound per turn by the runtime, not served by this process. No
@@ -20,6 +20,7 @@ import sh
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
+from lup.mcp import HostedServer, ServeLaunch
 from lup.workspace.context import (
     GATE_FLAG_ENV,
     OUTPUTS_DIR_ENV,
@@ -45,11 +46,37 @@ from lup_template.agent.toolsets import (
     EXAMPLE_GROUP,
     NOTES_GROUP,
     declared_tool_groups,
+    declared_tool_servers,
+    session_needs,
 )
 from lup_template.harness.catalog import HARNESS_SESSION
 
 pytestmark = pytest.mark.integration
 SUBPROCESS_TIMEOUT_SECONDS = 20
+
+LAUNCH = ServeLaunch(
+    program=["uv", "run", "lup-devtools", "tools", "serve"], needs=session_needs
+)
+"""How this project's session factory starts a server it hosts, one per process."""
+
+
+def declared(name: str) -> HostedServer:
+    """The server this project declares under *name*."""
+    return next(server for server in declared_tool_servers() if server.name == name)
+
+
+def served_command(server: HostedServer, *options: str) -> list[str]:
+    """The command line serving *server* alone, as the session factory writes it."""
+    command = LAUNCH.command(server)
+    return [command["command"], *command.get("args", []), *options]
+
+
+def server_parameters(
+    server: HostedServer, env: dict[str, str]
+) -> StdioServerParameters:
+    """The subprocess serving *server* alone, under the relayed session *env*."""
+    program, *arguments = served_command(server)
+    return StdioServerParameters(command=program, args=arguments, env=env)
 
 
 def unused_subagent_factory(_spec: SubagentSpec) -> Agent:
@@ -61,10 +88,9 @@ async def test_serve_tools_session_round_trip(tmp_path: Path) -> None:
     session_dir = tmp_path / "session"
     gate_flag = tmp_path / "gate_flag"
 
-    params = StdioServerParameters(
-        command="uv",
-        args=["run", "lup-devtools", "agent", "serve-tools"],
-        env={
+    params = server_parameters(
+        declared(NOTES_GROUP),
+        {
             **os.environ,
             SESSION_DIR_ENV: str(session_dir),
             GATE_FLAG_ENV: str(gate_flag),
@@ -82,13 +108,10 @@ async def test_serve_tools_session_round_trip(tmp_path: Path) -> None:
             listed = await asyncio.wait_for(
                 session.list_tools(), timeout=SUBPROCESS_TIMEOUT_SECONDS
             )
+            # One server per process: the notes server serves its own group
+            # and no other's, the example placeholder's included.
             names = {tool.name for tool in listed.tools}
-            assert {"review", "run_subagent"} <= names
-            # The example placeholder ships fabricated data and is served to no
-            # live agent by default — matching the Claude path. It is reachable
-            # only via an explicit --server example.
-            assert "search_example" not in names
-            assert "fetch_example" not in names
+            assert names == {"review", "run_subagent"}
 
             reviewed = await asyncio.wait_for(
                 session.call_tool(
@@ -110,20 +133,22 @@ async def test_serve_tools_session_round_trip(tmp_path: Path) -> None:
     assert (session_dir / "metrics.json").exists()
 
 
-def served_names(env: dict[str, str], *args: str) -> set[str]:
-    """Run ``serve-tools --list`` with the given selector; return the names."""
-    uv = sh.Command("uv")
-    out = uv("run", "lup-devtools", "agent", "serve-tools", "--list", *args, _env=env)
+def served_names(env: dict[str, str], server: HostedServer) -> set[str]:
+    """Run ``tools serve --list`` for one declared server; return the names."""
+    program, *arguments = served_command(server, "--list")
+    out = sh.Command(program)(*arguments, _env=env)
     return {line for line in str(out).splitlines() if line}
 
 
 def test_served_group_names_match_toolset_registry(tmp_path: Path) -> None:
-    """serve-tools must serve exactly what the toolsets registry builds.
+    """Each served server must list exactly what the toolsets registry builds.
 
-    ``build_session_toolset`` is the declared single source of tool groups
-    for every backend, and the stdio server derives from it — so each
-    ``--server <group>`` selection lists precisely that group's registry
-    tools, and the default serves every group but the example placeholder.
+    The declaration is the single source of tool groups for every backend,
+    and a stdio server is one of its entries validated back from its command
+    line — so each server lists precisely its group's registry tools. A
+    session starts one process per group it builds, never the example
+    placeholder, which serves only when started by name; together those
+    processes serve every group's tools but the example's.
     """
     session_dir = tmp_path / "session"
     realtime_dir = session_dir / "realtime"
@@ -136,7 +161,7 @@ def test_served_group_names_match_toolset_registry(tmp_path: Path) -> None:
         REALTIME_DIR_ENV: str(realtime_dir),
     }
 
-    declared = declared_tool_groups()
+    declaration = declared_tool_groups()
     needs = SessionNeeds(
         session_dir=session_dir,
         root=project_root(),
@@ -153,11 +178,18 @@ def test_served_group_names_match_toolset_registry(tmp_path: Path) -> None:
         # id, so both sides build the groups that wait on one.
         member=session_member_id("registry-match"),
     )
-    groups = assembled(declared, needs).groups
+    groups = assembled(declaration, needs).groups
+    launched = declared_served(declaration, needs)
+    assert EXAMPLE_GROUP not in launched
 
-    for group in (*declared_served(declared, needs), EXAMPLE_GROUP):
-        expected = {tool.name for tool in groups[group]}
-        assert served_names(env, "--server", group) == expected
+    listed = {
+        server.name: served_names(env, server)
+        for server in declared_tool_servers()
+        if server.name in (*launched, EXAMPLE_GROUP)
+    }
+    assert set(listed) == {*launched, EXAMPLE_GROUP}
+    for name, names in listed.items():
+        assert names == {tool.name for tool in groups[name]}
 
     default_expected = {
         tool.name
@@ -165,7 +197,7 @@ def test_served_group_names_match_toolset_registry(tmp_path: Path) -> None:
         if name != EXAMPLE_GROUP
         for tool in tools
     }
-    assert served_names(env) == default_expected
+    assert {tool for name in launched for tool in listed[name]} == default_expected
 
 
 async def test_native_tree_server_command_serves_the_agent_tools(
@@ -182,9 +214,9 @@ async def test_native_tree_server_command_serves_the_agent_tools(
     declaration = json.loads((root / ".claude/plugins/lup/.mcp.json").read_text())
     entry = declaration["mcpServers"][NOTES_GROUP]
     args = [
-        word.replace("${CLAUDE_PROJECT_DIR}", str(root)).replace(
-            HARNESS_SESSION, "harness-round-trip"
-        )
+        "harness-round-trip"
+        if word == HARNESS_SESSION
+        else word.replace("${CLAUDE_PROJECT_DIR}", str(root))
         for word in entry["args"]
     ]
 
@@ -219,10 +251,9 @@ async def test_serve_tools_realtime_session_group(tmp_path: Path) -> None:
     session_dir = tmp_path / "session"
     realtime_dir = session_dir / "realtime"
 
-    params = StdioServerParameters(
-        command="uv",
-        args=["run", "lup-devtools", "agent", "serve-tools", "--server", "session"],
-        env={
+    params = server_parameters(
+        declared("session"),
+        {
             **os.environ,
             SESSION_DIR_ENV: str(session_dir),
             GATE_FLAG_ENV: str(tmp_path / "gate_flag"),

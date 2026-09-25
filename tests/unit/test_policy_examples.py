@@ -24,9 +24,13 @@ ALLOWED_URL = "https://docs.example.com/api/runtime"
 async def attempted_call(
     config: Claude, tool_name: str, tool_input: JsonObject
 ) -> claude_types.HookJSONOutput:
-    """Answer one attempted tool call through the session's own hooks."""
+    """Answer one attempted tool call through the session's own hooks.
+
+    Neither example declares an MCP server, so the session builds none.
+    """
+    assert config.tools.mcp == []
     options = build_claude_options(
-        config, binding=lambda: None, resume=None, session_id=None
+        config, servers={}, binding=lambda: None, resume=None, session_id=None
     )
     assert options.hooks is not None, "the example session registers no hooks"
     payload = claude_types.PreToolUseHookInput(
@@ -90,7 +94,7 @@ async def test_fetch_example_denies_a_family_it_never_granted() -> None:
 
     assert decision == permission(
         "deny",
-        "Tool 'Bash' is outside this session's explicit native_tools and tool_servers.",
+        "Tool 'Bash' is outside this session's declared tools.",
     )
 
 

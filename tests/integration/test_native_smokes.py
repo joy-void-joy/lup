@@ -19,12 +19,12 @@ import sh
 from pydantic import BaseModel, Field
 
 from lup.providers.claude.harness import ClaudeSpellings
-from lup.providers.claude import Claude
+from lup.providers.claude import Claude, ClaudeTools
 from lup.providers.codex.harness_runtime import CodexPluginInstaller, PluginCacheConfig
 from lup.providers.codex import Codex
 from lup.harness.process import LocalProcessLauncher
 from lup.resolver.core import ResolverCore
-from lup.tools.mcp import create_mcp_server, server_tool_names
+from lup.mcp import Toolset
 from lup.channels.models import utc_now
 from lup.coordination.mailbox import AnswerDoor, AnswerOffer
 from lup.resolver.mailbox import QuestionMailbox
@@ -188,33 +188,40 @@ async def test_miniature_resolver_run_on_a_fixture_repository(tmp_path: Path) ->
     run_id = "smoke-run"
 
     def worker_factory(context: WorkerContext) -> Agent:
-        server = create_mcp_server(
-            "resolver",
-            tools=create_question_tools(
-                QuestionMailbox(repo / ".lup" / "resolve" / run_id),
-                context.concern_id,
-                run_id=run_id,
-                lease_root=context.root,
-                wake=core.wake,
-            ),
+        questions = create_question_tools(
+            QuestionMailbox(repo / ".lup" / "resolve" / run_id),
+            context.concern_id,
+            run_id=run_id,
+            lease_root=context.root,
+            wake=core.wake,
         )
         return Claude(
             model=CLAUDE_SMOKE_MODEL,
             system_prompt="Execute the persisted Lup resolver assignment.",
-            native_tools=["all"],
+            tools=ClaudeTools(
+                builtin="stock", mcp=[Toolset(questions, name="resolver")]
+            ),
             cwd=context.root,
             add_dirs=[context.root],
-            tool_servers={"resolver": server},
-            allowed_tools=[
-                f"mcp__resolver__{name}" for name in server_tool_names(server)
-            ],
+            allowed_tools=[f"mcp__resolver__{tool.name}" for tool in questions],
         )
 
     def reviewer_factory(context: ReviewerContext) -> Agent:
         return Claude(
             model=CLAUDE_SMOKE_MODEL,
             system_prompt="Independently review the persisted resolver change.",
-            native_tools=["read", "shell"],
+            tools=ClaudeTools(
+                builtin=[
+                    "Read",
+                    "Glob",
+                    "Grep",
+                    "WebFetch",
+                    "WebSearch",
+                    "Bash",
+                    "TaskOutput",
+                    "TaskStop",
+                ]
+            ),
             cwd=context.root,
             add_dirs=[context.root],
             hooks=context.hooks,
