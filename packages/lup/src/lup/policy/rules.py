@@ -20,7 +20,11 @@ from lup.policy.contracts import DecisionPolicy
 from lup.policy.grants import LeaseGrants
 from lup.policy.identity import AGENT_IDENTITY_ENV
 from lup.policy.kernel.decision import KernelDecision
-from lup.policy.kernel.policy_protocol import read_response, routing_failure
+from lup.policy.kernel.policy_protocol import (
+    read_response,
+    routing_failure,
+    unaccepted_policy,
+)
 from lup.policy.kernel.edit import (
     decide_edit,
     path_rule_matches as kernel_path_rule_matches,
@@ -34,6 +38,7 @@ from lup.policy.assets.host import (
     empty_directory_targets,
     foreign_repository,
     outside_this_project,
+    policy_refresh_request,
     recoverable_write_targets,
     resolved_write_targets,
     rewritten_text,
@@ -606,6 +611,14 @@ class EditPolicy(DecisionPolicy[EditBatch]):
         return Decision(effect="allow", reason="every edit in the batch is safe")
 
     def decide_change(self, change: EditChange, cwd: Path | None = None) -> Decision:
+        """One file's verdict, routed exactly as the generated dispatchers route it.
+
+        Including what a verdict says about whose policy reached it: an owner
+        whose accepted snapshot fell behind refuses with the operator's
+        command, and a sibling judged by this launch's policy carries that
+        command beside a refusal or a question -- the same text a session is
+        handed, since this is where it is sent to preview one.
+        """
         root = cwd or Path.cwd()
         path = str((root / change.path).resolve())
         try:
@@ -622,29 +635,34 @@ class EditPolicy(DecisionPolicy[EditBatch]):
             if response is not None:
                 return pydantic_decision(read_response(json.loads(response)))
         except (OSError, ValueError, KeyError, TypeError) as error:
-            return pydantic_decision(routing_failure(str(error)))
-        suffix = change.path.suffix.lower()
-        return pydantic_decision(
-            decide_edit(
-                Path(path).relative_to(root).as_posix()
-                if not worktree_root(path) and Path(path).is_relative_to(root)
-                else worktree_path(path),
-                change.before,
-                change.after,
-                path_exists=Path(path).exists(),
-                path_rules=[path_rule_row(rule) for rule in self.protected],
-                antipattern_rows=antipattern_rows(change),
-                path_roles=self.path_roles,
-                maximum_added_lines=self.maximum_added_lines,
-                autonomous=self.autonomous,
-                allowances=self.grants.granted(),
-                python_source=suffix in (".py", ".pyi"),
-                acceptance_guard=self.acceptance_guard,
-                suffix=suffix,
-                operation=change.operation,
-                edit_rules=self.edit_rules,
-                import_boundaries=self.import_boundaries,
-                foreign=foreign_repository(path, root),
-                outside_project=outside_this_project(path, root),
+            return pydantic_decision(
+                routing_failure(str(error), policy_refresh_request(path, root))
             )
+        suffix = change.path.suffix.lower()
+        decision = decide_edit(
+            Path(path).relative_to(root).as_posix()
+            if not worktree_root(path) and Path(path).is_relative_to(root)
+            else worktree_path(path),
+            change.before,
+            change.after,
+            path_exists=Path(path).exists(),
+            path_rules=[path_rule_row(rule) for rule in self.protected],
+            antipattern_rows=antipattern_rows(change),
+            path_roles=self.path_roles,
+            maximum_added_lines=self.maximum_added_lines,
+            autonomous=self.autonomous,
+            allowances=self.grants.granted(),
+            python_source=suffix in (".py", ".pyi"),
+            acceptance_guard=self.acceptance_guard,
+            suffix=suffix,
+            operation=change.operation,
+            edit_rules=self.edit_rules,
+            import_boundaries=self.import_boundaries,
+            foreign=foreign_repository(path, root),
+            outside_project=outside_this_project(path, root),
+        )
+        if decision.effect not in ("ask", "deny"):
+            return pydantic_decision(decision)
+        return pydantic_decision(
+            unaccepted_policy(decision, policy_refresh_request(path, root))
         )

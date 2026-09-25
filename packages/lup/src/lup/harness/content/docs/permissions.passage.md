@@ -431,6 +431,19 @@ protected edit paths. These records prevent accidental inheritance and stale
 policy execution; they are mutable local bookkeeping, not authentication
 against a hostile process with the same filesystem authority.
 
+A verdict reached under a policy the destination does not hold says so, and
+names the command with this launch's real nonce and paths —
+`uv run --directory <launch checkout> lup-devtools harness policy-refresh --nonce <nonce> --repository <checkout>`,
+runnable from any directory. A granted checkout whose generated policy moved
+away from its accepted snapshot is refused with it as the recovery. A worktree
+no grant names — cut in the launch's own repository, or beneath an explicitly
+mounted one — is judged by the launch checkout's policy, so a package renamed
+there makes its own composition roots look like foreign importers; where the
+policy that worktree generates differs, a refusal or a question about its
+files carries the same command, and
+`dev policy` shows it beside the verdict. The command is named only where the
+refresh would accept the checkout and change what judges it.
+
 Edit decisions cover protected paths, marker changes, size, the canonical
 anti-pattern audit, and declared import ownership. An edit over the size gate alone is deferred — the hook
 emits no decision, so auto-accept applies while hard gates stay explicit.

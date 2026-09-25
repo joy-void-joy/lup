@@ -12,6 +12,7 @@ import pytest
 import sh
 
 from lup.devtools.dev.policy_explain import verdict_for
+from lup.devtools.harness.policy_refresh import refresh_destination_policy
 import lup.policy.assets.host as policy_host
 from lup.policy.kernel.decision import KernelDecision
 from lup.policy.identity import AGENT_IDENTITY_ENV
@@ -552,6 +553,183 @@ def test_a_destination_grant_without_measured_write_authority_cannot_run(
 
     assert effect == "deny"
     assert "measured writable boundary" in detail
+
+
+def refresh_request(origin: Path, checkout: Path) -> str:
+    """The operator command a refusal is expected to hand over, spelled whole."""
+    return shlex.join(
+        [
+            "uv",
+            "run",
+            "--directory",
+            str(origin),
+            "lup-devtools",
+            "harness",
+            "policy-refresh",
+            "--nonce",
+            "routing-test",
+            "--repository",
+            str(checkout),
+        ]
+    )
+
+
+def test_a_regenerated_grant_refuses_with_the_operators_exact_refresh(
+    repositories: tuple[Path, Path],
+    runtime: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    origin, owner = repositories
+    authorize(origin, owner, runtime, monkeypatch)
+    data = owner / f".{runtime}/plugins/lup/hooks/runtime/policy_data.py"
+    data.write_text(data.read_text() + "\nMAXIMUM_ADDED_LINES = 3\n")
+    command = refresh_request(origin, owner)
+
+    effect, detail = native_edit(origin, owner / "value.txt", runtime)
+
+    assert effect == "deny"
+    assert "changed after this launch accepted it" in detail
+    assert command in detail
+    preview = verdict_for(
+        str(owner / "value.txt"), "edit", False, origin, declared_hook_set()
+    )
+    assert {reading.effect for reading in preview.readings} == {"deny"}
+    assert all(command in reading.recovery for reading in preview.readings)
+
+
+def launched_beside(
+    tmp_path: Path, runtime: str, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Path, Path]:
+    """A launch from one checkout, beside a worktree it cut and renamed a package in.
+
+    Both carry the launch's generated policy, and the worktree holds a
+    composition root under the renamed package importing an adapter -- an
+    import that policy owns only under the package's old name. Nothing grants
+    the worktree by name: the ledger holds what a launch that mounted nothing
+    records, its measured boundary and its runtime.
+    """
+    origin, sibling = tmp_path / "origin", tmp_path / "sibling"
+    git = initialized_repo(origin, tmp_path / "hooks")
+    git("worktree", "add", "-q", "--orphan", "-b", "sibling", str(sibling))
+    for checkout in (origin, sibling):
+        shutil.copytree(
+            Path(f".{runtime}/plugins/lup/hooks"),
+            checkout / f".{runtime}/plugins/lup/hooks",
+        )
+    composition = sibling / "src" / "adlib" / "harness" / "composition.py"
+    composition.parent.mkdir(parents=True)
+    composition.write_text(
+        '"""Composition root."""\n\nfrom lup.providers.claude import runtime\n\nVALUE = 1\n'
+    )
+    ledger = origin / ".lup/preflight/routing-test.json"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text(
+        json.dumps(
+            {
+                "writable_roots": [str(origin), str(sibling)],
+                "read_only_roots": [],
+                "destination_policies": [],
+                "runtime": [runtime],
+            }
+        )
+    )
+    monkeypatch.setenv("LUP_BOUNDARY_NONCE", "routing-test")
+    monkeypatch.setenv("LUP_BOUNDARY_ROOT", str(origin))
+    return origin, sibling
+
+
+def regenerated_after_rename(sibling: Path, runtime: str) -> None:
+    """The worktree's policy as generation writes it once the package is renamed."""
+    data = sibling / f".{runtime}/plugins/lup/hooks/runtime/policy_data.py"
+    data.write_text(
+        data.read_text()
+        + '\nIMPORT_BOUNDARIES[0]["owners"].append("src/adlib/harness/")\n'
+    )
+
+
+def test_a_sibling_judged_by_the_launch_policy_names_the_operator_refresh(
+    tmp_path: Path,
+    runtime: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    origin, sibling = launched_beside(tmp_path, runtime, monkeypatch)
+    target = sibling / "src" / "adlib" / "harness" / "composition.py"
+    effect, detail = native_edit(origin, target, runtime, "VALUE = 1", "VALUE = 2")
+    assert effect == "deny" and "seam-boundary" in detail
+    assert "policy-refresh" not in detail
+    regenerated_after_rename(sibling, runtime)
+    command = refresh_request(origin, sibling)
+
+    effect, detail = native_edit(origin, target, runtime, "VALUE = 1", "VALUE = 2")
+
+    assert effect == "deny" and "seam-boundary" in detail
+    assert "judged by the policy this session launched with" in detail
+    assert command in detail
+    preview = verdict_for(str(target), "edit", False, origin, declared_hook_set())
+    assert {reading.effect for reading in preview.readings} == {"deny"}
+    assert all(command in reading.recovery for reading in preview.readings)
+
+
+def test_the_operator_refresh_puts_the_siblings_own_policy_in_force(
+    tmp_path: Path,
+    runtime: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    origin, sibling = launched_beside(tmp_path, runtime, monkeypatch)
+    regenerated_after_rename(sibling, runtime)
+    target = sibling / "src" / "adlib" / "harness" / "composition.py"
+    assert native_edit(origin, target, runtime, "VALUE = 1", "VALUE = 2")[0] == "deny"
+    monkeypatch.delenv("LUP_BOUNDARY_NONCE")
+    accepted = refresh_destination_policy(origin, "routing-test", sibling)
+    monkeypatch.setenv("LUP_BOUNDARY_NONCE", "routing-test")
+
+    effect, detail = native_edit(origin, target, runtime, "VALUE = 1", "VALUE = 2")
+
+    assert accepted.runtime == runtime
+    assert effect == "allow", detail
+    assert target.read_text().endswith("VALUE = 1\n")
+
+
+def test_a_sibling_held_read_only_is_never_offered_a_refresh(
+    tmp_path: Path,
+    runtime: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    origin, sibling = launched_beside(tmp_path, runtime, monkeypatch)
+    regenerated_after_rename(sibling, runtime)
+    ledger = origin / ".lup/preflight/routing-test.json"
+    measured = json.loads(ledger.read_text())
+    measured["writable_roots"] = [str(origin)]
+    measured["read_only_roots"] = [str(sibling)]
+    ledger.write_text(json.dumps(measured))
+    target = sibling / "src" / "adlib" / "harness" / "composition.py"
+
+    effect, detail = native_edit(origin, target, runtime, "VALUE = 1", "VALUE = 2")
+
+    assert effect == "deny" and "writable boundary" in detail
+    assert "policy-refresh" not in detail
+
+
+def test_another_repository_is_never_offered_a_refresh(
+    repositories: tuple[Path, Path],
+    runtime: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    origin, foreign = repositories
+    ledger = origin / ".lup/preflight/routing-test.json"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text(
+        json.dumps(
+            {"writable_roots": [str(origin), str(foreign)], "runtime": [runtime]}
+        )
+    )
+    monkeypatch.setenv("LUP_BOUNDARY_NONCE", "routing-test")
+    monkeypatch.setenv("LUP_BOUNDARY_ROOT", str(origin))
+
+    effect, detail = native_edit(origin, foreign / "value.txt", runtime)
+
+    assert effect != "allow" and "different repository" in detail
+    assert "policy-refresh" not in detail
 
 
 def test_an_explicit_sibling_grant_uses_that_worktrees_accepted_policy(
