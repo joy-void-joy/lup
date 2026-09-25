@@ -343,8 +343,9 @@ def declared_scaffold() -> ScaffoldSource:
 
     Inherited rather than written at initialization: a project stamped out of
     this tree receives this declaration with the rest of the copied half, and
-    the registration `sync.json` ships names the source a project configures
-    in `sync.json.local`; the roots are the ones the stamp copied.
+    the registration `sync.json` ships names the repository it compiles from
+    -- or follows the pin, where the project resolves lup from a repository;
+    the roots are the ones the stamp copied.
     What it says of *this* checkout is that this is the scaffold
     itself, which `dev update` refuses on the strength of the template flag
     rather than of anything said here: the origin of every copy has nothing

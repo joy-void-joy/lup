@@ -3,10 +3,11 @@
 The workflow commands — worktrees, branches, PRs, the quality gate — are the
 library's, wired over :func:`declared` by the roster every project inherits.
 The one tree added here has template-ness as its subject: renaming the package
-an adopter inherits, and dropping the demonstrations the scaffold ships of
-itself. Neither means anything inside a project that has already been
-initialized once, which is why they are mounted onto the inherited tree rather
-than replacing it — a project that replaced `dev` to add two commands would be
+an adopter inherits, dropping the demonstrations the scaffold ships of itself,
+and pointing the lup registration it ships at the template it was generated
+from. None means anything inside a project that has already been initialized
+once, which is why they are mounted onto the inherited tree rather than
+replacing it — a project that replaced `dev` to add three commands would be
 restating every argument the library's own tree takes, which is the drift the
 roster removes.
 """
@@ -16,6 +17,7 @@ from typing import Annotated
 import typer
 
 import lup_template.devtools.dev.init as init
+import lup_template.devtools.dev.origin as origin
 import lup_template.harness.catalog as catalog
 from lup.devtools.dev.declarations import DevDeclarations
 from lup.workspace.paths import project_root
@@ -101,3 +103,26 @@ def init_drop_examples_cmd(
         typer.echo(f"\nStill named in {len(mentions)} line(s) — review manually:")
         for line in mentions:
             typer.echo(line)
+
+
+@init_app.command("upstream")
+def init_upstream_cmd(
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run", "-n", help="Show what would change without modifying files"
+        ),
+    ] = False,
+) -> None:
+    """Point the lup registration at the template this repository was generated from.
+
+    `sync.json` ships naming lup's own repository, and a project generated
+    from a fork of it builds on the fork. GitHub records which template a
+    repository was generated from, so this asks once and writes the answer
+    into the shipped registration -- or, where the project pins lup to a
+    repository, prints the command that moves the pin, which the
+    registration follows. Exits nonzero where anything is left to do.
+    """
+    project = catalog.declared_scaffold().project
+    if not origin.point_at_template(project_root(), project, dry_run):
+        raise typer.Exit(1)
