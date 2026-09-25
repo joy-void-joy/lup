@@ -9,14 +9,14 @@ print a turn as it happens — waited on a close that only the unasked result
 would have caused, and waited forever.
 
 That deadlock was reachable from the public surface with nothing in the type or
-the docstring warning of it: `decorated_session_factory` with a `recovery` or a
-`correction` was enough. Each case here runs under a timeout, because a suite
+the docstring warning of it: session layers with a `recovery` or a
+`correction` were enough. Each case here runs under a timeout, because a suite
 that hangs reports nothing where one that fails names the regression.
 """
 
 import asyncio
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import timedelta
 
 import pytest
@@ -29,10 +29,8 @@ from lup.sessions.capabilities import (
     TurnEngine,
 )
 from lup.sessions.errors import StructuredOutputError, TurnFailure
-from lup.sessions.client import Client
 from lup.sessions.events import (
     MessageCompletedEvent,
-    SessionHandle,
     SessionId,
     StartedTurn,
     TurnId,
@@ -40,10 +38,11 @@ from lup.sessions.events import (
     TurnMessage,
     TurnRequest,
     TurnResult,
+    TurnInput,
     TurnTextBlock,
-    turn_request,
 )
-from lup.sessions.middleware import CorrectionConfig, decorated_session_factory
+from lup.sessions.layers import SessionLayers
+from lup.sessions.middleware import CorrectionConfig
 from lup.types import Usage
 
 IDENTIFIERS = TurnIdentifiers(
@@ -135,18 +134,21 @@ class ScriptedSession(SessionEngine):
 
 def corrective_factory(
     script: list[tuple[list[TurnMessage], Answer | None]],
-) -> tuple[Client, ScriptedSession]:
-    """A factory whose sessions correct, over one scripted session."""
+) -> tuple[AbstractAsyncContextManager[SessionEngine], ScriptedSession]:
+    """A session that corrects, laid over one scripted session."""
     inner = ScriptedSession(script)
 
     @asynccontextmanager
-    async def opener(resume: SessionId | None = None) -> AsyncIterator[SessionHandle]:
-        yield SessionHandle(session=inner)
+    async def native() -> AsyncIterator[SessionEngine]:
+        yield inner
 
-    decorated = decorated_session_factory(
-        Client(opener), correction=CorrectionConfig(cycles=2)
-    )
-    return decorated, inner
+    layers = SessionLayers(correction=CorrectionConfig(cycles=2))
+    return layers.around(native(), None), inner
+
+
+def asked_for_answer() -> TurnRequest[Answer]:
+    """The one request every case starts: a prompt wanting an ``Answer``."""
+    return TurnRequest[Answer](input=TurnInput(text="go"), output_type=Answer)
 
 
 async def spoken(events: EventStream | None) -> list[str]:
@@ -176,8 +178,8 @@ async def test_draining_the_events_first_still_reaches_the_result() -> None:
         [([said("preamble")], None), ([said("done")], Answer(value=3))]
     )
 
-    async with factory.open() as handle:
-        turn = await handle.session.start(turn_request("go", Answer))
+    async with factory as engine:
+        turn = await engine.start(asked_for_answer())
         heard = await asyncio.wait_for(spoken(turn.events), timeout=5)
         result = await asyncio.wait_for(turn.turn.result(), timeout=5)
 
@@ -192,8 +194,8 @@ async def test_asking_for_the_result_first_still_answers() -> None:
         [([said("preamble")], None), ([said("done")], Answer(value=5))]
     )
 
-    async with factory.open() as handle:
-        turn = await handle.session.start(turn_request("go", Answer))
+    async with factory as engine:
+        turn = await engine.start(asked_for_answer())
         result = await asyncio.wait_for(turn.turn.result(), timeout=5)
 
     assert result.output == Answer(value=5)
@@ -207,8 +209,8 @@ async def test_watching_and_asking_at_once_agree_on_one_turn() -> None:
         [([said("preamble")], None), ([said("done")], Answer(value=7))]
     )
 
-    async with factory.open() as handle:
-        turn = await handle.session.start(turn_request("go", Answer))
+    async with factory as engine:
+        turn = await engine.start(asked_for_answer())
         heard, result = await asyncio.wait_for(
             asyncio.gather(spoken(turn.events), turn.turn.result()), timeout=5
         )
@@ -228,8 +230,8 @@ async def test_a_turn_nobody_asks_about_still_ends() -> None:
     """
     factory, inner = corrective_factory([([said("still thinking")], None)])
 
-    async with factory.open() as handle:
-        turn = await handle.session.start(turn_request("go", Answer))
+    async with factory as engine:
+        turn = await engine.start(asked_for_answer())
         heard = await asyncio.wait_for(spoken(turn.events), timeout=5)
 
     attempts = CorrectionConfig().cycles + 1
@@ -242,8 +244,8 @@ async def test_the_result_is_the_same_one_however_often_it_is_asked() -> None:
     """One logical turn settles once, so a second ask is not a second turn."""
     factory, inner = corrective_factory([([said("done")], Answer(value=9))])
 
-    async with factory.open() as handle:
-        turn = await handle.session.start(turn_request("go", Answer))
+    async with factory as engine:
+        turn = await engine.start(asked_for_answer())
         first = await asyncio.wait_for(turn.turn.result(), timeout=5)
         second = await asyncio.wait_for(turn.turn.result(), timeout=5)
 

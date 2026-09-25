@@ -26,7 +26,7 @@ import hashlib
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator, AsyncIterator, Iterator, Sequence
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -37,16 +37,19 @@ from pydantic import BaseModel, Field, TypeAdapter
 from lup.channels.stream import Stream
 from lup.observability.journal import ChainedWriter, Journal, JournalRecord, last_record
 from lup.sessions.composition import is_output_model
-from lup.sessions.capabilities import EventStream, SessionEngine, TurnEngine
+from lup.sessions.capabilities import (
+    EventStream,
+    SessionEngine,
+    SessionWrapper,
+    TurnEngine,
+)
 from lup.sessions.errors import DeltaStreamingDisabled, TurnError
-from lup.sessions.client import Client
 from lup.sessions.events import (
     BlockCompletedEvent,
     BlockDeltaEvent,
     BlockStartedEvent,
     LiveTurnEvent,
     MessageCompletedEvent,
-    SessionHandle,
     SessionId,
     TurnCompletedEvent,
     TurnEvent,
@@ -864,27 +867,38 @@ class JournalSession(SessionEngine):
         )
 
 
-def journal_session_factory(inner: Client, journal: TraceJournal) -> Client:
-    """Give every session opened by ``inner`` the canonical observable journal."""
+class JournalWrapper(SessionWrapper):
+    """Give every turn of a session the canonical observable journal.
+
+    The session's opening and close are recorded around it, so a session
+    that failed to open is in the journal as well as one that ran.
+    """
+
+    def __init__(self, journal: TraceJournal) -> None:
+        self.journal = journal
+
+    def around(
+        self,
+        opened: AbstractAsyncContextManager[SessionEngine],
+        resume: SessionId | None,
+    ) -> AbstractAsyncContextManager[SessionEngine]:
+        return self.journaled(opened, resume)
 
     @asynccontextmanager
-    async def open_journaled(
-        resume: SessionId | None = None,
-    ) -> AsyncGenerator[SessionHandle]:
-        journal.emit(
+    async def journaled(
+        self,
+        opened: AbstractAsyncContextManager[SessionEngine],
+        resume: SessionId | None,
+    ) -> AsyncGenerator[SessionEngine]:
+        self.journal.emit(
             "session_start",
             {"resume_session_id": resume.value if resume is not None else None},
         )
         try:
-            async with inner.open(resume) as handle:
-                yield SessionHandle(
-                    session=JournalSession(handle.session, journal),
-                    fork=handle.fork,
-                )
+            async with opened as inner:
+                yield JournalSession(inner, self.journal)
         except Exception as error:
-            journal.emit("error", {"message": str(error)})
+            self.journal.emit("error", {"message": str(error)})
             raise
         finally:
-            journal.emit("session_end")
-
-    return Client(open_journaled)
+            self.journal.emit("session_end")

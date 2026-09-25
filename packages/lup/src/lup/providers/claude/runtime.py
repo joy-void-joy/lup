@@ -1,17 +1,16 @@
-"""Claude Client composition with per-turn MCP tool rebinding."""
+"""Claude sessions opened through the Agent SDK, with per-turn MCP tool rebinding."""
 
 import asyncio
 import json
 import logging
 import shutil
 from collections import deque
-from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping, Sequence
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
 from functools import partial
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from time import perf_counter
-from types import EllipsisType
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -28,23 +27,20 @@ from pydantic import BaseModel, TypeAdapter
 
 from lup.tools.mcp import (
     LupMcpServerConfig,
-    LupMcpTool,
     McpServerEntry,
     relay_recursive_agent_to_mcp,
     running_companions,
 )
-from lup.tools.native import NativeTools
 from lup.execution.threads import run_sync
 from lup.providers.claude import (
     SUBMISSION_TOOL,
     Claude,
-    ClaudeCompatibleEndpoint,
     ClaudeSession,
 )
 from lup.providers.claude.config_home import session_config_home
 from lup.providers.claude.transcripts import ClaudeTranscripts, result_text
 from lup.providers.claude.native_tools import claude_native_tools, claude_tool_allowed
-from lup.providers.claude.model_choice import ClaudeModelChoice, claude_effort
+from lup.providers.claude.model_choice import claude_effort
 from lup.sessions.recursion import (
     child_recursive_agent_allowance,
     recursive_agent_scope,
@@ -66,13 +62,11 @@ from lup.sessions.errors import (
     TurnFailure,
     TurnInterruptedError,
 )
-from lup.sessions.client import Client
 from lup.sessions.events import (
     BlockCompletedEvent,
     BlockDeltaEvent,
     LiveTurnEvent,
     MessageCompletedEvent,
-    SessionHandle,
     SessionId,
     AnyTurnBlock,
     TurnIdentifiers,
@@ -875,51 +869,6 @@ class ClaudeSessionOpener:
                 ClaudeFork(state),
                 deltas=config.delta_streaming,
             )
-
-
-def create_claude(
-    options: Claude | None = None,
-    *,
-    model: ClaudeModelChoice | None = None,
-    system_prompt: str = "",
-    cwd: Path | None = None,
-    base_url: str | None = None,
-    api_key: str | None = None,
-    native_tools: NativeTools | EllipsisType = ...,
-    tools: Sequence[LupMcpTool] | None = None,
-) -> Client:
-    """Open Claude sessions, configured by argument or by whole declaration."""
-    base = options or Claude()
-    endpoint = (
-        ClaudeCompatibleEndpoint.model_validate(
-            {"base_url": base_url, "api_key": api_key}
-        )
-        if base_url is not None
-        else base.endpoint
-    )
-    config = Claude.model_validate(
-        base.model_copy(
-            update={
-                "model": base.model if model is None else model,
-                "system_prompt": system_prompt or base.system_prompt,
-                "cwd": base.cwd if cwd is None else cwd,
-                "native_tools": base.native_tools
-                if native_tools is ...
-                else native_tools,
-                "tools": [*base.tools, *(tools or [])],
-                "endpoint": endpoint,
-            }
-        )
-    )
-
-    @asynccontextmanager
-    async def open_handle(
-        resume: SessionId | None = None,
-    ) -> AsyncGenerator[SessionHandle]:
-        async with config.open(resume) as session:
-            yield SessionHandle(session=session.engine)
-
-    return Client(open_handle)
 
 
 def build_submission_server(

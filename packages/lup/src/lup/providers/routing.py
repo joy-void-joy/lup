@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from lup.providers.claude.models import ClaudeModel
 from lup.providers.codex.models import CodexModel
 from lup.providers.config import ModelMatcher
-from lup.sessions.client import Client
+from lup.sessions.surface import Agent
 
 
 class ExactModelMatcher(ModelMatcher):
@@ -40,7 +40,7 @@ class PrefixModelMatcher(ModelMatcher):
         return model.startswith(self.prefix)
 
 
-type FactoryRecipe = Callable[[], Client]
+type FactoryRecipe = Callable[[], Agent]
 
 
 class ModelRoute(BaseModel, frozen=True, arbitrary_types_allowed=True):
@@ -60,7 +60,7 @@ class ModelRouter:
             raise ValueError("model route names must be unique")
         self.routes = tuple(routes)
 
-    def resolve(self, model: str, recipe: str | None = None) -> Client:
+    def resolve(self, model: str, recipe: str | None = None) -> Agent:
         if recipe is not None:
             selected = next(
                 (route for route in self.routes if route.name == recipe), None

@@ -5,15 +5,13 @@ from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Annotated, Literal, Self, overload
+from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, Discriminator, Field
 
 from lup.sessions.capabilities import (
     EventStream,
-    ForkSession,
     Interrupt,
-    SessionEngine,
     Steer,
     SubmittedOutputStore,
     TurnEngine,
@@ -432,50 +430,15 @@ type SubmissionGateResolver = Callable[
 class TurnRequest[T: BaseModel | None](
     BaseModel, frozen=True, arbitrary_types_allowed=True
 ):
-    """Per-turn input and optional validated output type."""
+    """Per-turn input and optional validated output type.
+
+    What a session engine is asked to start. A program never builds one: it
+    asks a session for a turn, and the session builds this from the prompt and
+    the output type it was given.
+    """
 
     input: TurnInput
     output_type: type[T] | None = None
-
-
-# The overload pair and the implementation are one constructor, so each `def`
-# answers for itself: `input` is the value being packaged, in either of the two
-# spellings a caller may hand it, and the operation is building the request
-# around it rather than anything a TurnInput does to itself.
-@overload
-def turn_request(input: str | TurnInput) -> TurnRequest[None]: ...
-
-
-@overload
-def turn_request[T: BaseModel](
-    input: str | TurnInput,
-    output_type: type[T],
-) -> TurnRequest[T]: ...
-
-
-def turn_request[T: BaseModel](
-    input: str | TurnInput,
-    output_type: type[T] | None = None,
-) -> TurnRequest[T] | TurnRequest[None]:
-    """Construct a request while preserving its output type relationship.
-
-    The overload pair is what preserves it. Collapsed into this single
-    implementation signature, ``T`` is left unsolved when the argument is
-    omitted, and pyright infers ``TurnRequest[Unknown] | TurnRequest[None]``
-    there and ``TurnRequest[Summary] | TurnRequest[None]`` when a model is
-    passed. The overloads pin each direction to one exact type.
-    """
-    # Narrowed on `str` rather than on `TurnInput`: the foreign alternative is
-    # the one that cannot answer for itself, and asking about it leaves ours
-    # to arrive by exclusion instead of by name.
-    match input:
-        case str():
-            prompt = TurnInput(text=input)
-        case _:
-            prompt = input
-    if output_type is None:
-        return TurnRequest[None](input=prompt)
-    return TurnRequest[T](input=prompt, output_type=output_type)
 
 
 class TurnResult[T: BaseModel | None](BaseModel, frozen=True):
@@ -512,19 +475,6 @@ class SessionSummary(BaseModel, frozen=True):
     )
     created_at: datetime | None = None
     updated_at: datetime
-
-
-class SessionHandle(BaseModel, frozen=True, arbitrary_types_allowed=True):
-    """Transparent composition of a session and optional fork capability.
-
-    Reaching a capability through this handle is not a consumer holding an
-    ABC: the handle carries capabilities and no behaviour of its own, so
-    there is nothing for a composing surface to home. ``Client`` is
-    the behavioural surface over these seams.
-    """
-
-    session: SessionEngine
-    fork: ForkSession | None = None
 
 
 class StartedTurn[T: BaseModel | None](

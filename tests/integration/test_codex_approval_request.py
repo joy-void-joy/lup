@@ -68,9 +68,7 @@ from lup.policy.hooks import (
 )
 from lup.providers.codex.home import CodexWorktreeHomeStore
 from lup.providers.codex import Codex
-from lup.providers.codex.runtime import create_codex
-from lup.sessions.client import Client
-from lup.sessions.events import turn_request
+from lup.sessions.surface import Agent
 from lup.workspace.paths import find_project_root
 
 pytestmark = pytest.mark.integration
@@ -226,24 +224,21 @@ def settled(cwd: Path, event: str) -> list[dict[str, str]]:
     ]
 
 
-async def ask(factory: Client, command: str) -> ShellAttempt:
-    """Put one command to one already-configured session."""
-    async with factory.open() as handle:
-        accepted = await handle.session.start(
-            turn_request(
-                f"Run this command with the shell tool: {command}\n"
-                "Then call the submission tool with `ran` set to whether it "
-                "executed, and `output` set to what it printed, the refusal "
-                "you were given, or the approval you were left waiting on.",
-                ShellAttempt,
-            )
-        )
-        return (await accepted.turn.result()).output
+async def ask(agent: Agent, command: str) -> ShellAttempt:
+    """Put one command to one already-configured agent."""
+    result = await agent.ask(
+        f"Run this command with the shell tool: {command}\n"
+        "Then call the submission tool with `ran` set to whether it "
+        "executed, and `output` set to what it printed, the refusal "
+        "you were given, or the approval you were left waiting on.",
+        ShellAttempt,
+    )
+    return result.output
 
 
 async def test_the_probe_prompt_reaches_the_shell() -> None:
     """The control. Without it, a refusal and a reluctance look the same."""
-    observed = await ask(create_codex(quiet_session(find_project_root())), ALLOWED)
+    observed = await ask(quiet_session(find_project_root()), ALLOWED)
 
     assert observed.ran, observed.output
     assert "lup-approval-control" in observed.output
@@ -275,7 +270,7 @@ async def test_whether_permission_request_fires_in_an_app_server_session() -> No
     root = find_project_root()
     before = len(settled(root, "PermissionRequest"))
 
-    await ask(create_codex(answering_session(root, ApprovalWatch())), ALLOWED)
+    await ask(answering_session(root, ApprovalWatch()), ALLOWED)
 
     assert len(settled(root, "PermissionRequest")) > before, (
         "No PermissionRequest reached the plugin's dispatcher during a live "
@@ -316,7 +311,7 @@ async def test_whether_a_declined_decision_reaches_the_client_as_an_approval() -
     root = find_project_root()
     watch = ApprovalWatch()
 
-    observed = await ask(create_codex(answering_session(root, watch)), ASKED)
+    observed = await ask(answering_session(root, watch), ASKED)
 
     assert watch.arrived(), (
         "The dispatcher declined to decide and no approval request reached "

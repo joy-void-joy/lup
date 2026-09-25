@@ -1,44 +1,36 @@
 """Provider-independent background queue/debounce scheduling tests."""
 
 import asyncio
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
 
 import pytest
 from pydantic import BaseModel
 
 from lup.orchestration.background import BackgroundAgent, BackgroundConfig
 from lup.sessions.composition import AcceptedTurn, CompletedTurn, ComposedSession
-from lup.sessions.client import Client
 from lup.sessions.errors import TurnError
 from lup.sessions.events import (
-    SessionHandle,
     SessionId,
     TurnIdentifiers,
     TurnId,
-    TurnRequest,
     TurnResult,
-    turn_request,
 )
+from lup.sessions.surface import Conversation, Turn
 from tests.unit.test_capability_runtime import RecordingBinder
-from tests.unit.doubles import IgnoredInterrupt, SilentStream
+from tests.unit.doubles import EngineAgent, IgnoredInterrupt, SilentStream
 
 
 class BackgroundState(BaseModel, frozen=True):
     value: int
 
 
-class RecordingOpener:
+class RecordingEngines:
+    """Open a composed engine per session, recording every prompt it is asked."""
+
     def __init__(self) -> None:
         self.prompts: list[str] = []
         self.sequence = 0
 
-    @asynccontextmanager
-    async def session_context(
-        self, _resume: SessionId | None = None
-    ) -> AsyncGenerator[SessionHandle]:
-        binder = RecordingBinder()
-
+    def engine(self, _resume: SessionId | None) -> ComposedSession:
         async def start(text: str) -> AcceptedTurn:
             self.prompts.append(text)
             self.sequence += 1
@@ -56,23 +48,18 @@ class RecordingOpener:
                 interrupt=IgnoredInterrupt(),
             )
 
-        session = ComposedSession(start, binder)
-        try:
-            yield SessionHandle(session=session)
-        finally:
-            await session.abort_active()
+        return ComposedSession(start, RecordingBinder())
 
 
 @pytest.mark.asyncio
 async def test_background_agent_coalesces_to_latest_state() -> None:
-    opener = RecordingOpener()
-    factory = Client(opener.session_context)
+    engines = RecordingEngines()
     completed = asyncio.Event()
     results: list[TurnResult[None]] = []
     errors: list[TurnError] = []
 
-    def request(state: BackgroundState) -> TurnRequest[None]:
-        return turn_request(f"state={state.value}")
+    def asked(conversation: Conversation, state: BackgroundState) -> Turn[None]:
+        return conversation.ask(f"state={state.value}")
 
     async def result_handler(result: TurnResult[None]) -> None:
         results.append(result)
@@ -83,8 +70,8 @@ async def test_background_agent_coalesces_to_latest_state() -> None:
         completed.set()
 
     agent = BackgroundAgent[BackgroundState, None](
-        factory,
-        request,
+        EngineAgent(engines.engine),
+        asked,
         result_handler,
         error_handler,
         BackgroundConfig(debounce_seconds=0.001),
@@ -95,6 +82,6 @@ async def test_background_agent_coalesces_to_latest_state() -> None:
     await asyncio.wait_for(completed.wait(), timeout=1)
     await agent.stop()
 
-    assert opener.prompts == ["state=2"]
+    assert engines.prompts == ["state=2"]
     assert len(results) == 1
     assert errors == []

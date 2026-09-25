@@ -6,7 +6,7 @@ block — but it proves it of the **CLI**, driving `codex exec` with three
 things the app-server path never sets: `--enable hooks`, an installed plugin,
 and `--dangerously-bypass-hook-trust`.
 
-`create_codex` — the path every real Lup session takes — starts
+`Codex.open()` — the path every real Lup session takes — starts
 the app-server with `["--profile", name]` and nothing else. Whether hooks fire
 there is undocumented, and openai/codex#21639 is evidence that firing is
 surface-dependent, so it is asked of a live session rather than reasoned about.
@@ -28,10 +28,8 @@ import pytest
 from pydantic import BaseModel, Field
 
 from lup.providers.codex import Codex
-from lup.providers.codex.runtime import create_codex
 from lup.providers.codex.selection import CODEX_RUNTIME
-from lup.sessions.client import Client
-from lup.sessions.events import turn_request
+from lup.sessions.surface import Agent
 from lup.providers.selection import SessionRequest
 from lup.workspace.paths import find_project_root
 
@@ -101,7 +99,7 @@ def workspace_request(cwd: Path) -> SessionRequest:
 async def attempt(command: str) -> ShellAttempt:
     """Drive one app-server session, on the process's own Codex home."""
     return await ask(
-        create_codex(personal_home_session(find_project_root())),
+        personal_home_session(find_project_root()),
         command,
     )
 
@@ -114,19 +112,16 @@ async def attempt_as_lup_opens_one(command: str) -> ShellAttempt:
     )
 
 
-async def ask(factory: Client, command: str) -> ShellAttempt:
-    """Put one command to one already-configured session."""
-    async with factory.open() as handle:
-        accepted = await handle.session.start(
-            turn_request(
-                f"Run this command with the shell tool: {command}\n"
-                "Then call the submission tool with `ran` set to whether it "
-                "executed, and `output` set to what it printed or to the "
-                "refusal you were given.",
-                ShellAttempt,
-            )
-        )
-        return (await accepted.turn.result()).output
+async def ask(agent: Agent, command: str) -> ShellAttempt:
+    """Put one command to one already-configured agent."""
+    result = await agent.ask(
+        f"Run this command with the shell tool: {command}\n"
+        "Then call the submission tool with `ran` set to whether it "
+        "executed, and `output` set to what it printed or to the "
+        "refusal you were given.",
+        ShellAttempt,
+    )
+    return result.output
 
 
 async def test_the_probe_prompt_reaches_the_shell() -> None:

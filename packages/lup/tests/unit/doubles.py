@@ -21,10 +21,11 @@ script it speaks the app-server's newline-framed JSON-RPC from an
 import os
 import signal
 import sys
-from collections.abc import AsyncGenerator, AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncGenerator, AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
+from typing import Self, overload
 
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
@@ -39,22 +40,28 @@ from lup.providers.codex.app_server import (
     RpcSuccess,
 )
 from lup.harness.process import ExitStatus, LaunchRequest, ProcessLauncher
+from lup.providers.claude import ClaudeSession
 from lup.sessions.capabilities import (
+    ConversationRecord,
     EventStream,
+    ForkSession,
     Interrupt,
     SessionEngine,
     TurnEngine,
 )
-from lup.sessions.client import Client
 from lup.sessions.events import (
     LiveTurnEvent,
-    SessionHandle,
     SessionId,
+    SessionSummary,
     TurnEvent,
     TurnId,
     TurnIdentifiers,
+    TurnInput,
+    TurnMessage,
+    TurnRequest,
     TurnResult,
 )
+from lup.sessions.layers import SessionLayers
 from lup.types import EnvVars, JsonValue, Usage
 
 PROBE_WORDS = 2
@@ -180,16 +187,89 @@ class StaticTurn[T: BaseModel | None](TurnEngine[T]):
         return self.value
 
 
-def session_factory(session: SessionEngine) -> Client:
-    """A factory whose every opened session is the one given."""
+class HeldRecord(ConversationRecord):
+    """A conversation's record that holds its identity and no messages."""
+
+    def __init__(self, session: SessionId) -> None:
+        self.session = session
+
+    def identity(self) -> SessionId:
+        return self.session
+
+    async def messages(self) -> list[TurnMessage]:
+        return []
+
+
+class Unforked(ForkSession[ClaudeSession]):
+    """A double that does not fork, saying so if a test asks it to."""
+
+    def fork(
+        self, at: TurnId | None = None
+    ) -> AbstractAsyncContextManager[ClaudeSession]:
+        raise RuntimeError(f"this double does not fork (asked at {at})")
+
+
+class EngineAgent:
+    """An agent whose every session runs its turns on an engine a test supplies.
+
+    What it opens is a Claude session over that engine — the session class
+    with a record and no forks — laid in the layers a real agent lays, so a
+    test drives the engine it wrote through exactly the path a program takes.
+    """
+
+    def __init__(
+        self,
+        engine: Callable[[SessionId | None], SessionEngine],
+        layers: SessionLayers = SessionLayers(),
+    ) -> None:
+        self.engine = engine
+        self.layers = layers
+
+    def open(
+        self, resume: SessionId | None = None
+    ) -> AbstractAsyncContextManager[ClaudeSession]:
+        return self.opening(resume)
 
     @asynccontextmanager
-    async def open_session(
-        _resume: SessionId | None = None,
-    ) -> AsyncGenerator[SessionHandle]:
-        yield SessionHandle(session=session)
+    async def opening(self, resume: SessionId | None) -> AsyncGenerator[ClaudeSession]:
+        @asynccontextmanager
+        async def native() -> AsyncGenerator[SessionEngine]:
+            yield self.engine(resume)
 
-    return Client(open_session)
+        async with self.layers.around(native(), resume) as engine:
+            yield ClaudeSession(
+                engine,
+                HeldRecord(resume or SessionId(value="session")),
+                Unforked(),
+                deltas=True,
+            )
+
+    @overload
+    async def ask(self, prompt: str | TurnInput) -> TurnResult[None]: ...
+
+    @overload
+    async def ask[T: BaseModel](
+        self, prompt: str | TurnInput, output: type[T]
+    ) -> TurnResult[T]: ...
+
+    async def ask[T: BaseModel](
+        self, prompt: str | TurnInput, output: type[T] | None = None
+    ) -> TurnResult[T] | TurnResult[None]:
+        async with self.open() as session:
+            if output is None:
+                return await session.ask(prompt)
+            return await session.ask(prompt, output)
+
+    async def sessions(self) -> list[SessionSummary]:
+        return []
+
+    def layered(self, layers: SessionLayers) -> Self:
+        return type(self)(self.engine, layers.over(self.layers))
+
+
+def agent_over(session: SessionEngine) -> EngineAgent:
+    """An agent whose every opened session runs on the one engine given."""
+    return EngineAgent(lambda _resume: session)
 
 
 class FailingLauncher(ProcessLauncher):
@@ -397,4 +477,35 @@ if __name__ == "__main__":
             ),
             Path(sys.argv[2]),
         )
+    )
+
+
+@overload
+def request_for(prompt: str | TurnInput) -> TurnRequest[None]: ...
+
+
+@overload
+def request_for[T: BaseModel](
+    prompt: str | TurnInput, output: type[T]
+) -> TurnRequest[T]: ...
+
+
+def request_for[T: BaseModel](
+    prompt: str | TurnInput, output: type[T] | None = None
+) -> TurnRequest[T] | TurnRequest[None]:
+    """What a session asks its engine to start, for a test driving the engine.
+
+    A program never builds one — it asks a session — but a test of the engine
+    beneath the session starts turns on it directly.
+    """
+    words = TurnInput(text=prompt) if isinstance(prompt, str) else prompt
+    if output is None:
+        return TurnRequest[None](input=words)
+    return TurnRequest[T](input=words, output_type=output)
+
+
+def conversation_over(session: SessionEngine) -> ClaudeSession:
+    """A conversation whose turns run on the one engine given."""
+    return ClaudeSession(
+        session, HeldRecord(SessionId(value="session")), Unforked(), deltas=True
     )

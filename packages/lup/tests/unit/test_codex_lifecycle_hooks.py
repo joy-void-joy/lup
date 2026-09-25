@@ -19,9 +19,12 @@ from lup.sessions.errors import (
     TurnAlreadyActiveError,
     TurnContinuationError,
 )
-from lup.sessions.events import TurnTextBlock, turn_request
+from lup.sessions.events import (
+    TurnTextBlock,
+)
 from lup.sessions.middleware import CorrectionConfig, DecoratingSession
 from lup.types import JsonObject, JsonValue
+from tests.unit.doubles import request_for
 
 
 class CompletingServer(CodexAppServer):
@@ -110,7 +113,7 @@ async def test_stop_continues_and_receipts_follow_acceptance(tmp_path: Path) -> 
     session, server = hooked_session(
         tmp_path, LupHooksConfig(stop=[LupHookMatcher(hook=stop)])
     )
-    handle = await session.start(turn_request("work"))
+    handle = await session.start(request_for("work"))
     result = await handle.turn.result()
     assert len(server.starts) == 2
     assert active == [False, True]
@@ -119,7 +122,7 @@ async def test_stop_continues_and_receipts_follow_acceptance(tmp_path: Path) -> 
     assert [
         block.text for block in result.blocks if isinstance(block, TurnTextBlock)
     ] == ["turn-1", "turn-2"]
-    fresh = await session.start(turn_request("another logical turn"))
+    fresh = await session.start(request_for("another logical turn"))
     await fresh.turn.result()
     assert active == [False, True, False]
 
@@ -131,7 +134,7 @@ async def test_repeated_stop_blocks_surface_exhaustion(tmp_path: Path) -> None:
     session, server = hooked_session(
         tmp_path, LupHooksConfig(stop=[LupHookMatcher(hook=stop)])
     )
-    handle = await session.start(turn_request("work"))
+    handle = await session.start(request_for("work"))
     with pytest.raises(TurnContinuationError) as raised:
         await handle.turn.result()
     assert len(server.starts) == 3
@@ -158,7 +161,7 @@ async def test_late_post_tool_feedback_continues_instead_of_disappearing(
         post_tool_use=[LupHookMatcher(matcher="^ShellCommand$", hook=after)]
     )
     session, server = hooked_session(tmp_path, hooks, tool=True)
-    handle = await session.start(turn_request("work"))
+    handle = await session.start(request_for("work"))
     await handle.turn.result()
     assert len(server.starts) == 2
     assert receipts == [2]
@@ -177,7 +180,7 @@ async def test_hook_failure_preserves_completed_evidence(
 
     hooks = LupHooksConfig.model_validate({event: [LupHookMatcher(hook=broken)]})
     session, server = hooked_session(tmp_path, hooks, tool=event == "post_tool_use")
-    handle = await session.start(turn_request("work"))
+    handle = await session.start(request_for("work"))
     with pytest.raises(ProviderTurnError) as raised:
         await handle.turn.result()
     assert "hook failed visibly" in str(raised.value)
@@ -199,9 +202,9 @@ async def test_an_overlapping_public_start_cannot_reset_stop_state(
     session, _ = hooked_session(
         tmp_path, LupHooksConfig(stop=[LupHookMatcher(hook=stop)])
     )
-    handle = await session.start(turn_request("work"))
+    handle = await session.start(request_for("work"))
     await entered.wait()
     with pytest.raises(TurnAlreadyActiveError):
-        await session.start(turn_request("overlap"))
+        await session.start(request_for("overlap"))
     released.set()
     await handle.turn.result()

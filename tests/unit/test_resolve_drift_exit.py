@@ -28,7 +28,7 @@ from lup.resolver.models import (
     WritableRootLease,
 )
 from lup.resolver.run import ResolverInvariantError
-from lup.sessions.client import Client
+from lup.sessions.surface import Agent
 from lup_template.devtools.main import app
 from tests.unit.repos import commit_file, git_in, initialized_repo
 
@@ -68,7 +68,7 @@ def test_normal_resolver_cli_refuses_integration_head_drift(
         merge_skill=SkillInvocation(plugin="lup", skill="merge"),
     )
 
-    def unused_actor(_context: WorkerContext | ReviewerContext) -> Client:
+    def unused_actor(_context: WorkerContext | ReviewerContext) -> Agent:
         raise AssertionError(
             "integration drift must be refused before opening an actor"
         )

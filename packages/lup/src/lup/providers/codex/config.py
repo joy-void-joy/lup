@@ -6,7 +6,6 @@ from pydantic import BaseModel, Field
 
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex import Codex, CodexCompatibleEndpoint
-from lup.providers.codex.runtime import create_codex
 from lup.providers.config import ConfigTransform, ProfileResolver, ProfileSelector
 
 
@@ -66,7 +65,7 @@ def codex_profile_selector(
     registry: CodexProfileRegistry,
 ) -> ProfileSelector[Codex]:
     """The surface a consumer holds over Codex profile selection."""
-    return ProfileSelector(CodexProfileResolver(registry), create_codex)
+    return ProfileSelector(CodexProfileResolver(registry))
 
 
 class CodexCompatibilityTransform(ConfigTransform[Codex]):

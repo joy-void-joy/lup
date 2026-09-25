@@ -217,7 +217,7 @@ async def run_reviewer(
         capabilities=["workspace-read", "web-search"],
         timeout_seconds=timeout_seconds,
     )
-    result = await factory.query(reviewer_prompt, ReviewResult)
+    result = await factory.ask(reviewer_prompt, ReviewResult)
     return result.output
 
 

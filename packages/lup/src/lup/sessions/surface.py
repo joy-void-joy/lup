@@ -9,12 +9,13 @@ protocols instead, and asks only for what both answer.
 
 Structural rather than nominal, so nothing registers against them: the
 provider classes satisfy them by having the methods, and so does a test's
-double.
+double. Checkable at runtime too, so a model can hold one as a field — a
+check that the methods are there, which is all a structural check can be.
 """
 
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable
 from contextlib import AbstractAsyncContextManager
-from typing import Protocol, Self, overload
+from typing import Protocol, Self, overload, runtime_checkable
 
 from pydantic import BaseModel
 
@@ -31,6 +32,7 @@ from lup.sessions.events import (
 from lup.sessions.layers import SessionLayers
 
 
+@runtime_checkable
 class Turn[T: BaseModel | None](
     Awaitable[TurnResult[T]], AsyncIterable[AnyTurnBlock], Protocol
 ):
@@ -56,6 +58,7 @@ class Turn[T: BaseModel | None](
         ...
 
 
+@runtime_checkable
 class Conversation(Protocol):
     """One open session with a provider, whichever provider it is."""
 
@@ -77,6 +80,7 @@ class Conversation(Protocol):
         ...
 
 
+@runtime_checkable
 class Agent(Protocol):
     """One declared agent: what opens its sessions and lists the old ones."""
 

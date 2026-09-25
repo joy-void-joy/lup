@@ -1,4 +1,4 @@
-"""Codex app-server Client with live optional turn capabilities."""
+"""Codex sessions opened over app-server, with live turn capabilities."""
 
 import asyncio
 from functools import partial
@@ -10,7 +10,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from time import perf_counter
 from tempfile import TemporaryDirectory
-from types import EllipsisType
 from typing import Literal
 
 from pydantic import BaseModel, Field, ValidationError
@@ -30,12 +29,10 @@ from lup.providers.codex.hooks import (
 from lup.providers.codex.home import CodexWorktreeHomeStore, install_declared_policy
 from lup.providers.codex.login import CODEX_HOME, native_home
 from lup.providers.codex.output import CodexOutputContract, codex_output_contract
-from lup.providers.codex import Codex, CodexCompatibleEndpoint, CodexSession
-from lup.providers.codex.model_choice import CodexModelChoice
+from lup.providers.codex import Codex, CodexSession
 from lup.policy.hooks import LupHookInput, LupHookOutput, LupHooksConfig
 from lup.policy.identity import POLICY_ROOT_ENV
-from lup.tools.native import NativeTools
-from lup.tools.mcp import LupMcpTool, ToolResponse, running_companions
+from lup.tools.mcp import ToolResponse, running_companions
 from lup.sessions.composition import AcceptedTurn, CompletedTurn, ComposedSession
 from lup.sessions.capabilities import (
     ConversationRecord,
@@ -52,13 +49,11 @@ from lup.sessions.errors import UnsupportedCapability
 from lup.sessions.middleware import DecoratingSession
 from lup.sessions.errors import TurnAlreadyActiveError
 from lup.sessions.middleware import SerializedTurn
-from lup.sessions.client import Client
 from lup.sessions.events import (
     BlockCompletedEvent,
     BlockDeltaEvent,
     LiveTurnEvent,
     MessageCompletedEvent,
-    SessionHandle,
     SessionId,
     SessionSummary,
     AnyTurnBlock,
@@ -1292,51 +1287,6 @@ async def codex_sessions(declared: Codex) -> list[SessionSummary]:
         await server.close()
     summaries = [thread.summary() for thread in listed]
     return sorted(summaries, key=lambda summary: summary.updated_at, reverse=True)
-
-
-def create_codex(
-    options: Codex | None = None,
-    *,
-    model: CodexModelChoice | None = None,
-    system_prompt: str = "",
-    cwd: Path | None = None,
-    base_url: str | None = None,
-    api_key: str | None = None,
-    native_tools: NativeTools | EllipsisType = ...,
-    tools: Sequence[LupMcpTool] | None = None,
-) -> Client:
-    """Open Codex sessions, configured by argument or by whole declaration."""
-    base = options or Codex()
-    endpoint = (
-        CodexCompatibleEndpoint.model_validate(
-            {"base_url": base_url, "api_key": api_key}
-        )
-        if base_url is not None
-        else base.endpoint
-    )
-    config = Codex.model_validate(
-        base.model_copy(
-            update={
-                "model": base.model if model is None else model,
-                "system_prompt": system_prompt or base.system_prompt,
-                "cwd": base.cwd if cwd is None else cwd,
-                "native_tools": base.native_tools
-                if native_tools is ...
-                else native_tools,
-                "tools": [*base.tools, *(tools or [])],
-                "endpoint": endpoint,
-            }
-        )
-    )
-
-    @asynccontextmanager
-    async def open_handle(
-        resume: SessionId | None = None,
-    ) -> AsyncGenerator[SessionHandle]:
-        async with config.open(resume) as session:
-            yield SessionHandle(session=session.engine)
-
-    return Client(open_handle)
 
 
 async def submit_completed_output(

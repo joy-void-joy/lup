@@ -1,11 +1,11 @@
-"""Inference pins for the one-turn entry points.
+"""Inference pins for the one verb, ``ask``, on an agent and on its session.
 
-`turn_request` and `Client.query` are overloaded so each call shape
-resolves to one exact type rather than a union. The `assert_type` calls below
-are the regression guard: pyright — which `lup-devtools dev check` runs — fails
-the moment a later simplification collapses an overload set and widens what a
-call infers. Each pin sits on a call that also executes, so the pinned shapes
-cannot drift away from working code.
+``ask`` is overloaded so each call shape resolves to one exact type rather
+than a union. The `assert_type` calls below are the regression guard: pyright
+— which `lup-devtools dev check` runs — fails the moment a later
+simplification collapses an overload set and widens what a call infers. Each
+pin sits on a call that also executes, so the pinned shapes cannot drift away
+from working code.
 """
 
 from datetime import timedelta
@@ -15,7 +15,6 @@ import pytest
 from pydantic import BaseModel
 
 from lup.sessions.capabilities import SessionEngine, TurnEngine
-from lup.sessions.client import Client
 from lup.sessions.events import (
     SessionId,
     StartedTurn,
@@ -24,10 +23,10 @@ from lup.sessions.events import (
     TurnInput,
     TurnRequest,
     TurnResult,
-    turn_request,
 )
 from lup.types import Usage
-from tests.unit.doubles import IgnoredInterrupt, SilentStream, session_factory
+from lup.providers.claude import ClaudeTurn
+from tests.unit.doubles import EngineAgent, IgnoredInterrupt, SilentStream, agent_over
 
 IDENTIFIERS = TurnIdentifiers(
     session=SessionId(value="session"), turn=TurnId(value="turn")
@@ -79,78 +78,42 @@ class StubSession(SessionEngine):
             interrupt=IgnoredInterrupt(),
         )
 
-    def factory(self) -> Client:
-        """A factory whose every opened session is this one."""
-        return session_factory(self)
-
-
-def test_turn_request_without_a_model_infers_no_output() -> None:
-    from_text = turn_request("summarize")
-    from_input = turn_request(TurnInput(text="summarize"))
-
-    assert_type(from_text, TurnRequest[None])
-    assert_type(from_input, TurnRequest[None])
-    assert from_text.output_type is None
-    assert from_text.input == from_input.input
-
-
-def test_turn_request_with_a_model_infers_that_model() -> None:
-    from_text = turn_request("summarize", Summary)
-    from_input = turn_request(TurnInput(text="summarize"), Summary)
-
-    assert_type(from_text, TurnRequest[Summary])
-    assert_type(from_input, TurnRequest[Summary])
-    assert from_text.output_type is Summary
-    assert from_text.input == from_input.input
+    def agent(self) -> EngineAgent:
+        """An agent whose every opened session is this one."""
+        return agent_over(self)
 
 
 @pytest.mark.asyncio
-async def test_query_carries_a_prepared_request_type_through() -> None:
+async def test_a_one_shot_ask_infers_its_output_from_what_it_names() -> None:
     session = StubSession()
-    factory = session.factory()
+    agent = session.agent()
 
-    plain = await factory.query(turn_request("summarize"))
-    typed = await factory.query(turn_request("summarize", Summary))
-
-    assert_type(plain, TurnResult[None])
-    assert_type(typed, TurnResult[Summary])
-    assert plain.output is None
-    assert typed.output.title == "pinned"
-    assert session.prompts == ["summarize", "summarize"]
-
-
-@pytest.mark.asyncio
-async def test_query_reaches_a_result_from_a_prompt_in_one_call() -> None:
-    session = StubSession()
-    factory = session.factory()
-
-    plain = await factory.query("summarize")
-    typed = await factory.query("summarize", Summary)
-    from_input = await factory.query(TurnInput(text="wrapped"))
-    typed_input = await factory.query(TurnInput(text="wrapped"), Summary)
+    plain = await agent.ask("summarize")
+    typed = await agent.ask("summarize", Summary)
+    from_input = await agent.ask(TurnInput(text="wrapped"))
+    typed_input = await agent.ask(TurnInput(text="wrapped"), Summary)
 
     assert_type(plain, TurnResult[None])
     assert_type(typed, TurnResult[Summary])
     assert_type(from_input, TurnResult[None])
     assert_type(typed_input, TurnResult[Summary])
+    assert plain.output is None
     assert typed.output.title == "pinned"
     assert session.prompts == ["summarize", "summarize", "wrapped", "wrapped"]
 
 
 @pytest.mark.asyncio
-async def test_the_free_spelling_infers_exactly_what_the_method_does() -> None:
+async def test_a_session_turn_carries_its_output_type_until_awaited() -> None:
     session = StubSession()
-    factory = session.factory()
 
-    prepared = await factory.query(turn_request("summarize", Summary))
-    plain = await factory.query("summarize")
-    typed = await factory.query("summarize", Summary)
-    typed_input = await factory.query(TurnInput(text="wrapped"), Summary)
+    async with session.agent().open() as opened:
+        plain = opened.ask("summarize")
+        typed = opened.ask(TurnInput(text="wrapped"), Summary)
 
-    assert_type(prepared, TurnResult[Summary])
-    assert_type(plain, TurnResult[None])
-    assert_type(typed, TurnResult[Summary])
-    assert_type(typed_input, TurnResult[Summary])
-    assert plain.output is None
-    assert typed.output.title == "pinned"
-    assert session.prompts == ["summarize", "summarize", "summarize", "wrapped"]
+        assert_type(plain, ClaudeTurn[None])
+        assert_type(typed, ClaudeTurn[Summary])
+        assert session.prompts == []
+        assert_type(await plain, TurnResult[None])
+        assert (await typed).output.title == "pinned"
+
+    assert session.prompts == ["summarize", "wrapped"]

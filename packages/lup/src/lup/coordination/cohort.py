@@ -62,8 +62,8 @@ from lup.coordination.sessions import (
 from lup.channels.models import Door, publish_atomic, utc_now
 from lup.policy.hooks import LupHooksConfig
 from lup.observability.journal import ChainedWriter, Journal, JournalRecord
-from lup.sessions.client import Client
-from lup.sessions.events import TurnRequest, TurnResult
+from lup.sessions.events import TurnResult
+from lup.sessions.surface import Agent
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +77,7 @@ being appended to is a lock every reader of that file also has to know about.
 """
 
 
-type ActorRecipe = Callable[[ActorRef, LupHooksConfig], Client]
+type ActorRecipe = Callable[[ActorRef, LupHooksConfig], Agent]
 """How one actor's session is configured, given the hooks that reach it.
 
 The hooks are a parameter rather than something a recipe fetches, because
@@ -555,10 +555,11 @@ class ActorCohort:
         """
         return len(self.mail.waiting(actor).messages)
 
-    async def round[T: BaseModel | None](
+    async def round[T: BaseModel](
         self,
         actor: ActorRef,
-        request: TurnRequest[T],
+        prompt: str,
+        output: type[T],
         recipe: ActorRecipe,
         task: str = "",
     ) -> TurnResult[T]:
@@ -582,18 +583,19 @@ class ActorCohort:
         meant to reattach to, which is the one thing that judgement exists to
         protect.
         """
-        self.spawn(actor, task or request.input.text)
+        self.spawn(actor, task or prompt)
         try:
-            return await self.session(actor, recipe).turn(request)
+            return await self.session(actor, recipe).turn(prompt, output)
         except Exception as error:
             if self.settles(error):
                 await self.finish(actor, error=str(error))
             raise
 
-    async def ask[T: BaseModel | None](
+    async def ask[T: BaseModel](
         self,
         actor: ActorRef,
-        request: TurnRequest[T],
+        prompt: str,
+        output: type[T],
         recipe: ActorRecipe,
         task: str = "",
     ) -> TurnResult[T]:
@@ -608,14 +610,15 @@ class ActorCohort:
         One round and then done, which is the one-shot case of :meth:`round`
         rather than the general one.
         """
-        result = await self.round(actor, request, recipe, task)
+        result = await self.round(actor, prompt, output, recipe, task)
         await self.finish(actor, summary=submitted_summary(result.output))
         return result
 
-    def start[T: BaseModel | None](
+    def start[T: BaseModel](
         self,
         actor: ActorRef,
-        request: TurnRequest[T],
+        prompt: str,
+        output: type[T],
         recipe: ActorRecipe,
         task: str = "",
         then: Callable[[TurnResult[T]], Awaitable[None]] | None = None,
@@ -633,8 +636,8 @@ class ActorCohort:
         """
         return self.start_work(
             actor,
-            lambda opened: self.ask(opened, request, recipe, task),
-            task=task or request.input.text,
+            lambda opened: self.ask(opened, prompt, output, recipe, task),
+            task=task or prompt,
             then=then,
         )
 

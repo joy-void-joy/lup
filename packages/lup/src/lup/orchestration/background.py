@@ -14,9 +14,9 @@ from collections.abc import Awaitable, Callable
 
 from pydantic import BaseModel, Field
 
-from lup.sessions.client import Client
 from lup.sessions.errors import TurnError
-from lup.sessions.events import TurnRequest, TurnResult
+from lup.sessions.events import TurnResult
+from lup.sessions.surface import Agent, Conversation, Turn
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,14 @@ class BackgroundConfig(BaseModel, frozen=True):
     debounce_seconds: float = Field(default=0.1, ge=0)
 
 
-type StateToRequest[S: BaseModel, T: BaseModel | None] = Callable[[S], TurnRequest[T]]
+type StateToTurn[S: BaseModel, T: BaseModel | None] = Callable[
+    [Conversation, S], Turn[T]
+]
+"""How the latest state is put to the session: asked as one turn of it.
+
+A callable rather than a prompt, because asking is where the turn's output
+type is named, and naming it at the call is what keeps the result typed.
+"""
 type BackgroundResultHandler[T: BaseModel | None] = Callable[
     [TurnResult[T]], Awaitable[None]
 ]
@@ -39,14 +46,14 @@ class BackgroundAgent[S: BaseModel, T: BaseModel | None]:
 
     def __init__(
         self,
-        factory: Client,
-        state_to_request: StateToRequest[S, T],
+        agent: Agent,
+        state_to_turn: StateToTurn[S, T],
         result_handler: BackgroundResultHandler[T],
         error_handler: BackgroundErrorHandler,
         config: BackgroundConfig | None = None,
     ) -> None:
-        self.factory = factory
-        self.state_to_request = state_to_request
+        self.agent = agent
+        self.state_to_turn = state_to_turn
         self.result_handler = result_handler
         self.error_handler = error_handler
         self.config = config or BackgroundConfig()
@@ -82,7 +89,7 @@ class BackgroundAgent[S: BaseModel, T: BaseModel | None]:
             self.task = None
 
     async def run(self) -> None:
-        async with self.factory.open() as handle:
+        async with self.agent.open() as conversation:
             while not self.stopping:
                 await self.changed.wait()
                 self.changed.clear()
@@ -93,10 +100,8 @@ class BackgroundAgent[S: BaseModel, T: BaseModel | None]:
                 self.pending = None
                 if state is None:
                     continue
-                request = self.state_to_request(state)
                 try:
-                    turn = await handle.session.start(request)
-                    result = await turn.turn.result()
+                    result = await self.state_to_turn(conversation, state)
                 except TurnError as error:
                     await self.error_handler(error)
                 else:

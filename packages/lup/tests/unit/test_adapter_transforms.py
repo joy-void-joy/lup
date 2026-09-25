@@ -81,7 +81,6 @@ from lup.policy.models import (
     UnknownTool,
 )
 from lup.providers.config import ProfileSelector
-from lup.sessions.client import Client
 from lup.providers.routing import (
     ExactModelMatcher,
     ModelRoute,
@@ -89,7 +88,6 @@ from lup.providers.routing import (
     PrefixModelMatcher,
 )
 from lup.types import CustomModel, JsonObject
-from tests.unit.test_background_runtime import RecordingOpener
 
 
 class DecoderArm(BaseModel, frozen=True):
@@ -244,29 +242,17 @@ def test_an_unnamed_claude_profile_leaves_the_home_its_environment_selects() -> 
     assert configured.environment["KEEP"] == "1"
 
 
-class RecordingBuilder:
-    """Capture the configuration a selector hands to its factory builder."""
-
-    def __init__(self) -> None:
-        self.config: Claude | None = None
-
-    def build(self, config: Claude) -> Client:
-        self.config = config
-        return Client(RecordingOpener().session_context)
-
-
-def test_profile_selector_resolves_applies_then_constructs(tmp_path: Path) -> None:
+def test_profile_selector_resolves_and_applies_to_the_agent(tmp_path: Path) -> None:
     registry = ClaudeProfileRegistry(
         profiles={"work": ClaudeProfileSelection(config_directory=tmp_path / "work")}
     )
-    builder = RecordingBuilder()
-    selector = ProfileSelector(ClaudeProfileResolver(registry), builder.build)
+    selector = ProfileSelector(ClaudeProfileResolver(registry))
     base = Claude(model=CustomModel(id="claude"), environment={"KEEP": "1"})
-    selector.session_factory(base, "work")
 
-    assert builder.config is not None
-    assert builder.config.environment["CLAUDE_CONFIG_DIR"] == str(tmp_path / "work")
-    assert builder.config.environment["KEEP"] == "1"
+    selected = selector.session_factory(base, "work")
+
+    assert selected.environment["CLAUDE_CONFIG_DIR"] == str(tmp_path / "work")
+    assert selected.environment["KEEP"] == "1"
     assert "CLAUDE_CONFIG_DIR" not in base.environment
 
 
@@ -352,8 +338,8 @@ def test_codex_compatible_endpoint_uses_structured_provider_config(
 
 
 def test_model_router_uses_explicit_recipe_then_first_match() -> None:
-    broad = Client(RecordingOpener().session_context)
-    exact = Client(RecordingOpener().session_context)
+    broad = Claude(model=CustomModel(id="broad"))
+    exact = Claude(model=CustomModel(id="exact"))
     router = ModelRouter(
         [
             ModelRoute(

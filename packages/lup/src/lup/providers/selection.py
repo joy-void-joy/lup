@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field, model_validator
 from lup.policy.hooks import LupHooksConfig
 from lup.tools.mcp import McpServerEntry
 from lup.tools.native import NativeTools, native_grants
-from lup.sessions.client import Client
+from lup.sessions.surface import Agent
 from lup.providers.claude.models import ClaudeModel
 from lup.providers.codex.models import CodexModel
 from lup.providers.login import ProviderLogin
@@ -148,8 +148,8 @@ class SessionRequest(
         return self
 
 
-type SessionOpener = Callable[[SessionRequest], Client]
-"""Render one request into the configured session factory of one runtime."""
+type SessionOpener = Callable[[SessionRequest], Agent]
+"""Render one request into the agent of one runtime that opens its sessions."""
 
 type WorkspaceHome = Callable[[EnvVars, Path], EnvVars]
 """Give one workspace's sessions a configuration home of their own.
@@ -191,8 +191,8 @@ class Runtime(BaseModel, frozen=True, arbitrary_types_allowed=True):
     open: SessionOpener
     workspace_home: WorkspaceHome
 
-    def session_factory(self, request: SessionRequest) -> Client:
-        """Open a session factory for this runtime from a portable request."""
+    def session_factory(self, request: SessionRequest) -> Agent:
+        """The agent this runtime renders a portable request into."""
         return self.open(self.homed(SessionRequest.model_validate(request)))
 
     def homed(self, request: SessionRequest) -> SessionRequest:

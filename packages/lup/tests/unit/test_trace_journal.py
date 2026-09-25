@@ -24,7 +24,6 @@ from lup.sessions.events import (
     LiveTurnEvent,
     TurnEvent,
     TurnStartedEvent,
-    turn_request,
 )
 from lup.observability.audit import (
     ArgvRedaction,
@@ -41,7 +40,10 @@ from lup.observability.audit import (
 )
 from lup.types import JsonObject
 from tests.unit.test_capability_runtime import RecordingBinder
-from tests.unit.doubles import IgnoredInterrupt
+from tests.unit.doubles import (
+    IgnoredInterrupt,
+    request_for,
+)
 
 IDENTIFIERS = TurnIdentifiers(
     session=SessionId(value="session-1"), turn=TurnId(value="turn-1")
@@ -262,7 +264,7 @@ async def test_a_delta_free_session_keeps_its_durable_journal_and_result(
     session = JournalSession(
         ComposedSession(start, RecordingBinder()), journal_at(path)
     )
-    handle = await session.start(turn_request("hello"))
+    handle = await session.start(request_for("hello"))
     assert handle.events is not None
     with pytest.raises(DeltaStreamingDisabled):
         await anext(handle.events.live())

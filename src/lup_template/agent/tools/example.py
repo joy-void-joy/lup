@@ -216,7 +216,7 @@ async def extract_answer(content: str, question: str) -> str:
             "not contain one."
         ),
     )
-    result = await factory.query(f"Question: {question}\n\nDocument:\n{content}")
+    result = await factory.ask(f"Question: {question}\n\nDocument:\n{content}")
     text = "\n\n".join(
         text for block in result.blocks if (text := block.text_payload) is not None
     )

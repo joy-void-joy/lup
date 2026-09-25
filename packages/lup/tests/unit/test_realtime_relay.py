@@ -51,7 +51,7 @@ from lup.sessions.events import (
 )
 from lup.observability.trace import TraceLogger
 from lup.types import JsonObject, Usage
-from tests.unit.doubles import IgnoredInterrupt, SilentStream
+from tests.unit.doubles import IgnoredInterrupt, SilentStream, conversation_over
 
 
 def tool_map(
@@ -456,7 +456,7 @@ class TestRelaySession:
         )
 
         turns = await run_relay_session(
-            conversation,
+            conversation_over(conversation),
             scheduler=scheduler,
             mailbox=RealtimeMailbox(tmp_path),
             initial_prompt="[session start]",
@@ -489,7 +489,7 @@ class TestRelaySession:
         )
 
         turns = await run_relay_session(
-            conversation,
+            conversation_over(conversation),
             scheduler=Scheduler(on_action=on_action),
             mailbox=RealtimeMailbox(tmp_path),
             initial_prompt="[session start]",
@@ -533,7 +533,7 @@ class TestRelaySession:
         )
 
         await run_relay_session(
-            conversation,
+            conversation_over(conversation),
             scheduler=Scheduler(on_action=on_action),
             mailbox=RealtimeMailbox(tmp_path),
             initial_prompt="[session start]",
@@ -554,7 +554,7 @@ class TestRelaySession:
         conversation = FakeConversation([AgentTurn(tools, []) for _ in range(5)])
 
         turns = await run_relay_session(
-            conversation,
+            conversation_over(conversation),
             scheduler=Scheduler(on_action=on_action),
             mailbox=RealtimeMailbox(tmp_path),
             initial_prompt="[session start]",
@@ -596,7 +596,7 @@ class TestRelaySession:
         )
 
         await run_relay_session(
-            conversation,
+            conversation_over(conversation),
             scheduler=scheduler,
             mailbox=RealtimeMailbox(tmp_path),
             initial_prompt="[session start]",
@@ -629,7 +629,7 @@ class TestRelaySession:
         )
 
         turns = await run_relay_session(
-            conversation,
+            conversation_over(conversation),
             scheduler=Scheduler(on_action=on_action),
             mailbox=RealtimeMailbox(tmp_path),
             initial_prompt="[session start]",

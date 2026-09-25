@@ -12,8 +12,6 @@ from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.providers.claude.model_choice import claude_model_choice
 from lup.providers.claude.models import ClaudeEffort
 from lup.providers.claude import Claude, ClaudePermissionMode, ClaudeSandboxConfig
-from lup.providers.claude.runtime import create_claude
-from lup.sessions.client import Client
 from lup.providers.confinement import SessionContainment
 from lup.providers.selection import (
     Runtime,
@@ -110,15 +108,10 @@ def claude_config(request: SessionRequest) -> Claude:
     )
 
 
-def claude_session(request: SessionRequest) -> Client:
-    """Render a portable request into a configured Claude session factory."""
-    return create_claude(claude_config(request))
-
-
 CLAUDE_RUNTIME = Runtime(
     name="Claude Code",
     login=CLAUDE_LOGIN,
-    open=claude_session,
+    open=claude_config,
     workspace_home=workspace_config_environment,
 )
 """Claude Code, as the single value an application assigns to select it."""

@@ -92,7 +92,7 @@ from lup.resolver.tools import (
     read_resolver_tool_context,
 )
 from lup.resolver.join_tools import create_join_tools
-from lup.sessions.client import Client
+from lup.sessions.surface import Agent
 from lup.providers.profiles import SessionAccount
 from lup.types import EnvVars
 from lup.workspace.paths import project_root
@@ -1577,13 +1577,11 @@ def run_resolve(
     async def execute() -> None:
         from lup.providers.claude import Claude, ClaudeSandboxConfig
         from lup.providers.claude.runtime import (
-            create_claude,
             environmental_fault,
             may_be_a_rotation,
             needs_a_person,
         )
         from lup.providers.codex import Codex, CodexMcpServerConfig
-        from lup.providers.codex.runtime import create_codex
         from lup.providers.claude.model_choice import claude_model_choice
         from lup.providers.codex.model_choice import codex_model_choice
         from lup.providers.claude.config_home import (
@@ -1835,7 +1833,7 @@ def run_resolve(
         # about a confinement it could only restate.
         codex_worker_sandbox = SandboxPosture()
 
-        def worker_factory(context: WorkerContext) -> Client:
+        def worker_factory(context: WorkerContext) -> Agent:
             """Open one worker session that can ask its own questions.
 
             The tools are bound to this concern here rather than taking the
@@ -1906,109 +1904,30 @@ def run_resolve(
                 worker_environment_for = isolated_claude_environment(
                     concern_environment, cwd
                 )
-                return create_claude(
-                    Claude(
-                        model=claude_model,
-                        system_prompt="Execute the persisted Lup resolver assignment.",
-                        native_tools=[NativeToolGroup.ALL],
-                        cwd=cwd,
-                        add_dirs=[cwd, *toolchain_writable_paths()],
-                        plugin_dirs=[lease_plugin_dir(cwd, plugin.name)],
-                        sandbox=claude_worker_sandbox,
-                        environment=worker_environment_for,
-                        cli_path=actor_cli(
-                            cwd,
-                            context.concern_id,
-                            context.actor.kind,
-                            worker_environment_for,
-                        ),
-                        # Over stdio rather than in process, which is what
-                        # makes the boundary reachable at all: a CLI running
-                        # inside a container cannot see an object living in
-                        # this one. The transport is the one the Codex worker
-                        # beside it already uses, so both runtimes answer the
-                        # question the same way instead of one of them holding
-                        # a server only an uncontained worker could reach.
-                        tool_servers={
-                            "resolver": RawStdioServerConfig(
-                                command="uv",
-                                args=[
-                                    "run",
-                                    "lup-devtools",
-                                    "resolve",
-                                    "serve-tools",
-                                ],
-                                env={
-                                    **session_environment,
-                                    **tool_context.to_env(),
-                                },
-                            )
-                        },
-                        # Named from the tools rather than from the server,
-                        # which is the half a stdio transport cannot answer:
-                        # `server_tool_names` reports nothing for an external
-                        # config because introspecting one means connecting to
-                        # it, so reading the allowlist from there would empty
-                        # it in silence and deny this worker its own questions.
-                        allowed_tools=[
-                            f"mcp__resolver__{tool.name}" for tool in actor_tools
-                        ],
-                        hooks=merge_hooks(
-                            merge_hooks(
-                                merge_hooks(
-                                    create_permission_hooks([cwd], []),
-                                    worker_policy_hooks(
-                                        harness.declared_hooks,
-                                        context.grants,
-                                        CLAUDE_SEMANTICS,
-                                        claude_worker_sandbox.posture(),
-                                        relay,
-                                    ),
-                                ),
-                                create_git_inspection_hook(),
-                            ),
-                            context.hooks,
-                        ),
-                    )
-                )
-            return create_codex(
-                Codex(
-                    model=codex_model,
+                return Claude(
+                    model=claude_model,
+                    system_prompt="Execute the persisted Lup resolver assignment.",
                     native_tools=[NativeToolGroup.ALL],
-                    system_prompt=("Execute the persisted Lup resolver assignment."),
                     cwd=cwd,
-                    sandbox="workspace-write",
-                    containment="outer" if contained_actors else "none",
-                    # Falls back to the program's own name, which is what this
-                    # field already defaults to. Claude's seam takes ``None``
-                    # for the same case instead, because its SDK searches for a
-                    # CLI that is often not on PATH and a name passed there
-                    # would skip the search rather than stand in for it.
-                    executable=actor_cli(
+                    add_dirs=[cwd, *toolchain_writable_paths()],
+                    plugin_dirs=[lease_plugin_dir(cwd, plugin.name)],
+                    sandbox=claude_worker_sandbox,
+                    environment=worker_environment_for,
+                    cli_path=actor_cli(
                         cwd,
                         context.concern_id,
                         context.actor.kind,
-                        concern_environment,
-                    )
-                    or Path(actor_program),
-                    # An asking policy is what makes the app-server put this
-                    # worker's commands to the hooks below. Left at "never" a
-                    # Codex worker ran with the OS sandbox as its only floor,
-                    # because its generated plugin hook is not reached either.
-                    approval_policy="on-request",
-                    hooks=merge_hooks(
-                        worker_policy_hooks(
-                            harness.declared_hooks,
-                            context.grants,
-                            CODEX_SEMANTICS,
-                            codex_worker_sandbox,
-                            relay,
-                        ),
-                        context.hooks,
+                        worker_environment_for,
                     ),
-                    environment=concern_environment,
-                    mcp_servers={
-                        "resolver": CodexMcpServerConfig(
+                    # Over stdio rather than in process, which is what
+                    # makes the boundary reachable at all: a CLI running
+                    # inside a container cannot see an object living in
+                    # this one. The transport is the one the Codex worker
+                    # beside it already uses, so both runtimes answer the
+                    # question the same way instead of one of them holding
+                    # a server only an uncontained worker could reach.
+                    tool_servers={
+                        "resolver": RawStdioServerConfig(
                             command="uv",
                             args=[
                                 "run",
@@ -2016,14 +1935,89 @@ def run_resolve(
                                 "resolve",
                                 "serve-tools",
                             ],
-                            env={**session_environment, **tool_context.to_env()},
+                            env={
+                                **session_environment,
+                                **tool_context.to_env(),
+                            },
                         )
                     },
-                    writable_roots=[cwd],
+                    # Named from the tools rather than from the server,
+                    # which is the half a stdio transport cannot answer:
+                    # `server_tool_names` reports nothing for an external
+                    # config because introspecting one means connecting to
+                    # it, so reading the allowlist from there would empty
+                    # it in silence and deny this worker its own questions.
+                    allowed_tools=[
+                        f"mcp__resolver__{tool.name}" for tool in actor_tools
+                    ],
+                    hooks=merge_hooks(
+                        merge_hooks(
+                            merge_hooks(
+                                create_permission_hooks([cwd], []),
+                                worker_policy_hooks(
+                                    harness.declared_hooks,
+                                    context.grants,
+                                    CLAUDE_SEMANTICS,
+                                    claude_worker_sandbox.posture(),
+                                    relay,
+                                ),
+                            ),
+                            create_git_inspection_hook(),
+                        ),
+                        context.hooks,
+                    ),
                 )
+            return Codex(
+                model=codex_model,
+                native_tools=[NativeToolGroup.ALL],
+                system_prompt=("Execute the persisted Lup resolver assignment."),
+                cwd=cwd,
+                sandbox="workspace-write",
+                containment="outer" if contained_actors else "none",
+                # Falls back to the program's own name, which is what this
+                # field already defaults to. Claude's seam takes ``None``
+                # for the same case instead, because its SDK searches for a
+                # CLI that is often not on PATH and a name passed there
+                # would skip the search rather than stand in for it.
+                executable=actor_cli(
+                    cwd,
+                    context.concern_id,
+                    context.actor.kind,
+                    concern_environment,
+                )
+                or Path(actor_program),
+                # An asking policy is what makes the app-server put this
+                # worker's commands to the hooks below. Left at "never" a
+                # Codex worker ran with the OS sandbox as its only floor,
+                # because its generated plugin hook is not reached either.
+                approval_policy="on-request",
+                hooks=merge_hooks(
+                    worker_policy_hooks(
+                        harness.declared_hooks,
+                        context.grants,
+                        CODEX_SEMANTICS,
+                        codex_worker_sandbox,
+                        relay,
+                    ),
+                    context.hooks,
+                ),
+                environment=concern_environment,
+                mcp_servers={
+                    "resolver": CodexMcpServerConfig(
+                        command="uv",
+                        args=[
+                            "run",
+                            "lup-devtools",
+                            "resolve",
+                            "serve-tools",
+                        ],
+                        env={**session_environment, **tool_context.to_env()},
+                    )
+                },
+                writable_roots=[cwd],
             )
 
-        def reviewer_factory(context: ReviewerContext) -> Client:
+        def reviewer_factory(context: ReviewerContext) -> Agent:
             # A reviewer takes the same mail every other actor does. It used
             # to take none, being the one kind whose recipe was handed a bare
             # path, so the actor best placed to use a late fact — a criterion
@@ -2039,56 +2033,48 @@ def run_resolve(
                 reviewer_environment_for = isolated_claude_environment(
                     reviewer_environment, cwd
                 )
-                return create_claude(
-                    Claude(
-                        model=claude_model,
-                        system_prompt=(
-                            "Independently review the persisted resolver change."
-                        ),
-                        native_tools=[NativeToolGroup.READ, NativeToolGroup.SHELL],
-                        cwd=cwd,
-                        add_dirs=[cwd],
-                        environment=reviewer_environment_for,
-                        # A reviewer is read-only by design, so its lease is
-                        # the worker's with nothing writable rather than a
-                        # table of its own: built from one call, the two cannot
-                        # come to disagree about which checkouts exist.
-                        cli_path=actor_cli(
-                            cwd,
-                            reviewing,
-                            "reviewer",
-                            reviewer_environment_for,
-                            read_only=True,
-                        ),
-                        hooks=merge_hooks(
-                            create_permission_hooks([], [cwd]), context.hooks
-                        ),
-                    )
-                )
-            return create_codex(
-                Codex(
-                    model=codex_model,
-                    native_tools=[NativeToolGroup.WEB, NativeToolGroup.SHELL],
-                    approval_policy="on-request",
-                    hooks=merge_hooks(
-                        create_permission_hooks([], [cwd]), context.hooks
-                    ),
+                return Claude(
+                    model=claude_model,
                     system_prompt=(
                         "Independently review the persisted resolver change."
                     ),
+                    native_tools=[NativeToolGroup.READ, NativeToolGroup.SHELL],
                     cwd=cwd,
-                    sandbox="read-only",
-                    containment="outer" if contained_actors else "none",
-                    executable=actor_cli(
+                    add_dirs=[cwd],
+                    environment=reviewer_environment_for,
+                    # A reviewer is read-only by design, so its lease is
+                    # the worker's with nothing writable rather than a
+                    # table of its own: built from one call, the two cannot
+                    # come to disagree about which checkouts exist.
+                    cli_path=actor_cli(
                         cwd,
                         reviewing,
                         "reviewer",
-                        reviewer_environment,
+                        reviewer_environment_for,
                         read_only=True,
-                    )
-                    or Path(actor_program),
-                    environment=reviewer_environment,
+                    ),
+                    hooks=merge_hooks(
+                        create_permission_hooks([], [cwd]), context.hooks
+                    ),
                 )
+            return Codex(
+                model=codex_model,
+                native_tools=[NativeToolGroup.WEB, NativeToolGroup.SHELL],
+                approval_policy="on-request",
+                hooks=merge_hooks(create_permission_hooks([], [cwd]), context.hooks),
+                system_prompt=("Independently review the persisted resolver change."),
+                cwd=cwd,
+                sandbox="read-only",
+                containment="outer" if contained_actors else "none",
+                executable=actor_cli(
+                    cwd,
+                    reviewing,
+                    "reviewer",
+                    reviewer_environment,
+                    read_only=True,
+                )
+                or Path(actor_program),
+                environment=reviewer_environment,
             )
 
         mailbox = QuestionMailbox(state_root / resolved_run_id)

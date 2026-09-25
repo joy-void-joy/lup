@@ -3,94 +3,85 @@
 Two kinds of name are exported here, and the distinction is why the second kind
 is reached the way it is.
 
-The vocabulary -- sessions, turns, requests, results, and which vendor claims a
-model id -- is provider-neutral and free to import: naming it costs
-`lup.sessions` and the routing table at the vendor edge, three modules more
-and no measurable time, with neither SDK among them. The **constructors** are
-not, because each one reaches an adapter, and an adapter reaches the tool
-ecosystem its provider speaks. Imported eagerly here, `import
-lup` pulls 811 modules and roughly 1.3 seconds, including an ASGI server and a
-CLI framework, on behalf of a caller who may have wanted a type annotation.
+The vocabulary -- sessions, turns, results, and the protocols code naming no
+provider holds -- is provider-neutral and free to import: naming it costs
+`lup.sessions`, with neither SDK among it. The **agents** are not, because
+each one is declared in terms of the tools its provider speaks, and those
+reach an MCP server and the rest of that ecosystem. Imported eagerly here,
+`import lup` would pull several hundred modules on behalf of a caller who may
+have wanted a type annotation.
 
-So `create_claude` and `create_codex` resolve on first access instead. A reader
-still writes `from lup import create_claude` and a checker still sees the real
-signature -- the `TYPE_CHECKING` block below is what it reads -- while a module
-that only annotates against `Client` pays for none of it.
+So `Claude` and `Codex` resolve on first access instead. A reader still
+writes `from lup import Claude` and a checker still sees the real class --
+the `TYPE_CHECKING` block below is what it reads -- while a module that only
+annotates against `Agent` pays for none of it.
+
+This module is a re-export and nothing else: every name here is defined in
+the module a reader could import it from, and nothing inside the library
+imports from here.
 
 That laziness is also what keeps the harder promise: neither provider SDK is
-imported by `import lup`, nor by naming a constructor, but only by opening a
+imported by `import lup`, nor by naming an agent, but only by opening a
 session with one.
 """
 
-from collections.abc import Callable
 from importlib import import_module
 from typing import TYPE_CHECKING
 
-from lup.sessions.client import Client
-from lup.types import CustomModel
-from lup.tools.native import NativeToolGroup as NativeToolGroup
 from lup.sessions.events import (
-    SessionHandle,
     SessionId,
-    StartedTurn,
+    SessionSummary,
     TurnId,
     TurnInput,
-    TurnRequest,
+    TurnMessage,
     TurnResult,
-    turn_request,
 )
+from lup.sessions.surface import Agent, Conversation, Turn
+from lup.tools.native import NativeToolGroup
+from lup.types import CustomModel
 
 if TYPE_CHECKING:
     from lup.providers.claude import Claude
     from lup.providers.codex import Codex
-    from lup.providers.claude.runtime import create_claude
-    from lup.providers.codex.runtime import create_codex
 
 # Where each deferred name actually lives, so the resolution below is a lookup
 # rather than a branch per provider -- a third adapter is one row.
-# lup: ignore[library-default] — the constructors this library authors and the
+# lup: ignore[library-default] — the agents this library authors and the
 # modules it defines them in, so the table is what lup ships rather than a
 # choice made for an adopter: a provider arrives here as an adapter, and a row
-# an adopter replaced would point `from lup import create_claude` at something
-# lup never wrote.
-CONSTRUCTORS = {
+# an adopter replaced would point `from lup import Claude` at something lup
+# never wrote.
+AGENTS = {
     "Claude": "lup.providers.claude",
     "Codex": "lup.providers.codex",
-    "create_claude": "lup.providers.claude.runtime",
-    "create_codex": "lup.providers.codex.runtime",
 }
 
 
-def __getattr__(name: str) -> "type[Claude] | type[Codex] | Callable[..., Client]":
-    """Resolve a constructor on first access, and nothing else.
+def __getattr__(name: str) -> "type[Claude] | type[Codex]":
+    """Resolve an agent on first access, and nothing else.
 
     PEP 562's module hook, used for exactly the names above. Anything else
     raises the ``AttributeError`` Python would have raised anyway, in the same
     words, so a typo at the front door reads as a typo rather than as an import
     failure somewhere inside an adapter.
-
-    The return type is the one thing every constructor here agrees on. Each
-    takes its own provider's options, which is why the checker reads the
-    signatures from the ``TYPE_CHECKING`` block above rather than from this.
     """
-    if name not in CONSTRUCTORS:
+    if name not in AGENTS:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    return getattr(import_module(CONSTRUCTORS[name]), name)
+    return getattr(import_module(AGENTS[name]), name)
 
 
 __all__ = [  # lup: ignore[all-export] -- the package-root public API
+    "Agent",
     "Claude",
-    "Client",
     "Codex",
+    "Conversation",
     "CustomModel",
-    "SessionHandle",
+    "NativeToolGroup",
     "SessionId",
-    "StartedTurn",
+    "SessionSummary",
+    "Turn",
     "TurnId",
     "TurnInput",
-    "TurnRequest",
+    "TurnMessage",
     "TurnResult",
-    "create_claude",
-    "create_codex",
-    "turn_request",
 ]

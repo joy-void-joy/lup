@@ -5,7 +5,6 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from lup.providers.claude import Claude, ClaudeCompatibleEndpoint
-from lup.providers.claude.runtime import create_claude
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.providers.config import ConfigTransform, ProfileResolver, ProfileSelector
 
@@ -72,7 +71,7 @@ def claude_profile_selector(
     registry: ClaudeProfileRegistry,
 ) -> ProfileSelector[Claude]:
     """The surface a consumer holds over Claude account selection."""
-    return ProfileSelector(ClaudeProfileResolver(registry), create_claude)
+    return ProfileSelector(ClaudeProfileResolver(registry))
 
 
 class ClaudeCompatibilityTransform(ConfigTransform[Claude]):

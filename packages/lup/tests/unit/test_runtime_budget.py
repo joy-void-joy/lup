@@ -15,11 +15,14 @@ from lup.sessions.events import (
     SessionId,
     TurnId,
     TurnIdentifiers,
-    turn_request,
 )
 from lup.types import Usage
 from tests.unit.test_capability_runtime import RecordingBinder
-from tests.unit.doubles import IgnoredInterrupt, SilentStream
+from tests.unit.doubles import (
+    IgnoredInterrupt,
+    SilentStream,
+    request_for,
+)
 
 # One dollar a turn, so a ceiling reads as a turn count in these tests.
 DOLLAR_A_TURN = 1.0
@@ -89,7 +92,7 @@ async def test_a_completed_turn_is_charged_once_however_often_it_is_awaited(
         config(tmp_path / "spend.json", maximum_usd=10), recorder, [0.0]
     )
 
-    handle = await session.start(turn_request("work"))
+    handle = await session.start(request_for("work"))
     await handle.turn.result()
     await handle.turn.result()
 
@@ -119,7 +122,7 @@ async def test_an_exhausted_period_holds_the_next_turn_until_it_rolls(
     settings = config(tmp_path / "spend.json", maximum_usd=1)
     session = budgeted_session(settings, recorder, clock)
 
-    first = await session.start(turn_request("work"))
+    first = await session.start(request_for("work"))
     await first.turn.result()
 
     # The period is spent. Starting again sleeps, and the sleeper advances the
@@ -129,7 +132,7 @@ async def test_an_exhausted_period_holds_the_next_turn_until_it_rolls(
         clock[0] += seconds
 
     session.sleeper = rolling
-    second = await session.start(turn_request("work"))
+    second = await session.start(request_for("work"))
     await second.turn.result()
 
     assert recorder.slept == [3601.0]

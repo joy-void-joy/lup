@@ -51,28 +51,29 @@ from lup.resolver.models import (
 )
 from lup.resolver.run import ResolveRun, ResolverInvariantError
 from lup.resolver.tools import WAIT_CONTRACT
-from lup.sessions.client import Client
-from lup.sessions.events import TurnInput, TurnRequest, TurnResult, turn_request
-from lup.sessions.middleware import CorrectionConfig, decorated_session_factory
+from lup.sessions.events import TurnResult
+from lup.sessions.layers import SessionLayers
+from lup.sessions.middleware import CorrectionConfig
+from lup.sessions.surface import Agent
 
-type WorkerFactoryRecipe = Callable[[WorkerContext], Client]
-type ReviewerFactoryRecipe = Callable[[ReviewerContext], Client]
+type WorkerFactoryRecipe = Callable[[WorkerContext], Agent]
+type ReviewerFactoryRecipe = Callable[[ReviewerContext], Agent]
 
 
 def corrective[T](
-    recipe: Callable[[T], Client],
-) -> Callable[[T], Client]:
+    recipe: Callable[[T], Agent],
+    layers: SessionLayers = SessionLayers(correction=CorrectionConfig(cycles=2)),
+) -> Callable[[T], Agent]:
     """Give each opened session corrective structured-output reprompts.
 
     Every resolver turn ends in a typed submission; a model that answers in
     prose instead of calling the submission tool would otherwise fail the
-    whole run on its first miss.
+    whole run on its first miss. Laid over whatever the recipe's agent
+    already declares, so a worker keeps its own layers and gains these.
     """
 
-    def factory(argument: T) -> Client:
-        return decorated_session_factory(
-            recipe(argument), correction=CorrectionConfig(cycles=2)
-        )
+    def factory(argument: T) -> Agent:
+        return recipe(argument).layered(layers)
 
     return factory
 
@@ -281,7 +282,7 @@ class TurnRunner:
         withdrawal it is indistinguishable from.
         """
 
-        def recipe(opened: ActorRef, hooks: LupHooksConfig) -> Client:
+        def recipe(opened: ActorRef, hooks: LupHooksConfig) -> Agent:
             """Configure this worker's session around the mail that reaches it."""
             return self.worker_factory(
                 WorkerContext(
@@ -321,7 +322,7 @@ class TurnRunner:
         )
 
     async def reviewer_round[T: BaseModel](
-        self, actor: ActorRef, worktree: Path, request: TurnRequest[T]
+        self, actor: ActorRef, worktree: Path, prompt: str, output: type[T]
     ) -> TurnResult[T]:
         """One turn of a reading actor, announced against its own address.
 
@@ -330,7 +331,7 @@ class TurnRunner:
         the population record keeps one start for the round either way.
         """
         return await self.actors.round(
-            actor, request, self.reviewer_recipe(worktree), task=actor.id
+            actor, prompt, output, self.reviewer_recipe(worktree), task=actor.id
         )
 
     def worker_invocation(self) -> str:
@@ -392,7 +393,8 @@ class TurnRunner:
                 )
         result = await self.actors.round(
             ActorRef(kind="worker", id=assignment.concern.id, round=round_number),
-            turn_request(TurnInput(text=prompt), WorkerReport),
+            prompt,
+            WorkerReport,
             self.worker_recipe(
                 assignment.lease.root, self.granted_for(assignment.concern)
             ),
@@ -450,9 +452,7 @@ class TurnRunner:
                 f"{span}{answered}"
             )
         reviewer = ActorRef(kind="reviewer", id=concern.id, round=round_number)
-        result = await self.reviewer_round(
-            reviewer, worktree, turn_request(TurnInput(text=prompt), ReviewReport)
-        )
+        result = await self.reviewer_round(reviewer, worktree, prompt, ReviewReport)
         if result.output.concern_id != concern.id:
             raise ResolverInvariantError("reviewer returned a foreign concern id")
         return await self.declared_labels_only(
@@ -534,9 +534,7 @@ class TurnRunner:
             + format_carried(plan.carried)
             + f"\n\nRecorded decisions for this join:\n{decisions}"
         )
-        result = await self.merger_round(
-            lease, turn_request(TurnInput(text=prompt), JoinReport)
-        )
+        result = await self.merger_round(lease, prompt, JoinReport)
         return result.output
 
     async def merge_turn(
@@ -593,9 +591,7 @@ class TurnRunner:
             + f"Conflicted paths:\n{format_paths(conflicted)}\n\n"
             + f"Unaccounted content:\n{format_candidates(owed)}"
         )
-        result = await self.merger_round(
-            lease, turn_request(TurnInput(text=prompt), MergeReport)
-        )
+        result = await self.merger_round(lease, prompt, MergeReport)
         return result.output
 
     async def merge_retry(
@@ -604,19 +600,15 @@ class TurnRunner:
         """Name what the last report left unmet, on the session that wrote it."""
         result = await self.merger_round(
             lease,
-            turn_request(
-                TurnInput(
-                    text=(
-                        "Your merge report did not account for everything this "
-                        "join changed:\n- " + "\n- ".join(problems) + "\n\nFix "
-                        "the tree where it is wrong and resubmit a report that "
-                        "accounts for each item. Declaring a rewrite or a "
-                        "deliberate supersession with a reason is a complete "
-                        "answer; leaving one unmentioned is not."
-                    )
-                ),
-                MergeReport,
+            (
+                "Your merge report did not account for everything this "
+                "join changed:\n- " + "\n- ".join(problems) + "\n\nFix "
+                "the tree where it is wrong and resubmit a report that "
+                "accounts for each item. Declaring a rewrite or a "
+                "deliberate supersession with a reason is a complete "
+                "answer; leaving one unmentioned is not."
             ),
+            MergeReport,
         )
         return result.output
 
@@ -625,7 +617,7 @@ class TurnRunner:
         return self.worker_recipe(lease.root, self.merge_allowances())
 
     async def merger_round[T: BaseModel](
-        self, lease: WritableRootLease, request: TurnRequest[T]
+        self, lease: WritableRootLease, prompt: str, output: type[T]
     ) -> TurnResult[T]:
         """One turn of that conversation, announced against the merger's address.
 
@@ -636,7 +628,8 @@ class TurnRunner:
         """
         return await self.actors.round(
             ActorRef(kind="merger", id=lease.concern_id),
-            request,
+            prompt,
+            output,
             self.merger_recipe(lease),
             task=lease.concern_id,
         )
@@ -797,9 +790,7 @@ class TurnRunner:
             "acceptance criteria. Resubmit the same verdict with criteria_met "
             "drawn only from the declared ids: " + ", ".join(declared)
         )
-        result = await self.reviewer_round(
-            reviewer, worktree, turn_request(TurnInput(text=correction), ReviewReport)
-        )
+        result = await self.reviewer_round(reviewer, worktree, correction, ReviewReport)
         if result.output.concern_id != concern.id:
             raise ResolverInvariantError("reviewer returned a foreign concern id")
         return result.output

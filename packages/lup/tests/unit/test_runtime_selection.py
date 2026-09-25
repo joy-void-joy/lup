@@ -45,7 +45,6 @@ from lup.providers.codex.selection import (
 )
 from lup.policy.hooks import LupHooksConfig
 from lup.tools.mcp import create_mcp_server
-from lup.sessions.client import Client
 from lup.providers.confinement import SessionContainment
 from lup.providers.selection import (
     Runtime,
@@ -99,17 +98,8 @@ def test_every_runtime_spells_every_degree_of_autonomy(degree: str) -> None:
     assert degree in CODEX_AUTONOMY
 
 
-def test_claude_renders_the_whole_request(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    rendered: list[Claude] = []
-
-    def record(config: Claude) -> Client:
-        rendered.append(config)
-        return Client(lambda resume=None: None)  # pyright: ignore[reportArgumentType]
-
-    monkeypatch.setattr("lup.providers.claude.selection.create_claude", record)
-    CLAUDE_RUNTIME.session_factory(
+def test_claude_renders_the_whole_request(tmp_path: Path) -> None:
+    config = CLAUDE_RUNTIME.session_factory(
         SessionRequest(
             model=CustomModel(id="a-model"),
             instructions="be brief",
@@ -123,7 +113,7 @@ def test_claude_renders_the_whole_request(
         )
     )
 
-    config = rendered[0]
+    assert isinstance(config, Claude)
     assert config.model_id() == "a-model"
     assert config.system_prompt == "be brief"
     assert config.cwd == tmp_path
@@ -135,17 +125,8 @@ def test_claude_renders_the_whole_request(
     assert config.hooks is not None
 
 
-def test_codex_renders_what_it_can_spell(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    rendered: list[Codex] = []
-
-    def record(config: Codex) -> Client:
-        rendered.append(config)
-        return Client(lambda resume=None: None)  # pyright: ignore[reportArgumentType]
-
-    monkeypatch.setattr("lup.providers.codex.selection.create_codex", record)
-    CODEX_RUNTIME.session_factory(
+def test_codex_renders_what_it_can_spell(tmp_path: Path) -> None:
+    config = CODEX_RUNTIME.session_factory(
         SessionRequest(
             model=CustomModel(id="a-model"),
             instructions="be brief",
@@ -156,7 +137,7 @@ def test_codex_renders_what_it_can_spell(
         )
     )
 
-    config = rendered[0]
+    assert isinstance(config, Codex)
     assert config.model_id() == "a-model"
     assert config.system_prompt == "be brief"
     assert config.sandbox == "workspace-write"

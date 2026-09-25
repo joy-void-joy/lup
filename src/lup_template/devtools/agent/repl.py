@@ -10,15 +10,13 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from rich.console import Console
 
-    from lup.sessions.capabilities import SessionEngine
-    from lup.sessions.client import Client
     from lup.sessions.events import TurnResult
+    from lup.sessions.surface import Agent, Conversation
 
 import typer
 
 from lup.devtools.clipboard import ClipboardImage, clipboard_image, clipboard_text
 from lup.observability.display import format_duration
-from lup.sessions.events import turn_request
 from lup_template.agent.config import settings
 from lup_template.devtools.agent.serve import collect_registry_tools
 
@@ -78,7 +76,7 @@ class Interrupted(Exception):
 
 
 async def send_interruptible(
-    conv: "SessionEngine",
+    conv: "Conversation",
     prompt: str,
     console: "Console",
 ) -> "TurnResult[None]":
@@ -90,18 +88,19 @@ async def send_interruptible(
     loop = asyncio.get_running_loop()
     interrupt_count = 0
 
-    handle = await conv.start(turn_request(prompt))
-    send_task = asyncio.create_task(handle.turn.result())
+    turn = conv.ask(prompt)
+
+    async def answered() -> "TurnResult[None]":
+        return await turn
+
+    send_task = asyncio.create_task(answered())
 
     def on_sigint() -> None:
         nonlocal interrupt_count
         interrupt_count += 1
         if interrupt_count == 1:
             console.print("\n  [dim]interrupting...[/dim]")
-            if handle.interrupt is not None:
-                asyncio.ensure_future(handle.interrupt.interrupt())
-            else:
-                send_task.cancel()
+            asyncio.ensure_future(turn.interrupt())
         else:
             send_task.cancel()
 
@@ -119,13 +118,13 @@ def build_repl_factory(
     *,
     no_tools: bool,
     no_prompt: bool,
-) -> "Client":
-    """Build the configured provider-neutral factory for a REPL session.
+) -> "Agent":
+    """Build the configured provider-neutral agent for a REPL session.
 
     The overrides are assembly knobs on the neutral options
     (``build_session_options``) — realized before translation, on every
-    engine alike, never by patching a built client. Session-scoped
-    resources (sandbox cleanup) live inside ``client.session()``.
+    engine alike, never by patching a built agent. Session-scoped
+    resources (sandbox cleanup) are layered onto the agent's sessions.
     """
     from lup_template.agent.core import build_session_factory
 
@@ -184,7 +183,7 @@ async def exec_once(
     factory = build_repl_factory(model, no_tools=no_tools, no_prompt=no_prompt)
     async with factory.open() as opened:
         try:
-            response = await send_interruptible(opened.session, prompt, console)
+            response = await send_interruptible(opened, prompt, console)
         except Interrupted:
             console.print("  [dim]interrupted[/dim]\n")
             return
@@ -354,7 +353,7 @@ async def repl(
                         prompt_text = user_input
                     try:
                         response = await send_interruptible(
-                            opened.session,
+                            opened,
                             prompt_text,
                             console,
                         )

@@ -18,17 +18,15 @@ import asyncio
 import fcntl
 import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from lup.sessions.capabilities import SessionEngine, TurnEngine
-from lup.sessions.client import Client
+from lup.sessions.capabilities import SessionEngine, SessionWrapper, TurnEngine
 from lup.sessions.events import (
-    SessionHandle,
     SessionId,
     StartedTurn,
     TurnRequest,
@@ -230,30 +228,38 @@ class FinancialBudgetSession(SessionEngine):
         )
 
 
-# The config is one decorator's settings, and no one of them is the subject:
-# what this does is compose a config, a sink and a clock into a factory, which
-# belongs to none of the three alone.
-def financial_budget_session_factory(
-    inner: Client,
-    config: FinancialBudgetConfig,
-    sink: BudgetSink,
-    *,
-    sleeper: BudgetSleeper = asyncio.sleep,
-    now: EpochProvider = utc_epoch,
-) -> Client:
-    """Apply one durable period allowance across every session opened."""
-    store = FinancialBudgetStore(config)
+class FinancialBudgetWrapper(SessionWrapper):
+    """Apply one durable period allowance across every session it wraps.
+
+    One store for every session wrapped by the same wrapper, so the ceiling
+    is the account's across them rather than each session's own.
+    """
+
+    def __init__(
+        self,
+        config: FinancialBudgetConfig,
+        sink: BudgetSink,
+        *,
+        sleeper: BudgetSleeper = asyncio.sleep,
+        now: EpochProvider = utc_epoch,
+    ) -> None:
+        self.store = FinancialBudgetStore(config)
+        self.sink = sink
+        self.sleeper = sleeper
+        self.now = now
+
+    def around(
+        self,
+        opened: AbstractAsyncContextManager[SessionEngine],
+        resume: SessionId | None,
+    ) -> AbstractAsyncContextManager[SessionEngine]:
+        return self.budgeted(opened)
 
     @asynccontextmanager
-    async def open_budgeted(
-        resume: SessionId | None = None,
-    ) -> AsyncGenerator[SessionHandle]:
-        async with inner.open(resume) as handle:
-            yield SessionHandle(
-                session=FinancialBudgetSession(
-                    handle.session, store, sink, sleeper, now
-                ),
-                fork=handle.fork,
+    async def budgeted(
+        self, opened: AbstractAsyncContextManager[SessionEngine]
+    ) -> AsyncGenerator[SessionEngine]:
+        async with opened as inner:
+            yield FinancialBudgetSession(
+                inner, self.store, self.sink, self.sleeper, self.now
             )
-
-    return Client(open_budgeted)

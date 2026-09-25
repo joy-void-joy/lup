@@ -47,9 +47,7 @@ from lup.providers.codex.model_choice import codex_model_choice
 from lup.providers.codex.models import CodexEffort
 from lup.providers.codex.native_tools import CodexNativeTools
 from lup.providers.codex import CODEX_PROGRAM, Codex, CodexMcpServerConfig
-from lup.providers.codex.runtime import create_codex
 from lup.tools.mcp import LupMcpServerConfig, McpServerEntry, RawStdioServerConfig
-from lup.sessions.client import Client
 from lup.sessions.errors import UnsupportedCapability
 from lup.providers.confinement import SessionContainment
 from lup.providers.selection import (
@@ -270,11 +268,6 @@ def codex_config(request: SessionRequest) -> Codex:
     )
 
 
-def codex_session(request: SessionRequest) -> Client:
-    """Render a portable request into a configured Codex session factory."""
-    return create_codex(codex_config(request))
-
-
 def codex_workspace_home(environment: EnvVars, workspace: Path) -> EnvVars:
     """Give one workspace's Codex sessions a home of their own.
 
@@ -295,7 +288,7 @@ def codex_workspace_home(environment: EnvVars, workspace: Path) -> EnvVars:
 CODEX_RUNTIME = Runtime(
     name="Codex",
     login=CODEX_LOGIN,
-    open=codex_session,
+    open=codex_config,
     workspace_home=codex_workspace_home,
 )
 """Codex, as the single value an application assigns to select it."""

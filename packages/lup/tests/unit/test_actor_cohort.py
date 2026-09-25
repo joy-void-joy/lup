@@ -20,18 +20,16 @@ from lup.coordination.refs import ActorRef
 from lup.coordination.roster import Delivery, Roster
 from lup.policy.hooks import LupHooksConfig
 from lup.sessions.capabilities import SessionEngine, TurnEngine
-from lup.sessions.client import Client
+from lup.sessions.surface import Agent
 from lup.sessions.events import (
     StartedTurn,
-    TurnInput,
     TurnRequest,
     TurnResult,
-    turn_request,
 )
 from tests.unit.doubles import (
     IgnoredInterrupt,
     SilentStream,
-    session_factory,
+    agent_over,
     turn_result,
 )
 
@@ -103,9 +101,9 @@ def recipe_for(session: HeldSession) -> ActorRecipe:
     nothing anyone sends it.
     """
 
-    def recipe(_actor: ActorRef, hooks: LupHooksConfig) -> Client:
+    def recipe(_actor: ActorRef, hooks: LupHooksConfig) -> Agent:
         session.hooks = hooks
-        return session_factory(session)
+        return agent_over(session)
 
     return recipe
 
@@ -349,9 +347,7 @@ async def test_a_started_agent_leaves_its_caller_free_to_steer_it(
     working = asyncio.Event()
     session = HeldSession(summary="attacked", hold=working)
 
-    cohort.start(
-        actor, turn_request(TurnInput(text="attack it"), Finding), recipe_for(session)
-    )
+    cohort.start(actor, "attack it", Finding, recipe_for(session))
 
     assert [member.running for member in cohort.live()] == [True]
     cohort.say(actor, "that branch is closed", redirect=True)
@@ -371,9 +367,7 @@ async def test_an_asked_agent_records_what_it_found(tmp_path: Path) -> None:
     actor = cohort.actor("analyst")
     session = HeldSession(summary="the bound holds")
 
-    result = await cohort.ask(
-        actor, turn_request(TurnInput(text="check it"), Finding), recipe_for(session)
-    )
+    result = await cohort.ask(actor, "check it", Finding, recipe_for(session))
 
     assert result.output is not None and result.output.summary == "the bound holds"
     assert [member.summary for member in cohort.live()] == ["the bound holds"]
@@ -392,7 +386,8 @@ async def test_a_failed_agent_records_why_rather_than_vanishing(
     with pytest.raises(RuntimeError):
         await cohort.ask(
             actor,
-            turn_request(TurnInput(text="formalize it"), Finding),
+            "formalize it",
+            Finding,
             recipe_for(session),
         )
 
@@ -433,7 +428,8 @@ async def test_a_round_advances_an_agent_instead_of_finishing_it(
 
     await cohort.round(
         cohort.actor("worker", "a-concern"),
-        turn_request(TurnInput(text="resolve it"), Finding),
+        "resolve it",
+        Finding,
         recipe_for(session),
     )
 
@@ -441,7 +437,8 @@ async def test_a_round_advances_an_agent_instead_of_finishing_it(
 
     await cohort.round(
         cohort.actor("worker", "a-concern", round=2),
-        turn_request(TurnInput(text="revise it"), Finding),
+        "revise it",
+        Finding,
         recipe_for(session),
     )
 
@@ -473,9 +470,7 @@ async def test_a_round_records_one_start_however_often_it_is_announced(
     [detached] = [
         member for member in cohort.roster.live() if member.actor.id == actor.id
     ]
-    await cohort.round(
-        actor, turn_request(TurnInput(text="resolve it"), Finding), recipe_for(session)
-    )
+    await cohort.round(actor, "resolve it", Finding, recipe_for(session))
 
     started = [member for member in cohort.roster.live() if member.actor.id == actor.id]
     assert len(started) == 1
@@ -503,7 +498,8 @@ async def test_started_work_is_a_pipeline_rather_than_a_single_turn(
         for number in (1, 2):
             await cohort.round(
                 opened.model_copy(update={"round": number}),
-                turn_request(TurnInput(text="work"), Finding),
+                "work",
+                Finding,
                 recipe_for(session),
             )
             rounds.append(number)
@@ -640,9 +636,7 @@ async def test_a_suspension_out_of_a_turn_leaves_its_agent_standing(
     actor = cohort.actor("worker", "faulted")
 
     with pytest.raises(Faulted):
-        await cohort.round(
-            actor, turn_request(TurnInput(text="go"), Finding), recipe_for(session)
-        )
+        await cohort.round(actor, "go", Finding, recipe_for(session))
 
     standing = {member.actor.id: member for member in cohort.live()}
     assert standing["faulted"].running is True, "the host said nothing about it"

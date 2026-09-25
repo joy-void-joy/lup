@@ -3,8 +3,7 @@
 import asyncio
 import hashlib
 import logging
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import timedelta
 from pathlib import Path
 
@@ -30,10 +29,7 @@ from lup.sessions.errors import (
     TurnContinuationError,
     ValidationAttempt,
 )
-from lup.sessions.client import Client
 from lup.sessions.events import (
-    SessionHandle,
-    SessionId,
     AnyTurnBlock,
     StartedTurn,
     TurnIdentifiers,
@@ -673,49 +669,6 @@ class SerializedSession(SessionEngine):
             interrupt=handle.interrupt,
             steer=handle.steer,
         )
-
-
-# Each config is one decorator's own settings, and no one of them is the
-# subject: what this does is compose them into a session, which belongs to
-# neither the configs nor the factory alone.
-def decorated_session_factory(
-    inner: Client,
-    *,
-    timeout: TimeoutConfig | None = None,
-    budget: BudgetConfig | None = None,
-    recovery: RecoveryConfig | None = None,
-    correction: CorrectionConfig | None = None,
-    continuation: CorrectionConfig | None = None,
-    persistence: PersistenceConfig | None = None,
-    tracing: TracingConfig | None = None,
-    usage: UsageConfig | None = None,
-    display: DisplayConfig | None = None,
-    serialized: bool = False,
-) -> Client:
-    """Apply configured whole-turn decorators to every opened session."""
-
-    @asynccontextmanager
-    async def open_decorated(
-        resume: SessionId | None = None,
-    ) -> AsyncGenerator[SessionHandle]:
-        async with inner.open(resume) as handle:
-            session: SessionEngine = DecoratingSession(
-                handle.session,
-                timeout=timeout,
-                budget=budget,
-                recovery=recovery,
-                correction=correction,
-                continuation=continuation,
-                persistence=persistence,
-                tracing=tracing,
-                usage=usage,
-                display=display,
-            )
-            if serialized:
-                session = SerializedSession(session)
-            yield SessionHandle(session=session, fork=handle.fork)
-
-    return Client(open_decorated)
 
 
 def failure_from_result[T: BaseModel | None](

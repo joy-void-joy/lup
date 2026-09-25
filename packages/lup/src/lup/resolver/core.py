@@ -94,7 +94,6 @@ from lup.resolver.turns import (
     WorkerFactoryRecipe,
 )
 from lup.resolver.verification import Verifier
-from lup.sessions.events import TurnInput, turn_request
 
 
 logger = logging.getLogger(__name__)
@@ -543,7 +542,8 @@ class ResolverCore:
             result = await self.turns.reviewer_round(
                 planner,
                 self.config.workspace,
-                turn_request(TurnInput(text=attempt), ConcernInventory),
+                attempt,
+                ConcernInventory,
             )
             referenced = [
                 index

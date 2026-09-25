@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from lup.providers.claude.runtime import create_claude
-from lup.providers.codex.runtime import create_codex
+from lup.providers.claude import Claude
+from lup.providers.codex import Codex
 from lup.sessions.recursion import (
     MAX_RECURSIVE_AGENT_ENV,
     RecursiveAgentAllowance,
@@ -82,12 +82,12 @@ async def test_provider_session_opening_refuses_at_zero(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv(MAX_RECURSIVE_AGENT_ENV, "0")
-    client = (
-        create_claude(model="claude-fable-5")
+    agent = (
+        Claude(model="claude-fable-5")
         if provider == "claude"
-        else create_codex(model="gpt-5.6-sol", cwd=tmp_path)
+        else Codex(model="gpt-5.6-sol", cwd=tmp_path)
     )
 
     with pytest.raises(RecursiveAgentLimitError):
-        async with client.open():
+        async with agent.open():
             pass

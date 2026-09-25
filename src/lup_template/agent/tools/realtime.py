@@ -50,7 +50,8 @@ from lup.orchestration.realtime.models import (
 from lup.orchestration.realtime.scheduler import Scheduler
 from lup.orchestration.background import BackgroundAgent
 from lup.sessions.errors import TurnError
-from lup.sessions.events import TurnResult, turn_request
+from lup.sessions.events import TurnResult
+from lup.sessions.surface import Conversation, Turn
 from lup.observability.trace import TraceLogger
 
 logger = logging.getLogger(__name__)
@@ -426,10 +427,12 @@ def create_observer(
     from lup_template.agent.config import aux_model
     from lup_template.agent.core import build_auxiliary_factory
 
-    def state_to_request(state: ObserverState):
+    def state_to_turn(
+        conversation: Conversation, state: ObserverState
+    ) -> Turn[ObserverSummary]:
         msgs_text = "\n".join(state.messages)
         last_note = notes[-1] if notes else "(none yet)"
-        return turn_request(
+        return conversation.ask(
             f"New messages:\n{msgs_text}\n\nYour last note:\n{last_note}",
             ObserverSummary,
         )
@@ -444,7 +447,7 @@ def create_observer(
         build_auxiliary_factory(
             model=model or aux_model(), system_prompt=OBSERVER_SYSTEM_PROMPT
         ),
-        state_to_request,
+        state_to_turn,
         record,
         report,
     )

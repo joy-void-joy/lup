@@ -1,19 +1,25 @@
 """Invoke served delegated roles through each real application composition."""
 
 from pathlib import Path
-from types import SimpleNamespace
+from datetime import timedelta
 from typing import Literal
 
 import pytest
-from pydantic import TypeAdapter
+from pydantic import BaseModel, TypeAdapter
 
 from lup.providers.claude import Claude
 from lup.providers.claude.runtime import build_claude_options
 from lup.providers.codex import Codex
 from lup.orchestration.reflection import ReviewResult, ReviewVerdict
-from lup.sessions.client import Client
-from lup.sessions.events import TurnTextBlock
-from lup.types import SubagentSpec
+from lup.sessions.events import (
+    SessionId,
+    TurnId,
+    TurnIdentifiers,
+    TurnInput,
+    TurnResult,
+    TurnTextBlock,
+)
+from lup.types import SubagentSpec, Usage
 from lup.workspace.context import SessionContext
 from lup_template.agent import core
 from lup_template.agent.config import Settings, settings
@@ -21,7 +27,6 @@ from lup_template.agent.subagents import get_subagent_specs
 from lup_template.agent.tools import reflect
 from lup_template.devtools.agent.inspect_agent import InspectPayload, run_inspect
 from lup_template.devtools.agent.serve import collect_tools_by_server
-from tests.unit.test_template_fixes import static_session_factory
 
 
 @pytest.fixture
@@ -30,12 +35,26 @@ def configured(
 ) -> list[Claude | Codex]:
     captured: list[Claude | Codex] = []
 
-    def capture(config: Claude | Codex) -> Client:
-        captured.append(config)
-        return static_session_factory([TurnTextBlock(text="verified findings")])
+    async def answer(
+        agent: Claude | Codex,
+        prompt: str | TurnInput,
+        output: type[BaseModel] | None = None,
+    ) -> TurnResult[None]:
+        """Answer a one-shot ask without a session, keeping who was asked."""
+        captured.append(agent)
+        return TurnResult[None](
+            output=None,
+            messages=[],
+            blocks=[TurnTextBlock(text="verified findings")],
+            usage=Usage(),
+            duration=timedelta(),
+            identifiers=TurnIdentifiers(
+                session=SessionId(value="delegated"), turn=TurnId(value="once")
+            ),
+        )
 
-    monkeypatch.setattr(core, "create_claude", capture)
-    monkeypatch.setattr(core, "create_codex", capture)
+    monkeypatch.setattr(Claude, "ask", answer)
+    monkeypatch.setattr(Codex, "ask", answer)
     for name in (
         "model",
         "aux_model",
@@ -137,9 +156,10 @@ def test_explicit_engine_without_model_selects_native_strongest(
     expected: str,
 ) -> None:
     monkeypatch.setattr(settings, "agent_sdk", engine)
-    core.provider_factory(model=None, system_prompt="", cwd=tmp_path)
-    assert configured[0].model == "strongest"
-    assert configured[0].model_id() == expected
+    agent = core.provider_factory(model=None, system_prompt="", cwd=tmp_path)
+    assert isinstance(agent, Claude | Codex)
+    assert agent.model == "strongest"
+    assert agent.model_id() == expected
 
 
 @pytest.mark.parametrize(
@@ -158,8 +178,9 @@ def test_unconfigured_model_default_cannot_pin_another_provider(
     monkeypatch.delenv("AGENT_MODEL", raising=False)
     monkeypatch.setattr(settings, "model", DefaultSettings().model)
     monkeypatch.setattr(settings, "agent_sdk", engine)
-    core.provider_factory(model=settings.model, system_prompt="", cwd=tmp_path)
-    assert configured[0].model_id() == expected
+    agent = core.provider_factory(model=settings.model, system_prompt="", cwd=tmp_path)
+    assert isinstance(agent, Claude | Codex)
+    assert agent.model_id() == expected
 
 
 def test_codex_does_not_widen_role_to_session_sandbox(
@@ -168,9 +189,9 @@ def test_codex_does_not_widen_role_to_session_sandbox(
 ) -> None:
     monkeypatch.setattr(settings, "agent_sdk", "codex")
     monkeypatch.setattr(settings, "codex_sandbox", "danger_full_access")
-    core.build_subagent_factory(get_subagent_specs()[0])
-    assert isinstance(configured[0], Codex)
-    assert configured[0].sandbox == "read-only"
+    agent = core.build_subagent_factory(get_subagent_specs()[0])
+    assert isinstance(agent, Codex)
+    assert agent.sandbox == "read-only"
 
 
 def test_model_override_routes_when_no_engine_is_explicit(
@@ -180,8 +201,8 @@ def test_model_override_routes_when_no_engine_is_explicit(
 ) -> None:
     monkeypatch.setattr(settings, "agent_sdk", None)
     monkeypatch.setattr(settings, "model", "claude-opus-5")
-    core.provider_factory(model="gpt-6-astra", system_prompt="", cwd=tmp_path)
-    assert isinstance(configured[0], Codex)
+    agent = core.provider_factory(model="gpt-6-astra", system_prompt="", cwd=tmp_path)
+    assert isinstance(agent, Codex)
 
 
 def test_codex_explicit_role_turn_cap_is_not_ignored(
@@ -194,7 +215,6 @@ def test_codex_explicit_role_turn_cap_is_not_ignored(
     )
     with pytest.raises(ValueError, match="max_turns"):
         core.build_subagent_factory(spec)
-    assert configured == []
 
 
 @pytest.mark.parametrize("engine", ["claude", "codex"])
@@ -205,15 +225,30 @@ async def test_reviewer_compiles_on_both_engines(
 ) -> None:
     monkeypatch.setattr(settings, "agent_sdk", engine)
 
-    async def answered(
-        _self: Client, prompt: str, output_type: type[ReviewResult]
-    ) -> SimpleNamespace:
-        assert output_type is ReviewResult
-        return SimpleNamespace(
-            output=ReviewResult(verdict=ReviewVerdict.approve, assessment=prompt)
+    async def reviewed(
+        agent: Claude | Codex,
+        prompt: str | TurnInput,
+        output: type[BaseModel] | None = None,
+    ) -> TurnResult[ReviewResult]:
+        """Review without a session, keeping which agent was asked."""
+        assert output is ReviewResult
+        configured.append(agent)
+        return TurnResult[ReviewResult](
+            output=ReviewResult(
+                verdict=ReviewVerdict.approve,
+                assessment=prompt if isinstance(prompt, str) else prompt.text,
+            ),
+            messages=[],
+            blocks=[],
+            usage=Usage(),
+            duration=timedelta(),
+            identifiers=TurnIdentifiers(
+                session=SessionId(value="reviewed"), turn=TurnId(value="once")
+            ),
         )
 
-    monkeypatch.setattr(Client, "query", answered)
+    monkeypatch.setattr(Claude, "ask", reviewed)
+    monkeypatch.setattr(Codex, "ask", reviewed)
     result = await reflect.run_reviewer(
         reflect.ReflectInput(
             assessment="Evidence checked",

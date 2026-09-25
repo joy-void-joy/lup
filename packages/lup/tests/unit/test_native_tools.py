@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, ValidationError
 
-from lup import create_claude, create_codex
 from lup.providers.claude import Claude
 from lup.providers.claude.runtime import ClaudeSessionOpener, build_claude_options
 from lup.providers.codex.app_server import CodexAppServer, RpcMessage
@@ -217,8 +216,10 @@ def test_selection_preserves_app_tools_under_none_for_both_runtimes() -> None:
     assert claude_config(request).tool_servers["app"] is server
     assert codex_config(request).application_tools["lup_app_app__echo"] is echo
     assert codex_config(request).writable_roots == []
-    assert create_codex(model="gpt-6-astra", tools=[echo])
-    assert create_claude(model="claude-opus-5", tools=[echo])
+    assert (
+        Codex(model="gpt-6-astra", tools=[echo]).applications()["lup_app_echo"] is echo
+    )
+    assert "lup-tools" in Claude(model="claude-opus-5", tools=[echo]).servers()
 
 
 def test_dynamic_tool_names_cannot_shadow_another_explicit_handler() -> None:
@@ -240,7 +241,7 @@ def test_dynamic_tool_names_cannot_shadow_another_explicit_handler() -> None:
     with pytest.raises(ValueError, match="collide"):
         codex_config(request)
     with pytest.raises(ValueError, match="unique"):
-        create_codex(model="gpt-6-astra", tools=[first, first])
+        Codex(model="gpt-6-astra", tools=[first, first])
 
 
 async def test_unknown_inherited_model_is_refused_before_start(

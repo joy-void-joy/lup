@@ -16,17 +16,15 @@ produced.
 import asyncio
 import logging
 from collections.abc import AsyncGenerator, Awaitable, Callable
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import UTC, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from lup.sessions.capabilities import SessionEngine, TurnEngine
+from lup.sessions.capabilities import SessionEngine, SessionWrapper, TurnEngine
 from lup.sessions.errors import QuotaExceededError
-from lup.sessions.client import Client
 from lup.sessions.events import (
-    SessionHandle,
     SessionId,
     StartedTurn,
     TurnRequest,
@@ -163,27 +161,39 @@ class QuotaWaitingSession(SessionEngine):
         )
 
 
-# The config is one decorator's settings, and no one of them is the subject:
-# what this does is compose a config, a sink and a clock into a factory, which
-# belongs to none of the three alone.
-def quota_waiting_session_factory(
-    inner: Client,
-    config: QuotaWaitConfig,
-    sink: QuotaWaitSink,
-    *,
-    sleeper: QuotaSleeper = asyncio.sleep,
-    now: NowProvider = utc_now,
-) -> Client:
-    """Give every session opened by ``inner`` wait-only allowance recovery."""
+class QuotaWaitWrapper(SessionWrapper):
+    """Give every turn of a session wait-only allowance recovery.
+
+    A session wrapper rather than a turn decorator because it restarts the
+    identical request on the identical session, which it can only do holding
+    the session the turn was started on.
+    """
+
+    def __init__(
+        self,
+        config: QuotaWaitConfig,
+        sink: QuotaWaitSink,
+        *,
+        sleeper: QuotaSleeper = asyncio.sleep,
+        now: NowProvider = utc_now,
+    ) -> None:
+        self.config = config
+        self.sink = sink
+        self.sleeper = sleeper
+        self.now = now
+
+    def around(
+        self,
+        opened: AbstractAsyncContextManager[SessionEngine],
+        resume: SessionId | None,
+    ) -> AbstractAsyncContextManager[SessionEngine]:
+        return self.waiting(opened)
 
     @asynccontextmanager
-    async def open_waiting(
-        resume: SessionId | None = None,
-    ) -> AsyncGenerator[SessionHandle]:
-        async with inner.open(resume) as handle:
-            yield SessionHandle(
-                session=QuotaWaitingSession(handle.session, config, sink, sleeper, now),
-                fork=handle.fork,
+    async def waiting(
+        self, opened: AbstractAsyncContextManager[SessionEngine]
+    ) -> AsyncGenerator[SessionEngine]:
+        async with opened as inner:
+            yield QuotaWaitingSession(
+                inner, self.config, self.sink, self.sleeper, self.now
             )
-
-    return Client(open_waiting)

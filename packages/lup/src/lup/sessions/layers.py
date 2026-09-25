@@ -56,8 +56,16 @@ class SessionLayers(
     """What wraps each session around its turn decorators, innermost first."""
 
     def over(self, beneath: Self) -> Self:
-        """These layers laid over ``beneath``: a field set here wins, wrappers add."""
-        chosen = {name: getattr(self, name) for name in self.model_fields_set}
+        """These layers laid over ``beneath``: what is declared here wins, wrappers add.
+
+        A field passed as ``None`` declares nothing, so a caller composing its
+        layers from optional settings does not take away one ``beneath`` has.
+        """
+        chosen = {
+            name: value
+            for name in self.model_fields_set
+            if (value := getattr(self, name)) is not None
+        }
         chosen["wrappers"] = [*beneath.wrappers, *self.wrappers]
         return beneath.model_copy(update=chosen)
 

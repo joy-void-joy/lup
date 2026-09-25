@@ -47,7 +47,7 @@ Examples:
 
         >>> scheduler = Scheduler(on_action=deliver_to_user)
         >>> mailbox = RealtimeMailbox(notes.session / "realtime")
-        >>> async with adapter.session() as conv:
+        >>> async with agent.open() as conv:
         ...     await run_relay_session(
         ...         conv,
         ...         scheduler=scheduler,
@@ -86,8 +86,7 @@ from lup.orchestration.realtime.models import (
 )
 from lup.orchestration.realtime.scheduler import Scheduler, SleepResult
 from lup.orchestration.reflection import ReflectionGate
-from lup.sessions.capabilities import SessionEngine
-from lup.sessions.events import turn_request
+from lup.sessions.surface import Conversation
 from lup.observability.trace import TraceLogger
 
 logger = logging.getLogger(__name__)
@@ -615,7 +614,7 @@ def default_wake_message(result: SleepResult) -> str:
 
 
 async def run_relay_session(
-    conversation: SessionEngine,
+    conversation: Conversation,
     *,
     scheduler: Scheduler,
     mailbox: RealtimeMailbox,
@@ -711,8 +710,7 @@ async def run_relay_session(
         stop_watching = asyncio.Event()
         watcher = asyncio.create_task(watch_mailbox())
         try:
-            handle = await conversation.start(turn_request(message))
-            await handle.turn.result()
+            await conversation.ask(message)
         finally:
             stop_watching.set()
             await watcher

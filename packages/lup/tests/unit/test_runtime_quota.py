@@ -10,7 +10,6 @@ from lup.sessions.events import (
     SessionId,
     TurnId,
     TurnIdentifiers,
-    turn_request,
 )
 from lup.sessions.quota import (
     QuotaWaitConfig,
@@ -18,7 +17,11 @@ from lup.sessions.quota import (
     QuotaWaitingSession,
 )
 from tests.unit.test_capability_runtime import RecordingBinder
-from tests.unit.doubles import IgnoredInterrupt, SilentStream
+from tests.unit.doubles import (
+    IgnoredInterrupt,
+    SilentStream,
+    request_for,
+)
 
 FROZEN_NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -97,7 +100,7 @@ async def test_it_sleeps_to_the_stated_reset_then_reruns_the_same_request() -> N
         QuotaWaitConfig(profile="research", reset_grace_seconds=5),
     )
 
-    handle = await session.start(turn_request("prove the bound"))
+    handle = await session.start(request_for("prove the bound"))
     await handle.turn.result()
 
     assert recorder.slept == [605]
@@ -119,7 +122,7 @@ async def test_a_reset_already_past_still_waits_the_floor() -> None:
         QuotaWaitConfig(minimum_wait_seconds=30),
     )
 
-    handle = await session.start(turn_request("retry me"))
+    handle = await session.start(request_for("retry me"))
     await handle.turn.result()
 
     assert recorder.slept == [30]
@@ -137,7 +140,7 @@ async def test_without_a_stated_reset_it_falls_back_to_its_own_interval() -> Non
         QuotaWaitConfig(unknown_reset_wait_seconds=300),
     )
 
-    handle = await session.start(turn_request("retry me"))
+    handle = await session.start(request_for("retry me"))
     await handle.turn.result()
 
     assert recorder.slept == [300]
@@ -153,7 +156,7 @@ async def test_it_keeps_waiting_across_repeated_exhaustion() -> None:
         QuotaWaitConfig(unknown_reset_wait_seconds=120),
     )
 
-    handle = await session.start(turn_request("retry me"))
+    handle = await session.start(request_for("retry me"))
     await handle.turn.result()
 
     assert recorder.slept == [120, 120]

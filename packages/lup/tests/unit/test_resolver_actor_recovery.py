@@ -13,7 +13,9 @@ from lup.coordination.sessions import ActorRecord, ActorSchemaChangedError, Acto
 from lup.resolver.actor_recovery import retire_actor_binding
 from lup.resolver.journal import ActorBindingRetiredEvent, Journal
 from lup.resolver.state import ResolverStateRepository, StateTransitionError
-from lup.sessions.events import SessionId, TurnInput, turn_request
+from lup.sessions.events import (
+    SessionId,
+)
 
 
 class Report(BaseModel):
@@ -40,10 +42,9 @@ def test_rebinding_preserves_evidence_and_requires_a_fresh_conversation(
     recorded: tuple[ResolverStateRepository, ActorRecord],
 ) -> None:
     repository, previous = recorded
-    request = turn_request(TurnInput(text="audit integration"), Report)
     actor = ActorSession(previous.actor, Mock(), Mock(), previous)
     with pytest.raises(ActorSchemaChangedError, match="rebind-actor"):
-        actor.check_schema(request)
+        actor.check_schema(Report)
     untouched = {
         path: path.read_bytes() for path in repository.root.iterdir() if path.is_file()
     }
@@ -61,7 +62,7 @@ def test_rebinding_preserves_evidence_and_requires_a_fresh_conversation(
     assert len(entries) == 1
     assert isinstance(entries[0].event, ActorBindingRetiredEvent)
     assert entries[0].event.previous == previous
-    ActorSession(rebound.actor, Mock(), Mock(), rebound).check_schema(request)
+    ActorSession(rebound.actor, Mock(), Mock(), rebound).check_schema(Report)
 
 
 def test_rebinding_refuses_a_live_run_without_changing_its_binding(

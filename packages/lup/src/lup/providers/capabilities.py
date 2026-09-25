@@ -1,8 +1,9 @@
 """Versioned evidence-backed runtime capability matrix.
 
-The table describes capabilities supplied in ``SessionHandle`` and
-``StartedTurn`` values. Unsupported capabilities are absent; diagnostics never
-invoke operations and catch an unsupported-operation exception.
+The table describes what each provider's own session and turn classes carry.
+An unsupported capability is absent from the class — ``ClaudeTurn`` has no
+``steer`` — so diagnostics never invoke operations and catch an
+unsupported-operation exception.
 
 It sits beside the adapters rather than in an application because that is
 what it is evidence *about*: each column is one native contract at the

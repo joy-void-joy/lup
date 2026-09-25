@@ -2,8 +2,9 @@
 
 from collections.abc import AsyncGenerator, AsyncIterator
 from datetime import datetime, timedelta
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
+from typing import Self, overload
 
 import pytest
 from pydantic import BaseModel
@@ -12,25 +13,29 @@ from lup_template.agent import prompts
 from lup.orchestration.reflection import ReviewGate
 from lup_template.agent.config import aux_model, engine_for_settings, settings
 from lup_template.agent.core import reflection_submission_gate
+from lup.providers.claude import ClaudeSession
+from lup.sessions.layers import SessionLayers
 from lup.sessions.capabilities import (
+    ConversationRecord,
+    ForkSession,
     EventStream,
     Interrupt,
     SessionEngine,
     TurnEngine,
 )
-from lup.sessions.client import Client
 from lup.sessions.events import (
-    SessionHandle,
     SessionId,
+    SessionSummary,
     TurnBlock,
     TurnEvent,
     StartedTurn,
     TurnId,
     TurnIdentifiers,
+    TurnInput,
+    TurnMessage,
     TurnRequest,
     TurnResult,
     TurnTextBlock,
-    turn_request,
 )
 from lup.observability.trace import TraceLogger
 from lup.types import Usage
@@ -248,14 +253,71 @@ class StaticSession(SessionEngine):
         )
 
 
-def static_session_factory(blocks: list[TurnBlock]) -> Client:
-    @asynccontextmanager
-    async def open_static(
-        _resume: SessionId | None = None,
-    ) -> AsyncGenerator[SessionHandle]:
-        yield SessionHandle(session=StaticSession(blocks))
+class HeldRecord(ConversationRecord):
+    """The record of a conversation nothing reads back."""
 
-    return Client(open_static)
+    def identity(self) -> SessionId:
+        return SessionId(value="decorated")
+
+    async def messages(self) -> list[TurnMessage]:
+        return []
+
+
+class Unforked(ForkSession[ClaudeSession]):
+    def fork(
+        self, at: TurnId | None = None
+    ) -> AbstractAsyncContextManager[ClaudeSession]:
+        raise AssertionError(f"these tests never fork (asked at {at})")
+
+
+class StaticAgent:
+    """An agent whose sessions complete every turn with the same canned blocks.
+
+    Opened the way a real agent opens, through the layers laid over it, so
+    what the template lays on is what these tests observe.
+    """
+
+    def __init__(
+        self, blocks: list[TurnBlock], layers: SessionLayers = SessionLayers()
+    ) -> None:
+        self.blocks = blocks
+        self.layers = layers
+
+    def open(
+        self, resume: SessionId | None = None
+    ) -> AbstractAsyncContextManager[ClaudeSession]:
+        return self.opening(resume)
+
+    @asynccontextmanager
+    async def opening(self, resume: SessionId | None) -> AsyncGenerator[ClaudeSession]:
+        @asynccontextmanager
+        async def native() -> AsyncGenerator[SessionEngine]:
+            yield StaticSession(self.blocks)
+
+        async with self.layers.around(native(), resume) as engine:
+            yield ClaudeSession(engine, HeldRecord(), Unforked(), deltas=True)
+
+    @overload
+    async def ask(self, prompt: str | TurnInput) -> TurnResult[None]: ...
+
+    @overload
+    async def ask[T: BaseModel](
+        self, prompt: str | TurnInput, output: type[T]
+    ) -> TurnResult[T]: ...
+
+    async def ask[T: BaseModel](
+        self, prompt: str | TurnInput, output: type[T] | None = None
+    ) -> TurnResult[T] | TurnResult[None]:
+        async with self.open() as session:
+            if output is None:
+                return await session.ask(prompt)
+            return await session.ask(prompt, output)
+
+    async def sessions(self) -> list[SessionSummary]:
+        return []
+
+    def layered(self, layers: SessionLayers) -> Self:
+        return type(self)(self.blocks, layers.over(self.layers))
 
 
 @pytest.mark.asyncio
@@ -268,10 +330,10 @@ async def test_main_factory_decoration_wires_persistence_display_and_trace(
         trace_log=tmp_path / "logs" / "trace.md",
     )
     trace = TraceLogger(trace_path=notes.trace_log, title="test")
-    inner = static_session_factory([TurnTextBlock(text="decorated turn")])
+    inner = StaticAgent([TurnTextBlock(text="decorated turn")])
 
     decorated = decorate_factory(inner, notes=notes, trace_logger=trace)
-    result = await decorated.query(turn_request("run one turn"))
+    result = await decorated.ask("run one turn")
 
     assert result.blocks == [TurnTextBlock(text="decorated turn")]
     assert len(list((notes.trace_log.parent / "turns").glob("*.json"))) == 1

@@ -1,7 +1,7 @@
 """Nested Agent pattern (template).
 
 A nested agent is an MCP tool that, inside its handler, spins up an
-independent configured session via :meth:`lup.sessions.client.Client.query`, runs it to
+independent configured session via an agent's one-shot ``ask``, runs it to
 completion, and folds the scalar result back into a structured tool response.
 
 It differs from a **native subagent** (defined upfront in ``get_subagent_specs``
@@ -62,7 +62,7 @@ async def critique(params: CritiqueInput) -> CritiqueOutput:
     from lup_template.agent.core import build_auxiliary_factory
 
     factory = build_auxiliary_factory(model=aux_model())
-    result = await factory.query(
+    result = await factory.ask(
         f"Critique the following draft, focusing on {params.focus}. "
         f"Be specific and concise.\n\n{params.draft}"
     )

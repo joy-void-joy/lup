@@ -1,18 +1,28 @@
-# lup: ignore[dict-get, dict-str-object, bare-object]
-# External MCP ToolResponse dictionaries and monkeypatch call records are test fixtures.
+# lup: ignore[dict-get]
+# External MCP ToolResponse dictionaries are test fixtures.
 """Subagent delegation is driven by an explicitly injected factory recipe."""
 
-from types import SimpleNamespace
 from contextlib import AbstractAsyncContextManager
+from datetime import timedelta
+from typing import Self, overload
 
-import pytest
+from pydantic import BaseModel
 
-from lup.tools.mcp import ToolResponse
-from lup.sessions.events import TurnTextBlock
-from lup.sessions.client import Client
-from lup.sessions.events import SessionHandle, SessionId
 from lup.orchestration.subagents import create_run_subagent_tool
-from lup.types import SubagentSpec
+from lup.providers.claude import ClaudeSession
+from lup.sessions.events import (
+    SessionId,
+    SessionSummary,
+    TurnIdentifiers,
+    TurnId,
+    TurnInput,
+    TurnResult,
+    TurnTextBlock,
+)
+from lup.sessions.layers import SessionLayers
+from lup.sessions.surface import Agent
+from lup.tools.mcp import ToolResponse
+from lup.types import SubagentSpec, Usage
 
 RESEARCHER = SubagentSpec(
     name="researcher",
@@ -23,13 +33,45 @@ RESEARCHER = SubagentSpec(
 )
 
 
-def marker_factory() -> Client:
-    def refuse(
-        resume: SessionId | None = None,
-    ) -> AbstractAsyncContextManager[SessionHandle]:
-        raise AssertionError(f"query should be replaced in this test: {resume}")
+class AnsweringAgent:
+    """An agent whose one-shot answer is scripted, recording what it was asked."""
 
-    return Client(refuse)
+    def __init__(self) -> None:
+        self.asked: list[str | TurnInput] = []
+
+    def open(
+        self, resume: SessionId | None = None
+    ) -> AbstractAsyncContextManager[ClaudeSession]:
+        raise AssertionError(f"the tool asks one-shot and never opens ({resume})")
+
+    @overload
+    async def ask(self, prompt: str | TurnInput) -> TurnResult[None]: ...
+
+    @overload
+    async def ask[T: BaseModel](
+        self, prompt: str | TurnInput, output: type[T]
+    ) -> TurnResult[T]: ...
+
+    async def ask[T: BaseModel](
+        self, prompt: str | TurnInput, output: type[T] | None = None
+    ) -> TurnResult[T] | TurnResult[None]:
+        self.asked.append(prompt)
+        return TurnResult[None](
+            output=None,
+            messages=[],
+            blocks=[TurnTextBlock(text="findings")],
+            usage=Usage(),
+            duration=timedelta(),
+            identifiers=TurnIdentifiers(
+                session=SessionId(value="nested"), turn=TurnId(value="only")
+            ),
+        )
+
+    async def sessions(self) -> list[SessionSummary]:
+        return []
+
+    def layered(self, layers: SessionLayers) -> Self:
+        return self
 
 
 def response_text(response: ToolResponse) -> str:
@@ -39,7 +81,7 @@ def response_text(response: ToolResponse) -> str:
 class TestRunSubagentTool:
     async def test_unknown_role_lists_available(self) -> None:
         tool = create_run_subagent_tool(
-            [RESEARCHER], factory_recipe=lambda _spec: marker_factory()
+            [RESEARCHER], factory_recipe=lambda _spec: AnsweringAgent()
         )
 
         result = await tool.handler({"name": "ghost", "task": "x"})
@@ -47,7 +89,7 @@ class TestRunSubagentTool:
         assert "researcher" in response_text(result)
 
     async def test_invalid_recipe_fails_loudly(self) -> None:
-        def invalid(_spec: SubagentSpec) -> Client:
+        def invalid(_spec: SubagentSpec) -> Agent:
             raise ValueError("model route is unavailable")
 
         tool = create_run_subagent_tool([RESEARCHER], factory_recipe=invalid)
@@ -56,32 +98,18 @@ class TestRunSubagentTool:
         assert result.get("is_error") is True
         assert "model route is unavailable" in response_text(result)
 
-    async def test_dispatches_query_with_selected_spec(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_dispatches_the_task_to_the_selected_spec_s_agent(self) -> None:
         selected: list[SubagentSpec] = []
-        marker = marker_factory()
+        answering = AnsweringAgent()
 
-        def recipe(spec: SubagentSpec) -> Client:
+        def recipe(spec: SubagentSpec) -> Agent:
             selected.append(spec)
-            return marker
+            return answering
 
-        captured: dict[str, object] = {}
-
-        # Patched on the class rather than on the module: the free `query` was
-        # an alias of exactly this method, and collapsing the two spellings
-        # left one place to intercept.
-        async def query(self: Client, prompt: object) -> object:
-            captured.update(factory=self, prompt=prompt)
-            return SimpleNamespace(blocks=[TurnTextBlock(text="findings")])
-
-        monkeypatch.setattr(Client, "query", query)
         tool = create_run_subagent_tool([RESEARCHER], factory_recipe=recipe)
-
         result = await tool.handler({"name": "researcher", "task": "look this up"})
 
         assert result.get("is_error", False) is False
         assert "findings" in response_text(result)
         assert selected == [RESEARCHER]
-        assert captured["factory"] is marker
-        assert captured["prompt"] == "look this up"
+        assert answering.asked == ["look this up"]
