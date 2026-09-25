@@ -86,7 +86,8 @@ def unjudged_roots(
     admits: Callable[[list[str]], bool],
     release: ReleaseSpec,
 ) -> list[str]:
-    """What the sweep does not read as instruction, as path prefixes.
+    """What the sweep does not read as instruction: trees, each spelled with its
+    trailing separator, and single files, each spelled whole.
 
     The release's changelog is history rather than instruction: each note
     records the commands as they existed at that release, which a rename
@@ -128,7 +129,10 @@ def written_commands(unjudged: Sequence[str] = ()) -> list[WrittenCommand]:
     a wrong command arrives through the rendered skill rather than through
     the module that declared it. The declaration trees behind them, and a
     library this checkout only vendors, are ``unjudged`` —
-    :func:`unjudged_roots` says why each is judged elsewhere.
+    :func:`unjudged_roots` says why each is judged elsewhere. An entry ending
+    in a separator is a tree and holds every file under it; any other names
+    one file exactly, so a changelog set aside is not a prefix setting aside
+    whatever else happens to be spelled with its name in front.
 
     A test tree is not read. What a fixture spells is an input to a gate
     rather than an instruction to a reader: `dev worktree create feature` is
@@ -136,6 +140,13 @@ def written_commands(unjudged: Sequence[str] = ()) -> list[WrittenCommand]:
     purpose. Reading those would make the sweep report the tests that hold
     this project to its policy.
     """
+
+    def set_aside(file: str) -> bool:
+        """Whether a file is one of the unjudged, or sits in an unjudged tree."""
+        return any(
+            file == entry or (entry.endswith("/") and file.startswith(entry))
+            for entry in unjudged
+        )
 
     def mentions(file: str) -> list[WrittenCommand]:
         try:
@@ -152,7 +163,7 @@ def written_commands(unjudged: Sequence[str] = ()) -> list[WrittenCommand]:
     return [
         mention
         for file in tracked_files(suffixes=(".py", ".md"))
-        if "tests/" not in file and not file.startswith(tuple(unjudged))
+        if "tests/" not in file and not set_aside(file)
         for mention in mentions(file)
     ]
 

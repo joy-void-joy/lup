@@ -213,6 +213,7 @@ def test_prose_is_judged_where_it_renders_and_nowhere_it_does_not(
             ".claude/plugins/lup/skills/land/SKILL.md": stray,
             "src/adopter/devtools/main.py": f'"""{stray}"""\n',
             "CHANGELOG.md": f"## 0.1.0\n\n{stray}",
+            "CHANGELOG.md-draft.md": stray,
         },
     )
     monkeypatch.chdir(tmp_path / "adopter")
@@ -232,6 +233,7 @@ def test_prose_is_judged_where_it_renders_and_nowhere_it_does_not(
     ]
     assert judged == [
         ".claude/plugins/lup/skills/land/SKILL.md",
+        "CHANGELOG.md-draft.md",
         "src/adopter/devtools/main.py",
     ]
 
