@@ -25,6 +25,7 @@ import shlex
 import stat
 import time
 from collections import deque
+from collections.abc import Callable
 from contextlib import nullcontext
 from ipaddress import IPv4Address
 from pathlib import Path
@@ -37,6 +38,7 @@ from rich.console import Console
 from rich.live import Live
 from rich.text import Text
 
+from lup.devtools.harness.posture import SettingOrigins, origin_said
 from lup.devtools.harness.preflight import LaunchSentinels, ROOT_VARIABLE
 from lup.harness.credential import committer, fleet_rewrites
 from lup.harness.devices import (
@@ -64,6 +66,7 @@ from lup.sandbox.rail import (
     demoted,
     fleet_lease,
     hold_pruning_across,
+    merged,
     repository_layout,
     worker_lease,
 )
@@ -1464,6 +1467,66 @@ def build_image(
             ) from error
 
 
+def meminfo_total(meminfo: Path = Path("/proc/meminfo")) -> int | None:
+    """What the kernel says this host holds, or nothing where it cannot say."""
+    try:
+        listed = meminfo.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for line in listed.splitlines():
+        match line.split():
+            case ["MemTotal:", kibibytes, "kB"] if kibibytes.isdigit():
+                return int(kibibytes) * 1024
+            case _:
+                continue
+    return None
+
+
+class HeldMemory(BaseModel, frozen=True):
+    """A container's memory limit in bytes, and what its launch says about it."""
+
+    limit: int | None = None
+    notices: list[Notice] = []
+
+
+def resolved_memory(
+    image: Image,
+    engine: ContainerEngine,
+    origin: str,
+    host_total: Callable[[], int | None] = meminfo_total,
+) -> HeldMemory:
+    """The limit this container runs under, in bytes, and the line saying it.
+
+    A share is resolved against what the engine says it can hand out, and
+    only where it says nothing against the host's own total -- the two part
+    exactly where a share would go wrong, an engine inside a virtual machine
+    handing out the machine's memory rather than the laptop's. A share
+    neither can resolve refuses the launch rather than dropping the limit,
+    because a declared bound that silently is not there is the one failure
+    a boundary may not have.
+    """
+    limit = image.memory
+    if limit is None:
+        return HeldMemory(notices=[Notice(text="Memory: no limit", urgency="boundary")])
+    total = engine.memory_total() or host_total()
+    if total is None and limit.percent is not None:
+        raise typer.BadParameter(
+            f"The memory limit is {limit.percent}% of what the engine can hand "
+            "out, and neither the engine nor /proc/meminfo says how much that "
+            "is. Launch stopped. Set an amount instead, such as --memory 12g."
+        )
+    held = limit.resolved(total or 0)
+    return HeldMemory(
+        limit=held,
+        notices=[
+            Notice(
+                text=f"Memory: {limit.described(total or held)} ({origin})",
+                urgency="boundary",
+            )
+        ],
+    )
+
+
 def fleet_notice(accessible: list[AccessibleRoot]) -> list[Notice]:
     """What this session can reach beyond its own checkout, and in which mode.
 
@@ -1577,6 +1640,8 @@ def contained_argv(
     lease: Lease | None = None,
     devices: list[Device] = [],
     state_scope: NativeHomeScope | None = None,
+    origins: SettingOrigins = SettingOrigins(),
+    read_only: dict[Path, str] = {},
 ) -> list[str]:
     """The argv that opens a session in this project's container.
 
@@ -1626,6 +1691,17 @@ def contained_argv(
     a token for one editor window, holding no account and no credential -- so
     which account a session runs under and which editor it talks to are
     independent choices, and only the second decides this.
+
+    ``image`` is the declaration with this launch's network and memory
+    already resolved onto it, and ``origins`` says which layer each came
+    from, for the lines that say them. A caller with no launch around it --
+    a worker, a probe -- passes the declaration and takes the default: all
+    of it declared by the project.
+
+    ``read_only`` are host paths mounted refusing writes, each at the path
+    inside it maps to, folded into whichever lease the container runs under:
+    a compiled plugin at its own place, a mode's guidance over the committed
+    document's.
     """
     said = banner if banner is not None else Banner()
     if engine is not None:
@@ -1653,7 +1729,21 @@ def contained_argv(
         build_image(image, manifest, tag, client, root)
     name_for_checkout(tag, checkout_tag(root), client)
     reached_at = start_egress(image.egress, root.name, client, root)
+    if origins.network != "project":
+        said.add(
+            [
+                Notice(
+                    text=(
+                        f"Network mode: {image.egress.mode} "
+                        f"({origin_said(origins.network, '--network')})"
+                    ),
+                    urgency="boundary",
+                )
+            ]
+        )
     said.add(image.egress.notice(root.name))
+    memory = resolved_memory(image, client, origin_said(origins.memory, "--memory"))
+    said.add(memory.notices)
     if state_scope is None:
         said.add(superseded_volume_notice(root, client, existing_volumes(client)))
     # Started before the container rather than beside it, because a pipe with
@@ -1670,7 +1760,12 @@ def contained_argv(
     said.add(
         image.browser.notice(handing is not None, image.egress.shares_host_loopback())
     )
-    lease = lease if lease is not None else fleet_lease(root, accessible)
+    lease = merged(
+        [
+            lease if lease is not None else fleet_lease(root, accessible),
+            Lease(read_only=dict(read_only)),
+        ]
+    )
     said.add(fleet_notice(accessible))
     said.add(
         pruning_notice(hold_pruning_across([root, *(item.path for item in accessible)]))
@@ -1769,6 +1864,7 @@ def contained_argv(
         inherited_environment=inherited_environment,
         environments=held_environments(root, accessible, image.project_environment),
         devices=granted_devices.granted,
+        memory=memory.limit,
     )
 
 

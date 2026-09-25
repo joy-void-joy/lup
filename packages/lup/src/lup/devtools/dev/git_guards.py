@@ -77,6 +77,35 @@ line rather than a migration note nobody reads.
 """
 
 
+# lup: ignore[constant-declaration] — the one spelling of the variable the
+# launcher sets and the installed hook reads, an identity between the two
+STANDDOWN_VARIABLE = "LUP_GIT_GUARDS"
+"""What a session launched in a mode that asks its commits not be judged carries.
+
+Set by the launcher, in the session's environment only, to ``off``. Read by
+the hook rather than decided there, because which kind of session made a
+commit is the launcher's fact: the hook runs inside the session, and knows no
+more about it than what the launch handed down.
+"""
+
+MODE_STANDDOWN = f"""\
+# A session launched in a mode that asks for it commits without this check:
+# the launcher says so in the session's environment, and a later normal
+# session brings the tree back into line. Said rather than skipped silently.
+if [ "${{{STANDDOWN_VARIABLE}:-}}" = "off" ]; then
+  echo "lup: this session's mode stands the guard down; clean up in a normal session" >&2
+  exit 0
+fi
+"""
+"""What a guard reads before judging a commit a mode asked to go unjudged.
+
+Not a boundary, and not meant as one: a commit could always skip the hook
+with ``--no-verify``, and the pipeline judges what reaches it either way. What
+this buys is that a session told it may work freely is not stopped by a
+check its own mode set aside, with nothing to show for it but a retry.
+"""
+
+
 # lup: ignore[constant-declaration] — git's own mid-merge marker read in shell,
 # not a judgement a project could hold differently; and as a field default it
 # would arm the push moment too, where an unfinished merge decides nothing
@@ -213,7 +242,7 @@ class GitGuard(BaseModel, frozen=True):
         )
 
 
-DECLARED_GUARDS = [GitGuard(standdown=MERGE_STANDDOWN)]
+DECLARED_GUARDS = [GitGuard(standdown=MODE_STANDDOWN + MERGE_STANDDOWN)]
 """The hooks lup arms, offered to a project as the set it usually wants.
 
 A default rather than a fixture: a project that runs its gate somewhere else,

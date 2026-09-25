@@ -166,7 +166,7 @@ def test_owned_home_preparation_verifies_discovery_and_hook_trust(
     installation.install_codex_plugin(tmp_path, home, trusted=True)
     trust.assert_called_once_with(home, tmp_path)
     installer.verify.assert_called_once_with(installer.ensure.return_value, tmp_path)
-    hooks.assert_called_once_with(home, tmp_path, seed=True)
+    hooks.assert_called_once_with(home, tmp_path, seed=True, workspace=tmp_path)
 
 
 def test_matching_cache_is_not_proof_of_native_plugin_discovery(

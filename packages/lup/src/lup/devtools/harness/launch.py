@@ -14,10 +14,11 @@ from contextlib import AbstractContextManager, nullcontext
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 from uuid import uuid4
 
 import sh
+import tomlkit
 import typer
 from pydantic import BaseModel, Field, ValidationError
 
@@ -39,14 +40,41 @@ from lup.providers.codex.transcripts import CodexTranscripts
 from lup.coordination.identity import MEMBER_ENV, NAME_ENV, LaunchedMember
 from lup.coordination.repository import launched_member
 from lup.harness.environment import non_interactive_environment
-from lup.harness.models import HookSet, NativeName, Plugin, Resumption
+from lup.harness.models import HookSet, NativeName, Plugin, Resumption, SessionMode
 from lup.policy.boundary import BoundaryPreflight
 from lup.policy.identity import POLICY_ROOT_ENV
 from lup.policy.profiles import compile_boundary, depended_on, measured
 from lup.policy.snapshots import accept_destination_policies, destination_authorities
 from lup.sandbox.rail import AccessibleRoot, fleet_lease
-from lup.devtools.sync import accessible_roots, granted_devices
+from lup.trust.approved import APPROVED_TREE_ENV
+from lup.devtools.dev.git_guards import STANDDOWN_VARIABLE
+from lup.devtools.harness.modes import (
+    MODE_VARIABLE,
+    CompiledMode,
+    claude_variant,
+    codex_variant,
+    compiled_mode,
+    mode_environment,
+    mode_home_scope,
+    mode_notices,
+    refuse_on_host,
+    variant_of,
+)
+from lup.devtools.harness.posture import (
+    Chosen,
+    LaunchOverrides,
+    SessionSettings,
+    SettingOrigins,
+    applied,
+    permission_notices,
+)
+from lup.devtools.sync import accessible_roots, granted_devices, session_defaults
 from lup.harness.notice import Banner, Notice
+from lup.harness.posture import (
+    ClaudePermissionMode,
+    CodexApprovalPolicy,
+    CodexSandboxMode,
+)
 from lup.harness.requirements import (
     Finding,
     HostFacts,
@@ -868,8 +896,12 @@ def report_inside_requirements(
     """
     harness = composition.recipe.source
     credential = login.credentials_path(config_home)
+    # The machine's own defaults and nothing else, since a probe takes no
+    # launch flags: the network and the limit a session here would get when
+    # nobody asked for another.
+    settings = SessionSettings.resolved(harness, session_defaults())
     opening = contained_argv(
-        harness.image,
+        settings.image(harness.image),
         harness.requirements,
         project_root(),
         editor_rendezvous(login),
@@ -884,6 +916,7 @@ def report_inside_requirements(
         # verified in one says nothing about the other.
         accessible=accessible_roots(),
         devices=granted_devices(),
+        origins=settings.origins(),
     )
     # The same values on both sides of one call, which is the whole of what a
     # placement probe asks. Injected into the argv above and handed to the
@@ -1058,6 +1091,7 @@ def codex_sandbox_arguments(
     extra_args: list[str],
     sandbox: LaunchSandbox = LaunchSandbox.INNER,
     accessible: list[AccessibleRoot] = [],
+    mode: Chosen[CodexSandboxMode] | None = None,
 ) -> list[str]:
     """Compose the interactive Codex envelope that LUP_SANDBOX_ACTIVE vouches for.
 
@@ -1091,10 +1125,18 @@ def codex_sandbox_arguments(
     measured, and a boundary that was observed is a boundary whether this
     flag vouched for it or not, while a session with no boundary wants the
     lattice the flag would relax.
+
+    The container stands the envelope down whether or not a hook set
+    declares one, because what makes it wrong there is the proxy rather than
+    the policy: a plugin carrying no hooks meets the same internal network.
+    On the host, where nothing was declared nothing is established, and the
+    operator's own configuration answers.
+
+    ``mode`` is a sandbox mode the posture chose -- a flag for this launch,
+    the machine's default, or the project's -- and it outranks the choice
+    made here wherever :func:`~lup.devtools.harness.posture.applied` lets it
+    stand: a flag always, a declared one inside the container only.
     """
-    hooks = plugin.hooks
-    if hooks is None or hooks.sandbox is None:
-        return []
     overrides = [
         word
         for word in extra_args
@@ -1109,6 +1151,31 @@ def codex_sandbox_arguments(
             urgency="warning",
         ).say()
         return []
+    chosen_mode = applied(mode, sandbox.contained())
+    if chosen_mode is not None:
+        Notice(
+            text=f"codex sandbox: {chosen_mode.value} ({chosen_mode.said('--sandbox-mode')})",
+            urgency="boundary",
+        ).say()
+        return [
+            "--sandbox",
+            chosen_mode.value,
+            *(
+                writable_root_arguments(accessible)
+                if chosen_mode.value == "workspace-write"
+                else []
+            ),
+        ]
+    if mode is not None:
+        Notice(
+            text=(
+                f"codex sandbox: {mode.value} ({mode.said('--sandbox-mode')}) "
+                "applies inside the container only; this host launch keeps "
+                "the envelope below"
+            ),
+            urgency="boundary",
+        ).say()
+    declared = plugin.hooks.sandbox if plugin.hooks is not None else None
     match sandbox:
         case LaunchSandbox.OUTER:
             Notice(
@@ -1119,7 +1186,7 @@ def codex_sandbox_arguments(
                 urgency="boundary",
             ).say()
             return list(CODEX_CONFINEMENT.off)
-        case LaunchSandbox.NONE:
+        case LaunchSandbox.NONE if declared is not None:
             Notice(
                 text=(
                     "codex sandbox: off on the host — "
@@ -1128,6 +1195,10 @@ def codex_sandbox_arguments(
                 urgency="boundary",
             ).say()
             return list(CODEX_CONFINEMENT.off)
+        case LaunchSandbox.NONE:
+            return []
+        case LaunchSandbox.INNER if declared is None:
+            return []
         case LaunchSandbox.INNER:
             pass
     # Exercised before it is vouched for, the way the Claude path exercises
@@ -1294,7 +1365,15 @@ def claude_sandbox_arguments(
     pre-approves rather than refuses, and ``strictAllowlist`` has no effect
     from a repository's own settings — and what does refuse is the egress
     proxy, which is untouched by this.
+
+    Inside the container the switch is spelled whether or not the plugin
+    declares a sandbox: a plugin carrying no hooks declares none, and the
+    container being the boundary is a fact about the launch rather than
+    about the declaration. On the host, where nothing was declared, nothing
+    is said and the operator's own settings answer.
     """
+    if sandbox.contained():
+        return list(CLAUDE_CONFINEMENT.off)
     hooks = plugin.hooks
     if hooks is None or hooks.sandbox is None:
         return []
@@ -1311,6 +1390,119 @@ def claude_sandbox_arguments(
     ]
     widened = {"sandbox": {"filesystem": {"allowWrite": allowed}}}
     return ["--settings", json.dumps(widened)]
+
+
+def session_environment() -> EnvVars:
+    """The environment a launched session inherits, less what only the launch reads.
+
+    This process's own, made non-interactive, and without the approved
+    snapshot the installed launcher named for it: that variable points the
+    launch's registry readers at the copy its operator approved, and a
+    session inheriting it -- one opened on the host, whose tool servers and
+    shell start from this environment -- would read and write the snapshot
+    in place of its checkout with every `sync` command it ran.
+    """
+    environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]
+    environment.pop(APPROVED_TREE_ENV, None)
+    return environment
+
+
+def claude_permission_arguments(
+    mode: Chosen[ClaudePermissionMode] | None,
+    contained: bool,
+    extra_args: list[str],
+) -> list[str]:
+    """The permission mode this launch hands Claude Code, where it hands one.
+
+    Passed on the command line because it is the one place both ``auto`` and
+    ``bypassPermissions`` take effect from: the vendor's settings reference
+    says neither does from a project's or a checkout's own settings file.
+    A caller who passed ``--dangerously-skip-permissions`` among the words
+    for the CLI has said the same thing in the runtime's own words, which
+    stand rather than being contradicted by a second flag.
+    """
+    chosen_mode = applied(mode, contained)
+    if chosen_mode is None or "--dangerously-skip-permissions" in extra_args:
+        return []
+    return ["--permission-mode", chosen_mode.value]
+
+
+# lup: ignore[library-default] — each entry is literally a Codex CLI flag
+CODEX_APPROVAL_OVERRIDES = (
+    "-a",
+    "--ask-for-approval",
+    "--dangerously-bypass-approvals-and-sandbox",
+    "--yolo",
+)
+
+
+def codex_approval_arguments(
+    policy: Chosen[CodexApprovalPolicy] | None,
+    contained: bool,
+    extra_args: list[str],
+) -> list[str]:
+    """The approval policy this launch hands Codex, where it hands one.
+
+    A caller naming its own among the words for the CLI keeps it: Codex
+    takes one policy, and two spellings on one command line would leave
+    which one won to the order it happened to parse them in.
+    """
+    chosen_policy = applied(policy, contained)
+    caller = [
+        word
+        for word in extra_args
+        if word in CODEX_APPROVAL_OVERRIDES or word.startswith("--ask-for-approval=")
+    ]
+    if chosen_policy is None or caller:
+        return []
+    return ["--ask-for-approval", chosen_policy.value]
+
+
+def posture_notices(
+    plugin: Plugin,
+    settings: SessionSettings,
+    contained: bool,
+    runtime: Literal["claude", "codex"],
+) -> list[Notice]:
+    """What a launch says about the permissions its session opens under.
+
+    One line per setting that is anybody's to say, with where it came from,
+    and one line where the plugin carries no hooks -- because a gateless
+    session looks, from the inside, exactly like a gated one that has not
+    been refused anything yet.
+    """
+    ungated = (
+        [
+            Notice(
+                text=(
+                    "Policy hooks: none declared — nothing inside this session "
+                    "judges a tool call; the runtime's own permissions and the "
+                    "container are its boundary"
+                ),
+                urgency="boundary",
+            )
+        ]
+        if plugin.hooks is None
+        else []
+    )
+    match runtime:
+        case "claude":
+            spoken = permission_notices(
+                settings.permission_mode,
+                contained,
+                "Claude Code",
+                "--permission-mode",
+                "Permission mode",
+            )
+        case "codex":
+            spoken = permission_notices(
+                settings.approval_policy,
+                contained,
+                "Codex",
+                "--approval-policy",
+                "Approval policy",
+            )
+    return [*ungated, *spoken]
 
 
 def companion_plugin_directories(root: Path, generated: str) -> list[Path]:
@@ -1476,6 +1668,8 @@ def session_argv(
     member: LaunchedMember | None = None,
     prepare: Callable[[list[str], Path], None] | None = None,
     state_scope: NativeHomeScope | None = None,
+    settings: SessionSettings | None = None,
+    read_only: dict[Path, str] = {},
 ) -> list[str]:
     """The argv that opens a session, inside the declared container or on the host.
 
@@ -1500,6 +1694,16 @@ def session_argv(
     would leave whatever a contained launch wrote last standing as this
     session's answer -- a boundary belonging to a session that has already
     ended.
+
+    ``settings`` is what the launch resolved from its flags, the machine's
+    registry and the declaration. Its network and memory are resolved onto
+    the image every later step reads; absent, the declaration stands as
+    written.
+
+    ``read_only`` are host paths the container mounts refusing writes, each
+    at the path inside it maps to -- a mode's compiled plugin at its own
+    place, and a mode's guidance over the committed document, which the
+    session runs on and must not be able to change.
     """
     banner = cleared.banner
     # Minted where both runtimes pass through, so a session's coordination
@@ -1551,6 +1755,30 @@ def session_argv(
                     )
                 ]
             )
+        # The same for the container's own two settings, and for the same
+        # reason: a flag asking for a network or a limit describes a container
+        # this launch does not open.
+        asked = [
+            flag
+            for flag, setting in (
+                ("--network", settings.network if settings else None),
+                ("--memory", settings.memory if settings else None),
+            )
+            if setting is not None and setting.origin == "flag"
+        ]
+        if asked:
+            banner.add(
+                [
+                    Notice(
+                        text=(
+                            f"{' and '.join(asked)} asked for; the session runs "
+                            "on the host, whose network and memory it has, and "
+                            "each applies inside the container."
+                        ),
+                        urgency="detail",
+                    )
+                ]
+            )
         if prepare is not None:
             prepare([], config_home)
         if authenticate is not None:
@@ -1568,17 +1796,18 @@ def session_argv(
         say_opening(cleared, cleared.findings, transcript)
         return [cli, *arguments]
     harness = composition.recipe.source
+    image = settings.image(harness.image) if settings is not None else harness.image
     # A token crosses by name, so its value has to be in the environment of the
     # process that starts the container rather than anywhere in the argv. That
     # makes this the one place it has to be resolved: the argv builder reads
     # the same declaration for whether to pass the name, and a name passed
     # against an environment nobody populated forwards nothing.
-    carried = harness.image.forge.sourced(environment)
+    carried = image.forge.sourced(environment)
     if carried:
-        environment[harness.image.forge.token_variable] = carried
+        environment[image.forge.token_variable] = carried
     credential = login.credentials_path(config_home)
     opening = contained_argv(
-        harness.image,
+        image,
         harness.requirements,
         project_root(),
         editor_rendezvous(login),
@@ -1598,14 +1827,24 @@ def session_argv(
             MEMBER_ENV,
             NAME_ENV,
             POLICY_ROOT_ENV,
+            # The mode this session was launched in, and whether its commits
+            # stand the guards down: facts the launch holds and the session's
+            # own tools read, crossing by name like the rest.
+            *(
+                name
+                for name in (MODE_VARIABLE, STANDDOWN_VARIABLE)
+                if name in environment
+            ),
         ],
         banner=banner,
         sentinels=sentinels,
         accessible=accessible,
+        read_only=read_only,
         # This launch's flags lead and the machine's standing grants follow,
         # settled here beside the roots for the same reason they are.
         devices=[*devices, *granted_devices(told)],
         state_scope=state_scope,
+        origins=settings.origins() if settings is not None else SettingOrigins(),
     )
     # Verified on the way in, rather than asserted. This is §6's whole point
     # and the launch is where it has to happen: the boundary was built two
@@ -1626,14 +1865,14 @@ def session_argv(
         in_passing=True,
     )
     if prepare is not None:
-        prepare(probing(opening, stdin=True), Path(harness.image.config_home))
+        prepare(probing(opening, stdin=True), Path(image.config_home))
     # A contained session sharing host loopback can receive a browser callback.
     # Device login is needed where that callback stays outside its namespace.
     if authenticate is not None:
         authenticate(
             [*probing(opening, stdin=True), cli],
-            Path(harness.image.config_home),
-            not harness.image.egress.shares_host_loopback(),
+            Path(image.config_home),
+            not image.egress.shares_host_loopback(),
         )
     # Both halves of one measurement, joined here because this is where the
     # second is taken. The host roster answered for the relay and the store
@@ -1652,9 +1891,7 @@ def session_argv(
         runtime=cli,
     )
     say_opening(cleared, measured_here, transcript)
-    native = harness.image.clipboard.wrap(
-        [cli, *arguments], composition.clipboard_transport
-    )
+    native = image.clipboard.wrap([cli, *arguments], composition.clipboard_transport)
     return [*opening, *native]
 
 
@@ -1720,11 +1957,29 @@ def launch_claude(
     mounts: list[AccessibleRoot] = [],
     devices: list[Device] = [],
     recorder: SessionRecorder | None = None,
+    overrides: LaunchOverrides = LaunchOverrides(),
+    session_mode: SessionMode | None = None,
 ) -> None:
-    """Generate/reconcile Claude artifacts and launch the verified local plugin."""
+    """Generate/reconcile Claude artifacts and launch the verified local plugin.
+
+    ``overrides`` are this launch's own flags for the settings a machine's
+    registry and the declaration also answer, resolved before anything is
+    generated so a registry that will not parse stops the launch while the
+    tree is still as it was.
+
+    ``session_mode`` is the declared mode this session opens in, refused
+    before anything runs where the launch cannot carry it. The committed
+    trees are generated as for any launch; a mode needing its own plugin
+    gets one compiled beside them and opens on that.
+    """
     contradiction = resume.contradicted()
     if contradiction is not None:
         raise typer.BadParameter(contradiction)
+    if session_mode is not None:
+        refuse_on_host(session_mode, sandbox.contained())
+    settings = SessionSettings.resolved(
+        composition.recipe.source, session_defaults(), overrides, session_mode
+    )
     if checkpoint is not None and not generate_only:
         checkpoint(provider="claude")
     plugin = composition.recipe.source.plugins[0]
@@ -1740,6 +1995,28 @@ def launch_claude(
     )
     if cleared is None:
         return
+    root = project_root()
+    # The plugin this session actually runs on: the committed one, or the
+    # variant a mode compiled beside it -- which is also the one whose
+    # boundary is settled, since a variant without hooks depends on none of
+    # the capabilities the committed hooks would.
+    opened_on = (
+        variant_of(composition.recipe.source, session_mode).plugins[0]
+        if session_mode is not None
+        else plugin
+    )
+    compiled = (
+        compiled_mode(claude_variant, composition.recipe.source, session_mode, root)
+        if session_mode is not None
+        else CompiledMode()
+    )
+    plugin_directory = compiled.plugin or root / ".claude" / "plugins" / plugin.name
+    cleared.banner.add(
+        [
+            *mode_notices(session_mode),
+            *posture_notices(opened_on, settings, sandbox.contained(), "claude"),
+        ]
+    )
     arguments: list[str] = claude_resume_arguments(resume)
     # A mode's model is a default rather than a fixture: it says what this kind
     # of session runs on when nobody said otherwise, and an explicit --model
@@ -1749,14 +2026,13 @@ def launch_claude(
     )
     if selected_model is not None:
         arguments.extend(["--model", selected_model])
-    root = project_root()
     # Minted here rather than where the argv is settled, because this runtime
     # shows the name in its own chrome and the flag carrying it is built now;
     # the same identity is handed on so the exported one agrees with it.
     member = launched_member(root)
     inboxes = composition.recipe.source.image.inboxes
     named = [
-        root / ".claude" / "plugins" / plugin.name,
+        plugin_directory,
         *companion_plugin_directories(root, plugin.name),
     ]
     arguments.extend(
@@ -1799,14 +2075,26 @@ def launch_claude(
                 if inboxes.serve() is not None
                 else []
             ),
+            *claude_permission_arguments(
+                settings.permission_mode, sandbox.contained(), extra_args
+            ),
+            # The line naming the mode, appended to the runtime's own system
+            # prompt rather than replacing it, so the session knows which kind
+            # of session it is from its first turn.
+            *(
+                ["--append-system-prompt", session_mode.prompt()]
+                if session_mode is not None
+                else []
+            ),
             *(mode.command_words("claude") if mode is not None else []),
             *extra_args,
         ]
     )
-    environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]
+    environment = session_environment()
     environment[MAX_RECURSIVE_AGENT_ENV] = str(max_recursive_agent)
+    environment.update(mode_environment(session_mode))
     apply_sandbox_environment(
-        plugin,
+        opened_on,
         environment,
         "claude",
         [bubblewrap_requirement(), socat_requirement()],
@@ -1847,7 +2135,7 @@ def launch_claude(
                 "claude",
                 arguments,
                 composition,
-                plugin,
+                opened_on,
                 home if home is not None else ambient_config_home(profiles.login),
                 profiles.login,
                 sandbox,
@@ -1856,8 +2144,10 @@ def launch_claude(
                 sentinels,
                 cleared,
                 mounts,
-                devices,
+                [*devices, *(session_mode.devices if session_mode else [])],
                 member=member,
+                settings=settings,
+                read_only=compiled.mounts(),
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True
@@ -1889,19 +2179,26 @@ def prepare_codex_plugin(
     force: bool = False,
     trusted: bool = False,
     settings: CodexProfileSettings | None = None,
+    plugin_root: Path | None = None,
 ) -> None:
-    """Prepare the home where the launch runs, through its own execution boundary."""
+    """Prepare the home where the launch runs, through its own execution boundary.
+
+    ``plugin_root`` is where the plugin is installed from when that is not
+    the checkout -- a mode's compiled variant -- while ``root`` stays the
+    project the home trusts and the session opens in.
+    """
+    source = plugin_root or root
     if not prefix:
         if settings is not None:
-            settings.install(
-                home, enforce_policy=CodexMarketplace.declared(root) is not None
-            )
-        install_codex_plugin(root, home, force, trusted)
+            settings.install(home, enforce_policy=CodexMarketplace.enforced(source))
+        install_codex_plugin(root, home, force, trusted, plugin_root)
         return
     assert CODEX_LOGIN.home_preparation is not None
     command = [
         *prefix,
-        *CODEX_LOGIN.home_preparation.command(root, home, force, settings is not None),
+        *CODEX_LOGIN.home_preparation.command(
+            root, home, force, settings is not None, plugin_root
+        ),
     ]
     typer.echo(
         str(
@@ -1937,11 +2234,28 @@ def launch_codex(
     mounts: list[AccessibleRoot] = [],
     devices: list[Device] = [],
     recorder: SessionRecorder | None = None,
+    overrides: LaunchOverrides = LaunchOverrides(),
+    session_mode: SessionMode | None = None,
 ) -> None:
-    """Generate/reconcile Codex artifacts and launch without updating the CLI."""
+    """Generate/reconcile Codex artifacts and launch without updating the CLI.
+
+    ``overrides`` are resolved before generation for the reason
+    :func:`launch_claude` gives, and the sandbox mode among them reaches the
+    envelope rather than a flag of its own, because the envelope is where
+    this runtime's sandbox is already decided.
+
+    ``session_mode`` is taken as :func:`launch_claude` takes it. A mode
+    needing its own plugin has it installed into a home kept for that mode,
+    so a normal session's home never holds the variant.
+    """
     contradiction = resume.contradicted()
     if contradiction is not None:
         raise typer.BadParameter(contradiction)
+    if session_mode is not None:
+        refuse_on_host(session_mode, sandbox.contained())
+    settings = SessionSettings.resolved(
+        composition.recipe.source, session_defaults(), overrides, session_mode
+    )
     if checkpoint is not None and not generate_only:
         checkpoint(provider="codex")
     plugin = composition.recipe.source.plugins[0]
@@ -1957,17 +2271,56 @@ def launch_codex(
     )
     if cleared is None:
         return
-    environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]
-    environment[MAX_RECURSIVE_AGENT_ENV] = str(max_recursive_agent)
-    envelope = codex_sandbox_arguments(
-        plugin,
-        environment,
-        extra_args,
-        sandbox=sandbox,
-        accessible=(
-            [*mounts, *accessible_roots()] if sandbox is LaunchSandbox.INNER else []
-        ),
+    # The plugin this session runs on, and where a mode's variant of it is
+    # installed from, for the reasons launch_claude gives.
+    opened_on = (
+        variant_of(composition.recipe.source, session_mode).plugins[0]
+        if session_mode is not None
+        else plugin
     )
+    compiled = (
+        compiled_mode(
+            codex_variant, composition.recipe.source, session_mode, project_root()
+        )
+        if session_mode is not None
+        else CompiledMode()
+    )
+    plugin_root = compiled.plugin
+    cleared.banner.add(
+        [
+            *mode_notices(session_mode),
+            *posture_notices(opened_on, settings, sandbox.contained(), "codex"),
+        ]
+    )
+    environment = session_environment()
+    environment[MAX_RECURSIVE_AGENT_ENV] = str(max_recursive_agent)
+    environment.update(mode_environment(session_mode))
+    envelope = [
+        *codex_sandbox_arguments(
+            opened_on,
+            environment,
+            extra_args,
+            sandbox=sandbox,
+            accessible=(
+                [*mounts, *accessible_roots()] if sandbox is LaunchSandbox.INNER else []
+            ),
+            mode=settings.sandbox_mode,
+        ),
+        *codex_approval_arguments(
+            settings.approval_policy, sandbox.contained(), extra_args
+        ),
+        # The line naming the mode, as developer instructions this session is
+        # given beside the runtime's own, which it does not replace.
+        *(
+            [
+                "-c",
+                "developer_instructions="
+                + tomlkit.string(session_mode.prompt()).as_string(),
+            ]
+            if session_mode is not None
+            else []
+        ),
+    ]
     store = CodexWorktreeHomeStore()
     home = select_codex_home(codex_home, environment, project_root(), profile, store)
     selected_home = home.path
@@ -2036,8 +2389,20 @@ def launch_codex(
             environment,
             force_install,
             settings=selected_profile,
+            plugin_root=plugin_root,
         )
 
+    # A home per selected settings, and one apart again for a mode compiling
+    # its own plugin: a home keeps whichever revision it installed last, so a
+    # variant installed into the normal home would be what the next normal
+    # session found there.
+    scope = (
+        selected_profile.state_scope()
+        if selected_profile is not None and selected_profile.as_base
+        else None
+    )
+    if plugin_root is not None and session_mode is not None:
+        scope = mode_home_scope(session_mode, scope)
     try:
         with opening as session:
             environment.update(session)
@@ -2045,7 +2410,7 @@ def launch_codex(
                 "codex",
                 arguments,
                 composition,
-                plugin,
+                opened_on,
                 selected_home,
                 CODEX_LOGIN,
                 sandbox,
@@ -2054,14 +2419,12 @@ def launch_codex(
                 sentinels,
                 cleared,
                 mounts,
-                devices,
+                [*devices, *(session_mode.devices if session_mode else [])],
                 authenticate=authenticate,
                 prepare=prepare,
-                state_scope=(
-                    selected_profile.state_scope()
-                    if selected_profile is not None and selected_profile.as_base
-                    else None
-                ),
+                state_scope=scope,
+                settings=settings,
+                read_only=compiled.mounts(),
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True

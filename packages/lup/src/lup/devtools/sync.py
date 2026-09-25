@@ -89,7 +89,7 @@ import json
 import logging
 import os
 from collections.abc import Callable
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Annotated, Literal, NotRequired, Required, TypedDict, get_args
 
 import sh
@@ -111,6 +111,11 @@ from lup.devtools.subapps import subapp
 from lup.devtools.utils import decode_stderr, format_table, short_sha
 from lup.execution.shell import git
 from lup.harness.devices import Device, registered_devices
+from lup.harness.posture import (
+    ClaudePermissionMode,
+    CodexApprovalPolicy,
+    CodexSandboxMode,
+)
 from lup.harness.requirements import Finding, Manifest
 from lup.harness.toolchain import (
     container_client,
@@ -118,7 +123,9 @@ from lup.harness.toolchain import (
     granted_device_requirement,
 )
 from lup.policy.assets.host import launched, measured_boundary
+from lup.sandbox.models import NetworkMode
 from lup.sandbox.rail import AccessibleRoot
+from lup.trust.approved import MACHINE_REGISTRY, REGISTRY, declarations_root
 
 app = typer.Typer(no_args_is_help=True)
 SUBAPP = subapp(
@@ -260,6 +267,30 @@ class ProjectEntry(TypedDict, total=False):
     rather than a project quietly out of reach."""
 
 
+class SessionDefaults(TypedDict, total=False):
+    """What this machine's sessions default to, over what the project declares.
+
+    The middle of three layers: the project's declaration, this, then one
+    launch's own flags. A key left out leaves the layer below it standing.
+    Each is the same word the launcher's flag of that name takes, so a
+    default here and a flag on the command line cannot come to accept
+    different values; ``memory`` is the one spelled as text, parsed where it
+    is used, because this document is written back as JSON by the commands
+    that edit it.
+
+    Gitignored and inside the checkout, so a session can write it: the next
+    launch reads it on the host. Launched through the installed launcher,
+    that launch reads the copy the operator approved rather than the live
+    file, and a change to it is one of the things put to them.
+    """
+
+    network: NetworkMode
+    memory: str
+    permission_mode: ClaudePermissionMode
+    approval_policy: CodexApprovalPolicy
+    sandbox_mode: CodexSandboxMode
+
+
 @with_config(ConfigDict(extra="allow"))
 class SyncConfig(TypedDict):
     """Top-level shape of sync.json and sync.json.local.
@@ -291,6 +322,10 @@ class SyncConfig(TypedDict):
     installed is a fact about one machine, and a committed answer would open
     a program on every adopter's that may not be there."""
 
+    session: NotRequired[SessionDefaults]
+    """This machine's defaults for the sessions it launches, read from the
+    local file alone for the reason a device grant is."""
+
 
 SYNC_CONFIG_ADAPTER = TypeAdapter(SyncConfig)
 PROJECT_ENTRY_ADAPTER = TypeAdapter(ProjectEntry)
@@ -303,12 +338,25 @@ to accept different words. A second spelling here is how the CLI would end up
 taking a mode the registry then refuses to validate."""
 
 
-def sync_file() -> Path:
-    return project_root() / "sync.json"
+def sync_file(name: PurePosixPath = REGISTRY) -> Path:
+    """The committed registry, from the approved snapshot where a launch has one.
+
+    A launch the installed launcher handed off reads its registries from the
+    snapshot the operator approved (:mod:`lup.trust.approved`), because the
+    live file is writable from inside the container and decides what the next
+    session mounts. Everything else reads the checkout.
+    """
+    return declarations_root(project_root()) / name
 
 
-def local_file() -> Path:
-    return project_root() / "sync.json.local"
+def local_file(name: PurePosixPath = MACHINE_REGISTRY) -> Path:
+    """This machine's registry, from the approved snapshot where a launch has one.
+
+    The same redirection :func:`sync_file` makes, and the one that matters
+    most: this file is gitignored, so nothing but the launcher's review ever
+    sees a session rewrite it between two launches.
+    """
+    return declarations_root(project_root()) / name
 
 
 def cache_dir() -> Path:
@@ -351,6 +399,17 @@ def load_json(path: Path) -> SyncConfig:
         return SYNC_CONFIG_ADAPTER.validate_python(json.loads(path.read_text()))
     except json.JSONDecodeError as error:
         raise typer.BadParameter(f"{path} is not valid JSON: {error}") from error
+    except ValidationError as error:
+        # One line per refused key, where it sits in the document: a launch
+        # reading a misspelled posture stops on the key rather than on a
+        # traceback through the validator.
+        refused = "; ".join(
+            f"{'.'.join(str(part) for part in item['loc'])}: {item['msg']}"
+            for item in error.errors()
+        )
+        raise typer.BadParameter(
+            f"{path} is not a valid registry: {refused}"
+        ) from error
 
 
 def save_local(data: SyncConfig) -> None:
@@ -885,6 +944,16 @@ def registered_difftool() -> list[str]:
     never seen one of them.
     """
     return load_json(local_file()).get("difftool", [])
+
+
+def session_defaults() -> SessionDefaults:
+    """What this machine's sessions default to, empty where it says nothing.
+
+    From the local file alone, for the reason a device grant is: a posture
+    named in the committed file would be a project default spelled a second
+    time, and the project's declaration is where that one lives.
+    """
+    return load_json(local_file()).get("session", {})
 
 
 def granted_devices(report: Callable[[str], None] = typer.echo) -> list[Device]:

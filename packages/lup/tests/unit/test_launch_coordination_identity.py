@@ -21,15 +21,21 @@ import pytest
 import lup.devtools.harness.launch as launch
 from lup.coordination.identity import MEMBER_ENV, NAME_ENV, mint_member_id
 from lup.coordination.repository import RepositoryPeers
+from lup.harness.image import Image
 
 
 def composition() -> Mock:
-    """A composition carrying the one plugin each launcher reads first."""
+    """A composition carrying the one plugin each launcher reads first.
+
+    Its image is a real declaration, because a launch resolves the
+    container's network and memory off it before anything else runs.
+    """
     plugin = Mock()
     plugin.name = "lup"
     plugin.marketplace = "test"
     built = Mock()
     built.recipe.source.plugins = [plugin]
+    built.recipe.source.image = Image()
     return built
 
 

@@ -34,9 +34,18 @@ class HomePreparation(BaseModel, frozen=True):
     executable: str
 
     def command(
-        self, root: Path, home: Path, force: bool = False, settings: bool = False
+        self,
+        root: Path,
+        home: Path,
+        force: bool = False,
+        settings: bool = False,
+        plugin_root: Path | None = None,
     ) -> list[str]:
-        """Run installed library code in the checkout's own Python environment."""
+        """Run installed library code in the checkout's own Python environment.
+
+        ``plugin_root`` installs the plugin from somewhere other than the
+        checkout, which stays the project the home trusts.
+        """
         return [
             "uv",
             "run",
@@ -51,6 +60,7 @@ class HomePreparation(BaseModel, frozen=True):
             "--trust-project",
             *(["--force"] if force else []),
             *(["--settings-stdin"] if settings else []),
+            *(["--plugin-root", str(plugin_root)] if plugin_root is not None else []),
         ]
 
 

@@ -27,7 +27,10 @@ from pydantic import (
 from lup.harness.codescan.common import AntiPattern, RuleSelection
 from lup.devtools.launcher import DEFAULT_ENVIRONMENT
 from lup.formats.banner import ArtifactBanner, GeneratedBanner
-from lup.harness.image import Image
+from lup.harness.devices import Device
+from lup.harness.image import ContainerPrivileges, Image, MemoryLimit
+from lup.harness.posture import LaunchPosture, unconfining
+from lup.sandbox.models import NetworkMode
 from lup.harness.requirements import Manifest
 from lup.formats.markdown import (
     ProseCell,
@@ -1799,6 +1802,140 @@ class HookSet(BaseModel, frozen=True):
         ]
 
 
+class SessionMode(BaseModel, frozen=True):
+    """A named kind of session a project launches on purpose, and all it changes.
+
+    A normal launch opens a session under everything the project declared: its
+    hooks, its scan rules, the runtimes' own asking. Some work wants less of
+    that for a while — exploring freely, or making something where the
+    conventions are not the point, cleaned up afterwards by a normal
+    session — and the honest way to say so is a name a
+    person launches by, declared where a review reads it, rather than a pile
+    of flags someone has to remember and a session could imitate.
+
+    So a mode is a bundle of per-launch postures and nothing else. It never
+    edits the committed trees: a mode that drops the plugin's hooks or its
+    scan rules has a variant compiled for that one launch into a private
+    directory and the runtime is pointed there, so the next normal launch
+    finds the tree exactly as the declaration renders it. It is read from the
+    declaration the launcher compiles, never from anything a session can
+    write, which is what keeps a session from widening the kind it is.
+
+    Every field left at its default changes nothing, so a mode states only its
+    differences from a normal launch. Every knob that switches a boundary off
+    — the hooks, the runtimes' own asking, their own sandboxes — is meant for
+    the inside of the container, and a launch on the host refuses such a mode
+    rather than opening it with the container missing from under it.
+    """
+
+    name: NativeName
+    """What the mode is launched by: ``harness claude --mode <name>``."""
+
+    description: PortableText = Field(min_length=1, max_length=512)
+    """What this kind of session is for, said at launch and to the session."""
+
+    hooks: bool = True
+    """Whether the session runs under the plugin's hooks.
+
+    ``False`` compiles a variant of the plugin without them for this launch,
+    and opens the session on that: nothing inside it then judges a tool
+    call, and the container is its boundary. The committed trees are
+    untouched, so the next normal session is gated as before."""
+
+    scan_rules: bool = True
+    """Whether the hooks the session runs under hold it to the scan rules.
+
+    ``False`` compiles the variant with every rule retired — the posture
+    ``--ignore-antipatterns`` opens a session under, without writing it over
+    the committed trees as that flag does. Moot beside ``hooks=False``,
+    where no edit hook is left to carry rules."""
+
+    posture: LaunchPosture = LaunchPosture()
+    """What each runtime is told about asking. A launch's own flag outranks
+    it; it outranks the machine's defaults, being the more specific answer."""
+
+    network: NetworkMode | None = None
+    """The container's network for this kind of session, over the image's."""
+
+    memory: MemoryLimit | None = None
+    """The container's memory limit for this kind of session, over the image's."""
+
+    privileges: ContainerPrivileges | None = None
+    """What this kind of session's processes may hold, over the image's.
+
+    Unset keeps the image's, which by default holds nothing and gains
+    nothing. A mode meant to administer its own container declares what
+    that takes here, beside everything else it widens, so one read of the
+    mode says the whole of it."""
+
+    guidance: PromptDocument | None = None
+    """The always-loaded document this kind of session reads instead of the project's.
+
+    Unset keeps the committed guidance. Set, the launch compiles it for each
+    runtime with the renderer and the budget generation uses, and mounts
+    each rendered file read-only over the committed file's path inside the
+    container — so the session reads only this document, and the tree on
+    the host never changes."""
+
+    devices: list[Device] = []
+    """Devices every session of this kind is granted, beside the machine's own.
+
+    Which devices a machine holds is that machine's fact, so a device named
+    here is a claim every machine launching the mode is asked to honour: one
+    no CDI specification on the host names is withheld with a line, as a
+    machine's own grant would be."""
+
+    git_guards: bool = True
+    """Whether the repository's pre-commit guards judge this session's commits.
+
+    ``False`` has the launcher tell the guards so through the session's
+    environment, and they stand down: commits made mid-session are not
+    refused, and the cleanup a normal session does afterwards is where the
+    tree is brought back into line."""
+
+    instructions: str = ""
+    """What the session is told beyond its mode's name and description.
+
+    Appended to the runtime's own system prompt, never replacing it, so the
+    session knows which kind it is and what that asks of it."""
+
+    def prompt(self) -> str:
+        """The text appended to the session's system prompt, naming the mode."""
+        said = (
+            f"This session was launched in the `{self.name}` mode: {self.description}"
+        )
+        return f"{said}\n\n{self.instructions}" if self.instructions else said
+
+    def switched_off(self) -> list[str]:
+        """What this mode switches off that only a container may stand in for.
+
+        A mode naming any of these is refused on the host, because on the
+        host nothing else would be there: dropping the hooks, a runtime told
+        not to ask, or a runtime's own sandbox stood down. The posture's half
+        is read through :func:`~lup.harness.posture.unconfining`, the one
+        classification every layer of a launch is judged by.
+        """
+        posture = self.posture
+        named = [
+            (f"Claude Code's {posture.permission_mode} mode", posture.permission_mode),
+            ("Codex's approvals", posture.approval_policy),
+            ("Codex's own sandbox", posture.sandbox_mode),
+            ("Claude Code's Bash sandbox", posture.bash_sandbox),
+        ]
+        return [
+            *(["the plugin's hooks"] if not self.hooks else []),
+            *(
+                what
+                for what, value in named
+                if value is not None and unconfining(value)
+            ),
+        ]
+
+    def compiles_plugin(self) -> bool:
+        """Whether this mode opens its session on a plugin compiled for it alone."""
+        return not self.hooks or not self.scan_rules
+
+
 class ResolveSpec(BaseModel, frozen=True):
     id: str
     worker_identity: NativeName
@@ -1889,16 +2026,57 @@ class Harness(BaseModel, frozen=True):
     read off the manifest, so an image cannot be built from a roster the
     preflight never exercised.
     """
+    modes: list[SessionMode] = []
+    """The named kinds of session this project launches besides the normal one.
+
+    Empty is a project with one kind of session, which is most of them. Each
+    is launched by name and compiled per launch — see :class:`SessionMode` —
+    and none of them is rendered into a tree a session can reach, so a
+    session cannot widen what kind it is by editing a file.
+    """
+
+    def mode(self, name: str) -> SessionMode:
+        """The mode declared under ``name``, or a refusal naming the ones that are."""
+        found = next((mode for mode in self.modes if mode.name == name), None)
+        if found is None:
+            declared = ", ".join(mode.name for mode in self.modes) or "none"
+            raise ValueError(f"no mode is declared as {name!r}; declared: {declared}")
+        return found
+
+    def ungated(self) -> "Harness":
+        """This harness with every plugin's hooks taken away, for one launch.
+
+        The companion of :meth:`holding`, and read the same way: a copy only a
+        launch compiles, for a session declared to run without the gate,
+        never written over the committed trees. Everything else a plugin
+        carries — its skills, agents and tool servers — is the same plugin.
+        """
+        return self.model_copy(
+            update={
+                "plugins": [
+                    plugin.model_copy(update={"hooks": None}) for plugin in self.plugins
+                ]
+            }
+        )
 
     @property
-    def declared_hooks(self) -> HookSet:
+    def declared_hooks(self) -> HookSet | None:
         """The hook set this harness enforces, wherever a plugin declares it.
 
         A session composed in process reaches the same declaration the
         generated plugins are compiled from, so what a launched tree enforces
         and what an in-process session enforces cannot come apart.
+
+        ``None`` where no plugin carries one, which is a posture rather than an
+        omission: a project whose sessions run with no gate inside them, where
+        the container is the only boundary. Every reader answers that absence
+        in its own terms — nothing compiled, nothing to sweep, no policy to
+        ask — rather than inventing an empty set, which would read as a gate
+        that allows everything and is exactly what this is not.
         """
-        return next(plugin.hooks for plugin in self.plugins if plugin.hooks is not None)
+        return next(
+            (plugin.hooks for plugin in self.plugins if plugin.hooks is not None), None
+        )
 
     def holding(self, rules: RuleSelection) -> "Harness":
         """This harness compiled against a different selection of scan rules.
@@ -1992,6 +2170,9 @@ class Harness(BaseModel, frozen=True):
         agent_names = [agent.name for plugin in self.plugins for agent in plugin.agents]
         if len(agent_names) != len(dict.fromkeys(agent_names)):
             raise ValueError("harness agent names must be globally unique")
+        mode_names = [mode.name for mode in self.modes]
+        if len(mode_names) != len(dict.fromkeys(mode_names)):
+            raise ValueError("harness mode names must be unique")
         discovery_size = sum(
             len(declaration.description)
             for plugin in self.plugins
@@ -2005,8 +2186,14 @@ class Harness(BaseModel, frozen=True):
             for plugin in self.plugins
             for skill in plugin.skills
         }
+        # A mode's own guidance is always-loaded prose like the project's, so
+        # it is held to the same invocations and the same budget: a mode that
+        # named a skill nobody declares would open a session told to reach
+        # for nothing.
+        mode_guidance = [mode.guidance for mode in self.modes if mode.guidance]
         prompts = [
             self.guidance,
+            *mode_guidance,
             *[
                 declaration.prompt
                 for plugin in self.plugins
@@ -2085,15 +2272,24 @@ class Harness(BaseModel, frozen=True):
         if unknown_agents:
             raise ValueError(f"delegations name unknown agents: {unknown_agents}")
 
-        used = self.guidance.text_size()
-        if used > GUIDANCE_BUDGET.ceiling:
-            raise ValueError(
-                f"always-loaded guidance is {used} bytes, over the "
-                f"{GUIDANCE_BUDGET.ceiling} budget by "
-                f"{used - GUIDANCE_BUDGET.ceiling}. Move a section to a "
-                "generated document under docs/ and leave a file-path pointer, "
-                "the way Self-Improvement Loop and Permission Hooks were split."
-            )
+        for named, document in [
+            ("always-loaded guidance", self.guidance),
+            *[
+                (f"the {mode.name} mode's guidance", mode.guidance)
+                for mode in self.modes
+                if mode.guidance
+            ],
+        ]:
+            used = document.text_size()
+            if used > GUIDANCE_BUDGET.ceiling:
+                raise ValueError(
+                    f"{named} is {used} bytes, over the "
+                    f"{GUIDANCE_BUDGET.ceiling} budget by "
+                    f"{used - GUIDANCE_BUDGET.ceiling}. Move a section to a "
+                    "generated document under docs/ and leave a file-path "
+                    "pointer, the way Self-Improvement Loop and Permission "
+                    "Hooks were split."
+                )
         return self
 
 

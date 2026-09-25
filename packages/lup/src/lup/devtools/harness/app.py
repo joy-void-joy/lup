@@ -20,6 +20,7 @@ import lup.devtools.harness.doctor as doctor
 import lup.devtools.harness.drift as drift
 import lup.devtools.harness.launch as launch
 import lup.devtools.harness.policy_refresh as policy_refresh
+import lup.devtools.harness.posture as posture
 import lup.devtools.harness.reconcile as reconcile
 import lup.devtools.harness.resolve as resolve
 from lup.coordination.refs import ActorRef
@@ -34,14 +35,20 @@ from lup.devtools.harness.contained import (
     retire_images,
     superseded_images,
 )
-from lup.harness.image import Image, detected_client
+from lup.harness.image import Image, MemoryLimit, detected_client
 from lup.devtools.harness.generate import NativeHarnessComposition
 from lup.devtools.harness.profile_app import create_profile_app
-from lup.harness.models import Resumption
+from lup.harness.models import Resumption, SessionMode
 from lup.harness.notice import Banner
+from lup.harness.posture import (
+    ClaudePermissionMode,
+    CodexApprovalPolicy,
+    CodexSandboxMode,
+)
 from lup.harness.releases import resolved_agent_clis
 from lup.harness.requirements import Manifest
 from lup.providers.profiles import ProfileDirectory
+from lup.sandbox.models import NetworkMode
 from lup.devtools.harness.drift import RepositoryWriter
 from lup.workspace.paths import project_root
 
@@ -427,6 +434,26 @@ def create_harness_app(
         flags = "".join(f"  --{mode.name}: {mode.help}" for mode in modes)
         return f"{subject}{flags}"
 
+    def memory_asked(spelled: str | None) -> MemoryLimit | None:
+        """A ``--memory`` value parsed, or refused in the flag's own name."""
+        return None if spelled is None else posture.memory_limit(spelled, "--memory")
+
+    def mode_asked(
+        composition: NativeHarnessComposition, name: str | None
+    ) -> SessionMode | None:
+        """The declared mode ``--mode`` names, from the declaration this launch compiles.
+
+        Read off the composition rather than off anything on disk, so the
+        mode a session opens in is the one the reviewed declaration states:
+        a file a session could have written names no mode here.
+        """
+        if name is None:
+            return None
+        try:
+            return composition.recipe.source.mode(name)
+        except ValueError as refusal:
+            raise typer.BadParameter(f"--mode: {refusal}") from refusal
+
     claude_target = targets.builder("claude")
     if claude_target is not None:
         app.add_typer(create_profile_app(directory), name="profile")
@@ -528,6 +555,37 @@ def create_harness_app(
                     help="Mirror the native CLI transcript when this mode disables it",
                 ),
             ] = False,
+            network: Annotated[
+                NetworkMode | None,
+                typer.Option(
+                    "--network",
+                    help="The container's network for this launch, over the "
+                    "machine's default and the project's",
+                ),
+            ] = None,
+            memory: Annotated[
+                str | None,
+                typer.Option(
+                    "--memory",
+                    help="The container's memory limit for this launch: an "
+                    "amount such as 12g, or a share such as 75%",
+                ),
+            ] = None,
+            permission_mode: Annotated[
+                ClaudePermissionMode | None,
+                typer.Option(
+                    "--permission-mode",
+                    help="Claude Code's permission mode for this launch, over "
+                    "the mode's and the machine's",
+                ),
+            ] = None,
+            session_mode: Annotated[
+                str | None,
+                typer.Option(
+                    "--mode",
+                    help="Open the session in a mode this project declares",
+                ),
+            ] = None,
         ) -> None:
             selection = launch.extract_launch_mode(modes, ctx.args)
             allowance = (
@@ -537,10 +595,11 @@ def create_harness_app(
                 if max_recursive_agent is None
                 else max_recursive_agent
             )
+            composition = selected_target(
+                selection.mode, "claude", allowance, ignore_antipatterns
+            )
             launch.launch_claude(
-                selected_target(
-                    selection.mode, "claude", allowance, ignore_antipatterns
-                ),
+                composition,
                 selection.arguments,
                 directory,
                 profile,
@@ -558,6 +617,12 @@ def create_harness_app(
                 mounts=launch.declared_mounts(mount, mount_ro),
                 devices=launch.declared_devices(device),
                 recorder=recorder_for("claude"),
+                overrides=posture.LaunchOverrides(
+                    network=network,
+                    memory=memory_asked(memory),
+                    permission_mode=permission_mode,
+                ),
+                session_mode=mode_asked(composition, session_mode),
             )
 
     codex_target = targets.builder("codex")
@@ -699,6 +764,45 @@ def create_harness_app(
                     help="Mirror the native CLI transcript when this mode disables it",
                 ),
             ] = False,
+            network: Annotated[
+                NetworkMode | None,
+                typer.Option(
+                    "--network",
+                    help="The container's network for this launch, over the "
+                    "machine's default and the project's",
+                ),
+            ] = None,
+            memory: Annotated[
+                str | None,
+                typer.Option(
+                    "--memory",
+                    help="The container's memory limit for this launch: an "
+                    "amount such as 12g, or a share such as 75%",
+                ),
+            ] = None,
+            approval_policy: Annotated[
+                CodexApprovalPolicy | None,
+                typer.Option(
+                    "--approval-policy",
+                    help="When Codex asks before a command, for this launch, "
+                    "over the machine's default and the project's",
+                ),
+            ] = None,
+            sandbox_mode: Annotated[
+                CodexSandboxMode | None,
+                typer.Option(
+                    "--sandbox-mode",
+                    help="Codex's own sandbox for this launch, over the mode's "
+                    "and the machine's",
+                ),
+            ] = None,
+            session_mode: Annotated[
+                str | None,
+                typer.Option(
+                    "--mode",
+                    help="Open the session in a mode this project declares",
+                ),
+            ] = None,
         ) -> None:
             selection = launch.extract_launch_mode(modes, ctx.args)
             allowance = (
@@ -708,10 +812,11 @@ def create_harness_app(
                 if max_recursive_agent is None
                 else max_recursive_agent
             )
+            composition = selected_target(
+                selection.mode, "codex", allowance, ignore_antipatterns
+            )
             launch.launch_codex(
-                selected_target(
-                    selection.mode, "codex", allowance, ignore_antipatterns
-                ),
+                composition,
                 selection.arguments,
                 codex_home,
                 profile,
@@ -730,6 +835,13 @@ def create_harness_app(
                 mounts=launch.declared_mounts(mount, mount_ro),
                 devices=launch.declared_devices(device),
                 recorder=recorder_for("codex"),
+                overrides=posture.LaunchOverrides(
+                    network=network,
+                    memory=memory_asked(memory),
+                    approval_policy=approval_policy,
+                    sandbox_mode=sandbox_mode,
+                ),
+                session_mode=mode_asked(composition, session_mode),
             )
 
     return app
