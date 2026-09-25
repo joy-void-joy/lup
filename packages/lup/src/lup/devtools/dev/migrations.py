@@ -189,8 +189,8 @@ DECLARED: list[Migration] = [
                 instruction=(
                     "Read ClaudeProfileSelection.config_directory as optional: "
                     "None leaves whichever home the session's environment already "
-                    "selects, and AccountFile.resolve_config_dir() answers that "
-                    "home, honouring whichever one the environment names. A "
+                    "selects, and CLAUDE_LOGIN.selected_home(environment) answers "
+                    "that home, honouring whichever one the environment names. A "
                     "registry that must pin a home passes "
                     "default=ClaudeProfileSelection(config_directory=...)."
                 )
@@ -623,6 +623,73 @@ DECLARED: list[Migration] = [
                     "sent beside a named model and alone over an inherited one, "
                     "so no session inherits its home's effort any more; "
                     "resolved_effort() answers which rung is sent."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "PROFILE_ROOT",
+            "local_profile_directory",
+            "ACTIVE_FILE",
+            "REGISTRY_PATH",
+            "Account",
+            "Account.config_dir",
+            "Registry.profiles",
+            "Registry.active",
+            "AccountFile",
+            "AccountFile.__init__",
+            "AccountFile.homes_root",
+            "AccountFile.load_registry",
+            "AccountFile.save_registry",
+            "AccountFile.resolver_registry",
+            "AccountFile.resolve_config_dir",
+            "ClaudeProfileNames",
+            "ClaudeProfileNames.__init__",
+            "ClaudeProfileNames.names",
+            "ClaudeProfileNames.config_dir_for",
+            "ClaudeProfileNames.active_profile",
+            "ClaudeProfileRegistrar.__init__",
+            "ClaudeProfileRegistrar.add_profile",
+            "ClaudeProfileRegistrar.set_active",
+            "ClaudeProfileRegistrar.remove_profile",
+        ],
+        reason=(
+            "profiles lived in each checkout's .lup/profiles or in the personal "
+            "registry at ~/.lup/profiles.json, so every new repository opened "
+            "its accounts signed out; they live once per person now, a "
+            "directory per name beside the per-user config at "
+            "$XDG_CONFIG_HOME/lup (~/.config/lup), a home per runtime inside "
+            "each, selected by that config.toml's profile"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Move the accounts already kept once: this moves each "
+                    "checkout's .lup/profiles/<name> and the old registry's homes, "
+                    "links a home registered elsewhere, and carries the selection "
+                    "where the config file records none. Launches say so while "
+                    "an old location still holds accounts."
+                ),
+                command=["uv", "run", "lup-devtools", "harness", "profile", "migrate"],
+            ),
+            MigrationStep(
+                instruction=(
+                    "Build profile directories with user_profile_directory(login) "
+                    "from lup.providers.profile_tree wherever "
+                    "local_profile_directory(root, login) or a ProfileDirectory "
+                    "over ClaudeProfileNames and ClaudeProfileRegistrar was built. "
+                    "ProfileFolders takes the UserConfigFile whose profiles_root() "
+                    "it keeps, and the selection is UserConfigFile.load().profile "
+                    "rather than an .active file."
+                )
+            ),
+            MigrationStep(
+                instruction=(
+                    "Pass an application's own origin as claude_usage_entry(profiles) "
+                    "or codex_usage_entry(executable, profiles); codex_usage_entry "
+                    "takes no home any more, and `usage codex --profile NAME` reads "
+                    "that account's Codex home rather than refusing the name."
                 )
             ),
         ],

@@ -15,7 +15,8 @@ from lup.devtools.conversation import app as conversation_app
 from lup.devtools.conversation import browser
 from lup.devtools.conversation import chatgpt
 from lup.devtools.conversation import selection
-from lup.devtools.harness.composition import local_profile_directory
+from lup.providers.profile_tree import user_profile_directory
+from lup.providers.user_config import UserConfigFile
 from lup.devtools.setup import create_setup_app
 
 
@@ -114,30 +115,30 @@ async def test_login_finishes_when_the_browser_window_closes(
 def test_a_named_codex_profile_keeps_chatgpt_web_state_beside_its_home(
     tmp_path: Path,
 ) -> None:
-    profiles = local_profile_directory(tmp_path, CODEX_LOGIN)
+    profiles = user_profile_directory(CODEX_LOGIN, UserConfigFile(tmp_path / "lup"))
     profile = profiles.add("work")
 
     directory = profiles.state_dir("work", "chatgpt-web")
 
-    assert profile.config_dir == tmp_path / ".lup" / "profiles" / "work" / "codex-home"
-    assert directory == tmp_path / ".lup" / "profiles" / "work" / "chatgpt-web"
+    assert profile.config_dir == tmp_path / "lup" / "profiles" / "work" / "codex-home"
+    assert directory == tmp_path / "lup" / "profiles" / "work" / "chatgpt-web"
 
 
 def test_the_active_profile_supplies_browser_state_when_none_is_named(
     tmp_path: Path,
 ) -> None:
-    profiles = local_profile_directory(tmp_path, CODEX_LOGIN)
+    profiles = user_profile_directory(CODEX_LOGIN, UserConfigFile(tmp_path / "lup"))
     profiles.add("work")
 
     assert profiles.state_dir(None, "chatgpt-web") == (
-        tmp_path / ".lup" / "profiles" / "work" / "chatgpt-web"
+        tmp_path / "lup" / "profiles" / "work" / "chatgpt-web"
     )
 
 
 def test_chatgpt_command_reuses_the_active_codex_profile_container(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    profiles = local_profile_directory(tmp_path, CODEX_LOGIN)
+    profiles = user_profile_directory(CODEX_LOGIN, UserConfigFile(tmp_path / "lup"))
     profiles.add("work")
     opened: list[Path] = []
 
@@ -170,7 +171,7 @@ def test_chatgpt_command_reuses_the_active_codex_profile_container(
     )
 
     assert result.exit_code == 0
-    assert opened == [tmp_path / ".lup" / "profiles" / "work" / "chatgpt-web"]
+    assert opened == [tmp_path / "lup" / "profiles" / "work" / "chatgpt-web"]
 
 
 def recording_browser(monkeypatch: pytest.MonkeyPatch, opened: list[Path]) -> None:

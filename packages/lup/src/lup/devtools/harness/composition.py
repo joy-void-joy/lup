@@ -21,11 +21,6 @@ from lup.providers.claude.harness_runtime import (
     claude_capability_probes,
 )
 from lup.providers.claude.login import CLAUDE_LOGIN
-from lup.providers.claude.profile_store import (
-    AccountFile,
-    ClaudeProfileNames,
-    ClaudeProfileRegistrar,
-)
 from lup.harness.codescan.common import RuleSelection
 from lup.providers.codex.harness import CodexSpellings
 from lup.providers.codex.home import CodexWorktreeHomeStore
@@ -45,61 +40,23 @@ from lup.devtools.harness.generate import (
 )
 from lup.harness.evidence import WireContract
 from lup.harness.models import CapabilityEvidence, PromptDocument
-from lup.providers.login import ProviderLogin
-from lup.providers.profile_tree import (
-    ProfileFolders,
-    TreeProfileNames,
-    TreeProfileRegistrar,
-    TreeProfileStateLocations,
-)
+from lup.providers.profile_tree import user_profile_directory
 from lup.providers.profiles import ProfileDirectory
-
-PROFILE_ROOT = Path(".lup") / "profiles"
-"""Default place a project keeps its own profiles, relative to its root.
-
-Under ``.lup`` because that is already where a checkout's personal state
-lives — reconciliation proposals, resolver runs — and is already ignored, so
-a login cannot be committed by a rule nobody remembered to write.
-"""
 
 
 def claude_profile_directory() -> ProfileDirectory:
-    """The personal Claude account registry, as a directory to curate.
+    """The Claude side of the accounts this person keeps, as a directory to curate.
 
-    What a project falls back to when it keeps no accounts of its own: names
-    registered by hand, resolved against the login Claude Code itself writes.
+    What a project falls back to when it names no origin of its own: the
+    per-user profiles every checkout shares, so an account signed in once
+    opens in every repository.
     """
-    accounts = AccountFile()
-    return ProfileDirectory(
-        ClaudeProfileNames(accounts), ClaudeProfileRegistrar(accounts), CLAUDE_LOGIN
-    )
+    return user_profile_directory(CLAUDE_LOGIN)
 
 
-def local_profile_directory(
-    root: Path,
-    login: ProviderLogin,
-    profile_root: Path = PROFILE_ROOT,
-) -> ProfileDirectory:
-    """The accounts a project keeps itself, as directories under it.
-
-    What a project supplies instead of falling back to a personal registry:
-    one name means one directory in this checkout, so an account reaches a
-    launch without anything under the operator's home deciding which. A
-    checkout that has started no profiles resolves nothing, which leaves a
-    launch on whatever account its environment already selected.
-
-    Which runtime's homes those directories hold is the ``login``'s to say —
-    the subdirectory each takes is one of the words it carries — so a project
-    on one runtime keeps that runtime's accounts and a project on two keeps
-    both under one name, without this naming either.
-    """
-    folders = ProfileFolders(root / profile_root, login.home_subdir)
-    return ProfileDirectory(
-        TreeProfileNames(folders),
-        TreeProfileRegistrar(folders),
-        login,
-        TreeProfileStateLocations(folders),
-    )
+def codex_profile_directory() -> ProfileDirectory:
+    """The Codex side of the same accounts, one name meaning one person on both."""
+    return user_profile_directory(CODEX_LOGIN)
 
 
 type NativeCapabilityEvidence = (
@@ -153,7 +110,7 @@ class ClaudeComposer(NativeComposer):
             readiness=readiness,
             invocation_renderer=ClaudeSpellings(),
             login=CLAUDE_LOGIN,
-            default_config_home=Path.home() / ".claude",
+            default_config_home=CLAUDE_LOGIN.ambient_home,
             clipboard_transport="commands",
         )
 

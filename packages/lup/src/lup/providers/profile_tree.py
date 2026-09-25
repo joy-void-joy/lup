@@ -1,50 +1,53 @@
-"""Profiles a project keeps as directories of its own, one per account.
+"""The accounts one person keeps, as directories beside their lup config.
 
-The second shape :mod:`lup.providers.profiles` names. A name is a directory
-rather than an entry in a registry, so the configuration home that account
-runs under — and whatever else it earns — sit together under
-``<root>/<name>/``. Making the directory the origin is what keeps one name
-meaning one account however it is spelled, to a launch or to a command tree
-or to a setup wizard: there is no second list to register a profile in, and
-so none to fall out of step with the profiles that exist.
+A name is a directory rather than an entry in a registry, so the configuration
+home an account runs under — and whatever else it earns — sit together under
+``profiles/<name>/`` in the person's lup config home
+(:class:`~lup.providers.user_config.UserConfigFile`). Making the directory the
+origin is what keeps one name meaning one account however it is spelled, to a
+launch, a command tree, a setup wizard or a declaration's ``profile``: there
+is no second list to register a profile in, and so none to fall out of step.
 
-Nothing here names a provider. Both the root and the subdirectory a
-configuration home takes inside each profile are the caller's to choose, so
-the same layout serves whichever runtime's homes a project keeps, and a
-project keeping two runtimes' homes keeps them side by side under one name.
+Per person rather than per checkout, because an account belongs to whoever
+signs in: kept in a checkout, every new repository started signed out.
+
+Nothing here names a provider. The subdirectory a configuration home takes
+inside each profile is the runtime login's word, so one name holds a home for
+every runtime side by side, and ``profile=work`` means the same account on
+Claude Code and on Codex. Which name answers for a caller naming none is the
+``profile`` the person's config file records.
 """
 
 from pathlib import Path
 
-from lup.channels.models import write_atomic
-from lup.providers.profiles import ProfileNames, ProfileRegistrar, ProfileStateLocations
-
-ACTIVE_FILE = ".active"
-"""Default name for the file recording which profile a launch selects."""
+from lup.providers.login import ProviderLogin
+from lup.providers.profiles import (
+    ProfileDirectory,
+    ProfileNames,
+    ProfileRegistrar,
+    ProfileStateLocations,
+)
+from lup.providers.user_config import UserConfigFile
 
 
 class ProfileFolders:
     """The directory layout, as a plain collaborator both capabilities share.
 
-    A collaborator rather than a base class, for the reason
-    :mod:`lup.providers.claude.profile_store` gives of its registry file: an
-    implementation that inherited its reading would be inheriting behavior
-    alongside a capability, and the two classes below would then be one class
-    answering for two powers.
+    A collaborator rather than a base class: an implementation that inherited
+    its reading would be inheriting behavior alongside a capability, and the
+    two classes below would then be one class answering for two powers.
     """
 
-    def __init__(
-        self, root: Path, home_subdir: str, active_file: str = ACTIVE_FILE
-    ) -> None:
-        self.root = root
+    def __init__(self, config: UserConfigFile, home_subdir: str) -> None:
+        self.config = config
+        self.root = config.profiles_root()
         self.home_subdir = home_subdir
-        self.active_file = active_file
 
     def names(self) -> list[str]:
         """Every profile directory under the root, in display order.
 
         A root that does not exist yet holds no profiles rather than
-        failing: a project acquires one the first time it adds a profile,
+        failing: a person acquires one the first time they add a profile,
         and every reader before that should see an empty roster instead of
         an error about a directory nobody has had reason to create.
         """
@@ -65,20 +68,16 @@ class ProfileFolders:
         return self.root / name
 
     def active(self) -> str | None:
-        """The recorded selection, where one has been recorded."""
-        path = self.root / self.active_file
-        if not path.is_file():
-            return None
-        return path.read_text(encoding="utf-8").strip() or None
+        """The selection the person's config file records, where it records one."""
+        return self.config.load().profile
 
     def select(self, name: str) -> None:
         """Record which profile answers for a caller naming none."""
-        self.root.mkdir(parents=True, exist_ok=True)
-        write_atomic(self.root / self.active_file, f"{name}\n".encode())
+        self.config.select_profile(name)
 
 
 class TreeProfileNames(ProfileNames):
-    """Read which accounts a project's profile directories hold."""
+    """Read which accounts the profile directories hold."""
 
     def __init__(self, folders: ProfileFolders) -> None:
         self.folders = folders
@@ -96,7 +95,7 @@ class TreeProfileNames(ProfileNames):
 
 
 class TreeProfileRegistrar(ProfileRegistrar):
-    """Start and select a project's profile directories, and refuse to forget one."""
+    """Start and select profile directories, and refuse to forget one."""
 
     def __init__(self, folders: ProfileFolders) -> None:
         self.folders = folders
@@ -112,9 +111,8 @@ class TreeProfileRegistrar(ProfileRegistrar):
         default home, which the directory refuses however it is reached,
         because naming no profile is what selects that account.
 
-        The first profile a project starts becomes its selection, matching
-        what registering the first account into a personal registry does:
-        a project with exactly one profile should not also have to say so.
+        The first profile a person starts becomes their selection: someone
+        with exactly one account should not also have to say so.
         """
         home = self.folders.home_for(name)
         if config_dir is not None and config_dir != home:
@@ -143,13 +141,13 @@ class TreeProfileRegistrar(ProfileRegistrar):
         account earned. Answered as a ``ValueError`` whose message is the
         explanation, which is what a command tree renders in place of one.
 
-        Where that profile is the selection, the file recording it is named
+        Where that profile is the selection, the line recording it is named
         too: removed alone, the directory leaves every launch naming none
         refused for a profile that no longer exists, told to add it back.
         """
-        selection = self.folders.root / self.folders.active_file
         selected = (
-            f", and {selection}, which selects it"
+            f", and the `profile` line in {self.folders.config.path()}, which "
+            "selects it"
             if self.folders.active() == name
             else ""
         )
@@ -169,3 +167,24 @@ class TreeProfileStateLocations(ProfileStateLocations):
         if name not in self.folders.names():
             raise KeyError(name)
         return self.folders.container_for(name)
+
+
+def user_profile_directory(
+    login: ProviderLogin, config: UserConfigFile | None = None
+) -> ProfileDirectory:
+    """One runtime's side of the accounts a person keeps, as a directory to curate.
+
+    The one origin a name resolves against — a launch, the usage display, a
+    resolver run, a declaration's ``profile`` — so a name opens the same
+    account wherever it is spelled. Which runtime's homes it reads is the
+    ``login``'s to say, through the subdirectory each takes inside a profile.
+    ``config`` is the person's lup config home, read from the environment
+    unless a caller names another.
+    """
+    folders = ProfileFolders(config or UserConfigFile(), login.home_subdir)
+    return ProfileDirectory(
+        TreeProfileNames(folders),
+        TreeProfileRegistrar(folders),
+        login,
+        TreeProfileStateLocations(folders),
+    )

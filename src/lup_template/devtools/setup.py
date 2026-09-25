@@ -31,7 +31,6 @@ from pathlib import Path
 
 import typer
 
-from lup_template.harness.composition import profile_directory
 from lup.devtools.setup import (
     Integration,
     IntegrationStatus,
@@ -296,4 +295,4 @@ INTEGRATIONS: list[Integration] = [
 ]
 
 
-app = create_setup_app(INTEGRATIONS, profile_directory())
+app = create_setup_app(INTEGRATIONS)

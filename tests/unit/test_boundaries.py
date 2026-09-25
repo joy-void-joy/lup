@@ -64,7 +64,7 @@ def test_per_engine_imports_breach() -> None:
     text = (
         "import lup.providers.codex.runtime\n"
         "from lup.providers.codex.native import CodexEventDecoder\n"
-        "from lup.providers.claude.profile_store import ClaudeProfileNames\n"
+        "from lup.providers.claude.theme import ClaudeTheme\n"
         "from lup.providers.claude.harness import ClaudeSkillRenderer\n"
     )
     breaches = find_boundary_breaches(text)

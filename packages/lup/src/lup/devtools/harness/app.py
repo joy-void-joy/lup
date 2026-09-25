@@ -58,10 +58,9 @@ def create_harness_app(
 ) -> typer.Typer:
     """Wire the harness command tree over the targets one project declares.
 
-    A project that keeps Claude accounts of its own supplies ``profiles``
-    over that origin, so one name selects the same account for a launch here
-    as it does everywhere else in that project. Supplying none falls back to
-    the personal registry, which is the answer for a project keeping none.
+    ``profiles`` is where a name finds its account. Supplying none takes the
+    person's own, under their lup config home, which every checkout shares —
+    so one name selects the same account here as in any other repository.
 
     ``launch_modes`` are that project's own kinds of session. Each adds a flag
     to every launcher; selecting one compiles the tree it declares instead of

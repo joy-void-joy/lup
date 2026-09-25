@@ -12,7 +12,10 @@ from typing import Annotated
 
 import typer
 
+from lup.providers.profile_migration import migrate_profiles
 from lup.providers.profiles import Profile, ProfileDirectory
+from lup.providers.user_config import UserConfigFile
+from lup.workspace.paths import project_root
 
 
 def create_profile_app(directory: ProfileDirectory) -> typer.Typer:
@@ -89,5 +92,20 @@ def create_profile_app(directory: ProfileDirectory) -> typer.Typer:
         """Forget a profile, leaving its configuration home on disk."""
         entry = acting(lambda: directory.remove(name))
         typer.echo(f"Removed {entry.name} — left {entry.config_dir} on disk")
+
+    @app.command("migrate")
+    def migrate_command(
+        checkout: Annotated[
+            Path | None,
+            typer.Option(
+                "--checkout",
+                help="Checkout whose .lup/profiles to move; default: this one",
+            ),
+        ] = None,
+    ) -> None:
+        """Move profiles a checkout or the old ~/.lup registry kept into your lup config home."""
+        migration = migrate_profiles(checkout or project_root(), UserConfigFile())
+        for line in migration.lines():
+            typer.echo(line)
 
     return app

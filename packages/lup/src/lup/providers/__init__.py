@@ -92,16 +92,15 @@ seeds and sanitizes — so the concern is answered there rather than absent,
 and a Codex counterpart to this module would have no second document to
 reconcile.
 
-``codex/home.py`` versus ``claude/profile_store.py`` — the same concern
-answered differently, not a gap. Claude keeps several accounts as several
-config directories, so its side is a personal registry file with a naming
-and a registering capability composed over it. Codex keeps one rotating
-credential the runtime refreshes in place, so its side is per-worktree homes
-converging on one account home; copying that credential and diverging would
-strand every stale copy. The asymmetry left is that only Claude's origin is
-split into named capabilities — Codex reaches its home through one class and
-a selector — which follows from the same difference and is not a gap this
-sweep leaves open.
+``codex/home.py`` has no Claude counterpart, and that is not a gap. Both
+runtimes keep accounts the same way — a directory per name under the
+person's lup config home, a home per runtime inside it (``profile_tree.py``)
+— but a Codex launch opens a per-worktree home derived from the selected
+account's, because its plugin is installed per home; Claude takes its plugin
+by flag and opens the account's home as it stands. Codex keeps one rotating
+credential the runtime refreshes in place, so the per-worktree homes converge
+on the account home rather than copying it and diverging, which would strand
+every stale copy.
 
 Declined rather than absent
 ---------------------------

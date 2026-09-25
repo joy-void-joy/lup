@@ -23,7 +23,9 @@ from pydantic import BaseModel, Field, ValidationError
 
 from lup.harness.devices import Device
 from lup.providers.login import NativeHomeScope, ProviderLogin
+from lup.providers.profile_migration import legacy_notice
 from lup.providers.profiles import DefaultHomeProfile, ProfileDirectory
+from lup.providers.user_config import UserConfigFile
 from lup.devtools.harness.contained import contained_argv
 from lup.providers.claude.confinement import CLAUDE_SANDBOX_OFF
 from lup.providers.claude.model_choice import (
@@ -1288,6 +1290,18 @@ def writable_root_arguments(accessible: list[AccessibleRoot] = []) -> list[str]:
     return ["-c", f"sandbox_workspace_write.writable_roots={json.dumps(roots)}"]
 
 
+def announce_legacy_profiles(root: Path, config: UserConfigFile) -> None:
+    """Say where accounts were left behind, at every launch until they move.
+
+    Moved by a command rather than here, because moving a login is a decision
+    a launch should not take on its way past — and said rather than left,
+    because an account left there is one no launch can select.
+    """
+    notice = legacy_notice(root, config)
+    if notice is not None:
+        Notice(text=notice, urgency="warning").say()
+
+
 def announce_relaxed_rules(relaxed: bool, plugin: Plugin) -> None:
     """Say what a relaxed launch retired, and what it did not.
 
@@ -1890,6 +1904,7 @@ def launch_claude(
         checkpoint(provider="claude")
     plugin = composition.recipe.source.plugins[0]
     announce_relaxed_rules(relaxed, plugin)
+    announce_legacy_profiles(project_root(), UserConfigFile())
     sentinels = LaunchSentinels()
     cleared = ready_to_open(
         composition,
@@ -2131,6 +2146,7 @@ def launch_codex(
         checkpoint(provider="codex")
     plugin = composition.recipe.source.plugins[0]
     announce_relaxed_rules(relaxed, plugin)
+    announce_legacy_profiles(project_root(), UserConfigFile())
     sentinels = LaunchSentinels()
     cleared = ready_to_open(
         composition,

@@ -24,6 +24,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from lup.devtools.conversation.app import create_conversation_setup_app
+from lup.devtools.harness.composition import claude_profile_directory
 from lup.devtools.harness.profile_app import create_profile_app
 from lup.providers.profiles import ProfileDirectory
 from lup.types import EnvVars
@@ -272,17 +273,17 @@ def create_setup_app(
 ) -> typer.Typer:
     """Build the setup command tree over a project's declared integrations.
 
-    A project that keeps Claude accounts supplies the directory over its own
-    origin, and setup curates exactly the roster its launches select from.
+    Setup curates exactly the roster a launch selects from: ``profiles``
+    where a project names an origin of its own, the person's otherwise.
     """
+    directory = profiles or claude_profile_directory()
     app = typer.Typer(
         help="Interactive setup wizard",
         pretty_exceptions_show_locals=False,
         invoke_without_command=True,
     )
-    app.add_typer(create_conversation_setup_app(profiles), name="conversation")
-    if profiles is not None:
-        app.add_typer(create_profile_app(profiles), name="profile")
+    app.add_typer(create_conversation_setup_app(directory), name="conversation")
+    app.add_typer(create_profile_app(directory), name="profile")
     # The dashboard is this wizard seen through a browser — the same declared
     # integrations rendered for somebody who would rather click than answer
     # prompts. Beneath it rather than beside it because neither is usable

@@ -9,9 +9,8 @@ public part itself rather than pointing at another.
 What stays behind in the modules beside this one is the adapter proper. The
 runtime side: ``runtime`` opens Claude SDK sessions behind the
 :mod:`lup.sessions` contracts, ``transcripts`` reads the record Claude Code
-keeps of each conversation, ``config`` holds profile and compatible-endpoint
-transforms, and ``profile_store`` is the personal account registry the CLI
-composition roots read. The harness side: ``harness`` renders canonical
+keeps of each conversation, and ``config`` holds profile and
+compatible-endpoint transforms. The harness side: ``harness`` renders canonical
 declarations into the ``.claude`` plugin tree (including the generated policy
 dispatcher), ``harness_runtime`` probes the installed CLI for doctor
 evidence, ``native`` decodes hook payloads into :mod:`lup.policy` events and
@@ -30,15 +29,9 @@ Nothing here imports the Claude Agent SDK: an agent is a declaration, and the
 SDK loads when a session opens.
 
 Deliberately Claude-only, with no neutral contract:
-
-- :class:`~lup.providers.claude.profile_store.AccountFile` persists
-  personal named config-directory selections because the Claude CLI has no
-  native profile registry. It projects into ``ClaudeProfileRegistry``, which
-  the ``ProfileResolver`` filling consumes. The Codex CLI owns account homes
-  and named config overlays natively, so no Codex counterpart exists.
-- :mod:`~lup.providers.claude.hooks` translates portable Lup hooks into
-  in-process SDK hook callbacks, a mechanism only the Claude SDK exposes;
-  Codex hooks exist solely as generated plugin command artifacts.
+:mod:`~lup.providers.claude.hooks` translates portable Lup hooks into
+in-process SDK hook callbacks, a mechanism only the Claude SDK exposes; Codex
+hooks exist solely as generated plugin command artifacts.
 """
 
 from collections.abc import AsyncIterator, Generator
