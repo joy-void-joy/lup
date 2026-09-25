@@ -10,8 +10,11 @@ the roster, resolving requirements, and reporting what a module's prose costs
 all happen before anything is built, and none of them should import a skill.
 
 ``template-init`` stays on for an adopter, which is not obvious and is worth
-saying: a project built from this scaffold still calls ``/lup:init``, still
-installs the plugin, and still opens a design conversation. What it drops the
+saying: a project built from this scaffold still calls ``/lup:init`` and
+still installs the plugin. The design conversation is core's and reaches
+every project whatever it took. ``project`` is essential: an adopter rewrites
+its sections rather than declining them, and its ``agent`` tree serves every
+tool group a session is offered. What an adopter drops the
 moment it is stood up is ``examples`` — a directory composing lup's own
 runtime against lup's own README, plus the test modules driving it, which
 an adopter inherits as a suite it must keep green and will never run. That is
@@ -29,6 +32,9 @@ PROJECT = ModuleSpec(
         "expects of a session working in it."
     ),
     default_on=True,
+    # Rewritten rather than declined: the seat is the point, and `agent` is
+    # what serves every tool group a session is offered.
+    essential=True,
     subapps=["agent"],
 )
 
@@ -36,10 +42,14 @@ TEMPLATE_INIT = ModuleSpec(
     id="template-init",
     title="Template init",
     summary=(
-        "Standing a lup project up: designing it, initializing it, installing "
-        "the plugin into it, and restarting one from an explored predecessor."
+        "Standing a lup project up: initializing it, installing the plugin "
+        "into it, and restarting one from an explored predecessor."
     ),
     default_on=True,
+    # Initialization settles how the project tracks lup and hands it to the
+    # update loop; distill carries a predecessor's pieces through the import.
+    # Both are upstream's command tree and skills.
+    requires=["upstream"],
 )
 
 UPSTREAM = ModuleSpec(
@@ -50,6 +60,10 @@ UPSTREAM = ModuleSpec(
         "tracked repository rather than rewriting it."
     ),
     default_on=True,
+    # An update is a merge and an import a commit series: each skill ends at
+    # the loop's merge decision tree and its commit skill, which is what it is
+    # rather than a pointer it could do without.
+    requires=["git-workflow"],
     subapps=["sync"],
 )
 
@@ -59,6 +73,9 @@ EXAMPLES = ModuleSpec(
     summary="The scaffold's demonstrations of itself, which no adopter runs.",
     default_on=True,
     scaffold_only=True,
+    # The monitored-run example is a `lup.runs` pipeline and tells its reader
+    # to watch it with the runs module's command tree.
+    requires=["runs"],
     tool_groups=["example"],
 )
 

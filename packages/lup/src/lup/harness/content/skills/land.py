@@ -32,6 +32,16 @@ SKILL = models.Skill(
                     "commit_skill": models.SkillInvocation(
                         plugin="lup", skill="commit"
                     ),
+                    # The roster is the coordination module's tool group.
+                    "peers_see_it": models.WhereTaken(
+                        module="coordination",
+                        parts=[
+                            models.TextPart(
+                                text=", and `coordination_peers` is where it is "
+                                "seen coming"
+                            )
+                        ],
+                    ),
                     "approval": models.RequestApproval(
                         action="carrying out the actions those dispositions imply",
                         reason="the branches may hold work the user has not looked at",

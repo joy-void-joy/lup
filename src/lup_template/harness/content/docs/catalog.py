@@ -18,17 +18,15 @@ from pathlib import Path
 
 import lup.harness.models as models
 from lup.harness.content.docs.catalog import published
-from lup.harness.modules import DocumentContext, composed_documents
+from lup.harness.modules import Composition, DocumentContext
 from lup.providers.claude.harness import CLAUDE_DISPATCHER
 from lup.providers.codex.harness import CODEX_DISPATCHER
 from lup.devtools.dev.library import LibraryMode, read_mode
 from lup_template.harness.content.catalog import (
-    AGENTS,
+    COMPOSITION,
     LAYOUT,
-    MODULES,
     PLUGIN_NAME,
-    SKILLS,
-    SUBAPP_SPECS,
+    subapp_specs,
 )
 from lup_template.harness.content.docs import index
 
@@ -36,7 +34,7 @@ DOCS_ROOT = LAYOUT.docs().path
 """Directory this repository's own page modules live in, for their banners."""
 
 
-def context(root: Path) -> DocumentContext:
+def context(root: Path, composed: Composition = COMPOSITION) -> DocumentContext:
     """What the adopted modules' pages render against, for one checkout.
 
     Built against a checkout rather than declared, because two of the pages
@@ -56,13 +54,17 @@ def context(root: Path) -> DocumentContext:
     required to hold it. Asking the mode rather than testing for the directory
     is what keeps a copy left behind by ``--keep-vendored`` from voting on a
     page describing the lup actually being resolved.
+
+    *composed* is this repository's own roster unless a caller renders what
+    another selection would publish.
     """
+    content = composed.content()
     return DocumentContext(
         layout=LAYOUT,
         root=root,
-        skills=SKILLS,
-        agents=AGENTS,
-        subapps=SUBAPP_SPECS,
+        skills=content.skills,
+        agents=content.agents,
+        subapps=subapp_specs(composed),
         plugin=PLUGIN_NAME,
         claude_decodes=CLAUDE_DISPATCHER.routed_tools,
         codex_decodes=CODEX_DISPATCHER.routed_tools,
@@ -70,7 +72,12 @@ def context(root: Path) -> DocumentContext:
     )
 
 
-def documents(root: Path) -> list[models.Document]:
+def documents(root: Path, composed: Composition = COMPOSITION) -> list[models.Document]:
     """Every document under ``docs/``, the index first because it teaches the rest."""
-    pages = composed_documents(MODULES, context(root))
-    return [published("index", "README.md", index.document(pages), DOCS_ROOT), *pages]
+    pages = composed.documents(context(root, composed))
+    return [
+        published(
+            "index", "README.md", index.document(pages, composed.taken()), DOCS_ROOT
+        ),
+        *pages,
+    ]

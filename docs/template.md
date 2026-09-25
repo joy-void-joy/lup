@@ -75,9 +75,6 @@ src/lup_template/
 │       ├── settings.py      # What this repository grants, refuses, and enables for itself.
 │       ├── shell_vocabulary.py # Where this project's shell vocabulary differs from the one lup offers.
 │       ├── skills/          # Typed harness content declarations.
-│       │   ├── brainstorm.py # Canonical declaration for the brainstorm skill.
-│       │   ├── deciding.py  # The decision walk the design-facing skills share.
-│       │   ├── discovery.py # The discovery posture the design-facing skills share.
 │       │   ├── distill.py   # Canonical declaration for the distill skill.
 │       │   ├── import_skill.py # Canonical declaration for the import skill.
 │       │   ├── init.py      # Canonical declaration for the init skill.
@@ -272,9 +269,10 @@ any credential is lent, and https reads a public repository with none; inside
 a session every mounted checkout's remotes are rewritten onto the transport
 the launch's credential reaches, so a push goes out on the operator's ssh key
 or token alike. /lup:init points it at the repository the project was
-actually generated from when that is a fork (`dev init upstream`), and where
-the project resolves lup from a repository the entry follows that pin rather
-than its own URL, so the two never name different repositories.
+actually generated from when that is a fork (`dev init upstream`).
+Where the project resolves lup from a repository the entry
+follows that pin rather than its own URL, so the two never name different
+repositories.
 
 `"required": true` says the project cannot work without that repository
 present: the workflows that fix a defect upstream, derive a relocation map

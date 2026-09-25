@@ -19,8 +19,8 @@ Three commands, because they answer different questions, and which one you owe
 depends on what you are about to do. `dev check` puts both test suites, pyright
 and ruff on the machine at once and costs whichever of them finishes last — a
 couple of minutes — and it is **the bar for landing**: run it on the integrated
-result before work reaches the integration branch, which is what `/lup:land`
-does and the only moment the whole answer means anything. The gate reports what
+result before work reaches the integration branch{{ land_does_it }} — the
+only moment the whole answer means anything. The gate reports what
 each of its checks cost, so a run that felt slow can be read rather than
 guessed at.
 
@@ -283,6 +283,13 @@ Commit early, commit often, and keep commits atomic — if the message needs an
 "and", it is two commits. The format is `type(scope): description`:
 
 
+<!-- passage: loop-skills -->
+{{ rebase_skill }} pushes, opens the pull request, and rebuilds history
+with `git reset --soft main` and a force-push; re-run it after each round of
+review fixes. {{ close_skill }} merges the approved one and cleans up.
+{{ merge_skill }} guides conflict resolution.
+
+
 <!-- passage: what-has-to-be-green -->
 
 A `data` commit of generated outputs may go straight to `dev`; code never
@@ -293,10 +300,7 @@ Two branches: `dev` is the integration branch feature work merges into, and
 `main` is stable and receives only reviewed pull requests from `dev`. Never
 commit code directly to `dev`.
 
-{{ rebase_skill }} pushes, opens the pull request, and rebuilds history
-with `git reset --soft main` and a force-push; re-run it after each round of
-review fixes. {{ close_skill }} merges the approved one and cleans up. {{ merge_skill }} guides conflict
-resolution — and during a merge the bias is toward inclusion: audit the result
+{{ loop_skills }}During a merge the bias is toward inclusion: audit the result
 against both parents and confirm every removed function, parameter, or command
 was removed deliberately rather than lost to a conflict side.
 
@@ -520,8 +524,7 @@ was asked. A `solved:` claim is retired only by the verify-solved review
 pass, through `dev comments --retire`; the edit gate refuses a hand-deletion
 or rewording for everyone, agent and human alike. `defer:` notes park work
 at the site until deliberately resumed, and `ignore[<rule-id>]` hatches are
-not feedback at all — they come out with the violation they cover. {{ resolve_skill }} runs that pass;
-[resolver.md](resolver.md) describes what it does.
+not feedback at all — they come out with the violation they cover.{{ resolve_pass }}
 
 ## Native evidence and the release gate
 

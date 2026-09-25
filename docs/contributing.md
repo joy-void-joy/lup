@@ -22,8 +22,8 @@ Three commands, because they answer different questions, and which one you owe
 depends on what you are about to do. `dev check` puts both test suites, pyright
 and ruff on the machine at once and costs whichever of them finishes last — a
 couple of minutes — and it is **the bar for landing**: run it on the integrated
-result before work reaches the integration branch, which is what `/lup:land`
-does and the only moment the whole answer means anything. The gate reports what
+result before work reaches the integration branch, which is what `/lup:land` does — the
+only moment the whole answer means anything. The gate reports what
 each of its checks cost, so a run that felt slow can be read rather than
 guessed at.
 
@@ -307,8 +307,10 @@ commit code directly to `dev`.
 
 /lup:rebase pushes, opens the pull request, and rebuilds history
 with `git reset --soft main` and a force-push; re-run it after each round of
-review fixes. /lup:close merges the approved one and cleans up. /lup:merge guides conflict
-resolution — and during a merge the bias is toward inclusion: audit the result
+review fixes. /lup:close merges the approved one and cleans up.
+/lup:merge guides conflict resolution.
+
+During a merge the bias is toward inclusion: audit the result
 against both parents and confirm every removed function, parameter, or command
 was removed deliberately rather than lost to a conflict side.
 

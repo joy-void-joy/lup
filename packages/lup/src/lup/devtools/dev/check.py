@@ -19,9 +19,14 @@ import sh
 import typer
 from pydantic import BaseModel
 
-from lup.providers.harness import guidance_artifacts
+from lup.providers.harness import (
+    claude_prompt_renderer,
+    codex_prompt_renderer,
+    guidance_artifacts,
+)
 from lup.harness.codescan.markers import find_feedback
 from lup.harness.coverage import coverage_gaps
+from lup.harness.dependencies import reaches
 from lup.harness.modules import unloaded_guidance
 from lup.harness.models import (
     GUIDANCE_BUDGET,
@@ -46,7 +51,7 @@ from lup.devtools.dev.worktree import OWNERSHIP_MERGE_DRIVER, MergeDriver
 from lup.devtools.dev.cites import sweep_cites
 from lup.devtools.dev.comments import FoundComment, scan_tracked
 from lup.devtools.dev.commands import CommandSurface
-from lup.devtools.dev.documented import unresolved
+from lup.devtools.dev.documented import generated_files, unresolved
 from lup.ledger.models import LedgerNode
 from lup.ledger.store import LedgerLayout
 from lup.devtools.dev.environment import foreign_installs
@@ -1191,8 +1196,17 @@ def scan_reports(
         # command it *tells a reader to run* exists at all. Twenty-two did not,
         # including the one in the hooks workflow's own step 7, and each was
         # written beside the command it named — which is why neither the author
-        # nor any reviewer caught it and a session typing it did.
-        written = unresolved(command_surface().admits) if command_surface else []
+        # nor any reviewer caught it and a session typing it did. A declined
+        # module's tree may still be named in its own hand-written files.
+        written = (
+            unresolved(
+                command_surface().admits,
+                project.subapps.retired,
+                generated_files(project_root()),
+            )
+            if command_surface
+            else []
+        )
         yield CheckReport(
             name="documented commands",
             passed=not written,
@@ -1312,6 +1326,36 @@ def scan_reports(
             else [
                 "module coverage: ok, "
                 f"{len(project.coverage.modules)} module(s) claim everything declared"
+            ],
+        )
+
+        # The roster's other promise, read off the same modules: coverage asks
+        # whether every declaration has one owner, and this whether what each
+        # module names is something it stands on. A reach nobody declared is
+        # met by whoever declines an unrelated module, as a generation that
+        # refuses a skill they kept — so it is refused here instead, where the
+        # module that reached is the one named.
+        unmet = reaches(
+            [
+                project.coverage.selection.resolved(module)
+                for module in project.coverage.modules
+            ],
+            [claude_prompt_renderer(), codex_prompt_renderer()],
+            project.coverage.context,
+            project.coverage.beside,
+        )
+        yield CheckReport(
+            name="module independence",
+            passed=not unmet,
+            lines=[
+                f"module independence: FAIL ({len(unmet)} undeclared)",
+                *(f"  {reach.describe()}" for reach in unmet),
+            ]
+            if unmet
+            else [
+                "module independence: ok, "
+                f"{len(project.coverage.modules)} module(s) name only what they "
+                "stand on"
             ],
         )
 

@@ -119,8 +119,7 @@ membership changes. A binary's presence is not a successful verification.
 2. **Show a summary** of what was installed and why
 3. **Note what was skipped** and why (especially in non-interactive mode)
 4. **Suggest next steps**:
-   - Review the installed hooks and adjust patterns
-   - Try `{{ meta_skill }}` to review the generated harness trees
+   - Review the installed hooks and adjust patterns{{ meta_step }}
    - Run `{{ commit_skill }}` to test the commit workflow
    - Consider `{{ update_skill }}` later for ongoing sync
 

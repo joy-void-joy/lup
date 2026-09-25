@@ -51,7 +51,16 @@ MARKER_VOCABULARY = models.GuidanceSection(
             module=__name__,
             name="marker-vocabulary",
             values={
-                "resolve_skill": models.SkillInvocation(plugin="lup", skill="resolve"),
+                # The resolver answers `template:` markers; a project that
+                # declined it is not pointed at a skill it cannot run.
+                "resolve_pointer": models.WhereTaken(
+                    module="resolver",
+                    parts=[
+                        models.TextPart(text=" (`"),
+                        models.SkillInvocation(plugin="lup", skill="resolve"),
+                        models.TextPart(text="`)"),
+                    ],
+                ),
             },
         ),
     ],

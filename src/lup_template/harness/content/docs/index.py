@@ -76,10 +76,16 @@ WORK_STATUS = IndexEntry(
         "from the ledger by `ledger writeup`."
     ),
 )
-"""Declared by `lup_template.writeups` and written from this machine's log."""
+"""Declared by `lup_template.writeups` and written from this machine's log.
+
+Listed only where the ledger module is taken, because only there is it
+written: a writeup is `ledger writeup`'s output, and a project without the
+ledger has no log to render one from."""
 
 
-def document(pages: list[models.Document]) -> models.PromptDocument:
+def document(
+    pages: list[models.Document], taken: list[str] | None = None
+) -> models.PromptDocument:
     """Compose the index over the pages the adopted modules published.
 
     A row is looked up by the identity ownership already records a page under,
@@ -90,7 +96,9 @@ def document(pages: list[models.Document]) -> models.PromptDocument:
 
     Three rows name no page at all, because three pages are declared by no
     module — they render from the rule registry, the wired CLI, and the
-    compiled trees, none of which is a subject a project can decline.
+    compiled trees, none of which is a subject a project can decline. The
+    fourth such row is the ledger's writeup, listed where *taken* — every
+    module unless a caller says otherwise — holds the ledger.
     """
     page = page_index(pages)
     return document_index(
@@ -170,7 +178,7 @@ def document(pages: list[models.Document]) -> models.PromptDocument:
                     ),
                     COMMAND_REFERENCE,
                     GENERATED_PATHS,
-                    WORK_STATUS,
+                    *([WORK_STATUS] if taken is None or "ledger" in taken else []),
                     *page.rows(
                         "docs.quality-pipeline",
                         "The three check layers, and what each one uniquely catches.",

@@ -74,5 +74,13 @@ DOCUMENT = models.PromptDocument(
         models.Passage(module=__name__),
         settlement_table(),
         models.Passage(module=__name__, name="placement"),
+        # The peer policy answers from the coordination roster, which a
+        # project that declined the module never has: the section describing
+        # it goes with it.
+        models.WhereTaken(
+            module="coordination",
+            parts=[models.Passage(module=__name__, name="reaching-another-session")],
+        ),
+        models.Passage(module=__name__, name="forge-credentials"),
     ],
 )

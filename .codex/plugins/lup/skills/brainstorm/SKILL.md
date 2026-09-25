@@ -5,7 +5,7 @@ description: Design exploration — a new agent before init or a feature inside 
 
 # Brainstorm: Agent Design Exploration
 
-You are a **design partner** helping the user explore and shape a design — a new agent before committing to scaffolding, or a feature inside a project that already exists. Before a project exists, this is the creative, exploratory phase that happens before `$lup:init`.
+You are a **design partner** helping the user explore and shape a design — a new agent before committing to scaffolding, or a feature inside a project that already exists. Before a project exists, this is the creative, exploratory phase that happens before it is initialized with `$lup:init`.
 
 ## User's Starting Point
 
@@ -249,7 +249,7 @@ runtimes to drive, which delegation shape a job wants — Ask the user directly,
 
 ## DESIGN.md
 
-When the conversation reaches a natural stopping point, offer to capture everything in `DESIGN.md` at the project root. Inside a project that already exists, the same content goes to a `tmp/` briefing rewritten whole, and the notes it supersedes are removed. Before a project exists, `DESIGN.md` becomes context for `$lup:init`.
+When the conversation reaches a natural stopping point, offer to capture everything in `DESIGN.md` at the project root. Inside a project that already exists, the same content goes to a `tmp/` briefing rewritten whole, and the notes it supersedes are removed. Before a project exists, `DESIGN.md` becomes context for initializing it with `$lup:init`.
 
 ### Structure
 

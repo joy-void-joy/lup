@@ -308,6 +308,8 @@ under a git remote, a daemon socket — is not a scope question: the sandbox's
 only lever there is `excluded_commands`, which drops the command out of
 isolation rather than widening anything.
 
+
+<!-- passage: reaching-another-session -->
 ## Reaching another session
 
 Two native calls address the population [coordination.md](coordination.md)
@@ -336,6 +338,8 @@ pay for them.
 A deliberate send to a peer is not walled off. The `# lup: escalate:` marker in
 any of the call's own inputs turns the refusal into the approval question the
 sender asked for, carrying their stated reason — the valve every refusal has.
+
+<!-- passage: forge-credentials -->
 ## Forge credentials
 
 A contained session reaches its forge on something the operator lent it,

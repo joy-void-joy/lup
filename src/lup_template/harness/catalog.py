@@ -41,6 +41,11 @@ from lup.harness.codescan.boundaries import (
     native_import_boundaries,
 )
 from lup.harness.content.modules.specs import RESOLVER
+from lup.devtools.dev.documented import MENTION, WrittenCommand
+from lup.harness.dependencies import Published
+from lup_template.harness.content.modules.specs import TEMPLATE_INIT
+from lup_template.harness.content.template_claude import DOCUMENT as TEMPLATE_CLAUDE
+from lup_template.harness.content.template_codex import DOCUMENT as TEMPLATE_CODEX
 from lup.devtools.dev.check import BunTestRoot, TestRoot, collected_test_roles
 from lup.devtools.dev.library import DISTRIBUTION, VENDORED_ROOT, library_trackers
 from lup.devtools.dev.release import ReleaseSpec
@@ -63,18 +68,19 @@ from lup.tools.toolsets import startup_names
 from lup_template.agent.toolsets import declared_tool_groups
 from lup.devtools.roster import LIBRARY_SPECS as LIBRARY_SUBAPPS
 from lup.harness.coverage import ContentRoot, ModuleCoverage
+from lup.harness.modules import Composition
+import lup_template.harness.content.guidance as guidance
 from lup_template.devtools.subapps import APPLICATION_ROSTER
 from lup_template.harness.content.catalog import (
-    AGENTS,
-    GUIDANCE,
+    COMPOSITION,
     LAYOUT,
     MODULE_SELECTION,
     RULES,
-    SKILLS,
     SUBAPP_SELECTION,
-    TOOL_GROUPS,
+    WITHHELD_TOOL_GROUPS,
     entries,
 )
+from lup_template.harness.content.docs.catalog import context
 from lup_template.harness.content.image import agent_image
 from lup_template.harness.content.requirements import manifest
 from lup_template.harness.content.shell_vocabulary import (
@@ -134,6 +140,30 @@ EXCLUDED_COMMANDS = [
 Each is a requirement the boundary cannot express any other way, and the
 count is the point: an exclusion is not a widened rule but a removed one, so
 the list stays as short as the toolchain's actual incompatibilities."""
+
+
+def served_exclusions(composed: Composition = COMPOSITION) -> list[str]:
+    """The exclusions a project holding *composed* has a command for.
+
+    One naming a `lup-devtools` tree a declined module owns excludes nothing
+    that project can run, and the compiled policy is a file a session reads:
+    it would go on naming a command the CLI does not serve.
+    """
+    served = composed.subapps()
+    return [
+        command
+        for command in EXCLUDED_COMMANDS
+        if all(
+            words[0] in served
+            for tail in MENTION.findall(command)
+            if (
+                words := WrittenCommand(
+                    file="", line=0, spelled=tail.strip()
+                ).command_words()
+            )
+        )
+    ]
+
 
 ARTIFACT_REFUSAL = "publishing a page puts this work outside the repository"
 """Why an artifact is the wrong reflex here, as the approver of one reads it."""
@@ -214,14 +244,17 @@ the launcher's id, or the id its runtime gave the process, which
 every session of one worktree would share."""
 
 
-def agent_tool_servers(startup_deadline_seconds: float = 60.0) -> list[McpServer]:
+def agent_tool_servers(
+    withheld: list[str] = WITHHELD_TOOL_GROUPS, startup_deadline_seconds: float = 60.0
+) -> list[McpServer]:
     """Offer this project's own agent tools to whichever runtime is reading.
 
     The groups come from the same registry the in-process and subprocess
     backends assemble from, so a group added there reaches a native session
     too rather than only the ones this program launches itself. Realtime is
     the relay mode of a persistent run and belongs to no interactive session,
-    so its group is not among them.
+    so its group is not among them. *withheld* are the groups a declined
+    module owns, which no plugin starts a server for.
 
     The deadline is sized to a cold first boot rather than a warm one. Every
     server here starts through ``uv run``, which on a checkout without an
@@ -260,6 +293,7 @@ def agent_tool_servers(startup_deadline_seconds: float = 60.0) -> list[McpServer
         # that depended on what the generating machine had installed would
         # make two checkouts' plugins differ.
         for name in startup_names(declared_tool_groups())
+        if name not in withheld
     ]
 
 
@@ -472,7 +506,21 @@ def declared_coverage() -> ModuleCoverage:
         ],
         composed=[f"{LAYOUT.docs().package}.index"],
         subapps=[*LIBRARY_SUBAPPS, *APPLICATION_ROSTER],
-        tool_groups=TOOL_GROUPS,
+        # Every group this project declares, served or not: one no module
+        # claims is served to every project, and only the declaration names it.
+        tool_groups=[group.name for group in declared_tool_groups()],
+        context=context(project_root()),
+        # The guidance `/lup:install` carries into another repository is
+        # published only where template-init is taken, and names what the rest
+        # of the roster ships — so it is held to what that module stands on.
+        beside=[
+            Published(
+                module=TEMPLATE_INIT.id,
+                site=f"template {document.source}",
+                document=document,
+            )
+            for document in [TEMPLATE_CLAUDE, TEMPLATE_CODEX]
+        ],
     )
 
 
@@ -559,7 +607,11 @@ def dev_project() -> DevProject:
     )
 
 
-def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harness:
+def portable_harness(
+    version: str = "0.2.0",
+    root: Path | None = None,
+    composed: Composition = COMPOSITION,
+) -> Harness:
     """Build the canonical declaration graph consumed by every adapter.
 
     Deliberately one declaration, not one per platform: every intended
@@ -568,7 +620,12 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
     generation recipes, mapped in ``docs/platform-differentiation.md``.
     Per-platform declarations overriding a shared default were rejected
     because they would let semantic content fork silently.
+
+    *composed* is this repository's roster unless a caller builds what another
+    selection would compose — every surface that follows from the modules is
+    read off it, and nothing else here depends on them.
     """
+    content = composed.content()
     plugin_name = "lup"
     plugin = Plugin(
         id="plugin.lup",
@@ -578,9 +635,9 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
         description=(
             "Self-improvement harness with feedback, review, and safe resolution flows"
         ),
-        skills=SKILLS,
-        agents=AGENTS,
-        mcp_servers=agent_tool_servers(),
+        skills=content.skills,
+        agents=content.agents,
+        mcp_servers=agent_tool_servers(composed.withheld_tool_groups()),
         hooks=HookSet(
             id="hooks.lup-policy",
             policy_ids=["fetch", "shell", "edit", "unknown-tool"],
@@ -872,17 +929,17 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
                 # undeclared it refuses the write while the classifier allows
                 # it, which reads as a broken command rather than a boundary.
                 writable_paths=["~/.cache/uv", "/tmp"],
-                excluded_commands=EXCLUDED_COMMANDS,
+                excluded_commands=served_exclusions(composed),
             ),
         ),
     )
     return Harness(
         generator_version=version,
         source_evidence={"content": "typed-python"},
-        requirements=manifest(),
+        requirements=composed.requirements(manifest()),
         image=agent_image(),
         plugins=[plugin],
-        guidance=GUIDANCE,
+        guidance=guidance.document(composed.guidance()),
         # A project that declined the resolver module has no worker, review
         # or merge skill for a spec to name, so it declares none.
         resolver=(
@@ -893,7 +950,7 @@ def portable_harness(version: str = "0.2.0", root: Path | None = None) -> Harnes
                 review_skill=SkillInvocation(plugin="lup", skill="resolve-reviewer"),
                 merge_skill=SkillInvocation(plugin="lup", skill="merge"),
             )
-            if MODULE_SELECTION.takes(RESOLVER)
+            if RESOLVER.id in composed.taken()
             else None
         ),
     )

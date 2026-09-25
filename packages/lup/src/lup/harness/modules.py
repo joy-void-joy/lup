@@ -25,6 +25,11 @@ a project that has the subject.
 nothing, so the gap is caught either way — but it is caught at the end and it
 names the skill, and an operator who declined a module is owed the answer in
 the vocabulary they decided in. ``requires`` gives it, before anything builds.
+A mention that is incidental rather than needed — a pointer to the resolver's
+page from a guide that works without it — is wrapped in
+:class:`~lup.harness.models.WhereTaken` instead, and adoption drops it where
+that module was declined. `dev check` holds every module to one or the other,
+so declining a module never breaks one that did not say it needed it.
 """
 
 from collections.abc import Callable
@@ -35,6 +40,7 @@ from pydantic import BaseModel
 import lup.harness.models as models
 from lup.devtools.subapps import SubAppSpec
 from lup.harness.content.application import ApplicationLayout
+from lup.harness.requirements import Manifest
 from lup.seams import SelectableRule, Selection
 
 
@@ -62,7 +68,25 @@ class ModuleSpec(SelectableRule, frozen=True):
     """
 
     requires: list[str] = []
-    """Modules this one's declarations reach into, by id."""
+    """Modules this one's declarations reach into, by id.
+
+    Everything a module's content names — a skill it invokes, an agent it
+    delegates to, a command whose tree another module owns, a page another
+    module publishes — is either its own, reached through here, or inside a
+    :class:`~lup.harness.models.WhereTaken` naming the module it needs. `dev
+    check` holds every module to that, so declining one never breaks another
+    that did not say it needed it.
+    """
+
+    essential: bool = False
+    """Whether every project has this module, so no selection may decline it.
+
+    What every other module stands on: the gate, the generator, the tree every
+    session is launched from. A module may reach into an essential one without
+    naming it in :attr:`requires`, because there is no composition without it
+    — which is also why declining one is refused rather than honoured, since
+    honouring it would break every module at once.
+    """
 
     subapps: list[str] = []
     """Top-level CLI groups this module owns, by name.
@@ -86,6 +110,18 @@ class ModuleSpec(SelectableRule, frozen=True):
     Beside :attr:`subapps` and for the same reason: a session composing its
     servers reads names, and building a module to learn them would make every
     launch import every subject the project happens to hold.
+    """
+
+    requirements: list[str] = []
+    """External programs only this module's subject needs, by capability.
+
+    Named, like the command trees and tool groups, because the requirement
+    itself is the project's to declare — which constructor, which client,
+    which recovery — and a module only says that its subject is why one is
+    there. A requirement some module claims is asked of a machine only where a
+    module claiming it is taken; one no module claims is the project's own and
+    always asked. So a project that declined the sandbox is not told, at every
+    launch, that a container runtime it has no use for is missing.
     """
 
     scaffold_only: bool = False
@@ -177,6 +213,13 @@ class DocumentEntry(SelectableRule, frozen=True, arbitrary_types_allowed=True):
     def selection_id(self) -> str:
         return self.semantic_id
 
+    def given(self, taken: list[str]) -> "DocumentEntry":
+        """This page as a project that took *taken* modules renders it."""
+        build = self.build
+        return self.model_copy(
+            update={"build": lambda context: build(context).given(taken)}
+        )
+
 
 class Module(BaseModel, frozen=True):
     """One module as adopted: what it is, and everything it *declares*.
@@ -202,6 +245,21 @@ class Module(BaseModel, frozen=True):
 
     documents: list[DocumentEntry] = []
     """Pages under ``docs/`` whose subject is this module's, unrendered."""
+
+    def given(self, taken: list[str]) -> "Module":
+        """This module as a project that took *taken* modules reads it.
+
+        Every surface carrying prose is resolved, so a
+        :class:`~lup.harness.models.WhereTaken` naming a module the project
+        declined leaves nothing behind in a skill, a section, or a page.
+        """
+        return self.model_copy(
+            update={
+                "content": self.content.given(taken),
+                "guidance": [section.given(taken) for section in self.guidance],
+                "documents": [entry.given(taken) for entry in self.documents],
+            }
+        )
 
 
 class Adoption(BaseModel, frozen=True):
@@ -294,9 +352,14 @@ class ModuleSelection(BaseModel, frozen=True):
         return [entry.module for entry in self.adoptions if entry.taken is False]
 
     def takes(self, spec: ModuleSpec) -> bool:
-        """Whether this project has a module, deferring where it stated nothing."""
+        """Whether this project has a module, deferring where it stated nothing.
+
+        An essential module is taken by saying nothing whatever its default,
+        since there is no composition without it; one declined anyway is
+        answered as declined, so the refusal can name it.
+        """
         taken = self.adoption(spec.id).taken
-        return spec.default_on if taken is None else taken
+        return (spec.default_on or spec.essential) if taken is None else taken
 
     def loads(self, spec: ModuleSpec) -> bool:
         """Whether a module's prose reaches this project's always-loaded document.
@@ -357,6 +420,44 @@ class ModuleSelection(BaseModel, frozen=True):
             if group not in self.adoption(spec.id).tool_groups
         ]
 
+    def withheld_tool_groups(self, specs: list[ModuleSpec]) -> list[str]:
+        """Every tool group a module offers that this project's sessions are not.
+
+        The other side of :meth:`tool_groups`, for the declaration that lists a
+        project's groups by builder: a group no module claims is the project's
+        own and stays, so what a session loses is exactly what was declined.
+        """
+        offered = self.tool_groups(specs)
+        return [
+            group
+            for spec in specs
+            for group in spec.tool_groups
+            if group not in offered
+        ]
+
+    def requirements(self, manifest: Manifest, specs: list[ModuleSpec]) -> Manifest:
+        """What this project asks of a machine, less what only declined modules need.
+
+        A requirement is kept where no module claims it — the project's own —
+        or where a module claiming it is taken. Narrowed here rather than where
+        the manifest is written, so a module declined in the catalog stops
+        costing a machine its programs without anybody editing the roster of
+        requirements to match.
+        """
+        claimed = [name for spec in specs for name in spec.requirements]
+        needed = [
+            name for spec in specs if self.takes(spec) for name in spec.requirements
+        ]
+        return manifest.model_copy(
+            update={
+                "requirements": [
+                    item
+                    for item in manifest.requirements
+                    if item.capability not in claimed or item.capability in needed
+                ]
+            }
+        )
+
 
 class ModuleEntry(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """One module the library ships: what it says it is, and how it is built.
@@ -385,6 +486,55 @@ def unmet_requirements(specs: list[ModuleSpec]) -> list[str]:
         for needed in spec.requires
         if needed not in present
     ]
+
+
+def declined_essentials(
+    specs: list[ModuleSpec], selection: ModuleSelection
+) -> list[str]:
+    """Every essential module this selection declines, as the refusal it earns.
+
+    Returned rather than raised for the reason :func:`unmet_requirements` is:
+    a composition refuses on it, and a listing shows the same rows.
+    """
+    return [
+        f"module {spec.id!r} is essential and cannot be declined: every other "
+        "module stands on it"
+        for spec in specs
+        if spec.essential and not selection.takes(spec)
+    ]
+
+
+def required_closure(start: list[str], specs: list[ModuleSpec]) -> list[str]:
+    """These modules, and every module their ``requires`` reach, in reach order."""
+    needs = {spec.id: spec.requires for spec in specs}
+    reached = list(dict.fromkeys(start))
+    # Appending while walking is the breadth-first closure: each module
+    # reached is itself walked once, in the order it was reached.
+    for held in reached:
+        for needed in needs.get(held, []):
+            if needed not in reached:
+                reached.append(needed)
+    return reached
+
+
+def anchored(specs: list[ModuleSpec]) -> list[str]:
+    """Every module every project has: the essential ones, and what they require.
+
+    Only the first half is declared. A module an essential one requires is
+    just as impossible to decline — the requirement check refuses it — so a
+    listing saying what a project may decline has to say that too.
+    """
+    return required_closure([spec.id for spec in specs if spec.essential], specs)
+
+
+def standing(module: str, specs: list[ModuleSpec]) -> list[str]:
+    """Every module one module can count on being there, itself included.
+
+    What it requires, what those require in turn, and every module every
+    project has — the set a declaration may name without wrapping the mention
+    in a :class:`~lup.harness.models.WhereTaken`.
+    """
+    return required_closure([module, *anchored(specs)], specs)
 
 
 def scaffold_selection(
@@ -431,14 +581,24 @@ def adopted(
     The requirement check runs before any builder, which is what keeps a
     declined subject from costing an import: a module reaching into one the
     project does not have is answered here rather than by whichever
-    declaration first fails to resolve.
+    declaration first fails to resolve. An essential module declined is
+    refused in the same breath, since every other module stands on it.
+
+    Each module is then read as a project with exactly these modules reads
+    it, so a mention another module's content wrapped in
+    :class:`~lup.harness.models.WhereTaken` survives only where the module it
+    names was taken too.
     """
     resolved = selection or ModuleSelection()
     taken = [entry for entry in entries if resolved.takes(entry.spec)]
-    unmet = unmet_requirements([entry.spec for entry in taken])
+    unmet = [
+        *declined_essentials([entry.spec for entry in entries], resolved),
+        *unmet_requirements([entry.spec for entry in taken]),
+    ]
     if unmet:
         raise ValueError("; ".join(unmet))
-    return [resolved.resolved(entry.build()) for entry in taken]
+    ids = [entry.spec.id for entry in taken]
+    return [resolved.resolved(entry.build()).given(ids) for entry in taken]
 
 
 def composed_content(modules: list[Module]) -> models.ContentRoster:
@@ -518,3 +678,70 @@ def unloaded_guidance(
         if not resolved.loads(module.spec)
         for section in module.guidance
     ]
+
+
+class Composition(BaseModel, frozen=True):
+    """One roster as one selection adopted it, and every surface read off it.
+
+    Every surface a tree is built from — the plugin's skills and agents, the
+    always-loaded document, the pages, the command trees, the tool groups, the
+    requirements asked of a machine — is a function of the same three values,
+    so they travel as one. A root composes its own selection into one of these;
+    a check asking what another selection would compose builds a second from
+    the same entries, and nothing downstream can tell the two apart — which is
+    what lets a gate generate the tree a project declining one module would
+    get, without being that project.
+    """
+
+    specs: list[ModuleSpec]
+    """The whole roster, taken or not, in the order the composition lays it out."""
+
+    selection: ModuleSelection
+    modules: list[Module]
+    """The modules taken, each read as a project holding exactly these reads it."""
+
+    @classmethod
+    def of(
+        cls, entries: list[ModuleEntry], selection: ModuleSelection | None = None
+    ) -> "Composition":
+        """Adopt *selection* over *entries*, refusing a selection that cannot stand."""
+        chosen = selection or ModuleSelection()
+        return cls(
+            specs=[entry.spec for entry in entries],
+            selection=chosen,
+            modules=adopted(entries, chosen),
+        )
+
+    def taken(self) -> list[str]:
+        """Every module this composition holds, by id, in roster order."""
+        return [module.spec.id for module in self.modules]
+
+    def content(self) -> models.ContentRoster:
+        """Every skill and agent the plugin ships."""
+        return composed_content(self.modules)
+
+    def guidance(
+        self, chapters: list[models.GuidanceChapter] | None = None
+    ) -> list[models.GuidanceSection]:
+        """The always-loaded document's sections, chapter by chapter."""
+        return composed_guidance(self.modules, self.selection, chapters)
+
+    def documents(self, context: DocumentContext) -> list[models.Document]:
+        """Every page the taken modules publish, rendered against *context*."""
+        return composed_documents(self.modules, context)
+
+    def subapps(self) -> list[str]:
+        """Every command tree a taken module owns, in roster order."""
+        return self.selection.subapps(self.specs)
+
+    def tool_groups(self) -> list[str]:
+        """Every tool group a session is offered."""
+        return self.selection.tool_groups(self.specs)
+
+    def withheld_tool_groups(self) -> list[str]:
+        """Every tool group a declined module owns."""
+        return self.selection.withheld_tool_groups(self.specs)
+
+    def requirements(self, manifest: Manifest) -> Manifest:
+        """What a machine is asked for, less what only declined modules need."""
+        return self.selection.requirements(manifest, self.specs)

@@ -1,26 +1,24 @@
 """Changing the machinery rather than the product.
 
-Two subjects that looked separate until they were listed side by side: the
-harness a session runs under, and the walks that move code without losing it.
-Both answer the same question — the thing being edited is the apparatus, not
-the thing it was built to make — and a project doing one of them is doing the
-other within the week.
+Two subjects that looked separate until they were listed side by side:
+authoring the harness a session runs under, and the walks that move code
+without losing it. Both answer the same question — the thing being edited is
+the apparatus, not the thing it was built to make — and a project doing one of
+them is doing the other within the week.
 
 So adding a command, changing one, standing an investigator up, the refactor
 walk, the principle pass, and the tools that resolve a name rather than match
-text are one module. The two pages here are the reference behind the harness
-half: what generation produces and how to change it, and every intended
-difference between the runtimes it produces for.
+text are one module.
 
-Both of those pages describe the *composed* roster rather than this module's
-own, which is why they read it off the document context. A page whose subject
-is the composition cannot be a value this module holds, because this module is
-part of what it describes.
+What the module does not hold is the generator or the reference behind it.
+Every module ends at regenerating the trees and every session is launched from
+them, so the `harness` command tree, the page every generated banner points
+at, and the audit of what differs between the runtimes it produces for are
+core's: a project declining the authoring skills still regenerates, and still
+reads what it regenerated, whatever it kept.
 """
 
 from lup.harness.content.application import ApplicationLayout
-from lup.harness.content.docs import harness, platform_differentiation
-from lup.harness.content.docs.catalog import page
 from lup.harness.content.modules.specs import META
 from lup.harness.content.skills.add_command import skill as build_add_command
 from lup.harness.content.skills.create_investigator import (
@@ -48,24 +46,4 @@ def module(layout: ApplicationLayout) -> Module:
                 build_refactor_tools(layout),
             ]
         ),
-        documents=[
-            page(
-                "harness",
-                "harness.md",
-                lambda context: harness.document(
-                    context.skills, context.agents, context.plugin, context.layout
-                ),
-            ),
-            page(
-                "platform_differentiation",
-                "platform-differentiation.md",
-                lambda context: platform_differentiation.document(
-                    context.skills,
-                    context.agents,
-                    context.claude_decodes,
-                    context.codex_decodes,
-                    context.layout,
-                ),
-            ),
-        ],
     )

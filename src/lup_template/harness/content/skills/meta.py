@@ -2,7 +2,7 @@
 
 import lup.harness.models as models
 from lup.harness.content.application import ApplicationLayout
-from lup_template.harness.content.skills.deciding import deciding_parts
+from lup.harness.content.skills.deciding import deciding_parts
 
 
 def skill(layout: ApplicationLayout) -> models.Skill:

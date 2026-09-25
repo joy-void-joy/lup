@@ -13,6 +13,17 @@ project, and reads lup's branches through the clone `dev init base` fetched --
 the checkout's own `origin` is the project's wherever it was generated rather
 than cloned."""
 
+
+def where_taken(
+    module: str, name: str, values: dict[str, models.PromptPart] | None = None
+) -> models.WhereTaken:
+    """One of this skill's passages, rendered only where *module* was taken."""
+    return models.WhereTaken(
+        module=module,
+        parts=[models.Passage(module=__name__, name=name, values=values or {})],
+    )
+
+
 SKILL = models.Skill(
     id="skill.init",
     name="init",
@@ -92,14 +103,29 @@ SKILL = models.Skill(
                     "guidance_file_path": models.NativePath(
                         location="guidance_file", scope="every_tree"
                     ),
-                    "ask_5": models.AskUser(
-                        question="which external services the agent uses, and for each whether it authenticates by OAuth flow, API key, or a credentials file"
-                    ),
                     "watch": models.WatchOutput(
                         command="uv run lup-devtools dev check"
                     ),
-                    "feedback_loop_skill": models.SkillInvocation(
-                        plugin="lup", skill="feedback-loop"
+                    # Steps customizing a module the interview may decline
+                    # exist only where it was taken, after the numbered ones.
+                    "setup_step": where_taken(
+                        "setup",
+                        "setup-step",
+                        {
+                            "ask_5": models.AskUser(
+                                question="which external services the agent uses, and for each whether it authenticates by OAuth flow, API key, or a credentials file"
+                            )
+                        },
+                    ),
+                    "feedback_step": where_taken("feedback-loop", "feedback-step"),
+                    "feedback_after": where_taken(
+                        "feedback-loop",
+                        "feedback-after",
+                        {
+                            "feedback_loop_skill": models.SkillInvocation(
+                                plugin="lup", skill="feedback-loop"
+                            )
+                        },
                     ),
                 },
             ),

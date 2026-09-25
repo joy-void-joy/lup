@@ -58,7 +58,14 @@ from lup_template.harness.composition import (
     profile_directory,
 )
 from lup_template.devtools.setup import INTEGRATIONS
-from lup_template.harness.content.catalog import APPLICATION_SPECS, SUBAPP_SELECTION
+from lup.harness.content.modules.specs import LEDGER
+from lup.harness.modules import Composition
+from lup_template.harness.content.catalog import (
+    COMPOSITION,
+    SUBAPP_SELECTION,
+    application_specs,
+    subapp_selection,
+)
 
 
 def assembled_prompt() -> AgentPrompt:
@@ -82,8 +89,12 @@ def command_reference(root: Path | None = None, *, check: bool = False) -> Path:
     a repository writer runs long after both. Wired from the composition root
     because that is the only module that has the whole CLI — a writer declared
     beside the other two would have to import this one, which nothing does.
+    What the modules this project declined own is named too, so their own
+    hand-written files may go on describing them.
     """
-    return write_command_reference(app, root, check=check)
+    return write_command_reference(
+        app, root, check=check, declined=SUBAPP_SELECTION.retired
+    )
 
 
 def command_surface() -> CommandSurface:
@@ -127,7 +138,12 @@ DECLARATIONS = DevtoolsDeclarations(
     # reads the same list and opens the same log.
     node_classes=NODE_KINDS,
     edge_classes=EDGE_KINDS,
-    writeups=WRITEUPS,
+    # A writeup is `ledger writeup`'s output and names its commands, so it is
+    # written only where the ledger module is taken.
+    # lup: defer: a repository writer's output has no ownership manifest, so
+    # declining the ledger stops `docs/work-status.md` being rewritten and
+    # leaves its last copy in the tree for somebody to notice and delete.
+    writeups=WRITEUPS if LEDGER.id in COMPOSITION.taken() else [],
     ledger=LAYOUT,
 )
 """What this repository tells the library's roster about itself.
@@ -137,6 +153,7 @@ argument grows a field here with a default rather than breaking a call site.
 ``relocate_roots`` names four because this repository vendors the library it
 publishes; ``usage_entries`` names both backends because it runs on both.
 """
+
 
 # lup: ignore[constant-declaration] — this CLI's own composition: which sub-apps
 # only it has and under what name, decided here because nothing sits above it
@@ -151,36 +168,7 @@ along. A spec with no app raises on the first invocation rather than serving
 a CLI missing a command the docs promise.
 """
 
-app = typer.Typer(
-    help="lup-devtools: development and analysis tools",
-    pretty_exceptions_show_locals=False,
-    no_args_is_help=True,
-)
 
-ROSTER = {
-    entry.spec.name: entry
-    for entry in SUBAPP_SELECTION.over(
-        DECLARATIONS.roster(SUBAPP_SELECTION.retired),
-        [
-            SubApp(spec=spec, app=APPLICATION_APPS[spec.name])
-            for spec in APPLICATION_SPECS
-        ],
-    )
-}
-"""Every sub-app this CLI serves, by name, before anything is mounted onto one.
-
-Mounted from here because the trees below belong to a sub-app the library
-built: the module that owns them cannot reach back for an app composed after
-it, and replacing the whole entry to add two commands would restate every
-argument the inherited one takes.
-"""
-
-dev.extend(ROSTER["dev"].app)
-
-compose(app, list(ROSTER.values()))
-
-
-@app.callback()
 def report_a_conflicted_manifest() -> None:
     """Say what to run when `uv` is about to stop being able to start.
 
@@ -193,3 +181,42 @@ def report_a_conflicted_manifest() -> None:
     root = find_nearest_pyproject()
     if root is not None and conflicts.manifest_conflicted(root):
         typer.echo(conflicts.conflicted_manifest_notice(root), err=True)
+
+
+def cli(composed: Composition = COMPOSITION) -> typer.Typer:
+    """The CLI a project holding *composed* serves: every sub-app it owns, wired.
+
+    This repository's own roster unless a caller asks what another selection
+    would serve — which is how the gate resolves a generated document's
+    commands against the CLI that document's project would actually have.
+
+    The template's `dev init` tree is mounted onto the inherited `dev` app
+    here because the trees below belong to a sub-app the library built: the
+    module that owns them cannot reach back for an app composed after it, and
+    replacing the whole entry to add two commands would restate every argument
+    the inherited one takes.
+    """
+    selection = subapp_selection(composed)
+    roster = {
+        entry.spec.name: entry
+        for entry in selection.over(
+            DECLARATIONS.roster(selection.retired),
+            [
+                SubApp(spec=spec, app=APPLICATION_APPS[spec.name])
+                for spec in application_specs(composed)
+            ],
+        )
+    }
+    dev.extend(roster["dev"].app)
+    built = typer.Typer(
+        help="lup-devtools: development and analysis tools",
+        pretty_exceptions_show_locals=False,
+        no_args_is_help=True,
+    )
+    compose(built, list(roster.values()))
+    built.callback()(report_a_conflicted_manifest)
+    return built
+
+
+app = cli()
+"""The CLI this repository serves, which the ``lup-devtools`` entry point runs."""

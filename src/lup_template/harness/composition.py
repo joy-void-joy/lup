@@ -29,6 +29,8 @@ from lup.devtools.harness.generated_paths import write_generated_paths
 from lup.devtools.surfaces import LIBRARY_SURFACES
 from lup.web.build import write_web_bundles
 from lup.web.schema import write_view_schema
+from lup.harness.models import PromptDocument
+from lup.harness.modules import Composition
 from lup.providers.profiles import ProfileDirectory
 from lup.workspace.paths import project_root
 from lup_template.harness.catalog import (
@@ -37,7 +39,9 @@ from lup_template.harness.catalog import (
     declared_hook_set,
     portable_harness,
 )
+from lup_template.harness.content.catalog import COMPOSITION
 from lup_template.harness.content.docs.catalog import documents
+from lup_template.harness.content.modules.specs import TEMPLATE_INIT
 import lup_template.harness.content.settings as settings_module
 from lup_template.harness.content.settings import project_settings
 from lup_template.harness.content.template_claude import (
@@ -50,20 +54,25 @@ from lup_template.harness.content.template_codex import (
 CONTENT_ROOT = Path(__file__).parent / "content"
 
 
-def project_content(root: Path, rules: RuleSelection | None = None) -> ProjectContent:
+def project_content(
+    root: Path,
+    rules: RuleSelection | None = None,
+    composed: Composition = COMPOSITION,
+) -> ProjectContent:
     """Everything this repository publishes beside its compiled plugin tree.
 
     ``rules`` is a launch overruling what this repository holds itself to for
     one session, and nothing else reads it: what the repository actually
     settled stays the declaration in its catalog, which is what a review sees
-    and what `dev seams` writes.
+    and what `dev seams` writes. *composed* is this repository's roster unless
+    a caller asks what another selection would publish.
     """
-    harness = portable_harness(root=root)
+    harness = portable_harness(root=root, composed=composed)
     if rules is not None:
         harness = harness.holding(rules)
     return ProjectContent(
         harness=harness,
-        documents=documents(root),
+        documents=documents(root, composed),
         assets=[CONTENT_ROOT / "assets" / "file_suggest.sh"],
         settings=project_settings(harness.plugins[0]),
         settings_source=settings_module.__name__,
@@ -81,18 +90,38 @@ def profile_directory() -> ProfileDirectory:
     return local_profile_directory(project_root(), CLAUDE_LOGIN)
 
 
+def installer_guidance(
+    document: PromptDocument, composed: Composition = COMPOSITION
+) -> PromptDocument | None:
+    """The guidance `/lup:install` merges into a target, where this project has it.
+
+    Template-init's, because the install skill is what carries it into
+    another repository: a project that declined the module installs nothing
+    and publishes no template for it. Where it is taken, the template is read
+    as this roster reads it, so a line pointing at a declined module's skill
+    is not handed to a downstream project either.
+    """
+    if TEMPLATE_INIT.id not in composed.taken():
+        return None
+    return document.given(composed.taken())
+
+
 def claude_target(
     root: Path, rules: RuleSelection | None = None
 ) -> NativeHarnessComposition:
     """This project's content, compiled through the Claude adapter."""
-    return ClaudeComposer().compose(root, project_content(root, rules), TEMPLATE_CLAUDE)
+    return ClaudeComposer().compose(
+        root, project_content(root, rules), installer_guidance(TEMPLATE_CLAUDE)
+    )
 
 
 def codex_target(
     root: Path, rules: RuleSelection | None = None
 ) -> NativeHarnessComposition:
     """This project's content, compiled through the Codex adapter."""
-    return CodexComposer().compose(root, project_content(root, rules), TEMPLATE_CODEX)
+    return CodexComposer().compose(
+        root, project_content(root, rules), installer_guidance(TEMPLATE_CODEX)
+    )
 
 
 TARGETS = NativeTargets(builders={"claude": claude_target, "codex": codex_target})

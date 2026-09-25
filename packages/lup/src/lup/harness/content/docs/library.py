@@ -260,6 +260,16 @@ def document(layout: ApplicationLayout) -> models.PromptDocument:
                     "project_directory": models.code(layout.directory()),
                     "library_described": models.plain(LIBRARY.described()),
                     "subtree": models.code(LIBRARY.subtree),
+                    # The package is here whatever a project took; the page on
+                    # its lifecycle is the resolver module's.
+                    "resolver_lifecycle": models.WhereTaken(
+                        module="resolver",
+                        parts=[
+                            models.TextPart(
+                                text=" [resolver.md](resolver.md) covers the lifecycle."
+                            )
+                        ],
+                    ),
                 },
             ),
             LIBRARY.table(),

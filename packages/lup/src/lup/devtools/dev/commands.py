@@ -31,7 +31,7 @@ from pydantic import BaseModel
 from typer._click.core import Command as ClickCommand
 from typer.core import TyperGroup
 
-from lup.devtools.dev.documented import refuse_unresolved_commands
+from lup.devtools.dev.documented import generated_files, refuse_unresolved_commands
 import lup.harness.models as models
 from lup.providers.harness import claude_prompt_renderer
 from lup.formats.banner import GeneratedBanner
@@ -286,7 +286,11 @@ def command_reference_artifact(app: typer.Typer) -> Artifact:
 
 
 def write_command_reference(
-    app: typer.Typer, root: Path | None = None, *, check: bool = False
+    app: typer.Typer,
+    root: Path | None = None,
+    *,
+    check: bool = False,
+    declined: list[str] | None = None,
 ) -> Path:
     """Write or verify the generated command reference, and what names a command.
 
@@ -297,12 +301,19 @@ def write_command_reference(
     them. A miss raises rather than reports: generation is where a document is
     being *made*, and a document is not finished while it tells its reader to
     run something that does not exist.
+
+    *declined* are the command trees of modules this project did not take,
+    which its hand-written files may still name — see
+    :func:`~lup.devtools.dev.documented.unresolved`.
     """
+    checkout = root or project_root()
     written = write_generated_file(
         command_reference_artifact(app),
-        root or project_root(),
+        checkout,
         COMMAND_REFERENCE_COMMAND,
         check=check,
     )
-    refuse_unresolved_commands(CommandSurface.of(app).admits)
+    refuse_unresolved_commands(
+        CommandSurface.of(app).admits, declined or [], generated_files(checkout)
+    )
     return written

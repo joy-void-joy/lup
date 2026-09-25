@@ -110,7 +110,7 @@ added — and `agent/core.py` for how a session is composed.
 
 **Versioning:**
 
-- **pyproject.toml `[tool.lup] agent_version`**: The agent version — bump on behavior changes with `uv run lup-devtools version bump` (or `{{ bump_skill }}`)
+- **pyproject.toml `[tool.lup] agent_version`**: The agent version{{ version_bump }}
 
 **Environment:**
 
@@ -123,8 +123,7 @@ uv sync                                  # install; `uv add <pkg>` to add, never
 uv run lup-devtools dev check            # the pre-flight bar: ruff, pyright, tests
 uv run lup run "your task here"          # one session; --session-id names it
 uv run lup loop "task1" "task2"          # several, auto-committing each
-uv run lup-devtools setup                # keys, integrations, env vars (`dashboard` for the web UI)
-```
+{{ setup_command }}```
 
 `AGENT_SDK` and `AGENT_MODEL` pick the runtime and the model a session opens
 against. `uv run lup --help` and `uv run lup-devtools --help` are the full
@@ -166,13 +165,7 @@ Use `{{ debug_skill }} <error message>` to trace an error through the logs autom
 ## Feedback Loop Scripts
 
 ```bash
-# Collect feedback from sessions
-uv run lup-devtools feedback collect --all-time
-
-# Status: version, data, analysis state, aggregate stats
-uv run lup-devtools feedback status
-
-# Analyze traces
+{{ feedback_scripts }}# Analyze traces
 uv run lup-devtools trace list
 uv run lup-devtools trace show <session_id>
 ```
@@ -233,8 +226,7 @@ The agent version lives in `pyproject.toml` under `[tool.lup]`:
 agent_version = "0.1.0"
 ```
 
-- Set the initial version during init
-- Bump on behavior changes (prompts, tools, subagents) with `uv run lup-devtools version bump <level>` or `{{ bump_skill }}`
+- Set the initial version during init{{ bump_step }}
 
 ### Step 7: Enable Persistent Agent Mode (Optional)
 
@@ -426,7 +418,7 @@ The codebase should read as a **monolithic source of truth** -- understandable w
 
 A `# lup:` (or `// lup:`) comment is **actionable review feedback** for the agent to address — distinct from the `# lup: ignore` anti-pattern escape hatch. The edits hook prompts whenever an edit changes a file's `# lup:` marker count, and `lup-devtools` scans for unresolved notes.
 
-**Never delete a `# lup:` note until its concern is actually resolved** — fix the code it points at, or answer the question and reflect that answer in code, docs, or an explicit user decision. Making a file parse or tidying up does not count. A note in a comment-less format (e.g. JSON) still can't be silently dropped: resolve it, or relocate it to a file that can hold it. Use `{{ resolve_skill }}` to clear resolved notes.
+**Never delete a `# lup:` note until its concern is actually resolved** — fix the code it points at, or answer the question and reflect that answer in code, docs, or an explicit user decision. Making a file parse or tidying up does not count. A note in a comment-less format (e.g. JSON) still can't be silently dropped: resolve it, or relocate it to a file that can hold it.{{ resolve_clears }}
 
 ## Error Handling Philosophy
 
@@ -544,6 +536,8 @@ A prompt rule is a patch that coexists with the failure. A structural change mak
 2. **Meta Level** -- The agent's self-tracking: what it monitors about itself
 3. **Meta-Meta Level** -- The feedback loop process: scripts, analysis methods
 
+
+<!-- passage: running-the-feedback-loop -->
 ### Running the Feedback Loop
 
 1. **Collect feedback**: `uv run lup-devtools feedback collect`
@@ -552,6 +546,8 @@ A prompt rule is a patch that coexists with the failure. A structural change mak
 4. **Implement changes**: Fix tools -> Build requested capabilities -> Simplify prompts
 5. **Update documentation**: This file should evolve with the agent
 
+
+<!-- passage: what-to-track -->
 ### What to Track Per Session
 
 - **Sessions**: Results saved to `notes/traces/<version>/sessions/<session_id>/`
