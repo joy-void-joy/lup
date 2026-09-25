@@ -21,6 +21,7 @@ import pytest
 import lup.devtools.harness.launch as launch
 from lup.coordination.identity import MEMBER_ENV, NAME_ENV, mint_member_id
 from lup.coordination.repository import RepositoryPeers
+from lup.harness.messaging import SessionInboxes
 
 
 def composition() -> Mock:
@@ -30,6 +31,8 @@ def composition() -> Mock:
     plugin.marketplace = "test"
     built = Mock()
     built.recipe.source.plugins = [plugin]
+    # Declined, so no launch here binds an inbox on the machine's directory.
+    built.recipe.source.image.inboxes = SessionInboxes(directory="")
     return built
 
 

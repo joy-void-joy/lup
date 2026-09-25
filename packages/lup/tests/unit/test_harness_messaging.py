@@ -9,10 +9,15 @@ not ours, or is not private -- produces a session with no inbox at all, which
 reads exactly like a peer that is merely busy.
 """
 
+import json
 import re
+import socket
 import stat
 from pathlib import Path
 
+import pytest
+
+from lup.coordination.wake import WakePath, wake
 from lup.harness.image import Image
 from lup.harness.messaging import SessionInboxes
 
@@ -30,6 +35,10 @@ RUNTIME_SCANNED = [
 # What the runtime will bind, as a Unix socket address: it refuses a longer
 # path outright and says so. Its own message rounds it, and so does this.
 ADDRESS_LIMIT = 104
+
+# A repository's shared git directory, as a bare clone with its worktrees
+# beside it spells one: what the launcher hands the placement.
+LUP = Path("/home/me/lup.git")
 
 
 def test_the_directory_is_made_rather_than_left_to_the_engine(tmp_path: Path) -> None:
@@ -99,23 +108,65 @@ def test_a_member_is_named_by_the_member_rather_than_its_process() -> None:
     disambiguates a member's name between live sessions in a worktree, which
     makes it the name that means one session everywhere it is read.
     """
-    placed = SessionInboxes(directory="/tmp/lup-inbox").socket("dev-6")
+    placed = SessionInboxes(directory="/tmp/lup-inbox").socket(LUP, "dev-6")
 
-    assert placed == "/tmp/lup-inbox/dev-6.sock"
+    assert Path(placed).parent == Path("/tmp/lup-inbox")
+    assert Path(placed).name.startswith("lup-")
+    assert Path(placed).name.endswith("--dev-6.sock")
+
+
+def test_two_repositories_with_one_worktree_name_bind_two_inboxes() -> None:
+    """A name is unique on its repository's roster and nowhere else.
+
+    Measured: a session launched in another repository's ``main`` worktree was
+    refused by the runtime because this machine's ``main`` already listened at
+    the one path both minted. The repository in the name is what makes the
+    directory's files one member's each; its readable part is the same for two
+    checkouts of one project, so the digest of the git directory's path is
+    what tells them apart.
+    """
+    inboxes = SessionInboxes()
+
+    placed = {
+        inboxes.socket(Path("/home/me/nori/.git"), "main"),
+        inboxes.socket(Path("/home/me/lup.git"), "main"),
+        inboxes.socket(Path("/srv/elsewhere/nori/.git"), "main"),
+    }
+
+    assert len(placed) == 3
+    assert sorted(Path(path).name.startswith("nori-") for path in placed) == [
+        False,
+        True,
+        True,
+    ]
+
+
+def test_sessions_of_one_repository_still_bind_one_inbox_each() -> None:
+    """The roster numbers a second ``main`` into ``main-2``, and that survives."""
+    inboxes = SessionInboxes()
+
+    assert inboxes.socket(LUP, "main") != inboxes.socket(LUP, "main-2")
+    assert inboxes.socket(LUP, "main") == inboxes.socket(LUP, "main")
 
 
 def test_a_placed_address_stays_inside_what_a_unix_socket_holds() -> None:
     """Past about 104 bytes the runtime refuses the address and binds nothing.
 
     Which is why this directory is short and shallow rather than living beside
-    the checkout it serves. Measured against a real member name: the default
-    spends 25 of the budget and leaves the rest for however many sessions a
-    worktree numbers its way up to.
+    the checkout it serves. A repository and member name that would run past
+    it keep what fits and end in a digest of the whole, so the cap never costs
+    two members their difference -- including two whose names only differ past
+    the point where the cut falls.
     """
-    placed = SessionInboxes().socket("dev-6")
+    deep = Path("/home/someone/" + "a-very-long-project-name-" * 4 + ".git")
+    long_name = "feat-" + "an-extremely-descriptive-branch-" * 3
 
-    assert len(placed) < ADDRESS_LIMIT
-    assert len(SessionInboxes().socket("dev-" + "9" * 40)) < ADDRESS_LIMIT
+    placed = [SessionInboxes().socket(deep, long_name + suffix) for suffix in "12"]
+
+    assert len(SessionInboxes().socket(LUP, "dev-6").encode()) < ADDRESS_LIMIT
+    assert all(len(path.encode()) < ADDRESS_LIMIT for path in placed)
+    assert placed[0] != placed[1]
+    assert Path(placed[0]).name.startswith("a-very-long-project-name-")
 
 
 def test_the_default_is_not_a_directory_the_runtime_scans_for_peers() -> None:
@@ -189,3 +240,35 @@ def test_an_operator_is_told_which_way_it_went() -> None:
 
     assert placed and absent
     assert [said.text for said in placed] != [said.text for said in absent]
+
+
+def test_a_nudge_reaches_the_member_of_its_own_repository(tmp_path: Path) -> None:
+    """Two repositories' ``main`` sessions listen side by side, and a wake picks one.
+
+    Real sockets bound at the placed paths, because what is under test is that
+    the path a member declares is the one its own session binds and no other
+    session does: the frame lands in the repository it was addressed to, and
+    the other ``main`` has nothing waiting.
+    """
+    inboxes = SessionInboxes(directory=str(tmp_path / "in"))
+    inboxes.serve()
+    nori = inboxes.socket(Path("/home/me/nori/.git"), "main")
+    lup = inboxes.socket(LUP, "main")
+
+    with (
+        socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as nori_inbox,
+        socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as lup_inbox,
+    ):
+        for listener, path in [(nori_inbox, nori), (lup_inbox, lup)]:
+            listener.bind(path)
+            listener.listen(1)
+            listener.setblocking(False)
+        roused = wake(WakePath(runtime="claude", handle=nori), "look at your inbox")
+        connection, _ = nori_inbox.accept()
+        with connection:
+            frame = json.loads(connection.recv(4096))
+        with pytest.raises(BlockingIOError):
+            lup_inbox.accept()
+
+    assert roused.reached, roused.reason
+    assert frame["message"]["content"] == "look at your inbox"

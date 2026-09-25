@@ -65,6 +65,8 @@ from lup.coordination.identity import MEMBER_ENV, NAME_ENV, LaunchedMember
 from lup.coordination.repository import launched_member
 from lup.harness.environment import non_interactive_environment
 from lup.harness.image import detected_client
+from lup.harness.messaging import SessionInboxes
+from lup.workspace.edition import shared_git_directory
 from lup.harness.models import HookSet, NativeName, Plugin, Resumption
 from lup.policy.boundary import BoundaryPreflight
 from lup.policy.identity import POLICY_ROOT_ENV
@@ -1897,6 +1899,23 @@ def probing(opening: list[str], *, stdin: bool = False) -> list[str]:
     ]
 
 
+def placed_inbox(
+    inboxes: SessionInboxes, root: Path, member: LaunchedMember
+) -> str | None:
+    """Where this session binds the inbox a peer nudges it through, if anywhere.
+
+    Named by the launcher rather than left to the runtime, whose own default
+    is a directory a container does not share and a file named after a pid its
+    namespace assigns -- so two sessions in sibling containers name one path
+    and neither can reach the other. A directory that could not be made
+    answers nothing, which is a peer that waits for its mail rather than a
+    launch that fails.
+    """
+    if inboxes.serve() is None:
+        return None
+    return inboxes.socket(shared_git_directory(root), member.cli_name)
+
+
 def launch_claude(
     composition: NativeHarnessComposition,
     extra_args: list[str],
@@ -1980,7 +1999,7 @@ def launch_claude(
     # shows the name in its own chrome and the flag carrying it is built now;
     # the same identity is handed on so the exported one agrees with it.
     member = launched_member(root)
-    inboxes = composition.recipe.source.image.inboxes
+    inbox = placed_inbox(composition.recipe.source.image.inboxes, root, member)
     named = [
         root / ".claude" / "plugins" / plugin.name,
         *companion_plugin_directories(root, plugin.name),
@@ -2014,19 +2033,9 @@ def launch_claude(
             # still wins.
             "--name",
             member.cli_name,
-            # Where this session binds the inbox a peer nudges it through.
-            # Named by the launcher rather than left to the runtime, whose own
-            # default is a directory a container does not share and a file
-            # named after a pid its namespace assigns -- so two sessions in
-            # sibling containers name one path and neither can reach the
-            # other. A directory that could not be made leaves the flag off
-            # and the session on its own default, which is a peer that waits
-            # for its mail rather than a launch that fails.
-            *(
-                ["--messaging-socket-path", inboxes.socket(member.cli_name)]
-                if inboxes.serve() is not None
-                else []
-            ),
+            # Where this session binds the inbox a peer nudges it through;
+            # nowhere leaves the flag off and the session on its own default.
+            *(["--messaging-socket-path", inbox] if inbox is not None else []),
             *(mode.command_words("claude") if mode is not None else []),
             *extra_args,
         ]
