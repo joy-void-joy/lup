@@ -126,6 +126,7 @@ from policy_data import (
     SANDBOX_EXCLUDED_COMMANDS,
     SHELL_RULES,
     SPAWN_NAMES,
+    UNSCOPED_FETCH,
 )
 
 
@@ -268,6 +269,10 @@ def bash_decision(
         # uncontained session ever reaches: contained, the row above settles
         # the same operation first.
         unjudged_ambient="defer" if defers_unjudged(boundary) else "ask",
+        # What `curl` answers for an origin no scope names: the
+        # project's fetch declaration, or the posture above where it made
+        # none -- the same answer `fetch_decision` gives `WebFetch`.
+        unscoped_fetch=UNSCOPED_FETCH,
         # Resolved against what this launch mounted writable, so a write into a
         # worktree cut after the container started reaches a reviewer instead of
         # the writable base no overlay covers.
@@ -478,16 +483,18 @@ def unconfined_by_declaration(command: str) -> bool:
 def fetch_decision(url: str, root: Path | None = None) -> KernelDecision:
     """Judge one outbound fetch against the declared scopes.
 
-    The profile's answer for an origin no scope names is read from the same
-    ledger the shell family reads it from, so one declaration answers on both
-    surfaces. Read here rather than passed, because this entry point is what
-    a dispatcher calls and a dispatcher holds nothing but the call.
+    An origin no scope names answers what the project declared for it, and
+    where it declared nothing, the profile's posture read from the same
+    ledger the shell family reads it from, so one declaration answers on
+    every surface. Read here rather than passed, because this entry point is
+    what a dispatcher calls and a dispatcher holds nothing but the call.
     """
     verdict = decide_fetch(
         url,
         ALLOWED_FETCH_SCOPES,
         DENIED_FETCH_SCOPES,
-        "defer" if defers_unjudged(measured_boundary(root)) else "ask",
+        UNSCOPED_FETCH
+        or ("defer" if defers_unjudged(measured_boundary(root)) else "ask"),
     )
     if verdict.effect != "ask":
         return verdict

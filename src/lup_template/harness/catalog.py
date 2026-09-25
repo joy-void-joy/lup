@@ -714,6 +714,10 @@ def portable_harness(
                     for host in ("127.0.0.1", "localhost")
                 ),
             ],
+            # An origin outside those is handed to the runtime's own
+            # permission system rather than asked about here, by every route
+            # that reads one: a web fetch and `curl` alike.
+            unscoped_fetch="defer",
             # lup: template: which trees this domain will not let an agent edit
             # without a question. What is here answers for a framework that
             # generates its own plugin trees and carries its own policy; a

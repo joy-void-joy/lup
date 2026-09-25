@@ -62,20 +62,19 @@ def decide_fetch(
     url: str,
     allowed_scopes: list[UrlScopeRow],
     denied_scopes: list[UrlScopeRow],
-    unjudged_ambient: UnjudgedAmbient = "ask",
+    unscoped: UnjudgedAmbient = "ask",
 ) -> KernelDecision:
     """Deny matching scopes first, allow declared scopes, and ask otherwise.
 
-    The last of those is the profile's answer rather than this function's.
-    An origin no scope names is the fetch surface's version of a command the
-    vocabulary has no row for, and the shell has read a declaration about
-    that since :class:`~lup.policy.kernel.settlement.UnjudgedAmbientPolicy`
-    was written: ``ask`` keeps unjudged work visible, ``defer`` hands the
-    long tail to provider-native judgement. This said ``ask`` in its own
-    right, which made a profile that had declared the seamless posture get
-    it on one surface and not the other -- one declaration, two answers.
+    The last of those is the project's answer rather than this function's.
+    ``unscoped`` is what an origin no scope names answers: ``ask`` keeps it
+    visible, ``defer`` hands it to provider-native judgement. The caller
+    resolves it, from the project's fetch declaration or, where there is
+    none, from the posture the shell reads for a command the vocabulary has
+    no row for -- so a profile that declared the seamless posture gets it on
+    every surface rather than on one.
 
-    Only that half is taken. The rest of the settlement order is not
+    Only that answer is taken. The rest of the settlement order is not
     consulted here, and the reason is specific to fetch: the rule that
     settles unjudged work inside a boundary does so because every effect the
     operation can have is confined there, and the effect of a fetch is a
@@ -114,6 +113,6 @@ def decide_fetch(
     if allowed is not None:
         return KernelDecision("allow", allowed["reason"])
     outside = f"{url} is outside every declared fetch scope"
-    if unjudged_ambient == "defer":
+    if unscoped == "defer":
         return KernelDecision("defer", outside, abstention="provider_native")
     return KernelDecision("ask", outside, recovery=SCOPES_HINT)

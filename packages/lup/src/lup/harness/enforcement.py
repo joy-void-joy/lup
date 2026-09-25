@@ -164,11 +164,12 @@ def semantic_policy_for(
         import_boundaries=hooks.resolved_import_boundaries(),
     )
     return SemanticToolPolicy(
-        fetch=FetchPolicy(allowed, denied, hooks.unjudged_ambient),
+        fetch=FetchPolicy(allowed, denied, hooks.resolved_unscoped_fetch()),
         shell=ShellPolicy(
             hooks.resolved_shell_rules(),
             allowed_urls=allowed,
             denied_urls=denied,
+            unscoped_fetch=hooks.resolved_unscoped_fetch(),
             sandbox_active=sandbox_active,
             sandbox_excluded_commands=hooks.excluded_commands(),
             escapable=escapable,

@@ -1817,6 +1817,18 @@ class HookSet(BaseModel, frozen=True):
             "to answer"
         ),
     )
+    unscoped_fetch: UnjudgedAmbient | None = Field(
+        default=None,
+        description=(
+            "What a fetch outside every declared scope answers, whichever "
+            "route reaches it: a web fetch or `curl`. `defer` hands "
+            "the origin to the runtime's own permission system; `ask` puts "
+            "it to a reviewer. Unset, it follows `unjudged_ambient`. Its own "
+            "declaration because reading an unlisted origin is not work the "
+            "vocabulary forgot, and a project may hand one to the runtime "
+            "while keeping unjudged shell work visible"
+        ),
+    )
     boundary_capabilities: list[BoundaryCapability] = Field(
         default=[],
         description=(
@@ -1869,6 +1881,15 @@ class HookSet(BaseModel, frozen=True):
         first asking whether a sandbox exists to have an opinion.
         """
         return list(self.sandbox.excluded_commands) if self.sandbox else []
+
+    def resolved_unscoped_fetch(self) -> UnjudgedAmbient:
+        """What an origin no fetch scope names answers in this project.
+
+        The fetch declaration where one was made, the unjudged posture where
+        none was: one answer for `WebFetch` and `curl` alike, asked
+        here so the canonical policy composes no second reading of it.
+        """
+        return self.unscoped_fetch or self.unjudged_ambient
 
     def resolved_shell_rules(self) -> list[ShellCommandRule]:
         """The shell vocabulary this project actually judges by.

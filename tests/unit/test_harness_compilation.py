@@ -1909,14 +1909,19 @@ def test_generated_claude_hook_records_metadata_only_evidence(tmp_path: Path) ->
 def test_generated_hooks_record_a_fetch_by_origin_and_nothing_further(
     tmp_path: Path,
 ) -> None:
-    """Both journals name the origin that asked, and stop there.
+    """Both journals name the origin a fetch reached for, and stop there.
 
-    A refusal that carries no part of the input reads as "a URL was outside
+    A record that carries no part of the input reads as "a URL was outside
     the declared scopes" with no way to tell which URL, so the question the
     journal exists to answer -- what did this session try to reach -- is
     settled by inference. The origin is the half the scope table is written
     against; the path and the query are where a token or a document id ride,
     and they stay out, as does everything else in the call.
+
+    The origin is outside every scope, which this project hands to the
+    runtime's own permission system: Claude's hook says nothing, Codex's
+    exits clean on both judging events -- a deferral is never rendered as an
+    allow -- and no question is parked for a reviewer.
     """
     url = "https://docs.example.test:8443/private/page?token=do-not-record"
     body: JsonObject = {"hook_event_name": "PreToolUse", "cwd": str(tmp_path)}
@@ -1931,22 +1936,17 @@ def test_generated_hooks_record_a_fetch_by_origin_and_nothing_further(
         _return_cmd=True,
     )
     assert isinstance(claude, sh.RunningCommand)
-    rendered = ClaudeHookOutput.model_validate_json(claude.stdout)
-    assert rendered.hook_specific_output.permission_decision == "ask"
-    assert url in rendered.hook_specific_output.permission_decision_reason
-    codex = codex_hook_result(
-        {**body, "tool_name": "web_fetch", "tool_input": {"url": url}},
-        sandboxed=True,
-        plugin_data=codex_data,
-    )
+    assert "hookSpecificOutput" not in json.loads(claude.stdout)
+    fetch = {**body, "tool_name": "web_fetch", "tool_input": {"url": url}}
+    codex = codex_hook_result(fetch, sandboxed=True, plugin_data=codex_data)
     assert codex.exit_code == 0
-    spoken = json.loads(codex.stdout)["hookSpecificOutput"]
-    assert spoken["permissionDecision"] == "deny"
-    assert url in spoken["permissionDecisionReason"]
-    # Only the runtime without an ask effect parks; the other one asked.
-    pending = QuestionRelay(tmp_path / ".lup/questions.jsonl").pending()
-    assert {question.operation.tool for question in pending} == {"web_fetch"}
-    assert all(question.operation.payload == {"url": url} for question in pending)
+    assert not codex.stdout.strip()
+    requested = codex_hook_result(
+        {**fetch, "hook_event_name": "PermissionRequest"}, sandboxed=True
+    )
+    assert requested.exit_code == 0
+    assert not requested.stdout.strip()
+    assert not QuestionRelay(tmp_path / ".lup/questions.jsonl").pending()
 
     for data_root in (claude_data, codex_data):
         written = (data_root / "hook-events.jsonl").read_text(encoding="utf-8")
@@ -1954,6 +1954,7 @@ def test_generated_hooks_record_a_fetch_by_origin_and_nothing_further(
         assert "/private/page" not in written
         records = [json.loads(line) for line in written.splitlines()]
         assert [record["phase"] for record in records] == ["started", "completed"]
+        assert records[-1]["outcome"] == "defer"
         for record in records:
             assert record["fetch_origin"] == "https://docs.example.test:8443"
 

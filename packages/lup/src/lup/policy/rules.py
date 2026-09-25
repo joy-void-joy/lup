@@ -131,22 +131,22 @@ def url_scope_row(scope: UrlScope) -> UrlScopeRow:
 
 
 class FetchPolicy(DecisionPolicy[FetchUrl]):
-    """Evaluate deny scopes before allow scopes, and let the profile answer the rest.
+    """Evaluate deny scopes before allow scopes, and let the project answer the rest.
 
-    ``unjudged_ambient`` is the same declaration the shell family reads for a
-    command nothing classified, taken here so a profile that declared the
-    seamless posture gets it on both surfaces rather than on one.
+    ``unscoped`` is what an origin no scope names answers, and the shell
+    policy's curl screen is handed the same value, so one
+    declaration answers on every surface rather than on one.
     """
 
     def __init__(
         self,
         allowed: list[UrlScope],
         denied: list[UrlScope],
-        unjudged_ambient: UnjudgedAmbient = "ask",
+        unscoped: UnjudgedAmbient = "ask",
     ) -> None:
         self.allowed = list(allowed)
         self.denied = list(denied)
-        self.unjudged_ambient: UnjudgedAmbient = unjudged_ambient
+        self.unscoped: UnjudgedAmbient = unscoped
 
     def decide(self, event: FetchUrl) -> Decision:
         return pydantic_decision(
@@ -154,7 +154,7 @@ class FetchPolicy(DecisionPolicy[FetchUrl]):
                 str(event.url),
                 [url_scope_row(scope) for scope in self.allowed],
                 [url_scope_row(scope) for scope in self.denied],
-                self.unjudged_ambient,
+                self.unscoped,
             )
         )
 
@@ -191,7 +191,8 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
     The vocabulary is the caller's: ``rules`` is the whole table this project
     judges, not an extension of one the library chose. URL scopes feed the
     kernel's curl screen, so shell reads and WebFetch consult one declared
-    origin table.
+    origin table, and ``unscoped_fetch`` is what an origin outside it answers
+    -- the value :class:`FetchPolicy` is handed.
     """
 
     def __init__(
@@ -213,7 +214,9 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         runner_targets: list[RunnerTargetRule] | None = None,
         relayed: bool = False,
         authored: "EditPolicy | None" = None,
+        unscoped_fetch: UnjudgedAmbient | None = None,
     ) -> None:
+        self.unscoped_fetch: UnjudgedAmbient | None = unscoped_fetch
         self.authored = authored
         """The edit policy a write carrying its own content is put to.
 
@@ -471,6 +474,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 checkout_root=str(root),
                 inside_placement=self.inside_placement,
                 relayed=self.relayed,
+                unscoped_fetch=self.unscoped_fetch,
             )
         )
         # Strongest wins, the rule every other join in this policy uses. The

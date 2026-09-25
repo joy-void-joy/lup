@@ -1146,13 +1146,13 @@ def decide_curl_words(
     words: list[str],
     allowed_scopes: list[UrlScopeRow],
     denied_scopes: list[UrlScopeRow],
-    unjudged_ambient: UnjudgedAmbient = "ask",
+    unscoped: UnjudgedAmbient = "ask",
 ) -> KernelDecision:
     """Allow only read-method curl against the declared fetch scopes.
 
     Every positional word must be a URL the fetch policy allows; denied
-    origins deny, and an origin no scope names is the profile's to answer --
-    the same declaration `WebFetch` reads, so one spelling of reaching an
+    origins deny, and an origin no scope names is the fetch declaration's to
+    answer, the one `WebFetch` reads, so one spelling of reaching an
     undeclared origin cannot answer differently from the other. Flags that
     write files, send data, or carry credentials are not classified.
 
@@ -1202,9 +1202,7 @@ def decide_curl_words(
     if not urls:
         return unjudged("curl has no URL")
     for url in urls:
-        verdict = decide_fetch(
-            curl_url(url), allowed_scopes, denied_scopes, unjudged_ambient
-        )
+        verdict = decide_fetch(curl_url(url), allowed_scopes, denied_scopes, unscoped)
         if verdict.effect != "allow":
             return verdict
     return KernelDecision("allow", "read-only curl within declared scopes")

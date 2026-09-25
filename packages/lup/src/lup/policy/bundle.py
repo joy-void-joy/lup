@@ -25,6 +25,7 @@ from lup.policy.identity import AGENT_IDENTITY_ENV, POLICY_ROOT_ENV
 import lup.policy.kernel as kernel
 from lup.policy.kernel.typescript import TYPESCRIPT_SUFFIXES
 from lup.policy.kernel.effects import EffectRow, effect_row_values
+from lup.policy.kernel.semantics import UnjudgedAmbient
 from lup.policy.kernel.rows import (
     AcceptanceGuardRow,
     AntiPatternRow,
@@ -599,12 +600,17 @@ def render_policy_data(
     repair_command: list[str],
     rules: RuleSet | None = None,
     import_boundaries: list[ImportBoundary] | None = None,
+    unscoped_fetch: UnjudgedAmbient | None = None,
 ) -> str:
     """Render one plugin's canonical policy rows without executable logic.
 
     ``rules`` is the table compiled for the runtime this plugin belongs to, so
     a rule whose message names a native tool ships each tree the words that
     tree can act on. Omitting it renders the runtime-neutral table.
+
+    ``unscoped_fetch`` ships as declared, ``None`` included: an unset
+    declaration is answered at runtime by the posture the launch measured,
+    which no compiled constant could know.
     """
     body = "\n\n".join(
         [
@@ -612,6 +618,8 @@ def render_policy_data(
             + url_scope_rows_literal(allowed_fetch_scopes),
             "DENIED_FETCH_SCOPES: list[UrlScopeRow] = "
             + url_scope_rows_literal(denied_fetch_scopes),
+            "UNSCOPED_FETCH: UnjudgedAmbient | None = "
+            + ("None" if unscoped_fetch is None else json.dumps(unscoped_fetch)),
             "PATH_RULES: list[PathRuleRow] = "
             + path_rule_rows_literal(
                 runtime_path_rules(protected_roots, human_owned_files)
@@ -675,6 +683,7 @@ def render_policy_data(
         "    SpawnNameRow,\n"
         "    UrlScopeRow,\n"
         "    VerificationRow,\n"
-        ")"
+        ")\n"
+        "from kernel.semantics import UnjudgedAmbient"
         "\n\n\n" + body + "\n"
     )

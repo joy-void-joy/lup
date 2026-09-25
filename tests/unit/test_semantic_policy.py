@@ -39,6 +39,7 @@ from lup.providers.codex.native import (
 from lup.harness.enforcement import (
     declared_path_rules,
     declared_role_rows,
+    declared_scope,
     semantic_policy_for,
 )
 from lup.harness.models import HookSet
@@ -105,6 +106,7 @@ from lup.policy.rules import (
     UrlScope,
     human_owned_path_rule,
     path_rule_row,
+    url_scope_row,
 )
 
 from lup.policy.vocabulary import bun_rule
@@ -2457,14 +2459,14 @@ def test_the_declared_scopes_admit_the_host_a_documentation_route_starts_at() ->
 
     docs.anthropic.com answers the Claude Code paths with a 301 to
     code.claude.com and the API paths with one to platform.claude.com, both
-    declared. Undeclared, it puts an approval question on the first hop of a
-    route whose destination this project already reads, and the reader has
-    no way to tell that from an origin nobody vetted.
+    declared. Undeclared, it hands the first hop of a route whose
+    destination this project already reads to the runtime's permission
+    system, which has no way to tell it from an origin nobody vetted.
 
     What that admits is the redirecting host itself. A lookalike
     registration under it and the marketing site beside it are outside, so
     the egress this table also grants stays the documentation surface rather
-    than the domain.
+    than the domain, and those are the runtime's own to answer.
     """
     policy = semantic_policy_for(declared_hook_set())
 
@@ -2473,8 +2475,8 @@ def test_the_declared_scopes_admit_the_host_a_documentation_route_starts_at() ->
 
     assert effect("https://docs.anthropic.com/en/docs/claude-code/settings") == "allow"
     assert effect("https://docs.anthropic.com/en/api/messages") == "allow"
-    assert effect("https://docs.anthropic.com.evil.test/en/api/messages") == "ask"
-    assert effect("https://www.anthropic.com/news") == "ask"
+    assert effect("https://docs.anthropic.com.evil.test/en/api/messages") == "defer"
+    assert effect("https://www.anthropic.com/news") == "defer"
 
 
 def test_the_declared_scopes_carry_the_product_pages_no_manual_answers() -> None:
@@ -2483,8 +2485,8 @@ def test_the_declared_scopes_carry_the_product_pages_no_manual_answers() -> None
     A reference manual answers how a thing is called and what it returns. What
     it is, what it costs and what it claims are answered on the product's own
     pages and nowhere in the scopes beside them, so a question about the
-    product rather than the API otherwise buys an approval prompt on every
-    hop. Both spellings are named because a site that redirects apex to www,
+    product rather than the API otherwise reaches the runtime's permission
+    system on every hop. Both spellings are named because a site that redirects apex to www,
     or the reverse, would put the ask back on the redirect.
 
     This one widens rather than tidies: the origin is admitted for its own
@@ -2497,7 +2499,7 @@ def test_the_declared_scopes_carry_the_product_pages_no_manual_answers() -> None
 
     assert effect("https://claude.com/product/overview") == "allow"
     assert effect("https://www.claude.com/pricing") == "allow"
-    assert effect("https://claude.com.evil.test/pricing") == "ask"
+    assert effect("https://claude.com.evil.test/pricing") == "defer"
 
 
 def test_bundled_fetch_matches_canonical_scheme_port_and_path(tmp_path: Path) -> None:
@@ -2588,6 +2590,44 @@ def test_a_schemeless_curl_url_is_judged_the_way_curl_resolves_it() -> None:
     # and the bare spelling asks rather than inheriting a grant.
     assert effect("curl -s docs.example.com/api") == "ask"
     assert effect("curl -s https://docs.example.com/api") == "allow"
+
+
+def test_an_unscoped_origin_is_the_runtime_s_to_answer_by_every_route(
+    tmp_path: Path,
+) -> None:
+    """This project hands an origin no fetch scope names to the runtime.
+
+    One declaration, read by every route that reads an origin: the web fetch,
+    and `curl` from inside the shell classifier, in the canonical policy and
+    the bundled kernel alike, and at either placement -- a boundary confines
+    a command's writes, not a document entering the agent's context, so
+    containment settles nothing here. Unjudged shell work keeps its own
+    posture, and a declared origin is still simply allowed.
+    """
+    hooks = declared_hook_set()
+    assert hooks.unscoped_fetch == "defer"
+    bundled = load_bundled_kernel(tmp_path, "shell")
+    rows = ShellPolicy(SHELL_RULES).rules
+    scopes = [url_scope_row(declared_scope(scope)) for scope in hooks.allowed_fetch]
+    for sandboxed in (False, True):
+        policy = semantic_policy_for(hooks, sandbox_active=sandboxed)
+        fetched = policy.decide(FetchUrl(url=AnyHttpUrl("https://example.com/")))
+        assert fetched.effect == "defer"
+        for command, effect in (
+            ("curl -s https://example.com/", "defer"),
+            ("curl -s https://pypi.org/simple/", "allow"),
+            ("frobnicate --weird", "allow" if sandboxed else "ask"),
+        ):
+            assert policy.decide(ShellCommand(command=command)).effect == effect
+            generated = bundled.decide_shell(
+                command,
+                rows,
+                scopes,
+                [],
+                sandboxed=sandboxed,
+                unscoped_fetch=hooks.unscoped_fetch,
+            )
+            assert generated.effect == effect, (command, sandboxed)
 
 
 def test_a_scope_may_cover_every_port_on_one_host() -> None:

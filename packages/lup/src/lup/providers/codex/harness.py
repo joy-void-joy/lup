@@ -1019,6 +1019,7 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                         refused_tools=list(source.refused_tools),
                         peer_policy=source.peer_policy,
                         recoverable_target_limit=source.recoverable_target_limit,
+                        unscoped_fetch=source.unscoped_fetch,
                         runner_targets=list(source.runner_targets),
                         sandbox_excluded_commands=source.excluded_commands(),
                         auto_escape_prefixes=codex_allow_prefixes(

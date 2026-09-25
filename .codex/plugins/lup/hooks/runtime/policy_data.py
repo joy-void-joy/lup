@@ -18,6 +18,7 @@ from kernel.rows import (
     UrlScopeRow,
     VerificationRow,
 )
+from kernel.semantics import UnjudgedAmbient
 
 
 ALLOWED_FETCH_SCOPES: list[UrlScopeRow] = [
@@ -240,6 +241,8 @@ ALLOWED_FETCH_SCOPES: list[UrlScopeRow] = [
 ]
 
 DENIED_FETCH_SCOPES: list[UrlScopeRow] = []
+
+UNSCOPED_FETCH: UnjudgedAmbient | None = "defer"
 
 PATH_RULES: list[PathRuleRow] = [
     {

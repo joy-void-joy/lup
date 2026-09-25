@@ -135,14 +135,14 @@ class ShellContext(TypedDict):
     refusal, which a spelling under this checkout's scratch earns only where
     the host found nothing moving the bytes elsewhere."""
 
-    unjudged_ambient: UnjudgedAmbient
-    """The profile's answer for what nothing classified, carried for `curl`.
+    unscoped_fetch: UnjudgedAmbient
+    """What an origin no fetch scope names answers, carried for `curl`.
 
     A segment classifier does not settle anything, so almost nothing here
-    needs this. `curl` does, because it is the one verb whose row hands the
-    question to the fetch scopes -- and an origin no scope names is the same
-    silence the shell reads this declaration for. Without it, one spelling of
-    reaching an undeclared origin answered from the profile and the other
+    needs this. `curl` does, because its screen hands the question
+    to the fetch scopes -- and an origin no scope names is the question
+    `WebFetch` answers from the same declaration. Without it, one spelling of
+    reaching an undeclared origin answered from the declaration and the other
     from a constant."""
 
     antipattern_rows: dict[str, list[AntiPatternRow]]
@@ -220,7 +220,7 @@ def shell_context(
     target_tables: list[ShellRuleRow] | None = None,
     contained: bool = False,
     checkout_root: str = "",
-    unjudged_ambient: UnjudgedAmbient = "ask",
+    unscoped_fetch: UnjudgedAmbient = "ask",
     antipattern_rows: dict[str, list[AntiPatternRow]] | None = None,
     edit_rules: list[EditRuleRow] | None = None,
     import_boundaries: list[ImportBoundaryRow] | None = None,
@@ -262,7 +262,7 @@ def shell_context(
         contained=contained,
         checkout_root=checkout_root,
         displaced_targets=displaced_targets or [],
-        unjudged_ambient=unjudged_ambient,
+        unscoped_fetch=unscoped_fetch,
         antipattern_rows=antipattern_rows or {},
         edit_rules=edit_rules or [],
         import_boundaries=import_boundaries or [],
@@ -509,7 +509,7 @@ def decide_segment_words(
             words,
             context["allowed_scopes"],
             context["denied_scopes"],
-            context["unjudged_ambient"],
+            context["unscoped_fetch"],
         )
     if executable == "gh" and len(words) > 1 and words[1] == "api":
         return decide_gh_api_words(words)
@@ -1013,7 +1013,7 @@ def classify_shell(
     target_tables: list[ShellRuleRow] | None = None,
     contained: bool = False,
     checkout_root: str = "",
-    unjudged_ambient: UnjudgedAmbient = "ask",
+    unscoped_fetch: UnjudgedAmbient = "ask",
     antipattern_rows: dict[str, list[AntiPatternRow]] | None = None,
     edit_rules: list[EditRuleRow] | None = None,
     import_boundaries: list[ImportBoundaryRow] | None = None,
@@ -1054,7 +1054,7 @@ def classify_shell(
         target_tables=target_tables,
         contained=contained,
         checkout_root=checkout_root,
-        unjudged_ambient=unjudged_ambient,
+        unscoped_fetch=unscoped_fetch,
         antipattern_rows=antipattern_rows,
         edit_rules=edit_rules,
         import_boundaries=import_boundaries,
@@ -1120,9 +1120,15 @@ def joined_decision(decisions: list[KernelDecision]) -> KernelDecision:
     asked = next((item for item in decisions if item.effect == "ask"), None)
     if asked is not None:
         return asked.revised(sandbox=placement, checkpoint=restoration, findings=parts)
-    deferred = next((item for item in decisions if item.effect == "defer"), None)
-    if deferred is not None:
-        return deferred.revised(findings=parts)
+    deferred = [item for item in decisions if item.effect == "defer"]
+    if deferred:
+        # The abstention leaving the most to settle speaks for the line: a
+        # handoff to the runtime answers for its own segment, never for an
+        # unread one beside it, whichever of the two was written first.
+        return min(
+            deferred,
+            key=lambda item: (item.abstention == "provider_native", item.unlisted),
+        ).revised(findings=parts)
     reached = dict.fromkeys(item.rule for item in decisions if item.rule)
     return KernelDecision(
         "allow",
@@ -1211,6 +1217,7 @@ def decide_shell(
     recovered: bool = False,
     relayed: bool = False,
     unjudged_ambient: UnjudgedAmbient = "ask",
+    unscoped_fetch: UnjudgedAmbient | None = None,
     unleased_targets: list[str] | None = None,
     readonly_targets: list[str] | None = None,
     displaced_targets: list[DisplacedTargetRow] | None = None,
@@ -1272,6 +1279,9 @@ def decide_shell(
     decision nobody needed to make. Three states rather than two, because
     "nobody to ask" and "somebody, but not right now" are different answers
     and were sharing one.
+
+    ``unscoped_fetch`` is what a `curl` of an origin no fetch scope
+    names answers, and ``None`` reads ``unjudged_ambient`` for it.
     """
     hint = ESCALATE_HINT if interactive else RELAY_HINT if relayed else RESHAPE_HINT
     # Net of exclusion here, because exclusion is the native sandbox's own
@@ -1311,10 +1321,10 @@ def decide_shell(
                 # path inside the checkout reaches no declaration, and one
                 # file answers twice depending on how it was named.
                 checkout_root=checkout_root,
-                # And `curl` needs the same declaration the settlement below
-                # reads for a command nothing classified, because reaching an
-                # undeclared origin is that silence spelled as a verb.
-                unjudged_ambient=unjudged_ambient,
+                # And `curl` needs what an unlisted origin answers:
+                # the fetch declaration where the caller holds one, and the
+                # settlement's own posture below where it does not.
+                unscoped_fetch=unscoped_fetch or unjudged_ambient,
                 # The edit gates, for the verbs that rewrite a file in place.
                 # Absent, every such rewrite asks, which is the arrangement
                 # that makes a composition forgetting them safe rather than

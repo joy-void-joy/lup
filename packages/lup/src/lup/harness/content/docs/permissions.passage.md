@@ -36,7 +36,11 @@ to it, with a warning, where no Docker or Podman client is found;
 [harness.md](harness.md) carries the three postures.
 
 Segments join deny > ask > defer > allow — unjudged rides into a judged
-prompt, a judged deny wins the batch. Malformed input fails conservatively.
+prompt, a judged deny wins the batch. Between two deferrals the one leaving
+the most to settle speaks for the line: an unread segment before an
+unlisted one, and either before a handoff to the runtime, so a deferred
+`curl` never carries an unread command beside it to the runtime's own
+mode. Malformed input fails conservatively.
 
 ### What a rule states, and what it earns
 
@@ -331,7 +335,19 @@ scope may opt into its subdomains, which also contributes the `*.host`
 wildcard to the OS sandbox network allowlist, so both boundaries admit the
 same set. Declare any origin an agent should be able to read as a fetch
 scope; reserve the sandbox's `extra_domains` for hosts that need egress
-without being readable sources. Egress the proxy cannot carry at all — SSH
+without being readable sources.
+
+An origin outside every scope answers `HookSet.unscoped_fetch`, by every
+route that reads one: `WebFetch` and `curl` alike. `ask` puts it to
+a reviewer, `defer` hands it to the runtime's own permission system — a
+Claude hook returns no decision and Codex's exits clean on both judging
+events, so the runtime asks or allows by its own rules and nothing here
+turns the handoff into an allow. Unset, it follows `unjudged_ambient`.
+This repository declares `defer`, and keeps `unjudged_ambient` at `ask`:
+reading an unlisted origin is the runtime's question, while a command
+nothing classified stays visible. A denied scope is refused under either.
+
+Egress the proxy cannot carry at all — SSH
 under a git remote, a daemon socket — is not a scope question: the sandbox's
 only lever there is `excluded_commands`, which drops the command out of
 isolation rather than widening anything.
