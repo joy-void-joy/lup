@@ -18,6 +18,7 @@ failure mode the design forbids, so a caller that asked to be contained and
 cannot be gets a refusal naming what was missing, and the operator decides.
 """
 
+from collections.abc import Sequence
 import hashlib
 import json
 import os
@@ -67,6 +68,7 @@ from lup.sandbox.rail import (
     demoted,
     fleet_lease,
     hold_pruning_across,
+    in_repository,
     prepared_across,
     repository_layout,
     worker_lease,
@@ -767,6 +769,7 @@ def record_boundary(
     egress: SessionEgress,
     root: Path,
     devices: DeviceLease = DeviceLease(),
+    shared: Sequence[Path] = (),
 ) -> None:
     """Write down what this session is confined by, for the gate that explains it.
 
@@ -787,6 +790,12 @@ def record_boundary(
     reader: a run that computed inside this container has its provenance in
     this file, and a GPU that was withheld is the difference between a
     result and a run that fell back to the host without saying so.
+
+    The writable mounts are written too, because a read-only shared git
+    directory has writable directories bound back inside it and the deepest
+    mount is the one that refused; ``shared`` names each repository's shared
+    git directory, so a refusal under one is explained as git's rather than
+    as a path to declare.
     """
     ledger = root / ".lup" / "boundary.json"
     ledger.parent.mkdir(parents=True, exist_ok=True)
@@ -794,6 +803,8 @@ def record_boundary(
         json.dumps(
             {
                 "read_only": sorted(lease.read_only.values()),
+                "writable": sorted(lease.writable.values()),
+                "git_shared": sorted(str(path) for path in shared),
                 "write_refusals": list(WRITE_REFUSAL_MARKERS),
                 "allowed_hosts": sorted(item.host for item in egress.admits),
                 "devices": [device.name for device in devices.granted],
@@ -1734,7 +1745,17 @@ def contained_argv(
     # handed to the engine to fail on.
     granted_devices = lease_devices(devices, registered_devices())
     said.add(granted_devices.notices())
-    record_boundary(lease, image.egress, root, granted_devices)
+    record_boundary(
+        lease,
+        image.egress,
+        root,
+        granted_devices,
+        shared=[
+            repository_layout(path).common
+            for path in [root, *(item.path for item in accessible)]
+            if in_repository(path)
+        ],
+    )
     # Read on the host and passed in, never resolved inside: the file that
     # answers "where does this remote point" is `.git/config`, which the
     # container can write, so a rewrite decided in there is a rewrite the

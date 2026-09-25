@@ -51,6 +51,7 @@ from decisions import (
 from host import (
     approval_fingerprint,
     approval_subject,
+    boundary_account,
     declared_identity,
     file_diagnostics,
     note_ran,
@@ -418,7 +419,13 @@ def observe(payload):
     # What the command changed, read against the snapshot its own PreToolUse
     # took, and contested where another session had a window open across it.
     claim_window_closed(Path(root) if root else None)
-    return written_review(command, Path(root) if root else Path.cwd())
+    return [
+        *written_review(command, Path(root) if root else Path.cwd()),
+        *boundary_account(
+            payload["tool_response"] if "tool_response" in payload else "",
+            Path(root) if root else None,
+        ),
+    ]
 
 
 def main():
