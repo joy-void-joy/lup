@@ -31,7 +31,7 @@ import importlib.util
 from functools import cache
 from pathlib import Path, PurePath
 
-from jinja2 import Environment, StrictUndefined
+from jinja2 import Environment, StrictUndefined, meta
 from markdown_it import MarkdownIt
 from pydantic import BaseModel
 
@@ -228,13 +228,35 @@ def passage_text(module: str, name: str = "") -> str:
     )
 
 
+@cache
+def placed(module: str, name: str = "") -> frozenset[str]:
+    """Every value name one passage places, read off its template."""
+    return frozenset(
+        meta.find_undeclared_variables(environment().parse(passage_text(module, name)))
+    )
+
+
 def rendered(module: str, name: str, values: StringMap) -> str:
     """One passage with its values placed, each already spelled by its own kind.
 
     The values arrive rendered: a node has escaped itself and a part has been
     spelled in the vocabulary of the runtime reading it, so what happens here
     is placement and nothing else.
+
+    A value handed over and never placed is refused, the mirror of the name
+    placed and never handed over that ``StrictUndefined`` refuses. It is not
+    tidiness: a value is a part, and whatever a part declares — an invocation
+    of another module's skill, a command the skill must be granted — counts
+    as said by the declaration holding it, whether or not a reader ever sees
+    it. A pointer nobody renders still ties one module to another.
     """
+    unplaced = sorted(set(values) - placed(module, name))
+    if unplaced:
+        passage = f"the {name!r} passage" if name else "the passage"
+        raise ValueError(
+            f"{passage_path(module)} is handed {unplaced} for {passage}, which "
+            "places none of them: place each, or stop handing it over"
+        )
     return environment().from_string(passage_text(module, name)).render(values)
 
 
