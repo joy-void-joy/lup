@@ -18,6 +18,8 @@ import lup.devtools.harness.launch as launch
 from lup.providers.claude.login import CLAUDE_CONFIG_DIR, CLAUDE_LOGIN
 from lup.providers.profile_tree import user_profile_directory
 from lup.providers.user_config import UserConfigFile
+from lup.providers.claude.usage.reader import ClaudeUsageReader, claude_usage_entry
+from lup.providers.codex.usage.reader import CodexUsageReader, codex_usage_entry
 from tests.unit.test_launch_effort_default import Transcript, composition
 
 
@@ -142,19 +144,21 @@ def test_a_person_who_wrote_nothing_launches_on_lups_defaults(
     assert CLAUDE_CONFIG_DIR not in launched.environment
 
 
-def test_a_fresh_project_inherits_the_persons_tier_effort_and_account(
+def test_a_fresh_project_inherits_the_persons_account_theme_and_defaults(
     config: UserConfigFile, launched: Launched
 ) -> None:
     home = user_profile_directory(CLAUDE_LOGIN, config).add("work").config_dir
     writes(
         config,
-        'profile = "work"\ntier = "balanced"\neffort = "high"\n',
+        'profile = "work"\ntier = "balanced"\neffort = "high"\n\n'
+        '[theme]\nclaude = "light-daltonized"\n',
     )
 
     claude(config)
 
     assert flag(launched.arguments, "--model") == "sonnet"
     assert flag(launched.arguments, "--effort") == "high"
+    assert launched.settings["theme"] == "light-daltonized"
     assert launched.environment[CLAUDE_CONFIG_DIR] == str(home)
 
 
@@ -260,3 +264,23 @@ def test_codex_derives_its_worktree_home_from_the_selected_account(
     launch.launch_codex(composition(), [], None, None, None, False, False)
 
     assert stores == [{"account_home": config.profiles_root() / "work" / "codex-home"}]
+
+
+@pytest.mark.parametrize("named", ["work", None], ids=["named", "selected"])
+def test_the_usage_display_reads_the_account_a_launch_opens(
+    config: UserConfigFile, launched: Launched, named: str | None
+) -> None:
+    """One resolution for both, so a name cannot read one account and open another."""
+    accounts = user_profile_directory(CLAUDE_LOGIN, config)
+    accounts.add("personal")
+    accounts.add("work")
+    accounts.use("work")
+    claude_reader = claude_usage_entry().open(named)
+    codex_reader = codex_usage_entry().open(named)
+
+    launch.launch_claude(composition(), [], accounts, named, None, False)
+
+    assert isinstance(claude_reader, ClaudeUsageReader)
+    assert isinstance(codex_reader, CodexUsageReader)
+    assert str(claude_reader.config_dir) == launched.environment[CLAUDE_CONFIG_DIR]
+    assert codex_reader.home == config.profiles_root() / "work" / "codex-home"
