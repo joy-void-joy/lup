@@ -213,7 +213,9 @@ the launcher's id, or the id its runtime gave the process, which
 every session of one worktree would share."""
 
 
-def agent_tool_servers(startup_deadline_seconds: float = 60.0) -> list[McpServer]:
+def agent_tool_servers(
+    offered: list[str], startup_deadline_seconds: float = 60.0
+) -> list[McpServer]:
     """Offer this project's own agent tools to whichever runtime is reading.
 
     The groups come from the same registry the in-process and subprocess
@@ -221,6 +223,11 @@ def agent_tool_servers(startup_deadline_seconds: float = 60.0) -> list[McpServer
     too rather than only the ones this program launches itself. Realtime is
     the relay mode of a persistent run and belongs to no interactive session,
     so its group is not among them.
+
+    ``offered`` is the tool groups the adopted modules own, and a group
+    outside it is not started: a module declined takes its tool group with
+    it, rather than leaving a server a session opens for a subject the
+    project said it does not have.
 
     The deadline is sized to a cold first boot rather than a warm one. Every
     server here starts through ``uv run``, which on a checkout without an
@@ -259,6 +266,7 @@ def agent_tool_servers(startup_deadline_seconds: float = 60.0) -> list[McpServer
         # that depended on what the generating machine had installed would
         # make two checkouts' plugins differ.
         for name in startup_names(declared_tool_groups())
+        if name in offered
     ]
 
 
@@ -584,7 +592,7 @@ def portable_harness(
         ),
         skills=composed.content.skills,
         agents=composed.content.agents,
-        mcp_servers=agent_tool_servers(),
+        mcp_servers=agent_tool_servers(composed.tool_groups),
         hooks=HookSet(
             id="hooks.lup-policy",
             policy_ids=["fetch", "shell", "edit", "unknown-tool"],

@@ -61,6 +61,10 @@ def test_declining_a_module_and_what_requires_it_still_composes(module: str) -> 
     gone = {name for identity in declined for name in SHIPPED[identity]}
     assert compiled(claude).isdisjoint(gone)
     assert compiled(codex).isdisjoint(gone)
+    servers = {server.name for server in claude.recipe.source.plugins[0].mcp_servers}
+    assert servers.isdisjoint(
+        group for spec in SPECS if spec.id in declined for group in spec.tool_groups
+    )
     assert set(composed.subapps).isdisjoint(
         name for spec in SPECS if spec.id in declined for name in spec.subapps
     )
