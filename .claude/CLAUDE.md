@@ -34,7 +34,7 @@ You are not expected to hold this repository's conventions in memory. Gates enfo
 
 `docs/rules.md`, `docs/permissions.md`, and `docs/contributing.md` carry the rule index, the lattice with what a real changed line is, and how a suppression is scoped.
 
-Change the policy those gates enforce with /lup:hooks, which edits `lup.policy` and the catalog's `HookSet`, regenerates both plugins, and runs the fixture suite; generation compiles one hermetic dispatcher and runtime per plugin, so never edit a generated one. Harness settings stay project-level, in .claude/settings.json, which holds only native settings outside that policy boundary — never user-level.
+Change the policy those gates enforce with /lup:hooks, which edits `lup.policy` and the catalog's `HookSet`, regenerates both plugins, and runs the fixture suite; generation compiles one hermetic dispatcher and runtime per plugin, so never edit a generated one. Harness settings stay project-level, in .claude/settings.json, which holds only native settings outside that policy boundary — never user-level. The one user-level place is lup's per-user config at `~/.config/lup/` (`$XDG_CONFIG_HOME/lup`): accounts, profiles, theme and defaults, because those facts belong to the person, not the project.
 
 ### The `# lup:` Marker Vocabulary
 
