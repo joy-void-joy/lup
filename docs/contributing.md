@@ -181,10 +181,10 @@ Those symlinks resolve inside a contained session only for a project whose
 registration carries a `"mount"` of `"rw"` or `"ro"`, in `sync.json` where
 the project decides it for every machine or in `sync.json.local` where one
 machine does —
-`dev sync setup <name> <path> --mount rw` writes one, and `dev sync status`
+`sync setup <name> <path> --mount rw` writes one, and `sync status`
 shows which projects have it. A mounted project is leased whole: its
-checkout at that mode, its shared git directory with it, and its own sibling
-worktrees read-only, which is what lets a session commit in it. Without the
+checkout at that mode, with its shared git directory and its sibling
+worktrees, which is what lets a session commit in it. Without the
 key the project is tracked for review and nothing more, and the symlink
 dangles inside the container the way an unmounted path does. The key is why
 both registry files are protected edit roots: writing one widens the
@@ -225,6 +225,16 @@ transport this session can reach, not just the one it was launched from. A
 review never moves a branch there: `sync` reads the upstream's commits from
 its remote-tracking ref, so refreshing is a fetch and nothing in the clone is
 reset over.
+
+The `lup` entry `sync.json` ships is one of these. It names lup's repository
+over https, required and mounted read-write, so a project built on the
+scaffold holds lup from its first launch with nothing set up on the machine:
+the launch clones it where the cache has none, and `refs/lup` is its working
+tree. Where the project resolves lup from a repository, the entry follows
+that pin instead of its own URL, so the clone is always of the repository the
+library comes from. The scaffold itself is exempt, and so is any checkout of
+the repository an entry names: neither is cloned, mounted, fetched or
+reported missing, and `sync status` says which one it is.
 
 The base the branch is cut from is recorded against it, because topology
 cannot recover a creation point once the parent has merged on. A fresh branch

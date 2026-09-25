@@ -1,0 +1,419 @@
+"""A project built on the scaffold opens lup read-write at its first launch.
+
+The registration `sync.json` ships names lup's repository, so a launch
+materializes it and mounts it with nothing set up on the machine -- whether
+the project was cloned bare with its worktrees under `tree/`, or plainly,
+because neither the registry nor the lease may care which. These read the
+real shipped registration where they can, so a registration that stops naming
+its repository fails here rather than on somebody's first launch.
+
+Nothing reaches a network. A local bare repository stands in for the forge,
+and git's own `insteadOf` carries the forge spelling the registration uses to
+it, so the clone records the https origin a real one would -- which is what
+the transport rewrite a contained session gets is computed from.
+"""
+
+import json
+from pathlib import Path
+
+import pytest
+import sh
+
+from lup.devtools import sync
+from lup.harness import credential
+from lup.harness.credential import (
+    HttpsTransport,
+    RemoteRewrite,
+    SshTransport,
+    fleet_rewrites,
+    parse_remote,
+    same_repository,
+)
+from lup.sandbox.rail import fleet_lease
+from tests.unit.repos import commit_file, initialized_repo
+
+SHIPPED = sync.load_json(Path("sync.json"))
+"""The registration this checkout ships, read where the scaffold keeps it."""
+
+LAYOUTS = ["bare", "plain"]
+"""The two ways a project generated from the template is cloned."""
+
+
+def shipped_lup() -> sync.ProjectEntry:
+    """The lup entry of the shipped registration."""
+    return next(entry for entry in SHIPPED["projects"] if entry["name"] == "lup")
+
+
+SHIPPED_URL = shipped_lup().get("url", "")
+"""The repository the shipped lup entry names."""
+
+
+def forge_spelling(monkeypatch: pytest.MonkeyPatch, url: str, local: Path) -> None:
+    """Make ``url`` reach ``local``, and nothing else rewrite anything.
+
+    Set through the environment git reads above every file, the way a
+    contained session's own rewrites arrive, and replacing whatever this
+    session carries: an ambient ``insteadOf`` would answer the question these
+    tests ask before the code under test could.
+    """
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", f"url.{local}.insteadOf")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", url)
+
+
+def no_rewrites(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Read every remote exactly as it was written."""
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "0")
+
+
+@pytest.fixture
+def upstream(tmp_path: Path) -> Path:
+    """A bare repository standing in for lup's own, with `main` and `dev`."""
+    work = tmp_path / "upstream-work"
+    git = initialized_repo(work, tmp_path / "hooks")
+    commit_file(git, work, "pyproject.toml", "[tool.lup]\n", "lup")
+    git("branch", "dev")
+    bare = tmp_path / "upstream.git"
+    sh.git("clone", "--quiet", "--bare", str(work), str(bare), _tty_out=False)
+    return bare
+
+
+@pytest.fixture
+def cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The per-user clone cache, moved somewhere a test may write."""
+    root = tmp_path / "cache"
+    monkeypatch.setattr(sync, "cache_dir", lambda: root)
+    return root
+
+
+def project(
+    tmp_path: Path,
+    layout: str,
+    registry: sync.SyncConfig,
+    manifest: str = '[tool.lup]\nagent_version = "0.1.0"\n',
+    name: str = "project",
+) -> Path:
+    """A project generated from the template, published, and cloned by `layout`.
+
+    Its history is published to a bare repository of its own first, and the
+    checkout is cloned from there, which is what somebody does after "Use this
+    template": bare with its worktree under `tree/main`, or plainly. The
+    manifest declares no scaffold flag by default, which is a project that has
+    been initialized.
+    """
+    seed = tmp_path / f"{name}-seed"
+    git = initialized_repo(seed, tmp_path / "hooks")
+    commit_file(git, seed, "pyproject.toml", manifest, "initial")
+    commit_file(git, seed, "sync.json", json.dumps(registry), "registry")
+    published = tmp_path / f"{name}-forge.git"
+    sh.git("clone", "--quiet", "--bare", str(seed), str(published), _tty_out=False)
+    match layout:
+        case "bare":
+            clone = tmp_path / f"{name}.git"
+            sh.git("clone", "--quiet", "--bare", str(published), str(clone))
+            checkout = clone / "tree" / "main"
+            sh.git(
+                "-C", str(clone), "worktree", "add", "--quiet", str(checkout), "main"
+            )
+            return checkout
+        case _:
+            checkout = tmp_path / name
+            sh.git("clone", "--quiet", str(published), str(checkout))
+            return checkout
+
+
+def standing_in(monkeypatch: pytest.MonkeyPatch, checkout: Path) -> None:
+    """Run the registry as it runs from inside this checkout."""
+    monkeypatch.setattr(sync, "project_root", lambda: checkout)
+
+
+def test_the_shipped_registration_names_its_repository_over_https() -> None:
+    """The one fact every project built on the scaffold inherits and cannot set.
+
+    https because the clone is made on the host before any credential is
+    lent, and https reads a public repository with none; a session's remotes
+    are rewritten onto the transport its credential reaches afterwards.
+    """
+    lup = shipped_lup()
+    address = parse_remote(lup.get("url", ""))
+
+    assert address is not None and address.proxied
+    assert lup.get("required") is True
+    assert lup.get("mount") == "rw"
+
+
+@pytest.mark.parametrize("layout", LAYOUTS)
+def test_a_fresh_project_mounts_the_shipped_registration_read_write(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    upstream: Path,
+    cache: Path,
+    layout: str,
+) -> None:
+    """No `sync setup`, no `sync remote`: the launch's roots already hold lup."""
+    checkout = project(tmp_path, layout, SHIPPED)
+    standing_in(monkeypatch, checkout)
+    forge_spelling(monkeypatch, SHIPPED_URL, upstream)
+    said: list[str] = []
+
+    roots = sync.accessible_roots(said.append)
+
+    mounted = cache / "lup.git" / "tree" / "main"
+    assert [(root.path, root.writable) for root in roots] == [(mounted, True)]
+    assert (checkout / "refs" / "lup").resolve() == mounted
+    no_rewrites(monkeypatch)
+    assert sync.git_in(str(mounted), "remote", "get-url", "origin") == SHIPPED_URL
+    lease = fleet_lease(checkout, roots)
+    assert lease.writable_at(mounted / "pyproject.toml")
+    assert lease.writable_at(cache / "lup.git" / "refs")
+    assert not lease.writable_at(cache / "lup.git" / "config")
+
+
+@pytest.mark.parametrize("layout", LAYOUTS)
+def test_a_materialized_https_clone_is_rewritten_onto_the_sessions_transport(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    upstream: Path,
+    cache: Path,
+    layout: str,
+) -> None:
+    """How a session pushes to lup with the operator's own key.
+
+    The clone is walked with every other root the session opens, so an ssh
+    credential gets the https spelling rewritten onto `git@host:`, and a
+    token leaves it as it is -- the push goes out on whichever the launch
+    selected, never on the spelling the registration was committed in.
+    """
+    checkout = project(tmp_path, layout, SHIPPED)
+    standing_in(monkeypatch, checkout)
+    forge_spelling(monkeypatch, SHIPPED_URL, upstream)
+    roots = sync.accessible_roots(lambda _said: None)
+    no_rewrites(monkeypatch)
+    monkeypatch.setattr(credential, "resolved_host", lambda alias: alias)
+    opened = [checkout, *(root.path for root in roots)]
+
+    assert fleet_rewrites(opened, "github.com", SshTransport()) == [
+        RemoteRewrite(spelling="https://github.com/", target="git@github.com:")
+    ]
+    assert fleet_rewrites(opened, "github.com", HttpsTransport()) == []
+
+
+@pytest.mark.parametrize("layout", LAYOUTS)
+def test_the_scaffold_mounts_nothing_for_the_entry_it_ships(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    upstream: Path,
+    cache: Path,
+    layout: str,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Lup itself, or a fork of it, is the repository the entry names.
+
+    `[tool.lup] template = true` says so without anybody writing an opt-out
+    into a machine's local file: nothing is cloned, mounted or reported
+    missing, and `sync status` says why the row has nothing to fetch.
+    """
+    checkout = project(
+        tmp_path, layout, SHIPPED, manifest="[tool.lup]\ntemplate = true\n"
+    )
+    standing_in(monkeypatch, checkout)
+    forge_spelling(monkeypatch, SHIPPED_URL, upstream)
+    said: list[str] = []
+
+    assert sync.accessible_roots(said.append) == []
+    sync.fetch_cmd(None)
+    sync.status_cmd()
+
+    assert said == []
+    assert not cache.exists()
+    assert "shipped by this scaffold" in capsys.readouterr().out
+
+
+def test_a_checkout_of_the_registered_repository_owes_itself_nothing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    upstream: Path,
+    cache: Path,
+) -> None:
+    """Read off origin, so no flag and no local opt-out is needed to say it."""
+    checkout = project(tmp_path, "bare", SHIPPED)
+    sh.git("-C", str(checkout), "remote", "set-url", "origin", SHIPPED_URL)
+    standing_in(monkeypatch, checkout)
+    no_rewrites(monkeypatch)
+
+    assert sync.exemption(sync.find_project("lup")) == (
+        "this checkout is that repository"
+    )
+    sync.fetch_cmd(None)
+    assert not cache.exists()
+
+
+def test_a_machine_pushing_over_ssh_repoints_the_clone_it_already_has(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    upstream: Path,
+    cache: Path,
+) -> None:
+    """On the host no launch rewrites a remote, so the clone's origin is the push.
+
+    The shipped entry cloned it over https; a machine that pushes lup with its
+    own key says so once, and the clone it already made follows.
+    """
+    address = parse_remote(SHIPPED_URL)
+    assert address is not None
+    ssh = f"git@{address.host}:{address.repository}.git"
+    checkout = project(tmp_path, "plain", SHIPPED)
+    standing_in(monkeypatch, checkout)
+    forge_spelling(monkeypatch, SHIPPED_URL, upstream)
+    sync.accessible_roots(lambda _said: None)
+    no_rewrites(monkeypatch)
+
+    sync.set_remote("lup", ssh)
+
+    clone = cache / "lup.git"
+    assert sync.git_in(str(clone), "config", "--get", "remote.origin.url") == ssh
+    assert sync.transport_url(sync.find_project("lup")) == ssh
+
+
+def test_a_checkpoint_outlives_the_spelling_its_clone_was_read_over(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    upstream: Path,
+    cache: Path,
+) -> None:
+    """Recorded inside a container, read on the host.
+
+    `/lup:init` baselines the checkpoint in a contained session, whose
+    rewrites answer the clone's origin over ssh; the host reads it over
+    https. One repository and one ref, so one review -- where comparing the
+    spellings would report every commit up to it as never reviewed.
+    """
+    address = parse_remote(SHIPPED_URL)
+    assert address is not None
+    checkout = project(tmp_path, "plain", SHIPPED)
+    standing_in(monkeypatch, checkout)
+    forge_spelling(monkeypatch, SHIPPED_URL, upstream)
+    sync.accessible_roots(lambda _said: None)
+    no_rewrites(monkeypatch)
+    clone = cache / "lup.git"
+    reviewed = sync.git_in(str(clone), "rev-parse", "refs/remotes/origin/main")
+    ssh = f"git@{address.host}:{address.repository}.git"
+    sync.git_in(str(clone), "remote", "set-url", "origin", ssh)
+    sync.mark_synced("lup", at=reviewed)
+    sync.git_in(str(clone), "remote", "set-url", "origin", SHIPPED_URL)
+
+    found = sync.existing_upstream(sync.find_project("lup"))
+
+    assert found is not None
+    assert sync.checkpoint(sync.find_project("lup"), found) == reviewed
+
+
+def test_a_clone_another_project_made_is_linked_where_this_one_mounts_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    upstream: Path,
+    cache: Path,
+) -> None:
+    """The cache is per machine, so the second project finds lup already there.
+
+    Nothing is cloned for it, and `refs/lup` -- what `/lup:upstream` opens --
+    still has to resolve in it.
+    """
+    forge_spelling(monkeypatch, SHIPPED_URL, upstream)
+    first = project(tmp_path, "bare", SHIPPED, name="first")
+    standing_in(monkeypatch, first)
+    sync.accessible_roots(lambda _said: None)
+    no_rewrites(monkeypatch)
+    second = project(tmp_path, "plain", SHIPPED, name="second")
+    standing_in(monkeypatch, second)
+
+    roots = sync.accessible_roots(lambda _said: None)
+
+    assert [root.path for root in roots] == [cache / "lup.git" / "tree" / "main"]
+    assert (second / "refs" / "lup").resolve() == cache / "lup.git" / "tree" / "main"
+
+
+def test_the_library_registration_follows_its_git_pin(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One source of truth: the repository the project consumes lup from.
+
+    The shipped `url` stays in `sync.json` for a project that resolves a
+    release or keeps a vendored copy; a git pin supersedes it rather than
+    being restated beside it, and a refusal names the pin and its command.
+    """
+    pinned = "https://forge.example/fork/lup"
+    checkout = project(
+        tmp_path,
+        "plain",
+        SHIPPED,
+        manifest=(
+            '[tool.lup]\nagent_version = "0.1.0"\n\n'
+            f'[tool.uv.sources]\nlup = {{ git = "{pinned}", branch = "dev" }}\n'
+        ),
+    )
+    standing_in(monkeypatch, checkout)
+    no_rewrites(monkeypatch)
+
+    assert sync.find_project("lup").get("url") == pinned
+    assert sync.declaring_file("lup", "url").name == "pyproject.toml"
+    assert sync.renaming("lup", "https://forge.example/other/lup") == (
+        "repoint the pin it follows: uv run lup-devtools dev library git "
+        "--url https://forge.example/other/lup --branch dev"
+    )
+
+
+def test_a_registration_nothing_places_falls_back_to_its_distribution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, upstream: Path, cache: Path
+) -> None:
+    """A project made before the shipped entry named its repository.
+
+    Root files are the project's own from the first day, so its `sync.json`
+    never receives the url; the installed library says where it comes from
+    instead. A registration this machine placed keeps its own answer.
+    """
+    checkout = project(
+        tmp_path,
+        "bare",
+        {"projects": [{"name": "lup", "required": True, "mount": "rw"}]},
+    )
+    standing_in(monkeypatch, checkout)
+    no_rewrites(monkeypatch)
+    monkeypatch.setattr(sync, "distribution_repository", lambda name: str(upstream))
+
+    assert sync.find_project("lup").get("url") == str(upstream)
+    assert [root.path for root in sync.accessible_roots(lambda _said: None)] == [
+        cache / "lup.git" / "tree" / "main"
+    ]
+
+    (checkout / "sync.json.local").write_text(
+        json.dumps({"projects": [{"name": "lup", "path": str(tmp_path)}]})
+    )
+    assert "url" not in sync.find_project("lup")
+
+
+def test_the_source_label_is_read_as_the_standard_spells_it() -> None:
+    """PEP 753 folds `Source`, `Repository` and their spellings into one label."""
+    assert same_repository(
+        sync.distribution_repository("httpx"), "https://github.com/encode/httpx"
+    )
+    assert sync.distribution_repository("no-such-distribution-installed") == ""
+
+
+def test_a_bare_registration_links_refs_to_its_worktree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, upstream: Path
+) -> None:
+    """`refs/<name>` is a working tree whatever the registration named.
+
+    So `uv run --directory refs/lup` runs lup's own tooling for a path
+    registration of a bare clone as it does for a materialized one.
+    """
+    checkout = project(tmp_path, "plain", {"projects": []})
+    standing_in(monkeypatch, checkout)
+    no_rewrites(monkeypatch)
+    attached = upstream / "tree" / "main"
+    sh.git("-C", str(upstream), "worktree", "add", "--quiet", str(attached), "main")
+
+    sync.setup_project("lup", str(upstream), mount="rw")
+
+    assert (checkout / "refs" / "lup").resolve() == attached

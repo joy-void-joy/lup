@@ -338,10 +338,9 @@ def test_a_url_registration_is_mounted_at_its_worktree_not_its_bare_half(
 ) -> None:
     """A mount has to land on a working tree.
 
-    ``lease_for`` reads a bare directory as a repository whose every worktree
-    belongs to somebody else and holds all of them read-only, so a session
-    handed one gets a checkout it cannot work in and siblings it cannot
-    write — a boundary nobody declared rather than the mode that was named.
+    The lease is the same either way, but the edit authority is not: a
+    worktree mount accepts that checkout's own policy and no other, where a
+    bare one grants every worktree the clone holds.
     """
     registered(registry_root, {"name": "up", "url": str(remote), "mount": "rw"})
 

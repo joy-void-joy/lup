@@ -247,20 +247,34 @@ answer on every machine and belongs in the committed half. What *this machine*
 answers — where the checkout is, and which transport gets there — belongs in
 the gitignored one, and most machines answer only the second.
 
-**`sync.json` (committed)** declares the upstream's name without choosing
-a hosting account, and says what this project needs of it:
+**`sync.json` (committed)** names the upstream, says which repository it
+is, and says what this project needs of it:
 
 ```json
 {
   "projects": [
     {
       "name": "lup",
+      "url": "https://github.com/joy-void-joy/lup",
       "required": true,
       "mount": "rw"
     }
   ]
 }
 ```
+
+The URL is what makes the entry placeable on a machine that has never been
+told anything: a project generated from the template inherits it, and its
+first launch after initialization clones lup under
+`~/.cache/lup/sync/lup.git` and mounts it read-write, with no `sync setup`
+anywhere. It is spelled https because that clone is made on the host before
+any credential is lent, and https reads a public repository with none; inside
+a session every mounted checkout's remotes are rewritten onto the transport
+the launch's credential reaches, so a push goes out on the operator's ssh key
+or token alike. /lup:init points it at the repository the project was
+actually generated from when that is a fork (`dev init upstream`), and where
+the project resolves lup from a repository the entry follows that pin rather
+than its own URL, so the two never name different repositories.
 
 `"required": true` says the project cannot work without that repository
 present: the workflows that fix a defect upstream, derive a relocation map
@@ -272,21 +286,27 @@ machine has not answered is named by `sync status`, with the command that
 answers it, and makes it exit nonzero; the absence is a result rather than
 something the next command discovers.
 
-Two requirements are owed by nobody: one naming the repository this checkout
+Two registrations are owed by nobody: one naming the repository this checkout
 already is, read off its own origin, and a committed one read inside the
-template scaffold, whose `sync.json` is the file an adopter receives.
+template scaffold (`[tool.lup] template = true`), whose `sync.json` is the
+file an adopter receives. Neither is cloned, mounted, fetched or reported
+missing, and `sync status` says which one a row is, so the lup repository and
+every fork of it need no opt-out for the entry they ship.
 
-Configure where lup is, once per machine:
+Most machines configure nothing. One that reaches lup differently says so,
+once:
 
 ```bash
-uv run lup-devtools sync remote lup git@github.com:example/framework.git
-uv run lup-devtools sync setup lup /path/to/repo
+uv run lup-devtools sync remote lup git@github.com:joy-void-joy/lup.git
+uv run lup-devtools sync setup lup /path/to/repo --mount rw
 ```
 
-The first records the URL this machine fetches from, the second a checkout it
-already has. A registration with neither is materialized at
-`~/.cache/lup/sync/<name>.git`, derived from the name, so a machine that keeps
-its clone there needs no local entry at all.
+The first records the URL this machine fetches from — say, over ssh where it
+pushes lup with its own key outside any container, where no launch rewrites a
+remote — and repoints the clone already made to it; the second records a
+checkout this machine already has, which is then what sessions open. A registration with neither
+is materialized at `~/.cache/lup/sync/<name>.git`, derived from the name, so a
+machine that keeps its clone there needs no local entry at all.
 
 Repository identity is configured independently from the adopting project's
 own Git origin. `uv run lup-devtools dev library git --url <repository>` selects the dependency's
@@ -294,8 +314,10 @@ source explicitly. Without `--url`, it uses the existing Git dependency pin,
 then the scaffold's named sync registration: its URL, or its checkout's origin.
 An absent source is reported before any pin is changed. Library friction reports
 use that same configured upstream; the consuming project's reports use its own
-origin. Package metadata may declare `[project.urls]` for publication; the
-template supplies no account-specific URLs.
+origin. A `lup` entry that names no URL, remote or path — one committed before
+the entry carried a URL, which no update rewrites, since root files are the
+project's own — falls back to the source repository the installed library
+declares in its `[project.urls]`.
 
 It is scaffold, not personal state. **Agents must never modify the tracked
 `sync.json`**, and neither should routine project work; the edit policy
@@ -322,13 +344,13 @@ status` names the exact ref it reads. Registrations with an origin review
 `refs/remotes/origin/<branch>`;
 use `sync setup <name> <path> --review-from local` to review unpublished local
 work. A repository without an origin is itself the upstream. An unbranched
-`lup` registration follows the Git dependency's branch when their URLs agree;
-an explicit branch mismatch is reported. A failed fetch exits nonzero.
+`lup` registration follows the Git dependency's branch; an explicit branch
+mismatch is reported. A failed fetch exits nonzero.
 
 The registry has no direction in its name because direction depends on where
-you sit. A project built on the template configures the shipped `lup` entry and
-pulls *from* it. The lup repository itself sets `"ignore": true` on its own
-entry and registers its downstream fleet in `sync.json.local`, so /lup:update can generalize emerged patterns back into the template. Same
+you sit. A project built on the template inherits the shipped `lup` entry and
+pulls *from* it. The lup repository itself is exempt from that entry by its
+template flag and registers its downstream fleet in `sync.json.local`, so /lup:update can generalize emerged patterns back into the template. Same
 registry, opposite seats.
 
 An entry may also carry a `"mount"` of `"rw"` or `"ro"`, which is a

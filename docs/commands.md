@@ -113,6 +113,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev usage codex` | Show live Codex usage with pacing bars (ChatGPT plan). |
 | `dev init rename-package` | Rename the lup Python package to a project-specific name. |
 | `dev init drop-examples` | Remove the scaffold&#x27;s demonstrations of itself, which no adopter wants. |
+| `dev init upstream` | Point the lup registration at the template this repository was generated from. |
 
 ## `feedback`
 
