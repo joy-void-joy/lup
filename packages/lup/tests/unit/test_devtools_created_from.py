@@ -16,7 +16,11 @@ from pathlib import Path
 
 import pytest
 
+from lup.devtools.dev import worktree
 from lup.devtools.dev.branches import created_from
+from lup.devtools.dev.records import log_ref_updates
+from lup.devtools.harness.launch import relocation_hint
+from lup.devtools.sync import clone_bare
 from lup.harness.process import LaunchRequest, LocalProcessLauncher
 
 
@@ -133,3 +137,175 @@ def test_a_cut_from_a_bare_commit_is_no_base_either(
     monkeypatch.chdir(repo)
 
     assert created_from("topic") == ""
+
+
+def read_setting(repository: Path) -> str:
+    """The reflog setting a repository's git directory carries, empty where unset."""
+    return (
+        LocalProcessLauncher()
+        .launch(
+            LaunchRequest(
+                arguments=["git", "config", "--get", "core.logAllRefUpdates"],
+                cwd=repository,
+            )
+        )
+        .stdout.strip()
+    )
+
+
+@pytest.fixture
+def hermetic(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No global or system git setting, so a repository's own config decides.
+
+    The setting is answered across every scope, so a machine whose own global
+    config names it would otherwise decide every case below.
+    """
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+
+@pytest.fixture
+def bare(repo: Path, tmp_path: Path, hermetic: None) -> Path:
+    """A bare clone of the fixture's checkout, made with plain git."""
+    clone = tmp_path / "project.git"
+    run_git(tmp_path, "clone", "-q", "--bare", str(repo), str(clone))
+    return clone
+
+
+def test_a_bare_clone_nobody_prepared_logs_no_cut(
+    bare: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Git's default, measured, so the cases below measure lup's change to it."""
+    run_git(bare, "branch", "topic", "dev")
+    monkeypatch.chdir(bare)
+
+    assert created_from("topic") == ""
+
+
+def test_a_bare_clone_sync_makes_logs_the_cut_of_a_plain_git_branch(
+    repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, hermetic: None
+) -> None:
+    """The cache clone sync makes, then a branch cut against its git directory.
+
+    `git branch` run in the bare directory is exactly the command that logged
+    nothing before, and now answers through the reflog like any other.
+    """
+    clone = tmp_path / "cache" / "project.git"
+    clone_bare(str(repo), clone, lambda _: None)
+    run_git(clone, "branch", "topic", "dev")
+    monkeypatch.chdir(clone)
+
+    assert read_setting(clone) == "true"
+    assert created_from("topic") == "dev"
+
+
+def test_a_worktree_cut_from_a_bare_clone_turns_its_reflog_on(
+    bare: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The step `git worktree create` runs, from inside one of the clone's worktrees.
+
+    Written to the shared config rather than the worktree's own, since the
+    git directory itself is where the cut went unlogged.
+    """
+    run_git(bare, "worktree", "add", "-q", str(bare / "tree" / "dev"), "dev")
+    monkeypatch.chdir(bare / "tree" / "dev")
+    step = worktree.LoggedRefUpdates()
+
+    assert not step.satisfied()
+    step.run()
+    assert step.satisfied()
+    run_git(bare, "branch", "topic", "dev")
+    assert read_setting(bare) == "true"
+    assert created_from("topic") == "dev"
+
+
+def test_an_explicit_setting_is_left_as_it_was(bare: Path) -> None:
+    """Off, said on purpose, is the owner's call: nothing is written over it."""
+    run_git(bare, "config", "core.logAllRefUpdates", "false")
+
+    assert not log_ref_updates(bare)
+    assert read_setting(bare) == "false"
+
+
+def test_turning_it_on_twice_writes_once(bare: Path) -> None:
+    assert log_ref_updates(bare)
+    assert not log_ref_updates(bare)
+    assert read_setting(bare) == "true"
+
+
+def test_a_clone_with_a_working_tree_is_left_at_its_default(
+    repo: Path, hermetic: None
+) -> None:
+    """Git already logs there, so the setting would say nothing git does not.
+
+    `git init` writes it explicitly into a clone with a working tree, so it is
+    removed first: what is measured is that the default is left to git.
+    """
+    run_git(repo, "config", "--unset", "core.logAllRefUpdates")
+
+    assert not log_ref_updates(repo)
+    assert read_setting(repo) == ""
+
+
+def test_a_worktree_created_in_a_bare_clone_leaves_its_reflog_on(
+    bare: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The whole command, from the checkout a machine keeps beside the clone."""
+    run_git(bare, "worktree", "add", "-q", str(bare / "tree" / "dev"), "dev")
+    monkeypatch.chdir(bare / "tree" / "dev")
+    monkeypatch.setattr(worktree, "get_tree_dir", lambda: bare / "tree")
+
+    worktree.create(
+        "topic",
+        no_sync=True,
+        no_copy_data=True,
+        base_branch=None,
+        launcher=relocation_hint,
+    )
+    run_git(bare, "branch", "other", "dev")
+
+    assert read_setting(bare) == "true"
+    assert created_from("other") == "dev"
+
+
+def confine(bare: Path) -> None:
+    """Hold the clone's `config.lock` the way a sandbox does, without a mount.
+
+    A device node where git expects a file of its own refuses the exclusive
+    create every config write begins with, so config is all it blocks.
+    """
+    (bare / "config.lock").symlink_to(Path("/dev/null"))
+
+
+def test_a_clone_that_cannot_take_it_is_told_the_host_command(
+    bare: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Named before anything is made, with the command that settles it."""
+    confine(bare)
+    monkeypatch.chdir(bare)
+
+    assert worktree.report_a_blocked_reflog(diagnosed=False) is True
+    said = capsys.readouterr().err
+    assert "blocked by the sandbox" in said
+    assert f"git -C {bare} config core.logAllRefUpdates true" in said
+
+
+def test_a_blockage_already_diagnosed_is_not_diagnosed_twice(
+    bare: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    confine(bare)
+    monkeypatch.chdir(bare)
+
+    assert worktree.report_a_blocked_reflog(diagnosed=True) is True
+    said = capsys.readouterr().err
+    assert "blocked by the sandbox" not in said
+    assert "core.logAllRefUpdates true" in said
+
+
+def test_a_clone_that_can_take_it_hears_nothing(
+    bare: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(bare)
+
+    assert worktree.report_a_blocked_reflog(diagnosed=False) is False
+    assert capsys.readouterr().err == ""

@@ -122,6 +122,7 @@ from pydantic import (
 
 from lup.workspace.paths import is_template_scaffold, project_root
 from lup.devtools import sync_state
+from lup.devtools.dev.records import log_ref_updates
 from lup.harness.credential import remote_url, same_repository
 import lup.harness.content.docs.upstream_reports as upstream_reports
 from lup.devtools.harness.preflight import reopened
@@ -1150,6 +1151,10 @@ def clone_bare(url: str, repository: Path, report: Callable[[str], None]) -> Non
     ``FETCH_HEAD`` alone: ``refs/remotes`` stays empty, and the ref the
     review reads never appears — a silence shaped exactly like an upstream
     with nothing new.
+
+    ``--bare`` also leaves the reflog off, so it is turned on too: a session
+    in this clone cuts branches, and a branch's first reflog entry is where
+    git logs what it was cut from.
     """
     report(f"Cloning {url} into {repository}...")
     repository.parent.mkdir(parents=True, exist_ok=True)
@@ -1162,6 +1167,7 @@ def clone_bare(url: str, repository: Path, report: Callable[[str], None]) -> Non
             "remote.origin.fetch",
             "+refs/heads/*:refs/remotes/origin/*",
         )
+        log_ref_updates(repository)
         git("-C", str(repository), "fetch", "--quiet", "origin")
     except sh.ErrorReturnCode as error:
         report(f"Clone failed: {decode_stderr(error)}")

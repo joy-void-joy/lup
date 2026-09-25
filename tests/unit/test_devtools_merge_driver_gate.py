@@ -1,10 +1,11 @@
-"""Behavior tests for the one config write left in making a worktree.
+"""Behavior tests for the merge-driver config write left in making a worktree.
 
 Git resolves a merge driver's name from config alone, so no repository can
 ship the `lup-ownership` declaration `.gitattributes` carries and every clone
-registers it once. That registration is the only reason `dev worktree create`
-touches the shared config at all — and a clone that has already made it never
-writes there again.
+registers it once. Outside a bare clone, whose reflog is the other once-only
+write, that registration is the only reason `dev worktree create` touches the
+shared config at all — and a clone that has already made it never writes
+there again.
 
 Which is what the report in front of it has to know. Asked unconditionally,
 it stopped a worktree over a write nobody was going to make, wherever the
