@@ -285,8 +285,20 @@ def declared_hook_set() -> HookSet:
     Generated plugins read it off the harness they are compiled from. A
     session this program builds itself has to reach the same declaration, or
     it enforces something the generated tree does not.
+
+    Refuses where the plugin carries none, because a caller asking for the
+    policy itself is asking a question a gateless project has no answer to.
+    The wiring that has to work either way — the dev tree, the gate's own
+    project description — reads ``portable_harness().declared_hooks`` and says
+    what the absence means where it is met.
     """
-    return portable_harness().declared_hooks
+    hooks = portable_harness().declared_hooks
+    if hooks is None:
+        raise ValueError(
+            "this project's plugin declares no hook set, so there is no policy "
+            "to hand an in-process session"
+        )
+    return hooks
 
 
 def declared_test_roots() -> list[TestRoot]:
@@ -488,15 +500,17 @@ def dev_project() -> DevProject:
     The package name is derived from where this file actually sits rather
     than written down, so initialization renaming the package moves the
     scans with it instead of leaving them resolving against a name that is
-    gone. The roles and the rule selection come from the same hook set the
+    gone. The roles and the import boundaries come from the same hook set the
     generated trees enforce, so a scan and a hook cannot disagree about what
-    a path is for, nor about which rules are live here.
+    a path is for; the rule selection is the one both of them take, read
+    where it is declared, so a project whose plugin carries no hooks still
+    holds its sweep to the rules it kept.
 
     The other two selections come from the modules that apply them rather than
     being restated, so what the gate reports as retired is what the CLI and the
     plugin actually decline.
     """
-    hooks = declared_hook_set()
+    hooks = portable_harness().declared_hooks
     package = Path(__file__).resolve().parents[1].name
     return DevProject(
         package=package,
@@ -520,8 +534,8 @@ def dev_project() -> DevProject:
             "lup.policy.kernel",
         ],
         roots=application_roots(),
-        rules=hooks.rules,
-        import_boundaries=hooks.import_boundaries,
+        rules=RULES,
+        import_boundaries=hooks.import_boundaries if hooks is not None else [],
         subapps=SUBAPP_SELECTION,
         # lup: template: which trackers beyond this checkout this project may
         # report to. What is here is lup's own, and an adopted scaffold
@@ -536,7 +550,7 @@ def dev_project() -> DevProject:
         trackers=library_trackers(project_root(), declared_scaffold().project),
         modules=MODULE_SELECTION,
         coverage=declared_coverage(),
-        path_roles=declared_role_rows(list(hooks.path_roles)),
+        path_roles=declared_role_rows(list(hooks.path_roles) if hooks else []),
         # This file: what this repository settled about itself is written
         # here, so `dev seams` reads and edits it rather than looking
         # somewhere a library guessed at.

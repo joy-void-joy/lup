@@ -26,11 +26,13 @@ def declared() -> DevDeclarations:
 
     Every declaration is the catalog's, the test roots included: the policy
     derives the test role from the same list, so the suites the gate runs and
-    the files the policy judges as tests are one declaration read twice.
+    the files the policy judges as tests are one declaration read twice. The
+    hook set is read off the harness rather than demanded of it, so a plugin
+    carrying none reaches the tree as the absence it is.
     """
     return DevDeclarations(
         project=catalog.dev_project(),
-        hooks=catalog.declared_hook_set(),
+        hooks=catalog.portable_harness().declared_hooks,
         plugin=catalog.declared_plugin(),
         test_roots=catalog.declared_test_roots(),
         spread=catalog.declared_spread(),

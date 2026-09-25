@@ -33,9 +33,9 @@ from lup.workspace.paths import project_root
 from lup_template.harness.catalog import (
     PUBLISH,
     WORKFLOW,
-    declared_hook_set,
     portable_harness,
 )
+from lup_template.harness.content.catalog import RULES
 from lup_template.harness.content.docs.catalog import documents
 import lup_template.harness.content.settings as settings_module
 from lup_template.harness.content.settings import project_settings
@@ -101,7 +101,10 @@ TARGETS = NativeTargets(builders={"claude": claude_target, "codex": codex_target
 # lup: ignore[constant-declaration] — which files outside a runtime tree this
 # project generates, decided here because nothing sits above it to be asked
 REPOSITORY_WIDE: list[RepositoryWriter] = [
-    partial(write_rule_reference, selection=declared_hook_set().rules),
+    # The selection itself rather than the hook set holding it: the reference
+    # documents what the sweep enforces, which a plugin carrying no hooks
+    # still has.
+    partial(write_rule_reference, selection=RULES),
     partial(write_workflow, WORKFLOW),
     partial(write_publish, PUBLISH),
     partial(write_generated_paths, TARGETS),

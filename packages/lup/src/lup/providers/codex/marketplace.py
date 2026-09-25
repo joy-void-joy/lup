@@ -49,6 +49,18 @@ class CodexMarketplace(BaseModel, frozen=True):
         )
 
     @classmethod
+    def enforced(cls, root: Path) -> bool:
+        """Whether the plugin this project offers carries hooks a home must run.
+
+        What a prepared home switches the hooks feature on for. A project
+        offering no plugin and a project whose plugin declares no hooks are
+        the same answer here: nothing of this project's is waiting to be
+        loaded, so the switch stays whatever the operator's own settings say.
+        """
+        declared = cls.declared(root)
+        return declared is not None and declared.declares_hooks()
+
+    @classmethod
     def declared(cls, root: Path) -> "CodexMarketplace | None":
         """The plugin this project offers, or None where it offers none.
 

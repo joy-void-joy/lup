@@ -10,6 +10,7 @@ import that one for a type.
 
 from pathlib import Path
 
+import typer
 from pydantic import BaseModel
 
 import lup.devtools.dev.check as check
@@ -21,6 +22,27 @@ from lup.devtools.project import DevProject
 from lup.harness.models import HookSet, Plugin
 
 
+def declared_policy(
+    hooks: HookSet | None,
+    refusal: str = (
+        "This project's plugin declares no hook set: its sessions run with no "
+        "gate inside them and the container is their boundary, so there is no "
+        "policy here to ask."
+    ),
+) -> HookSet:
+    """The hook set a policy query reads, or a refusal saying there is none.
+
+    One sentence for every command that asks the policy something, because
+    the absence has one meaning wherever it is met. An empty set in its place
+    would answer ``allow`` to everything, which reads as a gate that waves
+    things through — a different claim from there being no gate at all.
+    """
+    if hooks is None:
+        typer.echo(refusal, err=True)
+        raise typer.Exit(2)
+    return hooks
+
+
 class DevDeclarations(BaseModel, frozen=True):
     """Everything the workflow trees read about the repository they run in.
 
@@ -30,7 +52,13 @@ class DevDeclarations(BaseModel, frozen=True):
     """
 
     project: DevProject
-    hooks: HookSet
+    hooks: HookSet | None
+    """The policy the plugin carries, or ``None`` for a plugin that carries none.
+
+    Absence is a posture the tree answers rather than an error it raises: the
+    gate skips the sweep that has nothing to sweep, and a command asking the
+    policy something says there is no policy — see :func:`declared_policy`."""
+
     plugin: Plugin
     test_roots: list[check.TestRoot]
     git_guards: list[git_guards_mod.GitGuard] = git_guards_mod.DECLARED_GUARDS

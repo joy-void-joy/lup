@@ -49,7 +49,7 @@ from lup.harness.codescan.markers import NoteKind
 from lup.harness.codescan.registry import all_rules
 import lup.devtools.py.app as py
 from lup.devtools.dev.commands import CommandSurface
-from lup.devtools.dev.declarations import DevDeclarations
+from lup.devtools.dev.declarations import DevDeclarations, declared_policy
 from lup.devtools.hooks.app import create_hooks_app
 from lup.devtools.report.app import create_report_app
 from lup.observability.usage.app import UsageEntry, create_usage_app
@@ -138,7 +138,7 @@ def create_dev_app(
     # over it — what the policy decides, what a name resolves to, what is left
     # to implement — which is the same subject `dev` already is.
     app.add_typer(
-        create_hooks_app(lambda: declared().hooks),
+        create_hooks_app(lambda: declared_policy(declared().hooks)),
         name="hooks",
         help="Query the permission policy",
     )
@@ -952,7 +952,7 @@ def create_dev_app(
         """
         try:
             destination = rules.write_rule_reference(
-                check=check_only, selection=declared().hooks.rules
+                check=check_only, selection=declared().project.rules
             )
         except RuntimeError as error:
             typer.echo(str(error), err=True)
@@ -1601,7 +1601,7 @@ def create_dev_app(
             output,
             suppressions,
             declarations.project,
-            declarations.hooks,
+            declared_policy(declarations.hooks),
             as_json,
         )
 
@@ -1648,7 +1648,7 @@ def create_dev_app(
             kind,
             autonomous,
             as_json,
-            declared().hooks,
+            declared_policy(declared().hooks),
             sandbox,
         )
 
@@ -1672,7 +1672,9 @@ def create_dev_app(
     ) -> None:
         """Show every shell form the declared vocabulary judges, and how."""
         rules = (
-            default_vocabulary() if offered else declared().hooks.resolved_shell_rules()
+            default_vocabulary()
+            if offered
+            else declared_policy(declared().hooks).resolved_shell_rules()
         )
         policy_explain.survey(rules, as_json, output, provenance)
 

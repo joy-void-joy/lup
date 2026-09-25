@@ -519,11 +519,17 @@ def codex_project_config(
     runtime's own unit. It renders only when the declaration names one, so a
     server that says nothing keeps the runtime's default instead of being
     given this file's opinion of one.
+
+    The hooks feature is switched on only where a plugin carries hooks. A
+    project declaring no gate has nothing for the feature to load, and a
+    project-level switch left on regardless would be this file's opinion of
+    the operator's own hooks rather than a fact about this project.
     """
     document = tomlkit.document()
-    features = tomlkit.table()
-    features["hooks"] = True
-    document["features"] = features
+    if any(plugin.hooks is not None for plugin in source.plugins):
+        features = tomlkit.table()
+        features["hooks"] = True
+        document["features"] = features
     document["project_doc_max_bytes"] = budget.ceiling
     servers = tomlkit.table(is_super_table=True)
     for plugin in source.plugins:

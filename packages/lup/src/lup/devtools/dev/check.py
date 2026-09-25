@@ -964,13 +964,58 @@ def owned_comments(
     return [item for item in found if str(item.file) in owned]
 
 
+def everyday_report(hooks_declaration: HookSet | None) -> CheckReport:
+    """Whether every command this project says it runs is still allowed.
+
+    The one measurement of the shell vocabulary that reads the direction a
+    tightening shows up in. The recorded asks say which commands a question
+    was raised about, and the rule census says what each row earns; neither
+    would notice a de-escalation that stopped firing, so a change putting a
+    question in front of `git status` passes both.
+
+    A plugin carrying no hooks has no vocabulary to sweep, and says so rather
+    than reporting a corpus of nothing as allowed.
+    """
+    if hooks_declaration is None:
+        return CheckReport(
+            name="everyday commands",
+            passed=True,
+            lines=["everyday commands: no hook set declared, nothing to sweep"],
+        )
+    stopped = stopped_everyday(hooks_declaration)
+    declared_count = sum(
+        len(family.commands) for family in hooks_declaration.everyday_commands
+    )
+    swept = declared_count * len(SESSION_SHAPES)
+    return CheckReport(
+        name="everyday commands",
+        passed=not stopped,
+        lines=[
+            f"everyday commands: FAIL ({len(stopped)} stopped of {swept})",
+            *(
+                line
+                for item in stopped
+                for line in (
+                    f"  [{item.effect}] {item.command}",
+                    f"    {item.what}, {item.shape} — {item.reason}",
+                )
+            ),
+        ]
+        if stopped
+        else [
+            f"everyday commands: ok, {declared_count} allowed in "
+            f"{len(SESSION_SHAPES)} session shapes"
+        ],
+    )
+
+
 def scan_reports(
     project: DevProject,
     scope: list[str] | None,
     compositions: list[NativeHarnessComposition],
     repository_writers: list[RepositoryWriter],
     git_guards: list[GitGuard],
-    hooks_declaration: HookSet,
+    hooks_declaration: HookSet | None,
     node_classes: list[type[LedgerNode]] | None = None,
     ledger: LedgerLayout = LedgerLayout(),
     command_surface: Callable[[], CommandSurface] | None = None,
@@ -1155,36 +1200,7 @@ def scan_reports(
         # counts answer every read, so nothing else has any reason to speak.
         yield from branch_record_reports(branches_awaiting_adoption())
 
-        # The one measurement of the shell vocabulary that reads the direction
-        # a tightening shows up in. The recorded asks say which commands a
-        # question was raised about, and the rule census says what each row
-        # earns; neither would notice a de-escalation that stopped firing, so
-        # a change putting a question in front of `git status` passes both.
-        stopped = stopped_everyday(hooks_declaration)
-        declared_count = sum(
-            len(family.commands) for family in hooks_declaration.everyday_commands
-        )
-        swept = declared_count * len(SESSION_SHAPES)
-        yield CheckReport(
-            name="everyday commands",
-            passed=not stopped,
-            lines=[
-                f"everyday commands: FAIL ({len(stopped)} stopped of {swept})",
-                *(
-                    line
-                    for item in stopped
-                    for line in (
-                        f"  [{item.effect}] {item.command}",
-                        f"    {item.what}, {item.shape} — {item.reason}",
-                    )
-                ),
-            ]
-            if stopped
-            else [
-                f"everyday commands: ok, {declared_count} allowed in "
-                f"{len(SESSION_SHAPES)} session shapes"
-            ],
-        )
+        yield everyday_report(hooks_declaration)
 
         # The other direction on the same subject. The sweep above asks whether
         # a command this project runs is still allowed; this asks whether a
@@ -1384,7 +1400,7 @@ def run_checks(
     compositions: list[NativeHarnessComposition],
     repository_writers: list[RepositoryWriter],
     git_guards: list[GitGuard],
-    hooks_declaration: HookSet,
+    hooks_declaration: HookSet | None,
     command_surface: Callable[[], CommandSurface] | None = None,
     scope: list[str] | None = None,
     test_workers: int = TEST_WORKERS,

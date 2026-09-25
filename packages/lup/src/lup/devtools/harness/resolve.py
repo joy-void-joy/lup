@@ -1339,7 +1339,7 @@ def seed_request(
 
 
 def worker_policy_hooks(
-    declared_hooks: HookSet,
+    declared_hooks: HookSet | None,
     grants: LeaseGrants,
     semantics: NativeSemantics,
     sandbox: SandboxPosture,
@@ -1398,7 +1398,15 @@ def worker_policy_hooks(
     correctly every time and the session handed it host facts it did not
     have. A composition only a running resolver can build is one no test
     reaches, and this one shipped its own widening once already.
+
+    A project whose plugin carries no hook set gets no policy here either:
+    its sessions were declared to run ungated, with the lease and the
+    container as their boundary, and a worker is one of those sessions.
+    Inventing a policy for the worker alone would judge it by rules the
+    project never wrote, and nothing it launches by hand would meet them.
     """
+    if declared_hooks is None:
+        return LupHooksConfig()
     return create_policy_hooks(
         semantic_policy_for(
             declared_hooks,
