@@ -15,6 +15,7 @@ under the test's own directory, and a directory profile is pointed at a home
 the test makes by a login declaring that home its default.
 """
 
+import json
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -24,7 +25,9 @@ from pydantic import ValidationError
 from typer.testing import CliRunner
 
 import lup.devtools.harness.launch as launch
+import lup.providers.claude.usage.reader as claude_usage
 from lup.devtools.harness.composition import NativeTargets
+from lup.observability.usage.app import create_usage_app
 from lup.devtools.harness.profile_app import create_profile_app
 from lup.devtools.resolve.app import create_resolve_app
 from lup.devtools.setup import create_setup_app
@@ -417,3 +420,27 @@ def test_a_resolver_run_refuses_a_stored_default_home_before_it_starts(
 
         assert result.exit_code == 2, result.output
         assert "profile remove main" in result.output
+
+
+def test_the_usage_display_reports_a_stored_default_home_as_a_failed_read(
+    registered: AccountFile, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reading an account's usage resolves its profile too, and says so the same way.
+
+    As a failed read rather than a traceback, so ``--json`` still answers a
+    parser with an error object on stdout.
+    """
+    monkeypatch.setattr(claude_usage, "AccountFile", lambda: registered)
+    root = typer.Typer()
+    root.add_typer(create_usage_app([claude_usage.claude_usage_entry()]), name="usage")
+
+    shown = runner.invoke(root, ["usage", "claude", "--profile", "main"])
+    emitted = runner.invoke(root, ["usage", "claude", "--json"])
+    unknown = runner.invoke(root, ["usage", "claude", "--profile", "ghost"])
+
+    assert shown.exit_code == 1, shown.output
+    assert "profile remove main" in shown.output
+    assert emitted.exit_code == 1, emitted.output
+    assert "profile remove main" in json.loads(emitted.stdout)["error"]
+    assert unknown.exit_code == 1, unknown.output
+    assert "unknown Claude profile 'ghost'" in unknown.output

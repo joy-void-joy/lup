@@ -17,6 +17,7 @@ from pydantic import BaseModel, ValidationError
 
 from lup.providers.claude.harness import ClaudeSpellings
 from lup.providers.claude.profile_store import AccountFile
+from lup.providers.profiles import DefaultHomeProfile
 from lup.providers.claude.usage.api import (
     ModelUsageEntry,
     StatsCache,
@@ -301,11 +302,31 @@ class ClaudeUsageReader(UsageReader):
 
 def claude_usage_entry() -> UsageEntry:
     """This runtime's place in the usage sub-app, for an application to name."""
+
+    def opened(profile: str | None) -> UsageReader:
+        """The reader for the home that profile selects, where it selects one.
+
+        A name the registry does not hold, and one naming the default home,
+        leave no account to read, which the entry's contract answers as
+        :class:`UsageUnavailable` — in the refusal's own words.
+        """
+        # lup: defer: This resolves `--profile` against the personal registry
+        # at ~/.lup/profiles.json whatever origin the application keeps its
+        # profiles in, so where a project keeps them as directories under
+        # .lup/profiles, usage for a name reads a different account than a
+        # launch of that name opens. Resolving through the application's own
+        # ProfileDirectory needs that directory handed to this entry, which is
+        # a change to how an application composes it.
+        try:
+            return ClaudeUsageReader(AccountFile().resolve_config_dir(profile))
+        except DefaultHomeProfile as refusal:
+            raise UsageUnavailable(str(refusal)) from refusal
+        except KeyError as unknown:
+            raise UsageUnavailable(unknown.args[0]) from unknown
+
     return UsageEntry(
         name="claude",
         runtime_name=ClaudeSpellings().runtime_name,
         help="Show live Claude Code usage with pacing bars (Anthropic OAuth).",
-        open=lambda profile: ClaudeUsageReader(
-            AccountFile().resolve_config_dir(profile)
-        ),
+        open=opened,
     )
