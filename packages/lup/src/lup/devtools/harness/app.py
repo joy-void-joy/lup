@@ -44,6 +44,8 @@ from lup.harness.requirements import Manifest
 from lup.providers.profiles import ProfileDirectory
 from lup.devtools.harness.drift import RepositoryWriter
 from lup.workspace.paths import project_root
+from lup.policy.assets.host import boundary_description
+from lup.sandbox.observed import unheld
 
 
 def create_harness_app(
@@ -265,6 +267,35 @@ def create_harness_app(
             for finding in findings
         ):
             raise typer.Exit(1)
+
+    @app.command("binds")
+    def binds_command() -> None:
+        """Check, inside a session, that every read-only bind it launched with holds.
+
+        Compares the paths the launch recorded as read-only against this
+        container's mount table. A host-side git write that replaces a file
+        bound read-only, such as a config rewrite, detaches that bind. Exits
+        nonzero naming each path no longer mounted read-only; relaunch the
+        session to restore it.
+        """
+        recorded = boundary_description(project_root())
+        expected = recorded["read_only"] if "read_only" in recorded else []
+        if not expected:
+            typer.echo(
+                "No read-only binds are recorded: this is not a contained session."
+            )
+            return
+        missing = unheld(expected)
+        if not missing:
+            typer.echo(f"All {len(expected)} read-only binds are in place.")
+            return
+        typer.echo(
+            "Not mounted read-only any more, so writable from this session: "
+            + ", ".join(missing)
+            + ". Relaunch the session to restore them.",
+            err=True,
+        )
+        raise typer.Exit(1)
 
     @app.command("sandbox-check")
     def sandbox_check_command(

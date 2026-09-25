@@ -23,7 +23,7 @@ same-path mounting that :func:`run_arguments` refuses to spell any other way.
 
 import json
 from collections.abc import Callable, Mapping, Sequence
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Literal
 
 import sh
@@ -1264,14 +1264,21 @@ USER $UID:$GID
         granted_devices = [
             argument for device in devices for argument in device.arguments()
         ]
+        # Parent before child whatever the mode: a lease nests a read-only
+        # shared git directory with writable directories bound back over it,
+        # and a writable share with read-only files over it, and an engine
+        # applying the list in order would shadow the child with the parent
+        # in either direction.
+        declared = [
+            *[(host, inside, "rw") for host, inside in writable.items()],
+            *[(host, inside, "ro") for host, inside in read_only.items()],
+        ]
         mounts = [
             argument
-            for host, inside in writable.items()
-            for argument in ("-v", f"{host}:{inside}:rw")
-        ] + [
-            argument
-            for host, inside in read_only.items()
-            for argument in ("-v", f"{host}:{inside}:ro")
+            for host, inside, mode in sorted(
+                declared, key=lambda mount: len(PurePosixPath(mount[1]).parts)
+            )
+            for argument in ("-v", f"{host}:{inside}:{mode}")
         ]
         seeded = (
             [

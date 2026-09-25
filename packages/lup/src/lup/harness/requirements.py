@@ -42,6 +42,7 @@ something silently untrue refuses to open at all.
 
 import grp
 import os
+import shlex
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Annotated, Literal
@@ -642,6 +643,93 @@ class HostFacts(BaseModel, frozen=True):
             "values one can be computed from are one value"
         ),
     )
+    read_only_binds: list[Path] = Field(
+        default=[],
+        description=(
+            "Every path this launch's lease binds read-only, at its own path "
+            "inside. A lease fact rather than a declaration: which worktrees "
+            "and repositories it covers is this machine's, decided at launch"
+        ),
+    )
+
+
+class BindProbe(BaseModel, frozen=True):
+    """Ask the container's mount table whether every read-only bind is there.
+
+    The lease is a list of paths the engine was asked to bind read-only, and
+    nothing about asking proves the engine did -- or that a bind is still in
+    place. A read-only *file* bind is detached by the kernel the moment the
+    host renames over the file it sits on, which is how git rewrites
+    `config`; what is left is a writable file with nothing saying so. So the
+    probe reads the table rather than trusting the argv: each path must be a
+    mount point, mounted read-only.
+
+    `findmnt --mountpoint P --options ro` rather than a pass over
+    `/proc/self/mountinfo`, because that file escapes a space in a path as
+    `\\040` and a hand-rolled comparison would report every such path
+    missing, and because the exit status answers both halves -- a mount
+    point, read-only -- with no option list taken apart. A shape, like
+    :class:`SentinelProbe`: the paths are this launch's, so :class:`HostFacts`
+    carries them in and :meth:`given` aims it.
+    """
+
+    kind: Literal["bind_probe"] = "bind_probe"
+    marker: str = Field(
+        default="every read-only bind held",
+        description="What the probe prints when every bind is in place",
+    )
+
+    def resolved(self, facts: HostFacts) -> Run:
+        """This probe as portable shell over this launch's read-only binds.
+
+        The missing paths go to stderr and the marker to stdout, the split
+        :meth:`Run.run` reads, so a failure's detail names every bind that is
+        not there rather than the first.
+        """
+        binds = " ".join(shlex.quote(str(path)) for path in facts.read_only_binds)
+        script = (
+            'missing=""; '
+            f"for bind in {binds}; do "
+            'findmnt --mountpoint "$bind" --options ro >/dev/null 2>&1 '
+            '|| missing="$missing $bind"; '
+            "done; "
+            'if [ -n "$missing" ]; then '
+            'printf "Not bound read-only:%s" "$missing" >&2; exit 1; fi; '
+            f'printf "{self.marker}"'
+        )
+        return Run(command=["sh", "-c", script], expect=self.marker)
+
+    def programs(self) -> list[str]:
+        """The shell and the table reader, which is all this runs."""
+        return ["sh", "findmnt"]
+
+    def pointed_at(self, program: str) -> "BindProbe":
+        """Unchanged: what varies here is the lease, not the program."""
+        return self
+
+    def behind(self, opening: list[str]) -> "BindProbe":
+        """Unchanged: :meth:`given` renders the ``Run`` that *opening* prefixes."""
+        return self
+
+    def given(self, facts: HostFacts) -> Run:
+        """The resolved command, aimed at this launch's binds."""
+        return self.resolved(facts)
+
+    def run(self) -> ExerciseOutcome:
+        """Refuse rather than pass, because no lease has aimed it yet.
+
+        The answer :class:`SentinelProbe` gives and for its reason: an unaimed
+        probe has checked nothing, and a pass here would vouch for binds no
+        launch declared.
+        """
+        return ExerciseOutcome(
+            proved=False,
+            exercised=False,
+            detail=(
+                "this bind probe was never given a lease to check, so it "
+                "tested nothing — exercise it through `for_host`"
+            ),
+        )
 
 
 class MountProbe(BaseModel, frozen=True):
@@ -972,7 +1060,7 @@ class VocabularyProbe(BaseModel, frozen=True):
 
 
 type Exercise = Annotated[
-    Run | AnyOf | MountProbe | SentinelProbe | VocabularyProbe,
+    Run | AnyOf | MountProbe | SentinelProbe | VocabularyProbe | BindProbe,
     Discriminator("kind"),
 ]
 

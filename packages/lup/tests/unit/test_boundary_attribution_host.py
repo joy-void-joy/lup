@@ -12,7 +12,12 @@ outlives the one command it was wrong about.
 import json
 from pathlib import Path
 
-from lup.policy.assets.host import boundary_description, boundary_refusal
+from lup.sandbox.attribution import WRITE_REFUSAL_MARKERS
+from lup.policy.assets.host import (
+    boundary_account,
+    boundary_description,
+    boundary_refusal,
+)
 
 CONFINED = {
     "read_only": ["/repo/tree/dev", "/repo/tree/other"],
@@ -102,3 +107,65 @@ def test_a_description_the_launcher_wrote_is_read_back(tmp_path: Path) -> None:
     ledger.parent.mkdir(parents=True)
     ledger.write_text(json.dumps(CONFINED), encoding="utf-8")
     assert boundary_description(tmp_path)["read_only"] == CONFINED["read_only"]
+
+
+SHARED = {
+    "read_only": ["/repo.git"],
+    "writable": ["/repo.git/refs", "/repo.git/objects", "/repo.git/tree"],
+    "git_shared": ["/repo.git"],
+    "write_refusals": ["Read-only file system", "Permission denied"],
+}
+"""A linked worktree's lease: the shared directory held, its data bound back."""
+
+
+def test_a_config_write_under_the_shared_directory_is_sent_to_a_host_terminal() -> None:
+    """The generic remedy -- declare the path in the image -- is wrong for git's own."""
+    spoken = boundary_refusal(
+        "error: could not lock config file /repo.git/config: Read-only file system",
+        SHARED,
+    )
+    assert "host terminal" in spoken
+    assert "image declaration" not in spoken
+
+
+def test_gc_meeting_the_shared_directory_is_named_as_well() -> None:
+    spoken = boundary_refusal(
+        "fatal: Unable to create '/repo.git/gc.pid.lock': Read-only file system", SHARED
+    )
+    assert "`git gc`" in spoken
+
+
+def test_a_refusal_inside_a_writable_directory_bound_back_is_not_claimed() -> None:
+    """The deepest mount decides: under `refs/` the write was the session's to make."""
+    assert (
+        boundary_refusal("/repo.git/refs/heads/x.lock: Permission denied", SHARED) == ""
+    )
+
+
+def test_a_push_that_exits_zero_still_carries_its_refusal(tmp_path: Path) -> None:
+    """`push -u` lands the push and fails only the upstream record, with exit 0."""
+    (tmp_path / ".lup").mkdir()
+    (tmp_path / ".lup" / "boundary.json").write_text(json.dumps(SHARED))
+    stderr = (
+        "error: could not lock config file /repo.git/config: Read-only file system\n"
+        "error: unable to write upstream branch configuration"
+    )
+
+    claude = boundary_account(
+        {"stdout": "", "stderr": stderr, "interrupted": False}, tmp_path
+    )
+    codex = boundary_account({"exit_code": 0, "output": stderr}, tmp_path)
+
+    assert len(claude) == 1 and "host terminal" in claude[0]
+    assert codex == claude
+    assert boundary_account(stderr, None) == []
+
+
+def test_a_branch_deletion_that_could_not_lock_config_is_explained() -> None:
+    """Git drops the errno here, deletes the branch, and exits 0."""
+    spoken = boundary_refusal(
+        "error: could not lock config file /repo.git/config\n"
+        "warning: update of config-file failed",
+        {**SHARED, "write_refusals": list(WRITE_REFUSAL_MARKERS)},
+    )
+    assert "host terminal" in spoken

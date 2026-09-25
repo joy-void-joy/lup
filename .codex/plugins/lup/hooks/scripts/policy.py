@@ -1359,30 +1359,82 @@ def boundary_refusal(failure: str, described: dict[str, list[str]]) -> str:
     egress half: a refused host is read out of the proxy's own log rather than
     out of the client's guess about why its connection died, and reaching that
     log means reaching the container runtime, which this half must not do.
+
+    A path under a repository's shared git directory gets the remedy that
+    fits it, because the generic one is wrong there: nothing belongs in the
+    image declaration, and what git could not write -- `config`, the lock
+    `git gc` takes -- is the host's to change from its own terminal. The
+    launch records those directories as ``git_shared`` and the writable
+    directories bound back inside them as ``writable``.
     """
     markers = described["write_refusals"] if "write_refusals" in described else []
     read_only = described["read_only"] if "read_only" in described else []
+    writable = described["writable"] if "writable" in described else []
+    shared = described["git_shared"] if "git_shared" in described else []
     if not markers or not read_only:
         return ""
     if not any(marker in failure for marker in markers):
         return ""
+
+    def under(path: str, mount: str) -> bool:
+        return path == mount or path.startswith(mount + "/")
+
+    # The deepest mount decides, as the table does: a writable directory
+    # bound back inside a read-only one is where a write under it landed,
+    # and a refusal there is not this boundary's.
     covering = [
-        mount
+        (candidate, mount)
         for word in failure.split()
         for candidate in [unquoted_path(word)]
         if candidate.startswith("/") and len(candidate) > 1
         for mount in read_only
-        if candidate == mount or candidate.startswith(mount + "/")
+        if under(candidate, mount)
+        and not any(
+            under(candidate, opened) and len(opened) > len(mount) for opened in writable
+        )
     ]
     if not covering:
         return ""
+    candidate, mount = covering[0]
+    if any(under(candidate, directory) for directory in shared):
+        return (
+            f"The boundary refused this, not the filesystem: {mount} is held "
+            "read-only because the host runs what a repository's git `config` "
+            "and `hooks/` name. Changing git configuration -- a remote, an "
+            "upstream, `user.*`, a submodule -- or running `git gc` is for a "
+            "host terminal; commits, branches, tags, fetch and `git push origin "
+            "<branch>` work here."
+        )
     return (
-        f"The boundary refused this, not the filesystem: {covering[0]} is "
+        f"The boundary refused this, not the filesystem: {mount} is "
         "mounted read-only on purpose, so retrying, changing permissions or "
         "creating the parent will not help. Work inside your own tree, or "
         "propose adding the path to the image declaration if it genuinely "
         "belongs in every session."
     )
+
+
+def boundary_account(
+    # lup: ignore[dict-str-payload] — each runtime's own tool-response mapping, whose stream keys differ per runtime
+    response: str | dict[str, str | int | float | bool | None],
+    root: Path | None,
+) -> list[str]:
+    """The boundary's sentence for what a finished shell command printed, if any.
+
+    Read after the command rather than before, because a refusal is only
+    known once the kernel has made it -- and read whether or not the command
+    failed: `git push -u` lands the push, fails to record the upstream in the
+    read-only `config`, and exits 0 with the refusal in its output. Each
+    runtime hands the output over in its own shape, a string or a mapping of
+    streams, so every string in it is read.
+    """
+    spoken = (
+        response
+        if isinstance(response, str)
+        else "\n".join(value for value in response.values() if isinstance(value, str))
+    )
+    said = boundary_refusal(spoken, boundary_description(root))
+    return [said] if said else []
 
 
 def outside_this_project(path_text: str, root: Path | None) -> bool:
@@ -3821,7 +3873,13 @@ def observe(payload):
     # What the command changed, read against the snapshot its own PreToolUse
     # took, and contested where another session had a window open across it.
     claim_window_closed(Path(root) if root else None)
-    return written_review(command, Path(root) if root else Path.cwd())
+    return [
+        *written_review(command, Path(root) if root else Path.cwd()),
+        *boundary_account(
+            payload["tool_response"] if "tool_response" in payload else "",
+            Path(root) if root else None,
+        ),
+    ]
 
 
 def main():

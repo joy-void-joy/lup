@@ -178,6 +178,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `harness propose-reconciliation` | Persist a source patch for separate review and stale-base-checked apply. |
 | `harness doctor` | Report installed native runtime evidence without updating either CLI. |
 | `harness requirements` | Check dependencies on the host, or in the session container with --inside. |
+| `harness binds` | Check, inside a session, that every read-only bind it launched with holds. |
 | `harness sandbox-check` | Evaluate arithmetic in a disposable Python sandbox without network access. |
 | `harness image` | Render the container image this project&#x27;s sessions run in. |
 | `harness egress` | Report or remove the network boundary this project&#x27;s sessions run behind. |

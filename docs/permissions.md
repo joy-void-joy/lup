@@ -499,10 +499,20 @@ inheritance and stale policy execution; they are mutable local bookkeeping,
 not authentication against a hostile process with the same filesystem
 authority.
 
-Every mounted repository's shared `config` and `hooks/` are the launch's
-read-only holes, because git runs on the host what they name. The container
-binds them read-only inside the writable share, and the ledger records them as
-read-only roots, which is what holds them on a host posture. The file tools
+Every mounted repository's shared `config` and `hooks/` are held read-only,
+because git runs on the host what they name. For a linked worktree the
+container binds the shared git directory itself read-only and every directory
+under it but `hooks/` and `modules/` writable back over it. A file bind would
+not hold: git rewrites `config` by renaming a lockfile over it, and the kernel
+detaches a file mount renamed over from the host, so one host-side `push -u`
+left every running container's `config` writable. A launch readies the
+directory first, making the directories git creates on first use and moving
+`packed-refs` into a writable `lup-refs/` behind a symlink, since every ref
+deletion rewrites it. A plain checkout keeps its per-worktree state at the
+top of that directory, so it keeps the writable share with `config` and
+`hooks/` bound read-only inside it. The ledger records the read-only
+directory, or the two files, as read-only roots, which is what holds them on
+a host posture. The file tools
 meet them through the edit gates. Every spelling of a shell write meets them
 through the `read-only-write` settlement — a redirection, `tee`, `sed -i`,
 `cp`, `mv`, `ln` — which refuses rather than asks, as the bind does, and reads

@@ -31,6 +31,7 @@ from lup.harness.toolchain import (
     metadata_refused_requirement,
     proxy_reachable_requirement,
     proxy_tunnels_requirement,
+    read_only_binds_requirement,
     question_relay_requirement,
     reaped_orphans_requirement,
     same_path_mount_requirement,
@@ -150,6 +151,9 @@ def manifest(boundary: SessionEgress | None = None) -> Manifest:
             # boundary did not stand still reaches its proxy and still places
             # every operation by a wall that is not there.
             inside_placement_requirement(),
+            # What the shared git `config` and `hooks/` rest on: the mount
+            # table, read inside, rather than the lease that asked for it.
+            read_only_binds_requirement(),
             # Ordered as a session meets them: the proxy has to be reachable
             # before it can tunnel, the tunnel has to stand before a turn can
             # run, and the terminal is what the operator sees either way.

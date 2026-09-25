@@ -18,6 +18,7 @@ failure mode the design forbids, so a caller that asked to be contained and
 cannot be gets a refusal naming what was missing, and the operator decides.
 """
 
+from collections.abc import Sequence
 import hashlib
 import json
 import os
@@ -55,6 +56,9 @@ from lup.harness.image import (
 from lup.harness.notice import Banner, Notice
 from lup.harness.releases import resolved_agent_clis
 from lup.harness.requirements import Manifest
+from lup.coordination.bare.store import STORE_DIR
+from lup.devtools.dev.admission import SLOT_DIRECTORY
+from lup.devtools.dev.traces import ARCHIVE_DIRECTORY_NAME
 from lup.harness.terminal import host_timezone
 from lup.providers.login import NativeHomeScope, ProviderLogin
 from lup.sandbox.attribution import WRITE_REFUSAL_MARKERS
@@ -64,10 +68,22 @@ from lup.sandbox.rail import (
     demoted,
     fleet_lease,
     hold_pruning_across,
+    in_repository,
+    prepared_across,
     repository_layout,
     worker_lease,
     working_trees,
 )
+
+# lup: ignore[library-default] — a mirror of the directories lup's own modules write under a shared git directory, named from those modules; no adopter chooses it
+SHARED_STATE = (STORE_DIR, SLOT_DIRECTORY, ARCHIVE_DIRECTORY_NAME)
+"""The directories lup keeps under a shared git directory, each made before a lease.
+
+A session writes each of them from inside -- the coordination store and the
+branch records, a gate's admission slots, archived traces -- and each is
+created on first use, which a read-only shared directory refuses. Named here
+from the modules that own them, so a rename there reaches the launch.
+"""
 
 
 def image_tag(dockerfile: str) -> str:
@@ -754,6 +770,7 @@ def record_boundary(
     egress: SessionEgress,
     root: Path,
     devices: DeviceLease = DeviceLease(),
+    shared: Sequence[Path] = (),
 ) -> None:
     """Write down what this session is confined by, for the gate that explains it.
 
@@ -774,6 +791,12 @@ def record_boundary(
     reader: a run that computed inside this container has its provenance in
     this file, and a GPU that was withheld is the difference between a
     result and a run that fell back to the host without saying so.
+
+    The writable mounts are written too, because a read-only shared git
+    directory has writable directories bound back inside it and the deepest
+    mount is the one that refused; ``shared`` names each repository's shared
+    git directory, so a refusal under one is explained as git's rather than
+    as a path to declare.
     """
     ledger = root / ".lup" / "boundary.json"
     ledger.parent.mkdir(parents=True, exist_ok=True)
@@ -781,6 +804,8 @@ def record_boundary(
         json.dumps(
             {
                 "read_only": sorted(lease.read_only.values()),
+                "writable": sorted(lease.writable.values()),
+                "git_shared": sorted(str(path) for path in shared),
                 "write_refusals": list(WRITE_REFUSAL_MARKERS),
                 "allowed_hosts": sorted(item.host for item in egress.admits),
                 "devices": [device.name for device in devices.granted],
@@ -1513,6 +1538,28 @@ def pruning_notice(refused: list[Path]) -> list[Notice]:
     ]
 
 
+def preparation_notice(refused: list[str]) -> list[Notice]:
+    """What to say when a shared git directory could not be readied for its bind.
+
+    Not a refusal to launch: `config` and `hooks/` are held read-only either
+    way. What an unready directory costs is inside the session -- a ref
+    deletion with no writable `packed-refs`, or a directory git makes on
+    first use that cannot be made under a read-only parent -- and a session
+    meeting that with nothing said would read it as a broken repository.
+    """
+    if not refused:
+        return []
+    return [
+        Notice(
+            text="Could not ready the shared git directory for its read-only bind ("
+            + "; ".join(refused)
+            + "). Deleting a branch or a first-use git directory may fail inside "
+            "this session; the next launch tries again.",
+            urgency="boundary",
+        )
+    ]
+
+
 def held_environments(
     root: Path,
     accessible: list[AccessibleRoot],
@@ -1682,6 +1729,12 @@ def contained_argv(
     said.add(
         image.browser.notice(handing is not None, image.egress.shares_host_loopback())
     )
+    # Readied before the lease is read, because the lease binds only the
+    # directories that exist: one git or lup makes on first use cannot be
+    # made later under the read-only shared directory. A read-only root is
+    # not readied -- its whole lease is read-only, and it is not ours to move.
+    readied = [root, *(item.path for item in accessible if item.writable)]
+    said.add(preparation_notice(prepared_across(readied, SHARED_STATE)))
     lease = lease if lease is not None else fleet_lease(root, accessible)
     said.add(fleet_notice(accessible))
     said.add(
@@ -1693,7 +1746,17 @@ def contained_argv(
     # handed to the engine to fail on.
     granted_devices = lease_devices(devices, registered_devices())
     said.add(granted_devices.notices())
-    record_boundary(lease, image.egress, root, granted_devices)
+    record_boundary(
+        lease,
+        image.egress,
+        root,
+        granted_devices,
+        shared=[
+            repository_layout(path).common
+            for path in [root, *(item.path for item in accessible)]
+            if in_repository(path)
+        ],
+    )
     # Read on the host and passed in, never resolved inside: the file that
     # answers "where does this remote point" is `.git/config`, which the
     # container can write, so a rewrite decided in there is a rewrite the

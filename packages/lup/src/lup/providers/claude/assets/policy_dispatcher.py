@@ -50,6 +50,7 @@ from decisions import (
 from host import (
     approval_fingerprint,
     approval_subject,
+    boundary_account,
     declared_identity,
     file_diagnostics,
     note_ran,
@@ -492,7 +493,15 @@ def observe(payload):
     # What the command changed, read against the snapshot its own PreToolUse
     # took, and contested where another session had a window open across it.
     claim_window_closed(session_root(payload))
-    return written_review(command, session_root(payload) or Path.cwd())
+    return [
+        *written_review(command, session_root(payload) or Path.cwd()),
+        # What the boundary refused, named as the boundary rather than left
+        # as an errno the agent would debug as a broken disk.
+        *boundary_account(
+            payload["tool_response"] if "tool_response" in payload else "",
+            session_root(payload),
+        ),
+    ]
 
 
 def main():
