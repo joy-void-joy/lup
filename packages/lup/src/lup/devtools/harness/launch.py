@@ -60,7 +60,8 @@ from lup.policy.profiles import compile_boundary, depended_on, measured
 from lup.policy.snapshots import accept_destination_policies, destination_authorities
 from lup.sandbox.rail import (
     AccessibleRoot,
-    accessible_lease,
+    host_run,
+    in_repository,
     fleet_lease,
     working_trees,
 )
@@ -1434,8 +1435,8 @@ def claude_sandbox_arguments(
     held: list[JsonValue] = [
         str(path)
         for item in accessible
-        if item.writable
-        for path in accessible_lease(item).read_only
+        if item.writable and in_repository(item.path)
+        for path in host_run(item.path)
     ]
     filesystem: JsonObject = {
         "allowWrite": allowed,

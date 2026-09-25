@@ -228,8 +228,9 @@ its remote-tracking ref, so refreshing is a fetch and nothing in the clone is
 reset over.
 
 The launch mounts such a clone whole rather than at its one worktree. The
-lease is the same either way — every worktree writable, the shared `config`
-and `hooks/` read-only — and what the whole clone adds is edit authority:
+lease is the same either way — every worktree writable, the shared git
+directory read-only with its data directories writable, so `config` and
+`hooks/` cannot be written — and what the whole clone adds is edit authority:
 each worktree in it is judged by its own policy, and `harness policy-refresh`
 accepts one cut after the launch. A registration naming a path mounts the
 working tree it resolves to and accepts that checkout's policy alone, so a

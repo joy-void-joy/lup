@@ -55,6 +55,9 @@ from lup.harness.image import (
 from lup.harness.notice import Banner, Notice
 from lup.harness.releases import resolved_agent_clis
 from lup.harness.requirements import Manifest
+from lup.coordination.bare.store import STORE_DIR
+from lup.devtools.dev.admission import SLOT_DIRECTORY
+from lup.devtools.dev.traces import ARCHIVE_DIRECTORY_NAME
 from lup.harness.terminal import host_timezone
 from lup.providers.login import NativeHomeScope, ProviderLogin
 from lup.sandbox.attribution import WRITE_REFUSAL_MARKERS
@@ -64,10 +67,20 @@ from lup.sandbox.rail import (
     demoted,
     fleet_lease,
     hold_pruning_across,
+    prepared_across,
     repository_layout,
     worker_lease,
     working_trees,
 )
+
+SHARED_STATE = (STORE_DIR, SLOT_DIRECTORY, ARCHIVE_DIRECTORY_NAME)
+"""The directories lup keeps under a shared git directory, each made before a lease.
+
+A session writes each of them from inside -- the coordination store and the
+branch records, a gate's admission slots, archived traces -- and each is
+created on first use, which a read-only shared directory refuses. Named here
+from the modules that own them, so a rename there reaches the launch.
+"""
 
 
 def image_tag(dockerfile: str) -> str:
@@ -1513,6 +1526,28 @@ def pruning_notice(refused: list[Path]) -> list[Notice]:
     ]
 
 
+def preparation_notice(refused: list[str]) -> list[Notice]:
+    """What to say when a shared git directory could not be readied for its bind.
+
+    Not a refusal to launch: `config` and `hooks/` are held read-only either
+    way. What an unready directory costs is inside the session -- a ref
+    deletion with no writable `packed-refs`, or a directory git makes on
+    first use that cannot be made under a read-only parent -- and a session
+    meeting that with nothing said would read it as a broken repository.
+    """
+    if not refused:
+        return []
+    return [
+        Notice(
+            text="Could not ready the shared git directory for its read-only bind ("
+            + "; ".join(refused)
+            + "). Deleting a branch or a first-use git directory may fail inside "
+            "this session; the next launch tries again.",
+            urgency="boundary",
+        )
+    ]
+
+
 def held_environments(
     root: Path,
     accessible: list[AccessibleRoot],
@@ -1682,6 +1717,12 @@ def contained_argv(
     said.add(
         image.browser.notice(handing is not None, image.egress.shares_host_loopback())
     )
+    # Readied before the lease is read, because the lease binds only the
+    # directories that exist: one git or lup makes on first use cannot be
+    # made later under the read-only shared directory. A read-only root is
+    # not readied -- its whole lease is read-only, and it is not ours to move.
+    readied = [root, *(item.path for item in accessible if item.writable)]
+    said.add(preparation_notice(prepared_across(readied, SHARED_STATE)))
     lease = lease if lease is not None else fleet_lease(root, accessible)
     said.add(fleet_notice(accessible))
     said.add(

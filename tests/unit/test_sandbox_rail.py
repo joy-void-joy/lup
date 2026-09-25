@@ -20,6 +20,8 @@ from lup.sandbox.rail import (
     hold_pruning_across,
     in_repository,
     lease_for,
+    prepared_across,
+    prepared_shared_directory,
     repository_layout,
     same_path,
     sibling_worktrees,
@@ -106,10 +108,10 @@ def test_no_path_is_leased_writable_and_read_only_at_once(
     """One path, one mode: two mounts at one target have no tie-break to trust.
 
     The shared directory arrives twice here -- once as the directory this
-    lease deliberately makes writable, once as its own sibling, because a
-    bare repository is the main worktree git reports. Both spellings said
-    read-only until the shared directory became writable, so the collision
-    was invisible rather than absent, and it resolves toward writable.
+    lease holds read-only, once as its own sibling, because a bare repository
+    is the main worktree git reports. Taken as a sibling it would be named
+    writable, and a path named both ways settles toward writable, which is
+    `config` writable with it -- so the lease's own mode is the one kept.
     """
     layout = repository_layout(bare_repository / "mine")
     leased = lease_for(bare_repository / "mine")
@@ -120,7 +122,8 @@ def test_no_path_is_leased_writable_and_read_only_at_once(
     # worktree, having quietly stopped exercising anything.
     assert layout.common in sibling_worktrees(bare_repository / "mine")
     assert not set(leased.writable) & set(leased.read_only)
-    assert leased.writable_at(layout.common)
+    assert not leased.writable_at(layout.common / "config")
+    assert leased.writable_at(layout.common / "refs")
 
 
 def test_a_checkout_inside_the_shared_directory_is_not_bound_a_second_time(
@@ -195,24 +198,27 @@ def test_a_lease_does_not_mount_the_worktree_it_is_for_as_a_sibling(
     assert repository / "mine" not in leased.read_only
 
 
-def test_the_shared_directory_is_writable_with_only_config_held_back(
+def test_the_shared_directory_is_read_only_with_its_directories_writable(
     repository: Path,
 ) -> None:
     """Every administrative entry writable to remove a worktree, and `config` not.
 
-    Two modes rather than three nested ones. Punching a sibling's
-    administrative entry read-only back over the shared directory keeps it
-    present and unwritable -- and makes `git worktree remove` impossible from
-    inside, since removing a worktree unlinks exactly that entry.
-    `config` is the one hole left, and it costs a session nothing: its keys
-    name programs the host runs, and no step of the workflow writes them.
+    Punching a sibling's administrative entry read-only back over the shared
+    directory keeps it present and unwritable -- and makes `git worktree
+    remove` impossible from inside, since removing a worktree unlinks exactly
+    that entry. `config` and `hooks/` stay under the read-only directory, and
+    a directory mount is what a host-side rewrite of `config` cannot detach.
     """
     layout = repository_layout(repository / "mine")
     leased = lease_for(repository / "mine")
-    assert leased.writable_at(layout.common)
+    assert not leased.writable_at(layout.common)
+    assert not leased.writable_at(layout.common / "config")
+    assert not leased.writable_at(layout.common / "hooks" / "pre-commit")
+    assert not leased.writable_at(layout.common / "modules")
+    for data in ("objects", "refs", "logs", "worktrees"):
+        assert leased.writable_at(layout.common / data)
     assert leased.writable_at(layout.common / "worktrees" / "other")
     assert leased.writable_at(layout.private)
-    assert not leased.writable_at(layout.common / "config")
 
 
 def test_a_commit_survives_everything_the_lease_leaves_unwritable(
@@ -253,11 +259,12 @@ def test_a_commit_survives_everything_the_lease_leaves_unwritable(
         for found in [layout.common, *layout.common.rglob("*")]
         if read_only_here(leased, found)
     ]
-    # `config` and `hooks/`, and asserting the whole list rather than a
+    # The shared directory, and asserting the whole list rather than a
     # membership is the point: this is the contract the lease states, so a
     # path appearing here is a change somebody has to mean rather than one
-    # that slips in.
-    assert holes(withheld) == [layout.common / "config", layout.common / "hooks"]
+    # that slips in. Inside it, `config` and `hooks/` are what stay withheld.
+    assert holes(withheld) == [layout.common]
+    assert {layout.common / "config", layout.common / "hooks"} <= set(withheld)
     restored = {entry: entry.stat().st_mode for entry in withheld}
     before = (layout.common / "config").read_bytes()
     try:
@@ -376,23 +383,11 @@ def test_a_plain_checkout_holds_its_config_back_too(tmp_path: Path) -> None:
     assert layout.common / "config" in worker_lease(tmp_path).read_only
 
 
-def test_a_leased_config_reaches_a_session_read_only_inside_its_writable_share(
-    repository: Path,
-) -> None:
-    """The hole has to survive the argv, not only the lease that declared it.
-
-    A session's mounts are emitted writable first and read-only after, which
-    is what puts this hole behind the base it sits in. Measured on podman
-    6.1.0 the engine sorts by depth and would land it either way, and that is
-    exactly why the order is pinned: the day an engine applies the list as
-    written is the day a writable parent silently fills the hole back in, and
-    a `config` reported held would be writable with nothing saying so.
-    """
-    layout = repository_layout(repository / "mine")
-    leased = lease_for(repository / "mine")
-    started = Image().session_arguments(
+def started_with(leased: Lease, checkout: Path) -> list[str]:
+    """The argv a session opens with under this lease."""
+    return Image().session_arguments(
         tag="lup-agent:x",
-        checkout=repository / "mine",
+        checkout=checkout,
         uid=1000,
         gid=1000,
         writable=leased.writable,
@@ -400,11 +395,42 @@ def test_a_leased_config_reaches_a_session_read_only_inside_its_writable_share(
         state_volume="lup-cfg-x",
         config_home_env="CLAUDE_CONFIG_DIR",
     )
-    held = layout.common / "config"
+
+
+def test_the_shared_directory_reaches_a_session_read_only_under_its_writable_data(
+    repository: Path,
+) -> None:
+    """The nesting has to survive the argv, not only the lease that declared it.
+
+    The shared directory is bound read-only as a directory and each of its
+    data directories writable after it. Measured on podman 6.1.0 the engine
+    sorts by depth and would land them either way, and that is exactly why
+    the order is pinned: an engine applying the list as written would shadow
+    every writable child with the read-only parent. `config` and `hooks/`
+    get no bind of their own -- a file bind is what a host rewrite detaches.
+    """
+    layout = repository_layout(repository / "mine")
+    started = started_with(lease_for(repository / "mine"), repository / "mine")
+    shared = f"{layout.common}:{layout.common}:ro"
+    for data in ("objects", "refs", "logs", "worktrees"):
+        child = layout.common / data
+        assert started.index(shared) < started.index(f"{child}:{child}:rw")
+    assert not [word for word in started if word.startswith(f"{layout.common}/config")]
+    assert not [word for word in started if word.startswith(f"{layout.common}/hooks")]
+
+
+def test_a_plain_checkout_binds_config_read_only_inside_its_writable_share(
+    tmp_path: Path,
+) -> None:
+    """The fallback layout, with the hole emitted after the base it sits in."""
+    git("-C", str(tmp_path), "init", "-q", "-b", "main")
+    layout = repository_layout(tmp_path)
+    leased = lease_for(tmp_path)
+    started = started_with(leased, tmp_path)
     carrier = leased.answers_from(layout.common)
     base = f"{carrier}:{carrier}:rw"
-    hole = f"{held}:{held}:ro"
-    assert started.index(base) < started.index(hole)
+    for held in (layout.common / "config", layout.common / "hooks"):
+        assert started.index(base) < started.index(f"{held}:{held}:ro")
 
 
 def test_paths_are_mounted_at_the_names_the_host_calls_them(
@@ -430,7 +456,7 @@ def test_a_human_owned_path_stays_writable_and_the_policy_asks(
     leased = lease_for(repository / "mine")
     assert readme.resolve() not in leased.read_only
     assert leased.covers(readme)
-    assert {path.name for path in leased.read_only} == {"config", "hooks"}
+    assert set(leased.read_only) == {repository_layout(repository / "mine").common}
 
 
 def test_siblings_are_asked_of_git_rather_than_scanned(repository: Path) -> None:
@@ -497,7 +523,8 @@ def test_a_declared_root_is_leased_with_the_repository_behind_it(
     layout = repository_layout(side)
 
     assert leased.writable_at(side)
-    assert leased.writable_at(layout.common)
+    assert not leased.writable_at(layout.common / "config")
+    assert leased.writable_at(layout.common / "refs")
     assert leased.writable_at(layout.private)
     assert leased.writable_at(other_repository)
     assert leased.writable_at(repository / "mine")
@@ -513,7 +540,7 @@ def test_a_commit_lands_in_a_declared_root_under_the_lease_it_gets(
     the checkout's own commit test models it: withhold write permission from
     exactly what the lease calls read-only, then run the real command.
 
-    A declared root gets the same `config` and `hooks/` holes the checkout's
+    A declared root gets the same read-only shared directory the checkout's
     own lease gets, and asserting the whole list says so: a repository
     reached across the boundary is one whose config keys and hook scripts run
     on the same host.
@@ -526,7 +553,7 @@ def test_a_commit_lands_in_a_declared_root_under_the_lease_it_gets(
         for found in [layout.common, *layout.common.rglob("*"), other_repository]
         if read_only_here(leased, found)
     ]
-    assert holes(withheld) == [layout.common / "config", layout.common / "hooks"]
+    assert holes(withheld) == [layout.common]
 
     restored = {entry: entry.stat().st_mode for entry in withheld}
     before = (layout.common / "config").read_bytes()
@@ -671,7 +698,7 @@ def test_a_worker_lease_holds_each_sibling_entry_read_only_inside_a_writable_sha
     """
     layout = repository_layout(repository / "mine")
     leased = worker_lease(repository / "mine")
-    assert leased.writable_at(layout.common)
+    assert leased.writable_at(layout.common / "worktrees")
     assert not leased.writable_at(layout.common / "worktrees" / "other")
     assert leased.writable_at(layout.private)
 
@@ -688,8 +715,7 @@ def test_a_worker_lease_holds_the_shared_config_read_only(
     """
     layout = repository_layout(repository / "mine")
     leased = worker_lease(repository / "mine")
-    assert layout.common / "config" in leased.read_only
-    assert layout.common / "config" not in leased.writable
+    assert read_only_here(leased, layout.common / "config")
 
 
 def test_both_leases_hold_the_shared_hooks_read_only_in_either_layout(
@@ -714,8 +740,8 @@ def test_both_leases_hold_the_shared_hooks_read_only_in_either_layout(
     for worktree in (repository / "mine", plain):
         hooks = repository_layout(worktree).common / "hooks"
         for leased in (lease_for(worktree), worker_lease(worktree)):
-            assert hooks in leased.read_only
-            assert hooks not in leased.writable
+            assert read_only_here(leased, hooks)
+            assert read_only_here(leased, hooks / "pre-commit")
 
 
 def test_a_reviewer_lease_is_the_worker_lease_with_nothing_writable(
@@ -739,3 +765,145 @@ def test_a_worker_lease_holds_no_human_owned_path_either(repository: Path) -> No
     leased = worker_lease(repository / "mine")
     assert owned not in leased.read_only
     assert leased.covers(owned)
+
+
+@pytest.fixture
+def cloned(tmp_path: Path) -> Path:
+    """A bare clone with a worktree inside it and a remote beside it, refs packed.
+
+    The layout the rail is shaped for: `tree/` inside the shared directory,
+    every ref packed the way a clone or a `gc` leaves them.
+    """
+    remote = tmp_path / "remote.git"
+    git("init", "-q", "--bare", "-b", "main", str(remote))
+    seed = tmp_path / "seed"
+    git("clone", "-q", str(remote), str(seed))
+    who = ("-c", "user.name=Test", "-c", "user.email=test@example.invalid")
+    git("-C", str(seed), *who, "commit", "-q", "--allow-empty", "-m", "first")
+    git("-C", str(seed), "push", "-q", "origin", "HEAD:main", "HEAD:gone")
+    shared = tmp_path / "proj.git"
+    git("clone", "-q", "--bare", str(remote), str(shared))
+    fetched = "+refs/heads/*:refs/remotes/origin/*"
+    git("-C", str(shared), "config", "remote.origin.fetch", fetched)
+    git("-C", str(shared), "fetch", "-q", "origin")
+    (shared / "tree").mkdir()
+    worktree = shared / "tree" / "dev"
+    git("-C", str(shared), "worktree", "add", "-q", str(worktree), "-b", "dev")
+    git("-C", str(shared), "pack-refs", "--all")
+    return worktree
+
+
+def test_preparing_the_shared_directory_is_idempotent(cloned: Path) -> None:
+    """Every launch runs it, so the second run has to change nothing at all."""
+    common = repository_layout(cloned).common
+    assert prepared_shared_directory(cloned, owned=("lup",)) == ""
+    packed = common / "packed-refs"
+    settled = {
+        entry.name: (entry.is_symlink(), entry.lstat().st_ino)
+        for entry in [*common.iterdir(), *(common / "lup-refs").iterdir()]
+    }
+    assert prepared_shared_directory(cloned, owned=("lup",)) == ""
+    again = {
+        entry.name: (entry.is_symlink(), entry.lstat().st_ino)
+        for entry in [*common.iterdir(), *(common / "lup-refs").iterdir()]
+    }
+    assert again == settled
+    assert packed.readlink() == Path("lup-refs") / "packed-refs"
+    for name in ("logs", "info", "worktrees", "rr-cache", "lup"):
+        assert (common / name).is_dir()
+    assert not (common / "packed-refs.lock").exists()
+
+
+def test_every_ref_survives_the_move_behind_the_symlink(cloned: Path) -> None:
+    """What `for-each-ref` reads before is what it reads after, byte for byte."""
+    listed = ["-C", str(cloned), "for-each-ref", "--format=%(refname) %(objectname)"]
+    before = git.out(*listed)
+    prepared_shared_directory(cloned)
+    assert git.out(*listed) == before
+
+
+def test_host_git_writes_packed_refs_through_the_symlink(cloned: Path) -> None:
+    """The measured half: every ref rewrite lands beside the target, the link stays."""
+    prepared_shared_directory(cloned)
+    common = repository_layout(cloned).common
+    git("-C", str(cloned), "branch", "-q", "topic")
+    git("-C", str(cloned), "pack-refs", "--all")
+    git("-C", str(cloned), "branch", "-q", "-D", "topic")
+    remote = common.parent / "remote.git"
+    git("-C", str(remote), "branch", "-q", "-D", "gone")
+    git("-C", str(cloned), "fetch", "-q", "--prune", "origin")
+    git("-C", str(cloned), "gc", "-q")
+    packed = common / "packed-refs"
+    assert packed.is_symlink()
+    assert packed.readlink() == Path("lup-refs") / "packed-refs"
+    names = git.out("-C", str(cloned), "for-each-ref", "--format=%(refname)").split()
+    assert "refs/heads/topic" not in names
+    assert "refs/remotes/origin/gone" not in names
+    assert "refs/remotes/origin/main" in names
+
+
+def test_fsck_reads_the_symlinked_packed_refs_as_a_warning(cloned: Path) -> None:
+    """`git fsck` exits 8 over a symlinked `packed-refs` until this is lowered."""
+    prepared_shared_directory(cloned)
+    git("-C", str(cloned), "fsck", "--no-progress")
+
+
+def test_the_config_host_git_writes_is_left_a_plain_file(cloned: Path) -> None:
+    """The layout needs nothing of `config`, so host rewrites stay ordinary.
+
+    `remote add`, `push -u` and a plain `config` set each replace the file by
+    renaming a lockfile over it; under a directory bind that changes a file
+    inside the mount rather than the mount, so nothing here redirects it.
+    """
+    prepared_shared_directory(cloned)
+    common = repository_layout(cloned).common
+    remote = common.parent / "remote.git"
+    git("-C", str(cloned), "remote", "add", "again", str(remote))
+    who = ("-c", "user.name=Test", "-c", "user.email=test@example.invalid")
+    git("-C", str(cloned), *who, "commit", "-q", "--allow-empty", "-m", "second")
+    git("-C", str(cloned), "push", "-q", "-u", "again", "dev")
+    git("-C", str(cloned), "config", "lab.key", "value")
+    config = common / "config"
+    assert not config.is_symlink()
+    assert git.out("-C", str(cloned), "config", "branch.dev.remote").strip() == "again"
+
+
+def test_a_held_packed_refs_lock_defers_the_move_and_says_why(cloned: Path) -> None:
+    """A writer mid-rewrite owns the file; the move waits for the next launch."""
+    common = repository_layout(cloned).common
+    (common / "packed-refs.lock").touch()
+    said = prepared_shared_directory(cloned)
+    assert "packed-refs.lock" in said
+    assert not (common / "packed-refs").is_symlink()
+    assert (common / "packed-refs.lock").exists()
+
+
+def test_a_plain_checkout_is_left_as_it_is(tmp_path: Path) -> None:
+    """Its lease keeps the directory writable, so nothing here is readied."""
+    git("-C", str(tmp_path), "init", "-q", "-b", "main")
+    before = sorted(entry.name for entry in (tmp_path / ".git").iterdir())
+    assert prepared_shared_directory(tmp_path) == ""
+    assert sorted(entry.name for entry in (tmp_path / ".git").iterdir()) == before
+
+
+def test_a_launch_binds_every_directory_the_preparation_made(cloned: Path) -> None:
+    """What the migration creates is what the lease hands back writable."""
+    prepared_shared_directory(cloned, owned=("lup",))
+    common = repository_layout(cloned).common
+    leased = lease_for(cloned)
+    for name in ("logs", "info", "worktrees", "rr-cache", "lup", "lup-refs", "tree"):
+        assert leased.writable_at(common / name)
+    assert leased.writable_at(common / "lup-refs" / "packed-refs")
+    assert not leased.writable_at(common / "packed-refs")
+    assert not leased.writable_at(common / "config")
+
+
+def test_readying_passes_over_a_directory_git_does_not_answer_for(
+    cloned: Path, tmp_path: Path
+) -> None:
+    """Reference material has no shared directory to ready, and is not a failure."""
+    plain = tmp_path / "notes"
+    plain.mkdir()
+    assert prepared_across([cloned, plain], owned=("lup",)) == []
+    assert (repository_layout(cloned).common / "lup").is_dir()
+    assert list(plain.iterdir()) == []

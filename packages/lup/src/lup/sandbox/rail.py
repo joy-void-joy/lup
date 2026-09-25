@@ -45,17 +45,33 @@ each entry read-only would be a third: siblings are mounted so they exist,
 and `gc.worktreePruneExpire` is set to never. The third is not missed,
 because it only answers for a directory that is present anyway.
 
-**`config` and `hooks/` are held read-only inside the writable share.** They
-are the two places under there whose *contents* run on the host. `config`
-names a program through `core.hooksPath`, `alias.*`, `credential.helper` and
-the `merge.*.driver` family, each handing git a command line to execute at
-the operator's next git command in any worktree of this repository; `hooks/`
-holds the script itself, the same reach with no key in between -- a
-`pre-commit` written there runs at the next commit in any worktree, and no
-config key is involved. Both are writes that land in no diff and reach no
-review. So the shared directory is mounted writable and each of them is bound
-read-only back over it, which the engine supports because
-`Sandbox.declared_mounts` emits parent before child.
+**`config` and `hooks/` are held read-only, by a directory mount.** They
+are the two places under the shared directory whose *contents* run on the
+host. `config` names a program through `core.hooksPath`, `alias.*`,
+`credential.helper` and the `merge.*.driver` family, each handing git a
+command line to execute at the operator's next git command in any worktree of
+this repository; `hooks/` holds the script itself, the same reach with no key
+in between -- a `pre-commit` written there runs at the next commit in any
+worktree, and no config key is involved. Both are writes that land in no diff
+and reach no review.
+
+Binding `config` read-only as a *file* over a writable share does not hold.
+Git rewrites `config` by renaming `config.lock` over it, and the kernel
+detaches a mount whose dentry is renamed over from another namespace: after
+the operator's next `git push -u`, `branch -d` or `remote` change on the host,
+every running container found `config` writable and replaceable. Pointing
+`config` at a read-only directory through a symlink does not hold either --
+the symlink sits in the writable share, and replacing it takes one `rm`.
+Both were measured in a user and mount namespace standing in for the
+container. What holds is the shared directory itself bound read-only, with
+each directory under it but `hooks/` and `modules/` bound writable back over
+it: `config` is then a file inside a directory mount, and a host rewrite
+changes the file without touching the mount. The files git replaces by
+rename at the top -- `packed-refs` -- move into a writable directory behind a
+symlink, which :func:`prepared_shared_directory` does once per clone, and a
+plain checkout, whose per-worktree state lives at the top, keeps the file
+binds. The engine applies the nesting because `Sandbox.declared_mounts` emits
+parent before child.
 
 Leaving them writable rests on the claim that a worker unable to write these
 cannot cut a worktree. That was measured, and it is false: `git worktree add`
@@ -328,6 +344,47 @@ def repository_layout(worktree: Path) -> RepositoryLayout:
     )
 
 
+def host_run(
+    worktree: Path, named: tuple[str, ...] = ("config", "hooks")
+) -> list[Path]:
+    """The paths under a repository's shared directory whose contents the host runs.
+
+    What every posture withholds, whatever shape its withholding takes: a
+    container holds them under a read-only directory mount, and an inner
+    sandbox, which has no mounts of its own to nest, denies them by name.
+    Denying the whole shared directory there instead would deny the objects
+    and refs every commit writes.
+    """
+    common = repository_layout(worktree).common
+    return [common / name for name in named]
+
+
+def shared_entries(
+    common: Path, held: tuple[str, ...] = ("hooks", "modules")
+) -> list[Path]:
+    """Every directory under a shared git directory a session writes through.
+
+    Read off the disk rather than listed, because what lives there is each
+    repository's own: git's `objects/`, `refs/` and `logs/`, a `tree/` a
+    project keeps its worktrees in, whatever a tool keeps its state in. What
+    is named is the exception. ``held`` stays under the read-only directory
+    because its contents run on the host: `hooks/` holds the scripts git
+    executes, and each `modules/<name>/` is a submodule's own git directory,
+    `config` and `hooks/` included. A symlink is left where it is, since a
+    bind would follow it to wherever it points.
+
+    A directory that is not there yet is not mounted -- a bind whose source is
+    missing is one the engine refuses the whole container for -- which is why
+    :func:`prepared_shared_directory` makes the ones git creates on first use
+    before a launch reads this.
+    """
+    return sorted(
+        entry
+        for entry in common.iterdir()
+        if entry.is_dir() and not entry.is_symlink() and entry.name not in held
+    )
+
+
 def sibling_worktrees(worktree: Path) -> list[Path]:
     """Every other checkout of this repository, as absolute paths.
 
@@ -342,6 +399,18 @@ def sibling_worktrees(worktree: Path) -> list[Path]:
         if line.startswith("worktree ")
     ]
     return [path for path in found if path != worktree and path.is_dir()]
+
+
+def siblings_of(worktree: Path, layout: RepositoryLayout) -> list[Path]:
+    """The sibling checkouts a lease mounts, less the shared directory itself.
+
+    `git worktree list` reports a bare repository as the main worktree, so
+    in a bare layout the shared directory comes back as its own sibling --
+    and mounted as one, it is writable as a whole and `config` with it,
+    because :func:`resolved` settles a path named both ways toward writable.
+    The shared directory's mode is the lease's to decide, never a sibling's.
+    """
+    return [path for path in sibling_worktrees(worktree) if path != layout.common]
 
 
 def working_trees(root: Path) -> list[Path]:
@@ -364,9 +433,11 @@ def working_trees(root: Path) -> list[Path]:
 def lease_for(worktree: Path) -> Lease:
     """The mounts one session needs over the repository it works in.
 
-    Every checkout of this repository writable, the shared administrative
-    directory with them, and two things held read-only inside: the shared
-    `config` and the shared `hooks/`. Siblings are mounted rather than left
+    Every checkout of this repository writable, and the shared administrative
+    directory read-only with every directory under it but `hooks/` and
+    `modules/` writable -- or, in a plain checkout, the shared directory
+    writable with `config` and `hooks/` held read-only inside it. Either way
+    `config` and `hooks/` are what cannot be written. Siblings are mounted rather than left
     out for the reason the module docstring gives -- absent, they are what
     `git worktree prune` deletes the administrative state of -- and writable
     for the reason it gives beside that.
@@ -381,38 +452,28 @@ def lease_for(worktree: Path) -> Lease:
     honour.
     """
     layout = repository_layout(worktree)
-    writable = [worktree, *sibling_worktrees(worktree)]
-    # Read-only in every layout, linked or plain: these are the two places
-    # under the shared directory whose contents name a program the host will
-    # run. `config` names one through `core.hooksPath`, `alias.*`,
-    # `credential.helper` and `merge.*.driver`; `hooks/` holds the script
-    # itself, with no key in between. Both execute at the operator's next git
-    # command in any worktree, from a write that lands in no diff. Nothing in
-    # the mandated workflow writes either -- cutting a worktree, committing,
-    # pushing, base detection and removal were each measured against a
-    # read-only bind of both. What is left is one once-per-clone act each,
-    # made on the host: the `merge.lup-ownership` registration and arming the
-    # guards. Each has a pre-flight refusing by name where it is outstanding.
-    read_only: list[Path] = [layout.common / "config", layout.common / "hooks"]
+    writable = [worktree, *siblings_of(worktree, layout)]
     if layout.linked():
-        # The shared directory is mounted writable as a whole, with no
-        # administrative entry punched back over it: every sibling's stays
-        # present, which is the guard that matters, and `worktree prune`
-        # removes an entry for a directory that has gone rather than one it
-        # can see. Holding each entry read-only bought the second half of
-        # that and cost the ability to remove a worktree at all -- `git
-        # worktree remove` unlinks the entry, so a read-only one refuses the
-        # removal with an errno about a filesystem.
-        #
-        # `config`, punched read-only over it above, is the one exception,
-        # and `Sandbox.declared_mounts` is what holds that hole up: it emits
-        # mounts parent before child, so a read-only entry inside a writable
-        # base is applied after it rather than shadowed by it.
-        writable += [
-            layout.common,
-            layout.private,
-        ]
+        # The shared directory read-only as a directory, and each directory
+        # under it bound writable back over it but `hooks/` and `modules/`.
+        # `config` and `hooks/` are the two places whose contents name a
+        # program the host runs, and a directory mount is the one shape a
+        # host-side rewrite cannot shed: git replaces `config` by renaming a
+        # lockfile over it, and the kernel detaches a *file* mount whose
+        # dentry is renamed over in another namespace -- while a rename inside
+        # a mounted directory changes a file under the mount, not the mount.
+        # Every sibling's administrative entry stays present and writable
+        # inside the writable `worktrees/`, which is the guard `worktree
+        # prune` needs and what lets `git worktree remove` unlink one.
+        read_only = [layout.common]
+        writable += [*shared_entries(layout.common), layout.private]
     else:
+        # A plain checkout keeps its per-worktree state -- `HEAD`, the index,
+        # `ORIG_HEAD` -- at the top of the shared directory, so the directory
+        # stays writable and `config` and `hooks/` are bound read-only back
+        # over it. The file bind is detached by the next host-side rewrite of
+        # `config`, which the read-only-bind requirement reports.
+        read_only = [layout.common / "config", layout.common / "hooks"]
         writable.append(layout.common)
     return resolved(same_path(writable), same_path(read_only))
 
@@ -427,55 +488,46 @@ def worker_lease(worktree: Path) -> Lease:
     entirely. Nothing about the shape differs; only when it is computed, and
     for whom.
 
-    Three nested modes rather than two flat ones: this worktree writable,
-    every sibling read-only, and the shared administrative directory writable
-    with each sibling's own entry read-only inside it, alongside the shared
-    `config` and `hooks/`. The directory is writable so a new worktree's entry
-    can be created beside the others -- without which no worker can cut a
-    worktree -- and those two are not carried along with it because a worker
-    needs the directory to admit a new child, never that file rewritten or
-    that hook armed. A human-owned path is not held either, for the reason
+    Nested modes rather than two flat ones: this worktree writable, every
+    sibling read-only, and the shared administrative directory read-only
+    with its directories writable back over it as :func:`lease_for` binds
+    them -- and inside the writable `worktrees/`, each sibling's own entry
+    read-only again. `worktrees/` is writable so a new worktree's entry can
+    be created beside the others -- without which no worker can cut a
+    worktree -- and `config` and `hooks/` are not carried along with it
+    because a worker needs the directory to admit a new child, never that
+    file rewritten or that hook armed. A human-owned path is not held either, for the reason
     :func:`lease_for` gives: the policy asks about a write to one, and a
     mount cannot.
     """
     layout = repository_layout(worktree)
     writable = [worktree]
-    # Read-only in every layout, for the reason :func:`lease_for` records at
-    # the same line: `config` names programs the host runs and `hooks/` holds
-    # them, and no step of the mandated workflow writes either.
-    read_only = [
-        layout.common / "config",
-        layout.common / "hooks",
-        *sibling_worktrees(worktree),
-    ]
+    read_only = siblings_of(worktree, layout)
     if layout.linked():
-        # The shared directory is mounted writable as a whole, with each
-        # sibling's administrative entry punched read-only back over it -- so
-        # every one stays present and unwritable, which is what keeps
-        # `worktree prune` from removing it. Each entry rather than the
-        # `worktrees/` directory holding them, because a read-only directory
+        # The shared directory read-only with its directories bound writable
+        # back over it, for the reason :func:`lease_for` gives -- and inside
+        # the writable `worktrees/`, each sibling's administrative entry
+        # punched read-only again, so every one stays present and unwritable,
+        # which is what keeps `worktree prune` from removing it. Each entry
+        # rather than `worktrees/` itself, because a read-only directory
         # refuses two different acts and only one of them was the subject:
         # rewriting an entry that is already there endangers a sibling, and
-        # creating a new one beside them endangers nobody. Held read-only,
-        # the second goes with the first and no worker in a container can
-        # cut a worktree at all. That nesting is the whole arrangement, and
-        # `Sandbox.declared_mounts` is what holds it up: it emits mounts
-        # parent before child, so a read-only hole is applied after the
-        # writable base it sits in instead of being shadowed by it.
-        #
-        # `config` above is a hole of exactly that kind, and the one that
-        # matters most: the rest of these entries protect a sibling's
-        # bookkeeping, while that one protects the host's shell.
+        # creating a new one beside them endangers nobody. That nesting is
+        # the whole arrangement, and `Sandbox.declared_mounts` is what holds
+        # it up: it emits mounts parent before child, so a read-only hole is
+        # applied after the writable base it sits in instead of being
+        # shadowed by it.
         read_only += [
-            entry
-            for entry in sorted((layout.common / "worktrees").iterdir())
-            if entry != layout.private
-        ]
-        writable += [
             layout.common,
-            layout.private,
+            *[
+                entry
+                for entry in sorted((layout.common / "worktrees").iterdir())
+                if entry != layout.private
+            ],
         ]
+        writable += [*shared_entries(layout.common), layout.private]
     else:
+        read_only += [layout.common / "config", layout.common / "hooks"]
         writable.append(layout.common)
     return resolved(same_path(writable), same_path(read_only))
 
@@ -561,6 +613,110 @@ def fleet_lease(
             ],
         ]
     )
+
+
+def relocated(path: Path, target: Path) -> None:
+    """Put a file git replaces by rename behind a symlink into a writable directory.
+
+    Git writes `packed-refs` the way it writes `config`: a lockfile beside
+    the file, renamed over it. Under a read-only shared directory that
+    lockfile cannot be made, and every ref deletion takes it -- `branch -D`,
+    `fetch --prune`, `pack-refs` -- so the file moves to ``target``, relative
+    to its own directory, and a symlink takes its place. Git resolves the
+    symlink before it takes the lock, so the lock and the rename both land
+    beside the target, on the host and inside alike; that was measured with
+    `pack-refs`, `branch -D` of a packed ref, `fetch --prune`, `gc`, `repack`
+    and `maintenance`, none of which replaced the symlink.
+
+    Taken under git's own lock, the one every writer of this file takes, so
+    no writer is between reading and replacing it; one that holds it now is a
+    `FileExistsError` and the move waits for the next launch. The file is
+    hard-linked into place and the symlink renamed over the original, so a
+    reader sees the old file or the symlink to the same bytes, never neither.
+    A file that does not exist yet leaves a symlink to where it will be,
+    which git reads as holding nothing and writes through on first use.
+    """
+    if path.is_symlink() and path.readlink() == target:
+        return
+    lock = path.with_name(f"{path.name}.lock")
+    lock.touch(exist_ok=False)
+    try:
+        if path.is_symlink():
+            raise FileExistsError(f"{path} points at {path.readlink()}, not {target}")
+        placed = path.parent / target
+        if path.exists():
+            staged = placed.with_name(f"{placed.name}.staged")
+            staged.unlink(missing_ok=True)
+            staged.hardlink_to(path)
+            staged.replace(placed)
+        pointer = path.with_name(f"{path.name}.link")
+        pointer.unlink(missing_ok=True)
+        pointer.symlink_to(target)
+        pointer.replace(path)
+    finally:
+        lock.unlink()
+
+
+def prepared_shared_directory(
+    worktree: Path,
+    owned: tuple[str, ...] = (),
+    made: tuple[str, ...] = ("logs", "info", "worktrees", "rr-cache"),
+    home: str = "lup-refs",
+    replaced: tuple[str, ...] = ("packed-refs",),
+) -> str:
+    """Ready a linked repository's shared directory to be bound read-only.
+
+    Three host-side acts, each a no-op once made, which is what lets every
+    launch run them. The directories git creates on first use are created
+    now, because :func:`shared_entries` binds only what exists and a session
+    finding `logs/` missing cannot make it under a read-only parent -- the
+    first commit in a fresh bare clone failed exactly that way. ``owned``
+    carries a caller's own additions beside git's. The files git replaces by
+    rename move into ``home`` behind a symlink, through :func:`relocated`.
+    And `fsck.badRefFiletype` is lowered to a warning, because `git fsck`
+    and `git refs verify` report a symlinked `packed-refs` as an error --
+    measured, exit 8 and 255 -- and nothing else git does objects to it.
+
+    Nothing is written to `config` when that setting already stands: every
+    rewrite of `config` detaches the file bind a running plain-checkout
+    session holds over it.
+
+    A plain checkout is left alone -- its lease keeps the directory writable.
+    Returns why the directory could not be readied, or an empty string, and
+    a launch goes ahead either way: a directory left unprepared costs its
+    sessions ref deletion or a first-use directory, not the boundary.
+    """
+    layout = repository_layout(worktree)
+    if not layout.linked():
+        return ""
+    common = layout.common
+    try:
+        for name in (*made, *owned, home):
+            (common / name).mkdir(exist_ok=True)
+        for name in replaced:
+            relocated(common / name, Path(home) / name)
+        asked = ["-C", str(worktree), "config", "fsck.badRefFiletype"]
+        if git.out(*asked, _ok_code=[0, 1]).strip() != "warn":
+            git(*asked, "warn")
+    except (OSError, sh.ErrorReturnCode) as error:
+        return f"{common}: {error}"
+    return ""
+
+
+def prepared_across(worktrees: list[Path], owned: tuple[str, ...] = ()) -> list[str]:
+    """Ready every repository given for its read-only bind, and say which would not.
+
+    Once per repository a launch leases writable, for the reason
+    :func:`hold_pruning_across` gives: a lease spans repositories nobody in
+    this session owns, and each binds its own shared directory. A path git
+    does not answer for has no shared directory and is passed over.
+    """
+    said = [
+        prepared_shared_directory(worktree, owned)
+        for worktree in worktrees
+        if in_repository(worktree)
+    ]
+    return [reason for reason in said if reason]
 
 
 def hold_worktree_pruning(worktree: Path) -> bool:
