@@ -78,7 +78,28 @@ DEVELOPMENT_WORKFLOW = models.GuidanceSection(
     id="development-workflow",
     chapter="workflow",
     parts=[
-        models.Passage(module=__name__, name="development-workflow"),
+        models.Passage(
+            module=__name__,
+            name="development-workflow",
+            values={
+                # Cutting one is the git-workflow module's command, and the
+                # page carrying the rest is its page: the rule holds without.
+                "worktree_step": models.WhereShipped(
+                    parts=[
+                        models.Passage(
+                            module=__name__,
+                            name="worktree-step",
+                            values={
+                                "create": models.CommandInvocation(
+                                    path=["git", "worktree", "create"],
+                                    arguments="feat-name",
+                                )
+                            },
+                        )
+                    ]
+                ),
+            },
+        ),
     ],
 )
 

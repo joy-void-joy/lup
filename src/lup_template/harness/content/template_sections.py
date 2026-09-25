@@ -16,7 +16,17 @@ CODEINTEL_TOOL_ROSTER: list[models.PromptPart] = [
 ]
 
 SETUP_THROUGH_NAMING: list[models.PromptPart] = [
-    models.Passage(module=__name__),
+    models.Passage(
+        module=__name__,
+        values={
+            # The first thing a target does is start tracking its upstream,
+            # which is the upstream module's command tree to run.
+            "first_setup": models.WhereShipped(
+                parts=[models.Passage(module=__name__, name="first-setup")],
+                commands=["sync"],
+            )
+        },
+    ),
 ]
 
 INNER_AGENT_BULLET: list[models.PromptPart] = [
@@ -28,21 +38,44 @@ PRINCIPLES_THROUGH_PATTERN_MENU: list[models.PromptPart] = [
         module=__name__,
         name="important-context",
         values={
-            # Each a pointer to a skill another module ships, beside a command
-            # or a practice that holds without it.
+            # Each a pointer into another module — its skill, its command tree,
+            # or both — beside a practice that holds without it.
             "bump_alternative": models.WhereShipped(
                 parts=[
-                    models.TextPart(text=" (or `"),
+                    models.TextPart(text=" — bump on behavior changes with `"),
+                    models.CommandInvocation(path=["version", "bump"]),
+                    models.TextPart(text="` (or `"),
                     models.SkillInvocation(plugin="lup", skill="bump"),
                     models.TextPart(text="`)"),
                 ]
             ),
             "bump_or": models.WhereShipped(
                 parts=[
-                    models.TextPart(text=" or `"),
+                    models.TextPart(
+                        text="\n- Bump on behavior changes (prompts, tools, "
+                        "subagents) with `"
+                    ),
+                    models.CommandInvocation(
+                        path=["version", "bump"], arguments="<level>"
+                    ),
+                    models.TextPart(text="` or `"),
                     models.SkillInvocation(plugin="lup", skill="bump"),
                     models.TextPart(text="`"),
                 ]
+            ),
+            "setup_line": models.WhereShipped(
+                parts=[
+                    models.TextPart(text="\n"),
+                    models.CommandInvocation(
+                        path=["setup"],
+                        arguments="               # keys, integrations, env vars "
+                        "(`dashboard` for the web UI)",
+                    ),
+                ]
+            ),
+            "feedback_scripts": models.WhereShipped(
+                parts=[models.Passage(module=__name__, name="feedback-scripts")],
+                commands=["feedback", "trace"],
             ),
             "debug_step": models.WhereShipped(
                 parts=[
@@ -59,46 +92,66 @@ PRINCIPLES_THROUGH_PATTERN_MENU: list[models.PromptPart] = [
     ),
 ]
 
-PATTERN_MENU_TAIL_THROUGH_WORKTREE_STEP: list[models.PromptPart] = [
-    models.Passage(
-        module=__name__,
-        name="plan-at-agent-speed",
-        values={"init_skill": models.SkillInvocation(plugin="lup", skill="init")},
-    ),
+PATTERN_MENU_TAIL_THROUGH_WORKFLOW_HEADING: list[models.PromptPart] = [
+    models.Passage(module=__name__, name="plan-at-agent-speed"),
 ]
 
-WORKFLOW_THROUGH_COMMIT_FORMAT: list[models.PromptPart] = [
-    models.Passage(
-        module=__name__,
-        name="worktrees",
-        values={
-            "relocate": models.RelocateSession(path="the absolute path step 1 prints"),
-            # How a branch lands, where the plugin ships the skills that land
-            # one: the steps before it hold for any workflow.
-            "landing_steps": models.WhereShipped(
-                parts=[
-                    models.Passage(
-                        module=__name__,
-                        name="landing-steps",
-                        values={
-                            "rebase_skill": models.SkillInvocation(
-                                plugin="lup", skill="rebase"
-                            ),
-                            "close_skill": models.SkillInvocation(
-                                plugin="lup", skill="close"
-                            ),
-                        },
-                    )
-                ]
+
+def git_workflow(regeneration_pointer: models.PromptPart) -> models.WhereShipped:
+    """The git loop, around one flavor's word on the plugin a worktree runs.
+
+    The loop is the git-workflow module's subject — cutting a worktree, landing
+    a branch, resolving a conflict, writing a commit — so the subsection is
+    held where that module's command tree is served, and a project whose
+    history is somebody else's to write reads its section without it.
+    """
+    return models.WhereShipped(
+        parts=[
+            models.Passage(
+                module=__name__,
+                name="git-workflow",
+                values={
+                    "init_skill": models.SkillInvocation(plugin="lup", skill="init")
+                },
             ),
-        },
-    ),
-    *conventions.MERGE_CONFLICT_RESOLUTION.parts,
-    *conventions.COMMIT_GUIDELINES.parts,
-    models.Passage(module=__name__, name="commit-types"),
-    *conventions.COMMIT_TYPES.parts,
-    models.Passage(module=__name__, name="commit-examples"),
-]
+            regeneration_pointer,
+            models.Passage(
+                module=__name__,
+                name="worktrees",
+                values={
+                    "relocate": models.RelocateSession(
+                        path="the absolute path step 1 prints"
+                    ),
+                    # How a branch lands, where the plugin ships the skills
+                    # that land one: the steps before it hold for any workflow.
+                    "landing_steps": models.WhereShipped(
+                        parts=[
+                            models.Passage(
+                                module=__name__,
+                                name="landing-steps",
+                                values={
+                                    "rebase_skill": models.SkillInvocation(
+                                        plugin="lup", skill="rebase"
+                                    ),
+                                    "close_skill": models.SkillInvocation(
+                                        plugin="lup", skill="close"
+                                    ),
+                                },
+                            )
+                        ]
+                    ),
+                },
+            ),
+            *conventions.MERGE_CONFLICT_RESOLUTION.parts,
+            *conventions.COMMIT_GUIDELINES.parts,
+            models.Passage(module=__name__, name="commit-types"),
+            *conventions.COMMIT_TYPES.parts,
+            models.Passage(module=__name__, name="commit-examples"),
+        ],
+        # Step 1 cuts the worktree in a code block of its own words.
+        commands=["git"],
+    )
+
 
 DIRECTORY_STRUCTURE_THROUGH_TOOLS: list[models.PromptPart] = [
     models.Passage(
@@ -193,5 +246,17 @@ def permission_hooks(policy_scope: str) -> list[models.PromptPart]:
 SELF_IMPROVEMENT_THROUGH_END: list[models.PromptPart] = [
     models.Passage(module=__name__, name="self-improvement-loop"),
     *conventions.FAILURE_ANALYSIS.parts,
-    models.Passage(module=__name__, name="diagnosing-failures"),
+    models.Passage(
+        module=__name__,
+        name="diagnosing-failures",
+        values={
+            "collect_command": models.WhereShipped(
+                parts=[
+                    models.TextPart(text=": `"),
+                    models.CommandInvocation(path=["feedback", "collect"]),
+                    models.TextPart(text="`"),
+                ]
+            )
+        },
+    ),
 ]

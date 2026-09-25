@@ -1,9 +1,4 @@
-<!-- section: First Setup -->
-## First Setup
-
-**[IMPORTANT: Run `uv run lup-devtools sync mark-synced lup` to initialize upstream sync tracking, then delete this section.]**
-
-<!-- section: Project Overview -->
+{{ first_setup }}<!-- section: Project Overview -->
 ## Project Overview
 
 **[Describe your agent and what it does]**
@@ -18,6 +13,29 @@ approval effects fail closed and are recorded as explicit capability gaps.
 Every supported runtime must provide equivalent user-visible behavior, validation, diagnostics, tests, and documentation for each capability. Runtime-specific implementations are valid only when their semantic differences are explicit and evidence-backed.
 
 ### Naming Convention
+
+
+<!-- passage: first-setup -->
+<!-- section: First Setup -->
+## First Setup
+
+**[IMPORTANT: Run `uv run lup-devtools sync mark-synced lup` to initialize upstream sync tracking, then delete this section.]**
+
+
+<!-- passage: feedback-scripts -->
+## Feedback Loop Scripts
+
+```bash
+# Collect feedback from sessions
+uv run lup-devtools feedback collect --all-time
+
+# Status: version, data, analysis state, aggregate stats
+uv run lup-devtools feedback status
+
+# Analyze traces
+uv run lup-devtools trace list
+uv run lup-devtools trace show <session_id>
+```
 
 
 <!-- passage: agent-vocabulary -->
@@ -110,7 +128,7 @@ added — and `agent/core.py` for how a session is composed.
 
 **Versioning:**
 
-- **pyproject.toml `[tool.lup] agent_version`**: The agent version — bump on behavior changes with `uv run lup-devtools version bump`{{ bump_alternative }}
+- **pyproject.toml `[tool.lup] agent_version`**: The agent version{{ bump_alternative }}
 
 **Environment:**
 
@@ -122,8 +140,7 @@ added — and `agent/core.py` for how a session is composed.
 uv sync                                  # install; `uv add <pkg>` to add, never edit pyproject.toml
 uv run lup-devtools dev check            # the pre-flight bar: ruff, pyright, tests
 uv run lup run "your task here"          # one session; --session-id names it
-uv run lup loop "task1" "task2"          # several, auto-committing each
-uv run lup-devtools setup                # keys, integrations, env vars (`dashboard` for the web UI)
+uv run lup loop "task1" "task2"          # several, auto-committing each{{ setup_line }}
 ```
 
 `AGENT_SDK` and `AGENT_MODEL` pick the runtime and the model a session opens
@@ -161,21 +178,7 @@ and is marked `@pytest.mark.integration`.
 
 **Do not hypothesize -- trace.** When debugging errors, find the actual logs and read the exact exception. Do not list "likely causes" or suggest the user check things. Open the log files yourself, grep for the error, read the traceback, and report what actually happened. If the logs don't contain enough information, say exactly what logging to add and where, so the error is captured next time.{{ debug_step }}
 
-## Feedback Loop Scripts
-
-```bash
-# Collect feedback from sessions
-uv run lup-devtools feedback collect --all-time
-
-# Status: version, data, analysis state, aggregate stats
-uv run lup-devtools feedback status
-
-# Analyze traces
-uv run lup-devtools trace list
-uv run lup-devtools trace show <session_id>
-```
-
----
+{{ feedback_scripts }}---
 
 # Customization Guide
 
@@ -231,8 +234,7 @@ The agent version lives in `pyproject.toml` under `[tool.lup]`:
 agent_version = "0.1.0"
 ```
 
-- Set the initial version during init
-- Bump on behavior changes (prompts, tools, subagents) with `uv run lup-devtools version bump <level>`{{ bump_or }}
+- Set the initial version during init{{ bump_or }}
 
 ### Step 7: Enable Persistent Agent Mode (Optional)
 
@@ -286,6 +288,8 @@ You are an AI agent. Every instinct you have about how long software takes — s
 <!-- section: Development Workflow -->
 # Development Workflow
 
+
+<!-- passage: git-workflow -->
 ## Git Workflow
 
 This project uses **git worktrees** (not regular branches) to develop multiple features in parallel.
@@ -546,7 +550,7 @@ A prompt rule is a patch that coexists with the failure. A structural change mak
 
 ### Running the Feedback Loop
 
-1. **Collect feedback**: `uv run lup-devtools feedback collect`
+1. **Collect feedback**{{ collect_command }}
 2. **Read traces deeply**: Don't skip to aggregates. Read 5-10 sessions in detail.
 3. **Extract patterns**: Tool failures, capability requests, reasoning quality
 4. **Implement changes**: Fix tools -> Build requested capabilities -> Simplify prompts

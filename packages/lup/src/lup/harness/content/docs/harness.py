@@ -75,6 +75,16 @@ def document(
                     # the same reason every other derived piece is one.
                     "statement_tag": models.code("{%"),
                     "comment_tag": models.code("{#"),
+                    # The setup wizard's tree is a second door onto the same
+                    # roster, named where a project serves it.
+                    "setup_profile": models.WhereShipped(
+                        parts=[
+                            models.TextPart(
+                                text=" (and `setup profile`, the same commands)"
+                            )
+                        ],
+                        commands=["setup"],
+                    ),
                 },
             ),
         ],

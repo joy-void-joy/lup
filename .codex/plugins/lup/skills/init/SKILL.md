@@ -283,7 +283,7 @@ Which runtimes the project carries is not a choice made here: every tree
 arrives with the clone, and generation writes each one it finds. Dropping a
 runtime is a later removal somebody decides on its own terms.
 
-#### 3. Initialize upstream sync
+#### 3. Initialize upstream sync (only if the `upstream` module was taken in Phase 1.5)
 
 Baseline the upstream checkpoint at *the recorded commit*. Register the
 selected branch, fetch it, and record the exact commit already consumed:
@@ -306,6 +306,7 @@ uv run lup-devtools sync mark-synced lup --at <commit>
 ```
 
 That is the case an adoption mid-stream is always in — the code is already here, and what is missing is only the record of how far it reached. Without the commit, marking synced claims every commit that landed afterward as reviewed, which is the one thing the checkpoint exists to prevent.
+
 That checkout is one you provide: clone the library beside the project, then
 `git switch --detach <commit>` it to the recorded commit. Not this project's
 own checkout — it stands at that commit too, and naming it makes the review
@@ -437,7 +438,7 @@ If this domain has no consequential, judgment-bearing output, `reflection` is in
 
 The reflection gate (`lup.orchestration.reflection`) is domain-neutral and doesn't need modification. Only the tool and its input model are domain-specific.
 
-### 7. `devtools/feedback/state.py`
+### 7. `devtools/feedback/state.py` (only if the `feedback-loop` module was taken in Phase 1.5)
 
 The feedback collection module (exposed via `uv run lup-devtools feedback collect`). Customize `load_outcomes()` and `compute_metrics()` for the domain's ground truth type.
 
@@ -462,7 +463,7 @@ The agent discovers tools through their descriptions -- a terse description mean
 
 See `src/<project>/agent/tools/example.py` for the pattern.
 
-### 10. Setup Wizard (`src/<project>/devtools/setup.py`)
+### 10. Setup Wizard (`src/<project>/devtools/setup.py`, only if the `setup` module was taken in Phase 1.5)
 
 Customize the interactive setup wizard for the domain's integrations:
 
@@ -477,13 +478,19 @@ The framework (env helpers, status table, mask, clipboard, browser open, wizard 
 The registry is a list of services, and which ones this domain has is the
 domain's answer rather than a guess from the code — so Ask the user directly, offering concrete options, and wait for the answer: which external services the agent uses, and for each whether it authenticates by OAuth flow, API key, or a credentials file before rewriting `INTEGRATIONS`.
 
-### 11. Update `feedback-loop.md`
+### 11. The feedback loop skill (only if the `feedback-loop` module was taken in Phase 1.5)
 
-Customize the feedback loop command for the domain's specific:
+Customize the feedback loop skill for the domain's specific:
 
 - Ground truth type
 - Metrics to analyze
 - Trace inspection approach
+
+The skill is the library's, so the domain's version is a rewrite under the same
+id — a `feedback-loop` skill in that module's `Adoption` in
+`src/<project>/harness/content/catalog.py`, the way the template rewrites
+`review` there — never an edit to a tree's rendered copy, which the next
+generation undoes.
 
 ## Phase 4: Verify Setup
 

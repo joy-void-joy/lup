@@ -33,11 +33,7 @@ If you can't find the trace, use `uv run lup-devtools trace list` to show availa
 
 Before analyzing the trace, understand what the agent had available:
 
-```bash
-uv run lup-devtools agent inspect --json
-```
-
-This shows tools, subagents, model, and prompt info. For deeper inspection, read:
+{{ inspect_step }}For deeper inspection, read:
 
 - **System prompt**: {{ agent_prompts_py }}
 - **Tool groups**: {{ agent_toolsets_py }} — the registry, and so the list of what the agent actually had

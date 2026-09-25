@@ -230,10 +230,11 @@ Which runtimes the project carries is not a choice made here: every tree
 arrives with the clone, and generation writes each one it finds. Dropping a
 runtime is a later removal somebody decides on its own terms.
 
-#### 3. Initialize upstream sync
+#### 3. Initialize upstream sync (only if the `upstream` module was taken in Phase 1.5)
 
 
-<!-- passage: verify -->
+<!-- passage: library-checkout -->
+
 That checkout is one you provide: clone the library beside the project, then
 `git switch --detach <commit>` it to the recorded commit. Not this project's
 own checkout — it stands at that commit too, and naming it makes the review
@@ -246,6 +247,13 @@ name is the one to update before a review. The branch may also have advanced
 since this project was cloned, and a checkpoint taken from its tip marks the
 commits in between as already reviewed when the project does not carry them.
 
+
+<!-- passage: no-upstream -->
+This project declined the `upstream` module, so it tracks no upstream and has
+no checkpoint to baseline.
+
+
+<!-- passage: verify -->
 #### 4. Verify
 
 ```bash
@@ -365,9 +373,9 @@ If this domain has no consequential, judgment-bearing output, `reflection` is in
 
 The reflection gate (`lup.orchestration.reflection`) is domain-neutral and doesn't need modification. Only the tool and its input model are domain-specific.
 
-### 7. `devtools/feedback/state.py`
+### 7. `devtools/feedback/state.py` (only if the `feedback-loop` module was taken in Phase 1.5)
 
-The feedback collection module (exposed via `uv run lup-devtools feedback collect`). Customize `load_outcomes()` and `compute_metrics()` for the domain's ground truth type.
+The feedback collection module{{ collect_command }}. Customize `load_outcomes()` and `compute_metrics()` for the domain's ground truth type.
 
 ### 8. Update the guidance
 
@@ -390,28 +398,33 @@ The agent discovers tools through their descriptions -- a terse description mean
 
 See `src/<project>/agent/tools/example.py` for the pattern.
 
-### 10. Setup Wizard (`src/<project>/devtools/setup.py`)
+### 10. Setup Wizard (`src/<project>/devtools/setup.py`, only if the `setup` module was taken in Phase 1.5)
 
 Customize the interactive setup wizard for the domain's integrations:
 
 - Replace the template integrations (Slack, Google, Notion, Example API) with the domain's actual services
 - Update the `INTEGRATIONS` list — each entry is an `Integration(name, env_keys, setup_func, status_func)`
 - Add corresponding `@app.command()` subcommands for individual integration setup
-- Update env var names in `config.py` to match what the setup wizard writes to `.env.local`
-- Verify `lup-devtools setup dashboard` exposes the same registry: declarative fields become browser forms, while bespoke flows link back to their CLI command
+- Update env var names in `config.py` to match what the setup wizard writes to `.env.local`{{ dashboard_check }}
 
 The framework (env helpers, status table, mask, clipboard, browser open, wizard flow) is reusable — only the integration functions and registry need customization.
 
 The registry is a list of services, and which ones this domain has is the
 domain's answer rather than a guess from the code — so {{ ask_5 }} before rewriting `INTEGRATIONS`.
 
-### 11. Update `feedback-loop.md`
+### 11. The feedback loop skill (only if the `feedback-loop` module was taken in Phase 1.5)
 
-Customize the feedback loop command for the domain's specific:
+Customize the feedback loop skill for the domain's specific:
 
 - Ground truth type
 - Metrics to analyze
 - Trace inspection approach
+
+The skill is the library's, so the domain's version is a rewrite under the same
+id — a `feedback-loop` skill in that module's `Adoption` in
+`src/<project>/harness/content/catalog.py`, the way the template rewrites
+`review` there — never an edit to a tree's rendered copy, which the next
+generation undoes.
 
 ## Phase 4: Verify Setup
 

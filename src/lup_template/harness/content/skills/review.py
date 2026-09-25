@@ -40,6 +40,21 @@ def skill(layout: ApplicationLayout) -> models.Skill:
                     module=__name__,
                     values={
                         "arguments": models.ArgumentsRef(),
+                        # The agent's own report of itself, where the
+                        # project serving its command tree is taken; the
+                        # sources below hold either way.
+                        "inspect_step": models.WhereShipped(
+                            parts=[
+                                models.TextPart(text="```bash\n"),
+                                models.CommandInvocation(
+                                    path=["agent", "inspect"], arguments="--json"
+                                ),
+                                models.TextPart(
+                                    text="\n```\n\nThis shows tools, subagents, "
+                                    "model, and prompt info. "
+                                ),
+                            ]
+                        ),
                         "agent_prompts_py": models.code(
                             layout.path("agent", "prompts.py")
                         ),

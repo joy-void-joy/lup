@@ -6,12 +6,12 @@ from lup_template.harness.content.template_sections import (
     CODEINTEL_TOOL_ROSTER,
     DIRECTORY_STRUCTURE_THROUGH_TOOLS,
     INNER_AGENT_BULLET,
-    PATTERN_MENU_TAIL_THROUGH_WORKTREE_STEP,
+    PATTERN_MENU_TAIL_THROUGH_WORKFLOW_HEADING,
     PRINCIPLES_THROUGH_PATTERN_MENU,
     SELF_IMPROVEMENT_THROUGH_END,
     SETUP_THROUGH_NAMING,
     TOOLING_INTRO,
-    WORKFLOW_THROUGH_COMMIT_FORMAT,
+    git_workflow,
     permission_hooks,
 )
 
@@ -31,9 +31,8 @@ DOCUMENT = models.PromptDocument(
         models.Passage(module=__name__, name="naming"),
         *PRINCIPLES_THROUGH_PATTERN_MENU,
         models.Passage(module=__name__, name="orchestration-pointer"),
-        *PATTERN_MENU_TAIL_THROUGH_WORKTREE_STEP,
-        models.Passage(module=__name__, name="regeneration-pointer"),
-        *WORKFLOW_THROUGH_COMMIT_FORMAT,
+        *PATTERN_MENU_TAIL_THROUGH_WORKFLOW_HEADING,
+        git_workflow(models.Passage(module=__name__, name="regeneration-pointer")),
         models.Passage(module=__name__, name="editing-style"),
         *DIRECTORY_STRUCTURE_THROUGH_TOOLS,
         models.Passage(module=__name__, name="diagnostics"),
@@ -47,6 +46,21 @@ DOCUMENT = models.PromptDocument(
                 "skill_pattern": models.SkillPattern(plugin="lup", placeholder="*"),
                 "init_skill": models.SkillInvocation(plugin="lup", skill="init"),
                 "install_skill": models.SkillInvocation(plugin="lup", skill="install"),
+                # The launcher's own tree curates profiles in every composition;
+                # the setup wizard's is a second door where it is served.
+                "profile_commands": models.WhereShipped(
+                    parts=[
+                        models.TextPart(
+                            text=" either\n`lup-devtools harness profile` or "
+                            "`lup-devtools setup profile` — the same\nroster "
+                            "through both"
+                        )
+                    ],
+                    commands=["setup"],
+                    otherwise=[
+                        models.TextPart(text="\n`lup-devtools harness profile`")
+                    ],
+                ),
             },
         ),
         *permission_hooks(CLAUDE_POLICY_SCOPE),

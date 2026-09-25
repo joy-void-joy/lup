@@ -125,32 +125,45 @@ display around the readers it names.
 """Everything between the diagram and the CLI roster, which is composed."""
 
 CLOSING_PARTS: list[models.PromptPart] = [
-    models.Passage(
-        module=__name__,
-        name="template",
-        values={
-            # The registry is described whether or not upstream is taken; the
-            # two skills built on it are named only where they ship.
-            "built_on_it": models.WhereShipped(
-                parts=[
-                    models.TextPart(text=" The "),
-                    models.SkillInvocation(plugin="lup", skill="update"),
-                    models.TextPart(text=" and "),
-                    models.SkillInvocation(plugin="lup", skill="import"),
-                    models.TextPart(text=" skills are built on it."),
-                ]
-            ),
-            "generalized_back": models.WhereShipped(
-                parts=[
-                    models.TextPart(text=", so "),
-                    models.SkillInvocation(plugin="lup", skill="update"),
-                    models.TextPart(
-                        text=" can generalize emerged patterns back into the template"
-                    ),
-                ]
-            ),
-        },
+    models.Passage(module=__name__, name="template"),
+    # Each section below is one command group's surface, described where the
+    # CLI serves it: the fenced blocks run the group in words of their own.
+    models.WhereShipped(
+        parts=[models.Passage(module=__name__, name="setup-dashboard")],
+        commands=["setup"],
     ),
+    models.WhereShipped(
+        parts=[
+            models.Passage(
+                module=__name__,
+                name="sync-registry",
+                values={
+                    # The two skills built on the registry are named only where
+                    # they ship, which a project can decide apart from the tree.
+                    "built_on_it": models.WhereShipped(
+                        parts=[
+                            models.TextPart(text=" The "),
+                            models.SkillInvocation(plugin="lup", skill="update"),
+                            models.TextPart(text=" and "),
+                            models.SkillInvocation(plugin="lup", skill="import"),
+                            models.TextPart(text=" skills are built on it."),
+                        ]
+                    ),
+                    "generalized_back": models.WhereShipped(
+                        parts=[
+                            models.TextPart(text=", so "),
+                            models.SkillInvocation(plugin="lup", skill="update"),
+                            models.TextPart(
+                                text=" can generalize emerged patterns back into the template"
+                            ),
+                        ]
+                    ),
+                },
+            )
+        ],
+        commands=["sync"],
+    ),
+    models.Passage(module=__name__, name="template-halves"),
 ]
 """Everything after the diagram, from the per-package guide onward."""
 

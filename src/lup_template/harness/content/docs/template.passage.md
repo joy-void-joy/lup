@@ -31,6 +31,8 @@ takes. What the plugin ships, what `docs/` publishes, what the CLI serves and
 what a session is offered are all derived from that one answer.
 [harness.md](harness.md) is the guide; this is only where the files are.
 
+
+<!-- passage: setup-dashboard -->
 ### The setup dashboard
 
 `uv run lup-devtools setup dashboard` serves a local browser interface at
@@ -53,6 +55,8 @@ local bind alone leaves that reachable by DNS rebinding from any page the
 browser has open. Both halves are `lup.web.loopback`, shared with the
 resolver's supervisor page; see [supervisor.md](supervisor.md).
 
+
+<!-- passage: sync-registry -->
 ### The sync registry
 
 `lup-devtools sync` tracks the other repositories this project exchanges
@@ -198,6 +202,8 @@ branch cut in the clone, a commit made on it, and every uncommitted file
 beside it exactly where they stand. `sync log` reports what the *upstream*
 added, never what a session working in the clone did.
 
+
+<!-- passage: template-halves -->
 ## How the two halves depend on each other
 
 `lup_template` imports `lup`. `lup` never imports `lup_template` — it is

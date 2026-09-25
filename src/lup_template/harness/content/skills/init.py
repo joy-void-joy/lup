@@ -60,7 +60,16 @@ SKILL = models.Skill(
                     ),
                 },
             ),
-            *provenance.sync_baseline(SPELLING),
+            # Tracking the library is the upstream module's command tree, so a
+            # project that declined it is told there is nothing to baseline.
+            models.WhereShipped(
+                parts=[
+                    *provenance.sync_baseline(SPELLING),
+                    models.Passage(module=__name__, name="library-checkout"),
+                ],
+                commands=["sync"],
+                otherwise=[models.Passage(module=__name__, name="no-upstream")],
+            ),
             models.Passage(
                 module=__name__,
                 name="verify",
@@ -80,11 +89,29 @@ SKILL = models.Skill(
                     "guidance_file_path": models.NativePath(
                         location="guidance_file", scope="every_tree"
                     ),
+                    "dashboard_check": models.WhereShipped(
+                        parts=[
+                            models.TextPart(
+                                text="\n- Verify `lup-devtools setup dashboard` "
+                                "exposes the same registry: declarative fields "
+                                "become browser forms, while bespoke flows link "
+                                "back to their CLI command"
+                            )
+                        ],
+                        commands=["setup"],
+                    ),
                     "ask_5": models.AskUser(
                         question="which external services the agent uses, and for each whether it authenticates by OAuth flow, API key, or a credentials file"
                     ),
                     "watch": models.WatchOutput(
                         command="uv run lup-devtools dev check"
+                    ),
+                    "collect_command": models.WhereShipped(
+                        parts=[
+                            models.TextPart(text=" (exposed via `"),
+                            models.CommandInvocation(path=["feedback", "collect"]),
+                            models.TextPart(text="`)"),
+                        ]
                     ),
                     # The loop is off by default, so the step that runs it is
                     # advice for a domain that took it rather than a phase of

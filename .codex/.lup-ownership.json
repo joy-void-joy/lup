@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "fe9936c5b64ec93250ad50ceed72465233690c8a70272f1eff4375cf492d0f00",
+  "source_digest": "6acabac805ec1ced2d7e87a4536660fbfed26c034759e61125144429541af201",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -58,7 +58,7 @@
     {
       "path": ".codex/plugins/lup/TEMPLATE_AGENTS.md",
       "category": "generated",
-      "sha256": "325dfa24038a7ef7ac1a3006e5b1160cf9dd80b928b1c2294c59374ddd292f5f",
+      "sha256": "3725493506a2832b804b8815e15fda6564e18d0317d3a4f93d092bf242550c9d",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -569,7 +569,7 @@
     {
       "path": ".codex/plugins/lup/skills/init/SKILL.md",
       "category": "generated",
-      "sha256": "1796c7cb7f2b75ede9dc139ed80760a20a2733b5faf559439ca7fbc0d976f616",
+      "sha256": "6316148af05295c07ee33ff5627d962cd13c3014d89cb3125b5a1f6632ac99a0",
       "semantic_id": "skill.init",
       "executable": false
     },

@@ -30,7 +30,9 @@ it. If the arguments come through empty, {{ ask }}.
 ## Phase 0: Reach the Old Repository
 
 Confirm the old repository is readable (`ls` its root). A fresh template's
-session usually cannot see it — nothing mounted it. Register it read-only
+session usually cannot see it — nothing mounted it.
+<!-- passage: register -->
+ Register it read-only
 rather than sending the user off to relaunch with a mount flag:
 
 ```bash
@@ -47,6 +49,22 @@ the registration outlives this run on purpose: it keeps the old repository
 reachable by name{{ import_later }} — nothing is lost by leaving
 everything behind today.
 
+
+<!-- passage: relaunch -->
+ This project declined
+the `upstream` module, so it keeps no registry to record a mount in: ask the
+user to relaunch the runtime this session runs with the old repository mounted
+read-only for that one launch, then resume this skill:
+
+```bash
+uv run lup-devtools harness <runtime> --continue --mount-ro <old-path>
+```
+
+`--continue` reaches this same conversation. Read-only is the mechanism
+behind the no-copy stance, not a limitation.
+
+
+<!-- passage: interview -->
 ## Phase 1: Interview First
 
 Read nothing yet. The user watched this exploration sprawl and knows why they

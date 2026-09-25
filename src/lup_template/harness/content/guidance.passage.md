@@ -25,9 +25,11 @@ A `# lup:` (or `// lup:`) comment is **actionable review feedback** about the co
 <!-- passage: development-workflow -->
 ## Development Workflow
 
-Use a **git worktree**; never commit code to `dev`. Run `uv run lup-devtools git worktree create feat-name` — which does not move this session, so an old-checkout edit misses the branch. Work in the path it prints: launch a session rooted there, or edit its files by absolute path where that tree is writable. `docs/contributing.md` carries the branch model, what a late relocation costs a running session, and the merge loop.
+Use a **git worktree**; never commit code to `dev`.{{ worktree_step }}
 
 
+<!-- passage: worktree-step -->
+ Run `{{ create }}` — which does not move this session, so an old-checkout edit misses the branch. Work in the path it prints: launch a session rooted there, or edit its files by absolute path where that tree is writable. `docs/contributing.md` carries the branch model, what a late relocation costs a running session, and the merge loop.
 <!-- passage: commit-type-pointer -->
 The type comes from `docs/contributing.md`'s table, which the commit skill renders when one is chosen.
 

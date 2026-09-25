@@ -649,7 +649,7 @@ ignored is what keeps a login out of a commit. A project that keeps none falls
 back to the personal registry at `~/.lup/profiles.json`, whose names are
 registered by hand and each carry wherever its home already lives.
 
-`harness profile` and `setup profile` curate whichever origin the project
+`harness profile` (and `setup profile`, the same commands) curates whichever origin the project
 supplied — `list`, `add`, `use`, `remove` — and `harness claude --profile`
 selects one for a single launch. Naming none selects the active profile; naming
 none with none active leaves whatever home the surrounding environment already
