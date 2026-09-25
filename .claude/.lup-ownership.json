@@ -842,7 +842,7 @@
     {
       "path": "docs/template.md",
       "category": "generated",
-      "sha256": "2991a86c1c3e31205678e07c6be857faa28e7649aba407c5e3ea9520bbd78591",
+      "sha256": "c6636d3c899fff906f629ffa160d72372aa78bad54138e3580c5744962bc95f6",
       "semantic_id": "docs.template",
       "executable": false
     },
