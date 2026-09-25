@@ -143,3 +143,30 @@ def test_a_directory_whose_package_was_deleted_is_owed_no_row(tmp_path: Path) ->
 
     assert [entry.name for entry in roster.owed()] == ["ordinary"]
     assert len(roster.table().rows) == 1
+
+
+def test_an_import_count_reads_every_statement_that_reaches_the_module(
+    tmp_path: Path,
+) -> None:
+    """A deferred import counts, a sibling sharing the prefix does not.
+
+    The placement prose quotes these counts rather than writing them, so what
+    it can be wrong about is the walk: an import inside a function is still
+    an edge the entry carries, and ``lup.resolvers`` is not ``lup.resolver``.
+    """
+    source = library_at(tmp_path)
+    package = source.name
+    (source / "driver").mkdir()
+    (source / "driver" / "reads.py").write_text(
+        f"from {package}.resolver.core import run\n"
+        f"import {package}.resolver\n"
+        "def later():\n"
+        f"    from {package}.resolver import models\n",
+        encoding="utf-8",
+    )
+    (source / "driver" / "sibling.py").write_text(
+        f"from {package}.resolvers import other\n", encoding="utf-8"
+    )
+    roster = Roster(source=source)
+
+    assert roster.imports("driver", "resolver") == {source / "driver" / "reads.py": 3}
