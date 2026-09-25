@@ -325,7 +325,9 @@ def create_dev_app(
         ] = False,
         no_test: Annotated[
             bool,
-            typer.Option("--no-test", help="Skip pytest"),
+            typer.Option(
+                "--no-test", help="Skip the test suites, and hold no gate slot"
+            ),
         ] = False,
         antipatterns: Annotated[
             bool,
@@ -468,7 +470,12 @@ def create_dev_app(
             ),
         ] = None,
     ) -> None:
-        """Run named tests in the suite that installs each, one run per suite."""
+        """Run named tests in the suite that installs each, one run per suite.
+
+        Holds one of the clone's gate slots as `dev check` does, and spreads
+        each suite over its share of the machine; with every slot held, it
+        waits and says so.
+        """
         declarations = declared()
         check.run_selected(
             test_roots=declarations.test_roots,

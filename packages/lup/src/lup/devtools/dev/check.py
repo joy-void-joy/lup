@@ -8,6 +8,7 @@ from hashlib import sha256
 from tempfile import gettempdir
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from functools import partial
 from importlib.util import find_spec
 from pathlib import Path
@@ -23,6 +24,7 @@ from lup.providers.harness import guidance_artifacts
 from lup.harness.codescan.markers import find_feedback
 from lup.harness.coverage import coverage_gaps
 from lup.harness.modules import unloaded_guidance
+from lup.harness.notice import Notice
 from lup.harness.models import (
     GUIDANCE_BUDGET,
     GuidanceBudget,
@@ -36,7 +38,7 @@ from lup.policy.assets.host import project_environment
 from lup.policy.everyday import SESSION_SHAPES
 from lup.workspace.paths import is_template_scaffold, project_root
 
-from lup.devtools.dev.admission import admitted
+from lup.devtools.dev.admission import Admission, admitted
 from lup.devtools.dev.antipatterns import scan_antipatterns
 from lup.devtools.project import DevProject
 from lup.devtools.dev.boundaries import scan_application_placement
@@ -353,6 +355,16 @@ def pyright_check(
     run — there is no dependency graph to reconstruct and therefore none to
     reconstruct wrongly.
 
+    Handed no ``--threads``, so it checks on one core. Measured over lup and
+    an adopter on a shared 32-core host, ``--threads 8`` mostly cut the wall
+    time by a third to three quarters, for two to five times the CPU and three
+    times the memory: each thread is a forked process holding its own program,
+    half a gigabyte to a gigabyte of it. In the full gate that buys nothing —
+    Pyright finishes well before the suites beside it, and the gate costs its
+    slowest row — while the cores it would take come out of those suites. It
+    is also why a gate run without its suites holds no slot; a threaded
+    Pyright would be something the slots have to divide.
+
     ``abandoned_after`` is how long a generated configuration may go untouched
     before this treats it as a killed run's leavings. An hour because the
     longest analysis here is minutes and the shortest session is not, so the
@@ -657,22 +669,37 @@ def run_selected(
     the way the gate carries it: a caller who named one file wants pytest's
     own failure report, and the gate's ordered summary exists for a run whose
     checks finish out of order.
+
+    Admitted the way the gate is, holding one of the clone's slots across
+    every suite it runs and spreading each over its share of *workers*. This
+    is the gate's suite at the gate's width, and the command several agents
+    run at once while their changes are moving; unadmitted, each of them
+    opens a full-width suite beside whatever gate holds a slot, and the
+    division the gate makes is undone by the runs it cannot see. The notices
+    are said as they arise rather than after, because this output streams:
+    a run queued behind four others says so before it waits, not after.
+    The selection is read before a slot is asked for, so a path under no
+    suite is refused at once rather than after a wait.
     """
+    groups = group_by_root(test_roots, selections)
     failed: list[str] = []
-    for group in group_by_root(test_roots, selections):
-        if not group.root.directory.is_dir():
-            for line in group.root.absent().lines:
-                typer.echo(line)
-            failed.append(group.root.name)
-            continue
-        typer.echo(f"\n{group.root.name}  ({group.root.directory})")
-        try:
-            group.root.run(group.paths, workers, excluded_roots, foreground=True)
-        except sh.ErrorReturnCode:
-            failed.append(group.root.name)
-        except sh.ForkException as error:
-            typer.echo(f"{group.root.name}: never started\n{str(error).strip()}")
-            failed.append(group.root.name)
+    with admitted(project_root(), workers, announce=Notice.say) as admission:
+        for group in groups:
+            if not group.root.directory.is_dir():
+                for line in group.root.absent().lines:
+                    typer.echo(line)
+                failed.append(group.root.name)
+                continue
+            typer.echo(f"\n{group.root.name}  ({group.root.directory})")
+            try:
+                group.root.run(
+                    group.paths, admission.workers, excluded_roots, foreground=True
+                )
+            except sh.ErrorReturnCode:
+                failed.append(group.root.name)
+            except sh.ForkException as error:
+                typer.echo(f"{group.root.name}: never started\n{str(error).strip()}")
+                failed.append(group.root.name)
     if failed:
         typer.echo(f"\nFailed: {', '.join(failed)}")
         raise typer.Exit(1)
@@ -1404,21 +1431,28 @@ def run_checks(
     """
     started = perf_counter()
     excluded_roots = non_code_roots(project)
-    # Held across every tool rather than around the suites alone: the
-    # type checker spreads itself too, so a slot covering only pytest
-    # would divide half the machine and leave the other half contended.
-    with admitted(project_root(), test_workers) as admission:
+    suites = [] if no_test else test_roots
+    # One slot for the whole run, taken before any tool starts: the tools
+    # start together, each suite reads its width as it launches, and a
+    # run's share is settled when it opens rather than revised as others
+    # come and go. What the share divides is the suites' workers alone —
+    # Pyright is handed no `--threads`, so it checks on a single core
+    # however many runs are on the machine — and a run opening no suite
+    # takes no slot, since a slot it held would narrow every suite opening
+    # beside it for the whole of that suite's run and divide nothing.
+    held = (
+        admitted(project_root(), test_workers)
+        if suites
+        else nullcontext(Admission(workers=test_workers))
+    )
+    with held as admission:
         tools: list[Callable[[], CheckReport]] = [
             partial(ruff_format_check, fix, excluded_roots),
             partial(ruff_lint_check, fix, excluded_roots),
             partial(pyright_check, excluded_roots),
             *(
-                []
-                if no_test
-                else [
-                    partial(root.checked, admission.workers, excluded_roots)
-                    for root in test_roots
-                ]
+                partial(root.checked, admission.workers, excluded_roots)
+                for root in suites
             ),
         ]
         sweeps = partial(
@@ -1502,6 +1536,13 @@ def run_changed(
     that is trusted and wrong costs more than a gate that is slow, so this one
     declines the question and says so on every run. `dev test` runs the files
     a person names; `dev check` stays the bar a commit passes.
+
+    **No gate slot is held**, where `dev check` over its suites and `dev test`
+    each hold one. This opens no suite, and its three tools over a handful of
+    files finish in seconds. Admitted, it would queue the loop's quick half
+    behind runs of minutes, and every run opening beside it would take a
+    narrower share for the whole of its own length — a share is fixed when a
+    run opens — to make room for a check long since finished.
     """
     started = perf_counter()
     scope = changed_python_files(since)
