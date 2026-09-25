@@ -1420,9 +1420,12 @@ def run_checks(
     """
     started = perf_counter()
     excluded_roots = non_code_roots(project)
-    # Held across every tool rather than around the suites alone: the
-    # type checker spreads itself too, so a slot covering only pytest
-    # would divide half the machine and leave the other half contended.
+    # One slot for the whole run, taken before any tool starts: the tools
+    # start together, each suite reads its width as it launches, and a
+    # run's share is settled when it opens rather than revised as others
+    # come and go. What the share divides is the suites' workers alone —
+    # Pyright is handed no `--threads`, so it checks on a single core
+    # however many runs are on the machine.
     with admitted(project_root(), test_workers) as admission:
         tools: list[Callable[[], CheckReport]] = [
             partial(ruff_format_check, fix, excluded_roots),
