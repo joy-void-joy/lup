@@ -92,7 +92,7 @@ def seen(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Mock:
     monkeypatch.setattr(launch, "ClaudeTranscripts", lambda _home: Mock())
     monkeypatch.setattr(launch, "ambient_config_home", lambda *a, **k: tmp_path)
     monkeypatch.setattr(launch, "codex_sandbox_arguments", recorded.codex_sandbox)
-    monkeypatch.setattr(launch, "CodexWorktreeHomeStore", lambda: Mock())
+    monkeypatch.setattr(launch, "CodexWorktreeHomeStore", lambda **_: Mock())
     monkeypatch.setattr(
         launch,
         "select_codex_home",
