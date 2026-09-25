@@ -4,10 +4,11 @@ All development tooling is exposed as the ``lup-devtools`` entry point.
 Each sub-app groups related commands.
 
 What this module holds is the declaration the library's roster is wired over,
-plus this project's own delta: the sub-apps only it has, and — through
-``subapps.SELECTION`` — any of lup's it declines. The inherited half is not
-named here, so a sub-app lup grows arrives with the next lock refresh instead
-of waiting for somebody to notice it and add a line.
+plus this project's own delta: the sub-apps only it has. Which of lup's it
+serves follows from the modules it adopted, derived in
+``harness/content/catalog.py``. The inherited half is not named here, so a
+sub-app lup grows arrives with the next lock refresh instead of waiting for
+somebody to notice it and add a line.
 
 The module is ``main.py`` rather than ``__main__.py`` or ``app.py`` because
 ``lup-devtools`` is launched through the ``[project.scripts]`` console entry
@@ -17,19 +18,15 @@ second launch path to keep in sync; ``app.py`` is reserved for the per-sub-app
 modules (``dev/app.py``, ``trace/app.py``, ...) so the root composer keeps a
 distinct name.
 
-Examples::
+Examples, from the groups every composition serves — the rest follow the
+adopted modules, and ``docs/commands.md`` lists what this one serves::
 
     $ uv run lup-devtools --help
     $ uv run lup-devtools agent inspect --json
     $ uv run lup-devtools dev py info requests
     $ uv run lup-devtools trace show <session_id>
-    $ uv run lup-devtools feedback status
-    $ uv run lup-devtools git branches
-    $ uv run lup-devtools git worktree create feat-name
     $ uv run lup-devtools dev check --no-test
     $ uv run lup-devtools dev report
-    $ uv run lup-devtools version
-    $ uv run lup-devtools sync status
     $ uv run lup-devtools dev usage claude --no-detail
 """
 

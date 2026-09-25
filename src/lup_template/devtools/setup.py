@@ -8,11 +8,10 @@ holds only what *this* project configures, and composes the two into the
 This is a **TEMPLATE**. Replace the integrations below with your domain's
 actual services; the framework is reusable as-is.
 
-Usage::
-
-    $ uv run lup-devtools setup          # Full walkthrough
-    $ uv run lup-devtools setup status   # Show what's configured
-    $ uv run lup-devtools setup slack    # Just one integration
+Run bare, the ``setup`` tree walks every integration; ``status`` shows what
+is configured, and each integration's slug sets up that one alone. Written in
+words rather than as commands to paste, because this file stays behind in a
+project that declined the setup module, whose CLI then serves no ``setup``.
 
 Customization:
     1. Append an ``Integration`` to ``INTEGRATIONS``. A token-based one is
