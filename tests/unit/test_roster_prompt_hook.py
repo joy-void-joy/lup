@@ -154,9 +154,7 @@ def test_the_ending_event_registers_the_departure_and_refuses_nothing(
 
 def test_a_project_without_a_roster_registers_nothing_and_carries_nothing() -> None:
     """The declaration is the peer policy, so declining it declines this too."""
-    undeclared = declared_hook_set().model_copy(
-        update={"peer_policy": None}
-    )
+    undeclared = declared_hook_set().model_copy(update={"peer_policy": None})
 
     quiet = prompt_hook(Path("plugin"), "PLUGIN_ROOT", undeclared, "UserPromptSubmit")
     silent = departure_hook(Path("plugin"), "PLUGIN_ROOT", undeclared, "SessionEnd")

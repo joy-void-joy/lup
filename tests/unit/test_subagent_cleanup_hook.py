@@ -330,9 +330,7 @@ def test_a_runtime_that_resumes_nobody_takes_the_sentence_alone() -> None:
 
 def test_a_project_that_declined_registers_nothing_and_carries_nothing() -> None:
     """The declaration is the hook set's own field, so None declines both events."""
-    declined = declared_hook_set().model_copy(
-        update={"subagent_cleanup": None}
-    )
+    declined = declared_hook_set().model_copy(update={"subagent_cleanup": None})
 
     quiet = cleanup_hooks(
         Path("plugin"),
