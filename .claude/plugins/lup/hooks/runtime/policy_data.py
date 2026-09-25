@@ -21982,7 +21982,6 @@ IMPORT_BOUNDARIES: list[ImportBoundaryRow] = [
         "owners": [
             "packages/lup/src/lup/providers/",
             "packages/lup/src/lup/__init__.py",
-            "packages/lup/src/lup/client.py",
             "packages/lup/src/lup/devtools/harness/composition.py",
             "packages/lup/src/lup/devtools/harness/launch.py",
             "packages/lup/src/lup/devtools/harness/resolve.py",
