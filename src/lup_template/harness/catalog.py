@@ -41,6 +41,7 @@ from lup.harness.codescan.boundaries import (
     native_import_boundaries,
 )
 from lup.harness.content.modules.specs import RESOLVER
+from lup.devtools.dev.documented import MENTION, WrittenCommand
 from lup.harness.dependencies import Published
 from lup_template.harness.content.modules.specs import TEMPLATE_INIT
 from lup_template.harness.content.template_claude import DOCUMENT as TEMPLATE_CLAUDE
@@ -76,6 +77,7 @@ from lup_template.harness.content.catalog import (
     MODULE_SELECTION,
     RULES,
     SUBAPP_SELECTION,
+    WITHHELD_TOOL_GROUPS,
     entries,
 )
 from lup_template.harness.content.docs.catalog import context
@@ -138,6 +140,29 @@ EXCLUDED_COMMANDS = [
 Each is a requirement the boundary cannot express any other way, and the
 count is the point: an exclusion is not a widened rule but a removed one, so
 the list stays as short as the toolchain's actual incompatibilities."""
+
+
+def served_exclusions(composed: Composition = COMPOSITION) -> list[str]:
+    """The exclusions a project holding *composed* has a command for.
+
+    One naming a `lup-devtools` tree a declined module owns excludes nothing
+    that project can run, and the compiled policy is a file a session reads:
+    it would go on naming a command the CLI does not serve.
+    """
+    served = composed.subapps()
+    return [
+        command
+        for command in EXCLUDED_COMMANDS
+        if all(
+            words[0] in served
+            for tail in MENTION.findall(command)
+            if (
+                words := WrittenCommand(
+                    file="", line=0, spelled=tail.strip()
+                ).command_words()
+            )
+        )
+    ]
 
 
 ARTIFACT_REFUSAL = "publishing a page puts this work outside the repository"
@@ -219,14 +244,17 @@ the launcher's id, or the id its runtime gave the process, which
 every session of one worktree would share."""
 
 
-def agent_tool_servers(startup_deadline_seconds: float = 60.0) -> list[McpServer]:
+def agent_tool_servers(
+    withheld: list[str] = WITHHELD_TOOL_GROUPS, startup_deadline_seconds: float = 60.0
+) -> list[McpServer]:
     """Offer this project's own agent tools to whichever runtime is reading.
 
     The groups come from the same registry the in-process and subprocess
     backends assemble from, so a group added there reaches a native session
     too rather than only the ones this program launches itself. Realtime is
     the relay mode of a persistent run and belongs to no interactive session,
-    so its group is not among them.
+    so its group is not among them. *withheld* are the groups a declined
+    module owns, which no plugin starts a server for.
 
     The deadline is sized to a cold first boot rather than a warm one. Every
     server here starts through ``uv run``, which on a checkout without an
@@ -265,6 +293,7 @@ def agent_tool_servers(startup_deadline_seconds: float = 60.0) -> list[McpServer
         # that depended on what the generating machine had installed would
         # make two checkouts' plugins differ.
         for name in startup_names(declared_tool_groups())
+        if name not in withheld
     ]
 
 
@@ -608,7 +637,7 @@ def portable_harness(
         ),
         skills=content.skills,
         agents=content.agents,
-        mcp_servers=agent_tool_servers(),
+        mcp_servers=agent_tool_servers(composed.withheld_tool_groups()),
         hooks=HookSet(
             id="hooks.lup-policy",
             policy_ids=["fetch", "shell", "edit", "unknown-tool"],
@@ -900,14 +929,14 @@ def portable_harness(
                 # undeclared it refuses the write while the classifier allows
                 # it, which reads as a broken command rather than a boundary.
                 writable_paths=["~/.cache/uv", "/tmp"],
-                excluded_commands=EXCLUDED_COMMANDS,
+                excluded_commands=served_exclusions(composed),
             ),
         ),
     )
     return Harness(
         generator_version=version,
         source_evidence={"content": "typed-python"},
-        requirements=manifest(),
+        requirements=composed.requirements(manifest()),
         image=agent_image(),
         plugins=[plugin],
         guidance=guidance.document(composed.guidance()),

@@ -366,8 +366,8 @@ def test_a_protected_path_edit_asks_where_its_author_is_working(root: Path) -> N
     target = Path("src/lup_template/harness/catalog.py").resolve()
     arguments: JsonObject = {
         "file_path": str(target),
-        "old_string": "excluded_commands=EXCLUDED_COMMANDS,",
-        "new_string": "excluded_commands=EXCLUDED_COMMANDS,  # reviewed",
+        "old_string": "excluded_commands=served_exclusions(composed),",
+        "new_string": "excluded_commands=served_exclusions(composed),  # reviewed",
     }
     assert native_call(root, "claude", tool="Edit", arguments=arguments) == "ask"
     assert QuestionRelay(root / ".lup/questions.jsonl").pending() == []

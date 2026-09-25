@@ -71,6 +71,9 @@ RESOLVER = ModuleSpec(
     default_on=True,
     requires=["git-workflow"],
     subapps=["resolve"],
+    # Each actor a run opens gets a container of its own unless the project
+    # declared its actors uncontained, and a host with no engine is refused.
+    requirements=["container runtime"],
 )
 
 VERSION = ModuleSpec(
@@ -106,6 +109,9 @@ SANDBOX = ModuleSpec(
     ),
     default_on=True,
     tool_groups=["sandbox"],
+    # The code a session evaluates runs in a container, so Docker or Podman is
+    # this module's cost: a project declining it is asked for neither.
+    requirements=["container runtime", "Python sandbox"],
 )
 
 SETUP = ModuleSpec(

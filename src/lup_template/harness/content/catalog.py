@@ -246,6 +246,16 @@ project does not have.
 TOOL_GROUPS = COMPOSITION.tool_groups()
 """Every MCP tool group a session is offered, by adopted module."""
 
+WITHHELD_TOOL_GROUPS = COMPOSITION.withheld_tool_groups()
+"""Every tool group a declined module owns, which no plugin here starts a server for.
+
+What the plugin's server list subtracts from the groups this project declares,
+so declining the sandbox leaves no harness session starting a container nobody
+asked for. The application's own agent composes its toolset from the
+declaration itself: which verbs the product carries is its runtime's decision,
+and its review gate expects the reflection tools to be there.
+"""
+
 
 def subapp_selection(composed: Composition = COMPOSITION) -> SubAppSelection:
     """Which of lup's own sub-apps a CLI composed from *composed* declines."""

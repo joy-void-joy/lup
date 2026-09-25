@@ -38,6 +38,9 @@ EXAMPLE_GROUP = "example"
 ask for it by name (``serve-tools --server example``) to try it."""
 
 
+# lup: defer: the `notes` group is the reflection module's, and it also carries
+# `run_subagent`, so a project declining reflection loses the delegation verb
+# from its harness sessions. Serve delegation from a group core or project owns.
 def notes_group(name: str = NOTES_GROUP) -> ToolGroup:
     """This domain's own verbs: structured self-review, and delegation.
 
