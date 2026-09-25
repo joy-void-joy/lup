@@ -678,3 +678,70 @@ def unloaded_guidance(
         if not resolved.loads(module.spec)
         for section in module.guidance
     ]
+
+
+class Composition(BaseModel, frozen=True):
+    """One roster as one selection adopted it, and every surface read off it.
+
+    Every surface a tree is built from — the plugin's skills and agents, the
+    always-loaded document, the pages, the command trees, the tool groups, the
+    requirements asked of a machine — is a function of the same three values,
+    so they travel as one. A root composes its own selection into one of these;
+    a check asking what another selection would compose builds a second from
+    the same entries, and nothing downstream can tell the two apart — which is
+    what lets a gate generate the tree a project declining one module would
+    get, without being that project.
+    """
+
+    specs: list[ModuleSpec]
+    """The whole roster, taken or not, in the order the composition lays it out."""
+
+    selection: ModuleSelection
+    modules: list[Module]
+    """The modules taken, each read as a project holding exactly these reads it."""
+
+    @classmethod
+    def of(
+        cls, entries: list[ModuleEntry], selection: ModuleSelection | None = None
+    ) -> "Composition":
+        """Adopt *selection* over *entries*, refusing a selection that cannot stand."""
+        chosen = selection or ModuleSelection()
+        return cls(
+            specs=[entry.spec for entry in entries],
+            selection=chosen,
+            modules=adopted(entries, chosen),
+        )
+
+    def taken(self) -> list[str]:
+        """Every module this composition holds, by id, in roster order."""
+        return [module.spec.id for module in self.modules]
+
+    def content(self) -> models.ContentRoster:
+        """Every skill and agent the plugin ships."""
+        return composed_content(self.modules)
+
+    def guidance(
+        self, chapters: list[models.GuidanceChapter] | None = None
+    ) -> list[models.GuidanceSection]:
+        """The always-loaded document's sections, chapter by chapter."""
+        return composed_guidance(self.modules, self.selection, chapters)
+
+    def documents(self, context: DocumentContext) -> list[models.Document]:
+        """Every page the taken modules publish, rendered against *context*."""
+        return composed_documents(self.modules, context)
+
+    def subapps(self) -> list[str]:
+        """Every command tree a taken module owns, in roster order."""
+        return self.selection.subapps(self.specs)
+
+    def tool_groups(self) -> list[str]:
+        """Every tool group a session is offered."""
+        return self.selection.tool_groups(self.specs)
+
+    def withheld_tool_groups(self) -> list[str]:
+        """Every tool group a declined module owns."""
+        return self.selection.withheld_tool_groups(self.specs)
+
+    def requirements(self, manifest: Manifest) -> Manifest:
+        """What a machine is asked for, less what only declined modules need."""
+        return self.selection.requirements(manifest, self.specs)
