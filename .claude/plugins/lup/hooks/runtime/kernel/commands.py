@@ -11,6 +11,7 @@ from .decision import (
     CheckpointRequirement,
     DecisionEffect,
     KernelDecision,
+    SUBSTITUTION_SENTINEL,
     SandboxPlacement,
     unjudged,
     unlisted,
@@ -52,7 +53,9 @@ from .words import (
     protected_write_target,
     refspec_effects,
     sed_invocation,
+    unread_flags,
     unread_over_tracked,
+    unread_prefix,
     unread_question,
     uv_command_words,
     uv_run_module_root,
@@ -751,13 +754,22 @@ def split_subcommand(
             ):
                 position += named["words"]
                 continue
-            return row_verdict(
-                default,
-                "ask",
-                f"{executable} global flag {word} changes how the command runs",
-            )
+            return global_flag_question(default, executable, word)
         position += 2 if word in value_flags else 1
     return Subcommand(word="", remainder=[])
+
+
+def global_flag_question(
+    default: ShellRuleRow, executable: str, flag: str
+) -> KernelDecision:
+    """The question a guarded global puts, whatever verb follows it.
+
+    Asked of the command's own row, for the placement it carries, and asked
+    before the verb is judged: the global changes how every verb runs.
+    """
+    return row_verdict(
+        default, "ask", f"{executable} global flag {flag} changes how the command runs"
+    )
 
 
 def declares_command(executable: str, rows: list[ShellRuleRow]) -> bool:
@@ -790,8 +802,28 @@ def decide_command_rows(
     flags name, and they default to nothing measured -- which every reader of
     them takes as the cautious reading rather than the permissive one, so a
     caller with no filesystem behind it loses a relaxation and gains no grant.
+
+    A word nobody can read until the command runs is answered by what it
+    could be: :func:`unread_readings` names each command it could stand for,
+    and :func:`strictest_reading` keeps the strictest verdict among them where
+    that is stricter than the spelling earns as written.
     """
     measured = no_write_facts() if facts is None else facts
+    return strictest_reading(
+        decide_as_spelled(words, rows, measured),
+        unread_readings(words, rows, measured),
+    )
+
+
+def decide_as_spelled(
+    words: list[str], rows: list[ShellRuleRow], measured: WriteFacts
+) -> KernelDecision:
+    """The verdict the rows give a command whose every word is read as spelled.
+
+    A word nobody can read is taken for the spelling it shows here -- an
+    unread verb names no row and falls to the default above it -- which is
+    why nothing but :func:`decide_command_rows` answers with this alone.
+    """
     executable = posixpath.basename(words[0])
     matches = [row for row in rows if row["command"] == executable]
     if not matches:
@@ -812,7 +844,7 @@ def decide_command_rows(
         return split
     subword = split["word"]
     remainder = split["remainder"]
-    # lup: defer: a verb word this walk cannot read -- `$OP`, a `$(...)`
+    # lup: solved: a verb word this walk cannot read -- `$OP`, a `$(...)`
     # result, `set$X` -- matches no operation row and falls to the sub-app's
     # default, as an unread sub-app word falls to the command's: `uv run
     # lup-devtools sync $OP lup /x --mount rw` and `dev questions $(echo
@@ -841,6 +873,203 @@ def decide_command_rows(
             return apply_command_row(subdefault, remainder, measured)
         return unlisted(f"{executable} {subword} {opword} is not classified")
     return apply_command_row(subrows[0], remainder, measured)
+
+
+class Reading(TypedDict):
+    """One command a word nobody can read could stand for, and its verdict.
+
+    ``word`` is the word as the walk saw it, and ``spelled`` what it was read
+    as: the verb path a row names, or the guarded flag it could finish as.
+    """
+
+    word: str
+    spelled: str
+    decision: KernelDecision
+
+
+def strictest_reading(
+    decided: KernelDecision, readings: list[Reading]
+) -> KernelDecision:
+    """What a command earns when one of its words cannot be read.
+
+    The strictest verdict any command the word could stand for would earn,
+    where that is stricter than the spelling earns as written, and the
+    spelling's own verdict otherwise -- so a word under a program that guards
+    nothing is answered as it always was. An expansion is a choice the
+    command makes at run time, and a verdict read off the spelling alone gave
+    the permissive default to whichever choice it did not show: `sync $OP`
+    reached `sync`'s allow while `sync setup` asks.
+
+    The reason names the word and the command it was read as ahead of that
+    command's own reason, because whoever answers is being asked about a
+    command they were not shown.
+    """
+    strictest = max(
+        readings,
+        key=lambda reading: STRENGTH.index(reading["decision"].effect),
+        default=None,
+    )
+    if strictest is None or STRENGTH.index(
+        strictest["decision"].effect
+    ) <= STRENGTH.index(decided.effect):
+        return decided
+    word = strictest["word"]
+    named = (
+        "a word a command substitution builds"
+        if SUBSTITUTION_SENTINEL in word
+        else f"`{word}`"
+    )
+    return (
+        strictest["decision"]
+        .revised(
+            reason=(
+                f"{named} could not be read and could be"
+                f" `{strictest['spelled']}`: {strictest['decision'].reason}"
+            )
+        )
+        .advising(
+            "Spell that word out, and the command is judged as the one it is"
+            " rather than as the strictest one it could be."
+        )
+    )
+
+
+def unread_readings(
+    words: list[str], rows: list[ShellRuleRow], measured: WriteFacts
+) -> list[Reading]:
+    """Every command a word the walk cannot read could stand for, judged.
+
+    Three kinds of word decide which row speaks, and an expansion in any of
+    them leaves that choice to run time. A verb word -- the subcommand, or
+    an operation beneath it -- could be any row whose name its legible part
+    begins, among the rows the words before it still leave, and is read as
+    each with that row's whole path in its place, since a result that splits
+    can supply every word of one. A global could be each guarded global its
+    legible part begins, and is asked about as that global is. A flag after
+    the verb could be each guarded flag its legible part begins, and is read
+    as that flag moved to the end, where it takes no following word for a
+    value and so names no path a write could be judged by.
+
+    A verb reading is the whole walk over the command it spells, so a second
+    unread word is read by this same rule inside it. A flag reading is the
+    walk as spelled, the other words read as written: one unread word at a
+    time keeps a line of several from multiplying into every combination of
+    what each could be, and what a probe flag or a frozen lock beside it
+    relaxes is still relaxed as it is for the flag written out.
+    """
+    executable = posixpath.basename(words[0])
+    matches = [row for row in rows if row["command"] == executable]
+    default = next((row for row in matches if not row["subcommand"]), None)
+    guarded = list(
+        dict.fromkeys(
+            flag for row in matches for flag in [*row["ask_flags"], *row["write_flags"]]
+        )
+    )
+    gated = any(row["subcommand"] for row in matches)
+    split = (
+        split_subcommand(executable, words[1:], default)
+        if gated
+        else Subcommand(word="", remainder=words[1:])
+    )
+    if isinstance(split, KernelDecision):
+        # A guarded global already asks, whatever the verb and flags after it.
+        return []
+    # Where the verb stands: every word before it is a global, and every word
+    # after it the verb's own. Nothing is global to a command without verbs,
+    # and everything is to a line of globals alone.
+    verb = (
+        len(words) - len(split["remainder"]) - 1
+        if split["word"] or not gated
+        else len(words)
+    )
+    readings = [
+        *[
+            Reading(
+                word=word,
+                spelled=flag,
+                decision=global_flag_question(default, executable, flag),
+            )
+            for word in words[1:verb]
+            if default is not None
+            for flag in unread_flags(word, default["ask_flags"])
+        ],
+        *[
+            Reading(
+                word=word,
+                spelled=flag,
+                decision=decide_as_spelled(
+                    [*words[:index], *words[index + 1 :], flag], rows, measured
+                ),
+            )
+            for index, word in enumerate(words)
+            if index > verb
+            for flag in unread_flags(word, guarded)
+        ],
+    ]
+    if not split["word"]:
+        return readings
+    prefix = unread_prefix(split["word"])
+    if prefix is not None:
+        paths = {
+            " ".join(path): path
+            for path in (
+                [row["subcommand"], *row["operation_path"]]
+                for row in matches
+                if row["subcommand"] and row["subcommand"].startswith(prefix)
+            )
+        }
+        return [
+            *readings,
+            *[
+                Reading(
+                    word=split["word"],
+                    spelled=f"{executable} {spelled}",
+                    decision=decide_command_rows(
+                        [*words[:verb], *path, *split["remainder"]], rows, measured
+                    ),
+                )
+                for spelled, path in paths.items()
+            ],
+        ]
+    positions = [
+        verb + 1 + index
+        for index, word in enumerate(split["remainder"])
+        if not word.startswith("-")
+    ]
+    operands = [words[position] for position in positions]
+    first = next(
+        (
+            index
+            for index, word in enumerate(operands)
+            if unread_prefix(word) is not None
+        ),
+        None,
+    )
+    if first is None:
+        return readings
+    begun = unread_prefix(operands[first]) or ""
+    at = positions[first]
+    paths = {
+        " ".join(row["operation_path"]): row["operation_path"]
+        for row in matches
+        if row["subcommand"] == split["word"]
+        and len(row["operation_path"]) > first
+        and row["operation_path"][:first] == operands[:first]
+        and row["operation_path"][first].startswith(begun)
+    }
+    return [
+        *readings,
+        *[
+            Reading(
+                word=operands[first],
+                spelled=f"{executable} {split['word']} {spelled}",
+                decision=decide_command_rows(
+                    [*words[:at], *path[first:], *words[at + 1 :]], rows, measured
+                ),
+            )
+            for spelled, path in paths.items()
+        ],
+    ]
 
 
 def decide_sed_words(words: list[str], context: "SedContext") -> KernelDecision:

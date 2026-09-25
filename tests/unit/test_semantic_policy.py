@@ -724,6 +724,55 @@ SHELL_POLICY_CASES = [
     DecisionCase(
         input="lup-devtools sync setup lup /srv/lup --mount rw", effect="deny"
     ),
+    # A word nobody can read until the command runs is judged as the strictest
+    # command it could stand for: a verb as every row its legible part and the
+    # words before it still leave, a flag as every guarded flag it could
+    # finish as. Contained or not, because the verb it becomes is chosen at
+    # run time either way.
+    DecisionCase(
+        input="uv run lup-devtools sync $OP lup /srv/lup --mount rw", effect="ask"
+    ),
+    DecisionCase(
+        input="uv run lup-devtools sync $OP lup /srv/lup --mount rw",
+        effect="ask",
+        sandboxed=True,
+    ),
+    DecisionCase(input="uv run lup-devtools sync set$X lup /srv/lup", effect="ask"),
+    DecisionCase(
+        input="uv run lup-devtools dev questions $(echo answer) abc --as operator",
+        effect="deny",
+    ),
+    DecisionCase(
+        input="uv run lup-devtools dev questions $(echo answer) abc --as operator",
+        effect="deny",
+        sandboxed=True,
+    ),
+    DecisionCase(input="uv run lup-devtools dev $VERB abc", effect="deny"),
+    DecisionCase(input="uv run lup-devtools dev comments --ret$X a.py:1", effect="ask"),
+    DecisionCase(
+        input="uv run lup-devtools dev comments --ret$X a.py:1",
+        effect="ask",
+        sandboxed=True,
+    ),
+    DecisionCase(
+        input="uv run lup-devtools dev comments --ret$(echo ire) a.py:1",
+        effect="ask",
+        sandboxed=True,
+    ),
+    DecisionCase(input="git $(echo checkout) -- .", effect="deny", sandboxed=True),
+    DecisionCase(input="git -$X status", effect="ask"),
+    DecisionCase(input="sort --out$X f", effect="ask"),
+    # What the legible part rules out is not read into it: `st$X` can only be
+    # `status`, and a sub-app guarding nothing leaves an unread verb as it
+    # was. The plain spellings beside them are what they always were.
+    DecisionCase(input="uv run lup-devtools sync st$X", effect="allow"),
+    DecisionCase(input="uv run lup-devtools git $X", effect="allow"),
+    DecisionCase(input="uv run lup-devtools git $X", effect="allow", sandboxed=True),
+    DecisionCase(input="npx $X", effect="ask"),
+    DecisionCase(
+        input="uv run lup-devtools dev comments --restore a.py:1", effect="allow"
+    ),
+    DecisionCase(input="git status", effect="allow"),
     # Redirections: discards and fd duplication are stripped; file writes ask.
     DecisionCase(input="grep x f 2>&1", effect="allow"),
     DecisionCase(input="grep x f > /dev/null", effect="allow"),

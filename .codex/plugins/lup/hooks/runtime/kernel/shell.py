@@ -86,6 +86,8 @@ from .commands import (
     git_restore_source,
     git_restore_unchanged,
     git_symbolic_ref_read,
+    strictest_reading,
+    unread_readings,
 )
 
 ESCALATE_RE = re.compile(
@@ -591,9 +593,15 @@ def decide_shell_segment(
     if any(
         SUBSTITUTION_SENTINEL in word for word in words[1:]
     ) and not argument_safe_words(words, context):
-        return unjudged(
-            "a command substitution result could become a guarded flag"
-        ).advising("Run it in its own call and splice the literal output.")
+        # Abstaining is the floor rather than the answer: a result standing
+        # where a verb or a guarded flag goes is read as the strictest one it
+        # could be, as any other word nobody can read is.
+        return strictest_reading(
+            unjudged(
+                "a command substitution result could become a guarded flag"
+            ).advising("Run it in its own call and splice the literal output."),
+            unread_readings(words, context["rows"], write_facts(context)),
+        )
     decision = decide_segment_words(words, context, directory)
     if is_help_probe(words[1:]):
         return decision.revised(

@@ -1272,6 +1272,42 @@ def opaque_argument(word: str) -> bool:
     return "}" in word and ("{-" in word or ",-" in word)
 
 
+def unread_prefix(word: str) -> str | None:
+    """What a word spells before an expansion takes the rest, or ``None``.
+
+    ``None`` is a word read whole, which is every word nothing in expands. A
+    ``$`` opens a parameter, and a command substitution is spliced in as a
+    sentinel opening with one; a backtick opens the older spelling of the
+    same. What follows is unknown rather than one more piece of this word,
+    because an unquoted result splits into further words at run time.
+    """
+    opened = next(
+        (index for index, character in enumerate(word) if character in "$`"), None
+    )
+    return None if opened is None else word[:opened]
+
+
+def unread_flags(word: str, flags: list[str]) -> list[str]:
+    """The guarded flags a word nobody can read whole could turn out to be.
+
+    Only a word whose legible part already spells a flag: ``--ret$X`` could
+    be ``--retire`` and ``-$X`` any of them. A short flag is reached from any
+    single-dash prefix, because the expansion can finish a cluster the way
+    :func:`flag_matches` reads one -- ``-a$X`` can become ``-af``. A word
+    opening on its expansion is :func:`opaque_argument`'s, and names no flag
+    here: it could as well be the path or the ref beside it.
+    """
+    prefix = unread_prefix(word)
+    if prefix is None or not prefix.startswith("-"):
+        return []
+    return [
+        flag
+        for flag in flags
+        if flag.startswith(prefix)
+        or (len(flag) == 2 and flag.startswith("-") and not prefix.startswith("--"))
+    ]
+
+
 def key_matches(word: str, patterns: list[str]) -> bool:
     """Match a setting name against a rule's guarded-key globs, case-blind.
 
