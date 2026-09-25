@@ -1773,6 +1773,13 @@ def set_remote(
     Where nothing shared names the repository, this is the whole registration:
     a project declared in the committed half by name alone is materialized
     from what this writes.
+
+    A clone this machine already made, under the cache, is repointed with
+    it: the transport a clone pushes over is its origin's, and a clone the
+    shipped https entry materialized would otherwise go on pushing over https
+    from the host, where no launch rewrites a remote, however this machine
+    reaches the forge. Only ever onto another spelling of the same
+    repository, which the check above has already established.
     """
     proj = find_project(name)
     declared = proj.get("url", "")
@@ -1806,8 +1813,37 @@ def set_remote(
             f"  Nothing in {sync_file().name} names the repository, so this is "
             "what identifies it here"
         )
+    cached = cached_clone(name) if "path" not in proj else None
+    if cached is not None:
+        retransported(cached, url)
     if proj.get("required") and cached_clone(name) is None:
         typer.echo(f"  Run: uv run lup-devtools sync fetch {name}")
+
+
+def retransported(clone: Path, url: str) -> None:
+    """Point a clone's origin at ``url``, another spelling of what it holds.
+
+    The spelling configured rather than the one git resolves to, since an
+    ``insteadOf`` in force -- a contained session's own rewrites -- would read
+    as a transport the clone does not have. Inside a session the shared
+    `config` is read-only, so the refusal is said with the host command that
+    makes the same change rather than raised.
+    """
+    held = git.out(
+        "-C", str(clone), "config", "--get", "remote.origin.url", _ok_code=[0, 1]
+    )
+    if not held or held == url or not same_repository(held, url):
+        return
+    try:
+        git("-C", str(clone), "remote", "set-url", "origin", url)
+    except sh.ErrorReturnCode as error:
+        typer.echo(
+            f"  The clone at {clone} still reaches it over {held}: "
+            f"{decode_stderr(error)}. From a host terminal: "
+            f"git -C {clone} remote set-url origin {url}"
+        )
+        return
+    typer.echo(f"  The clone at {clone} now fetches and pushes over it")
 
 
 @app.command("grant")
