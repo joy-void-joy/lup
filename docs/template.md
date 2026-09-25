@@ -142,10 +142,20 @@ the SDK; everything else is loaded through pydantic-settings in
 # AGENT_MODEL=claude-opus-5
 # AGENT_MAX_BUDGET_USD=5.00
 # AGENT_MAX_TURNS=50
+# AGENT_REASONING_EFFORT=high   # low through ultra, on both backends
+# CODEX_EFFORT=xhigh            # overrides AGENT_REASONING_EFFORT on Codex/OpenAI
 # AGENT_SANDBOX_ENABLED=false   # run without Docker (disables code execution tools)
 # AGENT_NOTES_PATH=./notes      # relocate session data
 # AGENT_LOGS_PATH=./logs        # relocate trace logs
 ```
+
+With `AGENT_REASONING_EFFORT` and `CODEX_EFFORT` both unset, a session takes
+the model's default effort: `xhigh` clamped to the model's catalog row — the
+first of `xhigh`, `high`, `medium`, `low` the row takes, none for a model
+whose row lists no effort, and `xhigh` for a model with no row. The agent's
+`resolved_effort()`, beside `model_id()`, answers which one a session gets,
+and an effort named that the model lacks is refused where the agent is
+declared.
 
 ## `devtools/` — the development CLI
 
