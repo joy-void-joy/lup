@@ -35,8 +35,10 @@ from lup.harness.modules import (
     composed_guidance,
     scaffold_selection,
 )
+from lup.harness.content.docs.catalog import page
 from lup.seams import Selection
 from lup_template.devtools.subapps import APPLICATION_ROSTER
+from lup_template.harness.content.docs import corpus
 from lup_template.harness.content.modules.catalog import composed_entries
 from lup_template.harness.content.skills.meta import skill as build_meta
 from lup_template.harness.content.skills.review import skill as build_review
@@ -70,10 +72,11 @@ take this one value rather than each declaring its own.
 def adoptions(layout: ApplicationLayout) -> list[Adoption]:
     """What this repository declares against modules whose subjects it shares.
 
-    Additions rather than forks. Each of these is a section or a skill this
-    repository wrote about a subject the library owns — how *this* project's
-    policy is changed, what its markers mean, where its deferred work goes —
-    and each arrives under a new id, so the module goes on growing underneath
+    Additions rather than forks. Each of these is a section, a skill or a page
+    this repository wrote about a subject the library owns — how *this*
+    project's policy is changed, what its markers mean, where its deferred work
+    goes, what it records in the ledger — and each arrives under a new id, so
+    it leaves with the module it was written against and the module goes on growing underneath
     while this states only what it added. The one declared under the library's
     own id is ``review``: the library reviews a trace against the harness,
     which is what every project has, and this repository reviews it against
@@ -116,6 +119,23 @@ def adoptions(layout: ApplicationLayout) -> list[Adoption]:
         Adoption(
             module="meta",
             content=models.ContentSelection(skills=[build_meta(layout)]),
+        ),
+        Adoption(
+            module="ledger",
+            # This repository's worked example of knowledge kinds over the
+            # ledger: its page is this project's, and its subject is the
+            # ledger's, so it is published where the ledger is and not
+            # elsewhere — the library ships the mechanism and no epistemics.
+            documents=Selection(
+                overrides=[
+                    page(
+                        "corpus",
+                        "corpus.md",
+                        lambda _: corpus.DOCUMENT,
+                        layout.docs(),
+                    )
+                ]
+            ),
         ),
     ]
 
