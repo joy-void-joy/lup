@@ -4,12 +4,12 @@ The workflow commands — worktrees, branches, PRs, the quality gate — are the
 library's, wired over :func:`declared` by the roster every project inherits.
 The one tree added here has template-ness as its subject: renaming the package
 an adopter inherits, dropping the demonstrations the scaffold ships of itself,
-and pointing the lup registration it ships at the template it was generated
-from. None means anything inside a project that has already been initialized
-once, which is why they are mounted onto the inherited tree rather than
-replacing it — a project that replaced `dev` to add three commands would be
-restating every argument the library's own tree takes, which is the drift the
-roster removes.
+pointing the lup registration it ships at the template it was generated from,
+and naming the commit of that template it was stamped from. They are about
+what a project was made from rather than what it does, which is why they are
+mounted onto the inherited tree rather than replacing it — a project that
+replaced `dev` to add four commands would be restating every argument the
+library's own tree takes, which is the drift the roster removes.
 """
 
 from typing import Annotated
@@ -125,4 +125,23 @@ def init_upstream_cmd(
     """
     project = catalog.declared_scaffold().project
     if not origin.point_at_template(project_root(), project, dry_run):
+        raise typer.Exit(1)
+
+
+@init_app.command("base")
+def init_base_cmd() -> None:
+    """Name the commit of lup this repository was stamped from: the base.
+
+    Everything initialization settles about lup is taken at one commit -- the
+    pin names a branch holding it, and the upstream checkpoint and the
+    scaffold branch are rooted at it -- and this checkout's own branch does
+    not always say which. A clone of lup carries lup's history, so the commit
+    is the newest one it shares; a repository made with GitHub's "Use this
+    template" carries only the tree GitHub copied into its one root commit,
+    so the commit is the one of lup's that holds that tree. The registration
+    is fetched to read lup's history, cloning it the first time. Exits
+    nonzero where the base is an estimate or was not found.
+    """
+    project = catalog.declared_scaffold().project
+    if not origin.report_base(project_root(), project):
         raise typer.Exit(1)
