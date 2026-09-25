@@ -713,6 +713,29 @@ def test_the_rename_ends_on_the_refresh_its_session_will_need(
     assert not any("policy-refresh" in step for step in next_steps(sibling))
 
 
+def test_a_question_the_launch_policy_asks_carries_the_refresh_on_every_runtime(
+    tmp_path: Path,
+    runtime: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A human-owned file asks, and the question keeps the operator's refresh.
+
+    One runtime asks natively and hands the recovery over beside the question;
+    the other turns every question into a review queue refusal, which must
+    add its review route to what the question said rather than replace it.
+    """
+    origin, sibling = launched_beside(tmp_path, runtime, monkeypatch)
+    (sibling / "README.md").write_text("before\n")
+    regenerated_after_rename(sibling, runtime)
+
+    effect, detail = native_edit(origin, sibling / "README.md", runtime)
+
+    assert effect == ("ask" if runtime == "claude" else "deny")
+    assert refresh_request(origin, sibling) in detail
+    if runtime == "codex":
+        assert "questions show" in detail
+
+
 def test_the_operator_refresh_puts_the_siblings_own_policy_in_force(
     tmp_path: Path,
     runtime: str,

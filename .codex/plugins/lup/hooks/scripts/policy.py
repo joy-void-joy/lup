@@ -3006,13 +3006,14 @@ def reviewed_decision(
     show = shlex.join([*prefix, "show", identifier])
     answer = shlex.join([*prefix, "answer", identifier, "--as", "operator"])
     reject = shlex.join([*prefix, "reject", identifier, "--as", "operator"])
-    return decision.revised(
-        effect="deny",
-        recovery=(
-            f"Review {identifier} is {result['state']}. The operator can run "
-            f"`{show}`, then `{answer}` or `{reject}`. "
-            "After approval, retry this exact tool call; changed file contents require fresh review."
-        ),
+    # The review route is added to what the question already said rather than
+    # put in its place: a question carrying its own way out — the operator's
+    # policy refresh, where the launch's policy is what asked — reaches this
+    # runtime's agent exactly as it reaches the one whose runtime asks natively.
+    return decision.revised(effect="deny").advising(
+        f"Review {identifier} is {result['state']}. The operator can run "
+        f"`{show}`, then `{answer}` or `{reject}`. "
+        "After approval, retry this exact tool call; changed file contents require fresh review."
     )
 
 
