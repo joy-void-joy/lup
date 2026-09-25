@@ -238,7 +238,9 @@ def test_an_unnamed_claude_profile_leaves_the_home_its_environment_selects() -> 
     directory opened every session on a document the account never wrote.
     Codex's default names no home either."""
     resolver = ClaudeProfileResolver(ClaudeProfileRegistry())
-    original = ClaudeSessionConfig(model="claude", environment={"KEEP": "1"})
+    original = ClaudeSessionConfig(
+        model=CustomModel(id="claude"), environment={"KEEP": "1"}
+    )
 
     configured = resolver.resolve(None).apply(original)
 
