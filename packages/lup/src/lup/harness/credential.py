@@ -1176,6 +1176,25 @@ class GitAccess(BaseModel, frozen=True):
         """
         return [] if self.maintains else [GitSetting(key="maintenance.auto", value="0")]
 
+    def tracking(self) -> list[GitSetting]:
+        """Branches that record no upstream, and a push that needs none.
+
+        A branch's upstream is a `[branch]` section in the shared `config`,
+        which a contained session cannot write. Git's default records one
+        whenever a branch is cut from a remote-tracking ref, and a record it
+        cannot write fails the whole command: measured, `git switch -c x
+        origin/main` exits 1 and `git worktree add -b x path origin/main`
+        leaves no worktree at all. With `branch.autoSetupMerge` off the cut
+        records nothing and succeeds, and with `push.default` at `current` a
+        bare `git push` sends the branch to its own name with no upstream to
+        consult. An explicit `--track`, `--set-upstream-to` or `push -u` still
+        asks for the record and still cannot have it.
+        """
+        return [
+            GitSetting(key="branch.autoSetupMerge", value="false"),
+            GitSetting(key="push.default", value="current"),
+        ]
+
     def helper(self, granted: bool) -> GitSetting:
         """What git answers an HTTPS challenge with, token or not.
 
@@ -1235,6 +1254,7 @@ class GitAccess(BaseModel, frozen=True):
             *credential.configuration(),
             *self.signing.configuration(),
             *self.maintenance(),
+            *self.tracking(),
             self.helper(granted),
         ]
 

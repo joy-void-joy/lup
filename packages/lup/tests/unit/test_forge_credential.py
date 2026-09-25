@@ -863,3 +863,33 @@ def test_an_identity_that_is_there_says_nothing_at_all(
     git("-C", str(tmp_path), "config", "user.email", "some@one.invalid")
 
     assert GitAccess().authorship(committer(tmp_path)) == []
+
+
+def test_a_contained_branch_records_no_upstream_and_pushes_without_one() -> None:
+    """The shared `config` is read-only inside, and an upstream is a record in it."""
+    keys = settled(GitAccess().environment(REWRITE, NOTHING, False))
+
+    assert keys["branch.autoSetupMerge"] == "false"
+    assert keys["push.default"] == "current"
+
+
+def test_a_branch_cut_from_a_remote_ref_writes_no_config(
+    tmp_path: Path, only_this_checkout_answers: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Git's default would record an upstream here, and fail where it cannot."""
+    remote = tmp_path / "remote.git"
+    git("init", "-q", "--bare", "-b", "main", str(remote))
+    local = tmp_path / "local"
+    git("clone", "-q", str(remote), str(local))
+    for name, value in GitIdentity(name="A", email="a@b.invalid").environment().items():
+        monkeypatch.setenv(name, value)
+    git("-C", str(local), "commit", "-q", "--allow-empty", "-m", "x")
+    git("-C", str(local), "push", "-q", "origin", "HEAD:main")
+    git("-C", str(local), "fetch", "-q", "origin")
+    for name, value in GitAccess().environment(REWRITE, NOTHING, False).items():
+        monkeypatch.setenv(name, value)
+    before = (local / ".git" / "config").read_bytes()
+
+    git("-C", str(local), "switch", "-q", "-c", "cut", "origin/main")
+
+    assert (local / ".git" / "config").read_bytes() == before
