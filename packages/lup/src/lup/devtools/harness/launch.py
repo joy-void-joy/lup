@@ -2212,6 +2212,13 @@ def launch_claude(
             checkpoint(provider="claude")
 
 
+# lup: defer: a contained Codex session runs its hooks from the revision
+# installed here, inside its home volume, which the session can write; the
+# Claude plugin is held with the generated trees, this copy is not. Hold the
+# installed revision read-only for the session (a volume sub-mount: Docker's
+# volume-subpath, podman's subpath) or install from a launch-time snapshot
+# the session cannot reach -- a choice between engine versions this launch
+# cannot yet assume
 def prepare_codex_plugin(
     prefix: list[str],
     home: Path,
