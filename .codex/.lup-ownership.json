@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "a311e06fe97910c291bb3880d53480962ed7e2a6c532377fdd9c70b7d0b46406",
+  "source_digest": "922fc798bafd8b3abc94cd29213df283b9ee52561983a3957707405b2726edc1",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -569,14 +569,14 @@
     {
       "path": ".codex/plugins/lup/skills/init/SKILL.md",
       "category": "generated",
-      "sha256": "aa996325a31ff95fed4e13c9887a6b6a9fec6e9b5ef0e888a5545e3fb38be066",
+      "sha256": "e2499b98dab099375ea66dac9864074bc50a01e8401d8efd7b5bb0b52f7c08f2",
       "semantic_id": "skill.init",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/skills/install/SKILL.md",
       "category": "generated",
-      "sha256": "c3a7716ddfccd6958793e0889de97629481c131213c1b7759edfcd75770300d8",
+      "sha256": "dcf00a7291cf4b5a6d0281a4abfe028e70cb58e8f8d5b020b5779eb74c223e9c",
       "semantic_id": "skill.install",
       "executable": false
     },
@@ -681,7 +681,7 @@
     {
       "path": ".codex/plugins/lup/skills/update/SKILL.md",
       "category": "generated",
-      "sha256": "231f1479e8929b47fc0bdaaab2ecc080e0d96cf112b53004d3636dc1dd4f64da",
+      "sha256": "5296c80f0239c450dec80749179dd164e72fde8490cc2563d8977dac4b7884e0",
       "semantic_id": "skill.update",
       "executable": false
     },
