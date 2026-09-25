@@ -243,6 +243,10 @@ own effects as the default beneath them. One statement serves both halves:
 while the runner row stated a verdict of its own, a target could bless itself
 and refuse its own verbs with nothing noticing.
 
+`uv run lup-devtools dev migrate pyright-environment` rewrites the protected
+`pyproject.toml` configuration and requires review. Its literal `--dry-run`
+form only reports the proposed change and is admitted as a read-only probe.
+
 Every axis cascades down a table's nesting, and absence means one thing
 everywhere: a subcommand or operation omitting `effects`, `refuses` or
 `sandbox` inherits the level above it, and one stating any of them overrides

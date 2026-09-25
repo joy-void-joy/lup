@@ -330,6 +330,8 @@ class ShellOperationRule(BaseModel, frozen=True):
     name: str
     parents: list[str] = []
     operator_only: bool = False
+    probe_flags: list[str] = []
+    """Literal flags that make this operation perform no mutation."""
     effects: list[EffectRow] = []
     refuses: str = ""
     ask_flags: list[str] = []
@@ -700,7 +702,7 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
                 write_flags=list(operation.write_flags),
                 allow_flags=[],
                 read_verbs=[],
-                probe_flags=[],
+                probe_flags=list(operation.probe_flags),
                 frozen_flags=[],
                 write_markers=[],
                 guarded_keys=[],
