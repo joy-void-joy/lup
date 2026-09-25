@@ -15,6 +15,7 @@ import asyncio
 from pydantic import AnyHttpUrl, BaseModel, Field
 
 from lup import Claude
+from lup.providers.claude import ClaudeTools
 from lup.providers.claude.hooks import CLAUDE_SEMANTICS
 from lup.policy.hooks import LupHooksConfig
 from lup.policy.enforcement import SemanticToolPolicy, create_policy_hooks
@@ -55,7 +56,7 @@ def session_config() -> Claude:
     """Carry the enforcing hooks into every session this agent opens."""
     return Claude(
         model="claude-opus-5",
-        native_tools=["WebFetch"],
+        tools=ClaudeTools(builtin=["WebFetch"]),
         system_prompt="Fetch what you are asked for and report what happened.",
         hooks=policy_hooks(),
     )

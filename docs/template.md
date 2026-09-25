@@ -39,7 +39,7 @@ src/lup_template/
 │   ├── agent/               # Agent introspection and interactive debugging tools.
 │   │   ├── inspect_agent.py # Agent configuration inspection: tools, schemas, prompt, subagents.
 │   │   ├── repl.py          # Interactive REPL with the agent via the SDK (continuous session).
-│   │   └── serve.py         # Opening the session a tool server serves, and handing it to the library.
+│   │   └── serve.py         # This project's tool groups, built for inspection rather than served.
 │   ├── dev/                 # Dev operations: worktrees, branches, and pre-flight checks.
 │   │   ├── app.py           # What only a template adds to the `dev` tree the library already builds.
 │   │   └── init.py          # Package renaming for downstream project initialization.
@@ -185,6 +185,7 @@ display around the readers it names.
 - `run` — Follow work that outlives its tool call
 - `setup` — Interactive setup wizard, and its page
 - `sync` — Stay in step with upstream: tracked repos, and what they owe
+- `tools` — Serve the MCP servers a launched session declares
 - `trace` — What a session left behind: its trace and its records
 - `version` — Agent version, changelog, and bump
 

@@ -64,8 +64,12 @@ from lup.workspace.paths import (
     project_root,
     read_project_name,
 )
-from lup.tools.toolsets import startup_names
-from lup_template.agent.toolsets import declared_tool_groups
+from lup.mcp import ServeLaunch
+from lup_template.agent.toolsets import (
+    declared_tool_groups,
+    declared_tool_servers,
+    session_needs,
+)
 from lup.devtools.roster import LIBRARY_SPECS as LIBRARY_SUBAPPS
 from lup.harness.coverage import ContentRoot, ModuleCoverage
 from lup.harness.modules import Composition
@@ -249,12 +253,14 @@ def agent_tool_servers(
 ) -> list[McpServer]:
     """Offer this project's own agent tools to whichever runtime is reading.
 
-    The groups come from the same registry the in-process and subprocess
+    The servers come from the same declaration the in-process and subprocess
     backends assemble from, so a group added there reaches a native session
-    too rather than only the ones this program launches itself. Realtime is
-    the relay mode of a persistent run and belongs to no interactive session,
-    so its group is not among them. *withheld* are the groups a declined
-    module owns, which no plugin starts a server for.
+    too rather than only the ones this program launches itself. Each entry
+    carries its server as the serve command validates it back, so what a
+    runtime starts is the declaration rather than a name looked up in a list
+    beside it. Realtime is the relay mode of a persistent run and belongs to
+    no interactive session, so its group is not among them. *withheld* are the
+    groups a declined module owns, which no plugin starts a server for.
 
     The deadline is sized to a cold first boot rather than a warm one. Every
     server here starts through ``uv run``, which on a checkout without an
@@ -265,25 +271,26 @@ def agent_tool_servers(
     session sees is two tool groups simply missing on the boot that built
     the environment and present on every boot after.
     """
+    launch = ServeLaunch(session=HARNESS_SESSION, needs=session_needs)
     return [
         McpServer(
-            id=f"mcp.{name}",
-            name=name,
-            description=f"Agent tools in the {name} group, served over stdio",
+            id=f"mcp.{server.name}",
+            name=server.name,
+            description=f"Agent tools in the {server.name} group, served over stdio",
             command="uv",
             arguments=[
                 LiteralWord(text="run"),
                 LiteralWord(text="--directory"),
                 ProjectRootWord(),
                 LiteralWord(text="lup-devtools"),
-                LiteralWord(text="agent"),
-                LiteralWord(text="serve-tools"),
+                LiteralWord(text="tools"),
+                LiteralWord(text="serve"),
                 LiteralWord(text="--runtime"),
                 RuntimeWord(),
-                LiteralWord(text="--server"),
-                LiteralWord(text=name),
-                LiteralWord(text="--session"),
-                LiteralWord(text=HARNESS_SESSION),
+                *(
+                    LiteralWord(text=word)
+                    for word in [*launch.options(), *server.served().arguments()]
+                ),
             ],
             startup_timeout_seconds=startup_deadline_seconds,
         )
@@ -292,8 +299,8 @@ def agent_tool_servers(
         # than built, since this list is rendered into a native tree and one
         # that depended on what the generating machine had installed would
         # make two checkouts' plugins differ.
-        for name in startup_names(declared_tool_groups())
-        if name not in withheld
+        for server in declared_tool_servers()
+        if server.group().serving == "startup" and server.name not in withheld
     ]
 
 
