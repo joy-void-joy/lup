@@ -35,6 +35,7 @@ from host import (
     delivers,
     measured_boundary,
     unleased_write_targets,
+    readonly_write_targets,
     script_run_nudge,
     directory_write_targets,
     empty_directory_targets,
@@ -87,6 +88,7 @@ from kernel.lex import (
     shell_path_verb_targets,
     shell_sed_rewrites,
     shell_write_targets,
+    shell_written_targets,
 )
 from kernel.rows import (
     DisplacedTargetRow,
@@ -294,6 +296,19 @@ def bash_decision(
                 target
                 for target in [*shell_write_targets(command), *acted_on]
                 if not is_session_scratch_target(target)
+            ],
+            boundary,
+            cwd,
+        ),
+        # The read-only holes of the same lease: a repository's shared config
+        # and hooks, which the container binds read-only and a host posture
+        # holds only here. Every spelling of a write, so a `cp` or `ln` into
+        # one meets what a redirection's content already met -- and only the
+        # writes, since this refuses: a copy's source is read, not written.
+        readonly_targets=readonly_write_targets(
+            [
+                *shell_write_targets(command),
+                *shell_written_targets(command, SHELL_RULES),
             ],
             boundary,
             cwd,

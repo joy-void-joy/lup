@@ -434,6 +434,23 @@ inheritance and stale policy execution; they are mutable local bookkeeping,
 not authentication against a hostile process with the same filesystem
 authority.
 
+Every mounted repository's shared `config` and `hooks/` are the launch's
+read-only holes, because git runs on the host what they name. The container
+binds them read-only inside the writable share, and the ledger records them as
+read-only roots, which is what holds them on a host posture. The file tools
+meet them through the edit gates. Every spelling of a shell write meets them
+through the `read-only-write` settlement — a redirection, `tee`, `sed -i`,
+`cp`, `mv`, `ln` — which refuses rather than asks, as the bind does, and reads
+only the operands a verb writes, so copying a hook *out* stays a read. A git
+config write naming a program keeps its own question. The runtime's own
+sandbox holds them for what no rule reads: an inner Claude launch passes them
+as `sandbox.filesystem.denyWrite`, which holds inside a wider `allowWrite`.
+An inner Codex launch cannot say that — `sandbox_workspace_write.writable_roots`
+takes no read-only region inside a root, and Codex protects only a root's
+`.git`, which a bare repository does not have — so it admits a mounted bare
+clone's worktrees rather than its git directory, and a worktree cut after
+the launch is Codex's to write from the next one.
+
 Edit decisions cover protected paths, marker changes, size, the canonical
 anti-pattern audit, and declared import ownership. An edit over the size gate alone is deferred — the hook
 emits no decision, so auto-accept applies while hard gates stay explicit.

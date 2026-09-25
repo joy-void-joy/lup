@@ -33,7 +33,9 @@ from lup.policy.assets.host import (
     directory_write_targets,
     empty_directory_targets,
     foreign_repository,
+    measured_boundary,
     outside_this_project,
+    readonly_write_targets,
     recoverable_write_targets,
     resolved_write_targets,
     rewritten_text,
@@ -50,6 +52,7 @@ from lup.policy.kernel.lex import (
     shell_path_verb_targets,
     shell_sed_rewrites,
     shell_write_targets,
+    shell_written_targets,
 )
 from lup.policy.kernel.roles import displaced_targets
 from lup.policy.kernel.rows import (
@@ -434,6 +437,17 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 ),
                 directory_targets=directory_write_targets(acted_on, root),
                 empty_directories=empty_directory_targets(acted_on, root),
+                # The launch's read-only holes, read off the ledger the edit
+                # path already routes by, so a `cp` into one is refused here
+                # exactly as the native dispatchers refuse it.
+                readonly_targets=readonly_write_targets(
+                    [
+                        *shell_write_targets(event.command),
+                        *shell_written_targets(event.command, self.rules),
+                    ],
+                    measured_boundary(root),
+                    root,
+                ),
                 recoverable_target_limit=self.recoverable_target_limit,
                 runner_targets=self.runner_targets,
                 target_tables=self.target_tables,
