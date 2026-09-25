@@ -58,8 +58,9 @@ the share of the cores that the runs already under way leave — four runs of
 four workers rather than four of sixteen. A fifth waits for a slot and says so
 as its wait begins, so a run that seems to hang with that line above it is
 queued rather than stuck; after half an hour it goes ahead at full width, in
-case a holder died without releasing its slot. `dev check --changed` holds no
-slot: it runs no suite, and a slot held for its few seconds would narrow every
+case a holder died without releasing its slot. `dev check --changed` and
+`dev check --no-test` hold none: neither runs a suite, and Pyright checks on one
+core, so a slot either held would divide nothing of its own and narrow every
 run opening beside it for the whole of that run. What the slots do not divide
 is the repository — a suite reading one whose branches another command is
 moving fails on that rather than on the code.

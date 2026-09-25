@@ -23,11 +23,14 @@ gate. `dev test` is the same suite at the same width over the files a caller
 names, and it is the half of the scoped loop a change runs while it is still
 moving — so ten agents iterating are ten suites of sixteen workers beside
 whatever gate is running, the contention this exists for arriving by the side
-door. `dev check --changed` takes no slot. It opens no suite, and its ruff and
-Pyright over a handful of files are done in seconds; a slot it held would
-narrow every run that started beside it for the whole of that run, since the
-share is fixed when a run opens, and would queue the seconds-long check behind
-runs of minutes.
+door. `dev check --changed` and `dev check --no-test` take no slot. Neither
+opens a suite: what they run is ruff and a Pyright handed no `--threads`, a
+single core however long it takes. A slot either held would divide nothing of
+its own, and would narrow every run that started beside it for the whole of
+that run, since the share is fixed when a run opens — and would queue
+`--changed`, a check of seconds, behind runs of minutes. That Pyright stays on
+one core is a decision `pyright_check` records, and the day it spreads, these
+two runs open something the share has to divide.
 
 Nothing here is correctness. A slot that cannot be taken, a lock file that
 cannot be made, a holder that died without releasing: each ends in the gate

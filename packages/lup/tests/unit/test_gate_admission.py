@@ -23,6 +23,8 @@ from lup.devtools.dev.admission import (
     held_beside,
     slot_paths,
 )
+from lup.devtools.project import DevProject
+from lup.harness.models import HookSet
 from lup.harness.notice import Notice
 
 
@@ -193,16 +195,99 @@ def test_dev_test_takes_its_share_beside_a_running_gate(
     assert "gate admission: 8 workers per suite" in capsys.readouterr().out
 
 
+def refuse(*_: object, **__: object) -> NoReturn:
+    raise AssertionError("a gate slot was asked for")
+
+
 def test_a_path_under_no_suite_is_refused_before_a_slot_is_asked_for(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A typo is answered at once, not after a wait behind four other runs."""
     suite = suite_in(tmp_path / "clone", monkeypatch)
-
-    def refuse(*_: object, **__: object) -> NoReturn:
-        raise AssertionError("a slot was asked for before the selection was read")
-
     monkeypatch.setattr(check, "admitted", refuse)
 
     with pytest.raises(typer.BadParameter):
         check.run_selected([suite], [str(tmp_path / "elsewhere")], [], workers=16)
+
+
+def quietly(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Everything the gate runs beside its suites answers at once, and passes."""
+    for name in ("ruff_format_check", "ruff_lint_check", "pyright_check"):
+
+        def tool(*_: object, name: str = name, **__: object) -> check.CheckReport:
+            return check.CheckReport(name=name, lines=[f"{name}: ok"])
+
+        monkeypatch.setattr(check, name, tool)
+
+    def swept(*_: object, **__: object) -> list[check.CheckReport]:
+        return []
+
+    monkeypatch.setattr(check, "scan_reports", swept)
+
+
+def gate(suites: list[check.TestRoot], no_test: bool) -> None:
+    check.run_checks(
+        fix=False,
+        no_test=no_test,
+        project=DevProject(package="app"),
+        test_roots=suites,
+        compositions=[],
+        repository_writers=[],
+        git_guards=[],
+        hooks_declaration=HookSet(id="probe", policy_ids=[]),
+        test_workers=16,
+    )
+
+
+def test_a_gate_over_its_suites_holds_a_slot_while_they_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    suite = suite_in(tmp_path, monkeypatch)
+    quietly(monkeypatch)
+
+    gate([suite], no_test=False)
+
+    assert suite.held == [1]
+    assert suite.handed == [16]
+
+
+def test_a_gate_that_opens_no_suite_holds_no_slot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--no-test` runs ruff and a single-core Pyright, so it has nothing to divide.
+
+    Held, its slot would narrow every suite opening beside it for the whole of
+    that suite's run, and queue it behind four others for a share it never
+    uses — which is why `--changed`, the other run opening no suite, takes
+    none either.
+    """
+    suite = suite_in(tmp_path, monkeypatch)
+    quietly(monkeypatch)
+    monkeypatch.setattr(check, "admitted", refuse)
+
+    gate([suite], no_test=True)
+
+    assert suite.handed == []
+
+
+def test_the_gate_hands_pyright_no_threads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What lets a run without suites go unadmitted: Pyright checks on one core.
+
+    Handed `--threads`, it forks a process per thread, each holding its own
+    program, and becomes something the slots have to divide — so a run
+    opening no suite would need admitting after all.
+    """
+    handed: list[tuple[object, ...]] = []
+
+    def recorded(*arguments: object, **_: object) -> None:
+        handed.append(arguments)
+
+    monkeypatch.setattr(check, "project_root", lambda: tmp_path)
+    monkeypatch.setattr(check, "uv", recorded)
+
+    assert check.pyright_check([]).passed
+    [arguments] = handed
+    assert arguments[:2] == ("run", "pyright")
+    assert not any(str(argument).startswith("--threads") for argument in arguments)

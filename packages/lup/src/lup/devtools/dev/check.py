@@ -8,6 +8,7 @@ from hashlib import sha256
 from tempfile import gettempdir
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from functools import partial
 from importlib.util import find_spec
 from pathlib import Path
@@ -37,7 +38,7 @@ from lup.policy.assets.host import project_environment
 from lup.policy.everyday import SESSION_SHAPES
 from lup.workspace.paths import is_template_scaffold, project_root
 
-from lup.devtools.dev.admission import admitted
+from lup.devtools.dev.admission import Admission, admitted
 from lup.devtools.dev.antipatterns import scan_antipatterns
 from lup.devtools.project import DevProject
 from lup.devtools.dev.boundaries import scan_application_placement
@@ -353,6 +354,16 @@ def pyright_check(
     understood. That is what separates narrowing this from narrowing a test
     run — there is no dependency graph to reconstruct and therefore none to
     reconstruct wrongly.
+
+    Handed no ``--threads``, so it checks on one core. Measured over lup and
+    an adopter on a shared 32-core host, ``--threads 8`` mostly cut the wall
+    time by a third to three quarters, for two to five times the CPU and three
+    times the memory: each thread is a forked process holding its own program,
+    half a gigabyte to a gigabyte of it. In the full gate that buys nothing —
+    Pyright finishes well before the suites beside it, and the gate costs its
+    slowest row — while the cores it would take come out of those suites. It
+    is also why a gate run without its suites holds no slot; a threaded
+    Pyright would be something the slots have to divide.
 
     ``abandoned_after`` is how long a generated configuration may go untouched
     before this treats it as a killed run's leavings. An hour because the
@@ -1420,24 +1431,28 @@ def run_checks(
     """
     started = perf_counter()
     excluded_roots = non_code_roots(project)
+    suites = [] if no_test else test_roots
     # One slot for the whole run, taken before any tool starts: the tools
     # start together, each suite reads its width as it launches, and a
     # run's share is settled when it opens rather than revised as others
     # come and go. What the share divides is the suites' workers alone —
     # Pyright is handed no `--threads`, so it checks on a single core
-    # however many runs are on the machine.
-    with admitted(project_root(), test_workers) as admission:
+    # however many runs are on the machine — and a run opening no suite
+    # takes no slot, since a slot it held would narrow every suite opening
+    # beside it for the whole of that suite's run and divide nothing.
+    held = (
+        admitted(project_root(), test_workers)
+        if suites
+        else nullcontext(Admission(workers=test_workers))
+    )
+    with held as admission:
         tools: list[Callable[[], CheckReport]] = [
             partial(ruff_format_check, fix, excluded_roots),
             partial(ruff_lint_check, fix, excluded_roots),
             partial(pyright_check, excluded_roots),
             *(
-                []
-                if no_test
-                else [
-                    partial(root.checked, admission.workers, excluded_roots)
-                    for root in test_roots
-                ]
+                partial(root.checked, admission.workers, excluded_roots)
+                for root in suites
             ),
         ]
         sweeps = partial(
@@ -1522,12 +1537,12 @@ def run_changed(
     declines the question and says so on every run. `dev test` runs the files
     a person names; `dev check` stays the bar a commit passes.
 
-    **No gate slot is held**, where `dev check` and `dev test` each hold one.
-    This opens no suite, and its three tools over a handful of files finish in
-    seconds. Admitted, it would queue the loop's quick half behind runs of
-    minutes, and every run opening beside it would take a narrower share for
-    the whole of its own length — a share is fixed when a run opens — to make
-    room for a check long since finished.
+    **No gate slot is held**, where `dev check` over its suites and `dev test`
+    each hold one. This opens no suite, and its three tools over a handful of
+    files finish in seconds. Admitted, it would queue the loop's quick half
+    behind runs of minutes, and every run opening beside it would take a
+    narrower share for the whole of its own length — a share is fixed when a
+    run opens — to make room for a check long since finished.
     """
     started = perf_counter()
     scope = changed_python_files(since)

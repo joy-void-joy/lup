@@ -325,7 +325,9 @@ def create_dev_app(
         ] = False,
         no_test: Annotated[
             bool,
-            typer.Option("--no-test", help="Skip pytest"),
+            typer.Option(
+                "--no-test", help="Skip the test suites, and hold no gate slot"
+            ),
         ] = False,
         antipatterns: Annotated[
             bool,
