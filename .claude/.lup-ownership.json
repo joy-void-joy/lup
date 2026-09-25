@@ -688,7 +688,7 @@
     {
       "path": ".claude/plugins/lup/scripts/file_suggest.sh",
       "category": "generated",
-      "sha256": "8408833a0d8e4fc13cc8d35b2bf421ef86880087327bcce0530667c8786dc358",
+      "sha256": "72a9cd8018e9bfed1a0f7c6ad377c6e892bd78f8269bd5b5cd477ec2b735d338",
       "semantic_id": "harness.file-suggestion",
       "executable": true
     },
