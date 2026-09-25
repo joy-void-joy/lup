@@ -16,6 +16,7 @@ arrives as an argument — the managed root to enumerate, the environment
 variable to read — never as a branch on which runtime is asking.
 """
 
+import ast
 import csv
 import fcntl
 import json
@@ -70,6 +71,81 @@ def policy_snapshot_digest(directory: Path) -> str:
         for item in policy_snapshot_files(directory)
     ]
     return sha256(json.dumps(rows, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def policy_data_literals(path: Path) -> dict:
+    """Every constant a generated ``policy_data.py`` assigns, read without running it.
+
+    The module is read rather than imported because the checkout holding it
+    is the session's to write: importing it to learn what it says would run
+    whatever it holds before anybody agreed to. What generation writes there
+    is data and nothing else -- a docstring, the row types imported from the
+    kernel, and one assignment of a literal per constant, annotated with a
+    type -- so each assignment is evaluated as a literal, a later one standing
+    over an earlier one as it would at import. Any other statement, or an
+    annotation that is more than a type, is one generation never writes and
+    would run at import, so it is refused, naming its line, rather than
+    skipped: a reading that left it out would describe a module other than
+    the one that runs.
+    """
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    except SyntaxError as error:
+        raise ValueError(f"{path} is not Python generation writes: {error}") from error
+
+    def typed(annotation: ast.expr) -> bool:
+        """Whether an annotation only names types, which importing never runs."""
+        return all(
+            isinstance(
+                node,
+                (
+                    ast.Name,
+                    ast.Attribute,
+                    ast.Subscript,
+                    ast.Tuple,
+                    ast.BinOp,
+                    ast.BitOr,
+                    ast.Constant,
+                    ast.Load,
+                ),
+            )
+            for node in ast.walk(annotation)
+        )
+
+    def assigned(statement: ast.stmt) -> dict:
+        """One statement as the constants it assigns, or a refusal naming it."""
+        match statement:
+            case (
+                ast.Expr(value=ast.Constant(value=str()))
+                | ast.ImportFrom(module="kernel.rows", level=0)
+            ):
+                return {}
+            case ast.Assign(targets=[ast.Name(id=name)], value=value):
+                pass
+            case ast.AnnAssign(
+                target=ast.Name(id=name),
+                annotation=annotation,
+                value=ast.expr() as value,
+            ) if typed(annotation):
+                pass
+            case _:
+                raise ValueError(
+                    f"{path}:{statement.lineno} is a statement generation never "
+                    "writes, and it would run when the policy is imported"
+                )
+        try:
+            return {name: ast.literal_eval(value)}
+        except (ValueError, TypeError) as error:
+            raise ValueError(
+                f"{path}:{statement.lineno} assigns {name} something other than "
+                "a literal, which would run when the policy is imported"
+            ) from error
+
+    return {
+        name: value
+        for statement in tree.body
+        for name, value in assigned(statement).items()
+    }
 
 
 def execution_write_refusal(path_text: str, root: Path | None) -> str:
@@ -301,16 +377,144 @@ def ledger_rows(name: str, root: Path | None) -> list[dict]:
     ]
 
 
+def worktree_refusal(checkout: str, launch: str) -> str:
+    """Why a refresh must not accept a checkout no grant names, or "" where it may.
+
+    Never the launch checkout itself, which is judged by the policy the
+    session launched with, and never a checkout nested inside another
+    checkout of its repository -- the launch's, or a sibling the launch's
+    policy judges -- whose own policy would judge a hole cut out of that tree.
+
+    Beyond those, it has to be a worktree Git itself registered. A `.git`
+    file naming the repository is one line anybody can write; what Git keeps
+    is the pair of an entry under the shared directory's `worktrees/` whose
+    `gitdir` names the checkout's `.git` back, and that `.git` naming the
+    entry, and it lists exactly the checkouts such pairs register.
+
+    Nothing here proves an entry came from `git worktree add`: a session can
+    write every file that command writes, so no file can show where one came
+    from. What is checked is an invariant Git holds itself to -- one branch
+    is checked out in one worktree, and Git refuses a second without
+    `--force` -- so an entry dressed to check out a branch another worktree
+    already has is refused as not cut the way Git cuts one. That is a
+    consistency check, not a proof of provenance: an entry written by hand on
+    a branch of its own passes it, and the operator's preview of what
+    accepting would change is the control for that residue.
+    """
+    path = Path(checkout)
+    if checkout == launch:
+        return (
+            f"{checkout} is the launch checkout itself, which the policy this "
+            "session launched with judges; it is never refreshed, and what it "
+            "generates takes effect at the next launch"
+        )
+    if path.is_relative_to(launch):
+        return (
+            f"{checkout} is nested inside the launch checkout {launch}, so its "
+            "policy would judge a hole cut out of the tree the launch's own "
+            "policy judges; cut the worktree beside the launch checkout instead"
+        )
+    marker = path / ".git"
+    if marker.is_symlink() or not marker.is_file():
+        return (
+            f"{checkout} is not a linked worktree: its .git is not a file naming "
+            "an entry Git registered. Only a worktree cut with `git worktree add` "
+            "is refreshed; cut one and regenerate its policy there"
+        )
+
+    def asked(*arguments: str) -> subprocess.CompletedProcess[str]:
+        """What Git answers about the checkout, bounded like every Git call here."""
+        return subprocess.run(
+            ["git", "-C", checkout, *arguments],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+
+    try:
+        located = asked(
+            "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"
+        )
+        listed = asked("worktree", "list", "--porcelain")
+    except subprocess.TimeoutExpired:
+        return (
+            f"Git did not answer about {checkout} within 5 seconds; retry once it does"
+        )
+    directories = [Path(line).resolve() for line in located.stdout.splitlines()]
+    if located.returncode != 0 or listed.returncode != 0 or len(directories) != 2:
+        told = (located.stderr + listed.stderr).strip()
+        return f"Git does not read {checkout} as a worktree: {told}"
+    entry, common = directories
+    if entry.parent != common / "worktrees":
+        return (
+            f"{marker} names {entry}, which is not an entry under "
+            f"{common / 'worktrees'}; Git registers no worktree there"
+        )
+    try:
+        named = Path((entry / "gitdir").read_text(encoding="utf-8").strip())
+    except OSError:
+        return f"{entry} names no checkout back, so Git registers no worktree there"
+    if (entry / named).resolve() != marker.resolve():
+        return (
+            f"{entry / 'gitdir'} names {named}, not {marker}: the entry this "
+            "checkout's .git points at is registered for another checkout"
+        )
+    lines = listed.stdout.splitlines()
+    starts = [index for index, line in enumerate(lines) if line.startswith("worktree ")]
+    branches = {
+        str(Path(lines[start].removeprefix("worktree ")).resolve()): next(
+            (
+                line.removeprefix("branch ")
+                for line in lines[start:end]
+                if line.startswith("branch ")
+            ),
+            "",
+        )
+        for start, end in zip(starts, [*starts[1:], len(lines)])
+        if "bare" not in lines[start:end]
+    }
+    if checkout not in branches:
+        return f"Git does not list {checkout} among the worktrees of {common}"
+    enclosing = [
+        other for other in branches if other != checkout and path.is_relative_to(other)
+    ]
+    if enclosing:
+        return (
+            f"{checkout} is nested inside {enclosing[0]}, another checkout of its "
+            "repository, so its policy would judge a hole cut out of that tree; "
+            "cut the worktree beside it instead"
+        )
+    sharing = [
+        other
+        for other, branch in branches.items()
+        if other != checkout and branches[checkout] and branch == branches[checkout]
+    ]
+    if sharing:
+        return (
+            f"{checkout} checks out {branches[checkout]}, which {sharing[0]} also "
+            "checks out. Git refuses a second worktree on one branch without "
+            "--force, so this one was not cut the way Git cuts one; check out a "
+            f"branch of its own there (`git -C {checkout} switch -c <name>`), or "
+            "cut a fresh worktree"
+        )
+    return ""
+
+
 def refreshable_checkout(path_text: str, root: Path | None) -> str:
     """The checkout holding a path, where an operator refresh would reach it.
 
     ``harness policy-refresh`` accepts a checkout the launch granted by name,
     and a worktree no grant names wherever the measured boundary holds it
-    writable and it belongs either to the launch checkout's own repository or
-    to one the launch mounted explicitly as a writable bare repository around
-    it. The launch checkout itself is judged by the policy the session loaded
-    and is never refreshed. Anything else answers "", because naming the
-    command there would send an operator to a refusal.
+    writable, :func:`worktree_refusal` finds nothing against it, and it
+    belongs either to a repository the launch mounted explicitly as a
+    writable bare repository around it, or to the launch checkout's own
+    repository within that repository's own lease: inside its shared
+    directory, or a checkout the launch measured writable as a mount of its
+    own. The command recomputes that lease from Git; the measured roots are
+    what this half can read, and they name the same checkouts. Anything else
+    answers "", because naming the command there would send an operator to a
+    refusal.
     """
     launch = launch_root(root)
     boundary = measured_boundary(root)
@@ -332,10 +536,14 @@ def refreshable_checkout(path_text: str, root: Path | None) -> str:
         and Path(owner).is_relative_to(row["root"])
         for row in ledger_rows("destination_authorities", root)
     )
-    reached = bool(repository) and (mounted or repository == shared_git_directory(here))
     writable = boundary["writable_roots"] if "writable_roots" in boundary else []
+    leased = Path(owner).is_relative_to(repository) or any(
+        str(Path(item).resolve()) == owner for item in writable
+    )
+    own = repository == shared_git_directory(here) and leased
     held = bool(writable) and not execution_write_refusal(owner, root)
-    return owner if reached and held else ""
+    reached = bool(repository) and (mounted or own) and held
+    return owner if reached and not worktree_refusal(owner, here) else ""
 
 
 def policy_refresh_command(checkout: str, root: Path | None) -> str:

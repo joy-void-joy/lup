@@ -90,6 +90,7 @@ call in the session.
 
 # lup: ignore[library-default] — the stdlib a compiled dispatcher actually imports; widening it is the hazard the pin exists to prevent
 DISPATCHER_STDLIB = (
+    "ast",
     "json",
     "shlex",
     "os",
@@ -149,6 +150,13 @@ fetch by its origin and by nothing else, which means splitting a URL into
 the scheme, host and port a scope is written against and dropping the path,
 the query and any userinfo -- taking that apart by hand is how the userinfo
 ends up in the record. Nothing already pinned here parses a URL.
+
+``ast`` earns its place the same way. What another checkout's generated
+policy says is read from its ``policy_data.py``, and that module was written
+in a checkout the session works in, so importing it to learn what it says
+would run whatever it holds. Parsing it and evaluating each assignment as a
+literal reads it as the data generation promises it is, and refuses it where
+it is not. Nothing already pinned here parses Python.
 """
 
 ROUTER = "dispatch"

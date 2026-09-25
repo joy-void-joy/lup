@@ -131,9 +131,20 @@ def create_harness_app(
                 help="Runtime the launch opened, for a launch ledger that records none"
             ),
         ] = None,
+        yes: Annotated[
+            bool,
+            typer.Option(
+                "--yes",
+                help="Accept without asking, after showing what accepting changes",
+            ),
+        ] = False,
     ) -> None:
-        """Accept changed destination policy from an independent operator terminal."""
-        policy_refresh.refresh_command(project_root(), nonce, repository, runtime)
+        """Accept changed destination policy from an independent operator terminal.
+
+        Shows how the checkout's generated policy differs from the one judging
+        it now, then asks before accepting it.
+        """
+        policy_refresh.refresh_command(project_root(), nonce, repository, runtime, yes)
 
     @app.command("check")
     def check_command(

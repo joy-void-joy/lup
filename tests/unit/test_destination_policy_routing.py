@@ -7,6 +7,7 @@ import shlex
 import sys
 from pathlib import Path
 from subprocess import TimeoutExpired
+from unittest.mock import Mock
 
 import pytest
 import sh
@@ -641,11 +642,18 @@ def launched_beside(
 
 
 def regenerated_after_rename(sibling: Path, runtime: str) -> None:
-    """The worktree's policy as generation writes it once the package is renamed."""
+    """The worktree's policy as generation writes it once the package is renamed.
+
+    Its import boundary names the renamed package's composition root among
+    its owners, assigned as the literal generation writes -- nothing but data,
+    which is all a refresh reads.
+    """
     data = sibling / f".{runtime}/plugins/lup/hooks/runtime/policy_data.py"
+    boundaries = policy_host.policy_data_literals(data)["IMPORT_BOUNDARIES"]
+    boundaries[0]["owners"].append("src/adlib/harness/")
     data.write_text(
         data.read_text()
-        + '\nIMPORT_BOUNDARIES[0]["owners"].append("src/adlib/harness/")\n'
+        + f"\nIMPORT_BOUNDARIES: list[ImportBoundaryRow] = {boundaries!r}\n"
     )
 
 
@@ -770,8 +778,14 @@ def test_the_operator_refresh_puts_the_siblings_own_policy_in_force(
     target = sibling / "src" / "adlib" / "harness" / "composition.py"
     assert native_edit(origin, target, runtime, "VALUE = 1", "VALUE = 2")[0] == "deny"
     monkeypatch.delenv("LUP_BOUNDARY_NONCE")
-    accepted = refresh_destination_policy(origin, "routing-test", sibling)
+    approve = Mock(return_value=True)
+    accepted = refresh_destination_policy(origin, "routing-test", sibling, approve)
     monkeypatch.setenv("LUP_BOUNDARY_NONCE", "routing-test")
+    (preview,) = approve.call_args.args
+    (boundary,) = [
+        change for change in preview.changes if change.name == "IMPORT_BOUNDARIES"
+    ]
+    assert any("src/adlib/harness/" in entry for entry in boundary.added)
 
     effect, detail = native_edit(origin, target, runtime, "VALUE = 1", "VALUE = 2")
 

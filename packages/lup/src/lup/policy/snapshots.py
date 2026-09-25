@@ -27,6 +27,37 @@ def policy_runtime(name: str) -> TypeGuard[PolicyRuntime]:
     return name in get_args(PolicyRuntime)
 
 
+def evaluator_source(checkout: Path, runtime: PolicyRuntime) -> Path:
+    """The one generated tree holding a checkout's evaluator for a runtime.
+
+    Refused, saying what to do, where there is not exactly one, and where the
+    one there is is not the checkout's own: a tree resolving outside the
+    checkout, or reached through a symlink inside it, holds bytes the checkout
+    does not, and accepting it would run them as the checkout's policy.
+    """
+    candidates = list(
+        (checkout / f".{runtime}" / "plugins").glob(
+            "*/hooks/scripts/policy_evaluator.py"
+        )
+    )
+    if len(candidates) != 1:
+        raise ValueError(
+            f"Expected one generated {runtime} destination policy evaluator "
+            f"in {checkout}; found {len(candidates)}. Run "
+            "`uv run lup-devtools harness generate all` there, then refresh "
+            "this launch's accepted policy snapshot."
+        )
+    source = candidates[0].parent.parent
+    if not source.resolve().is_relative_to(checkout.resolve()):
+        raise ValueError(
+            f"Destination policy source {source} resolves to {source.resolve()}, "
+            f"outside {checkout}; only a tree the checkout itself holds is accepted"
+        )
+    if any(path.is_symlink() for path in [source, *source.parents]):
+        raise ValueError(f"Destination policy source has a symlink: {source}")
+    return source
+
+
 class DestinationPolicy(BaseModel, frozen=True, extra="forbid"):
     """A checkout and evaluator the operator's launch explicitly made reachable."""
 
@@ -41,44 +72,18 @@ class DestinationPolicy(BaseModel, frozen=True, extra="forbid"):
     digest: str = ""
     error: str = ""
 
-    def evaluator_source(self, runtime: PolicyRuntime) -> Path:
-        """The one generated tree holding this checkout's evaluator for a runtime.
-
-        Refused, saying what to do, where there is not exactly one, and where
-        the one there is is not the checkout's own: a tree resolving outside
-        the checkout, or reached through a symlink inside it, holds bytes the
-        checkout does not, and accepting it would run them as the checkout's
-        policy.
-        """
-        checkout = Path(self.checkout)
-        candidates = list(
-            (checkout / f".{runtime}" / "plugins").glob(
-                "*/hooks/scripts/policy_evaluator.py"
-            )
-        )
-        if len(candidates) != 1:
-            raise ValueError(
-                f"Expected one generated {runtime} destination policy evaluator "
-                f"in {checkout}; found {len(candidates)}. Run "
-                "`uv run lup-devtools harness generate all` there, then refresh "
-                "this launch's accepted policy snapshot."
-            )
-        source = candidates[0].parent.parent
-        if not source.resolve().is_relative_to(checkout.resolve()):
-            raise ValueError(
-                f"Destination policy source {source} resolves to {source.resolve()}, "
-                f"outside {checkout}; only a tree the checkout itself holds is accepted"
-            )
-        if any(path.is_symlink() for path in [source, *source.parents]):
-            raise ValueError(f"Destination policy source has a symlink: {source}")
-        return source
-
-    def accepted(self, root: Path, runtime: str) -> "DestinationPolicy":
+    def accepted(
+        self, root: Path, runtime: str, reviewed: str = ""
+    ) -> "DestinationPolicy":
         """Copy only verified source into a content-addressed launch snapshot.
 
         ``runtime`` arrives from a launch or a ledger, and it is spelled into
         the path the evaluator is looked for at, so a name that is not a
         runtime is refused before anything is read.
+
+        ``reviewed`` is the digest an operator was shown, where one was: the
+        bytes accepted are then exactly those, and a checkout that changed
+        after it was shown is refused before anything is copied.
         """
         if not policy_runtime(runtime):
             return self.model_copy(
@@ -90,11 +95,16 @@ class DestinationPolicy(BaseModel, frozen=True, extra="forbid"):
                 }
             )
         try:
-            source = self.evaluator_source(runtime)
+            source = evaluator_source(Path(self.checkout), runtime)
         except ValueError as error:
             return self.model_copy(update={"error": str(error), "runtime": runtime})
         try:
             digest = policy_snapshot_digest(source)
+            if reviewed and digest != reviewed:
+                raise ValueError(
+                    f"{source} changed after it was shown; run the refresh again "
+                    "to see what it holds now"
+                )
             destination = root / ".lup" / "policy-snapshots" / digest
             destination.parent.mkdir(parents=True, exist_ok=True)
             if not destination.exists():
