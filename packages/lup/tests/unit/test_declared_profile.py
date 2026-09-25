@@ -10,8 +10,9 @@ own answer, or a session it runs inside, is never overruled by them.
 from pathlib import Path
 
 import pytest
+from pydantic import AnyHttpUrl
 
-from lup.providers.claude import Claude
+from lup.providers.claude import Claude, ClaudeCompatibleEndpoint
 from lup.providers.claude.login import CLAUDE_CONFIG_DIR, CLAUDE_LOGIN
 from lup.providers.claude.runtime import ClaudeSessionOpener
 from lup.providers.codex import Codex
@@ -99,3 +100,56 @@ def test_naming_no_profile_stays_on_the_surrounding_account(
 
     assert claude.environment[CLAUDE_CONFIG_DIR] == "/started/under"
     assert CODEX_HOME not in codex.environment
+
+
+def test_an_unnamed_model_runs_on_the_persons_tier(
+    config: UserConfigFile, tmp_path: Path
+) -> None:
+    assert ClaudeSessionOpener(Claude()).compiled().model_id() == "opus"
+    assert CodexSessionOpener(Codex(cwd=tmp_path)).compiled().model_id() == (
+        "gpt-5.6-sol"
+    )
+
+    writes(config, 'tier = "balanced"\n')
+
+    assert ClaudeSessionOpener(Claude()).compiled().model_id() == "sonnet"
+    assert CodexSessionOpener(Codex(cwd=tmp_path)).compiled().model_id() == (
+        "gpt-5.6-terra"
+    )
+
+
+def test_a_declared_model_or_endpoint_is_never_overruled_by_the_tier(
+    config: UserConfigFile, tmp_path: Path
+) -> None:
+    writes(config, 'tier = "fast"\n')
+    endpoint = ClaudeCompatibleEndpoint(base_url=AnyHttpUrl("http://localhost:8000/v1"))
+
+    assert ClaudeSessionOpener(Claude(model="opus")).compiled().model_id() == "opus"
+    assert ClaudeSessionOpener(Claude(endpoint=endpoint)).compiled().model is None
+    assert (
+        CodexSessionOpener(Codex(cwd=tmp_path, model="gpt-5.5")).compiled().model_id()
+        == "gpt-5.5"
+    )
+
+
+def test_an_unnamed_effort_starts_from_the_persons_and_steps_down_to_the_models(
+    config: UserConfigFile,
+) -> None:
+    writes(config, 'effort = "ultra"\n')
+
+    assert ClaudeSessionOpener(Claude(model="opus")).compiled().effort == "ultra"
+    assert (
+        ClaudeSessionOpener(Claude(model="claude-opus-4-6")).compiled().effort == "max"
+    )
+    assert ClaudeSessionOpener(Claude(model="haiku")).compiled().effort is None
+    assert (
+        ClaudeSessionOpener(Claude(model="opus", effort="low")).compiled().effort
+        == "low"
+    )
+
+
+def test_a_person_who_wrote_nothing_gets_lups_effort(config: UserConfigFile) -> None:
+    assert ClaudeSessionOpener(Claude(model="opus")).compiled().effort == "xhigh"
+    assert (
+        ClaudeSessionOpener(Claude(model="claude-opus-4-6")).compiled().effort == "high"
+    )

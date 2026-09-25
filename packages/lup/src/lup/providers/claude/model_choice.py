@@ -147,18 +147,22 @@ def refuse_unsupported_effort(
         )
 
 
-def claude_default_effort(model: ClaudeModelChoice | None) -> ClaudeEffort | None:
+def claude_default_effort(
+    model: ClaudeModelChoice | None, preferred: ClaudeEffort = "xhigh"
+) -> ClaudeEffort | None:
     """The effort a session on ``model`` thinks at when it names none.
 
-    ``xhigh`` wherever the model's catalog row takes it, and otherwise the
-    highest rung the row has below ``xhigh``, so the default adapts to the
-    model where a named effort would be refused by it; a model whose row lists
-    no effort gets none. A model with no row — inherited, a tier resolving to
-    nothing, a custom id — gets ``xhigh``, since nothing says it cannot.
+    ``preferred`` wherever the model's catalog row takes it, and otherwise the
+    highest rung the row has below it, so the default adapts to the model
+    where a named effort would be refused by it; a model whose row lists no
+    effort gets none. A model with no row — inherited, a tier resolving to
+    nothing, a custom id — gets ``preferred``, since nothing says it cannot.
+    ``xhigh`` is lup's own preference; a person's config may name another.
     """
     name = claude_model_name(model)
     if name is None:
-        return "xhigh"
-    descending: list[ClaudeEffort] = ["xhigh", "high", "medium", "low"]
+        return preferred
+    ladder: tuple[ClaudeEffort, ...] = get_args(ClaudeEffort.__value__)
+    descending = reversed(ladder[: ladder.index(preferred) + 1])
     accepted = CLAUDE_MODEL_EFFORTS[name]
     return next((rung for rung in descending if rung in accepted), None)

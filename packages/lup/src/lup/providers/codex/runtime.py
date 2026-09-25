@@ -28,7 +28,9 @@ from lup.providers.codex.hooks import (
 )
 from lup.providers.codex.home import CodexWorktreeHomeStore, install_declared_policy
 from lup.providers.codex.login import CODEX_HOME, CODEX_LOGIN, native_home
+from lup.providers.codex.model_choice import codex_default_effort
 from lup.providers.profile_tree import profile_environment
+from lup.providers.user_config import UserConfigFile
 from lup.providers.codex.output import CodexOutputContract, codex_output_contract
 from lup.providers.codex import Codex, CodexSession
 from lup.policy.hooks import LupHookInput, LupHookOutput, LupHooksConfig
@@ -1244,12 +1246,32 @@ class CodexSessionOpener:
         the thread is configured with, here rather than at declaration, so an
         agent can be copied and changed before it is built.
 
-        A named profile becomes the account home the session runs under.
+        What the declaration leaves unset is the person's to answer, read
+        from their lup config as each session opens: a model left unnamed
+        runs on their tier, unless a provider of its own serves the session,
+        and an effort left unnamed starts from theirs. A named profile becomes
+        the account home the session runs under.
         """
         declared = self.config
+        personal = UserConfigFile().load()
+        served = (
+            declared.endpoint is not None
+            or declared.model_provider is not None
+            or declared.provider_config is not None
+        )
+        model = (
+            declared.model if declared.model is not None or served else personal.tier
+        )
         account = profile_environment(CODEX_LOGIN, declared.profile)
         config = declared.model_copy(
-            update={"environment": {**declared.environment, **account}}
+            update={
+                "model": model,
+                "effort": declared.effort
+                or codex_default_effort(
+                    model, declared.model_tiers, personal.effort or "xhigh"
+                ),
+                "environment": {**declared.environment, **account},
+            }
         )
         if config.endpoint is None:
             return config

@@ -41,8 +41,9 @@ from lup.providers.claude.config_home import session_config_home
 from lup.providers.claude.transcripts import ClaudeTranscripts, result_text
 from lup.providers.claude.native_tools import claude_native_tools, claude_tool_allowed
 from lup.providers.claude.login import CLAUDE_LOGIN
-from lup.providers.claude.model_choice import claude_effort
+from lup.providers.claude.model_choice import claude_default_effort, claude_effort
 from lup.providers.profile_tree import profile_environment
+from lup.providers.user_config import UserConfigFile
 from lup.sessions.recursion import (
     child_recursive_agent_allowance,
     recursive_agent_scope,
@@ -804,14 +805,27 @@ class ClaudeSessionOpener:
         it — both here rather than at declaration, so an agent can be copied
         and changed before either is built.
 
-        A named profile becomes the account home the session runs under.
+        What the declaration leaves unset is the person's to answer, read
+        from their lup config as each session opens: a model left unnamed
+        runs on their tier, unless an endpoint serves models of its own, and
+        an effort left unnamed starts from theirs. A named profile becomes
+        the account home the session runs under.
         """
         declared = self.config
+        personal = UserConfigFile().load()
+        model = (
+            declared.model
+            if declared.model is not None or declared.endpoint is not None
+            else personal.tier
+        )
         account = profile_environment(CLAUDE_LOGIN, declared.profile)
         config = declared.model_copy(
             update={
                 "tool_servers": declared.servers(),
                 "tools": [],
+                "model": model,
+                "effort": declared.effort
+                or claude_default_effort(model, personal.effort or "xhigh"),
                 "environment": {**declared.environment, **account},
             }
         )

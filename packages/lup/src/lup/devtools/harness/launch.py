@@ -25,11 +25,12 @@ from lup.harness.devices import Device
 from lup.providers.login import NativeHomeScope, ProviderLogin
 from lup.providers.profile_migration import legacy_notice
 from lup.providers.profiles import DefaultHomeProfile, ProfileDirectory
-from lup.providers.user_config import UserConfigFile
+from lup.providers.user_config import UserConfig, UserConfigFile
 from lup.devtools.harness.contained import contained_argv
 from lup.providers.claude.confinement import CLAUDE_SANDBOX_OFF
 from lup.providers.claude.model_choice import (
     claude_default_effort,
+    claude_model_id,
     claude_effort,
     claude_effort_named,
     listed_claude_model,
@@ -39,6 +40,7 @@ from lup.providers.codex.model_choice import (
     codex_default_effort,
     codex_effort_arguments,
     codex_effort_named,
+    codex_model_id,
     listed_codex_model,
     refuse_unsupported_effort as refuse_codex_effort,
 )
@@ -1290,6 +1292,18 @@ def writable_root_arguments(accessible: list[AccessibleRoot] = []) -> list[str]:
     return ["-c", f"sandbox_workspace_write.writable_roots={json.dumps(roots)}"]
 
 
+def personal_config(config: UserConfigFile) -> UserConfig:
+    """The person's lup config, or a refusal naming the file to fix.
+
+    Refused rather than passed over, because a launch that dropped a setting
+    it could not read would open looking exactly like one that never had it.
+    """
+    try:
+        return config.load()
+    except ValueError as refusal:
+        raise typer.BadParameter(str(refusal)) from refusal
+
+
 def announce_legacy_profiles(root: Path, config: UserConfigFile) -> None:
     """Say where accounts were left behind, at every launch until they move.
 
@@ -1879,20 +1893,25 @@ def launch_claude(
     contradiction = resume.contradicted()
     if contradiction is not None:
         raise typer.BadParameter(contradiction)
+    config = UserConfigFile()
+    personal = personal_config(config)
     # A mode's model is a default rather than a fixture: it says what this kind
     # of session runs on when nobody said otherwise, and an explicit --model
     # still wins, because overriding the model is why a caller passes one.
-    selected_model = model or (
-        mode.native_model("claude") if mode is not None else None
+    # Where neither names one, the person's tier does, as it does in code.
+    selected_model = (
+        model
+        or (mode.native_model("claude") if mode is not None else None)
+        or claude_model_id(personal.tier)
     )
     # Refused before anything is generated or checkpointed: an effort the
     # model's catalog row lacks would be dropped by the CLI without a word.
-    # Unnamed, it is the model's default, the one a session declared in code
-    # takes, rather than whatever the CLI's own settings say.
+    # Unnamed, it is the model's default from the person's preferred rung, the
+    # one a session declared in code takes, rather than the CLI's own settings.
     listed = None if selected_model is None else listed_claude_model(selected_model)
     try:
         chosen_effort = (
-            claude_default_effort(listed)
+            claude_default_effort(listed, personal.effort or "xhigh")
             if effort is None
             else claude_effort_named(effort)
         )
@@ -1904,7 +1923,7 @@ def launch_claude(
         checkpoint(provider="claude")
     plugin = composition.recipe.source.plugins[0]
     announce_relaxed_rules(relaxed, plugin)
-    announce_legacy_profiles(project_root(), UserConfigFile())
+    announce_legacy_profiles(project_root(), config)
     sentinels = LaunchSentinels()
     cleared = ready_to_open(
         composition,
@@ -2123,21 +2142,31 @@ def launch_codex(
     contradiction = resume.contradicted()
     if contradiction is not None:
         raise typer.BadParameter(contradiction)
-    selected_model = model or (mode.native_model("codex") if mode is not None else None)
+    config = UserConfigFile()
+    personal = personal_config(config)
+    named_model = model or (mode.native_model("codex") if mode is not None else None)
+    # A named profile with no model named over it chose its model and effort
+    # together, so neither the person's tier nor a default effort is sent.
+    profiled = profile is not None and named_model is None
+    selected_model = (
+        named_model
+        if named_model is not None or profiled
+        else codex_model_id(personal.tier, CodexModelTiers())
+    )
     # Refused before anything is generated or checkpointed: the API refuses an
     # effort the model lacks with a 400 that names neither. Unnamed, it is the
-    # model's default, the one a session declared in code takes, rather than
-    # whatever the home's configuration says — except under a named profile
-    # with no model named over it, which chose its model and effort together.
+    # model's default from the person's preferred rung, the one a session
+    # declared in code takes, rather than whatever the home's configuration says.
     listed = None if selected_model is None else listed_codex_model(selected_model)
-    profiled = profile is not None and selected_model is None
     try:
         chosen_effort = (
             codex_effort_named(effort)
             if effort is not None
             else None
             if profiled
-            else codex_default_effort(listed, CodexModelTiers())
+            else codex_default_effort(
+                listed, CodexModelTiers(), personal.effort or "xhigh"
+            )
         )
         refuse_codex_effort(listed, chosen_effort, CodexModelTiers())
     except ValueError as refusal:
@@ -2146,7 +2175,7 @@ def launch_codex(
         checkpoint(provider="codex")
     plugin = composition.recipe.source.plugins[0]
     announce_relaxed_rules(relaxed, plugin)
-    announce_legacy_profiles(project_root(), UserConfigFile())
+    announce_legacy_profiles(project_root(), config)
     sentinels = LaunchSentinels()
     cleared = ready_to_open(
         composition,
