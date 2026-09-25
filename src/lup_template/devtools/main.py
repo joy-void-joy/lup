@@ -140,6 +140,9 @@ DECLARATIONS = DevtoolsDeclarations(
     edge_classes=EDGE_KINDS,
     # A writeup is `ledger writeup`'s output and names its commands, so it is
     # written only where the ledger module is taken.
+    # lup: defer: a repository writer's output has no ownership manifest, so
+    # declining the ledger stops `docs/work-status.md` being rewritten and
+    # leaves its last copy in the tree for somebody to notice and delete.
     writeups=WRITEUPS if LEDGER.id in COMPOSITION.taken() else [],
     ledger=LAYOUT,
 )
