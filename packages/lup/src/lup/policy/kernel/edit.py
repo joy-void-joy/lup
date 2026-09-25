@@ -20,6 +20,7 @@ from .roles import (
     FOREIGN_REPOSITORY_REFERRAL,
     GENERATED_PLUGIN_RECOVERY,
     GENERATED_PLUGIN_REFUSAL,
+    declared_scratch,
     is_generated_plugin_target,
     normalized_path,
     path_role,
@@ -3807,25 +3808,23 @@ def decide_edit(
     ``checkout_path`` is the same file as the session's own checkout spells
     it, and empty where that checkout does not hold the file. It differs from
     ``path`` only where a repository nested inside the checkout holds the
-    file, and it answers one question: whether a file another repository
-    holds lies under a root this checkout declares scratch.
+    file, and it answers one question, which two gates below defer to:
+    whether the file lies under a root this checkout declares scratch.
     """
-    # This checkout's scratch outranks the referral below. A repository nested
-    # under a root declared scratch here -- a probe kit given its own `git
-    # init` under `tmp/` -- is as disposable as the tree around it: its `.git`
-    # makes it a project root for a runtime launched inside, not somebody
-    # else's code to defer to. So the file is judged as this checkout spells
-    # it. The claim is read off that spelling alone, which is empty wherever
-    # the checkout does not hold the file -- a sibling worktree, a `refs/` link
-    # landing in another project, the machine's temporary root -- so each of
-    # those keeps the referral, and another repository's own `tmp/` is never
-    # read as this checkout's. Only a foreign file is re-read: a worktree of
-    # this repository placed under `tmp/` is still this repository's code.
-    if (
-        foreign
-        and checkout_path
-        and path_role(checkout_path, path_roles or []) == "scratch"
-    ):
+    # Scratch this checkout declares, read off the checkout's own spelling
+    # alone. That is empty wherever the checkout does not hold the file -- a
+    # sibling worktree, a `refs/` link landing in another project, the
+    # machine's temporary root -- so none of those can claim it, and another
+    # repository's own `tmp/` is never read as this checkout's.
+    scratch_here = declared_scratch(checkout_path, path_roles or [])
+    # It outranks the referral below. A repository nested under that scratch
+    # -- a probe kit given its own `git init` under `tmp/` -- is as disposable
+    # as the tree around it: its `.git` makes it a project root for a runtime
+    # launched inside, not somebody else's code to defer to, so the file is
+    # judged as this checkout spells it. Only a foreign file is re-read: a
+    # worktree of this repository placed under `tmp/` is still this
+    # repository's code.
+    if foreign and scratch_here:
         path, foreign = checkout_path, False
     granted = allowances or []
     previous = before or ""
@@ -3857,7 +3856,14 @@ def decide_edit(
     # the lattice can reach is wrong for this file — an allow writes something
     # that will be overwritten, and an ask puts a question to a human whose
     # only correct answer is "edit the source instead".
-    if is_generated_plugin_target(path):
+    #
+    # This checkout's scratch is the one place it does not reach. Nothing this
+    # project generates lands there, so a plugin tree under it is somebody's
+    # own -- a probe kit's hand-written plugin -- and editing it edits no
+    # build product. The checkout's spelling is of where the file lands, the
+    # host having resolved it, so a link planted in scratch reaches no
+    # generated tree through this.
+    if is_generated_plugin_target(path) and not scratch_here:
         return KernelDecision(
             "deny",
             GENERATED_PLUGIN_REFUSAL,

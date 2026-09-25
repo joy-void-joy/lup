@@ -67,12 +67,14 @@ from lup.policy.kernel.decision import (
 from lup.policy.kernel.commands import decide_command_rows, decide_uv
 from lup.policy.kernel.edit import decide_edit
 from lup.policy.kernel.rows import (
+    DisplacedTargetRow,
     PathRoleRow,
     RunnerTargetRow,
     ShellRuleRow,
     runner_target_values,
     shell_row_values,
 )
+from lup.policy.kernel.shell import decide_shell
 from lup.providers.codex.harness import codex_allow_prefixes
 from lup.policy.refused_tools import RefusedTool, erase_refused_tools
 from lup.policy.edit_rules import EditRule
@@ -794,6 +796,16 @@ SHELL_POLICY_CASES = [
     DecisionCase(
         input="cat .claude/plugins/lup/hooks/scripts/policy.py", effect="allow"
     ),
+    # Scratch this checkout declares holds no generated tree, so a plugin tree
+    # under it is a probe kit's own hand-written one and is written like the
+    # scratch around it. Only this checkout's: a spelling that climbs out of
+    # it, or sits under the machine's temporary root, keeps the refusal.
+    DecisionCase(input="echo x > tmp/kit/.claude/plugins/p/x.md", effect="allow"),
+    DecisionCase(input="mkdir -p tmp/kit/.codex/plugins/p", effect="allow"),
+    DecisionCase(input="cp tmp/a tmp/kit/.claude/plugins/p/x.md", effect="allow"),
+    DecisionCase(input="touch tmp/kit/.codex/plugins/p/marker", effect="allow"),
+    DecisionCase(input="echo x > ../kit/.claude/plugins/p/x.md", effect="deny"),
+    DecisionCase(input="echo x > /tmp/kit/.claude/plugins/p/x.md", effect="deny"),
     # Every path-taking judged-ask verb reads the same role, so a scratch root
     # is housekept without friction while production keeps the verb's ask.
     DecisionCase(input="cp tmp/a.json tmp/b.json", effect="allow"),
@@ -3954,6 +3966,125 @@ def test_this_checkouts_scratch_outranks_the_foreign_referral(
     assert [verdict.effect for verdict in verdicts] == [effect, effect]
     if effect == "ask":
         assert all("different repository" in verdict.reason for verdict in verdicts)
+
+
+@pytest.mark.parametrize(
+    ("holding", "checkout", "foreign", "effect"),
+    [
+        # A plugin tree under this checkout's scratch, and the same one inside
+        # a kit with a repository of its own: neither is a build product.
+        pytest.param(
+            "tmp/kit/.claude/plugins/p/x.md",
+            "tmp/kit/.claude/plugins/p/x.md",
+            False,
+            "allow",
+            id="scratch",
+        ),
+        pytest.param(
+            ".codex/plugins/p/x.md",
+            "tmp/kit/.codex/plugins/p/x.md",
+            True,
+            "allow",
+            id="kit",
+        ),
+        # This checkout's own compiled tree.
+        pytest.param(
+            ".claude/plugins/lup/x.md",
+            ".claude/plugins/lup/x.md",
+            False,
+            "deny",
+            id="ours",
+        ),
+        # Scratch the checkout does not hold — a sibling worktree's — and a
+        # tree under another repository's own `tmp/`.
+        pytest.param(
+            "tmp/kit/.claude/plugins/p/x.md", "", False, "deny", id="not-held"
+        ),
+        pytest.param("tmp/.claude/plugins/p/x.md", "", True, "deny", id="their-tmp"),
+        # The machine's temporary root is scratch for every checkout and
+        # belongs to none, so even spelled as the checkout's it earns nothing.
+        pytest.param(
+            "/tmp/kit/.claude/plugins/p/x.md",
+            "/tmp/kit/.claude/plugins/p/x.md",
+            False,
+            "deny",
+            id="temporary-root",
+        ),
+    ],
+)
+def test_the_generated_plugin_refusal_stops_at_this_checkouts_scratch(
+    holding: str,
+    checkout: str,
+    foreign: bool,
+    effect: str,
+    tmp_path: Path,
+) -> None:
+    """Nothing this project generates lands in its scratch, so the refusal stops there.
+
+    A probe kit carries a hand-written plugin under `.claude/plugins/` or
+    `.codex/plugins/`, and the refusal read the spelling alone: every file of
+    it was "a generated plugin tree" nothing had generated. The exception is
+    read off the checkout's own spelling, like the referral's, so it reaches
+    no tree the checkout does not hold.
+    """
+    bundled = load_bundled_kernel(tmp_path, "edit")
+    verdicts = [
+        judge(
+            holding,
+            "probe\n",
+            "probed\n",
+            path_exists=True,
+            path_rules=[],
+            antipattern_rows=[],
+            path_roles=FIXTURE_PATH_ROLES,
+            foreign=foreign,
+            checkout_path=checkout,
+        )
+        for judge in (decide_edit, bundled.decide_edit)
+    ]
+
+    assert [verdict.effect for verdict in verdicts] == [effect, effect]
+    if effect == "deny":
+        assert all(verdict.rule == "edit:generated-plugin" for verdict in verdicts)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param("echo x > tmp/kit/.claude/plugins/p/x.md", id="redirect"),
+        pytest.param("touch tmp/kit/.claude/plugins/p/x.md", id="path-verb"),
+    ],
+)
+def test_a_scratch_spelling_a_link_moves_keeps_the_plugin_refusal(
+    command: str, tmp_path: Path
+) -> None:
+    """The shell reads spellings, so the exception needs the host's word on each.
+
+    A link planted in scratch can carry a write into this checkout's compiled
+    tree while its spelling still reads as scratch. The host resolves every
+    write target and reports the ones landing under another role; one it
+    reported keeps the refusal, and the same spelling it did not is scratch.
+    """
+    bundled = load_bundled_kernel(tmp_path, "shell")
+    rows = ShellPolicy(SHELL_RULES).rules
+    moved = [
+        DisplacedTargetRow(
+            path="tmp/kit/.claude/plugins/p/x.md", lands=".claude/plugins/p/x.md"
+        )
+    ]
+
+    for judge in (decide_shell, bundled.decide_shell):
+        linked = judge(
+            command,
+            rows,
+            path_roles=FIXTURE_PATH_ROLES,
+            existing_targets=[],
+            displaced_targets=moved,
+        )
+        unlinked = judge(
+            command, rows, path_roles=FIXTURE_PATH_ROLES, existing_targets=[]
+        )
+        assert (linked.effect, unlinked.effect) == ("deny", "allow")
 
 
 def test_retiring_a_suppression_the_ast_refutes_is_allowed() -> None:

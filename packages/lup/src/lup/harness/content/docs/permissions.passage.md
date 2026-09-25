@@ -437,6 +437,17 @@ the path as this checkout spells it, never as the nested repository does, so
 a kit under a sibling worktree's `tmp/`, a `refs/` link landing in another
 project, and another repository's own `tmp/` all keep the referral.
 
+The refusal to write a generated plugin tree by hand stops at the same line,
+and for a reason of its own: nothing this project generates lands in its
+scratch, which a test walking both recipes pins. So a kit's own hand-written
+`.claude/plugins/` or `.codex/plugins/` there is written like any other
+scratch file — by an edit, a redirect or a path verb. This checkout's compiled
+trees stay refused, and so does every tree its scratch does not hold: a
+sibling worktree's, another repository's, one under the machine's temporary
+root, and this checkout's own reached through a link planted in scratch, which
+the host resolves and the shell refuses once it has seen the link move the
+write.
+
 Edit decisions cover protected paths, marker changes, size, the canonical
 anti-pattern audit, and declared import ownership. An edit over the size gate alone is deferred — the hook
 emits no decision, so auto-accept applies while hard gates stay explicit.

@@ -127,6 +127,14 @@ class ShellContext(TypedDict):
     depending on how a caller named it. The machine's own path, so it arrives
     from the host per call rather than from any declaration."""
 
+    displaced_targets: list[DisplacedTargetRow]
+    """Write targets the host found landing under a role other than they claim.
+
+    The settlement asks about a write through such a link; a segment reads
+    them for one thing only, the scratch exception to the generated-plugin
+    refusal, which a spelling under this checkout's scratch earns only where
+    the host found nothing moving the bytes elsewhere."""
+
     unjudged_ambient: UnjudgedAmbient
     """The profile's answer for what nothing classified, carried for `curl`.
 
@@ -222,6 +230,7 @@ def shell_context(
     allowances: list[str] | None = None,
     rewritten_documents: list[RewrittenDocumentRow] | None = None,
     unproduced_documents: list[UnproducedDocumentRow] | None = None,
+    displaced_targets: list[DisplacedTargetRow] | None = None,
 ) -> ShellContext:
     """Bundle one classification's declarations, normalizing absent lists.
 
@@ -252,6 +261,7 @@ def shell_context(
         target_tables=target_tables or [],
         contained=contained,
         checkout_root=checkout_root,
+        displaced_targets=displaced_targets or [],
         unjudged_ambient=unjudged_ambient,
         antipattern_rows=antipattern_rows or {},
         edit_rules=edit_rules or [],
@@ -452,7 +462,12 @@ def decide_segment_words(
         )
         if recognized is not None:
             return recognized
-    refused = refuses_generated_plugin_write(words)
+    refused = refuses_generated_plugin_write(
+        words,
+        context["path_roles"],
+        context["checkout_root"],
+        context["displaced_targets"],
+    )
     if refused is not None:
         return refused
     recoverable = confined_to_recoverable_roots(
@@ -1008,6 +1023,7 @@ def classify_shell(
     allowances: list[str] | None = None,
     rewritten_documents: list[RewrittenDocumentRow] | None = None,
     unproduced_documents: list[UnproducedDocumentRow] | None = None,
+    displaced_targets: list[DisplacedTargetRow] | None = None,
 ) -> KernelDecision:
     """Conservatively classify every command in one shell command line.
 
@@ -1048,6 +1064,7 @@ def classify_shell(
         allowances=allowances,
         rewritten_documents=rewritten_documents,
         unproduced_documents=unproduced_documents,
+        displaced_targets=displaced_targets,
     )
     tree = parse_shell(command)
     if isinstance(tree, KernelDecision):
@@ -1065,6 +1082,7 @@ def classify_shell(
             contained,
             checkout_root,
             tracked_targets,
+            displaced_targets,
         )
         return joined_decision(
             [
@@ -1082,6 +1100,7 @@ def classify_shell(
         contained,
         checkout_root,
         tracked_targets,
+        displaced_targets,
     )
     if redirected is not None:
         return redirected
@@ -1308,6 +1327,10 @@ def decide_shell(
                 allowances=allowances,
                 rewritten_documents=rewritten_documents,
                 unproduced_documents=unproduced_documents,
+                # Where a link moves a write, for the one grant a segment
+                # reads off a spelling it has to be able to trust: the scratch
+                # exception to the generated-plugin refusal.
+                displaced_targets=displaced_targets,
             ),
             escalation=reading.request,
             contained=contained,

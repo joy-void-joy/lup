@@ -14,6 +14,14 @@ own reading — against one layout holding the kit and every repository that
 keeps its question: one nested in the checkout outside any scratch root, one
 beside the checkout, the same one reached through a `refs/` link, and a kit
 under a sibling worktree's scratch.
+
+The kit's own plugin is the same case one refusal later. A probe kit carries
+a hand-written `.claude/plugins/` or `.codex/plugins/` of its own, and the
+refusal meant for this project's compiled trees read the path alone, so the
+probe could not be built. Scratch here holds no generated tree, which the last
+case pins against the recipes themselves; every tree outside it keeps the
+refusal, including this checkout's own reached through a link planted in
+scratch.
 """
 
 import json
@@ -27,10 +35,13 @@ import sh
 
 from lup.devtools.dev.policy_explain import verdict_for
 from lup.harness.enforcement import declared_role_rows
+from lup.policy.assets.host import this_checkout_path
+from lup.policy.kernel.roles import declared_scratch
 from lup.policy.models import EditBatch, EditChange, ShellCommand
 from lup.policy.rules import ShellPolicy
 from lup.types import JsonObject
 from lup_template.harness.catalog import declared_hook_set
+from lup_template.harness.composition import TARGETS
 from tests.unit.native import codex_denial
 from tests.unit.repos import commit_file, initialized_repo
 
@@ -64,6 +75,29 @@ open: against its own checkout it reads `tmp/probe.py`, which is exactly how
 this repository declares scratch.
 """
 
+KIT_PLUGINS = [
+    pytest.param("checkout/tmp/kit/.claude/plugins/p/x.md", id="claude-plugin"),
+    pytest.param("checkout/tmp/kit/.codex/plugins/p/x.md", id="codex-plugin"),
+]
+"""A probe kit's own hand-written plugin, under each runtime's plugin root."""
+
+GENERATED_ELSEWHERE = [
+    pytest.param("checkout/.claude/plugins/lup/x.md", id="this-checkouts-claude-tree"),
+    pytest.param("checkout/.codex/plugins/lup/x.md", id="this-checkouts-codex-tree"),
+    pytest.param(
+        "checkout/tmp/linked/.claude/plugins/lup/x.md", id="linked-from-scratch"
+    ),
+    pytest.param("elsewhere/.claude/plugins/p/x.md", id="another-repositorys-tree"),
+    pytest.param("elsewhere/tmp/.claude/plugins/p/x.md", id="another-repositorys-tmp"),
+    pytest.param("sibling/tmp/kit/.claude/plugins/p/x.md", id="sibling-scratch"),
+]
+"""Every plugin tree the checkout's own scratch does not hold, spelled from the base.
+
+`checkout/tmp/linked/.claude` is a link into this checkout's real `.claude`:
+spelled under scratch, landing in the generated tree, which is the spelling
+the exception must not be read off.
+"""
+
 
 @pytest.fixture(params=["claude", "codex"])
 def runtime(request: pytest.FixtureRequest) -> Runtime:
@@ -93,9 +127,18 @@ def base(tmp_path: Path) -> Path:
         "elsewhere/src/probe.py",
         "elsewhere/tmp/probe.py",
         "sibling/tmp/kit/probe.py",
+        "checkout/tmp/kit/.claude/plugins/p/x.md",
+        "checkout/tmp/kit/.codex/plugins/p/x.md",
+        "checkout/.claude/plugins/lup/x.md",
+        "checkout/.codex/plugins/lup/x.md",
+        "elsewhere/.claude/plugins/p/x.md",
+        "elsewhere/tmp/.claude/plugins/p/x.md",
+        "sibling/tmp/kit/.claude/plugins/p/x.md",
     ):
         (tmp_path / held).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / held).write_text(f"{PREIMAGE}\n", encoding="utf-8")
+    (checkout / "tmp" / "linked").mkdir()
+    (checkout / "tmp" / "linked" / ".claude").symlink_to(checkout / ".claude")
     return tmp_path
 
 
@@ -388,3 +431,107 @@ def test_the_preview_keeps_every_other_repositorys_question(
     assert all(
         "different repository" in reading.reason for reading in previewed.readings
     )
+
+
+@pytest.mark.parametrize("spelled", KIT_PLUGINS)
+def test_a_kits_own_plugin_tree_under_scratch_is_written_like_scratch(
+    runtime: Runtime, base: Path, spelled: str
+) -> None:
+    """Nothing this project generates lands under `tmp/`, so this is the kit's.
+
+    The refusal exists because a hand edit of a compiled tree is reverted by
+    the next generation; a kit's hand-written plugin has no generation to
+    revert it, and refusing it left a probe of plugin behaviour unbuildable.
+    """
+    target = base / spelled
+    written = target.relative_to(base / "checkout")
+    calls = [
+        edit(runtime, target, base),
+        created(runtime, target.with_name("y.md"), base),
+        shell("PreToolUse", f"echo hello > {written}", base),
+        shell("PreToolUse", f"mkdir -p {written.parent / 'q'}", base),
+    ]
+
+    assert [verdict(runtime, call, base)[0] for call in calls] == ["allow"] * 4
+
+
+@pytest.mark.parametrize("spelled", GENERATED_ELSEWHERE)
+def test_every_plugin_tree_outside_this_checkouts_scratch_keeps_the_refusal(
+    runtime: Runtime, base: Path, spelled: str
+) -> None:
+    effect, reason = verdict(runtime, edit(runtime, base / spelled, base), base)
+
+    assert effect == "deny"
+    assert "generated plugin tree" in reason
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param("echo hello > .claude/plugins/lup/x.md", id="claude-tree"),
+        pytest.param("echo hello > .codex/plugins/lup/x.md", id="codex-tree"),
+        # Spelled under scratch and landing in the real tree: the host resolves
+        # the link, and a spelling it moved is not one the exception trusts.
+        pytest.param(
+            "echo hello > tmp/linked/.claude/plugins/lup/x.md", id="linked-redirect"
+        ),
+        pytest.param("mkdir -p tmp/linked/.claude/plugins/lup/extra", id="linked-verb"),
+        pytest.param(
+            "echo hello > ../elsewhere/tmp/.claude/plugins/p/x.md",
+            id="another-repositorys-tmp",
+        ),
+    ],
+)
+def test_a_shell_write_into_a_plugin_tree_outside_scratch_keeps_the_refusal(
+    runtime: Runtime, base: Path, command: str
+) -> None:
+    effect, reason = verdict(runtime, shell("PreToolUse", command, base), base)
+
+    assert effect == "deny"
+    assert "generated plugin tree" in reason
+
+
+def test_the_preview_reads_a_kits_plugin_tree_as_scratch_and_ours_as_generated(
+    base: Path,
+) -> None:
+    checkout = base / "checkout"
+
+    def effects(subject: str, kind: str) -> set[str]:
+        """Every placement's effect for one subject, as `dev policy` reads it."""
+        read = verdict_for(subject, kind, False, checkout, declared_hook_set())
+        return {reading.effect for reading in read.readings}
+
+    assert effects(str(base / "checkout/tmp/kit/.claude/plugins/p/x.md"), "edit") == {
+        "allow"
+    }
+    assert effects("echo hello > tmp/kit/.codex/plugins/p/x.md", "shell") == {"allow"}
+    assert effects(str(base / "checkout/.claude/plugins/lup/x.md"), "edit") == {"deny"}
+    assert effects("echo hello > tmp/linked/.claude/plugins/lup/x.md", "shell") == {
+        "deny"
+    }
+
+
+def test_no_tree_this_repository_generates_lands_under_its_scratch() -> None:
+    """The exception is only sound while nothing generated can land in scratch.
+
+    Walked from the recipes both runtimes compile rather than from a list, so
+    an artifact placed under a scratch root — or a generated root turned into
+    a link that resolves into one — fails here, before the exception would let
+    a hand edit of it through. Both spellings are asked: the one the recipe
+    declares, and the one the file resolves to in this checkout, which is the
+    spelling the edit gates actually read.
+    """
+    root = Path.cwd()
+    roles = declared_role_rows(list(declared_hook_set().path_roles))
+    landing = [
+        spelled
+        for build in TARGETS.builders.values()
+        for artifact in build(root).recipe.desired.artifacts
+        for spelled in (
+            artifact.path.as_posix(),
+            this_checkout_path(str(root / artifact.path), root),
+        )
+        if declared_scratch(spelled, roles)
+    ]
+
+    assert landing == []
