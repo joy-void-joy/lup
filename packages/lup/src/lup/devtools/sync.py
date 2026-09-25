@@ -136,7 +136,7 @@ from lup.harness.toolchain import (
     granted_device_requirement,
 )
 from lup.policy.assets.host import launched, measured_boundary
-from lup.sandbox.pointers import root_refusal
+from lup.devtools.pointer_trust import judged_roots
 from lup.sandbox.rail import AccessibleRoot
 
 if TYPE_CHECKING:
@@ -783,13 +783,16 @@ def refuse_redirected_location(
     to. A checkout mounted writable into a launch is one a contained session
     could have redirected, and this is the host reading it afterwards.
 
-    Anchored on the location as the registry or the cache names it, never
-    through its own pointer: a bare clone on its own path, a worktree on the
-    `tree/` holding it. One that cannot be anchored that way is refused with
-    the reason rather than passed over.
+    The location is discovered from the repository that vouches for it, found
+    by path or remembered from the host, rather than trusted for where it sits
+    -- see :func:`lup.devtools.pointer_trust.judged_roots`. A repository met for the
+    first time is remembered or reported, and only a real mismatch refuses.
     """
-    if message := root_refusal(location):
-        report(message)
+    trust = judged_roots([location], operator=Path.cwd())
+    for notice in trust.notices:
+        report(notice)
+    if trust.refusal:
+        report(trust.refusal)
         raise typer.Exit(1)
     return location
 

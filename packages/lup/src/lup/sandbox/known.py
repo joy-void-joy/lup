@@ -1,0 +1,108 @@
+"""The repositories lup has seen from the host, kept where no container reaches.
+
+Most repositories are found by where they are -- a plain checkout's `.git`, the
+bare clone holding `tree/`, a clone a worktree sits inside. One kind is not: a
+linked worktree placed anywhere, `git worktree add ../x` beside a plain clone,
+reached from itself, has no path back to its repository but the pointer under
+test. So the repository is remembered the first time lup sees it from the
+host, before any container ran for it -- at a launch's preflight, or when lup
+cuts the worktree -- and the worktree is discovered from it thereafter.
+
+One set of repository git directories, not a record per worktree: a worktree
+is found through its repository, so remembering the repository is what makes
+every worktree it later lists reachable, including the ones a contained session
+cuts after the launch.
+
+The store is the user's state, under `$XDG_STATE_HOME/lup/`, and only the host
+writes it. A launched session is refused the write by :func:`host_side`, and
+no lease may grant a mount over it -- the launch checks that before a container
+starts -- because a store a container could write is a store a container could
+add its own repository to.
+"""
+
+import os
+from collections.abc import Sequence
+from pathlib import Path
+
+from pydantic import BaseModel, ValidationError
+
+
+class KnownRepositories(BaseModel):
+    """Every repository git directory lup has vouched for from the host."""
+
+    repositories: list[str] = []
+
+
+def store_directory() -> Path:
+    """Where the store lives: `$XDG_STATE_HOME/lup`, or `~/.local/state/lup`.
+
+    A relative `XDG_STATE_HOME` is ignored, as the base directory
+    specification says it must be, rather than resolved against wherever the
+    command happens to run.
+    """
+    environ = os.environ  # lup: ignore[os-environ]
+    state = environ["XDG_STATE_HOME"] if "XDG_STATE_HOME" in environ else ""
+    base = (
+        Path(state)
+        if state and Path(state).is_absolute()
+        else Path.home() / ".local" / "state"
+    )
+    return base / "lup"
+
+
+def store_file() -> Path:
+    """The one file the store keeps, inside :func:`store_directory`."""
+    return store_directory() / "repositories.json"
+
+
+def host_side() -> bool:
+    """Whether this process runs on the host rather than inside a launched session.
+
+    A launch hands every session it opens the nonce naming its boundary
+    measurement, and a native sandbox marks itself active; neither reaches a
+    command the operator runs from a terminal.
+    """
+    environ = os.environ  # lup: ignore[os-environ]
+    launched = "LUP_BOUNDARY_NONCE" in environ
+    sandboxed = "LUP_SANDBOX_ACTIVE" in environ and environ["LUP_SANDBOX_ACTIVE"] == "1"
+    return not launched and not sandboxed
+
+
+def known_repositories() -> list[Path]:
+    """Every repository the store remembers, or none where it cannot be read.
+
+    Unreadable reads as empty: the store only ever adds trust, so losing it
+    costs first sightings reported again rather than a repository trusted
+    wrongly.
+    """
+    try:
+        raw = store_file().read_text()
+        return [
+            Path(path)
+            for path in KnownRepositories.model_validate_json(raw).repositories
+        ]
+    except (OSError, ValidationError):
+        return []
+
+
+def remember(repositories: Sequence[Path]) -> list[Path]:
+    """Add these repositories to the store, and return the ones it lacked.
+
+    Written whole and renamed into place, so a reader never meets half a file
+    and two launches racing lose nothing but their own addition, which the
+    next launch makes again. Nothing is written where nothing is new.
+    """
+    held = {str(path) for path in known_repositories()}
+    added = sorted({str(path.resolve()) for path in repositories} - held)
+    if not added:
+        return []
+    store = store_file()
+    store.parent.mkdir(parents=True, exist_ok=True)
+    staged = store.with_name(f".{store.name}.{os.getpid()}")
+    staged.write_text(
+        KnownRepositories(repositories=sorted({*held, *added})).model_dump_json(
+            indent=2
+        )
+    )
+    staged.replace(store)
+    return [Path(path) for path in added]

@@ -174,14 +174,15 @@ def test_the_worktree_lifecycle_refuses_a_redirected_pointer(
 ) -> None:
     """`dev git worktree` operations refuse before host git enters a moved set.
 
-    Anchored on the layout's shared directory, so the redirected `commondir`
-    is measured against the trusted common rather than the one it names.
+    Run from a worktree beside its repository, which no path leads back to:
+    the first run remembers the repository from the host, and the second
+    finds the redirected `commondir` against it rather than the one it names.
     """
     from lup.devtools.dev import worktree
 
     common = common_of(repository)
-    (common / "tree").mkdir()
-    monkeypatch.setattr(worktree, "find_tree_dir", lambda: common / "tree")
+    monkeypatch.chdir(repository / "mine")
+    monkeypatch.setattr(worktree, "find_tree_dir", lambda: None)
     worktree.refuse_redirected_pointers()
 
     built = evil_gitdir(repository)

@@ -25,7 +25,8 @@ from lup.web.build import dependencies_behind, restore_dependencies
 from lup.devtools.layout import find_tree_dir, get_tree_dir
 from lup.devtools.clipboard import copy_to_clipboard
 from lup.execution.shell import git
-from lup.sandbox.pointers import own_common, pointer_drift, refusal, tree_checkouts
+from lup.devtools.pointer_trust import judged_roots
+from lup.sandbox.pointers import tree_checkouts
 from lup.devtools.utils import (
     attributed_stderr,
     clear_stale_config_locks,
@@ -670,22 +671,22 @@ def register_worktree(name: str, worktree_path: Path, base_branch: str | None) -
 def refuse_redirected_pointers() -> None:
     """Refuse before host git acts on a worktree whose pointer was moved.
 
-    Anchored on the layout's shared directory -- the bare root or main
-    checkout holding ``tree/``, found by what it holds rather than by asking
-    git, which would follow a `commondir` planted there -- never on a worktree
-    pointer, which is itself what an escape rewrites. Every directory in
-    ``tree/`` is followed from its own `.git` as well as found through the
-    entries, so rewriting an entry's back-pointer hides nothing. A layout with
-    no ``tree/`` has no sibling worktree to redirect, and one whose holder is
-    no repository nothing to verify: both no-op, so this is safe to call before
-    any host git command rather than only the worktree ones.
+    Judges the checkout this command runs in, and every directory standing
+    where a worktree stands in ``tree/`` where there is one, each discovered
+    from the repository that vouches for it rather than trusted for its place
+    -- see :func:`lup.devtools.pointer_trust.judged_roots`. Run from the host this
+    is also where lup remembers the repository a worktree is cut from, before
+    any container ran in it. Outside a repository nothing is judged, so this
+    is safe to call before any host git command rather than only the worktree
+    ones.
     """
+    here = Path.cwd()
     tree = find_tree_dir()
-    common = own_common(tree.parent) if tree is not None else None
-    if tree is None or common is None:
-        return
-    if message := refusal(pointer_drift(common, tree_checkouts(tree))):
-        typer.echo(message, err=True)
+    trust = judged_roots([here, *(tree_checkouts(tree) if tree else [])], operator=here)
+    for notice in trust.notices:
+        typer.echo(notice, err=True)
+    if trust.refusal:
+        typer.echo(trust.refusal, err=True)
         raise typer.Exit(1)
 
 
