@@ -6,6 +6,7 @@ is several times what the same suite costs alone. Nobody sees the contention,
 so everybody concludes the gate is slow.
 """
 
+from contextlib import ExitStack
 from pathlib import Path
 
 from lup.devtools.dev.admission import (
@@ -14,6 +15,7 @@ from lup.devtools.dev.admission import (
     admitted,
     slot_paths,
 )
+from lup.harness.notice import Notice
 
 
 def test_a_run_with_the_machine_to_itself_keeps_every_worker(tmp_path: Path) -> None:
@@ -86,3 +88,40 @@ def test_the_slots_belong_to_the_clone_rather_than_to_one_worktree(
 
     assert first.parent.name == SLOT_DIRECTORY
     assert first.parent.parent == tmp_path / ".git"
+
+
+def test_a_share_is_announced_as_it_is_taken_and_kept_in_the_record(
+    tmp_path: Path,
+) -> None:
+    """A streaming caller hears what the gate reads back, not a second story."""
+    heard: list[Notice] = []
+    with admitted(tmp_path, 16):
+        with admitted(tmp_path, 16, announce=heard.append) as second:
+            assert second.said == heard
+            assert [
+                notice.text.startswith("gate admission: 8 ") for notice in heard
+            ] == [True]
+
+
+def test_a_streaming_caller_hears_the_wait_as_it_begins(tmp_path: Path) -> None:
+    """A run queued without a word reads as hung, and is killed as hung.
+
+    The holder gives its slot up only once the waiter has announced its wait,
+    so the waiter getting in at all — rather than running anyway when its
+    patience ends — is what shows the notice arrived while it was queued.
+    """
+    heard: list[Notice] = []
+    with ExitStack() as holder:
+        holder.enter_context(admitted(tmp_path, 16, slots=1))
+
+        def announce(notice: Notice) -> None:
+            heard.append(notice)
+            holder.close()
+
+        with admitted(
+            tmp_path, 16, slots=1, patience=30.0, announce=announce
+        ) as queued:
+            assert queued.workers == 16
+            assert queued.said == heard
+
+    assert ["waiting" in notice.text for notice in heard] == [True]
