@@ -474,14 +474,16 @@ def create_harness_app(
                 ),
             ] = False,
             sandbox: Annotated[
-                launch.LaunchSandbox,
+                launch.LaunchSandbox | None,
                 typer.Option(
                     "--sandbox",
                     help="Which sandbox holds the session: the verified "
                     "container (outer), the runtime's own on the host "
-                    "(inner), or the semantic policy alone (none)",
+                    "(inner), or the semantic policy alone (none). Defaults "
+                    "to outer, or to inner with a warning when no Docker or "
+                    "Podman client is found; an explicit outer is refused there",
                 ),
-            ] = launch.LaunchSandbox.OUTER,
+            ] = None,
             mount: Annotated[
                 list[Path],
                 typer.Option(
@@ -645,14 +647,16 @@ def create_harness_app(
                 ),
             ] = False,
             sandbox: Annotated[
-                launch.LaunchSandbox,
+                launch.LaunchSandbox | None,
                 typer.Option(
                     "--sandbox",
                     help="Which sandbox holds the session: the verified "
                     "container (outer), the runtime's own on the host "
-                    "(inner), or the semantic policy alone (none)",
+                    "(inner), or the semantic policy alone (none). Defaults "
+                    "to outer, or to inner with a warning when no Docker or "
+                    "Podman client is found; an explicit outer is refused there",
                 ),
-            ] = launch.LaunchSandbox.OUTER,
+            ] = None,
             mount: Annotated[
                 list[Path],
                 typer.Option(

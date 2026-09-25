@@ -240,7 +240,9 @@ def test_launcher_selects_the_same_settings_for_preparation_auth_and_session(
     composition = Mock()
     composition.recipe.source.plugins = [Mock(hooks=None)]
     monkeypatch.setattr(
-        launch, "ready_to_open", Mock(return_value=launch.LaunchOpening())
+        launch,
+        "ready_to_open",
+        Mock(return_value=launch.LaunchOpening(sandbox=sandbox)),
     )
     monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
     monkeypatch.setattr(launch, "non_interactive_environment", lambda environment: {})

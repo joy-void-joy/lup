@@ -30,7 +30,10 @@ escalation recipe. Under a launcher-verified OS sandbox
 block derives from the same `HookSet` declaration. A command the sandbox's
 `excluded_commands` takes out of isolation re-enters it too, without the
 escape: the boundary was told to leave that command alone, so there is
-nothing for unjudged work to defer to.
+nothing for unjudged work to defer to. That sandbox is the one `--sandbox
+inner` establishes on the host, and a launch naming no `--sandbox` falls back
+to it, with a warning, where no Docker or Podman client is found;
+[harness.md](harness.md) carries the three postures.
 
 Segments join deny > ask > defer > allow — unjudged rides into a judged
 prompt, a judged deny wins the batch. Malformed input fails conservatively.
