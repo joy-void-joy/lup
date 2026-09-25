@@ -56,6 +56,7 @@ from lup.sessions.events import (
 from lup.sessions.output import FileSubmittedOutputStore, submit_output
 from lup.sessions.output import InMemorySubmittedOutputStore
 from lup.types import CustomModel
+from tests.unit.doubles import IgnoredInterrupt, SilentStream
 
 
 class OutputA(BaseModel, frozen=True):
@@ -113,7 +114,8 @@ def accepted_turn(sequence: int, interrupt: Interrupt | None = None) -> Accepted
             turn=TurnId(value=f"turn-{sequence}"),
         ),
         complete=complete,
-        interrupt=interrupt,
+        events=SilentStream(),
+        interrupt=interrupt or IgnoredInterrupt(),
     )
 
 
@@ -232,6 +234,8 @@ async def test_post_completion_failure_preserves_partial_evidence() -> None:
                 turn=TurnId(value="turn-partial"),
             ),
             complete=complete,
+            events=SilentStream(),
+            interrupt=IgnoredInterrupt(),
         ),
         turn_request("typed", OutputA),
         BrokenStore(),

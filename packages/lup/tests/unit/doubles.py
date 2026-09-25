@@ -21,7 +21,7 @@ script it speaks the app-server's newline-framed JSON-RPC from an
 import os
 import signal
 import sys
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
@@ -39,11 +39,18 @@ from lup.providers.codex.app_server import (
     RpcSuccess,
 )
 from lup.harness.process import ExitStatus, LaunchRequest, ProcessLauncher
-from lup.sessions.capabilities import SessionEngine, TurnEngine
+from lup.sessions.capabilities import (
+    EventStream,
+    Interrupt,
+    SessionEngine,
+    TurnEngine,
+)
 from lup.sessions.client import Client
 from lup.sessions.events import (
+    LiveTurnEvent,
     SessionHandle,
     SessionId,
+    TurnEvent,
     TurnId,
     TurnIdentifiers,
     TurnResult,
@@ -129,6 +136,38 @@ def turn_result[T: BaseModel | None](
             "identifiers": marks if marks is not None else identifiers(),
         }
     )
+
+
+class SilentStream(EventStream):
+    """A turn's events for a double with none to report: the stream just ends.
+
+    Every started turn carries a stream, so a double that has nothing to say
+    still hands one back, and a reader of it sees a turn that was quiet.
+    """
+
+    async def ended(self) -> AsyncIterator[LiveTurnEvent]:
+        for event in ():
+            yield event
+
+    async def ended_durable(self) -> AsyncIterator[TurnEvent]:
+        for event in ():
+            yield event
+
+    def events(self) -> AsyncIterator[TurnEvent]:
+        return self.ended_durable()
+
+    def live(self) -> AsyncIterator[LiveTurnEvent]:
+        return self.ended()
+
+
+class IgnoredInterrupt(Interrupt):
+    """An interrupt a double accepts and does nothing about, counting each ask."""
+
+    def __init__(self) -> None:
+        self.asked = 0
+
+    async def interrupt(self) -> None:
+        self.asked += 1
 
 
 class StaticTurn[T: BaseModel | None](TurnEngine[T]):

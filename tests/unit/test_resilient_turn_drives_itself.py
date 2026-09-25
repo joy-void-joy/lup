@@ -22,7 +22,12 @@ from datetime import timedelta
 import pytest
 from pydantic import BaseModel
 
-from lup.sessions.capabilities import EventStream, SessionEngine, TurnEngine
+from lup.sessions.capabilities import (
+    EventStream,
+    Interrupt,
+    SessionEngine,
+    TurnEngine,
+)
 from lup.sessions.errors import StructuredOutputError, TurnFailure
 from lup.sessions.client import Client
 from lup.sessions.events import (
@@ -74,6 +79,13 @@ class ScriptedStream(EventStream):
         return self.iterate()
 
 
+class IgnoredInterrupt(Interrupt):
+    """Accept an interrupt and do nothing: these turns end on their own."""
+
+    async def interrupt(self) -> None:
+        return None
+
+
 class ScriptedTurn(TurnEngine[Answer | None]):
     """A native turn that submits its scripted output, or admits it did not."""
 
@@ -114,7 +126,9 @@ class ScriptedSession(SessionEngine):
         step = min(len(self.attempts) - 1, len(self.script) - 1)
         messages, output = self.script[step]
         handle = StartedTurn[Answer | None](
-            turn=ScriptedTurn(messages, output), events=ScriptedStream(messages)
+            turn=ScriptedTurn(messages, output),
+            events=ScriptedStream(messages),
+            interrupt=IgnoredInterrupt(),
         )
         return handle  # pyright: ignore[reportReturnType]
 

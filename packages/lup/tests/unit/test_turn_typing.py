@@ -27,7 +27,7 @@ from lup.sessions.events import (
     turn_request,
 )
 from lup.types import Usage
-from tests.unit.doubles import session_factory
+from tests.unit.doubles import IgnoredInterrupt, SilentStream, session_factory
 
 IDENTIFIERS = TurnIdentifiers(
     session=SessionId(value="session"), turn=TurnId(value="turn")
@@ -73,7 +73,11 @@ class StubSession(SessionEngine):
         self, request: TurnRequest[T]
     ) -> StartedTurn[T]:
         self.prompts.append(request.input.text)
-        return StartedTurn[T](turn=StubTurn(request))
+        return StartedTurn[T](
+            turn=StubTurn(request),
+            events=SilentStream(),
+            interrupt=IgnoredInterrupt(),
+        )
 
     def factory(self) -> Client:
         """A factory whose every opened session is this one."""

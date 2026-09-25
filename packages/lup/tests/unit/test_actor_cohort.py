@@ -28,7 +28,12 @@ from lup.sessions.events import (
     TurnResult,
     turn_request,
 )
-from tests.unit.doubles import session_factory, turn_result
+from tests.unit.doubles import (
+    IgnoredInterrupt,
+    SilentStream,
+    session_factory,
+    turn_result,
+)
 
 
 class Finding(BaseModel):
@@ -83,7 +88,11 @@ class HeldSession(SessionEngine):
         if output_type is None or not issubclass(output_type, BaseModel):
             raise AssertionError("these turns request typed output")
         output = output_type.model_validate({"summary": self.summary})
-        return StartedTurn[T](turn=HeldTurn(turn_result(output), self.hold, self.fails))
+        return StartedTurn[T](
+            turn=HeldTurn(turn_result(output), self.hold, self.fails),
+            events=SilentStream(),
+            interrupt=IgnoredInterrupt(),
+        )
 
 
 def recipe_for(session: HeldSession) -> ActorRecipe:

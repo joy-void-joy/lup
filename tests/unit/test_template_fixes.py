@@ -1,6 +1,6 @@
 """Regression tests for the provider-neutral application template."""
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
 from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -12,12 +12,18 @@ from lup_template.agent import prompts
 from lup.orchestration.reflection import ReviewGate
 from lup_template.agent.config import aux_model, engine_for_settings, settings
 from lup_template.agent.core import reflection_submission_gate
-from lup.sessions.capabilities import SessionEngine, TurnEngine
+from lup.sessions.capabilities import (
+    EventStream,
+    Interrupt,
+    SessionEngine,
+    TurnEngine,
+)
 from lup.sessions.client import Client
 from lup.sessions.events import (
     SessionHandle,
     SessionId,
     TurnBlock,
+    TurnEvent,
     StartedTurn,
     TurnId,
     TurnIdentifiers,
@@ -192,6 +198,27 @@ class StaticTurn[T: BaseModel | None](TurnEngine[T]):
         return self.value
 
 
+class QuietStream(EventStream):
+    """A canned turn reports no events: its stream simply ends."""
+
+    async def ended(self) -> AsyncIterator[TurnEvent]:
+        for event in ():
+            yield event
+
+    def events(self) -> AsyncIterator[TurnEvent]:
+        return self.ended()
+
+    def live(self) -> AsyncIterator[TurnEvent]:
+        return self.ended()
+
+
+class IgnoredInterrupt(Interrupt):
+    """Accept an interrupt and do nothing: a canned turn is already done."""
+
+    async def interrupt(self) -> None:
+        return None
+
+
 class StaticSession(SessionEngine):
     """Complete every turn with the same successful canned result."""
 
@@ -214,7 +241,11 @@ class StaticSession(SessionEngine):
                 ),
             }
         )
-        return StartedTurn[T](turn=StaticTurn(result))
+        return StartedTurn[T](
+            turn=StaticTurn(result),
+            events=QuietStream(),
+            interrupt=IgnoredInterrupt(),
+        )
 
 
 def static_session_factory(blocks: list[TurnBlock]) -> Client:

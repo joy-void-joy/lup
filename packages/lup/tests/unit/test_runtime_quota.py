@@ -18,6 +18,7 @@ from lup.sessions.quota import (
     QuotaWaitingSession,
 )
 from tests.unit.test_capability_runtime import RecordingBinder
+from tests.unit.doubles import IgnoredInterrupt, SilentStream
 
 FROZEN_NOW = datetime(2026, 1, 1, tzinfo=UTC)
 
@@ -70,6 +71,8 @@ def waiting_session(
                 turn=TurnId(value=f"turn-{attempt}"),
             ),
             complete=complete,
+            events=SilentStream(),
+            interrupt=IgnoredInterrupt(),
         )
 
     return QuotaWaitingSession(

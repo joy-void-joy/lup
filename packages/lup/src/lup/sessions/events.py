@@ -3,7 +3,8 @@
 import json
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
-from datetime import timedelta
+from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Annotated, Literal, Self, overload
 
 from pydantic import BaseModel, Discriminator, Field
@@ -316,6 +317,16 @@ class TurnEventBase(BaseModel, frozen=True):
         """The whole transcript message this event completed, if it completed one."""
         return None
 
+    @property
+    def completed_block(self) -> "AnyTurnBlock | None":
+        """The content block this event completed, if it completed one.
+
+        What iterating a turn yields, asked of the event for the reason every
+        answer here is: a kind of event that also completes a block says so
+        itself, rather than a walk having to learn its type.
+        """
+        return None
+
 
 class TurnStartedEvent(TurnEventBase, frozen=True):
     """A native turn was accepted."""
@@ -351,6 +362,10 @@ class BlockCompletedEvent(TurnEventBase, frozen=True):
     type: Literal["block_completed"] = "block_completed"
     identifiers: TurnIdentifiers
     block: AnyTurnBlock
+
+    @property
+    def completed_block(self) -> AnyTurnBlock:
+        return self.block
 
 
 class MessageCompletedEvent(TurnEventBase, frozen=True):
@@ -474,6 +489,31 @@ class TurnResult[T: BaseModel | None](BaseModel, frozen=True):
     identifiers: TurnIdentifiers
 
 
+class SessionSummary(BaseModel, frozen=True):
+    """One conversation a provider has on record, as a listing shows it.
+
+    Read from the provider's own record rather than from anything this
+    library kept, so a conversation started outside it — a terminal session,
+    another program — lists beside the ones it opened, and ``id`` resumes
+    either kind.
+    """
+
+    id: SessionId
+    title: str | None = Field(
+        default=None,
+        description="The name the provider or a person gave it, where it has one",
+    )
+    preview: str = Field(
+        default="",
+        description="The first prompt, as the provider recorded it",
+    )
+    cwd: Path | None = Field(
+        default=None, description="The working directory it was started in"
+    )
+    created_at: datetime | None = None
+    updated_at: datetime
+
+
 class SessionHandle(BaseModel, frozen=True, arbitrary_types_allowed=True):
     """Transparent composition of a session and optional fork capability.
 
@@ -490,16 +530,21 @@ class SessionHandle(BaseModel, frozen=True, arbitrary_types_allowed=True):
 class StartedTurn[T: BaseModel | None](
     BaseModel, frozen=True, arbitrary_types_allowed=True
 ):
-    """Transparent composition of an accepted turn's capabilities.
+    """What a session engine hands back for one accepted turn.
 
-    A carrier on the same terms as :class:`SessionHandle`: it holds seams and
-    no behaviour, so ``turn.result()`` reaches an engine rather than calling a
-    surface that should have owned shared behaviour.
+    A carrier rather than a surface: it holds the seams a provider filled and
+    no behaviour, so ``turn.result()`` reaches an engine. The public turn a
+    caller holds is composed over one of these.
+
+    Events and interrupt are not optional, because both providers supply them
+    and a turn a caller cannot watch or stop is not one this library opens.
+    Steering is, because only one of them can: a provider's own turn class
+    says whether it steers, and this field is where that turn finds how.
     """
 
     turn: TurnEngine[T]
-    events: EventStream | None = None
-    interrupt: Interrupt | None = None
+    events: EventStream
+    interrupt: Interrupt
     steer: Steer | None = None
 
 

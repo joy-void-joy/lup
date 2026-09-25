@@ -12,6 +12,7 @@ from pydantic import BaseModel
 if TYPE_CHECKING:
     from lup.sessions.events import (
         LiveTurnEvent,
+        SessionId,
         SessionHandle,
         TurnEvent,
         StartedTurn,
@@ -139,3 +140,22 @@ class TurnToolBinder(ABC):
     @abstractmethod
     async def bind[T: BaseModel](self, binding: TurnToolBinding[T] | None) -> None:
         """Finish binding before native turn input is accepted."""
+
+
+class SessionWrapper(ABC):
+    """Wrap one opened session: its lifetime, and every turn started on it.
+
+    What a journal, a spending ceiling, an allowance wait or a cleanup is to a
+    session. Each is handed the context that opens the session beneath it,
+    not yet entered, so it sees an open fail as well as succeed and can act
+    when the session closes however it closes. It answers with the context a
+    caller enters instead, yielding the engine beneath or one wrapping it.
+    """
+
+    @abstractmethod
+    def around(
+        self,
+        opened: AbstractAsyncContextManager[SessionEngine],
+        resume: SessionId | None,
+    ) -> AbstractAsyncContextManager[SessionEngine]:
+        """The context opening the session beneath this wrapper, wrapped."""

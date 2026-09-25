@@ -21,6 +21,7 @@ from lup.sessions.events import (
     turn_request,
 )
 from tests.unit.test_capability_runtime import RecordingBinder
+from tests.unit.doubles import IgnoredInterrupt, SilentStream
 
 
 class BackgroundState(BaseModel, frozen=True):
@@ -51,6 +52,8 @@ class RecordingOpener:
                     turn=TurnId(value=f"turn-{self.sequence}"),
                 ),
                 complete=complete,
+                events=SilentStream(),
+                interrupt=IgnoredInterrupt(),
             )
 
         session = ComposedSession(start, binder)

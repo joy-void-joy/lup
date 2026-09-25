@@ -25,7 +25,13 @@ from lup.sessions.events import (
 )
 from lup.types import Usage
 
-from tests.unit.doubles import StaticTurn, identifiers, session_factory
+from tests.unit.doubles import (
+    IgnoredInterrupt,
+    SilentStream,
+    StaticTurn,
+    identifiers,
+    session_factory,
+)
 
 FRESH = "fresh-session"
 
@@ -53,7 +59,11 @@ class ResumeRefusingSession(SessionEngine):
                 "identifiers": identifiers(session=FRESH),
             }
         )
-        return StartedTurn[T](turn=StaticTurn(result))
+        return StartedTurn[T](
+            turn=StaticTurn(result),
+            events=SilentStream(),
+            interrupt=IgnoredInterrupt(),
+        )
 
 
 def refusing_factory() -> tuple[Client, list[SessionId | None]]:
@@ -99,7 +109,11 @@ class RecordingSession(SessionEngine):
                 "identifiers": identifiers(),
             }
         )
-        return StartedTurn[T](turn=StaticTurn(result))
+        return StartedTurn[T](
+            turn=StaticTurn(result),
+            events=SilentStream(),
+            interrupt=IgnoredInterrupt(),
+        )
 
 
 def mailed_session(

@@ -21,6 +21,7 @@ from lup.sessions.capabilities import (
 )
 from lup.sessions.errors import (
     BudgetExceededError,
+    DeltaStreamingDisabled,
     ProviderTurnError,
     StructuredOutputError,
     TurnError,
@@ -134,12 +135,10 @@ class SwitchingInterrupt(Interrupt):
     """Delegate interruption to the currently active native retry attempt."""
 
     def __init__(self, current: Interrupt) -> None:
-        self.current: Interrupt | None = current
+        self.current = current
 
     async def interrupt(self) -> None:
-        current = self.current
-        if current is not None:
-            await current.interrupt()
+        await self.current.interrupt()
 
 
 class SwitchingSteer(Steer):
@@ -171,9 +170,8 @@ class SwitchingEventStream(EventStream):
         self.closed = False
         self.consumed = False
 
-    def switch(self, current: EventStream | None) -> None:
-        if current is not None:
-            self.pending.append(current)
+    def switch(self, current: EventStream) -> None:
+        self.pending.append(current)
         self.changed.set()
 
     def close(self) -> None:
@@ -184,11 +182,21 @@ class SwitchingEventStream(EventStream):
         if self.consumed:
             raise RuntimeError("logical live event stream can only be consumed once")
         self.consumed = True
+        yielded = False
         while True:
             if self.pending:
-                current = self.pending.pop(0)
-                view = current.live() if deltas else current.events()
+                current = self.pending[0]
+                try:
+                    view = current.live() if deltas else current.events()
+                except DeltaStreamingDisabled:
+                    # Refused before anything was read, so the durable view
+                    # is still whole: a reader falling back to it gets every
+                    # stream rather than a stream already spent on the refusal.
+                    self.consumed = yielded
+                    raise
+                self.pending.pop(0)
                 async for event in view:
+                    yielded = True
                     yield event
                 continue
             if self.closed:
@@ -218,7 +226,7 @@ class TimeoutTurn[T: BaseModel | None](TurnEngine[T]):
         inner: TurnEngine[T],
         config: TimeoutConfig,
         deadline: float,
-        interrupt: Interrupt | None,
+        interrupt: Interrupt,
     ) -> None:
         self.inner = inner
         self.config = config
@@ -231,11 +239,10 @@ class TimeoutTurn[T: BaseModel | None](TurnEngine[T]):
                 return await self.inner.result()
         except TimeoutError as error:
             message = f"turn exceeded {self.config.seconds:g} seconds"
-            if self.interrupt is not None:
-                try:
-                    await self.interrupt.interrupt()
-                except Exception as interrupt_error:
-                    message += f"; interruption also failed: {interrupt_error}"
+            try:
+                await self.interrupt.interrupt()
+            except Exception as interrupt_error:
+                message += f"; interruption also failed: {interrupt_error}"
             raise TurnTimeoutError(
                 TurnFailure(
                     message=message,
@@ -305,8 +312,8 @@ class ResilientTurn[T: BaseModel | None](TurnEngine[T]):
         request: TurnRequest[T],
         recovery: RecoveryConfig | None,
         correction: CorrectionConfig | None,
-        interrupt: SwitchingInterrupt | None,
-        events: SwitchingEventStream | None,
+        interrupt: SwitchingInterrupt,
+        events: SwitchingEventStream,
         steer: SwitchingSteer | None,
         continuation: CorrectionConfig | None = None,
     ) -> None:
@@ -382,16 +389,13 @@ class ResilientTurn[T: BaseModel | None](TurnEngine[T]):
                         TurnFailure(message=str(error)), failures
                     )
                     raise ProviderTurnError(failure) from error
-                if self.interrupt is not None:
-                    self.interrupt.current = handle.interrupt
-                if self.events is not None:
-                    self.events.switch(handle.events)
+                self.interrupt.current = handle.interrupt
+                self.events.switch(handle.events)
                 if self.steer is not None:
                     self.steer.current = handle.steer
                 current = handle.turn
         finally:
-            if self.events is not None:
-                self.events.close()
+            self.events.close()
 
 
 def correction_request[T: BaseModel | None](
@@ -593,27 +597,19 @@ class DecoratingSession(SessionEngine):
                 ) from error
         turn: TurnEngine[T] = handle.turn
         correction = self.correction if is_output_model(request.output_type) else None
-        logical_interrupt = (
-            SwitchingInterrupt(handle.interrupt)
-            if handle.interrupt is not None
-            else None
-        )
+        logical_interrupt = SwitchingInterrupt(handle.interrupt)
         resilient = (
             self.recovery is not None
             or correction is not None
             or self.continuation is not None
         )
-        logical_events = (
-            SwitchingEventStream(handle.events)
-            if resilient and handle.events is not None
-            else None
-        )
+        logical_events = SwitchingEventStream(handle.events) if resilient else None
         logical_steer = (
             SwitchingSteer(handle.steer)
             if resilient and handle.steer is not None
             else None
         )
-        if resilient:
+        if logical_events is not None:
             turn = ResilientTurn(
                 turn,
                 self.inner,
@@ -628,12 +624,7 @@ class DecoratingSession(SessionEngine):
             self.pending.add(turn.settling)
             turn.settling.add_done_callback(self.pending.discard)
         if self.timeout is not None and deadline is not None:
-            turn = TimeoutTurn(
-                turn,
-                self.timeout,
-                deadline,
-                logical_interrupt or handle.interrupt,
-            )
+            turn = TimeoutTurn(turn, self.timeout, deadline, logical_interrupt)
         if self.budget is not None:
             turn = BudgetTurn(turn, self.budget)
         if self.persistence is not None:
@@ -647,7 +638,7 @@ class DecoratingSession(SessionEngine):
         return StartedTurn[T](
             turn=turn,
             events=logical_events or handle.events,
-            interrupt=logical_interrupt or handle.interrupt,
+            interrupt=logical_interrupt,
             steer=logical_steer or handle.steer,
         )
 

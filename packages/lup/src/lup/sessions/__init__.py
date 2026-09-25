@@ -16,6 +16,12 @@ to concerns:
   callbacks and capabilities.
 - :mod:`lup.sessions.middleware` — decorators around whole logical turns
   (timeouts, budgets, retries, persistence, tracing, usage, display).
+- :mod:`lup.sessions.layers` — those decorators and the session wrappers,
+  declared as the one field an agent carries.
+- :mod:`lup.sessions.turns` — the turn every provider's public turn is
+  composed over: started on first use, its events read once and replayed.
+- :mod:`lup.sessions.surface` — the protocols provider-neutral code holds:
+  an agent, its conversations, their turns.
 - :mod:`lup.providers.routing` and :mod:`lup.providers.config` — first-match
   selection of a configured factory recipe.
 - :mod:`lup.sessions.output` — validated submitted-output stores and the

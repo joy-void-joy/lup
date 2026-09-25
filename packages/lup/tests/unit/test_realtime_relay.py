@@ -51,6 +51,7 @@ from lup.sessions.events import (
 )
 from lup.observability.trace import TraceLogger
 from lup.types import JsonObject, Usage
+from tests.unit.doubles import IgnoredInterrupt, SilentStream
 
 
 def tool_map(
@@ -422,7 +423,11 @@ class FakeConversation(SessionEngine):
         self, request: TurnRequest[T]
     ) -> StartedTurn[T]:
         self.prompts.append(request.input.text)
-        handle = StartedTurn[None](turn=FakeTurn(self, len(self.prompts) - 1))
+        handle = StartedTurn[None](
+            turn=FakeTurn(self, len(self.prompts) - 1),
+            events=SilentStream(),
+            interrupt=IgnoredInterrupt(),
+        )
         return cast("StartedTurn[T]", handle)  # lup: ignore[cast] — generic test double
 
 

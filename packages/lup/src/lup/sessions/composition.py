@@ -60,12 +60,16 @@ type CompleteTurn = Callable[[], Awaitable[CompletedTurn]]
 
 
 class AcceptedTurn(BaseModel, frozen=True, arbitrary_types_allowed=True):
-    """Acknowledged native turn and independently supplied optional capabilities."""
+    """Acknowledged native turn and the capabilities its adapter supplies.
+
+    Events and interrupt every adapter supplies; steering only the one that
+    can, which is why it alone may be absent.
+    """
 
     identifiers: TurnIdentifiers
     complete: CompleteTurn
-    events: EventStream | None = None
-    interrupt: Interrupt | None = None
+    events: EventStream
+    interrupt: Interrupt
     steer: Steer | None = None
 
 

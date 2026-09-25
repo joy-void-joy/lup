@@ -28,6 +28,8 @@ from lup.resolver.join_tools import (
     create_join_tools,
 )
 from tests.unit.doubles import (
+    IgnoredInterrupt,
+    SilentStream,
     FailingLauncher,
     ScriptedLauncher,
     StaticTurn,
@@ -816,7 +818,11 @@ class ResolverTestSession(SessionEngine):
             output,
             identifiers(f"resolver-{self.root.name}", f"turn-{self.sequence}"),
         )
-        return StartedTurn[T](turn=StaticTurn(result))
+        return StartedTurn[T](
+            turn=StaticTurn(result),
+            events=SilentStream(),
+            interrupt=IgnoredInterrupt(),
+        )
 
 
 def resolver_test_factory(

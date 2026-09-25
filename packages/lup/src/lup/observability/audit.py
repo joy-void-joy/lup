@@ -779,7 +779,7 @@ class JournalTurn[T: BaseModel | None](TurnEngine[T]):
         self,
         inner: TurnEngine[T],
         journal: TraceJournal,
-        event_stream: JournalEventStream | None,
+        event_stream: JournalEventStream,
     ) -> None:
         self.inner = inner
         self.journal = journal
@@ -790,8 +790,7 @@ class JournalTurn[T: BaseModel | None](TurnEngine[T]):
             result = await self.inner.result()
         except TurnError as error:
             failure = error.failure
-            if self.event_stream is not None:
-                await self.event_stream.wait()
+            await self.event_stream.wait()
             identifiers = failure.identifiers
             self.journal.emit(
                 "error",
@@ -811,8 +810,7 @@ class JournalTurn[T: BaseModel | None](TurnEngine[T]):
                 turn_id=(identifiers.turn.value if identifiers is not None else None),
             )
             raise
-        if self.event_stream is not None:
-            await self.event_stream.wait()
+        await self.event_stream.wait()
         self.journal.emit(
             "turn_result",
             {
@@ -857,11 +855,7 @@ class JournalSession(SessionEngine):
         )
         handle = await self.inner.start(request)
         mirrored: asyncio.Queue[LiveTurnEvent | None] = asyncio.Queue()
-        event_stream = (
-            JournalEventStream(handle.events, self.journal, mirrored)
-            if handle.events is not None
-            else None
-        )
+        event_stream = JournalEventStream(handle.events, self.journal, mirrored)
         return StartedTurn[T](
             turn=JournalTurn(handle.turn, self.journal, event_stream),
             events=event_stream,

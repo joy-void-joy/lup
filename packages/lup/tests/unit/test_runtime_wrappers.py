@@ -58,6 +58,7 @@ from lup.sessions.middleware import (
 )
 from lup.types import Usage
 from tests.unit.test_capability_runtime import RecordingBinder, RecordingInterrupt
+from tests.unit.doubles import IgnoredInterrupt, SilentStream
 
 
 class WrappedOutput(BaseModel, frozen=True):
@@ -75,7 +76,8 @@ def accepted(
             turn=TurnId(value=f"turn-{sequence}"),
         ),
         complete=complete,
-        interrupt=interrupt,
+        events=SilentStream(),
+        interrupt=interrupt or IgnoredInterrupt(),
     )
 
 
@@ -618,6 +620,7 @@ async def test_retry_joins_live_events_and_retargets_steer(continuation: bool) -
             events=ScriptedEventStream(
                 f"attempt-{turn_sequence}", identifiers, drained
             ),
+            interrupt=IgnoredInterrupt(),
             steer=RecordingSteer(f"steer-{turn_sequence}", steered),
         )
 

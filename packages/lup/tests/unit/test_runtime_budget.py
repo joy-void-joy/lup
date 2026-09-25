@@ -19,6 +19,7 @@ from lup.sessions.events import (
 )
 from lup.types import Usage
 from tests.unit.test_capability_runtime import RecordingBinder
+from tests.unit.doubles import IgnoredInterrupt, SilentStream
 
 # One dollar a turn, so a ceiling reads as a turn count in these tests.
 DOLLAR_A_TURN = 1.0
@@ -66,6 +67,8 @@ def budgeted_session(
                 turn=TurnId(value=f"turn-{turn}"),
             ),
             complete=complete,
+            events=SilentStream(),
+            interrupt=IgnoredInterrupt(),
         )
 
     return FinancialBudgetSession(
