@@ -5,11 +5,12 @@ import json
 import logging
 import shutil
 from collections import deque
-from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping, Sequence
 from functools import partial
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from time import perf_counter
 from typing import TYPE_CHECKING
 from uuid import uuid4
@@ -39,7 +40,7 @@ from lup.providers.claude import (
 )
 from lup.providers.claude.config_home import session_config_home
 from lup.providers.claude.transcripts import ClaudeTranscripts, result_text
-from lup.providers.claude.native_tools import claude_native_tools, claude_tool_allowed
+from lup.mcp import hosted_servers, opened_needs
 from lup.providers.claude.model_choice import claude_effort
 from lup.sessions.recursion import (
     child_recursive_agent_allowance,
@@ -305,11 +306,14 @@ class ClaudeConversationState:
         self,
         opener: "ClaudeSessionOpener",
         config: Claude,
+        servers: Mapping[str, McpServerEntry],
         resume: SessionId | None,
         fork: ClaudeForkPoint | None = None,
     ) -> None:
         self.opener = opener
         self.config = config
+        self.servers = servers
+        """The declaration's MCP servers, built once for this session."""
         self.resume = resume.value if resume is not None else None
         self.forking = fork
         self.session_id = self.resume or str(uuid4())
@@ -363,6 +367,7 @@ class ClaudeConversationState:
             case ClaudeForkPoint(parent=parent, through=through), _:
                 return build_claude_options(
                     self.config,
+                    servers=self.servers,
                     binding=self.current_submission,
                     resume=parent,
                     session_id=self.session_id,
@@ -372,6 +377,7 @@ class ClaudeConversationState:
             case None, None:
                 return build_claude_options(
                     self.config,
+                    servers=self.servers,
                     binding=self.current_submission,
                     resume=None,
                     session_id=self.session_id,
@@ -379,6 +385,7 @@ class ClaudeConversationState:
             case None, resumed:
                 return build_claude_options(
                     self.config,
+                    servers=self.servers,
                     binding=self.current_submission,
                     resume=resumed,
                     session_id=None,
@@ -797,14 +804,11 @@ class ClaudeSessionOpener:
     def compiled(self) -> Claude:
         """The declaration as its sessions open with it.
 
-        The application's own tools are served on a server of their own, and
-        a compatible endpoint becomes the environment that routes the CLI to
-        it — both here rather than at declaration, so an agent can be copied
-        and changed before either is built.
+        A compatible endpoint becomes the environment that routes the CLI to
+        it here rather than at declaration, so an agent can be copied and
+        changed before it is built.
         """
-        config = self.config.model_copy(
-            update={"tool_servers": self.config.servers(), "tools": []}
-        )
+        config = self.config
         if config.endpoint is None:
             return config
         from lup.providers.claude.config import ClaudeCompatibilityTransform
@@ -820,7 +824,17 @@ class ClaudeSessionOpener:
         config = compiled.model_copy(
             update={"environment": allowance.environment(compiled.environment)}
         )
-        state = ClaudeConversationState(self, config, resume, fork)
+        # Built here rather than at declaration: a hosted server closes over
+        # the session it serves — its identity, a container started for it,
+        # a directory of its own that lives exactly as long as it does.
+        scratch = TemporaryDirectory(prefix="lup-session-")
+        servers = hosted_servers(
+            config.tools.mcp,
+            opened_needs(
+                config.cwd or Path.cwd(), Path(scratch.name), config.environment
+            ),
+        )
+        state = ClaudeConversationState(self, config, servers, resume, fork)
         composed = ComposedSession(
             starter=state.start_turn,
             binder=ClaudeTurnToolBinder(state),
@@ -844,14 +858,14 @@ class ClaudeSessionOpener:
         # do not fix it from the shape alone.
         companions = [
             companion
-            for server in config.tool_servers.values()
+            for server in servers.values()
             if isinstance(server, LupMcpServerConfig)
             for companion in server.companions
         ]
 
         @asynccontextmanager
         async def native() -> AsyncGenerator[SessionEngine]:
-            with recursive_agent_scope(allowance):
+            with scratch, recursive_agent_scope(allowance):
                 async with running_companions(companions):
                     try:
                         yield composed
@@ -945,24 +959,50 @@ def installed_claude(environment: EnvVars) -> Path | None:
     return Path(found) if found is not None else None
 
 
+def claude_tool_allowed(
+    name: str,
+    roster: Sequence[str] | None,
+    servers: Mapping[str, McpServerEntry],
+) -> bool:
+    """Whether a session holding ``roster`` and ``servers`` may call ``name``.
+
+    An MCP tool is authorized by the server serving it and never by a
+    built-in grant, so an ambient server a session did not declare stays
+    refused even under Claude Code's preset.
+    """
+    if not name.startswith("mcp__"):
+        return roster is None or name in roster
+    return any(
+        name in [f"mcp__{key}__{tool}" for tool in server.tool_names]
+        if isinstance(server, LupMcpServerConfig)
+        else name.startswith(f"mcp__{key}__")
+        for key, server in servers.items()
+    )
+
+
 def build_claude_options(
     config: Claude,
     *,
+    servers: Mapping[str, McpServerEntry],
     binding: SubmissionBindingSource,
     resume: str | None,
     session_id: str | None,
     fork_session: bool = False,
     resume_session_at: str | None = None,
 ) -> "claude.ClaudeAgentOptions":
-    """Build SDK options lazily and never enable native structured output."""
+    """Build SDK options lazily and never enable native structured output.
+
+    ``servers`` are the declaration's MCP servers as this session built them,
+    which is the one part of the options that is not read off ``config``.
+    """
     import claude_agent_sdk as claude
     from claude_agent_sdk import types as claude_types
     from lup.providers.claude.hooks import lup_hooks_to_claude
     from lup.providers.claude.subagents import model_alias, subagent_tools
 
     config = Claude.model_validate(config)
-    native = claude_native_tools(config.native_tools)
-    servers = dict(config.tool_servers)
+    native = config.tools.roster()
+    servers = dict(servers)
     allowed = list(config.allowed_tools)
     if binding() is not None:
         servers["lup-output"] = build_submission_server(binding)
@@ -982,7 +1022,7 @@ def build_claude_options(
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "deny",
-                "permissionDecisionReason": f"Tool {name!r} is outside this session's explicit native_tools and tool_servers.",
+                "permissionDecisionReason": f"Tool {name!r} is outside this session's declared tools.",
             }
         }
 
@@ -1019,13 +1059,17 @@ def build_claude_options(
         if config.sandbox is not None
         else None
     )
+    # The stock tools are Claude Code's coding agent, and that agent is its
+    # tools and the system prompt that teaches them; a narrower grant keeps
+    # only the caller's instructions, since the preset's describe tools the
+    # session does not have.
     system_prompt: str | claude_types.SystemPromptPreset | None = (
         {
             "type": "preset",
             "preset": "claude_code",
             "append": config.system_prompt,
         }
-        if config.coding_harness_preset
+        if native is None
         else config.system_prompt or None
     )
     chosen = config.resolved_effort()
@@ -1033,7 +1077,11 @@ def build_claude_options(
     return claude.ClaudeAgentOptions(
         model=config.model_id(),
         system_prompt=system_prompt,
-        tools={"type": "preset", "preset": "claude_code"} if native is None else native,
+        tools=(
+            {"type": "preset", "preset": "claude_code"}
+            if native is None
+            else list[str](native)
+        ),
         allowed_tools=list(dict.fromkeys(allowed)),
         disallowed_tools=list(config.disallowed_tools),
         mcp_servers={

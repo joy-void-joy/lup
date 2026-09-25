@@ -1,20 +1,29 @@
-"""Codex process and thread controls for explicit built-in tool facilities."""
+"""The tools a Codex session is given, and the controls that hold it to them.
+
+Codex's built-ins are facilities rather than a roster: a shell, hosted web
+search, and patch application, each switched on or off where the app-server
+starts. So a grant names those three and nothing else. Codex has no tool
+that reads, writes or fetches without being one of them, and a grant for
+one it lacks is refused by the Literal rather than approximated by the
+nearest facility, which would hand over more than was asked for.
+"""
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING, Self
 
 import sh
-from pydantic import TypeAdapter
+from pydantic import BaseModel, TypeAdapter
 
-from pydantic import BaseModel
+from lup.tools.builtin import BuiltinPreset
+from lup.types import EnvVars, JsonObject, JsonValue
 
-from lup.tools.native import NativeToolGroup, NativeTools, native_grants
-from lup.types import JsonObject, JsonValue
-from lup.types import EnvVars
+if TYPE_CHECKING:
+    from lup.providers.codex import CodexBuiltinTool
 
 
-class CodexNativeTools(BaseModel, frozen=True):
-    """Facilities Codex can expose without approximating an exact grant."""
+class CodexBuiltins(BaseModel, frozen=True):
+    """The facilities one session starts with, as the app-server is told them."""
 
     shell: bool = False
     web: bool = False
@@ -23,35 +32,23 @@ class CodexNativeTools(BaseModel, frozen=True):
     all_tools: bool = False
 
     @classmethod
-    def compile(cls, grants: NativeTools) -> "CodexNativeTools":
-        shell = False
-        web = False
-        write = False
-        all_tools = False
-        for grant in native_grants(grants):
-            match grant:
-                case NativeToolGroup.ALL:
-                    all_tools = True
-                case NativeToolGroup.SHELL | "Bash":
-                    shell = True
-                case NativeToolGroup.WEB | "WebSearch":
-                    web = True
-                case NativeToolGroup.WRITE | "apply_patch":
-                    write = True
-                case _:
-                    raise ValueError(
-                        f"Codex cannot enforce native tool grant {grant!r} exactly. "
-                        "SHELL/Bash grants command execution; WEB/WebSearch grants "
-                        "hosted web research. Neither silently substitutes for Read, "
-                        "Write, or WebFetch. Use explicit application tools for those operations."
-                    )
-        return cls(
-            shell=shell or all_tools,
-            web=web or all_tools,
-            write=write or all_tools,
-            images=all_tools,
-            all_tools=all_tools,
-        )
+    def compile(cls, builtin: "BuiltinPreset | list[CodexBuiltinTool]") -> Self:
+        """The facilities a grant switches on; ``stock`` is every one Codex has."""
+        match builtin:
+            case "stock":
+                return cls(
+                    shell=True, web=True, write=True, images=True, all_tools=True
+                )
+            case "web":
+                return cls(web=True)
+            case "none":
+                return cls()
+            case list():
+                return cls(
+                    shell="Bash" in builtin,
+                    web="WebSearch" in builtin,
+                    write="apply_patch" in builtin,
+                )
 
     def configuration(self) -> JsonObject:
         """Override every startup facility that can introduce ambient tools."""

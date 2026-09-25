@@ -7,7 +7,7 @@ from typing import Literal
 import pytest
 from pydantic import BaseModel, TypeAdapter
 
-from lup.providers.claude import Claude
+from lup.providers.claude import Claude, ClaudeTools
 from lup.providers.claude.runtime import build_claude_options
 from lup.providers.codex import Codex
 from lup.orchestration.reflection import ReviewResult, ReviewVerdict
@@ -95,13 +95,13 @@ async def test_served_roles_execute_on_the_selected_engine(
     if engine == "claude":
         assert isinstance(config, Claude)
         assert config.model_id() == "opus"
-        assert config.native_tools == [
+        assert config.tools.builtin == [
             "Read",
             "Glob",
             "Grep",
             *(["WebSearch", "WebFetch"] if name == "researcher" else []),
         ]
-        assert config.allowed_tools == config.native_tools
+        assert config.allowed_tools == config.tools.builtin
         assert config.setting_sources == []
     else:
         assert isinstance(config, Codex)
@@ -115,7 +115,8 @@ async def test_served_roles_execute_on_the_selected_engine(
 
 def test_native_and_served_claude_roles_share_the_compiler() -> None:
     options = build_claude_options(
-        Claude(subagents=get_subagent_specs(), native_tools=["all"]),
+        Claude(subagents=get_subagent_specs(), tools=ClaudeTools(builtin="stock")),
+        servers={},
         binding=lambda: None,
         resume=None,
         session_id=None,
@@ -270,7 +271,13 @@ async def test_reviewer_compiles_on_both_engines(
         )
     else:
         assert isinstance(config, Claude)
-        assert config.native_tools == ["Read", "Glob", "Grep", "WebSearch", "WebFetch"]
+        assert config.tools.builtin == [
+            "Read",
+            "Glob",
+            "Grep",
+            "WebSearch",
+            "WebFetch",
+        ]
 
 
 @pytest.mark.parametrize("failure", ["error", "missing"])

@@ -34,7 +34,6 @@ from lup import (
     SessionSummary,   # one conversation the provider has on record
     TurnId,           # the provider's identity for one turn; a fork is cut at it
     CustomModel,      # a model id outside the runtime's catalog, on purpose
-    NativeToolGroup,  # explicit groups of built-in tool authority
 )
 ```
 
@@ -171,45 +170,71 @@ adapter — several hundred modules, the MCP tooling its tools are declared in �
 and still no SDK: opening a session is what finally loads Claude's SDK or
 starts Codex's app-server.
 
-## Native tools
+## Tools
 
-`native_tools` defaults to `None` on `Claude`, `Codex`, and `SessionRequest`.
-`None` and an empty sequence grant no
-built-in tools and inherit no ambient tool inventory. A caller opts in with
-`NativeToolGroup` values or exact names supported by its provider:
+What a session may call is one field, `tools`, typed per provider:
+`ClaudeTools` from `lup.providers.claude` and `CodexTools` from
+`lup.providers.codex`. Each holds `builtin`, the runtime's own tools, and
+`mcp`, the MCP servers every session carries.
+
+`builtin` is a preset or an exact list. `"web"` is the default: fetch and
+search, and nothing that reads, writes or runs anything on the machine the
+session runs on until something grants it. `"stock"` is everything the runtime
+ships — on Claude the SDK's `claude_code` tool preset and the coding system
+prompt that teaches it, with `system_prompt` appended. `"none"` leaves only the
+declared servers. A list names exactly the tools granted, as
+`ClaudeBuiltinTool` or `CodexBuiltinTool` literals, so a misspelt name is a
+type error where it is written and a validation error where it is read:
 
 ```python
-from lup import Claude, Codex, NativeToolGroup
+from lup import Claude, Codex
+from lup.mcp import CodeIntel, Coordination, Toolset
+from lup.providers.claude import ClaudeTools
+from lup.providers.codex import CodexTools
 
-reader = Claude(native_tools=[NativeToolGroup.READ])
-executor = Codex(native_tools=[NativeToolGroup.SHELL])
+from my_project.tools import lookup  # an @lup_tool declared at module level
+
+reader = Claude(
+    tools=ClaudeTools(
+        builtin=["Read", "Glob", "Grep"],
+        mcp=[Coordination(), CodeIntel(), Toolset([lookup], name="project")],
+    )
+)
+executor = Codex(tools=CodexTools(builtin=["Bash"]))
+coder = Claude(tools=ClaudeTools(builtin="stock"))
 ```
 
-The groups are `READ`, `WEB`, `WRITE`, `SHELL`, and `ALL`. `ALL` explicitly
-grants the runtime's broad built-in inventory; it does not promise every
-experimental facility or grant ambient application integrations. Groups
-compose, and unknown or unenforceable grants fail before a session starts.
-Permission patterns such as `Bash(*)` are not native tool identities.
-
-| Grant | Claude | Codex |
+| `builtin` | Claude | Codex |
 |---|---|---|
-| `NativeToolGroup.READ` | `Read`, `Glob`, `Grep`, `WebFetch`, `WebSearch` | Rejected: reading through a shell would grant execution |
-| `NativeToolGroup.WEB` | `WebFetch`, `WebSearch` | Native web search |
-| `NativeToolGroup.WRITE` | `Write`, `Edit`, `NotebookEdit` | Patch application |
-| `NativeToolGroup.SHELL` | `Bash`, `TaskOutput`, `TaskStop` | Shell execution |
-| Exact names | Includes `Read`, `WebFetch`, `Write`, `Bash` | `Bash`, `WebSearch`, `apply_patch`; `Read`, `Write`, and `WebFetch` are rejected |
+| `"stock"` | The `claude_code` preset, with Claude Code's system prompt | Every facility: shell, web search, patches, images, delegation |
+| `"web"` | `WebFetch`, `WebSearch` | Hosted web search |
+| `"none"` | No built-in | No facility |
+| A list | Exactly those of its 25 tools | Any of `Bash`, `WebSearch`, `apply_patch` |
 
-The declaration's `tools=[...]` field supplies application `@lup_tool`
-handlers independently. Those handlers still work with `native_tools=None`:
-Claude hosts them through MCP, and Codex dispatches them through its in-process
-dynamic-tool handlers. `tool_servers` on `Claude` and `mcp_servers` on `Codex`
-remain the explicit MCP-server declarations. Typed output remains available
-with no native tools. On `Claude`, `allowed_tools` controls automatic approval
-within the declared authority and `disallowed_tools` narrows it; neither adds
-an undeclared tool.
+Codex has no tool that reads, writes or fetches without being one of those
+three facilities, so `Read`, `Write` and `WebFetch` are not Codex names rather
+than names it approximates. Permission patterns such as `Bash(*)` are not tool
+names either.
 
-Explicit session hooks remain attached when native tools are granted. Codex
-enables the verified declared project policy plugin for an explicit native grant while keeping
+The servers in `mcp` are objects from `lup.mcp`. `Coordination()`,
+`Ledger(...)`, `CodeIntel()` and `Sandbox()` are lup's own groups;
+`Toolset([...])` serves a project's `@lup_tool` handlers, `Group(builder)` a
+group built over the session, and `External(name=..., server=...)` a transport
+lup does not host. Each is read two ways. A session this process opens hosts
+it, built when the session opens — Claude over the SDK's in-process MCP, Codex
+through its dynamic tools. A runtime's own CLI starts it instead, as a stdio
+command running `python -m lup.mcp.serve` (or a composed CLI's `tools serve`)
+that carries the server's class and fields, which the subprocess validates back
+into the same declaration. That is why a served `Toolset` names module-level
+tools: an import path is what crosses the process boundary.
+
+Typed output remains available with no built-in. On `Claude`, `allowed_tools`
+controls automatic approval within the declared tools and `disallowed_tools`
+narrows it; neither adds an undeclared tool. Plugin directories require
+`"stock"`, since a plugin can introduce delegated authority.
+
+Explicit session hooks remain attached when built-in tools are granted. Codex
+enables the verified declared project policy plugin for an explicit built-in grant while keeping
 unrelated inherited plugins disabled. Provider settings and extra arguments
 that could widen the requested authority are rejected, including altered
 copies of validated configurations.
@@ -421,6 +446,7 @@ the way six of them once were.
 | `execution` | What carrying work out runs into, and what to do about each of it. The retry and the throttle a flaky or rate-limited service is met with, the executor a blocking call is handed to so work in flight outlives any one loop&#x27;s teardown, and whether a path can be written at all — or whether a boundary owns it and something merely died holding a lock. |
 | `formats` | What a generated artifact is written as, at the leaf where data enters it. Not what a document says, but what it has to be spelled like to survive being one. A file compiled from a declaration has to say so, in whatever comment syntax its own format admits; a value spliced into a compiled table has to survive the characters that would end a cell or a row early. Both are one question — the target format&#x27;s rules, applied where data crosses into it — and it is nobody else&#x27;s: prose a human wrote is Markdown all the way down and needs nothing here, which is why this sits below every package that compiles something rather than inside the one that compiles most. |
 | `ledger` | One DAG of typed nodes per repository, and nothing about what they mean. Work that outlives the session which did it has to live somewhere a later session finds. Prose rots because nothing checks it; a per-branch file forks because every worktree holds one; a stored status keeps its label after the support for it goes away. This is the mechanism that avoids all three, and it is deliberately only the mechanism. |
+| `mcp` | The MCP servers a session carries, each declared as a value. A server is named in an agent&#x27;s tools and read twice. A session this process opens hosts it, built against what that session has — its checkout, its roster identity, its container. A session a runtime&#x27;s own CLI launches starts it instead, as the transport that launch declares: a stdio subprocess serving it, for anything lup hosts. Both answers come from one value, so the session a library opens and the one a terminal launches carry the same servers, and neither is a list kept beside the other. |
 | `observability` | What happened, recorded so that a later reader can answer for it. One subject rather than four top-level entries answering the same reader question. The ordered record file every durable log appends to; the lossless hash-chained audit stream a session writes as it runs; the compact markdown trace and its sidecar a later reader skims to find a session worth opening; the console display; the per-tool metrics; the replay divergence check; the per-turn cost arithmetic; and the account-level metered usage. What separates them is what each is kept *for* — evidence, navigation, or a bill — and never the mechanism, which they share. |
 | `orchestration` | Running more than one piece of work, and staying able to speak to it. A cohort of addressable held sessions with mail that lands in front of each one&#x27;s next tool call; a background agent that coalesces wakes into turns; a scheduler and relay for work that sleeps; durable out-of-process jobs; the review gates a turn passes through; and spec-driven delegation for runtimes whose own subagents will not do. |
 | `runs` | Work that outlives the tool call which started it, and stays watchable. A job long enough to be worth launching in the background is a job nobody can see. The answer here is one directory and a protocol over it: the run declares what it scheduled before starting, lands one atomically written result per unit, claims a unit while it works on it, and writes a line each time something happens. Everything a follower knows it reads from those, so a run launched detached, from another session, or before this shell existed is observable without being touched — and following one cannot perturb it. |

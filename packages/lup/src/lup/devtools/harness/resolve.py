@@ -33,7 +33,7 @@ from lup.tools.mcp import (
     create_mcp_server,
     serve_stdio,
 )
-from lup.tools.native import NativeToolGroup
+from lup.mcp import External
 from lup.policy.grants import LeaseGrants, allowance_grants_environment
 from lup.policy.identity import agent_identity_environment
 from lup.harness.environment import non_interactive_environment
@@ -1576,13 +1576,13 @@ def run_resolve(
         report_a_blocked_registration(root)
 
     async def execute() -> None:
-        from lup.providers.claude import Claude, ClaudeSandboxConfig
+        from lup.providers.claude import Claude, ClaudeSandboxConfig, ClaudeTools
         from lup.providers.claude.runtime import (
             environmental_fault,
             may_be_a_rotation,
             needs_a_person,
         )
-        from lup.providers.codex import Codex, CodexMcpServerConfig
+        from lup.providers.codex import Codex, CodexTools
         from lup.providers.claude.model_choice import claude_model_choice
         from lup.providers.codex.model_choice import codex_model_choice
         from lup.providers.claude.config_home import (
@@ -1901,6 +1901,20 @@ def run_resolve(
                     else []
                 ),
             ]
+            # Over stdio rather than in process, which is what makes the
+            # boundary reachable at all: a CLI running inside a container
+            # cannot see an object living in this one. One transport for both
+            # runtimes, so they answer the question the same way instead of
+            # one of them holding a server only an uncontained worker could
+            # reach.
+            questions = External(
+                name="resolver",
+                server=RawStdioServerConfig(
+                    command="uv",
+                    args=["run", "lup-devtools", "resolve", "serve-tools"],
+                    env={**session_environment, **tool_context.to_env()},
+                ),
+            )
             if adapter == "claude":
                 worker_environment_for = isolated_claude_environment(
                     concern_environment, cwd
@@ -1908,7 +1922,7 @@ def run_resolve(
                 return Claude(
                     model=claude_model,
                     system_prompt="Execute the persisted Lup resolver assignment.",
-                    native_tools=[NativeToolGroup.ALL],
+                    tools=ClaudeTools(builtin="stock", mcp=[questions]),
                     cwd=cwd,
                     add_dirs=[cwd, *toolchain_writable_paths()],
                     plugin_dirs=[lease_plugin_dir(cwd, plugin.name)],
@@ -1920,28 +1934,6 @@ def run_resolve(
                         context.actor.kind,
                         worker_environment_for,
                     ),
-                    # Over stdio rather than in process, which is what
-                    # makes the boundary reachable at all: a CLI running
-                    # inside a container cannot see an object living in
-                    # this one. The transport is the one the Codex worker
-                    # beside it already uses, so both runtimes answer the
-                    # question the same way instead of one of them holding
-                    # a server only an uncontained worker could reach.
-                    tool_servers={
-                        "resolver": RawStdioServerConfig(
-                            command="uv",
-                            args=[
-                                "run",
-                                "lup-devtools",
-                                "resolve",
-                                "serve-tools",
-                            ],
-                            env={
-                                **session_environment,
-                                **tool_context.to_env(),
-                            },
-                        )
-                    },
                     # Named from the tools rather than from the server,
                     # which is the half a stdio transport cannot answer:
                     # `server_tool_names` reports nothing for an external
@@ -1970,7 +1962,7 @@ def run_resolve(
                 )
             return Codex(
                 model=codex_model,
-                native_tools=[NativeToolGroup.ALL],
+                tools=CodexTools(builtin="stock", mcp=[questions]),
                 system_prompt=("Execute the persisted Lup resolver assignment."),
                 cwd=cwd,
                 sandbox="workspace-write",
@@ -2003,18 +1995,6 @@ def run_resolve(
                     context.hooks,
                 ),
                 environment=concern_environment,
-                mcp_servers={
-                    "resolver": CodexMcpServerConfig(
-                        command="uv",
-                        args=[
-                            "run",
-                            "lup-devtools",
-                            "resolve",
-                            "serve-tools",
-                        ],
-                        env={**session_environment, **tool_context.to_env()},
-                    )
-                },
                 writable_roots=[cwd],
             )
 
@@ -2039,7 +2019,18 @@ def run_resolve(
                     system_prompt=(
                         "Independently review the persisted resolver change."
                     ),
-                    native_tools=[NativeToolGroup.READ, NativeToolGroup.SHELL],
+                    tools=ClaudeTools(
+                        builtin=[
+                            "Read",
+                            "Glob",
+                            "Grep",
+                            "WebFetch",
+                            "WebSearch",
+                            "Bash",
+                            "TaskOutput",
+                            "TaskStop",
+                        ]
+                    ),
                     cwd=cwd,
                     add_dirs=[cwd],
                     environment=reviewer_environment_for,
@@ -2060,7 +2051,7 @@ def run_resolve(
                 )
             return Codex(
                 model=codex_model,
-                native_tools=[NativeToolGroup.WEB, NativeToolGroup.SHELL],
+                tools=CodexTools(builtin=["WebSearch", "Bash"]),
                 approval_policy="on-request",
                 hooks=merge_hooks(create_permission_hooks([], [cwd]), context.hooks),
                 system_prompt=("Independently review the persisted resolver change."),

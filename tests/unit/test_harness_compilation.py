@@ -148,10 +148,8 @@ from lup.policy.dispatcher import (
 from lup.types import EnvVars
 from lup.tools.toolsets import startup_names
 from lup_template.agent.toolsets import EXAMPLE_GROUP, NOTES_GROUP, declared_tool_groups
-from lup_template.devtools.agent.serve import (
-    collect_tools_by_server,
-    harness_session_context,
-)
+from lup.mcp.serve import harness_session_context
+from lup_template.devtools.agent.serve import collect_tools_by_server
 from lup.devtools.dev.rules import rule_reference_artifact
 from lup_template.harness.catalog import (
     HARNESS_SESSION,

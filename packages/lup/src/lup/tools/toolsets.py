@@ -24,12 +24,13 @@ rather than listed beside it, so the two cannot disagree.
 
 The groups lup ships tools for come with builders of their own, below: an
 adopter names them rather than rebuilding them, and a companion added to one
-arrives with the pin.
+arrives with the pin. :mod:`lup.mcp` declares each as a server a session
+carries, and :mod:`lup.mcp.serve` serves one to a runtime that launched it.
 """
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel
 
@@ -37,15 +38,27 @@ from lup.coordination.wake import WakePath
 from lup.ledger.models import LedgerEdge, LedgerNode
 from lup.ledger.store import LedgerLayout
 from lup.orchestration.reflection import ReviewGate
-from lup.sandbox.container import Sandbox
 from lup.tools.mcp import (
     LupMcpServerConfig,
     LupMcpTool,
     ServerCompanion,
     create_mcp_server,
-    serve_stdio,
 )
 from lup.tools.policy import BaseToolPolicy
+
+
+@runtime_checkable
+class CodeSandbox(Protocol):
+    """A container a session runs code in, as the groups serving it reach it.
+
+    Named by what the groups call rather than by the class that implements it,
+    so declaring a session's needs imports no container engine's client — that
+    is the sandbox extra's, loaded only where a container is started.
+    """
+
+    def create_tools(self, usage_notes: str = "") -> list[LupMcpTool]: ...
+
+    def stop(self) -> None: ...
 
 
 class SessionNeeds(BaseModel, frozen=True, arbitrary_types_allowed=True):
@@ -75,7 +88,7 @@ class SessionNeeds(BaseModel, frozen=True, arbitrary_types_allowed=True):
     outputs_dir: Path | None = None
     """Past outputs a reviewer reads for calibration, where there are any."""
 
-    sandbox: Sandbox | None = None
+    sandbox: CodeSandbox | None = None
     """The session's container, where one was started for it."""
 
     realtime_dir: Path | None = None
@@ -150,31 +163,6 @@ class SessionToolset(BaseModel, frozen=True, arbitrary_types_allowed=True):
     groups: dict[str, list[LupMcpTool]]
     companions: dict[str, list[ServerCompanion]]
 
-    def served(self, group: str | None, without: list[str]) -> list[LupMcpTool]:
-        """The tools one server serves: a named group's, or every other group's.
-
-        ``without`` names the groups a default set leaves out, which is how a
-        group that must be asked for by name stays out of every session that
-        did not ask.
-        """
-        if group is not None:
-            return list(self.groups.get(group, []))
-        return [
-            tool
-            for name, tools in self.groups.items()
-            if name not in without
-            for tool in tools
-        ]
-
-    def beside(self, group: str | None) -> list[ServerCompanion]:
-        """The companions serving beside one group, or beside all of them."""
-        return [
-            companion
-            for name, companions in self.companions.items()
-            if group is None or name == group
-            for companion in companions
-        ]
-
 
 def assembled(groups: list[ToolGroup], needs: SessionNeeds) -> SessionToolset:
     """Build every declared group this session has something to put in it."""
@@ -225,9 +213,8 @@ def registered(
 ) -> list[LupMcpServerConfig]:
     """One server per group a session registers in the process running it.
 
-    The in-process counterpart of :func:`serve_toolset`, and the same two
-    decisions: a group servable only by name is not registered, and what each
-    server carries is what the policy admits. A runtime's own spelling of a
+    Two decisions: a group servable only by name is not registered, and what
+    each server carries is what the policy admits. A runtime's own spelling of a
     server is its adapter's to make — this hands over the neutral
     configuration every adapter is built from.
 
@@ -239,28 +226,6 @@ def registered(
         for name, tools in toolset.groups.items()
         if name not in named_only(groups)
     ]
-
-
-def serve_toolset(
-    toolset: SessionToolset,
-    groups: list[ToolGroup],
-    group: str | None,
-    default_name: str,
-) -> None:
-    """Serve one group of a session's tools over MCP stdio, and its companions.
-
-    The loop every subprocess backend runs, here rather than in a copy an
-    adopter carries. What a server serves is one named group or the default
-    set — every group but the ones servable by name alone — and what runs
-    beside it is that group's companions, so a server started for one group
-    carries that group's pulse and the default set carries all of them.
-    """
-    served = toolset.served(group, named_only(groups))
-    serve_stdio(
-        create_mcp_server(
-            group or default_name, tools=served, companions=toolset.beside(group)
-        )
-    )
 
 
 def coordination_group(name: str = "coordination") -> ToolGroup:

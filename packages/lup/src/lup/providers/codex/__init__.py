@@ -52,7 +52,9 @@ from lup.providers.codex.model_choice import (
     refuse_unsupported_effort,
 )
 from lup.providers.codex.models import CodexEffort
-from lup.providers.codex.native_tools import CodexNativeTools
+from lup.providers.codex.builtins import CodexBuiltins
+from lup.mcp import ToolServer, uniquely_named
+from lup.tools.builtin import BuiltinPreset
 from lup.providers.codex.subagents import CodexModelTiers, CodexSubagentTools
 from lup.providers.confinement import SessionContainment
 from lup.sessions.capabilities import ConversationRecord, ForkSession, SessionEngine
@@ -73,8 +75,6 @@ from lup.sessions.events import (
 from lup.sessions.layers import SessionLayers
 from lup.sessions.middleware import CorrectionConfig
 from lup.sessions.turns import LazyTurn, turn_input
-from lup.tools.mcp import LupMcpTool, ServerCompanion
-from lup.tools.native import NativeTools
 from lup.types import EnvVars, JsonObject
 
 CODEX_PROGRAM = Path("codex")
@@ -87,6 +87,26 @@ runtime is called.
 """
 
 OPENAI_COMPAT_API_KEY_ENV = "LUP_OPENAI_COMPAT_API_KEY"
+
+
+type CodexBuiltinTool = Literal["Bash", "WebSearch", "apply_patch"]
+"""A facility Codex ships: command execution, hosted web search, file patches."""
+
+
+class CodexTools(BaseModel, frozen=True, extra="forbid", arbitrary_types_allowed=True):
+    """What a Codex session may call: which built-ins, and which MCP servers."""
+
+    builtin: BuiltinPreset | list[CodexBuiltinTool] = "web"
+    """Codex's own facilities: a preset, or exactly the ones named."""
+
+    mcp: list[ToolServer] = []
+    """The MCP servers every session carries, each hosted or started as declared."""
+
+    @model_validator(mode="after")
+    def servers_are_named_apart(self) -> Self:
+        """Refuse two servers under one name, which would address one tool twice."""
+        uniquely_named(self.mcp)
+        return self
 
 
 class CodexMcpServerConfig(BaseModel, frozen=True):
@@ -277,23 +297,16 @@ class Codex(
     layers: SessionLayers = SessionLayers()
     """What every session opened here is wrapped in, turn by turn and whole."""
 
-    mcp_servers: dict[str, CodexMcpServerConfig] = {}
+    tools: CodexTools = CodexTools()
+    """Which built-ins and MCP servers every session carries; the web alone unset.
+
+    A server this library hosts is answered in this process through the
+    thread's own dynamic tools, each named ``lup_app_``, its server and its
+    own name; an external one is a subprocess the app-server starts.
+    """
+
     writable_roots: list[Path] = []
     delegated_tools: CodexSubagentTools | None = None
-    native_tools: NativeTools = None
-    tools: list[LupMcpTool] = []
-    """Application tools, answered in this process through the thread's own
-    dynamic tools, each named ``lup_app_`` and its own name."""
-
-    application_tools: dict[str, LupMcpTool] = {}
-    companions: list[ServerCompanion] = []
-
-    def applications(self) -> dict[str, LupMcpTool]:
-        """Every application tool a thread declares: the named ones, and ``tools``."""
-        return {
-            **self.application_tools,
-            **{f"lup_app_{tool.name}": tool for tool in self.tools},
-        }
 
     @model_validator(mode="after")
     def reject_unanswerable_approvals(self) -> Self:
@@ -309,26 +322,15 @@ class Codex(
             raise ValueError(
                 "outer containment requires the prepared container executable"
             )
-        CodexNativeTools.compile(self.native_tools)
         for key in self.provider_config or {}:
             if key not in {"model_provider", "model_providers"}:
                 raise ValueError(
-                    f"provider_config {key!r} is outside provider endpoint declarations and explicit session authority; use native_tools or tool_servers"
+                    f"provider_config {key!r} is outside provider endpoint declarations and explicit session authority; use tools"
                 )
-        named = [*self.application_tools, *(f"lup_app_{t.name}" for t in self.tools)]
-        if len(named) != len(dict.fromkeys(named)):
-            raise ValueError("application tool names must be unique")
-        for name in named:
-            if (
-                not name.startswith("lup_app_")
-                or not name.isascii()
-                or not all(char.isalnum() or char in "_-" for char in name)
-                or len(name) > 64
-            ):
-                raise ValueError(f"invalid or reserved application tool name {name!r}")
-        if self.delegated_tools is not None and self.native_tools:
+        if self.delegated_tools is not None and self.tools.builtin != "none":
             raise ValueError(
-                "delegated_tools and native_tools are alternative authority declarations"
+                "delegated_tools and tools.builtin are alternative authority "
+                "declarations; declare tools=CodexTools(builtin='none') beside it"
             )
         if self.delegated_tools is not None and (
             self.sandbox != "read-only" or self.approval_policy != "never"
@@ -336,9 +338,7 @@ class Codex(
             raise ValueError(
                 "delegated tools require read-only sandbox and never approvals"
             )
-        if self.delegated_tools is not None and (
-            self.mcp_servers or self.writable_roots
-        ):
+        if self.delegated_tools is not None and (self.tools.mcp or self.writable_roots):
             raise ValueError(
                 "delegated tool capabilities do not grant MCP servers or writable roots"
             )
@@ -414,15 +414,15 @@ class Codex(
         refuse_unsupported_effort(self.model, self.effort, self.model_tiers)
         return self
 
-    def native_capabilities(self) -> CodexNativeTools:
-        """Resolve explicit delegated facilities through the same startup bounds."""
+    def builtins(self) -> CodexBuiltins:
+        """The facilities sessions start with, a delegated role's or the grant's."""
         if self.delegated_tools is not None:
-            return CodexNativeTools(
+            return CodexBuiltins(
                 shell=self.delegated_tools.workspace_read,
                 images=self.delegated_tools.workspace_read,
                 web=self.delegated_tools.web_search,
             )
-        return CodexNativeTools.compile(self.native_tools)
+        return CodexBuiltins.compile(self.tools.builtin)
 
     def workspace(self) -> Path:
         """The directory a session works in: the declared one, or where the caller is."""

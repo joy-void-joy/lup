@@ -11,7 +11,12 @@ from lup.providers.claude.config_home import workspace_config_environment
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.providers.claude.model_choice import claude_model_choice
 from lup.providers.claude.models import ClaudeEffort
-from lup.providers.claude import Claude, ClaudePermissionMode, ClaudeSandboxConfig
+from lup.providers.claude import (
+    Claude,
+    ClaudePermissionMode,
+    ClaudeSandboxConfig,
+    ClaudeTools,
+)
 from lup.providers.confinement import SessionContainment
 from lup.providers.selection import (
     Runtime,
@@ -89,10 +94,9 @@ def claude_config(request: SessionRequest) -> Claude:
     return Claude(
         model=None if request.model is None else claude_model_choice(request.model),
         system_prompt=request.instructions,
-        native_tools=request.native_tools,
+        tools=ClaudeTools(builtin=request.tools.builtin, mcp=request.tools.mcp),
         allowed_tools=request.allowed_tools,
         disallowed_tools=request.disallowed_tools,
-        tool_servers=request.tool_servers,
         permission_mode=(
             None if request.autonomy is None else CLAUDE_AUTONOMY[request.autonomy]
         ),

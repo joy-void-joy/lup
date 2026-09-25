@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "eb5b0501016f8bf25195abb7dbfb26ef6d24307297b25e7cfe35bb52b7b5c559",
+  "source_digest": "9fad55558539fdc10f2d977c7f0a2c7d849235c0ad39ada63eeb8e16dc656cc4",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -44,7 +44,7 @@
     {
       "path": ".codex/config.toml",
       "category": "generated",
-      "sha256": "7abcd3b92dbd69c40ae23ef9f8229311cca23621ef828bacd78991cc5cf2c6d9",
+      "sha256": "e86f0175bb5f8cd289e3644bce48e3a2ecdfb35ab82c7905861be92cfff1d4e6",
       "semantic_id": "harness.project-config",
       "executable": false
     },
@@ -576,7 +576,7 @@
     {
       "path": ".codex/plugins/lup/skills/install/SKILL.md",
       "category": "generated",
-      "sha256": "dcf00a7291cf4b5a6d0281a4abfe028e70cb58e8f8d5b020b5779eb74c223e9c",
+      "sha256": "4a0e07d9ae2c34f30c0b27f180a24ee0fc6336218ff28f9421873d41b60141fe",
       "semantic_id": "skill.install",
       "executable": false
     },

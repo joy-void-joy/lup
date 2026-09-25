@@ -6,14 +6,15 @@
         "--directory",
         "${CLAUDE_PROJECT_DIR}",
         "lup-devtools",
-        "agent",
-        "serve-tools",
+        "tools",
+        "serve",
         "--runtime",
         "claude",
-        "--server",
-        "codeintel",
         "--session",
-        "harness"
+        "harness",
+        "--needs",
+        "lup_template.agent.toolsets.session_needs",
+        "lup.mcp:CodeIntel"
       ],
       "command": "uv"
     },
@@ -23,14 +24,15 @@
         "--directory",
         "${CLAUDE_PROJECT_DIR}",
         "lup-devtools",
-        "agent",
-        "serve-tools",
+        "tools",
+        "serve",
         "--runtime",
         "claude",
-        "--server",
-        "coordination",
         "--session",
-        "harness"
+        "harness",
+        "--needs",
+        "lup_template.agent.toolsets.session_needs",
+        "lup.mcp:Coordination"
       ],
       "command": "uv"
     },
@@ -40,14 +42,16 @@
         "--directory",
         "${CLAUDE_PROJECT_DIR}",
         "lup-devtools",
-        "agent",
-        "serve-tools",
+        "tools",
+        "serve",
         "--runtime",
         "claude",
-        "--server",
-        "ledger",
         "--session",
-        "harness"
+        "harness",
+        "--needs",
+        "lup_template.agent.toolsets.session_needs",
+        "lup.mcp:Ledger",
+        "{\"nodes\":[\"lup.coordination.tasks.Task\",\"lup.coordination.handoffs.Handoff\",\"lup.observability.sessions.Session\",\"lup.observability.sessions.Output\"],\"edges\":[\"lup.coordination.tasks.Blocks\",\"lup.coordination.handoffs.Transfers\",\"lup.observability.sessions.OutputOf\"],\"layout\":{\"committed\":{},\"placements\":{\"lup.coordination.tasks.Task\":\"committed\",\"lup.coordination.handoffs.Handoff\":\"committed\"}}}"
       ],
       "command": "uv"
     },
@@ -57,14 +61,16 @@
         "--directory",
         "${CLAUDE_PROJECT_DIR}",
         "lup-devtools",
-        "agent",
-        "serve-tools",
+        "tools",
+        "serve",
         "--runtime",
         "claude",
-        "--server",
-        "notes",
         "--session",
-        "harness"
+        "harness",
+        "--needs",
+        "lup_template.agent.toolsets.session_needs",
+        "lup.mcp:Group",
+        "{\"name\":\"notes\",\"builder\":\"lup_template.agent.toolsets.notes_group\"}"
       ],
       "command": "uv"
     },
@@ -74,14 +80,16 @@
         "--directory",
         "${CLAUDE_PROJECT_DIR}",
         "lup-devtools",
-        "agent",
-        "serve-tools",
+        "tools",
+        "serve",
         "--runtime",
         "claude",
-        "--server",
-        "sandbox",
         "--session",
-        "harness"
+        "harness",
+        "--needs",
+        "lup_template.agent.toolsets.session_needs",
+        "lup.mcp:Group",
+        "{\"name\":\"sandbox\",\"builder\":\"lup.tools.toolsets.sandbox_group\"}"
       ],
       "command": "uv"
     }

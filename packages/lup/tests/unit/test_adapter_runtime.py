@@ -11,7 +11,7 @@ from uuid import UUID
 import pytest
 from pydantic import BaseModel, Field, ValidationError
 
-from lup.providers.claude import Claude, SESSION_THINKING_TOKENS
+from lup.providers.claude import Claude, ClaudeTools, SESSION_THINKING_TOKENS
 from lup.providers.claude.runtime import (
     ClaudeConversationState,
     ClaudeFork,
@@ -29,9 +29,10 @@ from lup.providers.claude.runtime import (
     needs_a_person,
 )
 from lup.providers.codex.app_server import CodexAppServer, RpcMessage, RpcNotification
-from lup.providers.codex import Codex, CodexMcpServerConfig
+from lup.providers.codex import Codex, CodexMcpServerConfig, CodexTools
 from lup.providers.codex.runtime import (
     CodexConversationState,
+    CodexServing,
     CodexSteer,
     CodexTurnChannel,
     CodexTurnToolBinder,
@@ -42,8 +43,7 @@ from lup.providers.codex.runtime import (
     notification_turn_id,
 )
 from lup.policy.hooks import create_permission_hooks
-from lup.tools.native import NativeToolGroup
-from lup.providers.codex.native_tools import CodexNativeTools
+from lup.providers.codex.builtins import CodexBuiltins
 from lup.sessions.errors import ProviderTurnError, TurnInterruptedError
 from lup.types import CustomModel, JsonObject, JsonValue, SubagentSpec
 from lup.sessions.events import (
@@ -79,7 +79,7 @@ if TYPE_CHECKING:
 
 def claude_state(config: Claude) -> ClaudeConversationState:
     """Conversation state for a new session, built the way the opener builds it."""
-    return ClaudeConversationState(ClaudeSessionOpener(config), config, None)
+    return ClaudeConversationState(ClaudeSessionOpener(config), config, {}, None)
 
 
 class FirstOutput(BaseModel):
@@ -104,8 +104,10 @@ def test_claude_session_defaults_and_hooks_reach_native_options(
         Claude(
             model=CustomModel(id="claude"),
             system_prompt="Project rules",
+            tools=ClaudeTools(builtin="stock"),
             hooks=hooks,
         ),
+        servers={},
         binding=lambda: None,
         resume=None,
         session_id="18f5debf-499a-42bb-8856-0b39dd59943d",
@@ -127,6 +129,7 @@ def test_the_manual_permission_mode_reaches_the_sdk_as_its_default() -> None:
     """The SDK's literal still spells the CLI's ``manual`` as ``default``."""
     options = build_claude_options(
         Claude(permission_mode="manual"),
+        servers={},
         binding=lambda: None,
         resume=None,
         session_id="18f5debf-499a-42bb-8856-0b39dd59943d",
@@ -151,8 +154,9 @@ def test_a_named_plugin_directory_reaches_the_session(tmp_path: Path) -> None:
             model=CustomModel(id="claude"),
             cwd=tmp_path / "lease",
             plugin_dirs=[lease],
-            native_tools=[NativeToolGroup.ALL],
+            tools=ClaudeTools(builtin="stock"),
         ),
+        servers={},
         binding=lambda: None,
         resume=None,
         session_id="18f5debf-499a-42bb-8856-0b39dd59943d",
@@ -162,6 +166,7 @@ def test_a_named_plugin_directory_reaches_the_session(tmp_path: Path) -> None:
 
     unnamed = build_claude_options(
         Claude(model=CustomModel(id="claude")),
+        servers={},
         binding=lambda: None,
         resume=None,
         session_id="18f5debf-499a-42bb-8856-0b39dd59943d",
@@ -177,6 +182,7 @@ def test_claude_isolation_knobs_reach_native_options() -> None:
             setting_sources=[],
             extra_args={"strict-mcp-config": None, "no-session-persistence": None},
         ),
+        servers={},
         binding=lambda: None,
         resume=None,
         session_id="18f5debf-499a-42bb-8856-0b39dd59943d",
@@ -193,6 +199,7 @@ def test_claude_isolation_knobs_reach_native_options() -> None:
 def test_claude_isolation_knobs_default_to_no_inherited_tools() -> None:
     options = build_claude_options(
         Claude(model=CustomModel(id="claude")),
+        servers={},
         binding=lambda: None,
         resume=None,
         session_id="18f5debf-499a-42bb-8856-0b39dd59943d",
@@ -200,7 +207,7 @@ def test_claude_isolation_knobs_default_to_no_inherited_tools() -> None:
 
     assert options.max_buffer_size is None
     assert options.setting_sources == []
-    assert options.tools == []
+    assert options.tools == ["WebFetch", "WebSearch"]
     assert options.strict_mcp_config
     assert options.extra_args == {}
 
@@ -267,8 +274,9 @@ def test_claude_native_subagents_and_reported_cost_are_preserved() -> None:
                     model="balanced",
                 )
             ],
-            native_tools=["Agent", "WebSearch"],
+            tools=ClaudeTools(builtin=["Agent", "WebSearch"]),
         ),
+        servers={},
         binding=lambda: None,
         resume=None,
         session_id="18f5debf-499a-42bb-8856-0b39dd59943d",
@@ -285,21 +293,26 @@ def test_codex_thread_config_contains_project_mcp_and_writable_roots(
     config = Codex(
         model=CustomModel(id="gpt"),
         cwd=tmp_path,
-        mcp_servers={
+        tools=CodexTools(builtin="none"),
+        writable_roots=[tmp_path / "session"],
+    )
+    serving = CodexServing(
+        servers={
             "notes": CodexMcpServerConfig(
                 command="uv",
                 args=["run", "serve-tools", "--server", "notes"],
                 env={"LUP_SESSION_DIR": str(tmp_path / "session")},
             )
-        },
-        writable_roots=[tmp_path / "session"],
+        }
     )
-    state = CodexConversationState(config, CodexAppServer(Path("codex")), None)
+    state = CodexConversationState(
+        config, CodexAppServer(Path("codex")), None, serving=serving
+    )
 
     parameters = state.thread_parameters()
 
     assert parameters["config"] == {
-        **CodexNativeTools().configuration(),
+        **CodexBuiltins().configuration(),
         "mcp_servers": {
             "notes": {
                 "enabled": True,
@@ -317,7 +330,7 @@ def test_codex_thread_config_uses_app_server_approval_spelling(tmp_path: Path) -
     config = Codex(
         cwd=tmp_path,
         approval_policy="on-request",
-        native_tools=[NativeToolGroup.SHELL],
+        tools=CodexTools(builtin=["Bash"]),
         hooks=create_permission_hooks([], []),
     )
     state = CodexConversationState(config, CodexAppServer(Path("codex")), None)
@@ -337,12 +350,11 @@ async def test_thread_parameters_omit_model_for_the_native_default(
 async def test_mcp_elicitation_accepts_composed_servers_declines_others(
     tmp_path: Path,
 ) -> None:
-    config = Codex(
-        model=CustomModel(id="gpt"),
-        cwd=tmp_path,
-        mcp_servers={"notes": CodexMcpServerConfig(command="uv")},
+    config = Codex(model=CustomModel(id="gpt"), cwd=tmp_path)
+    serving = CodexServing(servers={"notes": CodexMcpServerConfig(command="uv")})
+    state = CodexConversationState(
+        config, CodexAppServer(Path("codex")), None, serving=serving
     )
-    state = CodexConversationState(config, CodexAppServer(Path("codex")), None)
 
     def elicitation(server: str) -> RpcMessage:
         return RpcMessage(
@@ -805,7 +817,7 @@ def test_a_new_claude_conversation_is_started_under_the_id_it_answers() -> None:
 def test_a_resumed_claude_conversation_names_nothing_new() -> None:
     config = Claude(model=CustomModel(id="claude"))
     state = ClaudeConversationState(
-        ClaudeSessionOpener(config), config, SessionId(value="resumed-id")
+        ClaudeSessionOpener(config), config, {}, SessionId(value="resumed-id")
     )
 
     options = state.options()
@@ -841,6 +853,7 @@ async def test_claude_binder_refreshes_same_schema_turns_without_reconnecting(
     def submission_tool_is_bound() -> bool:
         options = build_claude_options(
             state.config,
+            servers=state.servers,
             binding=state.current_submission,
             resume=None,
             session_id=state.session_id,

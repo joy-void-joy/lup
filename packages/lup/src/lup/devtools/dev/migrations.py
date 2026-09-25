@@ -646,6 +646,133 @@ DECLARED: list[Migration] = [
             ),
         ],
     ),
+    Migration(
+        subjects=[
+            "Claude.coding_harness_preset",
+            "Claude.native_tools",
+            "Claude.tool_servers",
+            "Claude.servers",
+            "Claude.enforce_native_authority",
+            "TOOLS_SERVER",
+            "claude_native_tools",
+            "Codex.native_tools",
+            "Codex.mcp_servers",
+            "Codex.application_tools",
+            "Codex.companions",
+            "Codex.applications",
+            "Codex.native_capabilities",
+            "SessionRequest.native_tools",
+            "SessionRequest.tool_servers",
+            "NativeToolGroup",
+            "NativeToolGroup.READ",
+            "NativeToolGroup.WEB",
+            "NativeToolGroup.WRITE",
+            "NativeToolGroup.SHELL",
+            "NativeToolGroup.ALL",
+            "NativeTools",
+            "native_grants",
+        ],
+        reason=(
+            "what a session may call was four fields per provider — a roster of "
+            "built-ins, a list of hosted tools, a map of servers, and a preset "
+            "flag for the prompt that goes with the built-ins — so one agent "
+            "declared its tools in a different place for each provider; one "
+            "typed tools field holds all of it, and its default is the web "
+            "alone rather than every built-in"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Declare tools=ClaudeTools(builtin=..., mcp=[...]) on Claude "
+                    "and tools=CodexTools(builtin=..., mcp=[...]) on Codex, both "
+                    "from their provider module, or "
+                    "tools=SessionTools(builtin=..., mcp=[...]) on a "
+                    "SessionRequest. builtin is 'stock' (every built-in; on "
+                    "Claude also Claude Code's coding system prompt, which is "
+                    "what coding_harness_preset=True sent), 'web' (fetch and "
+                    "search: the default), 'none', or an exact list of "
+                    "ClaudeBuiltinTool / CodexBuiltinTool names."
+                )
+            ),
+            MigrationStep(
+                instruction=(
+                    "Spell a NativeToolGroup as its names: on Claude READ is "
+                    "Read, Glob, Grep, WebFetch, WebSearch; WEB is 'web'; WRITE "
+                    "is Write, Edit, NotebookEdit; SHELL is Bash, TaskOutput, "
+                    "TaskStop; ALL is 'stock'. On Codex SHELL is Bash, WEB is "
+                    "WebSearch, WRITE is apply_patch, ALL is 'stock'. A session "
+                    "that declared no grant had no built-in (on Claude with "
+                    "Claude Code's system prompt) and now has fetch and search: "
+                    "say builtin='none' to keep none."
+                )
+            ),
+            MigrationStep(
+                instruction=(
+                    "Move servers into mcp=[...] as objects from lup.mcp: "
+                    "tools=[...] of @lup_tool handlers is Toolset([...], "
+                    "name=...), a tool_servers or mcp_servers entry is "
+                    "External(name=..., server=<its stdio, sse or http "
+                    "transport>), and lup's own groups are Coordination(), "
+                    "Ledger(...), CodeIntel() and Sandbox(). application_tools "
+                    "and companions are what a hosted server compiles to, and "
+                    "Codex.builtins() answers what native_capabilities() did."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "serve_toolset",
+            "SessionToolset.served",
+            "SessionToolset.beside",
+        ],
+        reason=(
+            "a server is served by its own declaration, one per process, so "
+            "the loop that served a group or a default set of them by name "
+            "has nothing left to choose"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Declare each group as a server from lup.mcp — a project's "
+                    "own as Group(builder) — and start it with "
+                    "ServeLaunch(...).command(server), which runs "
+                    "python -m lup.mcp.serve (or a composed CLI's `tools "
+                    "serve`) for that one server; what a project adds to the "
+                    "session goes in a needs hook named by ServeLaunch(needs=...)."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "CodexNativeTools",
+            "CodexNativeTools.shell",
+            "CodexNativeTools.web",
+            "CodexNativeTools.write",
+            "CodexNativeTools.images",
+            "CodexNativeTools.all_tools",
+            "CodexNativeTools.compile",
+            "CodexNativeTools.configuration",
+            "CodexNativeTools.arguments",
+            "CodexNativeTools.model_catalog",
+        ],
+        reason=(
+            "the controls holding a Codex session to its built-in grant are "
+            "named for what they control rather than for where the tools come "
+            "from"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Import CodexBuiltins from lup.providers.codex.builtins where "
+                    "CodexNativeTools came from lup.providers.codex.native_tools: "
+                    "every field and method keeps its name, and compile takes a "
+                    "builtin preset or a list of CodexBuiltinTool names."
+                )
+            ),
+        ],
+    ),
 ]
 """Every break this library has taken since its last release, and what to do.
 

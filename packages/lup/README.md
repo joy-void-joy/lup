@@ -41,7 +41,7 @@ is also what opens those sessions: there is no client to build from one.
 Everything else at the root is vocabulary to annotate against: `Agent`,
 `Conversation`, and `Turn` for code naming neither provider, and
 `TurnResult`, `TurnInput`, `TurnMessage`, `SessionId`, `SessionSummary`,
-`TurnId`, `CustomModel`, and `NativeToolGroup`. The two agents resolve on
+`TurnId`, and `CustomModel`. The two agents resolve on
 first access, so `import lup` pulls neither adapter, and naming one still
 loads no SDK: opening a session does.
 

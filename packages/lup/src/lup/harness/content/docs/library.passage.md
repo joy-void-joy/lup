@@ -32,7 +32,6 @@ from lup import (
     SessionSummary,   # one conversation the provider has on record
     TurnId,           # the provider's identity for one turn; a fork is cut at it
     CustomModel,      # a model id outside the runtime's catalog, on purpose
-    NativeToolGroup,  # explicit groups of built-in tool authority
 )
 ```
 
@@ -169,45 +168,71 @@ adapter — several hundred modules, the MCP tooling its tools are declared in �
 and still no SDK: opening a session is what finally loads Claude's SDK or
 starts Codex's app-server.
 
-## Native tools
+## Tools
 
-`native_tools` defaults to `None` on `Claude`, `Codex`, and `SessionRequest`.
-`None` and an empty sequence grant no
-built-in tools and inherit no ambient tool inventory. A caller opts in with
-`NativeToolGroup` values or exact names supported by its provider:
+What a session may call is one field, `tools`, typed per provider:
+`ClaudeTools` from `lup.providers.claude` and `CodexTools` from
+`lup.providers.codex`. Each holds `builtin`, the runtime's own tools, and
+`mcp`, the MCP servers every session carries.
+
+`builtin` is a preset or an exact list. `"web"` is the default: fetch and
+search, and nothing that reads, writes or runs anything on the machine the
+session runs on until something grants it. `"stock"` is everything the runtime
+ships — on Claude the SDK's `claude_code` tool preset and the coding system
+prompt that teaches it, with `system_prompt` appended. `"none"` leaves only the
+declared servers. A list names exactly the tools granted, as
+`ClaudeBuiltinTool` or `CodexBuiltinTool` literals, so a misspelt name is a
+type error where it is written and a validation error where it is read:
 
 ```python
-from lup import Claude, Codex, NativeToolGroup
+from lup import Claude, Codex
+from lup.mcp import CodeIntel, Coordination, Toolset
+from lup.providers.claude import ClaudeTools
+from lup.providers.codex import CodexTools
 
-reader = Claude(native_tools=[NativeToolGroup.READ])
-executor = Codex(native_tools=[NativeToolGroup.SHELL])
+from my_project.tools import lookup  # an @lup_tool declared at module level
+
+reader = Claude(
+    tools=ClaudeTools(
+        builtin=["Read", "Glob", "Grep"],
+        mcp=[Coordination(), CodeIntel(), Toolset([lookup], name="project")],
+    )
+)
+executor = Codex(tools=CodexTools(builtin=["Bash"]))
+coder = Claude(tools=ClaudeTools(builtin="stock"))
 ```
 
-The groups are `READ`, `WEB`, `WRITE`, `SHELL`, and `ALL`. `ALL` explicitly
-grants the runtime's broad built-in inventory; it does not promise every
-experimental facility or grant ambient application integrations. Groups
-compose, and unknown or unenforceable grants fail before a session starts.
-Permission patterns such as `Bash(*)` are not native tool identities.
-
-| Grant | Claude | Codex |
+| `builtin` | Claude | Codex |
 |---|---|---|
-| `NativeToolGroup.READ` | `Read`, `Glob`, `Grep`, `WebFetch`, `WebSearch` | Rejected: reading through a shell would grant execution |
-| `NativeToolGroup.WEB` | `WebFetch`, `WebSearch` | Native web search |
-| `NativeToolGroup.WRITE` | `Write`, `Edit`, `NotebookEdit` | Patch application |
-| `NativeToolGroup.SHELL` | `Bash`, `TaskOutput`, `TaskStop` | Shell execution |
-| Exact names | Includes `Read`, `WebFetch`, `Write`, `Bash` | `Bash`, `WebSearch`, `apply_patch`; `Read`, `Write`, and `WebFetch` are rejected |
+| `"stock"` | The `claude_code` preset, with Claude Code's system prompt | Every facility: shell, web search, patches, images, delegation |
+| `"web"` | `WebFetch`, `WebSearch` | Hosted web search |
+| `"none"` | No built-in | No facility |
+| A list | Exactly those of its 25 tools | Any of `Bash`, `WebSearch`, `apply_patch` |
 
-The declaration's `tools=[...]` field supplies application `@lup_tool`
-handlers independently. Those handlers still work with `native_tools=None`:
-Claude hosts them through MCP, and Codex dispatches them through its in-process
-dynamic-tool handlers. `tool_servers` on `Claude` and `mcp_servers` on `Codex`
-remain the explicit MCP-server declarations. Typed output remains available
-with no native tools. On `Claude`, `allowed_tools` controls automatic approval
-within the declared authority and `disallowed_tools` narrows it; neither adds
-an undeclared tool.
+Codex has no tool that reads, writes or fetches without being one of those
+three facilities, so `Read`, `Write` and `WebFetch` are not Codex names rather
+than names it approximates. Permission patterns such as `Bash(*)` are not tool
+names either.
 
-Explicit session hooks remain attached when native tools are granted. Codex
-enables the verified declared project policy plugin for an explicit native grant while keeping
+The servers in `mcp` are objects from `lup.mcp`. `Coordination()`,
+`Ledger(...)`, `CodeIntel()` and `Sandbox()` are lup's own groups;
+`Toolset([...])` serves a project's `@lup_tool` handlers, `Group(builder)` a
+group built over the session, and `External(name=..., server=...)` a transport
+lup does not host. Each is read two ways. A session this process opens hosts
+it, built when the session opens — Claude over the SDK's in-process MCP, Codex
+through its dynamic tools. A runtime's own CLI starts it instead, as a stdio
+command running `python -m lup.mcp.serve` (or a composed CLI's `tools serve`)
+that carries the server's class and fields, which the subprocess validates back
+into the same declaration. That is why a served `Toolset` names module-level
+tools: an import path is what crosses the process boundary.
+
+Typed output remains available with no built-in. On `Claude`, `allowed_tools`
+controls automatic approval within the declared tools and `disallowed_tools`
+narrows it; neither adds an undeclared tool. Plugin directories require
+`"stock"`, since a plugin can introduce delegated authority.
+
+Explicit session hooks remain attached when built-in tools are granted. Codex
+enables the verified declared project policy plugin for an explicit built-in grant while keeping
 unrelated inherited plugins disabled. Provider settings and extra arguments
 that could widen the requested authority are rejected, including altered
 copies of validated configurations.

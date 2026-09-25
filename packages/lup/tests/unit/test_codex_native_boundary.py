@@ -14,7 +14,7 @@ from lup.providers.codex.harness_runtime import (
     CodexPluginInstaller,
     PluginCacheEvidence,
 )
-from lup.providers.codex.native_tools import CodexNativeTools
+from lup.providers.codex.builtins import CodexBuiltins
 from lup.providers.codex import Codex
 from lup.providers.codex.runtime import CodexSessionOpener
 
@@ -142,7 +142,8 @@ async def test_readiness_and_session_use_the_selected_executable_and_environment
     # Opening a session bounds the built-in facilities before the process
     # starts and points it at a catalog compiled into its own temporary
     # directory, so the declared controls and the subcommand are what is fixed.
-    declared = CodexNativeTools().arguments()
+    assert config.builtins() == CodexBuiltins(web=True)
+    declared = config.builtins().arguments()
     for arguments in opened[1:]:
         assert arguments[: len(declared)] == declared
         assert arguments[-1] == "app-server"

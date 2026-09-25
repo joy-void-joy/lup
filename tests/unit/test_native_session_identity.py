@@ -13,17 +13,36 @@ import pytest
 from lup.coordination.identity import MEMBER_ENV
 from lup.coordination.peer_tools import RosterPulse
 from lup.coordination.relay import InboxRelay
+from lup.mcp import Coordination
+from lup.mcp.serve import context_needs, harness_session_context, serve_command
 from lup.providers.claude.identity import CLAUDE_SESSION_ENV
 from lup.providers.identity import native_session_id
+from lup.tools.mcp import ServerCompanion
+from lup.tools.toolsets import SessionNeeds, assembled
 from lup.workspace.context import SESSION_DIR_ENV
-from lup_template.devtools.agent import serve
+from lup_template.agent.config import settings
+from lup_template.agent.toolsets import declared_tool_groups
 from lup_template.harness.catalog import HARNESS_SESSION
+
+SESSION_NEEDS = "lup_template.agent.toolsets.session_needs"
+"""The needs hook every generated server entry names on its command line."""
 
 
 def unlaunched(monkeypatch: pytest.MonkeyPatch) -> None:
     """No launcher minted an id, and no adapter relayed a session."""
     monkeypatch.delenv(MEMBER_ENV, raising=False)
     monkeypatch.delenv(SESSION_DIR_ENV, raising=False)
+
+
+def opened(identity: str) -> SessionNeeds:
+    """The session a native server opens under the harness name, known by *identity*."""
+    return context_needs(harness_session_context(HARNESS_SESSION), identity)
+
+
+def coordination_companions(identity: str) -> list[ServerCompanion]:
+    """What runs beside the coordination server that session hosts."""
+    server = Coordination().hosted(opened(identity))
+    return server.companions if server is not None else []
 
 
 def test_claude_hands_its_servers_the_session_id_and_codex_hands_nothing(
@@ -44,11 +63,9 @@ def test_a_native_server_joins_under_the_id_its_runtime_gave_the_process(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     unlaunched(monkeypatch)
-    context = serve.harness_session_context(HARNESS_SESSION)
 
-    toolset = serve.collect_session_toolset(context, identity="abc-123")
+    [pulse, relay] = coordination_companions("abc-123")
 
-    [pulse, relay] = toolset.companions["coordination"] if toolset else []
     assert isinstance(pulse, RosterPulse)
     assert pulse.member_id == "abc-123"
     assert isinstance(relay, InboxRelay)
@@ -60,11 +77,10 @@ def test_a_native_server_with_no_identity_serves_no_coordination_verbs(
 ) -> None:
     """Nothing, rather than a member every session of the worktree would share."""
     unlaunched(monkeypatch)
-    context = serve.harness_session_context(HARNESS_SESSION)
+    needs = opened("")
 
-    toolset = serve.collect_session_toolset(context, identity="")
-
-    assert toolset is not None
+    assert Coordination().hosted(needs) is None
+    toolset = assembled(declared_tool_groups(), needs)
     assert "coordination" not in toolset.groups
     assert toolset.companions == {}
 
@@ -74,11 +90,9 @@ def test_the_launcher_s_id_outranks_the_runtime_s(
 ) -> None:
     unlaunched(monkeypatch)
     monkeypatch.setenv(MEMBER_ENV, "launched1")
-    context = serve.harness_session_context(HARNESS_SESSION)
 
-    toolset = serve.collect_session_toolset(context, identity="abc-123")
+    [pulse, relay] = coordination_companions("abc-123")
 
-    [pulse, relay] = toolset.companions["coordination"] if toolset else []
     assert isinstance(pulse, RosterPulse)
     assert pulse.member_id == "launched1"
     assert isinstance(relay, InboxRelay)
@@ -88,15 +102,31 @@ def test_the_launcher_s_id_outranks_the_runtime_s(
 def test_serving_for_claude_lists_the_coordination_verbs_under_the_runtime_s_id(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The whole path: `--runtime claude --session harness`, no launcher, one runtime id."""
-    unlaunched(monkeypatch)
-    monkeypatch.setenv(CLAUDE_SESSION_ENV, "abc-123")
+    """The whole path: `--runtime claude --session harness`, no launcher, one runtime id.
 
-    serve.serve_tools(True, "coordination", HARNESS_SESSION, "claude")
-    with_identity = capsys.readouterr().out
+    The needs hook sets the engine from the runtime it is given, which is
+    restored after the test rather than left to the next one.
+    """
+    unlaunched(monkeypatch)
+    monkeypatch.setattr(settings, "agent_sdk", settings.agent_sdk)
+    monkeypatch.setattr(settings, "sandbox_enabled", False)
+    monkeypatch.setenv(CLAUDE_SESSION_ENV, "abc-123")
+    arguments = Coordination().served().arguments()
+
+    def listed() -> str:
+        """The tool names the generated coordination entry would serve."""
+        serve_command(
+            *arguments,
+            session=HARNESS_SESSION,
+            runtime="claude",
+            needs=SESSION_NEEDS,
+            list_only=True,
+        )
+        return capsys.readouterr().out
+
+    with_identity = listed()
     monkeypatch.delenv(CLAUDE_SESSION_ENV)
-    serve.serve_tools(True, "coordination", HARNESS_SESSION, "claude")
-    without = capsys.readouterr().out
+    without = listed()
 
     assert "coordination_peers" in with_identity
     assert without == ""

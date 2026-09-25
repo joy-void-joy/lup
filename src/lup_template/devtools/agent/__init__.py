@@ -3,7 +3,6 @@
 Commands:
 - inspect: Pretty-print the full agent configuration (tools, schemas, prompt, subagents)
 - capabilities: Render the backend capability matrix (the parity contract)
-- serve-tools: Start SDK tools as an MCP stdio server (used by the ``claude`` runner)
 - repl: Interactive REPL with the agent via the SDK (continuous session)
 
 Examples::
@@ -15,19 +14,15 @@ Examples::
     $ uv run lup-devtools agent repl
     $ uv run lup-devtools agent repl --model sonnet --no-prompt
     $ uv run lup-devtools agent repl --exec "ping" --no-tools
-    $ uv run lup-devtools agent serve-tools
 """
 
 import asyncio
 from typing import Annotated
 
 import typer
-from pydantic import TypeAdapter, ValidationError
-from lup_template.agent.config import Engine
 
 import lup_template.devtools.agent.inspect_agent as inspect_agent
 import lup_template.devtools.agent.repl as repl
-import lup_template.devtools.agent.serve as serve
 
 app = typer.Typer(no_args_is_help=True)
 
@@ -56,56 +51,6 @@ def capabilities_cmd(
 ) -> None:
     """Show the backend capability matrix (the parity contract, generated)."""
     inspect_agent.run_capabilities(markdown)
-
-
-@app.command("serve-tools")
-def serve_tools_cmd(
-    list_only: Annotated[
-        bool,
-        typer.Option("--list", help="Print served tool names and exit"),
-    ] = False,
-    server_group: Annotated[
-        str | None,
-        typer.Option(
-            "--server",
-            help="Serve only this declared group; default: all but the named-only ones",
-        ),
-    ] = None,
-    session: Annotated[
-        str | None,
-        typer.Option(
-            "--session",
-            help="Open a session under this name when none is relayed",
-        ),
-    ] = None,
-    runtime: Annotated[
-        str | None,
-        typer.Option(
-            "--runtime", help="Engine owning this tool server; overrides AGENT_SDK"
-        ),
-    ] = None,
-) -> None:
-    """Start SDK tools as an MCP stdio server (the ``notes`` server).
-
-    Launched as a subprocess by the subprocess-served-tool adapters, by the
-    ``claude`` runner, and by the generated native harness trees. When
-    session-context env vars are present (see
-    ``lup.workspace.context.SessionContext``), session-bound
-    tools — reflect and
-    submit_output — are served alongside the static tools, and tool
-    metrics are flushed to the session directory for the parent to read.
-    A native runtime relays no such context, so it names a session instead
-    and this process opens it.
-    """
-    try:
-        selected = (
-            TypeAdapter(Engine).validate_python(runtime)
-            if runtime is not None
-            else None
-        )
-    except ValidationError as error:
-        raise typer.BadParameter(str(error), param_hint="--runtime") from error
-    serve.serve_tools(list_only, server_group, session, selected)
 
 
 @app.command("repl")

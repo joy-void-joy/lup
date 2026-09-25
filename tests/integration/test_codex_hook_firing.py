@@ -27,10 +27,10 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel, Field
 
-from lup.providers.codex import Codex
+from lup.providers.codex import Codex, CodexTools
 from lup.providers.codex.selection import CODEX_RUNTIME
 from lup.sessions.surface import Agent
-from lup.providers.selection import SessionRequest
+from lup.providers.selection import SessionRequest, SessionTools
 from lup.workspace.paths import find_project_root
 
 pytestmark = pytest.mark.integration
@@ -74,7 +74,7 @@ def personal_home_session(cwd: Path) -> Codex:
         system_prompt=INSTRUCTIONS,
         cwd=cwd,
         sandbox="danger-full-access",
-        native_tools=["Bash"],
+        tools=CodexTools(builtin=["Bash"]),
         approval_policy="never",
     )
 
@@ -86,13 +86,16 @@ def workspace_request(cwd: Path) -> SessionRequest:
     that matters: it calls ``contained()`` first, pointing the session at a
     worktree-scoped home seeded with credentials and a config and **no
     plugins**. This is the arm that describes a forecasting agent.
+
+    The portable request grants built-ins by preset alone, so the shell this
+    probe runs arrives with the stock preset rather than as ``Bash`` alone.
     """
     return SessionRequest(
         model=PROBE_MODEL,
         instructions=INSTRUCTIONS,
         cwd=cwd,
         autonomy="unattended",
-        native_tools=["Bash"],
+        tools=SessionTools(builtin="stock"),
     )
 
 

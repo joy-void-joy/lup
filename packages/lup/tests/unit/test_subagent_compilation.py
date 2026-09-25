@@ -8,9 +8,9 @@ from pydantic import ValidationError
 
 from lup.providers.claude.subagents import model_alias, subagent_tools as claude_tools
 from lup.providers.codex.app_server import CodexAppServer
-from lup.providers.codex import Codex
+from lup.providers.codex import Codex, CodexTools
 from lup.providers.codex.runtime import CodexConversationState
-from lup.providers.codex.native_tools import CodexNativeTools
+from lup.providers.codex.builtins import CodexBuiltins
 from lup.providers.codex.subagents import CodexModelTiers, subagent_tools as codex_tools
 from lup.sessions.events import SessionId
 from lup.types import (
@@ -133,6 +133,7 @@ async def test_codex_disables_inherited_mcp_before_start(
         cwd=tmp_path,
         sandbox="read-only",
         approval_policy="never",
+        tools=CodexTools(builtin="none"),
         delegated_tools=codex_tools(role(capabilities=["workspace-read"])),
     )
     assert config.delegated_tools is not None
@@ -147,7 +148,7 @@ async def test_codex_disables_inherited_mcp_before_start(
         # A role declaring no application tools binds no dynamic-tool channel;
         # typed output rides `outputSchema` on each turn instead.
         "config": {
-            **CodexNativeTools(shell=True, images=True).configuration(),
+            **CodexBuiltins(shell=True, images=True).configuration(),
             "mcp_servers": {"ambient-writer": {"enabled": False}},
         },
     }
@@ -160,6 +161,7 @@ async def test_codex_restricted_role_cannot_resume_wider_thread(tmp_path: Path) 
         cwd=tmp_path,
         sandbox="read-only",
         approval_policy="never",
+        tools=CodexTools(builtin="none"),
         delegated_tools=codex_tools(role()),
     )
     state = CodexConversationState(
@@ -171,4 +173,15 @@ async def test_codex_restricted_role_cannot_resume_wider_thread(tmp_path: Path) 
 
 def test_codex_restricted_tools_require_enforced_bounds(tmp_path: Path) -> None:
     with pytest.raises(ValidationError, match="read-only sandbox"):
-        Codex(cwd=tmp_path, delegated_tools=codex_tools(role()))
+        Codex(
+            cwd=tmp_path,
+            tools=CodexTools(builtin="none"),
+            delegated_tools=codex_tools(role()),
+        )
+    with pytest.raises(ValidationError, match="alternative authority"):
+        Codex(
+            cwd=tmp_path,
+            sandbox="read-only",
+            approval_policy="never",
+            delegated_tools=codex_tools(role()),
+        )

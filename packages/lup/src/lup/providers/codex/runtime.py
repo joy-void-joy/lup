@@ -29,10 +29,19 @@ from lup.providers.codex.hooks import (
 from lup.providers.codex.home import CodexWorktreeHomeStore, install_declared_policy
 from lup.providers.codex.login import CODEX_HOME, native_home
 from lup.providers.codex.output import CodexOutputContract, codex_output_contract
-from lup.providers.codex import Codex, CodexSession
+from lup.providers.codex import Codex, CodexMcpServerConfig, CodexSession
 from lup.policy.hooks import LupHookInput, LupHookOutput, LupHooksConfig
 from lup.policy.identity import POLICY_ROOT_ENV
-from lup.tools.mcp import ToolResponse, running_companions
+from lup.tools.mcp import (
+    LupMcpServerConfig,
+    LupMcpTool,
+    McpServerEntry,
+    RawStdioServerConfig,
+    ServerCompanion,
+    ToolResponse,
+    running_companions,
+)
+from lup.mcp import hosted_servers, opened_needs
 from lup.sessions.composition import AcceptedTurn, CompletedTurn, ComposedSession
 from lup.sessions.capabilities import (
     ConversationRecord,
@@ -506,8 +515,11 @@ class CodexConversationState:
         fork_from: SessionId | None = None,
         fork_at: TurnId | None = None,
         opener: "CodexSessionOpener | None" = None,
+        serving: "CodexServing | None" = None,
     ) -> None:
         self.config = Codex.model_validate(config)
+        self.serving = serving or CodexServing()
+        """The declaration's MCP servers, as this session was served them."""
         self.opener = opener or CodexSessionOpener(self.config)
         self.fork_at = fork_at
         self.server = server
@@ -554,7 +566,7 @@ class CodexConversationState:
         if self.resume is not None or self.fork_from is not None:
             prior = self.resume or self.fork_from
             assert prior is not None
-            if self.config.applications():
+            if self.serving.applications:
                 await self.validate_persisted_tools(prior)
             params = self.thread_parameters()
             params.pop("dynamicTools", None)
@@ -610,7 +622,7 @@ class CodexConversationState:
         if self.config.model_provider is not None:
             params["modelProvider"] = self.config.model_provider
         configuration = dict(self.config.provider_config or {})
-        configuration.update(self.config.native_capabilities().configuration())
+        configuration.update(self.config.builtins().configuration())
         if self.policy_plugin is not None:
             features = configuration["features"]
             assert isinstance(features, dict)
@@ -624,7 +636,7 @@ class CodexConversationState:
             **{name: {"enabled": False} for name in self.inherited_servers},
             **{
                 name: {"enabled": True, **server.model_dump(mode="json")}
-                for name, server in self.config.mcp_servers.items()
+                for name, server in self.serving.servers.items()
             },
         }
         dynamic: list[JsonValue] = [
@@ -633,7 +645,7 @@ class CodexConversationState:
                 "description": tool.description,
                 "inputSchema": tool.input_schema,
             }
-            for name, tool in self.config.applications().items()
+            for name, tool in self.serving.applications.items()
         ]
         # Only a session declaring application tools binds the thread-scoped
         # channel; typed output rides `outputSchema` on each turn instead.
@@ -649,7 +661,7 @@ class CodexConversationState:
             params["sandbox"] = self.config.sandbox
         if self.config.approval_policy is not None:
             params["approvalPolicy"] = self.config.approval_policy
-        native = self.config.native_capabilities()
+        native = self.config.builtins()
         if native.write and self.config.sandbox is None:
             params["sandbox"] = "workspace-write"
         if (
@@ -830,7 +842,7 @@ class CodexConversationState:
                 ],
                 "success": False,
             }
-        if call.tool not in self.config.applications():
+        if call.tool not in self.serving.applications:
             return {
                 "contentItems": [
                     {
@@ -852,7 +864,7 @@ class CodexConversationState:
                 "success": False,
             }
         try:
-            result: ToolResponse = await self.config.applications()[call.tool].handler(
+            result: ToolResponse = await self.serving.applications[call.tool].handler(
                 call.arguments
             )
         except Exception as error:
@@ -916,7 +928,7 @@ class CodexConversationState:
     def resolve_mcp_elicitation(self, message: RpcMessage) -> JsonValue:
         """Accept tool-call elicitations for servers this session composed.
 
-        The composition that opened this session declared its ``mcp_servers``,
+        The composition that opened this session declared its MCP servers,
         so calls to those servers are pre-authorized; an elicitation naming
         any other server declines. Without this, every project tool call is
         reported to the model as "user rejected MCP tool call".
@@ -928,7 +940,7 @@ class CodexConversationState:
             raise UnsupportedCapability(
                 "Codex MCP forms, URL and verification elicitations require an interactive client; use an interactive session to answer them"
             )
-        if request.server_name in self.config.mcp_servers:
+        if request.server_name in self.serving.servers:
             return {"action": "accept"}
         return {"action": "decline"}
 
@@ -1124,12 +1136,28 @@ class CodexSessionOpener:
                     **environment,
                     POLICY_ROOT_ENV: str(compiled.policy_root or compiled.workspace()),
                 },
-                "mcp_servers": {
+            }
+        )
+        # Built here rather than at declaration: a hosted server closes over
+        # the session it serves — its identity, a container started for it,
+        # a directory of its own that lives exactly as long as it does.
+        scratch = TemporaryDirectory(prefix="lup-session-")
+        served = codex_serving(
+            hosted_servers(
+                config.tools.mcp,
+                opened_needs(
+                    config.workspace(), Path(scratch.name), config.environment
+                ),
+            )
+        )
+        serving = served.model_copy(
+            update={
+                "servers": {
                     name: server.model_copy(
                         update={"env": allowance.environment(server.env)}
                     )
-                    for name, server in compiled.mcp_servers.items()
-                },
+                    for name, server in served.servers.items()
+                }
             }
         )
         policy_plugin = None
@@ -1152,7 +1180,7 @@ class CodexSessionOpener:
             config = config.model_copy(
                 update={"environment": {**effective, CODEX_HOME: str(home)}}
             )
-        native = config.native_capabilities()
+        native = config.builtins()
         server = CodexAppServer(
             config.executable,
             environment=config.environment,
@@ -1166,6 +1194,7 @@ class CodexSessionOpener:
             fork_from=fork_from,
             fork_at=fork_at,
             opener=self,
+            serving=serving,
         )
         session = ComposedSession(
             state.start_turn,
@@ -1221,7 +1250,7 @@ class CodexSessionOpener:
                 )
                 with recursive_agent_scope(allowance):
                     await server.start()
-                    async with running_companions(config.companions):
+                    async with running_companions(serving.companions):
                         try:
                             await state.ensure_thread()
                             yield CodexHookSession(state, corrected)
@@ -1232,6 +1261,7 @@ class CodexSessionOpener:
                     await server.close()
                 finally:
                     directory.cleanup()
+                    scratch.cleanup()
 
         async with config.layers.around(process(), resume or fork_from) as engine:
             yield CodexSession(engine, CodexRecord(state), CodexFork(state))
@@ -1248,6 +1278,82 @@ class CodexSessionOpener:
         from lup.providers.codex.config import CodexCompatibilityTransform
 
         return CodexCompatibilityTransform(self.config.endpoint).apply(self.config)
+
+
+class CodexServing(BaseModel, frozen=True, arbitrary_types_allowed=True):
+    """A declaration's MCP servers, as one Codex session is served them.
+
+    A server this library hosts answers in this process, each of its tools a
+    dynamic tool of the thread named ``lup_app_``, its server and its own name,
+    with whatever runs beside it running here too. An external one is a
+    subprocess the app-server starts from its declared transport.
+    """
+
+    servers: dict[str, CodexMcpServerConfig] = {}
+    applications: dict[str, LupMcpTool] = {}
+    companions: list[ServerCompanion] = []
+
+
+def codex_mcp_server(name: str, server: McpServerEntry) -> CodexMcpServerConfig:
+    """Narrow one external server into the subprocess Codex launches.
+
+    Only a stdio transport has a Codex spelling: the app-server starts its
+    servers as subprocesses and reaches no networked one this adapter could
+    name, so any other transport is refused rather than approximated.
+    """
+    match server:
+        case {"command": str(command)}:
+            stdio: RawStdioServerConfig = server
+            return CodexMcpServerConfig(
+                command=command,
+                args=list(stdio["args"]) if "args" in stdio else [],
+                env=dict(stdio["env"]) if "env" in stdio else {},
+            )
+        case _:
+            raise ValueError(
+                f"Codex starts tool server {name!r} as a subprocess, and it is "
+                "declared with a networked transport; declare a stdio command"
+            )
+
+
+def codex_serving(entries: dict[str, McpServerEntry]) -> CodexServing:
+    """Sort built servers into what this process answers and what Codex starts."""
+    hosted = {
+        name: entry
+        for name, entry in entries.items()
+        if isinstance(entry, LupMcpServerConfig)
+    }
+    applications = [
+        (f"lup_app_{name}__{tool.name}", tool)
+        for name, entry in hosted.items()
+        for tool in entry.tools
+    ]
+    named = [name for name, _tool in applications]
+    if len(named) != len(dict.fromkeys(named)):
+        raise ValueError(
+            "hosted server/tool names collide in Codex; rename the ambiguous server or tool"
+        )
+    for name in named:
+        if (
+            not name.isascii()
+            or not all(char.isalnum() or char in "_-" for char in name)
+            or len(name) > 64
+        ):
+            raise ValueError(
+                f"Codex cannot name dynamic tool {name!r}: it takes at most 64 "
+                "ASCII letters, digits, '_' and '-'; rename the server or tool"
+            )
+    return CodexServing(
+        servers={
+            name: codex_mcp_server(name, entry)
+            for name, entry in entries.items()
+            if name not in hosted
+        },
+        applications=dict(applications),
+        companions=[
+            companion for entry in hosted.values() for companion in entry.companions
+        ],
+    )
 
 
 async def codex_sessions(declared: Codex) -> list[SessionSummary]:

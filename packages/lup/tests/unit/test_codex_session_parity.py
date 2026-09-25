@@ -15,6 +15,7 @@ from lup.providers.codex.output import CodexJsonEnvelope, codex_output_contract
 from lup.providers.codex import Codex, CodexMcpServerConfig
 from lup.providers.codex.runtime import (
     CodexConversationState,
+    CodexServing,
     CodexTurnChannel,
     decode_completed_item,
 )
@@ -480,11 +481,10 @@ async def test_interactive_mcp_elicitations_are_never_accepted_as_tool_approval(
     tmp_path: Path, params: JsonObject
 ) -> None:
     state = CodexConversationState(
-        Codex(
-            cwd=tmp_path, mcp_servers={"tools": CodexMcpServerConfig(command="tools")}
-        ),
+        Codex(cwd=tmp_path),
         CodexAppServer(Path("codex")),
         None,
+        serving=CodexServing(servers={"tools": CodexMcpServerConfig(command="tools")}),
     )
     state.thread_id = "thread-1"
     with pytest.raises(UnsupportedCapability, match="interactive"):
@@ -499,11 +499,10 @@ async def test_interactive_mcp_elicitations_are_never_accepted_as_tool_approval(
 
 async def test_mcp_approval_from_another_thread_is_declined(tmp_path: Path) -> None:
     state = CodexConversationState(
-        Codex(
-            cwd=tmp_path, mcp_servers={"tools": CodexMcpServerConfig(command="tools")}
-        ),
+        Codex(cwd=tmp_path),
         CodexAppServer(Path("codex")),
         None,
+        serving=CodexServing(servers={"tools": CodexMcpServerConfig(command="tools")}),
     )
     state.thread_id = "thread-1"
     assert await state.handle_server_request(

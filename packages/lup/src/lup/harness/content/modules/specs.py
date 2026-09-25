@@ -36,7 +36,7 @@ CORE = ModuleSpec(
     # The debug skill reads a session's trace, which is the one command tree
     # it needs and does not own.
     requires=["observability"],
-    subapps=["dev", "harness", "git"],
+    subapps=["dev", "harness", "git", "tools"],
     tool_groups=["codeintel"],
 )
 

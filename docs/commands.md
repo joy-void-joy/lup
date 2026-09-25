@@ -12,7 +12,6 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | --- | --- |
 | `agent inspect` | Inspect the full agent configuration: tools, schemas, prompt, subagents. |
 | `agent capabilities` | Show the backend capability matrix (the parity contract, generated). |
-| `agent serve-tools` | Start SDK tools as an MCP stdio server (the ``notes`` server). |
 | `agent repl` | Interactive REPL — continuous session with the agent via the SDK. |
 
 ## `conversation`
@@ -277,6 +276,12 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `sync remote` | Record how this machine reaches a repository (writes to sync.json.local). |
 | `sync grant` | Grant sessions on this machine a host device (writes to sync.json.local). |
 | `sync revoke` | Take a device back from sessions on this machine (writes to sync.json.local). |
+
+## `tools`
+
+| Command | What it does |
+| --- | --- |
+| `tools serve` | Serve one hosted tool server over MCP stdio, for the session it names. |
 
 ## `trace`
 

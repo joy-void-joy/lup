@@ -93,10 +93,9 @@ def test_a_group_served_only_by_name_is_in_no_default_set(tmp_path: Path) -> Non
     assert EXAMPLE_GROUP in toolset.groups
     assert EXAMPLE_GROUP in named_only(groups)
     assert EXAMPLE_GROUP not in startup_names(groups)
-    assert not set(toolset.served(None, named_only(groups))) & set(
-        toolset.groups[EXAMPLE_GROUP]
-    )
-    assert toolset.served(EXAMPLE_GROUP, named_only(groups))
+    servers = registered(toolset, groups, BaseToolPolicy())
+    assert EXAMPLE_GROUP not in {server.name for server in servers}
+    assert toolset.groups[EXAMPLE_GROUP]
 
 
 def test_a_runtime_starts_no_server_for_a_session_bound_group() -> None:

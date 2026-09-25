@@ -1,7 +1,7 @@
 """Codex as one selectable runtime.
 
 Codex decides autonomy with a sandbox, and native authority is compiled
-independently of it: ``native_tools`` names the built-in facilities a session
+independently of it: ``tools`` names the built-in facilities a session
 may reach, and an unsupported exact grant fails before launch rather than
 being approximated. Declared application tools keep their Python handlers
 through the thread's dynamic tools, while explicitly external servers keep
@@ -45,9 +45,8 @@ from lup.providers.codex.home import select_codex_home
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.model_choice import codex_model_choice
 from lup.providers.codex.models import CodexEffort
-from lup.providers.codex.native_tools import CodexNativeTools
-from lup.providers.codex import CODEX_PROGRAM, Codex, CodexMcpServerConfig
-from lup.tools.mcp import LupMcpServerConfig, McpServerEntry, RawStdioServerConfig
+from lup.providers.codex.builtins import CodexBuiltins
+from lup.providers.codex import CODEX_PROGRAM, Codex, CodexTools
 from lup.sessions.errors import UnsupportedCapability
 from lup.providers.confinement import SessionContainment
 from lup.providers.selection import (
@@ -86,40 +85,6 @@ CODEX_EFFORT: dict[SessionEffort, CodexEffort] = {
 
 Every rung under its own name, each one Codex's catalog lists; a model whose
 own row lacks one refuses it where the session is declared."""
-
-
-def codex_mcp_server(name: str, server: McpServerEntry) -> CodexMcpServerConfig:
-    """Narrow one declared tool group into the subprocess Codex launches.
-
-    The in-process case is refused rather than relaunched as a subprocess,
-    which is the repair its message is written to head off. A hosted server
-    closes over the state of the process that hosts it — the context
-    variables scoping the session it answers inside, its open clients, its
-    caches — and a subprocess inherits none of it while answering every call
-    as though it had. The failure that follows is not an error: it is a tool
-    returning a confident answer computed against defaults, which is the one
-    kind of wrong nothing downstream can detect.
-
-    Serving it is therefore an application's decision about what that group's
-    tools read, and the application has to state it by declaring a transport
-    that carries whatever they need.
-    """
-    match server:
-        case {"command": str(command)}:
-            stdio: RawStdioServerConfig = server
-            return CodexMcpServerConfig(
-                command=command,
-                args=list(stdio["args"]) if "args" in stdio else [],
-                env=dict(stdio["env"]) if "env" in stdio else {},
-            )
-        case _:
-            raise ValueError(
-                f"Codex serves tool group {name!r} over a subprocess; this one is "
-                "declared as an in-process or networked server. It is not relaunched "
-                "as one: a hosted server reads the hosting process's own state, and "
-                "a subprocess would answer from defaults rather than fail. Declare a "
-                "transport that carries what its tools read."
-            )
 
 
 # lup: ignore[constant-declaration] — each value is Codex's own sandbox name for
@@ -225,16 +190,7 @@ def codex_config(request: SessionRequest) -> Codex:
         )
     if request.cwd is None:
         raise ValueError("Codex sandboxes a session against a cwd; none was given")
-    application_tools = [
-        (f"lup_app_{name}__{tool.name}", tool)
-        for name, server in request.tool_servers.items()
-        if isinstance(server, LupMcpServerConfig)
-        for tool in server.tools
-    ]
-    if len({name for name, _tool in application_tools}) != len(application_tools):
-        raise ValueError(
-            "hosted server/tool names collide in Codex; rename the ambiguous server or tool"
-        )
+    builtins = CodexBuiltins.compile(request.tools.builtin)
     return Codex(
         model=None if request.model is None else codex_model_choice(request.model),
         system_prompt=request.instructions,
@@ -247,23 +203,8 @@ def codex_config(request: SessionRequest) -> Codex:
         hooks=request.hooks,
         effort=(None if request.effort is None else CODEX_EFFORT[request.effort]),
         environment=request.environment,
-        native_tools=request.native_tools,
-        mcp_servers={
-            name: codex_mcp_server(name, server)
-            for name, server in request.tool_servers.items()
-            if not isinstance(server, LupMcpServerConfig)
-        },
-        application_tools=dict(application_tools),
-        companions=[
-            companion
-            for server in request.tool_servers.values()
-            if isinstance(server, LupMcpServerConfig)
-            for companion in server.companions
-        ],
-        writable_roots=[request.cwd]
-        if CodexNativeTools.compile(request.native_tools).write
-        or CodexNativeTools.compile(request.native_tools).shell
-        else [],
+        tools=CodexTools(builtin=request.tools.builtin, mcp=request.tools.mcp),
+        writable_roots=[request.cwd] if builtins.write or builtins.shell else [],
         submission_gate_resolver=request.submission_gate,
     )
 

@@ -11,17 +11,20 @@ from pydantic import AnyHttpUrl, BaseModel, SecretStr
 from lup.providers.claude import ClaudeCompatibleEndpoint
 from lup.providers.claude.config import ClaudeCompatibilityTransform
 from lup.providers.claude.model_choice import ClaudeModelChoice, claude_model_choice
-from lup.providers.claude import Claude, ClaudeSandboxConfig, SESSION_THINKING_TOKENS
-from lup.tools.native import NativeToolGroup, NativeTools
-from lup.providers.claude.subagents import subagent_tools as claude_subagent_tools
+from lup.providers.claude import (
+    Claude,
+    ClaudeBuiltinTool,
+    ClaudeSandboxConfig,
+    ClaudeTools,
+    SESSION_THINKING_TOKENS,
+)
+from lup.tools.builtin import BuiltinPreset
+from lup.providers.claude.subagents import subagent_builtins as claude_subagent_builtins
 from lup.providers.codex import CodexCompatibleEndpoint
 from lup.providers.codex.config import CodexCompatibilityTransform
 from lup.providers.codex.model_choice import CodexModelChoice, codex_model_choice
-from lup.providers.codex import Codex, CodexMcpServerConfig
-from lup.providers.codex.subagents import CodexSubagentTools
+from lup.providers.codex import Codex, CodexTools
 from lup.providers.codex.subagents import subagent_tools as codex_subagent_tools
-from lup.providers.codex.selection import codex_config
-from lup.providers.selection import SessionRequest
 from lup.sessions.layers import CleanupWrapper, SessionLayers
 from lup.sessions.surface import Agent
 from lup.sessions.composition import submission_gate_resolver
@@ -44,7 +47,8 @@ from lup.sessions.middleware import (
     TraceRecord,
     TracingConfig,
 )
-from lup.tools.mcp import McpServerEntry
+from lup.mcp import External, ServeLaunch, ToolServer, Toolset
+from lup.tools.mcp import LupMcpServerConfig, McpServerEntry
 from lup.observability.metrics import (
     get_metrics_summary,
     log_metrics_summary,
@@ -142,15 +146,13 @@ def provider_factory(
     model: str | None,
     system_prompt: str,
     cwd: Path,
-    native_tools: NativeTools = None,
-    tool_servers: dict[str, McpServerEntry] | None = None,
+    builtin: BuiltinPreset = "none",
+    mcp: list[ToolServer] | None = None,
     allowed_tools: list[str] | None = None,
     hooks: LupHooksConfig | None = None,
     add_dirs: list[Path] | None = None,
-    coding_harness_preset: bool = True,
     session_defaults: bool = True,
     submission_gate: SubmissionGateResolver | None = None,
-    codex_mcp_servers: dict[str, CodexMcpServerConfig] | None = None,
     writable_roots: list[Path] | None = None,
     subagents: list[SubagentSpec] | None = None,
     thinking_budget: int | None = None,
@@ -179,9 +181,10 @@ def provider_factory(
             if compat_base_url() is None
             else CustomModel(id=model)
         )
+        roster: BuiltinPreset | list[ClaudeBuiltinTool] = builtin
         if role is not None:
-            native_tools = claude_subagent_tools(role)
-            allowed_tools = list(native_tools)
+            roster = claude_subagent_builtins(role)
+            allowed_tools = list(roster)
             if role.model != "inherit":
                 if compat_base_url() is not None:
                     raise ValueError(
@@ -195,10 +198,8 @@ def provider_factory(
         config = Claude(
             model=claude_model,
             system_prompt=system_prompt,
-            coding_harness_preset=coding_harness_preset,
-            native_tools=native_tools,
+            tools=ClaudeTools(builtin=roster, mcp=mcp or []),
             allowed_tools=allowed_tools or [],
-            tool_servers=tool_servers or {},
             permission_mode=(
                 settings.permission_mode
                 if settings.permission_mode is not None
@@ -277,13 +278,7 @@ def provider_factory(
                 "Codex app-server cannot honor configured option(s): "
                 + ", ".join(unsupported)
             )
-        delegated_tools = (
-            codex_subagent_tools(role)
-            if role is not None
-            else CodexSubagentTools()
-            if native_tools == []
-            else None
-        )
+        delegated_tools = codex_subagent_tools(role) if role is not None else None
         # A configured id is checked against Codex's catalog on the native
         # engine; an OpenAI-compatible provider names its own models.
         codex_model: CodexModelChoice | None = (
@@ -301,11 +296,6 @@ def provider_factory(
             if engine != "codex":
                 raise ValueError("AGENT_MODEL is required for a compatible endpoint")
             codex_model = "strongest"
-        applications = codex_config(
-            SessionRequest(cwd=cwd, tool_servers=tool_servers or {})
-        )
-        if applications.mcp_servers.keys() & (codex_mcp_servers or {}).keys():
-            raise ValueError("tool_servers and codex_mcp_servers name the same server")
         config = Codex(
             model=codex_model,
             system_prompt=system_prompt,
@@ -327,12 +317,12 @@ def provider_factory(
             hooks=hooks,
             effort=settings.codex_effort or settings.reasoning_effort,
             submission_gate_resolver=submission_gate,
-            mcp_servers={**applications.mcp_servers, **(codex_mcp_servers or {})},
-            application_tools=applications.application_tools,
-            companions=applications.companions,
+            tools=CodexTools(
+                builtin="none" if delegated_tools is not None else builtin,
+                mcp=mcp or [],
+            ),
             writable_roots=writable_roots or [],
             delegated_tools=delegated_tools,
-            native_tools=None if delegated_tools is not None else native_tools,
         )
         endpoint = compat_base_url()
         if engine in ("openai", "openai-compat"):
@@ -495,7 +485,11 @@ def build_session_factory(
     from lup_template.agent.tool_policy import ToolPolicy
     from lup_template.agent.subagents import get_subagent_specs
     from lup.tools.toolsets import SessionNeeds, assembled, registered, served_names
-    from lup_template.agent.toolsets import declared_tool_groups
+    from lup_template.agent.toolsets import (
+        declared_tool_groups,
+        declared_tool_servers,
+    )
+    from lup_template.agent.toolsets import session_needs as project_needs
     from lup.coordination.identity import member_ref, session_member_id
     from lup_template.kinds import NODE_KINDS, LAYOUT
 
@@ -513,13 +507,12 @@ def build_session_factory(
     no_subagents: list[SubagentSpec] = []
     subagents = no_subagents if toolless else get_subagent_specs()
     system_prompt = "" if bare_prompt else get_system_prompt()
-    tool_servers: dict[str, McpServerEntry] = {}
-    codex_mcp_servers: dict[str, CodexMcpServerConfig] = {}
+    mcp: list[ToolServer] = []
     writable_roots: list[Path] = []
     allowed_tools: list[str] = []
     submission_gate: SubmissionGate[AgentOutput] | None = None
     hooks = create_permission_hooks(notes.rw, notes.ro)
-    native_tools: NativeTools = None if toolless else [NativeToolGroup.ALL]
+    builtin: BuiltinPreset = "none" if toolless else "stock"
     sandbox: Sandbox | None = None
     groups = declared_tool_groups()
 
@@ -573,6 +566,16 @@ def build_session_factory(
             # the very tool that finalizes the turn.
             allowed_tools.append(SUBMISSION_TOOL)
             hooks = merge_hooks(hooks, create_tool_allowlist_hook(allowed_tools))
+
+            def declared(name: str, entry: McpServerEntry) -> ToolServer:
+                """One registered group as the session declares it, hosted here."""
+                match entry:
+                    case LupMcpServerConfig():
+                        return Toolset(entry.tools, name=name)
+                    case _:
+                        return External(name=name, server=entry)
+
+            mcp = [declared(name, entry) for name, entry in tool_servers.items()]
             submission_gate = reflection_submission_gate(gate)
         case False, _:
             from lup.orchestration.reflection import ReviewGate
@@ -603,27 +606,22 @@ def build_session_factory(
                 environment["AGENT_MODEL"] = selected_model
             if settings.aux_model is not None:
                 environment["AGENT_AUX_MODEL"] = settings.aux_model
-            codex_mcp_servers = {
-                name: CodexMcpServerConfig(
-                    command="uv",
-                    args=[
-                        "run",
-                        "lup-devtools",
-                        "agent",
-                        "serve-tools",
-                        "--server",
-                        name,
-                    ],
-                    env=environment,
-                )
-                # Which groups this session has, derived by building them
-                # rather than listed beside the builder: a server started for
-                # a group this session builds empty is a subprocess serving
-                # nothing.
-                for name in policy.filter_group_names(
-                    served_names(groups, session_needs(gate, None, realtime_dir))
-                )
-            }
+            # Which groups this session has, derived by building them rather
+            # than listed beside the builder: a server started for a group
+            # this session builds empty is a subprocess serving nothing.
+            served = policy.filter_group_names(
+                served_names(groups, session_needs(gate, None, realtime_dir))
+            )
+            launch = ServeLaunch(
+                program=["uv", "run", "lup-devtools", "tools", "serve"],
+                needs=project_needs,
+                environment=environment,
+            )
+            mcp = [
+                External(name=server.name, server=server.launched(launch))
+                for server in declared_tool_servers()
+                if server.name in served
+            ]
             writable_roots = list(notes.rw)
 
     resolver = (
@@ -635,14 +633,12 @@ def build_session_factory(
         model=model or settings.model,
         system_prompt=system_prompt,
         cwd=Path.cwd(),
-        native_tools=native_tools,
-        tool_servers=tool_servers,
+        builtin=builtin,
+        mcp=mcp,
         allowed_tools=allowed_tools,
         hooks=hooks,
         add_dirs=[*notes.all_dirs, *settings.extra_dirs],
-        coding_harness_preset=not bare_prompt,
         submission_gate=resolver,
-        codex_mcp_servers=codex_mcp_servers,
         writable_roots=writable_roots,
         subagents=subagents if engine in ("claude", "claude-compat") else None,
     )
@@ -719,7 +715,6 @@ def build_auxiliary_factory(
             )
             if tools is not None or capabilities is not None
             else None,
-            coding_harness_preset=False,
             session_defaults=False,
             thinking_budget=thinking_budget,
             max_turns=max_turns,
@@ -737,7 +732,6 @@ def build_subagent_factory(spec: SubagentSpec) -> Agent:
             system_prompt=spec.prompt,
             cwd=Path.cwd(),
             role=spec,
-            coding_harness_preset=False,
             session_defaults=False,
             max_turns=spec.max_turns,
         )
