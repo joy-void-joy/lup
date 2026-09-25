@@ -1,11 +1,11 @@
 """The package root stays a deliberately small runtime front door.
 
-Small, and no longer only nouns. The root once exported eight carrier types and
-nothing that made one, so `import lup` reached no constructor at all and every
-non-trivial example had to open a session by importing an adapter — the tier
+Small, but not only nouns. A root exporting carrier types and nothing that made
+one would reach no agent at all, and every non-trivial example would have to
+open a session by importing an adapter — the tier
 `seam-boundary` fails the build over everywhere else in the library. The
-constructors below are what that cost, asserted here so the root cannot quietly
-become a vocabulary again.
+agents below are what prevents that, asserted here so the root cannot quietly
+become a vocabulary.
 """
 
 import subprocess
@@ -13,7 +13,7 @@ import sys
 
 import lup
 
-CONSTRUCTORS = {"create_claude", "create_codex"}
+AGENTS = {"Claude", "Codex"}
 
 
 def in_a_fresh_interpreter(source: str) -> str:
@@ -40,43 +40,42 @@ def test_every_export_resolves() -> None:
 
 def test_root_exports_only_portable_runtime_conveniences() -> None:
     assert set(lup.__all__) == {  # lup: ignore[set-shape] — exact export comparison
+        "Agent",
         "Claude",
-        "Client",
         "Codex",
+        "Conversation",
         # The one way to name a model no catalog lists, which every model
-        # argument a root constructor takes accepts.
+        # argument a root agent takes accepts.
         "CustomModel",
-        "SessionHandle",
+        "NativeToolGroup",
         "SessionId",
-        "StartedTurn",
+        "SessionSummary",
+        "Turn",
         "TurnId",
         "TurnInput",
-        "TurnRequest",
+        "TurnMessage",
         "TurnResult",
-        "create_claude",
-        "create_codex",
-        "turn_request",
     }
 
 
-def test_the_root_exports_something_that_builds_a_client() -> None:
+def test_the_root_exports_an_agent_for_every_provider() -> None:
     """The property the export list above is only one spelling of.
 
-    A reader who has found `import lup` must be able to get a client from it.
+    A reader who has found `import lup` must be able to get an agent from it.
     Stated separately because the set comparison passes for any set — including
-    one that has lost every constructor and kept the nouns, which is exactly
-    the state this whole surface was rebuilt out of.
+    one that has lost every agent and kept the nouns, which is exactly the
+    vocabulary this front door must not shrink to.
     """
-    assert CONSTRUCTORS <= set(lup.__all__)
-    assert all(callable(getattr(lup, name)) for name in CONSTRUCTORS)
+    assert AGENTS <= set(lup.__all__)
+    assert all(callable(getattr(lup, name)) for name in AGENTS)
 
 
 def test_importing_lup_loads_no_provider_sdk_and_stays_small() -> None:
     """The promise the module docstring makes, measured where it is meaningful.
 
-    Eagerly re-exporting the constructors pulled 811 modules and roughly 1.3
-    seconds — an ASGI server and a CLI framework among them — on behalf of a
-    caller who may have wanted a type annotation. Deferring them is what makes
+    Eagerly re-exporting the agents pulls several hundred modules — an ASGI
+    server and a CLI framework among them — on behalf of a caller who may
+    have wanted a type annotation. Deferring them is what makes
     the root cheap enough to be the thing everybody imports.
     """
     reported = in_a_fresh_interpreter(
@@ -88,8 +87,8 @@ def test_importing_lup_loads_no_provider_sdk_and_stays_small() -> None:
     assert int(count) < 400, f"`import lup` pulled {count} modules"
 
 
-def test_naming_a_constructor_loads_its_adapter_but_no_provider_sdk() -> None:
-    """Reaching a constructor imports its adapter, which is unavoidable.
+def test_naming_an_agent_loads_its_adapter_but_no_provider_sdk() -> None:
+    """Reaching an agent imports its adapter, which is unavoidable.
 
     The vendor's own SDK is not, and is loaded by opening a session instead —
     so `import lup` works, and keeps working, on a machine with only one
@@ -97,9 +96,9 @@ def test_naming_a_constructor_loads_its_adapter_but_no_provider_sdk() -> None:
     """
     reported = in_a_fresh_interpreter(
         "import sys; "
-        "from lup import create_claude, create_codex; "
-        "print(callable(create_claude), callable(create_codex), "
+        "from lup import Claude, Codex; "
+        "print(Claude.__module__, Codex.__module__, "
         "'claude_agent_sdk' in sys.modules)"
     )
 
-    assert reported == "True True False"
+    assert reported == "lup.providers.claude lup.providers.codex False"
