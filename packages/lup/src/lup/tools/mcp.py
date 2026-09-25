@@ -361,8 +361,8 @@ def serve_stdio(config: LupMcpServerConfig) -> None:
     """Serve an in-process MCP server over stdio (blocking).
 
     The subprocess half of tool serving: backends that cannot host
-    in-process servers launch a tool-server subprocess (``lup-devtools
-    agent serve-tools``), which builds the same
+    in-process servers launch a tool-server subprocess (:mod:`lup.mcp.serve`),
+    which builds the same
     :func:`create_mcp_server` config the in-process path registers and
     exposes it here over a stdio transport — one server construction for
     every backend. SIGTERM raises ``SystemExit`` so ``atexit`` cleanup

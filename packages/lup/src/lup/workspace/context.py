@@ -5,13 +5,13 @@
 """Session context relay: parent process to a tool-serving subprocess.
 
 Backends whose tools run outside the agent process expose lup's MCP
-tools through an external stdio subprocess (``lup-devtools agent
-serve-tools``). The Codex runtime does not pass the parent's shell env to
+tools through an external stdio subprocess (``python -m
+lup.mcp.serve``). The Codex runtime does not pass the parent's shell env to
 that subprocess, so session state the tools need — reflect, submit_output,
 sandbox, realtime relay — crosses the boundary as env vars.
 
 :class:`SessionContext` is that contract. The producer (the subprocess
-adapter builder) and the consumer (serve-tools via
+adapter builder) and the consumer (:mod:`lup.mcp.serve` via
 :func:`read_session_context`) share this one definition, so the env vars
 cannot drift apart. In-process backends run these tools in the agent
 process and never touch the relay.

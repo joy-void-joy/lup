@@ -144,7 +144,7 @@ class ReviewGate(ReflectionGate):
 
     File-backed mode persists the fail counter beside the flag file, so
     enforcement keeps working across the process boundary (the
-    serve-tools subprocess) exactly like the base flag does.
+    tool-serving subprocess) exactly like the base flag does.
     """
 
     def __init__(self, flag_path: Path | None = None, *, max_fails: int = 3) -> None:

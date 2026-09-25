@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Literal, Self
 
 import sh
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, ImportString, model_validator
 
 from lup.execution.shell import git
 from lup.ledger.kinds import kind_of
@@ -133,7 +133,9 @@ class LedgerLayout(BaseModel, frozen=True):
 
     committed: InTree | None = None
     local: SharedStore = SharedStore()
-    placements: dict[type[LedgerNode], Placement] = {}
+    placements: dict[ImportString[type[LedgerNode]], Placement] = {}
+    """Where each kind goes, keyed by its class — an import path once serialized,
+    so a layout crosses a process boundary as the value it is."""
 
     @model_validator(mode="after")
     def committed_kinds_have_somewhere_to_go(self) -> Self:

@@ -54,6 +54,7 @@ from lup.providers.profiles import ProfileDirectory
 from lup.observability.usage.app import UsageEntry
 
 import lup.devtools.sync as sync
+import lup.devtools.tools as tools
 import lup.devtools.trace.app as trace
 import lup.devtools.version as version
 
@@ -323,12 +324,13 @@ LIBRARY_ROSTER = [
         ),
     ),
     RosterEntry(spec=sync.SUBAPP.spec, build=lambda _: sync.SUBAPP.app),
+    RosterEntry(spec=tools.SUBAPP.spec, build=lambda _: tools.SUBAPP.app),
     RosterEntry(spec=trace.SUBAPP_SPEC, build=lambda _: create_trace_app()),
     RosterEntry(spec=version.SUBAPP.spec, build=lambda _: version.SUBAPP.app),
 ]
 """Every sub-app lup ships, in the order `--help` lists them.
 
-Eleven names, each owned by exactly one module, which is the property this list
+Each name is owned by exactly one module, which is the property this list
 is arranged for rather than a count it happened to reach. A module claims a
 top-level name and a project declining the module stops being served everything
 beneath it — so a command sitting under a name some other module owns is a
