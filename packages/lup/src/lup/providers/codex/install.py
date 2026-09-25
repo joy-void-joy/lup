@@ -15,6 +15,7 @@ from lup.providers.codex.home import (
 )
 from lup.providers.codex.marketplace import CodexMarketplace
 from lup.providers.codex.profile import CodexProfileSettings
+from lup.providers.codex.theme import claude_daltonized_theme
 
 
 def install_codex_plugin(
@@ -27,6 +28,7 @@ def install_codex_plugin(
     if trusted:
         home.mkdir(parents=True, exist_ok=True)
         trust_project(home, root)
+        claude_daltonized_theme().write(home)
     installer = CodexPluginInstaller(
         PluginCacheConfig(
             codex_home=home, marketplace=declared.name, plugin=declared.plugin

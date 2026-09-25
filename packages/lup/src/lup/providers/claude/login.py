@@ -43,6 +43,16 @@ answered. Read as renewable it suppresses the seed, and the session it
 suppresses it for opens demanding the one flow a contained session cannot
 finish.
 
+The ambient home is the operator's: joined onto this process's home
+directory as the module is imported, never onto a ``HOME`` a request hands its
+session. A request changes ``HOME`` for a tool its session runs, and that
+session must still authenticate as the operator, so the account a derived home
+is seeded from and linked back to stays the one this program was launched as.
+Claude Code left to choose would join the request's instead — its default is
+joined onto ``os.homedir()``, which reads ``HOME`` — and a homed session is
+never left that choice, because homing names its configuration home outright.
+Every other place asking for the default home reads it here.
+
 The ambient home cannot be named. Claude Code (read from 2.1.282) keeps its
 configuration document at ``join(CLAUDE_CONFIG_DIR || homedir(),
 ".claude.json")``: ``~/.claude.json`` with the variable unset, and

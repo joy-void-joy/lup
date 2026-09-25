@@ -9,7 +9,6 @@ tree at all.
 from functools import partial
 from pathlib import Path
 
-from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.harness.codescan.common import RuleSelection
 from lup.devtools.dev.model_catalog import catalog_writers, library_catalogs
 from lup.devtools.dev.rules import write_rule_reference
@@ -18,7 +17,6 @@ from lup.devtools.harness.composition import (
     ClaudeComposer,
     CodexComposer,
     NativeTargets,
-    local_profile_directory,
 )
 from lup.devtools.harness.drift import RepositoryWriter
 from lup.devtools.harness.generate import (
@@ -31,8 +29,6 @@ from lup.web.build import write_web_bundles
 from lup.web.schema import write_view_schema
 from lup.harness.models import PromptDocument
 from lup.harness.modules import Composition
-from lup.providers.profiles import ProfileDirectory
-from lup.workspace.paths import project_root
 from lup_template.harness.catalog import (
     PUBLISH,
     WORKFLOW,
@@ -77,17 +73,6 @@ def project_content(
         settings=project_settings(harness.plugins[0]),
         settings_source=settings_module.__name__,
     )
-
-
-def profile_directory() -> ProfileDirectory:
-    """The Claude accounts this checkout keeps, under ``.lup/profiles``.
-
-    Named once and reached by both the launcher and the setup wizard, so a
-    name means the same account whichever tree the caller curates it through
-    — which is the whole reason to keep the profiles here rather than let
-    each entry point fall back to the operator's personal registry.
-    """
-    return local_profile_directory(project_root(), CLAUDE_LOGIN)
 
 
 def installer_guidance(

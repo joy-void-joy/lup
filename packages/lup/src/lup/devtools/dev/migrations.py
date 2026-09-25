@@ -189,8 +189,8 @@ DECLARED: list[Migration] = [
                 instruction=(
                     "Read ClaudeProfileSelection.config_directory as optional: "
                     "None leaves whichever home the session's environment already "
-                    "selects, and AccountFile.resolve_config_dir() answers that "
-                    "home, honouring whichever one the environment names. A "
+                    "selects, and CLAUDE_LOGIN.selected_home(environment) answers "
+                    "that home, honouring whichever one the environment names. A "
                     "registry that must pin a home passes "
                     "default=ClaudeProfileSelection(config_directory=...)."
                 )
@@ -769,6 +769,137 @@ DECLARED: list[Migration] = [
                     "CodexNativeTools came from lup.providers.codex.native_tools: "
                     "every field and method keeps its name, and compile takes a "
                     "builtin preset or a list of CodexBuiltinTool names."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "PROFILE_ROOT",
+            "local_profile_directory",
+            "ACTIVE_FILE",
+            "REGISTRY_PATH",
+            "Account",
+            "Account.config_dir",
+            "Registry.profiles",
+            "Registry.active",
+            "AccountFile",
+            "AccountFile.__init__",
+            "AccountFile.homes_root",
+            "AccountFile.load_registry",
+            "AccountFile.save_registry",
+            "AccountFile.resolver_registry",
+            "AccountFile.resolve_config_dir",
+            "ClaudeProfileNames",
+            "ClaudeProfileNames.__init__",
+            "ClaudeProfileNames.names",
+            "ClaudeProfileNames.config_dir_for",
+            "ClaudeProfileNames.active_profile",
+            "ClaudeProfileRegistrar.__init__",
+            "ClaudeProfileRegistrar.add_profile",
+            "ClaudeProfileRegistrar.set_active",
+            "ClaudeProfileRegistrar.remove_profile",
+        ],
+        reason=(
+            "profiles lived in each checkout's .lup/profiles or in the personal "
+            "registry at ~/.lup/profiles.json, so every new repository opened "
+            "its accounts signed out; they live once per person now, a "
+            "directory per name beside the per-user config at "
+            "$XDG_CONFIG_HOME/lup (~/.config/lup), a home per runtime inside "
+            "each, selected by that config.toml's profile"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Move the accounts already kept once: this moves each "
+                    "checkout's .lup/profiles/<name> and the old registry's homes, "
+                    "links a home registered elsewhere, and carries the selection "
+                    "where the config file records none. Launches say so while "
+                    "an old location still holds accounts."
+                ),
+                command=["uv", "run", "lup-devtools", "harness", "profile", "migrate"],
+            ),
+            MigrationStep(
+                instruction=(
+                    "Build profile directories with user_profile_directory(login) "
+                    "from lup.providers.profile_tree wherever "
+                    "local_profile_directory(root, login) or a ProfileDirectory "
+                    "over ClaudeProfileNames and ClaudeProfileRegistrar was built. "
+                    "ProfileFolders takes the UserConfigFile whose profiles_root() "
+                    "it keeps, and the selection is UserConfigFile.load().profile "
+                    "rather than an .active file."
+                )
+            ),
+            MigrationStep(
+                instruction=(
+                    "Pass an application's own origin as claude_usage_entry(profiles) "
+                    "or codex_usage_entry(executable, profiles); codex_usage_entry "
+                    "takes no home any more, and `usage codex --profile NAME` reads "
+                    "that account's Codex home rather than refusing the name."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=["default_config_home"],
+        reason=(
+            "three places computed Claude's default configuration home each on "
+            "their own; the login declaration is the one that says it"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Read CLAUDE_LOGIN.ambient_home, from "
+                    "lup.providers.claude.login, wherever default_config_home() "
+                    "was called: the same directory, joined onto this process's "
+                    "home rather than a HOME a session carries."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "Codex.named_profile",
+            "Codex.validated_for_app_server",
+            "CodexProfileSelection.named_profile",
+        ],
+        reason=(
+            "a Codex profile named a configuration overlay inside one home, "
+            "which the app-server cannot select, so the field only ever "
+            "refused; profile= now names an account on Claude and Codex alike"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Pass profile=NAME to Claude(...) or Codex(...) to open its "
+                    "sessions as that account: a name among the person's lup "
+                    "profiles, resolved to that runtime's home inside it, and "
+                    "refused listing the known names where there is none. Drop "
+                    "named_profile=..., which a session could never open with, "
+                    "and every call to validated_for_app_server(), which checked "
+                    "nothing else."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=["DEFAULT_ACCOUNT_HOME"],
+        reason=(
+            "a worktree's Codex home was seeded from ~/.codex once and kept "
+            "that copy, so every setting changed since, and every one changed "
+            "in another checkout's session, never reached it; it is derived "
+            "from the selected account at each launch and a session's changes "
+            "return to that account, whose default the login declaration names"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Read CODEX_LOGIN.ambient_home, from lup.providers.codex.login, "
+                    "wherever DEFAULT_ACCOUNT_HOME was read, and construct "
+                    "CodexWorktreeHomeStore(account_home=...) with a profile's "
+                    "Codex home where a run is started as one. Call "
+                    "return_settings(worktree) beside publish(worktree) once a "
+                    "session over a derived home closes."
                 )
             ),
         ],

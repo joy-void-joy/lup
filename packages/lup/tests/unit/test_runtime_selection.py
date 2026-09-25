@@ -71,16 +71,20 @@ def empty_user_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     Every test here starts from an empty user directory with no runtime's
     home named, and names one where that is its subject.
 
-    Codex's worktree store fixes the operator's account home when it is
-    imported — :data:`~lup.providers.codex.home.DEFAULT_ACCOUNT_HOME` says
-    why — so it is bound to the empty directory here, which stands for the
-    operator's, rather than following ``HOME``.
+    Both runtimes' logins fix the operator's default home when they are
+    imported — ``CLAUDE_LOGIN`` says why — so the homes selection reads are
+    bound to the empty directory here, which stands for the operator's,
+    rather than following ``HOME``.
     """
     user = tmp_path / "user"
     user.mkdir()
     monkeypatch.setenv("HOME", str(user))
     for name in (CLAUDE_CONFIG_DIR, CLAUDE_OAUTH_URL_ENV, CODEX_HOME):
         monkeypatch.delenv(name, raising=False)
+    operator = CLAUDE_LOGIN.model_copy(
+        update={"ambient_home": user / CLAUDE_LOGIN.ambient_home.name}
+    )
+    monkeypatch.setattr("lup.providers.claude.config_home.CLAUDE_LOGIN", operator)
     account = user / CODEX_LOGIN.ambient_home.name
     store = partial(CodexWorktreeHomeStore, account)
     monkeypatch.setattr("lup.providers.codex.home.CodexWorktreeHomeStore", store)

@@ -180,11 +180,33 @@ def test_claude_daltonized_theme_uses_truecolor_palette() -> None:
     )
 
 
-def test_prepare_generates_theme_without_selecting_it(tmp_path: Path) -> None:
+def home_theme(home: Path) -> object:
+    """The theme a home's configuration draws, or None where it names none."""
+    config = home / "config.toml"
+    if not config.is_file():
+        return None
+    return (
+        tomlkit.parse(config.read_text(encoding="utf-8"))
+        .unwrap()
+        .get("tui", {})
+        .get("theme")
+    )
+
+
+def worktree_of(tmp_path: Path, name: str = "worktree") -> Path:
+    """A checkout for a store to derive a home for."""
+    worktree = tmp_path / name
+    worktree.mkdir()
+    return worktree
+
+
+def test_lups_theme_is_drawn_only_where_the_account_names_none(
+    tmp_path: Path,
+) -> None:
     account = tmp_path / "account"
     account.mkdir()
-    worktree = tmp_path / "worktree"
-    worktree.mkdir()
+    (account / "config.toml").write_text(ACCOUNT_CONFIG, encoding="utf-8")
+    worktree = worktree_of(tmp_path)
     store = CodexWorktreeHomeStore(account)
     theme = claude_daltonized_theme()
     parsed_theme = TextMateThemeDocument.model_validate(
@@ -196,8 +218,8 @@ def test_prepare_generates_theme_without_selecting_it(tmp_path: Path) -> None:
     generated = scoped / "themes" / "claude-daltonized.tmTheme"
 
     assert generated.read_text(encoding="utf-8") == theme.render()
-    config = tomlkit.parse((scoped / "config.toml").read_text(encoding="utf-8"))
-    assert "tui" not in config
+    assert home_theme(scoped) == "claude-daltonized"
+    assert home_theme(account) is None, "the account was given lup's theme"
 
     generated.write_text("stale", encoding="utf-8")
     store.prepare(worktree)
@@ -205,7 +227,126 @@ def test_prepare_generates_theme_without_selecting_it(tmp_path: Path) -> None:
     assert generated.read_text(encoding="utf-8") == theme.render()
 
 
-def test_prepare_preserves_scoped_state_after_first_use(tmp_path: Path) -> None:
+def test_a_theme_the_account_keeps_is_drawn_with_its_file(tmp_path: Path) -> None:
+    account = tmp_path / "account"
+    (account / "themes").mkdir(parents=True)
+    (account / "themes" / "mine.tmTheme").write_text("mine", encoding="utf-8")
+    (account / "config.toml").write_text(
+        ACCOUNT_CONFIG + '\n[tui]\ntheme = "mine"\n', encoding="utf-8"
+    )
+
+    scoped = CodexWorktreeHomeStore(account).prepare(worktree_of(tmp_path))
+
+    assert home_theme(scoped) == "mine"
+    assert (scoped / "themes" / "mine.tmTheme").read_text(encoding="utf-8") == "mine"
+
+
+def test_a_theme_the_config_names_wins_in_the_home_and_leaves_the_account(
+    tmp_path: Path,
+) -> None:
+    account = tmp_path / "account"
+    account.mkdir()
+    (account / "config.toml").write_text(
+        ACCOUNT_CONFIG + '\n[tui]\ntheme = "zenburn"\n', encoding="utf-8"
+    )
+    worktree = worktree_of(tmp_path)
+    store = CodexWorktreeHomeStore(account, theme="dracula")
+
+    scoped = store.prepare(worktree)
+
+    assert home_theme(scoped) == "dracula"
+    assert home_theme(account) == "zenburn"
+    assert store.return_settings(worktree) == []
+    assert home_theme(account) == "zenburn"
+
+
+def chosen_in_session(scoped: Path, theme: str) -> None:
+    """What a session's /theme writes into the home it runs in."""
+    config = tomlkit.parse((scoped / "config.toml").read_text(encoding="utf-8"))
+    config.setdefault("tui", tomlkit.table())["theme"] = theme
+    (scoped / "config.toml").write_text(tomlkit.dumps(config), encoding="utf-8")
+
+
+def test_a_sessions_theme_returns_to_the_account_with_its_file(
+    tmp_path: Path,
+) -> None:
+    account = tmp_path / "account"
+    account.mkdir()
+    (account / "config.toml").write_text(ACCOUNT_CONFIG, encoding="utf-8")
+    worktree = worktree_of(tmp_path)
+    store = CodexWorktreeHomeStore(account)
+    scoped = store.prepare(worktree)
+    (scoped / "themes" / "mine.tmTheme").write_text("mine", encoding="utf-8")
+    chosen_in_session(scoped, "mine")
+
+    assert store.return_settings(worktree) == ["tui.theme"]
+    assert home_theme(account) == "mine"
+    assert (account / "themes" / "mine.tmTheme").read_text(encoding="utf-8") == "mine"
+
+    elsewhere = CodexWorktreeHomeStore(account).prepare(worktree_of(tmp_path, "new"))
+    assert home_theme(elsewhere) == "mine"
+    assert (elsewhere / "themes" / "mine.tmTheme").is_file()
+
+
+def test_lups_filled_theme_never_returns_to_the_account(tmp_path: Path) -> None:
+    """Only what a session chose goes back; what lup drew for it does not."""
+    account = tmp_path / "account"
+    account.mkdir()
+    (account / "config.toml").write_text(ACCOUNT_CONFIG, encoding="utf-8")
+    worktree = worktree_of(tmp_path)
+    store = CodexWorktreeHomeStore(account)
+    scoped = store.prepare(worktree)
+    config = tomlkit.parse((scoped / "config.toml").read_text(encoding="utf-8"))
+    config["model"] = "gpt-chosen"
+    (scoped / "config.toml").write_text(tomlkit.dumps(config), encoding="utf-8")
+
+    assert store.return_settings(worktree) == ["model"]
+    assert home_theme(account) is None
+
+
+def test_a_sessions_theme_returns_without_undoing_the_accounts_meanwhile(
+    tmp_path: Path,
+) -> None:
+    account = tmp_path / "account"
+    account.mkdir()
+    (account / "config.toml").write_text(
+        ACCOUNT_CONFIG + '\n[tui]\ntheme = "zenburn"\n', encoding="utf-8"
+    )
+    worktree = worktree_of(tmp_path)
+    store = CodexWorktreeHomeStore(account)
+    scoped = store.prepare(worktree)
+    (account / "config.toml").write_text(
+        ACCOUNT_CONFIG.replace("gpt-personal", "gpt-meanwhile")
+        + '\n[tui]\ntheme = "zenburn"\n',
+        encoding="utf-8",
+    )
+    chosen_in_session(scoped, "dracula")
+
+    assert store.return_settings(worktree) == ["tui.theme"]
+    settings = tomlkit.parse((account / "config.toml").read_text(encoding="utf-8"))
+    assert settings["model"] == "gpt-meanwhile"
+    assert home_theme(account) == "dracula"
+
+
+def test_an_account_theme_changed_meanwhile_is_not_undone(tmp_path: Path) -> None:
+    account = tmp_path / "account"
+    account.mkdir()
+    (account / "config.toml").write_text(
+        ACCOUNT_CONFIG + '\n[tui]\ntheme = "zenburn"\n', encoding="utf-8"
+    )
+    worktree = worktree_of(tmp_path)
+    store = CodexWorktreeHomeStore(account)
+    store.prepare(worktree)
+    (account / "config.toml").write_text(
+        ACCOUNT_CONFIG + '\n[tui]\ntheme = "monokai"\n', encoding="utf-8"
+    )
+
+    assert store.return_settings(worktree) == []
+    assert home_theme(account) == "monokai"
+
+
+def test_prepare_keeps_what_the_home_itself_holds(tmp_path: Path) -> None:
+    """A newer login, a transcript and the home's own installs survive a launch."""
     account = tmp_path / "account"
     account.mkdir()
     (account / "auth.json").write_text("account-auth", encoding="utf-8")
@@ -215,7 +356,9 @@ def test_prepare_preserves_scoped_state_after_first_use(tmp_path: Path) -> None:
     store = CodexWorktreeHomeStore(account)
     scoped = store.prepare(worktree)
     (scoped / "auth.json").write_text("scoped-auth", encoding="utf-8")
-    (scoped / "config.toml").write_text('model = "scoped"\n', encoding="utf-8")
+    config = tomlkit.parse((scoped / "config.toml").read_text(encoding="utf-8"))
+    config["plugins"] = {"lup@worktree": {"enabled": True}}
+    (scoped / "config.toml").write_text(tomlkit.dumps(config), encoding="utf-8")
     session = scoped / "sessions" / "saved.jsonl"
     session.parent.mkdir()
     session.write_text("saved\n", encoding="utf-8")
@@ -224,8 +367,106 @@ def test_prepare_preserves_scoped_state_after_first_use(tmp_path: Path) -> None:
     assert store.prepare(worktree) == scoped
     assert (scoped / "auth.json").read_text(encoding="utf-8") == "scoped-auth"
     settings = tomlkit.parse((scoped / "config.toml").read_text(encoding="utf-8"))
-    assert settings["model"] == "scoped"
+    assert settings["plugins"] == {"lup@worktree": {"enabled": True}}
     assert session.read_text(encoding="utf-8") == "saved\n"
+
+
+def test_a_setting_changed_in_the_account_reaches_an_existing_home(
+    tmp_path: Path,
+) -> None:
+    """Seeded once, a home kept the account as it stood the day it was made."""
+    account = tmp_path / "account"
+    account.mkdir()
+    (account / "config.toml").write_text(ACCOUNT_CONFIG, encoding="utf-8")
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    store = CodexWorktreeHomeStore(account)
+    scoped = store.prepare(worktree)
+
+    (account / "config.toml").write_text(
+        ACCOUNT_CONFIG.replace("gpt-personal", "gpt-since")
+        + '\n[tui]\ntheme = "zenburn"\n',
+        encoding="utf-8",
+    )
+    store.prepare(worktree)
+
+    settings = tomlkit.parse((scoped / "config.toml").read_text(encoding="utf-8"))
+    assert settings["model"] == "gpt-since"
+    assert settings["tui"] == {"theme": "zenburn"}
+    assert str(worktree.resolve()) in settings["projects"]
+
+
+def test_a_session_change_returns_to_the_account_and_reaches_a_new_checkout(
+    tmp_path: Path,
+) -> None:
+    """The reset this ends: a preference set in one project, absent in the next."""
+    account = tmp_path / "account"
+    account.mkdir()
+    (account / "config.toml").write_text("# mine\n" + ACCOUNT_CONFIG, encoding="utf-8")
+    first = tmp_path / "first"
+    first.mkdir()
+    store = CodexWorktreeHomeStore(account)
+    scoped = store.prepare(first)
+    config = tomlkit.parse((scoped / "config.toml").read_text(encoding="utf-8"))
+    config["notice"] = {"hide_full_access_warning": True}
+    config["model"] = "gpt-chosen"
+    config["plugins"] = {"lup@first": {"enabled": True}}
+    (scoped / "config.toml").write_text(tomlkit.dumps(config), encoding="utf-8")
+
+    carried = store.return_settings(first)
+
+    assert carried == ["model", "notice"]
+    kept = (account / "config.toml").read_text(encoding="utf-8")
+    assert kept.startswith("# mine")
+    account_settings = tomlkit.parse(kept)
+    assert account_settings["model"] == "gpt-chosen"
+    assert account_settings["notice"] == {"hide_full_access_warning": True}
+    assert "lup@first" not in account_settings["plugins"]
+    assert str(first.resolve()) not in account_settings.get("projects", {})
+    assert store.return_settings(first) == []
+
+    second = tmp_path / "second"
+    second.mkdir()
+    fresh = tomlkit.parse(
+        (store.prepare(second) / "config.toml").read_text(encoding="utf-8")
+    )
+    assert fresh["model"] == "gpt-chosen"
+    assert fresh["notice"] == {"hide_full_access_warning": True}
+
+
+def test_a_session_leaves_an_account_change_made_meanwhile_alone(
+    tmp_path: Path,
+) -> None:
+    """Measured against the launch, not the account, so it undoes nothing."""
+    account = tmp_path / "account"
+    account.mkdir()
+    (account / "config.toml").write_text(ACCOUNT_CONFIG, encoding="utf-8")
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    store = CodexWorktreeHomeStore(account)
+    store.prepare(worktree)
+    (account / "config.toml").write_text(
+        ACCOUNT_CONFIG.replace("gpt-personal", "gpt-meanwhile"), encoding="utf-8"
+    )
+
+    assert store.return_settings(worktree) == []
+    settings = tomlkit.parse((account / "config.toml").read_text(encoding="utf-8"))
+    assert settings["model"] == "gpt-meanwhile"
+
+
+def test_a_first_sign_in_under_a_new_profile_reaches_its_account_home(
+    tmp_path: Path,
+) -> None:
+    """A profile's Codex home need not exist until its first login lands in it."""
+    account = tmp_path / "profiles" / "work" / "codex-home"
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    store = CodexWorktreeHomeStore(account)
+    scoped = store.prepare(worktree)
+    (scoped / "auth.json").write_text(SEEDED_CREDENTIAL, encoding="utf-8")
+
+    assert store.publish(worktree)
+    assert (account / "auth.json").read_text(encoding="utf-8") == SEEDED_CREDENTIAL
 
 
 def test_a_scoped_home_trusts_the_checkout_it_was_made_for(tmp_path: Path) -> None:

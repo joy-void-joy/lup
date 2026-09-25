@@ -1,15 +1,13 @@
-"""Where a project's named configuration homes come from, and the surface over them.
+"""Where named configuration homes come from, and the surface over them.
 
-What a profile name means is the application's to decide: a personal registry
-file listing accounts by hand, or a directory the project already keeps one
-account per entry in. Two capabilities answer for such an origin, because
-reading one and curating one are separate powers and most callers only ever
-need the first — :class:`ProfileNames` says which names exist and what each
-selects, :class:`ProfileRegistrar` registers, selects, and forgets them. Both
-are engines; :class:`ProfileDirectory` is the concrete surface a command tree
-and a launcher hold over whichever pair an application supplied. Both shapes
-ship: :mod:`lup.providers.claude.profile_store` keeps the registry, and
-:mod:`lup.providers.profile_tree` keeps the directories.
+What a profile name means is an origin's to decide. Two capabilities answer
+for one, because reading one and curating one are separate powers and most
+callers only ever need the first — :class:`ProfileNames` says which names
+exist and what each selects, :class:`ProfileRegistrar` registers, selects,
+and forgets them. Both are engines; :class:`ProfileDirectory` is the concrete
+surface a command tree and a launcher hold over whichever pair an application
+supplied. The one lup ships is :mod:`lup.providers.profile_tree`: the
+person's own accounts, a directory each, beside their lup config.
 
 Nothing here names a provider. A directory carries the :class:`ProviderLogin`
 of the runtime whose homes it holds, so reporting whether one is signed in —

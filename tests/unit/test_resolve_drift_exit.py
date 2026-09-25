@@ -114,7 +114,7 @@ def test_normal_resolver_cli_refuses_integration_head_drift(
     monkeypatch.setattr(
         codex_home,
         "select_codex_home",
-        lambda *_: SimpleNamespace(path=tmp_path / "codex-home", isolated=True),
+        lambda *_, **__: SimpleNamespace(path=tmp_path / "codex-home", isolated=True),
     )
     monkeypatch.setattr(codex_install, "install_codex_plugin", lambda *_, **__: None)
 

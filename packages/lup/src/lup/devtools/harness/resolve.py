@@ -1601,6 +1601,7 @@ def run_resolve(
         from lup.providers.codex.install import install_codex_plugin
 
         from lup.providers.codex.home import CodexWorktreeHomeStore, select_codex_home
+        from lup.providers.profile_tree import user_profile_directory
 
         def codex_policy_environment(target: str, environment: EnvVars) -> EnvVars:
             """Point a Codex session at a home carrying this project's policy.
@@ -1617,12 +1618,20 @@ def run_resolve(
             One home per run rather than per concern: the plugin is the same
             for every worker, and seeding a personal account copy once per
             concern would differ from the operator's in nothing but cost.
+            It is derived from the run's account on Codex — the profile the
+            run was started as, which names one account on both runtimes.
             """
             if target != "codex":
                 return {}
-            home = select_codex_home(
-                None, environment, root, account.name, CodexWorktreeHomeStore()
+            codex_account = user_profile_directory(CODEX_LOGIN).launch_home(
+                account.name
             )
+            store = (
+                CodexWorktreeHomeStore()
+                if codex_account is None
+                else CodexWorktreeHomeStore(account_home=codex_account)
+            )
+            home = select_codex_home(None, environment, root, store=store)
             if not resolver_spec.contain_actors:
                 install_codex_plugin(root, home.path, trusted=home.isolated)
             return {"CODEX_HOME": str(home.path)}

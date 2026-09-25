@@ -55,7 +55,6 @@ import lup_template.devtools.dev.app as dev
 from lup_template.harness.composition import (
     REPOSITORY_WIDE,
     TARGETS,
-    profile_directory,
 )
 from lup_template.devtools.setup import INTEGRATIONS
 from lup.harness.content.modules.specs import LEDGER
@@ -132,7 +131,6 @@ DECLARATIONS = DevtoolsDeclarations(
         if settings.model is not None
         else None
     ),
-    profiles=profile_directory(),
     # What this repository records and where, declared once in
     # `lup_template.kinds` because the tool group a session records through
     # reads the same list and opens the same log.

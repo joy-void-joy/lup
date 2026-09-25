@@ -125,21 +125,25 @@ def refuse_unsupported_effort(
 
 
 def codex_default_effort(
-    model: CodexModelChoice | None, tiers: CodexModelTiers
+    model: CodexModelChoice | None,
+    tiers: CodexModelTiers,
+    preferred: CodexEffort = "xhigh",
 ) -> CodexEffort | None:
     """The effort a session on ``model`` reasons at when it names none.
 
-    ``xhigh`` wherever the model's catalog row takes it, and otherwise the
-    highest rung the row has below ``xhigh``, so the default adapts to the
-    model where a named effort would be refused by it; a model whose row lists
-    no effort gets none. A model with no row — inherited, a tier ``tiers``
-    resolves to nothing, a custom id — gets ``xhigh``, since nothing says it
-    cannot.
+    ``preferred`` wherever the model's catalog row takes it, and otherwise the
+    highest rung the row has below it, so the default adapts to the model
+    where a named effort would be refused by it; a model whose row lists no
+    effort gets none. A model with no row — inherited, a tier ``tiers``
+    resolves to nothing, a custom id — gets ``preferred``, since nothing says
+    it cannot. ``xhigh`` is lup's own preference; a person's config may name
+    another.
     """
     match codex_model_resolved(model, tiers):
         case None | CustomModel():
-            return "xhigh"
+            return preferred
         case name:
             accepted = CODEX_MODEL_EFFORTS[name]
-    descending: list[CodexEffort] = ["xhigh", "high", "medium", "low"]
+    ladder: tuple[CodexEffort, ...] = get_args(CodexEffort.__value__)
+    descending = reversed(ladder[: ladder.index(preferred) + 1])
     return next((rung for rung in descending if rung in accepted), None)

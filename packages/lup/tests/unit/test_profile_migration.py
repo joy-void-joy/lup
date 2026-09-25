@@ -1,0 +1,149 @@
+"""Accounts kept where lup used to keep them reach the person's config home once.
+
+An account left in a checkout's ``.lup/profiles`` or the old ``~/.lup``
+registry is one no launch can select, and a login copied rather than moved
+is two chains that diverge on the first renewal. These pin that a run moves
+each account, carries one selection without overriding the person's, never
+overwrites a name the destination holds, and that running it again finds
+nothing left to do — and that a launch says so while something is left.
+"""
+
+import json
+from pathlib import Path
+
+import pytest
+
+from lup.providers.claude.login import CLAUDE_LOGIN
+from lup.providers.codex.login import CODEX_LOGIN
+from lup.providers.profile_migration import legacy_notice, migrate_profiles
+from lup.providers.profile_tree import user_profile_directory
+from lup.providers.user_config import UserConfigFile
+
+
+@pytest.fixture
+def config(tmp_path: Path) -> UserConfigFile:
+    return UserConfigFile(tmp_path / "config" / "lup")
+
+
+@pytest.fixture
+def checkout(tmp_path: Path) -> Path:
+    """A checkout keeping a signed-in Claude profile and a selection."""
+    root = tmp_path / "checkout"
+    kept = root / ".lup" / "profiles"
+    home = kept / "work" / CLAUDE_LOGIN.home_subdir
+    home.mkdir(parents=True)
+    CLAUDE_LOGIN.credentials_path(home).write_text('{"login": 1}', encoding="utf-8")
+    (kept / ".active").write_text("work\n", encoding="utf-8")
+    return root
+
+
+def test_a_checkouts_profiles_move_with_their_selection(
+    checkout: Path, config: UserConfigFile, tmp_path: Path
+) -> None:
+    migration = migrate_profiles(checkout, config, tmp_path / "old-home")
+
+    home = user_profile_directory(CLAUDE_LOGIN, config).launch_home(None)
+    assert home is not None
+    assert home == config.profiles_root() / "work" / CLAUDE_LOGIN.home_subdir
+    assert CLAUDE_LOGIN.logged_in(home)
+    assert migration.selected == "work"
+    assert [move.outcome for move in migration.moves] == ["moved"]
+    assert not (checkout / ".lup" / "profiles").exists()
+
+
+def test_running_it_again_finds_nothing_to_do(
+    checkout: Path, config: UserConfigFile, tmp_path: Path
+) -> None:
+    migrate_profiles(checkout, config, tmp_path / "old-home")
+    settled = sorted(config.home.rglob("*"))
+
+    again = migrate_profiles(checkout, config, tmp_path / "old-home")
+
+    assert again.lines() == ["nothing to migrate"]
+    assert sorted(config.home.rglob("*")) == settled
+
+
+def test_a_launch_says_where_accounts_are_left_until_they_move(
+    checkout: Path, config: UserConfigFile, tmp_path: Path
+) -> None:
+    before = legacy_notice(checkout, config, tmp_path / "old-home")
+
+    migrate_profiles(checkout, config, tmp_path / "old-home")
+
+    assert before is not None
+    assert str(checkout / ".lup" / "profiles") in before
+    assert "harness profile migrate" in before
+    assert legacy_notice(checkout, config, tmp_path / "old-home") is None
+
+
+def test_a_selection_the_person_already_made_is_theirs(
+    checkout: Path, config: UserConfigFile, tmp_path: Path
+) -> None:
+    (config.profiles_root() / "personal").mkdir(parents=True)
+    config.select_profile("personal")
+
+    migration = migrate_profiles(checkout, config, tmp_path / "old-home")
+
+    assert migration.selected is None
+    assert config.load().profile == "personal"
+
+
+def test_a_name_the_destination_holds_keeps_what_it_holds(
+    checkout: Path, config: UserConfigFile, tmp_path: Path
+) -> None:
+    """The same person, signed in to Claude there and Codex here."""
+    theirs = config.profiles_root() / "work" / CLAUDE_LOGIN.home_subdir
+    theirs.mkdir(parents=True)
+    CLAUDE_LOGIN.credentials_path(theirs).write_text('{"mine": 1}', encoding="utf-8")
+    codex = checkout / ".lup" / "profiles" / "work" / CODEX_LOGIN.home_subdir
+    codex.mkdir()
+
+    migration = migrate_profiles(checkout, config, tmp_path / "old-home")
+
+    outcomes = {move.source.name: move.outcome for move in migration.moves}
+    assert outcomes == {"claude-config": "kept", "codex-home": "moved"}
+    assert CLAUDE_LOGIN.credentials_path(theirs).read_text() == '{"mine": 1}'
+    assert (config.profiles_root() / "work" / CODEX_LOGIN.home_subdir).is_dir()
+    left = checkout / ".lup" / "profiles" / "work" / CLAUDE_LOGIN.home_subdir
+    assert CLAUDE_LOGIN.logged_in(left), "a conflict dropped the source"
+    assert "merge it by hand" in migration.lines()[0]
+
+
+def test_the_old_registry_moves_homes_it_made_and_links_the_rest(
+    config: UserConfigFile, tmp_path: Path
+) -> None:
+    old_home = tmp_path / "old-home"
+    made = old_home / "homes" / "work"
+    made.mkdir(parents=True)
+    elsewhere = tmp_path / "their-own-home"
+    elsewhere.mkdir()
+    (old_home / "profiles.json").write_text(
+        json.dumps(
+            {
+                "profiles": {
+                    "work": {"config_dir": str(made)},
+                    "side": {"config_dir": str(elsewhere)},
+                    "main": {"config_dir": str(CLAUDE_LOGIN.ambient_home)},
+                },
+                "active": "side",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    migration = migrate_profiles(tmp_path / "no-checkout", config, old_home)
+
+    outcomes = {move.name: move.outcome for move in migration.moves}
+    assert outcomes == {"main": "refused", "side": "linked", "work": "moved"}
+    directory = user_profile_directory(CLAUDE_LOGIN, config)
+    assert directory.launch_home("work") == (
+        config.profiles_root() / "work" / "claude-config"
+    )
+    selected = directory.launch_home(None)
+    assert selected is not None and selected.resolve() == elsewhere.resolve()
+    assert elsewhere.is_dir(), "a home of their own choosing was moved"
+    assert not (old_home / "profiles.json").exists()
+    assert not (old_home / "homes").exists()
+    assert migrate_profiles(tmp_path / "no-checkout", config, old_home).lines() == [
+        "nothing to migrate"
+    ]

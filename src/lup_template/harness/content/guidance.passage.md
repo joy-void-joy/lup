@@ -5,7 +5,7 @@ Lup is a reusable framework and template for autonomous, tool-using agents: keep
 
 
 <!-- passage: changing-the-policy -->
-Change the policy those gates enforce with {{ hooks_skill }}, which edits `lup.policy` and the catalog's `HookSet`, regenerates both plugins, and runs the fixture suite; generation compiles one hermetic dispatcher and runtime per plugin, so never edit a generated one. Harness settings stay project-level, in {{ project_settings }}, which holds only native settings outside that policy boundary — never user-level.
+Change the policy those gates enforce with {{ hooks_skill }}, which edits `lup.policy` and the catalog's `HookSet`, regenerates both plugins, and runs the fixture suite; never edit a generated dispatcher or runtime. Harness settings stay project-level, in {{ project_settings }}, native settings outside that policy boundary; only lup's `~/.config/lup/` is user-level: accounts, profiles, theme and defaults belong to the person, not the project.
 
 
 <!-- passage: marker-vocabulary -->

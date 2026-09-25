@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from lup.providers.codex.home import DEFAULT_ACCOUNT_HOME
+from lup.providers.codex.login import CODEX_LOGIN
 from lup.observability.audit import ObservableEventKind
 from lup.observability.native import (
     NativeRecordOrigin,
@@ -33,7 +33,7 @@ class CodexTranscripts(NativeTranscripts):
     """Read Codex's persisted session records."""
 
     def __init__(self, codex_home: Path | None = None) -> None:
-        self.codex_home = codex_home or DEFAULT_ACCOUNT_HOME
+        self.codex_home = codex_home or CODEX_LOGIN.ambient_home
 
     def roots(self) -> list[Path]:
         return [self.codex_home / CODEX_SESSIONS_DIR]

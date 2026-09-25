@@ -6,6 +6,7 @@ tokens cost against the plan, and how a model family is named and coloured.
 The display itself knows none of it.
 """
 
+import os
 from collections import Counter
 from collections.abc import Sequence
 from datetime import date, datetime, timedelta
@@ -16,8 +17,9 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from lup.providers.claude.harness import ClaudeSpellings
-from lup.providers.claude.profile_store import AccountFile
-from lup.providers.profiles import DefaultHomeProfile
+from lup.providers.claude.login import CLAUDE_LOGIN
+from lup.providers.profile_tree import user_profile_directory
+from lup.providers.profiles import DefaultHomeProfile, ProfileDirectory, UnknownProfile
 from lup.providers.claude.usage.api import (
     ModelUsageEntry,
     StatsCache,
@@ -300,17 +302,26 @@ class ClaudeUsageReader(UsageReader):
         )
 
 
-def claude_usage_entry() -> UsageEntry:
-    """This runtime's place in the usage sub-app, for an application to name."""
+def claude_usage_entry(profiles: ProfileDirectory | None = None) -> UsageEntry:
+    """This runtime's place in the usage sub-app, for an application to name.
+
+    ``profiles`` is the origin a launch resolves names against, the person's
+    own unless an application keeps another, so ``--profile`` reads the
+    account a launch of that name opens.
+    """
+    directory = profiles or user_profile_directory(CLAUDE_LOGIN)
 
     def opened(profile: str | None) -> UsageReader:
-        """The reader for the home that profile selects, where it selects one.
+        """The reader for the home a launch naming that profile runs under.
 
-        A name the registry does not hold, and one naming the default home,
-        leave no account to read, which the entry's contract answers as
-        :class:`UsageUnavailable` — in the refusal's own words.
+        The same resolution a launch makes — the name, else the selection,
+        else whichever home the environment selects — so the two cannot read
+        different accounts for one name. A name the directory does not hold,
+        and one naming the default home, leave no account to read, which the
+        entry's contract answers as :class:`UsageUnavailable` in the
+        refusal's own words.
         """
-        # lup: defer: This resolves `--profile` against the personal registry
+        # lup: solved: This resolves `--profile` against the personal registry
         # at ~/.lup/profiles.json whatever origin the application keeps its
         # profiles in, so where a project keeps them as directories under
         # .lup/profiles, usage for a name reads a different account than a
@@ -318,11 +329,12 @@ def claude_usage_entry() -> UsageEntry:
         # ProfileDirectory needs that directory handed to this entry, which is
         # a change to how an application composes it.
         try:
-            return ClaudeUsageReader(AccountFile().resolve_config_dir(profile))
-        except DefaultHomeProfile as refusal:
+            home = directory.launch_home(profile)
+        except (DefaultHomeProfile, UnknownProfile) as refusal:
             raise UsageUnavailable(str(refusal)) from refusal
-        except KeyError as unknown:
-            raise UsageUnavailable(unknown.args[0]) from unknown
+        # lup: ignore[os-environ] — the environment an unnamed profile inherits
+        inherited = directory.login.selected_home(dict(os.environ))
+        return ClaudeUsageReader(home if home is not None else inherited)
 
     return UsageEntry(
         name="claude",

@@ -70,7 +70,7 @@ def launched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[list[str]]
     )
     monkeypatch.setattr(launch, "ClaudeTranscripts", lambda _home: Mock())
     monkeypatch.setattr(launch, "CodexTranscripts", lambda _home: Mock())
-    monkeypatch.setattr(launch, "CodexWorktreeHomeStore", lambda: Mock())
+    monkeypatch.setattr(launch, "CodexWorktreeHomeStore", lambda **_: Mock())
     monkeypatch.setattr(
         launch,
         "select_codex_home",

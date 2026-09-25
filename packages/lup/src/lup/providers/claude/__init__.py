@@ -9,9 +9,8 @@ public part itself rather than pointing at another.
 What stays behind in the modules beside this one is the adapter proper. The
 runtime side: ``runtime`` opens Claude SDK sessions behind the
 :mod:`lup.sessions` contracts, ``transcripts`` reads the record Claude Code
-keeps of each conversation, ``config`` holds profile and compatible-endpoint
-transforms, and ``profile_store`` is the personal account registry the CLI
-composition roots read. The harness side: ``harness`` renders canonical
+keeps of each conversation, and ``config`` holds profile and
+compatible-endpoint transforms. The harness side: ``harness`` renders canonical
 declarations into the ``.claude`` plugin tree (including the generated policy
 dispatcher), ``harness_runtime`` probes the installed CLI for doctor
 evidence, ``native`` decodes hook payloads into :mod:`lup.policy` events and
@@ -30,15 +29,9 @@ Nothing here imports the Claude Agent SDK: an agent is a declaration, and the
 SDK loads when a session opens.
 
 Deliberately Claude-only, with no neutral contract:
-
-- :class:`~lup.providers.claude.profile_store.AccountFile` persists
-  personal named config-directory selections because the Claude CLI has no
-  native profile registry. It projects into ``ClaudeProfileRegistry``, which
-  the ``ProfileResolver`` filling consumes. The Codex CLI owns account homes
-  and named config overlays natively, so no Codex counterpart exists.
-- :mod:`~lup.providers.claude.hooks` translates portable Lup hooks into
-  in-process SDK hook callbacks, a mechanism only the Claude SDK exposes;
-  Codex hooks exist solely as generated plugin command artifacts.
+:mod:`~lup.providers.claude.hooks` translates portable Lup hooks into
+in-process SDK hook callbacks, a mechanism only the Claude SDK exposes; Codex
+hooks exist solely as generated plugin command artifacts.
 """
 
 from collections.abc import AsyncIterator, Generator
@@ -357,6 +350,14 @@ class Claude(
     Plugins can introduce delegated authority and require the broad ALL grant.
     """
     environment: EnvVars = {}
+    profile: str | None = None
+    """The account every session opens as: a name among the person's lup
+    profiles, resolved to that account's Claude home the way ``harness claude
+    --profile`` resolves it, and taking precedence over a home ``environment``
+    names. Unset, sessions stay on the account this process already runs
+    under. An unknown name is refused when a session opens, listing the known
+    ones."""
+
     endpoint: ClaudeCompatibleEndpoint | None = None
     """An Anthropic-compatible endpoint the sessions talk to instead of Anthropic's."""
 
@@ -492,14 +493,18 @@ class Claude(
         """The conversations Claude Code has on record for this agent's workspace.
 
         Read from the transcripts Claude Code keeps under this agent's own
-        configuration home, newest first, whether this library opened them or
-        a terminal did.
+        configuration home — its profile's, where it names one — newest
+        first, whether this library opened them or a terminal did.
         """
         from lup.execution.threads import run_sync
         from lup.providers.claude.config_home import session_config_home
+        from lup.providers.claude.login import CLAUDE_LOGIN
         from lup.providers.claude.transcripts import ClaudeTranscripts
+        from lup.providers.profile_tree import profile_environment
 
-        transcripts = ClaudeTranscripts(session_config_home(self.environment))
+        account = profile_environment(CLAUDE_LOGIN, self.profile)
+        home = session_config_home({**self.environment, **account})
+        transcripts = ClaudeTranscripts(home)
         workspace = self.cwd if self.cwd is not None else Path.cwd()
         return await run_sync(lambda: transcripts.sessions(workspace))
 

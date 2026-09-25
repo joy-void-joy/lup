@@ -12,9 +12,13 @@ from pathlib import Path
 
 import pytest
 
+import lup.devtools.harness.launch as launch
 from lup.devtools.gitguard import TEST_IDENTITY, GuardVerdict, RepositoryWatch
 from lup.harness.environment import launcher_decided_names
+from lup.providers.claude.config_home import ClaudeConfigHome, selected_config_home
+from lup.providers.claude.login import CLAUDE_CONFIG_DIR
 from lup.providers.identity import RUNTIME_DECIDED_ENV
+from lup.types import EnvVars
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -49,6 +53,51 @@ def trusted_repository_store_isolated(
     """
     with pytest.MonkeyPatch.context() as environment:
         environment.setenv("XDG_STATE_HOME", str(tmp_path_factory.mktemp("state")))
+        yield
+
+
+@pytest.fixture(scope="session", autouse=True)
+def personal_config_withheld(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Iterator[None]:
+    """Answer as lup's defaults, whatever the person running the suite decided.
+
+    Session-scoped and autouse for the reason the launcher's variables are
+    taken away above: a developer's own ``~/.config/lup/config.toml`` — a
+    theme, a tier, a selected profile — answers the question a test meant to
+    put to the code. Pointed at an empty directory rather than unset, which
+    would fall back to that same file. See :mod:`lup.providers.user_config`.
+    """
+    with pytest.MonkeyPatch.context() as environment:
+        environment.setenv(
+            "XDG_CONFIG_HOME", str(tmp_path_factory.mktemp("xdg-config"))
+        )
+        yield
+
+
+@pytest.fixture(scope="session", autouse=True)
+def personal_claude_account_withheld(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Iterator[None]:
+    """Keep every launch under test out of the developer's own Claude account.
+
+    A host launch settles its theme into the account it runs as, and a launch
+    naming no profile runs as the operator's default home — fixed when the
+    login is imported, so no ``HOME`` a test sets moves it. The home a launch
+    reads when none is named is bound to an empty directory for the whole
+    suite; one a test names outright is still the one it named.
+    """
+    account = tmp_path_factory.mktemp("claude-account")
+
+    def withheld(environment: EnvVars) -> ClaudeConfigHome:
+        if environment.get(CLAUDE_CONFIG_DIR):
+            return selected_config_home(environment)
+        return ClaudeConfigHome(
+            directory=account / ".claude", document=account / ".claude.json"
+        )
+
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr(launch, "selected_config_home", withheld)
         yield
 
 

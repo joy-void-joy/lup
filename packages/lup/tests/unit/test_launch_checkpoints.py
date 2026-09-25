@@ -130,7 +130,7 @@ def test_codex_checkpoints_before_preflight_and_after_close(
         "codex_sandbox_arguments",
         lambda _plugin, _environment, _args, sandbox=launch.LaunchSandbox.INNER, accessible=[]: [],
     )
-    monkeypatch.setattr(launch, "CodexWorktreeHomeStore", lambda: store)
+    monkeypatch.setattr(launch, "CodexWorktreeHomeStore", lambda **_: store)
     monkeypatch.setattr(launch, "select_codex_home", lambda *args: home)
     monkeypatch.setattr(launch, "codex_login_preflight", lambda *args: None)
     monkeypatch.setattr(launch, "CodexTranscripts", lambda _home: Mock())

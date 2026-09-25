@@ -2,20 +2,21 @@
 
 Claude Code reads its configuration document from ``~/.claude.json`` while
 ``CLAUDE_CONFIG_DIR`` is unset, and from ``<dir>/.claude.json`` once it names
-a directory — ``~/.claude`` included. A profile registered at the default home
-therefore opened every session on a document the account never wrote, and the
-person's theme, trust records and projects looked reset. These pin the refusal
-at every place a profile can be registered, selected or resolved, and that a
-registration already on disk fails naming itself and the way out, while
-forgetting it stays open.
+a directory — ``~/.claude`` included. A profile at the default home therefore
+opened every session on a document the account never wrote, and the person's
+theme, trust records and projects looked reset. These pin the refusal at
+every place a profile can be registered, selected or resolved, and that a
+profile already on disk fails naming itself and the way out, while removing
+it stays open.
 
-Nothing here writes to the real default home: a registration naming it is
-refused before anything is written, a registration already on disk is a file
-under the test's own directory, and a directory profile is pointed at a home
-the test makes by a login declaring that home its default.
+Nothing here writes to the real default home: a profile naming it is refused
+before anything is written, and one already on disk is a symlink under the
+test's own directory, which resolves onto the default home without touching
+it.
 """
 
 import json
+import shutil
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -33,19 +34,11 @@ from lup.devtools.resolve.app import create_resolve_app
 from lup.devtools.setup import create_setup_app
 from lup.providers.claude.config import ClaudeProfileRegistry, ClaudeProfileSelection
 from lup.providers.claude.login import CLAUDE_CONFIG_DIR, CLAUDE_LOGIN
-from lup.providers.claude.profile_store import (
-    AccountFile,
-    ClaudeProfileNames,
-    ClaudeProfileRegistrar,
-)
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.login import ProviderLogin
-from lup.providers.profile_tree import (
-    ProfileFolders,
-    TreeProfileNames,
-    TreeProfileRegistrar,
-)
+from lup.providers.profile_tree import user_profile_directory
 from lup.providers.profiles import DefaultHomeProfile, ProfileDirectory
+from lup.providers.user_config import UserConfigFile
 
 DEFAULT_HOME = CLAUDE_LOGIN.ambient_home
 
@@ -62,30 +55,37 @@ runner = CliRunner(env=WIDE_PLAIN_CONSOLE)
 
 
 @pytest.fixture
-def accounts(tmp_path: Path) -> AccountFile:
-    return AccountFile(tmp_path / "profiles.json")
+def config(tmp_path: Path) -> UserConfigFile:
+    return UserConfigFile(tmp_path / "lup")
 
 
 @pytest.fixture
-def directory(accounts: AccountFile) -> ProfileDirectory:
-    return ProfileDirectory(
-        ClaudeProfileNames(accounts), ClaudeProfileRegistrar(accounts), CLAUDE_LOGIN
-    )
+def directory(config: UserConfigFile) -> ProfileDirectory:
+    return user_profile_directory(CLAUDE_LOGIN, config)
+
+
+def symlinked(
+    config: UserConfigFile, name: str, login: ProviderLogin, target: Path
+) -> Path:
+    """A profile whose home is a symlink onto ``target``."""
+    home = config.profiles_root() / name / login.home_subdir
+    home.parent.mkdir(parents=True)
+    home.symlink_to(target, target_is_directory=True)
+    return home
 
 
 @pytest.fixture
-def registered(accounts: AccountFile, tmp_path: Path) -> AccountFile:
-    """A registry written before the refusal existed: ``main`` is the default home.
+def registered(config: UserConfigFile, directory: ProfileDirectory) -> ProfileDirectory:
+    """A profile written before the refusal existed: ``main`` is the default home.
 
-    Spelled the way a person types it, so resolution has to expand it before it
-    can tell; ``work`` sits beside it to show the refusal is about ``main``.
+    Linked rather than named, which is the one way a directory profile can
+    reach it, and selected; ``work`` sits beside it to show the refusal is
+    about ``main``.
     """
-    accounts.registry_path.write_text(
-        '{"profiles":{"main":{"config_dir":"~/.claude"},'
-        f'"work":{{"config_dir":"{tmp_path / "work-home"}"}}}},"active":"main"}}',
-        encoding="utf-8",
-    )
-    return accounts
+    symlinked(config, "main", CLAUDE_LOGIN, DEFAULT_HOME)
+    (config.profiles_root() / "work" / CLAUDE_LOGIN.home_subdir).mkdir(parents=True)
+    config.select_profile("main")
+    return directory
 
 
 def own_default(tmp_path: Path) -> ProviderLogin:
@@ -93,22 +93,6 @@ def own_default(tmp_path: Path) -> ProviderLogin:
     home = tmp_path / "user" / ".claude"
     home.mkdir(parents=True)
     return CLAUDE_LOGIN.model_copy(update={"ambient_home": home})
-
-
-def tree_directory(root: Path, login: ProviderLogin) -> ProfileDirectory:
-    """Profiles kept as directories, one per account, under ``root``."""
-    folders = ProfileFolders(root, login.home_subdir)
-    return ProfileDirectory(
-        TreeProfileNames(folders), TreeProfileRegistrar(folders), login
-    )
-
-
-def symlinked(root: Path, name: str, login: ProviderLogin, target: Path) -> Path:
-    """A directory profile whose home is a symlink onto ``target``."""
-    home = root / name / login.home_subdir
-    home.parent.mkdir(parents=True)
-    home.symlink_to(target, target_is_directory=True)
-    return home
 
 
 # The login's own answer, which every refusal below asks.
@@ -166,28 +150,28 @@ def test_a_registry_cannot_default_to_the_default_home_by_name() -> None:
         )
 
 
-# The personal registry, curated and resolved directly.
+# The directory a launcher, a resolver run and the command trees hold.
 
 
 @pytest.mark.parametrize("spelled", [DEFAULT_HOME, Path("~/.claude")])
-def test_registering_the_default_home_is_refused_before_anything_is_written(
-    accounts: AccountFile, spelled: Path
+def test_adding_the_default_home_is_refused_before_anything_is_written(
+    directory: ProfileDirectory, config: UserConfigFile, spelled: Path
 ) -> None:
-    registrar = ClaudeProfileRegistrar(accounts)
-
     with pytest.raises(DefaultHomeProfile, match=WAY_OUT) as raised:
-        registrar.add_profile("main", spelled)
+        directory.add("main", spelled)
 
     assert "profile 'main' cannot name the default home" in str(raised.value)
-    assert not accounts.registry_path.exists()
+    assert "symlink" not in str(raised.value)
+    assert not config.profiles_root().exists()
+    assert not config.path().exists()
 
 
 def test_a_stored_default_home_fails_resolution_naming_itself_and_the_way_out(
-    registered: AccountFile,
+    registered: ProfileDirectory,
 ) -> None:
     for name in [None, "main"]:
         with pytest.raises(DefaultHomeProfile) as raised:
-            registered.resolve_config_dir(name)
+            registered.launch_home(name)
 
         refusal = str(raised.value)
         assert f"profile 'main' names the default home {DEFAULT_HOME.resolve()}" in (
@@ -197,118 +181,80 @@ def test_a_stored_default_home_fails_resolution_naming_itself_and_the_way_out(
         assert f"remove it (`profile remove main`) and {WAY_OUT}" in refusal
 
 
-def test_a_stored_default_home_cannot_be_selected(registered: AccountFile) -> None:
-    registrar = ClaudeProfileRegistrar(registered)
-    registrar.set_active("work")
-
-    with pytest.raises(DefaultHomeProfile, match="profile 'main'"):
-        registrar.set_active("main")
-    assert registered.load_registry().active == "work"
-
-
-def test_forgetting_a_stored_default_home_restores_the_default_account(
-    registered: AccountFile, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The way out the refusal names has to be open, and has to arrive."""
-    monkeypatch.delenv(CLAUDE_CONFIG_DIR, raising=False)
-    registrar = ClaudeProfileRegistrar(registered)
-
-    registrar.remove_profile("main")
-
-    assert registered.resolve_config_dir() == CLAUDE_LOGIN.ambient_home
-    assert ClaudeProfileNames(registered).names() == ["work"]
-
-
-# The directory a launcher, a resolver run and the command trees hold.
-
-
-def test_the_directory_refuses_the_default_home_before_the_origin_sees_it(
-    directory: ProfileDirectory,
-) -> None:
-    with pytest.raises(DefaultHomeProfile, match=WAY_OUT):
-        directory.add("main", DEFAULT_HOME)
-
-    assert directory.entries() == []
-
-
 def test_a_stored_default_home_is_refused_wherever_it_would_be_launched(
-    registered: AccountFile,
+    registered: ProfileDirectory, config: UserConfigFile
 ) -> None:
-    """Named or merely active, for a launch, a run's account, or a selection.
+    """Named or merely selected, for a launch, a run's account, or a selection.
 
-    Adding it again without a home is refused too, before anything is
-    written: what the name already holds is the default home.
+    Adding it again is refused too, before anything is written: what the name
+    already holds is the default home.
     """
-    directory = ProfileDirectory(
-        ClaudeProfileNames(registered), ClaudeProfileRegistrar(registered), CLAUDE_LOGIN
-    )
-    stored = registered.registry_path.read_bytes()
+    stored = config.path().read_bytes()
 
     for refused in [
-        lambda: directory.launch_home(None),
-        lambda: directory.launch_home("main"),
-        lambda: directory.account(None),
-        lambda: directory.use("main"),
-        lambda: directory.add("main"),
+        lambda: registered.launch_home(None),
+        lambda: registered.launch_home("main"),
+        lambda: registered.account(None),
+        lambda: registered.use("main"),
+        lambda: registered.add("main"),
     ]:
         with pytest.raises(DefaultHomeProfile, match="profile remove main"):
             refused()
 
-    assert registered.registry_path.read_bytes() == stored
-    assert directory.launch_home("work") == registered.registry_path.parent / (
-        "work-home"
-    )
-    assert [entry.name for entry in directory.entries()] == ["main", "work"]
+    assert config.path().read_bytes() == stored
+    assert registered.launch_home("work") == registered.profile("work").config_dir
+    assert [entry.name for entry in registered.entries()] == ["main", "work"]
 
 
-def test_pointing_a_stored_default_home_elsewhere_repairs_it(
-    registered: AccountFile, tmp_path: Path
+def test_removing_a_stored_default_home_restores_the_default_account(
+    registered: ProfileDirectory, config: UserConfigFile
+) -> None:
+    """The way out the refusal names has to be open, and has to arrive."""
+    with pytest.raises(ValueError, match="remove that directory") as said:
+        registered.remove("main")
+    assert "`profile` line" in str(said.value)
+
+    shutil.rmtree(config.profiles_root() / "main")
+    config.select_profile(None)
+
+    assert registered.launch_home(None) is None
+    assert registered.account(None).variables == {}
+    assert registered.names.names() == ["work"]
+
+
+def test_replacing_a_linked_default_home_with_its_own_repairs_it(
+    registered: ProfileDirectory, config: UserConfigFile
 ) -> None:
     """The other way out: the name keeps working, on a home of its own."""
-    directory = ProfileDirectory(
-        ClaudeProfileNames(registered), ClaudeProfileRegistrar(registered), CLAUDE_LOGIN
-    )
+    home = config.profiles_root() / "main" / CLAUDE_LOGIN.home_subdir
+    home.unlink()
+    home.mkdir()
 
-    directory.add("main", tmp_path / "main-home")
-
-    assert directory.launch_home(None) == tmp_path / "main-home"
+    assert registered.launch_home(None) == home
 
 
-def test_the_directory_forgets_a_stored_default_home_and_then_names_none(
-    registered: AccountFile,
-) -> None:
-    directory = ProfileDirectory(
-        ClaudeProfileNames(registered), ClaudeProfileRegistrar(registered), CLAUDE_LOGIN
-    )
-
-    removed = directory.remove("main")
-
-    assert removed.config_dir == Path.home() / ".claude"
-    assert directory.launch_home(None) is None
-    assert directory.account(None).variables == {}
-
-
-def test_a_directory_profile_is_refused_the_default_home_rather_than_advised_to_link(
+def test_a_profile_is_refused_the_default_home_rather_than_advised_to_link(
     tmp_path: Path,
 ) -> None:
     """Its own refusal would say to symlink that path, which is the trap itself."""
     login = own_default(tmp_path)
-    tree = tree_directory(tmp_path / "profiles", login)
+    config = UserConfigFile(tmp_path / "lup")
+    tree = user_profile_directory(login, config)
 
     with pytest.raises(DefaultHomeProfile, match=WAY_OUT) as raised:
         tree.add("main", login.ambient_home)
 
     assert "symlink" not in str(raised.value)
-    assert not (tmp_path / "profiles").exists()
+    assert not config.profiles_root().exists()
 
 
-def test_a_directory_profile_symlinked_onto_the_default_home_is_refused(
+def test_a_profile_symlinked_onto_the_default_home_is_refused(
     tmp_path: Path,
 ) -> None:
     login = own_default(tmp_path)
-    root = tmp_path / "profiles"
-    symlinked(root, "main", login, login.ambient_home)
-    tree = tree_directory(root, login)
+    config = UserConfigFile(tmp_path / "lup")
+    symlinked(config, "main", login, login.ambient_home)
+    tree = user_profile_directory(login, config)
 
     for refused in [
         lambda: tree.add("main"),
@@ -323,23 +269,23 @@ def test_a_directory_profile_symlinked_onto_the_default_home_is_refused(
     assert tree.names.active_profile() is None, "a refused add selected it anyway"
 
 
-def test_a_codex_directory_profile_may_link_its_default_home(tmp_path: Path) -> None:
+def test_a_codex_profile_may_link_its_default_home(tmp_path: Path) -> None:
     """Codex keeps nothing beside its home, so naming it is naming nothing."""
     login = CODEX_LOGIN.model_copy(
         update={"ambient_home": tmp_path / "user" / ".codex"}
     )
     login.ambient_home.mkdir(parents=True)
-    root = tmp_path / "profiles"
-    home = symlinked(root, "main", login, login.ambient_home)
+    config = UserConfigFile(tmp_path / "lup")
+    home = symlinked(config, "main", login, login.ambient_home)
 
-    assert tree_directory(root, login).launch_home("main") == home
+    assert user_profile_directory(login, config).launch_home("main") == home
 
 
 # The command trees and entry points a person reaches all of this through.
 
 
 def test_the_profile_command_tree_refuses_adding_the_default_home(
-    directory: ProfileDirectory, accounts: AccountFile
+    directory: ProfileDirectory, config: UserConfigFile
 ) -> None:
     result = runner.invoke(
         create_profile_app(directory),
@@ -349,24 +295,20 @@ def test_the_profile_command_tree_refuses_adding_the_default_home(
     assert result.exit_code != 0
     assert "profile 'main' cannot name the default home" in result.output
     assert WAY_OUT in result.output
-    assert not accounts.registry_path.exists()
+    assert not config.profiles_root().exists()
 
 
 def test_the_profile_command_tree_refuses_selecting_a_stored_default_home(
-    registered: AccountFile,
+    registered: ProfileDirectory,
 ) -> None:
-    directory = ProfileDirectory(
-        ClaudeProfileNames(registered), ClaudeProfileRegistrar(registered), CLAUDE_LOGIN
-    )
-
-    result = runner.invoke(create_profile_app(directory), ["use", "main"])
+    result = runner.invoke(create_profile_app(registered), ["use", "main"])
 
     assert result.exit_code != 0
     assert "profile remove main" in result.output
 
 
 def test_the_setup_wizard_refuses_adding_the_default_home(
-    directory: ProfileDirectory, accounts: AccountFile
+    directory: ProfileDirectory, config: UserConfigFile
 ) -> None:
     result = runner.invoke(
         create_setup_app([], directory),
@@ -375,16 +317,13 @@ def test_the_setup_wizard_refuses_adding_the_default_home(
 
     assert result.exit_code != 0
     assert WAY_OUT in result.output
-    assert not accounts.registry_path.exists()
+    assert not config.profiles_root().exists()
 
 
 def test_a_launch_refuses_a_stored_default_home_as_a_bad_parameter(
-    registered: AccountFile, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    registered: ProfileDirectory, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Run ``launch_claude`` as far as the profile it exports, and no further."""
-    directory = ProfileDirectory(
-        ClaudeProfileNames(registered), ClaudeProfileRegistrar(registered), CLAUDE_LOGIN
-    )
     plugin = Mock()
     plugin.name = "lup"
     composition = Mock()
@@ -403,17 +342,14 @@ def test_a_launch_refuses_a_stored_default_home_as_a_bad_parameter(
     monkeypatch.setattr(launch, "start_harness_transcript", session)
 
     with pytest.raises(typer.BadParameter, match="profile remove main"):
-        launch.launch_claude(composition, [], directory, None, None, False)
+        launch.launch_claude(composition, [], registered, None, None, False)
 
 
 def test_a_resolver_run_refuses_a_stored_default_home_before_it_starts(
-    registered: AccountFile,
+    registered: ProfileDirectory,
 ) -> None:
     """Refused in this terminal, including for a run that would have detached."""
-    directory = ProfileDirectory(
-        ClaudeProfileNames(registered), ClaudeProfileRegistrar(registered), CLAUDE_LOGIN
-    )
-    app = create_resolve_app(Mock(), NativeTargets(builders={}), profiles=directory)
+    app = create_resolve_app(Mock(), NativeTargets(builders={}), profiles=registered)
 
     for arguments in [["--profile", "main"], ["--detach", "--adapter", "claude"]]:
         result = runner.invoke(app, arguments)
@@ -423,16 +359,17 @@ def test_a_resolver_run_refuses_a_stored_default_home_before_it_starts(
 
 
 def test_the_usage_display_reports_a_stored_default_home_as_a_failed_read(
-    registered: AccountFile, monkeypatch: pytest.MonkeyPatch
+    registered: ProfileDirectory,
 ) -> None:
     """Reading an account's usage resolves its profile too, and says so the same way.
 
     As a failed read rather than a traceback, so ``--json`` still answers a
     parser with an error object on stdout.
     """
-    monkeypatch.setattr(claude_usage, "AccountFile", lambda: registered)
     root = typer.Typer()
-    root.add_typer(create_usage_app([claude_usage.claude_usage_entry()]), name="usage")
+    root.add_typer(
+        create_usage_app([claude_usage.claude_usage_entry(registered)]), name="usage"
+    )
 
     shown = runner.invoke(root, ["usage", "claude", "--profile", "main"])
     emitted = runner.invoke(root, ["usage", "claude", "--json"])
@@ -443,4 +380,4 @@ def test_the_usage_display_reports_a_stored_default_home_as_a_failed_read(
     assert emitted.exit_code == 1, emitted.output
     assert "profile remove main" in json.loads(emitted.stdout)["error"]
     assert unknown.exit_code == 1, unknown.output
-    assert "unknown Claude profile 'ghost'" in unknown.output
+    assert "unknown profile 'ghost'; known: main, work" in unknown.output

@@ -60,10 +60,9 @@ def create_harness_app(
 ) -> typer.Typer:
     """Wire the harness command tree over the targets one project declares.
 
-    A project that keeps Claude accounts of its own supplies ``profiles``
-    over that origin, so one name selects the same account for a launch here
-    as it does everywhere else in that project. Supplying none falls back to
-    the personal registry, which is the answer for a project keeping none.
+    ``profiles`` is where a name finds its account. Supplying none takes the
+    person's own, under their lup config home, which every checkout shares —
+    so one name selects the same account here as in any other repository.
 
     ``launch_modes`` are that project's own kinds of session. Each adds a flag
     to every launcher; selecting one compiles the tree it declares instead of
@@ -473,11 +472,21 @@ def create_harness_app(
             ctx: typer.Context,
             profile: Annotated[
                 str | None,
-                typer.Option("--profile", "-p", help="Claude config-directory profile"),
+                typer.Option(
+                    "--profile",
+                    "-p",
+                    help="Account profile under ~/.config/lup/profiles; "
+                    "default: the one config.toml selects",
+                ),
             ] = None,
             model: Annotated[
                 str | None,
-                typer.Option("--model", "-m", help="Native model override"),
+                typer.Option(
+                    "--model",
+                    "-m",
+                    help="Native model override; default: the tier in "
+                    "~/.config/lup/config.toml, strongest unless it names another",
+                ),
             ] = None,
             effort: Annotated[
                 str | None,
@@ -485,8 +494,9 @@ def create_harness_app(
                     "--effort",
                     help="Reasoning effort: low, medium, high, xhigh, max, or "
                     "ultra (xhigh with ultracode on); refused where the "
-                    "model's catalog row lacks it. Default: xhigh, or the "
-                    "row's highest rung below it",
+                    "model's catalog row lacks it. Default: the effort in "
+                    "~/.config/lup/config.toml, else xhigh, stepped down to a "
+                    "rung the row takes",
                 ),
             ] = None,
             generate_only: Annotated[
@@ -654,7 +664,13 @@ def create_harness_app(
             ] = None,
             model: Annotated[
                 str | None,
-                typer.Option("--model", "-m", help="Native model override"),
+                typer.Option(
+                    "--model",
+                    "-m",
+                    help="Native model override; default: the tier in "
+                    "~/.config/lup/config.toml, strongest unless it names "
+                    "another, except under --profile",
+                ),
             ] = None,
             effort: Annotated[
                 str | None,
@@ -662,7 +678,8 @@ def create_harness_app(
                     "--effort",
                     help="Reasoning effort: low, medium, high, xhigh, max, or "
                     "ultra; refused where the model's catalog row lacks it. "
-                    "Default: xhigh, or the row's highest rung below it; a "
+                    "Default: the effort in ~/.config/lup/config.toml, else "
+                    "xhigh, stepped down to a rung the row takes; a "
                     "--profile with no --model keeps the profile's own",
                 ),
             ] = None,

@@ -8,6 +8,7 @@ and simply has no legend to draw.
 """
 
 import asyncio
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -15,8 +16,9 @@ import sh
 from pydantic import ValidationError
 
 from lup.providers.codex.harness import CodexSpellings
-from lup.providers.codex.home import DEFAULT_ACCOUNT_HOME
 from lup.providers.codex.login import CODEX_LOGIN
+from lup.providers.profile_tree import user_profile_directory
+from lup.providers.profiles import DefaultHomeProfile, ProfileDirectory, UnknownProfile
 from lup.providers.codex.usage.api import (
     AccountUsage,
     CodexAccountClient,
@@ -110,12 +112,9 @@ def days_from(
 class CodexUsageReader(UsageReader):
     """Read the account the app-server is signed in to under one home."""
 
-    def __init__(
-        self, executable: Path, home: Path, profile: str | None = None
-    ) -> None:
+    def __init__(self, executable: Path, home: Path) -> None:
         self.executable = executable
         self.home = home
-        self.profile = profile
 
     def environment(self) -> EnvVars:
         """Point the app-server this starts at the home being read."""
@@ -124,23 +123,12 @@ class CodexUsageReader(UsageReader):
     def refusal(self) -> str | None:
         """Why this reading cannot happen at all, where it cannot.
 
-        A named profile is refused rather than ignored: a Codex profile is a
-        configuration overlay inside one home, so honouring the flag would
-        read the same account while looking like it read another.
-
-        Neither message offers the configuration-home variable as a way out.
+        The message does not offer the configuration-home variable as a way out.
         This reads the home it was composed against and exports that same
         home to the process it starts, so naming another one in the
         environment changes nothing — and advice that does nothing is worse
         than none, because it reads as a remedy already tried.
         """
-        if self.profile is not None:
-            return (
-                "A Codex profile names a configuration overlay inside one "
-                "home, not a second account, so it cannot select whose usage "
-                f"is read. This display reads {self.home}, which is chosen "
-                "where the usage sub-app is composed."
-            )
         credentials = CODEX_LOGIN.credentials_path(self.home)
         if not credentials.exists():
             return (
@@ -178,17 +166,31 @@ class CodexUsageReader(UsageReader):
 
 
 def codex_usage_entry(
-    executable: Path = Path("codex"), home: Path = DEFAULT_ACCOUNT_HOME
+    executable: Path = Path("codex"), profiles: ProfileDirectory | None = None
 ) -> UsageEntry:
     """This runtime's place in the usage sub-app, for an application to name.
 
-    Both the binary and the home are the caller's to replace: an application
-    that keeps its accounts somewhere other than the runtime's own default
-    says so here rather than editing this.
+    ``profiles`` is where ``--profile`` finds its account, the person's own
+    unless an application keeps another: one name is one account on every
+    runtime, so the name that selects a Claude login selects its Codex login.
+    Naming none reads the selection, else whichever home the environment
+    selects, as a launch would.
     """
+    directory = profiles or user_profile_directory(CODEX_LOGIN)
+
+    def opened(profile: str | None) -> UsageReader:
+        """The reader for the home that profile selects, refused in its own words."""
+        try:
+            home = directory.launch_home(profile)
+        except (DefaultHomeProfile, UnknownProfile) as refusal:
+            raise UsageUnavailable(str(refusal)) from refusal
+        # lup: ignore[os-environ] — the environment an unnamed profile inherits
+        inherited = directory.login.selected_home(dict(os.environ))
+        return CodexUsageReader(executable, home if home is not None else inherited)
+
     return UsageEntry(
         name="codex",
         runtime_name=CodexSpellings().runtime_name,
         help="Show live Codex usage with pacing bars (ChatGPT plan).",
-        open=lambda profile: CodexUsageReader(executable, home, profile),
+        open=opened,
     )

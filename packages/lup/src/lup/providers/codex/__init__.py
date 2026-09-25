@@ -58,7 +58,6 @@ from lup.tools.builtin import BuiltinPreset
 from lup.providers.codex.subagents import CodexModelTiers, CodexSubagentTools
 from lup.providers.confinement import SessionContainment
 from lup.sessions.capabilities import ConversationRecord, ForkSession, SessionEngine
-from lup.sessions.errors import UnsupportedCapability
 from lup.sessions.events import (
     AnyTurnBlock,
     LiveTurnEvent,
@@ -267,7 +266,14 @@ class Codex(
     executable: Path = CODEX_PROGRAM
     containment: SessionContainment = "none"
     """The boundary owning this executable's home; outer wrappers prepare theirs."""
-    named_profile: str | None = None
+    profile: str | None = None
+    """The account every session opens as: a name among the person's lup
+    profiles, resolved to that account's Codex home the way the same name
+    selects its Claude home, and taking precedence over a home
+    ``environment`` names. Unset, sessions stay on the account this process
+    already runs under. An unknown name is refused when a session opens,
+    listing the known ones."""
+
     model_provider: str | None = None
     provider_config: JsonObject | None = None
     endpoint: CodexCompatibleEndpoint | None = None
@@ -347,17 +353,6 @@ class Codex(
                 f"approval_policy {self.approval_policy!r} makes the app-server "
                 "ask this session for decisions; supply hooks to answer them, "
                 "or use 'never'"
-            )
-        return self
-
-    def validated_for_app_server(self) -> Self:
-        """Refuse native capabilities before any process starts, without payloads."""
-        if self.named_profile is not None:
-            raise UnsupportedCapability(
-                "Codex app-server cannot select named profiles or apply all startup "
-                "settings through thread configuration. Configure the intended "
-                "CODEX_HOME/config.toml before opening, or supply explicit supported "
-                "session settings. Interactive Codex launches support named profiles."
             )
         return self
 

@@ -41,7 +41,10 @@ from lup.providers.claude import (
 from lup.providers.claude.config_home import session_config_home
 from lup.providers.claude.transcripts import ClaudeTranscripts, result_text
 from lup.mcp import hosted_servers, opened_needs
-from lup.providers.claude.model_choice import claude_effort
+from lup.providers.claude.login import CLAUDE_LOGIN
+from lup.providers.claude.model_choice import claude_default_effort, claude_effort
+from lup.providers.profile_tree import profile_environment
+from lup.providers.user_config import UserConfigFile
 from lup.sessions.recursion import (
     child_recursive_agent_allowance,
     recursive_agent_scope,
@@ -807,8 +810,29 @@ class ClaudeSessionOpener:
         A compatible endpoint becomes the environment that routes the CLI to
         it here rather than at declaration, so an agent can be copied and
         changed before it is built.
+
+        What the declaration leaves unset is the person's to answer, read
+        from their lup config as each session opens: a model left unnamed
+        runs on their tier, unless an endpoint serves models of its own, and
+        an effort left unnamed starts from theirs. A named profile becomes
+        the account home the session runs under.
         """
-        config = self.config
+        declared = self.config
+        personal = UserConfigFile().load()
+        model = (
+            declared.model
+            if declared.model is not None or declared.endpoint is not None
+            else personal.tier
+        )
+        account = profile_environment(CLAUDE_LOGIN, declared.profile)
+        config = declared.model_copy(
+            update={
+                "model": model,
+                "effort": declared.effort
+                or claude_default_effort(model, personal.effort or "xhigh"),
+                "environment": {**declared.environment, **account},
+            }
+        )
         if config.endpoint is None:
             return config
         from lup.providers.claude.config import ClaudeCompatibilityTransform
