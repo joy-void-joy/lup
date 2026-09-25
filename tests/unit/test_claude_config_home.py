@@ -28,7 +28,7 @@ from lup.providers.claude.config_home import (
     untrusted_degradation,
     workspace_config_environment,
 )
-from lup.providers.claude.login import CLAUDE_CONFIG_DIR
+from lup.providers.claude.login import CLAUDE_CONFIG_DIR, CLAUDE_LOGIN
 from lup.providers.session_home import SessionHomeLayout, SessionHomes
 from lup.types import EnvVars
 
@@ -255,11 +255,27 @@ def test_trust_is_recorded_for_the_lease_and_not_the_operator(tmp_path: Path) ->
     assert (home / CLAUDE_HOME_DOCUMENT).read_bytes() == before
 
 
+def operator_at(monkeypatch: pytest.MonkeyPatch, home: Path) -> None:
+    """Stand ``home`` in for the operator's, as the login declares it.
+
+    The login fixes the default home when it is imported, for the reason
+    ``CLAUDE_LOGIN`` gives, so moving ``HOME`` alone moves only the document
+    beside it; the declaration is bound to the same directory.
+    """
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(
+        "lup.providers.claude.config_home.CLAUDE_LOGIN",
+        CLAUDE_LOGIN.model_copy(
+            update={"ambient_home": home / CLAUDE_LOGIN.ambient_home.name}
+        ),
+    )
+
+
 def test_an_unnamed_home_reads_the_document_beside_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Unset, Claude reads ``~/.claude.json`` rather than an entry in the home."""
-    monkeypatch.setenv("HOME", str(tmp_path))
+    operator_at(monkeypatch, tmp_path)
 
     selected = selected_config_home({})
 
@@ -280,7 +296,7 @@ def test_a_legacy_document_is_read_wherever_one_exists(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, named: bool
 ) -> None:
     """Existence alone decides it, ahead of a current document beside it."""
-    monkeypatch.setenv("HOME", str(tmp_path))
+    operator_at(monkeypatch, tmp_path)
     home = tmp_path / "account" if named else tmp_path / ".claude"
     environment = {CLAUDE_CONFIG_DIR: str(home)} if named else {}
     save_document((home if named else tmp_path) / ".claude.json", {"theme": "light"})
