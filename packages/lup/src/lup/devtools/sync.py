@@ -963,9 +963,11 @@ def accessible_roots(
     the confined thing choosing what confines it.
 
     A registration carrying only a URL is materialized on the way past, so
-    naming a project on a forge is enough to be able to open it. That happens
-    on the host, before the boundary and on the only side that can reach the
-    forge -- and only where nothing is on disk yet, because
+    naming a project on a forge is enough to be able to open it -- which is
+    what the lup entry the scaffold ships relies on, so a project built on it
+    opens lup read-write at its first launch with nothing set up. That
+    happens on the host, before the boundary and on the only side that can
+    reach the forge -- and only where nothing is on disk yet, because
     :func:`ensure_local` also fetches, and opening a session is not a review.
     `refs/<name>` is pointed at whatever is mounted either way, so a clone
     another project on this machine materialized first is reachable here by
