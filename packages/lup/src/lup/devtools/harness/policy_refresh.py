@@ -3,7 +3,9 @@
 import json
 import os
 from collections.abc import Callable
+from difflib import SequenceMatcher, unified_diff
 from pathlib import Path
+from typing import Literal
 from tempfile import NamedTemporaryFile
 
 import typer
@@ -13,15 +15,15 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from lup.devtools.harness.preflight import NONCE_VARIABLE, ledger_path
 from lup.execution.shell import git
 from lup.policy.assets.host import (
+    contents_digest,
     policy_data_literals,
-    policy_snapshot_digest,
-    policy_snapshot_files,
     worktree_refusal,
 )
 from lup.policy.snapshots import (
     DestinationPolicy,
     PolicyRuntime,
     RepositoryPolicyAuthority,
+    captured_policy,
     evaluator_source,
 )
 from lup.sandbox.rail import Lease, lease_for, repository_layout
@@ -173,11 +175,29 @@ class PolicyLaunchLedger(BaseModel, extra="allow"):
 
 
 class ConstantChange(BaseModel, frozen=True):
-    """One named constant of a generated policy, as the entries accepting it trades."""
+    """One named constant of a generated policy, as accepting it would rewrite it.
+
+    Positional, because a table read first match first -- the path rules, the
+    path roles -- decides by order as well as by content: an entry moved above
+    another changes what a path is judged by though nothing was added or
+    dropped, so a move reads as the entry leaving one place and arriving at
+    another, each at the position it holds.
+    """
 
     name: str
     removed: list[str]
     added: list[str]
+    lines: list[str]
+    """The change in reading order: where it falls, then what leaves and arrives."""
+
+
+class CodeChange(BaseModel, frozen=True):
+    """One evaluator file whose code differs from what this launch's lup generates."""
+
+    name: str
+    state: Literal["changed", "added", "removed"]
+    diff: list[str]
+    """The unified diff from the launch's generated file to the checkout's."""
 
 
 class PolicyPreview(BaseModel, frozen=True):
@@ -186,8 +206,12 @@ class PolicyPreview(BaseModel, frozen=True):
     The data is read from both sides' ``policy_data.py`` without running
     either -- :func:`~lup.policy.assets.host.policy_data_literals` -- because
     the side being accepted was written by the session asking for it. The
-    code beside that data is compared rather than read: every evaluator file
-    whose bytes differ is named, because accepting runs it.
+    code beside that data runs once accepted, so every evaluator file that
+    differs from what this launch's own lup generates is shown as a diff.
+
+    ``contents`` is every file accepting takes, as read once: the digest is
+    theirs, what is shown was parsed from them, and the snapshot is written
+    from them, so the bytes shown and the bytes accepted cannot come apart.
     """
 
     checkout: str
@@ -195,22 +219,27 @@ class PolicyPreview(BaseModel, frozen=True):
     digest: str
     judging: str
     changes: list[ConstantChange]
-    code: list[str]
+    code: list[CodeChange]
+    contents: dict[str, bytes]
 
     def lines(self) -> list[str]:
         """The preview as the operator reads it, one compact line per entry."""
         entries = [
             line
             for change in self.changes
-            for line in [
-                f"  {change.name}",
-                *[f"    - {entry}" for entry in change.removed],
-                *[f"    + {entry}" for entry in change.added],
-            ]
+            for line in [f"  {change.name}", *[f"    {row}" for row in change.lines]]
         ]
         code = [
-            "  Code that runs once accepted, whose bytes differ:",
-            *[f"    {name}" for name in self.code],
+            "  Code that runs once accepted, where it differs from what this "
+            "launch's lup generates:",
+            *[
+                line
+                for change in self.code
+                for line in [
+                    f"    {change.name} ({change.state})",
+                    *[f"      {row}" for row in change.diff],
+                ]
+            ],
         ]
         return [
             f"Accepting the {self.runtime} policy {self.checkout} generates "
@@ -223,6 +252,24 @@ class PolicyPreview(BaseModel, frozen=True):
 
 class RefreshDeclined(Exception):
     """The operator was shown what accepting would change and said no."""
+
+
+class UnreviewedCode(Exception):
+    """The checkout's evaluator code differs, and nobody said to accept code.
+
+    Carries the preview, so the refusal is read beside the diff it is about:
+    accepting code is its own answer, given with ``--accept-code`` after the
+    diff was seen rather than folded into a question about data.
+    """
+
+    def __init__(self, preview: PolicyPreview) -> None:
+        super().__init__(
+            f"{preview.checkout}'s {preview.runtime} evaluator code differs from "
+            "what this launch's lup generates, in the files shown above. Nothing "
+            "was accepted; once that diff is code you mean to run, refresh again "
+            "with --accept-code."
+        )
+        self.preview = preview
 
 
 def entry_line(entry: JsonValue) -> str:
@@ -268,15 +315,61 @@ def constant_entries(value: JsonValue) -> list[str]:
 def constant_change(
     name: str, judging: JsonObject, accepting: JsonObject
 ) -> ConstantChange:
-    """One constant's entries the accepted policy drops, and the ones it gains."""
+    """One constant's entries as accepting rewrites them, position by position."""
     before = constant_entries(judging[name]) if name in judging else []
     after = constant_entries(accepting[name]) if name in accepting else []
-    kept = {line for line in after}
-    held = {line for line in before}
+    hunks = [
+        (start, end, first, last)
+        for tag, start, end, first, last in SequenceMatcher(
+            a=before, b=after, autojunk=False
+        ).get_opcodes()
+        if tag != "equal"
+    ]
     return ConstantChange(
         name=name,
-        removed=[line for line in before if line not in kept],
-        added=[line for line in after if line not in held],
+        removed=[line for start, end, _, _ in hunks for line in before[start:end]],
+        added=[line for _, _, first, last in hunks for line in after[first:last]],
+        lines=[
+            row
+            for start, end, first, last in hunks
+            for row in [
+                f"@ entry {start + 1} of {len(before)}",
+                *[f"- {line}" for line in before[start:end]],
+                *[f"+ {line}" for line in after[first:last]],
+            ]
+        ],
+    )
+
+
+def code_change(
+    name: str, generated: bytes | None, accepting: bytes | None
+) -> CodeChange:
+    """One evaluator file as the launch's lup generates it against the checkout's."""
+
+    def read(content: bytes | None) -> list[str]:
+        """A file's lines, or none where the side holds no such file."""
+        return (
+            [] if content is None else content.decode("utf-8", "replace").splitlines()
+        )
+
+    return CodeChange(
+        name=name,
+        state=(
+            "added"
+            if generated is None
+            else "removed"
+            if accepting is None
+            else "changed"
+        ),
+        diff=list(
+            unified_diff(
+                read(generated),
+                read(accepting),
+                fromfile=f"generated/{name}",
+                tofile=f"checkout/{name}",
+                lineterm="",
+            )
+        ),
     )
 
 
@@ -285,38 +378,33 @@ def policy_preview(
 ) -> PolicyPreview:
     """What accepting ``existing``'s generated policy changes for the launch at ``root``.
 
-    Compared with the policy that judges the checkout now: the snapshot its
-    grant accepted, where it holds one, and otherwise the launch checkout's
-    own generated tree, whose policy judges every worktree no grant names.
-    Its digest is read before anything else and again after, so the preview
-    describes one set of bytes, and acceptance takes exactly those.
+    The data is compared with the policy that judges the checkout now: the
+    snapshot its grant accepted, where it holds one, and otherwise the launch
+    checkout's own generated tree, whose policy judges every worktree no grant
+    names. The code is compared with that launch tree, which is what the
+    launch's own lup generates, and with the snapshot judging now only where
+    the launch checkout generates no tree for this runtime. Each side is read
+    once, and what is shown is parsed from those bytes.
     """
     source = evaluator_source(Path(existing.checkout), runtime)
-    digest = policy_snapshot_digest(source)
+    theirs = captured_policy(source)
     snapshot = Path(existing.snapshot) if existing.snapshot else None
-    judging = (
-        snapshot
-        if snapshot is not None and snapshot.is_dir()
-        else evaluator_source(root, runtime)
-    )
+    granted = snapshot if snapshot is not None and snapshot.is_dir() else None
+    judging = granted or evaluator_source(root, runtime)
+    held_contents = captured_policy(judging)
+    try:
+        launch = evaluator_source(root, runtime)
+    except ValueError:
+        launch = judging
+    generated = held_contents if launch == judging else captured_policy(launch)
+    data = "runtime/policy_data.py"
     adapter = TypeAdapter(JsonObject)
     accepting = adapter.validate_python(
-        policy_data_literals(source / "runtime" / "policy_data.py")
+        policy_data_literals(source / data, theirs[data].decode("utf-8"))
     )
     held = adapter.validate_python(
-        policy_data_literals(judging / "runtime" / "policy_data.py")
+        policy_data_literals(judging / data, held_contents[data].decode("utf-8"))
     )
-    data = "runtime/policy_data.py"
-    theirs = {
-        item.relative_to(source).as_posix(): item.read_bytes()
-        for item in policy_snapshot_files(source)
-    }
-    ours = {
-        item.relative_to(judging).as_posix(): item.read_bytes()
-        for item in policy_snapshot_files(judging)
-    }
-    if policy_snapshot_digest(source) != digest:
-        raise ValueError(f"{source} changed while it was read; run the refresh again")
     changes = [
         constant_change(name, held, accepting)
         for name in dict.fromkeys([*accepting, *held])
@@ -324,17 +412,24 @@ def policy_preview(
     return PolicyPreview(
         checkout=existing.checkout,
         runtime=runtime,
-        digest=digest,
+        digest=contents_digest(theirs),
         judging=str(judging),
-        changes=[change for change in changes if change.removed or change.added],
+        changes=[change for change in changes if change.lines],
         code=[
-            *[
-                f"{name}: {'changed' if name in ours else 'added'}"
-                for name, content in theirs.items()
-                if name != data and (name not in ours or ours[name] != content)
-            ],
-            *[f"{name}: removed" for name in ours if name not in theirs],
+            code_change(
+                name,
+                generated[name] if name in generated else None,
+                theirs[name] if name in theirs else None,
+            )
+            for name in dict.fromkeys([*generated, *theirs])
+            if name != data
+            and (
+                name not in generated
+                or name not in theirs
+                or generated[name] != theirs[name]
+            )
         ],
+        contents=theirs,
     )
 
 
@@ -344,6 +439,7 @@ def refresh_destination_policy(
     repository: Path,
     approve: Callable[[PolicyPreview], bool],
     runtime: PolicyRuntime | None = None,
+    accept_code: bool = False,
 ) -> DestinationPolicy:
     """Replace one accepted snapshot without extending that launch's authority.
 
@@ -354,7 +450,9 @@ def refresh_destination_policy(
     ``approve`` is shown what accepting would change before anything is
     written. Declined, it raises :class:`RefreshDeclined` with the ledger and
     the snapshot store as they were; approved, it accepts the bytes it was
-    shown and no others.
+    shown and no others. Evaluator code differing from what the launch's lup
+    generates raises :class:`UnreviewedCode` before anybody is asked, unless
+    ``accept_code`` says the operator has seen that diff and means to run it.
     """
     # lup: ignore[os-environ] — reject an operator-only action inherited by the requesting session
     if os.environ.get(NONCE_VARIABLE):
@@ -394,9 +492,11 @@ def refresh_destination_policy(
             f"--runtime {runtime} names another runtime"
         )
     preview = policy_preview(existing, root.resolve(), existing.runtime)
+    if preview.code and not accept_code:
+        raise UnreviewedCode(preview)
     if not approve(preview):
         raise RefreshDeclined(checkout)
-    accepted = existing.accepted(root.resolve(), existing.runtime, preview.digest)
+    accepted = existing.accepted(root.resolve(), existing.runtime, preview.contents)
     if accepted.error:
         raise ValueError(accepted.error)
     document.destination_policies = [
@@ -421,11 +521,13 @@ def refresh_command(
     repository: Path,
     runtime: PolicyRuntime | None = None,
     yes: bool = False,
+    accept_code: bool = False,
 ) -> None:
     """Show the operator what a refresh changes, and accept it once they agree.
 
     The preview is printed either way, so what ``--yes`` accepted is on the
-    record too; the flag skips only the question.
+    record too; the flag skips only the question. Code differing from what
+    the launch's lup generates is shown and refused until ``--accept-code``.
     """
 
     def approve(preview: PolicyPreview) -> bool:
@@ -434,7 +536,13 @@ def refresh_command(
         return yes or typer.confirm("Accept this policy for the launch?")
 
     try:
-        accepted = refresh_destination_policy(root, nonce, repository, approve, runtime)
+        accepted = refresh_destination_policy(
+            root, nonce, repository, approve, runtime, accept_code
+        )
+    except UnreviewedCode as unreviewed:
+        typer.echo("\n".join(unreviewed.preview.lines()))
+        typer.echo(str(unreviewed))
+        raise typer.Exit(1) from None
     except RefreshDeclined:
         typer.echo(
             f"Nothing accepted: launch {nonce} judges {repository.resolve()} "

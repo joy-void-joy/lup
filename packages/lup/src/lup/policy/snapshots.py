@@ -8,7 +8,11 @@ import sh
 from pydantic import BaseModel
 
 from lup.execution.shell import git
-from lup.policy.assets.host import policy_snapshot_digest, policy_snapshot_files
+from lup.policy.assets.host import (
+    contents_digest,
+    policy_snapshot_contents,
+    policy_snapshot_digest,
+)
 from lup.sandbox.rail import AccessibleRoot, Lease, repository_layout, sibling_worktrees
 
 PolicyRuntime = Literal["claude", "codex"]
@@ -58,6 +62,20 @@ def evaluator_source(checkout: Path, runtime: PolicyRuntime) -> Path:
     return source
 
 
+def captured_policy(source: Path) -> dict[str, bytes]:
+    """One evaluator's files as bytes held in memory, read so they describe one state.
+
+    Everything after this reads the held bytes and never the checkout again:
+    what is hashed, what is shown and what is written as the snapshot are one
+    set of bytes. Read twice and compared, so a tree caught mid-write is
+    refused rather than held as a mixture no generation wrote.
+    """
+    first = policy_snapshot_contents(source)
+    if policy_snapshot_contents(source) != first:
+        raise ValueError(f"{source} changed while it was read; run the refresh again")
+    return first
+
+
 class DestinationPolicy(BaseModel, frozen=True, extra="forbid"):
     """A checkout and evaluator the operator's launch explicitly made reachable."""
 
@@ -73,17 +91,19 @@ class DestinationPolicy(BaseModel, frozen=True, extra="forbid"):
     error: str = ""
 
     def accepted(
-        self, root: Path, runtime: str, reviewed: str = ""
+        self, root: Path, runtime: str, shown: dict[str, bytes] | None = None
     ) -> "DestinationPolicy":
-        """Copy only verified source into a content-addressed launch snapshot.
+        """Write held source bytes into a content-addressed launch snapshot.
 
         ``runtime`` arrives from a launch or a ledger, and it is spelled into
         the path the evaluator is looked for at, so a name that is not a
         runtime is refused before anything is read.
 
-        ``reviewed`` is the digest an operator was shown, where one was: the
-        bytes accepted are then exactly those, and a checkout that changed
-        after it was shown is refused before anything is copied.
+        ``shown`` is the bytes an operator was shown, where they were: those
+        are what the snapshot is written from, and the checkout is not read
+        again, so no change made after the showing -- nor one made and undone
+        -- can put other bytes in its place. Unshown, the source is captured
+        once here, the same way.
         """
         if not policy_runtime(runtime):
             return self.model_copy(
@@ -99,12 +119,8 @@ class DestinationPolicy(BaseModel, frozen=True, extra="forbid"):
         except ValueError as error:
             return self.model_copy(update={"error": str(error), "runtime": runtime})
         try:
-            digest = policy_snapshot_digest(source)
-            if reviewed and digest != reviewed:
-                raise ValueError(
-                    f"{source} changed after it was shown; run the refresh again "
-                    "to see what it holds now"
-                )
+            contents = captured_policy(source) if shown is None else shown
+            digest = contents_digest(contents)
             destination = root / ".lup" / "policy-snapshots" / digest
             destination.parent.mkdir(parents=True, exist_ok=True)
             if not destination.exists():
@@ -112,13 +128,13 @@ class DestinationPolicy(BaseModel, frozen=True, extra="forbid"):
                     prefix=".accept-", dir=destination.parent
                 ) as area:
                     staged = Path(area) / "revision"
-                    for item in policy_snapshot_files(source):
-                        copied = staged / item.relative_to(source)
+                    for name, content in contents.items():
+                        copied = staged / name
                         copied.parent.mkdir(parents=True, exist_ok=True)
-                        copied.write_bytes(item.read_bytes())
+                        copied.write_bytes(content)
                     if policy_snapshot_digest(staged) != digest:
                         raise ValueError(
-                            f"Destination policy changed while copying {source}"
+                            f"The snapshot of {source} did not keep the bytes held"
                         )
                     try:
                         staged.rename(destination)
@@ -129,8 +145,6 @@ class DestinationPolicy(BaseModel, frozen=True, extra="forbid"):
                 raise ValueError(
                     f"Accepted destination snapshot is corrupt: {destination}"
                 )
-            if policy_snapshot_digest(source) != digest:
-                raise ValueError(f"Destination policy changed while accepting {source}")
         except (OSError, ValueError) as error:
             return self.model_copy(
                 update={"source": str(source), "error": str(error), "runtime": runtime}

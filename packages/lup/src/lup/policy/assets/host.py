@@ -61,19 +61,30 @@ def policy_snapshot_files(directory: Path) -> list[Path]:
     return sorted([evaluator, *runtime.rglob("*.py")])
 
 
-def policy_snapshot_digest(directory: Path) -> str:
-    """Bind the evaluator and every imported runtime source to accepted bytes."""
-    rows = [
-        [
-            str(item.relative_to(directory).as_posix()),
-            sha256(item.read_bytes()).hexdigest(),
-        ]
+def policy_snapshot_contents(directory: Path) -> dict[str, bytes]:
+    """Every file one evaluator's snapshot holds, read once, by its relative path.
+
+    In the order :func:`policy_snapshot_files` lists them, which is the order
+    a digest binds, so bytes held in memory hash exactly as the tree does.
+    """
+    return {
+        item.relative_to(directory).as_posix(): item.read_bytes()
         for item in policy_snapshot_files(directory)
-    ]
+    }
+
+
+def contents_digest(contents: dict[str, bytes]) -> str:
+    """Bind an evaluator's files, as held, to one digest."""
+    rows = [[name, sha256(content).hexdigest()] for name, content in contents.items()]
     return sha256(json.dumps(rows, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
-def policy_data_literals(path: Path) -> dict:
+def policy_snapshot_digest(directory: Path) -> str:
+    """Bind the evaluator and every imported runtime source to accepted bytes."""
+    return contents_digest(policy_snapshot_contents(directory))
+
+
+def policy_data_literals(path: Path, text: str | None = None) -> dict:
     """Every constant a generated ``policy_data.py`` assigns, read without running it.
 
     The module is read rather than imported because the checkout holding it
@@ -87,9 +98,15 @@ def policy_data_literals(path: Path) -> dict:
     would run at import, so it is refused, naming its line, rather than
     skipped: a reading that left it out would describe a module other than
     the one that runs.
+
+    ``text`` is the module as already read, where a caller holds the bytes it
+    will act on: a second read of ``path`` could describe other bytes.
     """
     try:
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        tree = ast.parse(
+            path.read_text(encoding="utf-8") if text is None else text,
+            filename=str(path),
+        )
     except SyntaxError as error:
         raise ValueError(f"{path} is not Python generation writes: {error}") from error
 

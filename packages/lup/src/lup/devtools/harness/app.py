@@ -138,13 +138,23 @@ def create_harness_app(
                 help="Accept without asking, after showing what accepting changes",
             ),
         ] = False,
+        accept_code: Annotated[
+            bool,
+            typer.Option(
+                "--accept-code",
+                help="Accept evaluator code that differs from what this launch's "
+                "lup generates, once its diff has been read",
+            ),
+        ] = False,
     ) -> None:
         """Accept changed destination policy from an independent operator terminal.
 
         Shows how the checkout's generated policy differs from the one judging
         it now, then asks before accepting it.
         """
-        policy_refresh.refresh_command(project_root(), nonce, repository, runtime, yes)
+        policy_refresh.refresh_command(
+            project_root(), nonce, repository, runtime, yes, accept_code
+        )
 
     @app.command("check")
     def check_command(

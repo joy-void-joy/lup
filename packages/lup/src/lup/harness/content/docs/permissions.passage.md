@@ -452,12 +452,22 @@ grant accepted, or else the launch checkout's own — and asks. Both
 being accepted was written by the session asking: each named constant, from
 protected paths, path roles and anti-pattern rows through import boundaries,
 shell and fetch rules, sandbox-excluded commands, refused tools and autonomous
-identities, lists the entries accepting removes and adds, one line each, and
-every evaluator file whose code differs is named, because accepting runs it. A
-`policy_data.py` holding anything generation never writes is refused rather
-than shown. `--yes` accepts without asking, after showing the same preview; a
-declined question writes nothing, and what is accepted is exactly the bytes
-shown — a checkout regenerated in between is refused, to be shown again.
+identities, lists the entries accepting removes and adds, one line each, at
+the position each holds — the path rules and roles are read first match
+first, so an entry moved above another shows as leaving one place and
+arriving at another. A `policy_data.py` holding anything generation never
+writes is refused rather than shown. Evaluator code runs once accepted, so
+every file differing from what this launch's own lup generates is shown as a
+unified diff, and the refresh then refuses until it is run again with
+`--accept-code`; where the launch checkout generates no tree for that runtime,
+the code is compared with the snapshot judging now. `--yes` accepts without
+asking, after showing the same preview, and answers only for the data. A
+declined question writes nothing. Every file is read once: the digest, what
+is shown and the snapshot written all come from those bytes, and the checkout
+is not read again, so a change made after the showing — or made and undone
+while it was read — cannot put other bytes in the snapshot. A checkout that
+moves on afterwards is judged by what was shown, and its next edit names the
+refresh again.
 
 A verdict reached under a policy the destination does not hold says so, and
 names the command with this launch's real nonce and paths —

@@ -11,9 +11,11 @@ from typer.testing import CliRunner
 from lup.devtools.harness import launch
 from lup.devtools.harness.app import create_harness_app
 from lup.devtools.harness.composition import NativeTargets
+import lup.devtools.harness.policy_refresh as policy_refresh
 from lup.devtools.harness.policy_refresh import (
     PolicyPreview,
     RefreshDeclined,
+    UnreviewedCode,
     refresh_destination_policy,
 )
 from lup.devtools.harness.preflight import (
@@ -895,9 +897,15 @@ def test_the_operator_sees_what_accepting_changes_before_anything_is_accepted(
     (hooks / "runtime" / "kernel" / "decision.py").write_text("VALUE = 2\n")
     approve = Mock(return_value=True)
 
-    accepted = refresh_destination_policy(caller, sentinels.nonce, feature, approve)
+    with pytest.raises(UnreviewedCode, match="--accept-code") as unreviewed:
+        refresh_destination_policy(caller, sentinels.nonce, feature, approve)
+    assert not approve.called
+    accepted = refresh_destination_policy(
+        caller, sentinels.nonce, feature, approve, accept_code=True
+    )
 
     (preview,) = approve.call_args.args
+    assert unreviewed.value.preview.lines() == preview.lines()
     changes = {change.name: change for change in preview.changes}
     assert list(changes) == ["ANTI_PATTERN_ROWS", "IMPORT_BOUNDARIES"]
     assert changes["ANTI_PATTERN_ROWS"].removed == [
@@ -907,11 +915,48 @@ def test_the_operator_sees_what_accepting_changes_before_anything_is_accepted(
     (before,) = changes["IMPORT_BOUNDARIES"].removed
     (after,) = changes["IMPORT_BOUNDARIES"].added
     assert "src/renamed/harness/" in after and "src/renamed/harness/" not in before
-    assert preview.code == ["runtime/kernel/decision.py: changed"]
+    (code,) = preview.code
+    assert (code.name, code.state) == ("runtime/kernel/decision.py", "changed")
+    assert "-VALUE = 1" in code.diff and "+VALUE = 2" in code.diff
     shown = "\n".join(preview.lines())
     assert '    - .py: id="dict-get"' in shown
-    assert "  IMPORT_BOUNDARIES" in shown and "runtime/kernel/decision.py" in shown
+    assert "  IMPORT_BOUNDARIES" in shown
+    assert "    runtime/kernel/decision.py (changed)" in shown
+    assert "      +VALUE = 2" in shown
     assert accepted.digest == preview.digest
+
+
+def test_a_reordered_first_match_table_is_shown_where_each_entry_moves(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two path roles swapped: nothing added, nothing dropped, and a path judged apart.
+
+    Roles are read first match first, so the order is part of what they say.
+    A comparison of which entries each side holds reads the two as one table.
+    """
+    monkeypatch.delenv("LUP_BOUNDARY_NONCE", raising=False)
+    bare, caller, sentinels = launched_in_own_repository(tmp_path)
+    roles = [{"root": "src/data/", "role": "data"}, {"root": "src/", "role": "source"}]
+    (caller / ".codex/plugins/example/hooks/runtime/policy_data.py").write_text(
+        f"PATH_ROLES = {roles!r}\n"
+    )
+    feature = cut(bare, bare / "tree" / "feature", "feature")
+    evaluator(feature, "codex", f"PATH_ROLES = {roles[::-1]!r}\n")
+    approve = Mock(return_value=True)
+
+    refresh_destination_policy(caller, sentinels.nonce, feature, approve)
+
+    (preview,) = approve.call_args.args
+    (change,) = preview.changes
+    assert change.name == "PATH_ROLES"
+    # `src/` now comes first, and so wins for everything under `src/data/`.
+    assert change.lines == [
+        "@ entry 1 of 2",
+        '+ root="src/" role="source"',
+        "@ entry 2 of 2",
+        '- root="src/" role="source"',
+    ]
 
 
 def test_a_declined_refresh_writes_nothing(
@@ -968,6 +1013,45 @@ def test_the_command_asks_before_accepting_and_yes_answers_for_the_operator(
     assert len(json.loads(ledger.read_text())["destination_policies"]) == 1
 
 
+def test_the_command_shows_differing_code_and_accepts_it_only_when_told_to(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Code the launch's lup would not generate is shown as a diff, then refused.
+
+    `--yes` answers the question about data and nothing else: running other
+    code is its own answer, given once the diff has been read.
+    """
+    monkeypatch.delenv("LUP_BOUNDARY_NONCE", raising=False)
+    bare, caller, sentinels = launched_in_own_repository(tmp_path)
+    feature = cut(bare, bare / "tree" / "feature", "feature")
+    hooks = evaluator(feature, "codex")
+    (hooks / "runtime" / "kernel" / "decision.py").write_text("VALUE = 2\n")
+    monkeypatch.setattr("lup.devtools.harness.app.project_root", lambda: caller)
+    app = create_harness_app(NativeTargets(builders={}), [])
+    arguments = [
+        "policy-refresh",
+        "--nonce",
+        sentinels.nonce,
+        "--repository",
+        str(feature),
+        "--yes",
+    ]
+    ledger = caller / ".lup/preflight" / f"{sentinels.nonce}.json"
+
+    refused = CliRunner().invoke(app, arguments)
+    untouched = json.loads(ledger.read_text())["destination_policies"]
+    accepted = CliRunner().invoke(app, [*arguments, "--accept-code"])
+
+    assert refused.exit_code == 1
+    assert "runtime/kernel/decision.py (changed)" in refused.output
+    assert "-VALUE = 1" in refused.output and "+VALUE = 2" in refused.output
+    assert "--accept-code" in refused.output and untouched == []
+    assert accepted.exit_code == 0, accepted.output
+    assert "+VALUE = 2" in accepted.output
+    assert len(json.loads(ledger.read_text())["destination_policies"]) == 1
+
+
 def test_what_is_accepted_is_exactly_what_was_shown(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -979,17 +1063,34 @@ def test_what_is_accepted_is_exactly_what_was_shown(
     ledger = caller / ".lup/preflight" / f"{sentinels.nonce}.json"
     written = ledger.read_text()
 
-    def regenerated_while_asked(_preview: PolicyPreview) -> bool:
+    shown_data = (hooks / "runtime" / "policy_data.py").read_bytes()
+    reading = policy_refresh.policy_data_literals
+
+    def changed_and_changed_back(path: Path, text: str | None = None) -> dict:
+        """The checkout rewritten while the preview reads, then put back."""
+        if path.is_relative_to(feature):
+            path.write_text(policy_data(["dict-get"], []))
+        try:
+            return reading(path, text)
+        finally:
+            if path.is_relative_to(feature):
+                path.write_bytes(shown_data)
+
+    def regenerated_while_asked(preview: PolicyPreview) -> bool:
         (hooks / "runtime" / "policy_data.py").write_text(policy_data([], []))
         return True
 
-    with pytest.raises(ValueError, match="changed after it was shown"):
-        refresh_destination_policy(
-            caller, sentinels.nonce, feature, regenerated_while_asked
-        )
+    monkeypatch.setattr(
+        policy_refresh, "policy_data_literals", changed_and_changed_back
+    )
+    accepted = refresh_destination_policy(
+        caller, sentinels.nonce, feature, regenerated_while_asked
+    )
 
-    assert ledger.read_text() == written
-    assert not (caller / ".lup" / "policy-snapshots").exists()
+    assert ledger.read_text() != written
+    snapshot = Path(accepted.snapshot)
+    assert (snapshot / "runtime" / "policy_data.py").read_bytes() == shown_data
+    assert accepted.digest == policy_snapshot_digest(snapshot)
 
 
 @pytest.mark.parametrize(
