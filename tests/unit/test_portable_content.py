@@ -130,7 +130,6 @@ def test_vocabulary_follows_the_locations_a_runtime_can_spell() -> None:
     assert "AskUserQuestion" in vocabulary
 
 
-
 def guidance_of(text: str) -> GuidanceDocument:
     """An always-loaded document holding this one line of prose and nothing else."""
     return GuidanceDocument(
@@ -145,9 +144,7 @@ def test_compiling_refuses_prose_that_names_a_platform() -> None:
     """The gate has to bite at the seam, not only in this file's inventory."""
     harness = portable_harness()
     leaked = harness.model_copy(
-        update={
-            "guidance": guidance_of("Edit .claude/settings.json by hand")
-        }
+        update={"guidance": guidance_of("Edit .claude/settings.json by hand")}
     )
 
     with pytest.raises(ValueError, match="must name no platform"):
