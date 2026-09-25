@@ -106,7 +106,17 @@ class ClaudeConfigUnreadable(RuntimeError):
 
 
 def default_config_home() -> Path:
-    """The configuration home a session opens under when none is named."""
+    """The configuration home a session opens under when none is named.
+
+    The operator's: joined onto this process's home directory, never onto a
+    ``HOME`` a request hands its session. A request changes ``HOME`` for a
+    tool its session runs, and that session must still authenticate as the
+    operator, so the account a derived home is seeded from and linked back
+    to stays the one this program was launched as. Claude Code left to
+    choose would join the request's instead — its own default is joined onto
+    ``os.homedir()``, which reads ``HOME`` — and a homed session is never
+    left that choice, because homing names its configuration home outright.
+    """
     return Path.home() / CLAUDE_HOME_DIR
 
 
@@ -181,6 +191,11 @@ def selected_config_home(environment: EnvVars) -> ClaudeConfigHome:
     Claude Code's own resolution, in its own order: a legacy document inside
     the home wherever one exists, and otherwise the current one — inside a
     named home, or beside the home directory when none is named.
+
+    One input is deliberately not the environment's: the home directory,
+    for the unnamed home and the document beside it, is this process's —
+    the operator's — rather than a ``HOME`` the environment carries for a
+    session's tools, for the reason :func:`default_config_home` gives.
     """
     # lup: defer: an exported empty CLAUDE_CONFIG_DIR is read here as the
     # directory `.`, this process's working directory, with the document

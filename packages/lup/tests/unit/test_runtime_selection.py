@@ -70,8 +70,10 @@ def empty_user_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     Every test here starts from an empty user directory with no runtime's
     home named, and names one where that is its subject.
 
-    Codex's worktree store fixes its account home when it is imported, so
-    it is bound to the empty directory here rather than following ``HOME``.
+    Codex's worktree store fixes the operator's account home when it is
+    imported — :data:`~lup.providers.codex.home.DEFAULT_ACCOUNT_HOME` says
+    why — so it is bound to the empty directory here, which stands for the
+    operator's, rather than following ``HOME``.
     """
     user = tmp_path / "user"
     user.mkdir()
@@ -328,6 +330,32 @@ def test_claude_falls_back_to_its_default_account_when_nothing_names_one(
     assert load_document(home / CLAUDE_HOME_DOCUMENT) == {"account": "default"}
 
 
+def test_claude_derives_from_the_operator_s_account_whatever_home_a_request_names(
+    empty_user_home: Path, tmp_path: Path
+) -> None:
+    """A request's own ``HOME`` is for the tools its session runs, and the
+    session still authenticates as the operator: with no home named, the
+    default it derives from is the operator's, though Claude Code left to
+    choose would join the request's. The request keeps its ``HOME``."""
+    operator = empty_user_home / CLAUDE_HOME_DIR
+    claude_account(operator, empty_user_home / CLAUDE_HOME_DOCUMENT, "operator")
+    elsewhere = tmp_path / "elsewhere"
+    claude_account(
+        elsewhere / CLAUDE_HOME_DIR, elsewhere / CLAUDE_HOME_DOCUMENT, "elsewhere"
+    )
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    request = SessionRequest(cwd=workspace, environment={"HOME": str(elsewhere)})
+
+    homed = CLAUDE_RUNTIME.homed(request)
+    home = Path(homed.environment[CLAUDE_CONFIG_DIR])
+
+    assert homed.environment["HOME"] == str(elsewhere)
+    login = CLAUDE_LOGIN.credentials_path(home).resolve()
+    assert login == CLAUDE_LOGIN.credentials_path(operator).resolve()
+    assert load_document(home / CLAUDE_HOME_DOCUMENT) == {"account": "operator"}
+
+
 def test_codex_opens_a_session_in_the_home_it_was_launched_under(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -384,6 +412,28 @@ def test_codex_falls_back_to_the_worktree_home_when_nothing_names_one(
     assert login == json.dumps({"account": "default"})
     settings = tomllib.loads((home / "config.toml").read_text(encoding="utf-8"))
     assert settings["account"] == "default"
+
+
+def test_codex_seeds_from_the_operator_s_account_whatever_home_a_request_names(
+    empty_user_home: Path, tmp_path: Path
+) -> None:
+    """The same for Codex: the worktree home copies in the operator's login,
+    though Codex left to choose would read ``.codex`` in the request's
+    ``HOME``. The request keeps its ``HOME``."""
+    codex_account(empty_user_home / CODEX_LOGIN.ambient_home.name, "operator")
+    elsewhere = tmp_path / "elsewhere"
+    codex_account(elsewhere / CODEX_LOGIN.ambient_home.name, "elsewhere")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    request = SessionRequest(cwd=workspace, environment={"HOME": str(elsewhere)})
+
+    homed = CODEX_RUNTIME.homed(request)
+    home = Path(homed.environment[CODEX_HOME])
+
+    assert homed.environment["HOME"] == str(elsewhere)
+    assert home == CodexWorktreeHomeStore().home_for(workspace)
+    login = CODEX_LOGIN.credentials_path(home).read_text(encoding="utf-8")
+    assert login == json.dumps({"account": "operator"})
 
 
 class GatedOutput(BaseModel):

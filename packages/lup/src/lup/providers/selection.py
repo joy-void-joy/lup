@@ -187,6 +187,12 @@ the request, or in the environment this program was launched with.
 Which variable carries it is the runtime's own, which is why this is a field
 rather than a shared helper: a session handed another runtime's is pointed at
 a directory its CLI never reads, and loses the home its profile chose.
+
+A request's ``HOME`` names no account. With no home named, each runtime's
+default is the operator's, joined onto this process's home directory: a
+request changes ``HOME`` for a tool its session runs, and the session must
+still authenticate as the operator, though the CLI left to choose would read
+the request's. Each runtime's default says so where it is chosen.
 """
 
 

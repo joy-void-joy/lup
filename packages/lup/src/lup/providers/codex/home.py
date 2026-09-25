@@ -23,6 +23,17 @@ logger = logging.getLogger(__name__)
 
 
 DEFAULT_ACCOUNT_HOME = Path.home() / ".codex"
+"""The operator's own Codex account, which a worktree home is seeded from.
+
+Joined onto this process's home directory as the module is imported, and
+never onto a ``HOME`` a request hands its session. A request changes
+``HOME`` for a tool its session runs, and that session must still
+authenticate as the operator, so the login a worktree home copies in stays
+the one this program was launched as. Codex left to choose would read the
+request's instead — its default is ``.codex`` in the effective ``HOME``, as
+:func:`~lup.providers.codex.login.native_home` reads it — and a homed
+session is never left that choice, because homing names its home outright.
+"""
 SCOPED_HOME_DIR = Path(".lup") / "codex-home"
 """Where a checkout keeps the Codex home its own sessions run under.
 
