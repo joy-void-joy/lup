@@ -98,8 +98,9 @@ async def plan(agent: Claude) -> Plan:
 A turn starts the first time anything asks for it — an `await`, an iteration,
 `events()`, `live()`, `interrupt()`, or on Codex `steer()` — and starts once
 however many ask; awaiting it after iterating returns the same result. Its
-submission tool is bound to the output model before the provider accepts the
-prompt, so no turn runs ahead of the schema it has to answer in.
+output model is bound before the provider accepts the prompt — Claude's
+submission tool, Codex's `outputSchema` — so no turn runs ahead of the schema
+it has to answer in.
 
 | Ask the turn | For |
 | --- | --- |
