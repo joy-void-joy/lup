@@ -27,8 +27,15 @@ Two registry files declare what to track:
 - sync.json.local (gitignored): what this machine answers — where a checkout
   actually is ("path"), the transport that reaches it from here ("remote"),
   branch overrides, and local-only projects. Set "ignore": true to skip a
-  project's review (useful when you ARE the upstream). Most machines need no
-  entry at all: the clone's location is derived from the name.
+  project's review. Most machines need no entry at all: the clone's location
+  is derived from the name, and a registration naming the repository this
+  checkout already is needs no opt-out either (see :func:`exemption`).
+
+Which repository an entry means is its "url", completed in two places the
+files do not have to restate (see :func:`completed`): the library's own
+registration follows the git pin in pyproject.toml wherever the project
+resolves lup from a repository, and a registration nothing places falls back
+to the source repository its installed distribution declares.
 
 The split is by *who the fact belongs to*, not by which key it is. A path can
 genuinely differ between machines and a transport almost always does; which
@@ -88,12 +95,23 @@ Examples::
 import json
 import logging
 import os
+import string
 from collections.abc import Callable
+from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
-from typing import Annotated, Literal, NotRequired, Required, TypedDict, get_args
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Literal,
+    NotRequired,
+    Required,
+    TypedDict,
+    get_args,
+)
 
 import sh
 import typer
+from packaging.metadata import parse_email
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -119,6 +137,9 @@ from lup.harness.toolchain import (
 )
 from lup.policy.assets.host import launched, measured_boundary
 from lup.sandbox.rail import AccessibleRoot
+
+if TYPE_CHECKING:
+    from lup.devtools.dev.library import GitSource
 
 app = typer.Typer(no_args_is_help=True)
 SUBAPP = subapp(
@@ -197,7 +218,17 @@ class ProjectEntry(TypedDict, total=False):
     spellings of one repository are compared as one by
     :func:`~lup.harness.credential.same_repository`. So an https
     registration and an ssh clone of it agree, and two different
-    repositories under one name are still refused."""
+    repositories under one name are still refused.
+
+    Spelled as https where it is committed: a clone is made on the host
+    before any credential is lent, and https reads a public repository with
+    none, while every remote a session opens is rewritten onto whichever
+    transport its credential reaches (see
+    :func:`~lup.harness.credential.remote_rewrites`).
+
+    The library's own registration reads its ``url`` off the git pin
+    wherever the project resolves lup from a repository, rather than off
+    either file -- see :func:`completed`."""
 
     remote: str
     """The URL this machine fetches from, where it is not the one ``url`` names.
@@ -399,10 +430,99 @@ def ensure_ref_symlink(name: str, target: str) -> None:
     logger.debug("refs/%s -> %s", name, target_path)
 
 
+SOURCE_LABELS = ("source", "repository", "sourcecode", "github")
+"""The labels core metadata files a distribution's source repository under.
+
+PEP 753's well-known ``source`` label and the aliases it folds into it, each
+compared after the normalization the standard defines: punctuation and
+whitespace removed, then lowercased."""
+
+
+def distribution_repository(name: str, labels: tuple[str, ...] = SOURCE_LABELS) -> str:
+    """The source repository an installed distribution of this name declares.
+
+    Read from the core metadata it was installed with, which is where a
+    published package says where it comes from -- and the one statement of
+    lup's home a project carries without anybody writing it down, whether it
+    resolves a release or keeps a vendored copy. ``Project-URL`` is read by
+    ``packaging``, whose parser is the standard's. Nothing where no such
+    distribution is installed or it declares no source.
+    """
+
+    def normalized(label: str) -> str:
+        """A label as PEP 753 compares one."""
+        return "".join(
+            character
+            for character in label
+            if character not in string.punctuation and not character.isspace()
+        ).lower()
+
+    try:
+        metadata = distribution(name).read_text("METADATA") or ""
+    except PackageNotFoundError:
+        return ""
+    raw, _unparsed = parse_email(metadata)
+    if "project_urls" not in raw:
+        return ""
+    return next(
+        (
+            url
+            for label, url in raw["project_urls"].items()
+            if normalized(label) in labels
+        ),
+        "",
+    )
+
+
+def pinned_source(name: str, root: Path | None = None) -> "GitSource | None":
+    """The git pin a registration of this name follows, where the project has one.
+
+    Only the library's own registration follows one: ``[tool.uv.sources]``
+    pins the ``lup`` distribution, and the registration of that name is the
+    repository the project consumes it from. Imported where it is asked
+    rather than at the top, because the library module reads this module's
+    registrations to decide where to pin from, and so imports it first.
+    """
+    from lup.devtools.dev.library import DISTRIBUTION, read_git_source
+
+    if name != DISTRIBUTION:
+        return None
+    return read_git_source(root if root is not None else project_root())
+
+
+def completed(entry: ProjectEntry, root: Path) -> ProjectEntry:
+    """One merged registration, with the repository it means filled in.
+
+    Two completions, both derived and neither written back. The library's own
+    registration takes its ``url`` from the git pin wherever the project
+    resolves lup from a repository: the pin is what the project consumes, and
+    a registration naming another repository would mount, review and compile
+    the copied half from a history the library does not come from -- so the
+    pin decides, and nothing has to restate it. A registration nothing
+    places -- no ``url``, no ``remote``, no ``path`` -- takes the source
+    repository its installed distribution declares; one this machine placed
+    keeps the answer it gave.
+    """
+    pinned = pinned_source(entry["name"], root)
+    if pinned is not None:
+        return PROJECT_ENTRY_ADAPTER.validate_python({**entry, "url": pinned.url})
+    if "url" in entry or "remote" in entry or "path" in entry:
+        return entry
+    declared = distribution_repository(entry["name"])
+    if not declared:
+        return entry
+    return PROJECT_ENTRY_ADAPTER.validate_python({**entry, "url": declared})
+
+
 def load_projects(root: Path | None = None) -> list[ProjectEntry]:
-    """Load and merge projects from sync.json + sync.json.local."""
-    base = load_json(root / "sync.json" if root is not None else sync_file())
-    local = load_json(root / "sync.json.local" if root is not None else local_file())
+    """Load and merge projects from sync.json + sync.json.local.
+
+    Local entries override tracked ones by name, and each merged entry is
+    then completed with the repository it means (see :func:`completed`).
+    """
+    home = root if root is not None else project_root()
+    base = load_json(home / "sync.json")
+    local = load_json(home / "sync.json.local")
 
     merged: dict[str, ProjectEntry] = {}  # lup: ignore[empty-collection] — merge fold
     for p in base.get("projects", []):
@@ -415,7 +535,7 @@ def load_projects(root: Path | None = None) -> list[ProjectEntry]:
         else:
             merged[name] = p.copy()
 
-    return list(merged.values())
+    return [completed(entry, home) for entry in merged.values()]
 
 
 def find_project(name: str) -> ProjectEntry:
@@ -511,19 +631,14 @@ def review_branch(proj: ProjectEntry, repository: Path) -> str:
     from lup.devtools.dev.library import read_git_source
 
     declared = proj.get("branch", "")
-    manifest = project_root() / "pyproject.toml"
-    source = read_git_source(project_root()) if manifest.is_file() else None
+    source = read_git_source(project_root())
     if source is None or source.ref_kind != "branch":
         return declared
+    # The library's own registration never disagrees with the pin here: it
+    # takes its url from it (see `completed`). What is left is any other
+    # registration of the same repository, which follows the consumed branch.
     registered_url = registered_repository(proj) or remote_url(repository, "origin")
     if not registered_url or not same_repository(registered_url, source.url):
-        if proj["name"] == "lup":
-            logger.warning(
-                "Sync registration %s names %s while the library consumes %s",
-                proj["name"],
-                registered_url or repository,
-                source.url,
-            )
         return declared
     if declared and declared != source.ref:
         logger.warning(
@@ -1080,12 +1195,36 @@ def declaring_file(name: str, key: str) -> Path:
     file wins when it holds the key, because that is the half the merge takes
     it from; anything else is answered by the local one, including a key
     nobody has written yet, which is where it would go.
+
+    The library's own ``url`` is the exception: wherever the project pins lup
+    to a repository the registration follows that pin (see :func:`completed`),
+    so the manifest holding it is the file that says it.
     """
+    if key == "url" and pinned_source(name) is not None:
+        return project_root() / "pyproject.toml"
     tracked = next(
         (p for p in load_json(sync_file()).get("projects", []) if p["name"] == name),
         None,
     )
     return sync_file() if tracked is not None and key in tracked else local_file()
+
+
+def renaming(name: str, url: str) -> str:
+    """The edit that makes a registration mean ``url``, where its answer is kept.
+
+    The pin, for the library's own registration wherever the project resolves
+    lup from a repository: the registration follows it, so an edit to either
+    registry file would be read over. The file carrying the key otherwise.
+    """
+    pinned = pinned_source(name)
+    if pinned is not None:
+        return (
+            "repoint the pin it follows: uv run lup-devtools dev library git "
+            f"--url {url} --{pinned.ref_kind} {pinned.ref}"
+        )
+    return (
+        f"set \"url\" on the '{name}' entry in {declaring_file(name, 'url').name} to it"
+    )
 
 
 def require_registered_origin(
@@ -1125,8 +1264,7 @@ def require_registered_origin(
         f"{declaring_file(name, 'url').name}. Two repositories under one "
         "name, so a review, a mount or a commit would land in the wrong "
         "history; nothing was read from it. Write whichever is true:\n"
-        f'  - {pointing} is the repository meant: set "url" on the '
-        f"'{name}' entry in {declaring_file(name, 'url').name} to it.\n"
+        f"  - {pointing} is the repository meant: {renaming(name, pointing)}.\n"
         f"  - {declared} is: {theirs}. Where this machine reaches it at "
         f"another URL, say so with: uv run lup-devtools sync remote {name} "
         "<url>\n"
@@ -1603,8 +1741,8 @@ def set_remote(
             "committed into as this one.\n"
             f"  - to reach {declared} from here, pass the URL that does.\n"
             f"  - to track {url} as well, register it under its own name.\n"
-            f"  - to change which repository '{name}' means, set \"url\" on "
-            f"its entry in {declaring_file(name, 'url').name}."
+            f"  - to change which repository '{name}' means, "
+            f"{renaming(name, url)}."
         )
         raise typer.Exit(1)
 
