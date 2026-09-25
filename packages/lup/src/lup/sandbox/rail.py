@@ -95,10 +95,10 @@ A rail without attribution is worse than no rail.
 """
 
 import posixpath
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import sh
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from lup.execution.shell import git
 
@@ -119,6 +119,19 @@ class Lease(BaseModel, frozen=True):
         default={},
         description="Host paths this worker may read and must not write",
     )
+    pinned: dict[Path, str] = Field(
+        default={},
+        description=(
+            "Host paths mounted writable even where an enclosing mount already "
+            "carries them, so each is a mount point of its own: nothing inside "
+            "can rename or remove it, which keeps a read-only hole beneath it "
+            "at the path the host reads"
+        ),
+    )
+
+    def mounted_writable(self) -> dict[Path, str]:
+        """Every writable mount, pinned ones among them, as an engine takes them."""
+        return {**self.writable, **self.pinned}
 
     def answers_from(self, path: Path) -> Path | None:
         """The mount whose mode this path takes, or ``None`` where none does.
@@ -133,7 +146,7 @@ class Lease(BaseModel, frozen=True):
         """
         enclosing = [
             root
-            for root in [*self.writable, *self.read_only]
+            for root in [*self.writable, *self.pinned, *self.read_only]
             if path == root or root in path.parents
         ]
         return max(enclosing, key=lambda root: len(root.parts), default=None)
@@ -144,7 +157,7 @@ class Lease(BaseModel, frozen=True):
 
     def writable_at(self, path: Path) -> bool:
         """Whether this lease lets a path be written."""
-        return self.answers_from(path) in self.writable
+        return self.answers_from(path) in self.mounted_writable()
 
 
 class AccessibleRoot(BaseModel, frozen=True):
@@ -188,7 +201,11 @@ def reached_through(path: Path, inside: str, mounts: dict[Path, str]) -> Path | 
     return max(reaching, key=lambda root: len(root.parts), default=None)
 
 
-def resolved(writable: dict[Path, str], read_only: dict[Path, str]) -> Lease:
+def resolved(
+    writable: dict[Path, str],
+    read_only: dict[Path, str],
+    pinned: dict[Path, str] = {},
+) -> Lease:
     """One path, one mode, settled toward writable, and stated once.
 
     Two ways to arrive at the same collision, and neither is hypothetical.
@@ -218,20 +235,81 @@ def resolved(writable: dict[Path, str], read_only: dict[Path, str]) -> Lease:
     rests on; so does a writable checkout inside a read-only directory inside
     a writable share, which stays writable because the mount between them is
     the one that would otherwise answer for it.
-    """
-    settled = {
-        path: inside for path, inside in read_only.items() if path not in writable
-    }
 
-    def stated_once(mode: dict[Path, str]) -> dict[Path, str]:
+    ``pinned`` is the one exception to stating a mount once, and on purpose:
+    a pinned path is kept as its own mount however redundant its mode,
+    because what it is for is being a mount point. It is writable, so a path
+    named both ways is stated as pinned alone.
+    """
+    unpinned = {path: inside for path, inside in writable.items() if path not in pinned}
+    settled = {
+        path: inside
+        for path, inside in read_only.items()
+        if path not in writable and path not in pinned
+    }
+    every = {**unpinned, **pinned, **settled}
+
+    def stated_once(mode: dict[Path, str], same: dict[Path, str]) -> dict[Path, str]:
         """This mode's mounts, less the ones an enclosing mount already makes."""
         return {
             path: inside
             for path, inside in mode.items()
-            if reached_through(path, inside, {**writable, **settled}) not in mode
+            if reached_through(path, inside, every) not in same
         }
 
-    return Lease(writable=stated_once(writable), read_only=stated_once(settled))
+    return Lease(
+        writable=stated_once(unpinned, {**unpinned, **pinned}),
+        read_only=stated_once(settled, settled),
+        pinned=dict(pinned),
+    )
+
+
+def rooted(lease: Lease) -> Lease:
+    """This lease with every hold's path held in place, not only the hold itself.
+
+    A read-only mount refuses writes to what it covers. It does not stop the
+    directory *holding* it from being renamed, and a directory with mounts
+    beneath it can be: measured, ``mv .lup .lup2`` succeeded with
+    ``.lup/preflight`` held read-only inside, and nothing then stopped a new
+    ``.lup/preflight`` being written where the host reads it. The same is
+    true of a pinned directory's parent. So every directory between a hold
+    and the writable mount enclosing it is pinned too — a mount point cannot
+    be renamed or removed from inside — and each hold is then reachable only
+    by the path the host reads it by.
+
+    Nothing is pinned inside a read-only mount, where nothing can be renamed
+    anyway, so this never makes a path writable that was not.
+    """
+    mounts = {**lease.mounted_writable(), **lease.read_only}
+    writable = lease.mounted_writable()
+
+    def between(held: Path) -> list[Path]:
+        """The directories from the mount enclosing ``held`` down to its parent."""
+        enclosing = max(
+            (mount for mount in mounts if mount in held.parents),
+            key=lambda mount: len(mount.parts),
+            default=None,
+        )
+        if enclosing is None or enclosing not in writable:
+            return []
+        return [
+            directory for directory in held.parents if enclosing in directory.parents
+        ]
+
+    return resolved(
+        lease.writable,
+        lease.read_only,
+        {
+            **lease.pinned,
+            **same_path(
+                [
+                    directory
+                    for held in [*lease.read_only, *lease.pinned]
+                    for directory in between(held)
+                ]
+            ),
+        },
+    )
 
 
 def merged(leases: list[Lease]) -> Lease:
@@ -245,6 +323,7 @@ def merged(leases: list[Lease]) -> Lease:
     return resolved(
         {path: inside for lease in leases for path, inside in lease.writable.items()},
         {path: inside for lease in leases for path, inside in lease.read_only.items()},
+        {path: inside for lease in leases for path, inside in lease.pinned.items()},
     )
 
 
@@ -400,6 +479,131 @@ def lease_for(worktree: Path) -> Lease:
     return resolved(same_path(writable), same_path(read_only))
 
 
+class NestedRepository(BaseModel, frozen=True):
+    """A repository kept inside the checkout, whose git state the host still runs.
+
+    The checkout's own ``config`` and ``hooks/`` are held because the host's
+    next git command runs what they name. A repository inside the checkout —
+    a directory of generated work with its own history, say — has the same
+    two files under the checkout's writable mount, and the operator runs git
+    there too, so it is held the same way.
+
+    Declared rather than found by scanning, for three reasons. A scan reads
+    a tree the session writes, so the session would choose what its next
+    launch mounts: a thousand planted ``.git`` directories is a launch that
+    cannot start, the argument that makes :class:`AccessibleRoot` a
+    declaration. A scan holds a repository from the launch *after* it
+    appears, so the session that made it wrote its configuration unheld and
+    the next launch protects whatever that session left there; a declared
+    one is created by the host first when ``create`` asks, and its
+    configuration is the host's from the first session on. And a scan walks
+    every ignored directory — environments, package caches — at every launch,
+    for an answer the project already has.
+    """
+
+    path: PurePosixPath = Field(description="Where it sits, relative to the checkout")
+    create: bool = Field(
+        default=False,
+        description=(
+            "Initialize it on the host when a launch finds it absent, so no "
+            "session is ever the one that wrote its configuration"
+        ),
+    )
+
+    @field_validator("path")
+    @classmethod
+    def inside_the_checkout(cls, value: PurePosixPath) -> PurePosixPath:
+        """Refuse a path that would name the checkout itself or reach outside it."""
+        if value.is_absolute() or ".." in value.parts or value == PurePosixPath("."):
+            raise ValueError(
+                f"nested repository {value.as_posix()!r} must name a directory "
+                "inside the checkout, relative to its root"
+            )
+        return value
+
+
+def held_repository(checkout: Path) -> Lease:
+    """The mounts that keep one checkout's git configuration where git reads it.
+
+    Holding ``config`` and ``hooks/`` read-only answers for the files. It
+    does not answer for where git looks for them, and a session can move
+    that — each of these was measured, with a planted alias running on the
+    next git command:
+
+    - renaming the git directory, which is allowed while mounts sit beneath
+      it, then making a new one with a configuration of the session's own;
+    - planting ``commondir`` in the git directory, which git follows to
+      read ``config`` from wherever it names;
+    - rewriting a linked worktree's ``.git`` pointer, or its administrative
+      ``commondir``, to the same end.
+
+    So ``commondir`` is held read-only too, as a file naming the directory
+    itself: ``.``, which git reads as no redirection at all. Measured neutral
+    for status, add, commit, log, ``worktree add``, ``list`` and ``remove``,
+    ``gc`` and ``fsck``, in a plain repository, a bare one, and from a linked
+    worktree of each. :func:`anchored` makes the file on the host before any
+    mount names it, and :func:`rooted` pins every directory between these
+    holds and the mount enclosing them, the git directory among them, so
+    none of them can be moved from under the host.
+
+    A linked worktree's pointer and administrative files are held with them,
+    which costs one thing: ``git worktree remove``, ``move`` and ``repair``
+    of *this* checkout from inside the session, since each rewrites or
+    unlinks a file held here. Its siblings keep theirs writable — removing a
+    sibling from inside is ordinary work — and that is the residual: a
+    sibling's pointer rewritten from here is a configuration the host reads
+    at its next git command in that sibling.
+    """
+    layout = repository_layout(checkout)
+    anchors = [
+        layout.common / "config",
+        layout.common / "hooks",
+        layout.common / "commondir",
+    ]
+    pointers = (
+        [layout.private / "commondir", layout.private / "gitdir", checkout / ".git"]
+        if layout.linked()
+        else []
+    )
+    return Lease(read_only=same_path([*anchors, *pointers]))
+
+
+def anchored(checkout: Path) -> None:
+    """Make on the host what :func:`held_repository` mounts, or refuse a redirected one.
+
+    A bind whose source is missing refuses the whole container, so the
+    ``commondir`` naming the directory itself is written here when absent,
+    and a ``hooks/`` directory made where ``git init`` was told not to make
+    one. A ``commondir`` naming anywhere else in a repository's own git
+    directory is the redirection itself, left by a session that was not held
+    at the time, and holding it read-only would keep it: refused, with the
+    file named, for the operator to remove on the host. So is a linked
+    worktree whose administrative directory is not among its repository's
+    worktrees, which is the other shape the same redirection takes.
+    """
+    layout = repository_layout(checkout)
+    if layout.linked() and layout.private.parent != layout.common / "worktrees":
+        raise ValueError(
+            f"{checkout} reads its git configuration from {layout.common}, "
+            f"which does not list {layout.private} among its worktrees. A "
+            f"`commondir` or `.git` pointer was rewritten; repair it on the "
+            "host with `git worktree repair`, or remove a planted "
+            "`commondir`, and launch again."
+        )
+    commondir = layout.common / "commondir"
+    if commondir.exists() and commondir.read_text(encoding="utf-8").splitlines() != [
+        "."
+    ]:
+        raise ValueError(
+            f"{commondir} points this repository's git configuration somewhere "
+            "else. A repository's own git directory names itself there or has "
+            "no such file; remove it on the host and launch again."
+        )
+    if not commondir.exists():
+        commondir.write_text(".\n", encoding="utf-8")
+    (layout.common / "hooks").mkdir(exist_ok=True)
+
+
 def worker_lease(worktree: Path) -> Lease:
     """The mounts that confine one worker to the tree it was given.
 
@@ -488,7 +692,7 @@ def demoted(lease: Lease) -> Lease:
     nobody may move either, and the alternative is a mode that refuses the
     file while admitting the thing that rewrites it.
     """
-    return Lease(read_only={**lease.writable, **lease.read_only})
+    return Lease(read_only={**lease.writable, **lease.pinned, **lease.read_only})
 
 
 def accessible_lease(root: AccessibleRoot) -> Lease:

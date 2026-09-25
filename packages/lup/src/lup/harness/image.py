@@ -45,6 +45,7 @@ from lup.harness.messaging import SessionInboxes
 from lup.harness.requirements import Manifest, Package, PackageManager
 from lup.harness.services import HostServices
 from lup.harness.terminal import TerminalHandoff
+from lup.sandbox.rail import NestedRepository
 from lup.types import EnvVars, JsonObject
 
 
@@ -488,6 +489,41 @@ def detected_client(
     )
 
 
+class HeldPaths(BaseModel, frozen=True):
+    """What a project asks its contained sessions to read and never rewrite.
+
+    Every contained session is held from two things already, without being
+    asked: its repository's git configuration and hooks, with the places git
+    looks for them, and the record its launch keeps under ``.lup/`` for the
+    session's gates to believe. Those cost a session nothing it does. These
+    are the holds a project opts into, because each costs its sessions
+    something a project that has not moved that work elsewhere still needs.
+    """
+
+    generated: bool = Field(
+        default=False,
+        description=(
+            "Hold the generated trees read-only: every file the ownership "
+            "proof lists, each plugin's directory whole. A session then edits "
+            "the declarations and never the trees, and the next launch "
+            "compiles them — so regenerating from inside fails, as does any "
+            "git command that rewrites a generated file in the working tree: "
+            "switching to a branch whose trees differ, a merge or rebase "
+            "touching them, a reset or stash restoring them. Off by default "
+            "because regenerating is an ordinary session's work in a project "
+            "whose launches do not compile for it"
+        ),
+    )
+    repositories: list[NestedRepository] = Field(
+        default=[],
+        description=(
+            "Repositories kept inside the checkout, each held as the "
+            "checkout's own is: its git configuration and hooks read-only, "
+            "and it and its git directory pinned where git looks for them"
+        ),
+    )
+
+
 class Image(BaseModel, frozen=True):
     """The container image and the run it is started with, declared together.
 
@@ -869,6 +905,13 @@ class Image(BaseModel, frozen=True):
             "bound sits beside it on purpose: work that renders or compiles "
             "wants every core, and a starved session is a slow one rather than "
             "a host brought down"
+        ),
+    )
+    held: HeldPaths = Field(
+        default=HeldPaths(),
+        description=(
+            "What a contained session reads and never rewrites, beyond the "
+            "git configuration and launch record every session is held from"
         ),
     )
     trusted_projects: list[Path] = Field(

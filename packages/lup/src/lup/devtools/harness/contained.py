@@ -39,7 +39,13 @@ from rich.live import Live
 from rich.text import Text
 
 from lup.devtools.harness.posture import SettingOrigins, origin_said
-from lup.devtools.harness.preflight import LaunchSentinels, ROOT_VARIABLE
+from lup.devtools.harness.preflight import (
+    LaunchSentinels,
+    ROOT_VARIABLE,
+    ledger_directory,
+    mount_table,
+)
+from lup.execution.shell import git
 from lup.harness.credential import committer, fleet_rewrites
 from lup.harness.devices import (
     Device,
@@ -55,19 +61,27 @@ from lup.harness.image import (
     detected_client,
 )
 from lup.harness.notice import Banner, Notice
+from lup.harness.ownership import OwnershipManifestError, generated_artifacts
 from lup.harness.releases import resolved_agent_clis
 from lup.harness.requirements import Manifest
 from lup.harness.terminal import host_timezone
+from lup.policy.snapshots import snapshot_directory
 from lup.providers.login import NativeHomeScope, ProviderLogin
 from lup.sandbox.attribution import WRITE_REFUSAL_MARKERS
 from lup.sandbox.rail import (
     AccessibleRoot,
     Lease,
+    NestedRepository,
+    anchored,
     demoted,
     fleet_lease,
+    held_repository,
     hold_pruning_across,
+    in_repository,
     merged,
     repository_layout,
+    rooted,
+    same_path,
     worker_lease,
 )
 
@@ -777,7 +791,7 @@ def record_boundary(
     this file, and a GPU that was withheld is the difference between a
     result and a run that fell back to the host without saying so.
     """
-    ledger = root / ".lup" / "boundary.json"
+    ledger = mount_table(root)
     ledger.parent.mkdir(parents=True, exist_ok=True)
     ledger.write_text(
         json.dumps(
@@ -789,6 +803,172 @@ def record_boundary(
             },
             indent=2,
         )
+    )
+
+
+def launch_record(root: Path) -> list[Path]:
+    """What a launch writes under ``.lup/`` for its session's gates to believe.
+
+    The measurement ledger, the destination policies a launch accepted, and
+    the mount table. Each is written on the host — by the launcher, or by
+    ``harness policy-refresh`` from an operator's terminal, which refuses to
+    run inside a session — and only read inside, by the hooks: which
+    boundary this session stands behind, which policy judges a destination
+    repository, why a write was refused. A session that could write them
+    could copy in a ledger naming a policy of its own, so they are held
+    read-only; nothing a session legitimately does writes them, which is why
+    holding them costs even a session without hooks nothing.
+
+    Beside them and deliberately not held, each with a writer inside the
+    session: the question relay, ``.lup/questions.jsonl``, where a gated
+    session's hooks post the asks an operator answers; the review claims
+    they take when an answer is spent; the approvals record,
+    ``.lup/hooks/approvals.jsonl``, where they note what was asked and what
+    ran — observations that grant nothing, read back only to list them; and
+    the learned corpus and script counter the hooks keep.
+
+    Made to exist here, because a bind whose source is missing refuses the
+    whole container: both directories, and the table's file, which
+    :func:`record_boundary` then writes before the container starts.
+    """
+    directories = [ledger_directory(root), snapshot_directory(root)]
+    for directory in directories:
+        directory.mkdir(parents=True, exist_ok=True)
+    table = mount_table(root)
+    table.touch(exist_ok=True)
+    return [*directories, table]
+
+
+class ContainerLease(BaseModel, frozen=True):
+    """The mounts a container runs under, and what its launch says about them."""
+
+    lease: Lease
+    notices: list[Notice] = []
+
+
+def container_lease(
+    root: Path,
+    image: Image,
+    lease: Lease,
+    read_only: dict[Path, str] = {},
+) -> ContainerLease:
+    """Everything a container mounts from the host: its lease, the launch's own, and every hold.
+
+    ``lease`` is what the container may reach — a session's over its whole
+    repository, a worker's over its own tree — and ``read_only`` what the
+    launch adds, each mounted at the path inside it maps to. The holds are
+    punched into that, and only where it would let a path be written: a hold
+    narrows what a container writes and never widens what it reaches, so a
+    worker whose lease holds the operator's checkout read-only gains nothing
+    from the operator's holds.
+
+    Three kinds. The launch record, :func:`launch_record`, always. The git
+    configuration of the checkout the container opens on, and of each
+    repository the image declares inside it, always — see
+    :func:`~lup.sandbox.rail.held_repository`, and
+    :func:`~lup.sandbox.rail.anchored` for what is made on the host first.
+    And the generated trees, where the image asks for them.
+
+    A mount the launch adds wins where it and a hold name one path inside:
+    a mode's guidance is mounted over the committed document, and holding
+    the committed document there as well would leave the engine to settle
+    two mounts at one target by order.
+    """
+    said: list[Notice] = []
+    taken = set(read_only.values())
+
+    def within(held: Lease) -> Lease:
+        """This hold, less what the lease would not let be written anyway."""
+        return Lease(
+            pinned={
+                path: inside
+                for path, inside in held.pinned.items()
+                if lease.writable_at(path)
+            },
+            read_only={
+                path: inside
+                for path, inside in held.read_only.items()
+                if lease.writable_at(path) and inside not in taken
+            },
+        )
+
+    def repository(checkout: Path) -> Lease:
+        """One repository's holds, with what they mount made on the host first."""
+        held = within(held_repository(checkout))
+        if not held.pinned and not held.read_only:
+            return held
+        try:
+            anchored(checkout)
+        except ValueError as refusal:
+            raise typer.BadParameter(str(refusal)) from refusal
+        return held
+
+    def nested(declared: NestedRepository) -> Lease:
+        """A declared repository's holds, initialized first where it asks to be."""
+        checkout = root / declared.path
+        if not (checkout / ".git").exists():
+            if not declared.create:
+                said.append(
+                    Notice(
+                        text=(
+                            f"Nested repository {declared.path}: not there, so "
+                            "nothing held; a session that makes it writes its "
+                            "configuration unheld"
+                        ),
+                        urgency="boundary",
+                    )
+                )
+                return Lease()
+            checkout.mkdir(parents=True, exist_ok=True)
+            git("init", "-q", str(checkout))
+            said.append(
+                Notice(
+                    text=f"Nested repository {declared.path}: initialized on the host",
+                    urgency="boundary",
+                )
+            )
+        return repository(checkout)
+
+    def generated() -> Lease:
+        """The generated trees, file by file and plugin by plugin, where asked for."""
+        if not image.held.generated:
+            return Lease()
+        try:
+            owned = generated_artifacts(root).held()
+        except OwnershipManifestError as error:
+            raise typer.BadParameter(str(error)) from error
+        said.append(
+            Notice(
+                text=(
+                    "Generated trees: read-only in this session; edit the "
+                    "declarations, and the next launch compiles them"
+                ),
+                urgency="boundary",
+            )
+        )
+        return Lease(
+            read_only=same_path(
+                [root / path for path in owned if (root / path).exists()]
+            )
+        )
+
+    holds = [
+        Lease(read_only=same_path(launch_record(root))),
+        repository(root) if in_repository(root) else Lease(),
+        *(nested(declared) for declared in image.held.repositories),
+        generated(),
+    ]
+    return ContainerLease(
+        lease=rooted(
+            merged(
+                [
+                    lease,
+                    Lease(read_only=dict(read_only)),
+                    *(within(held) for held in holds),
+                ]
+            )
+        ),
+        notices=said,
     )
 
 
@@ -1792,12 +1972,14 @@ def contained_argv(
     said.add(
         image.browser.notice(handing is not None, image.egress.shares_host_loopback())
     )
-    lease = merged(
-        [
-            lease if lease is not None else fleet_lease(root, accessible),
-            Lease(read_only=dict(read_only)),
-        ]
+    held = container_lease(
+        root,
+        image,
+        lease if lease is not None else fleet_lease(root, accessible),
+        read_only,
     )
+    lease = held.lease
+    said.add(held.notices)
     said.add(fleet_notice(accessible))
     said.add(
         pruning_notice(hold_pruning_across([root, *(item.path for item in accessible)]))
@@ -1872,7 +2054,7 @@ def contained_argv(
         checkout=root,
         uid=root.stat().st_uid,
         gid=root.stat().st_gid,
-        writable=lease.writable,
+        writable=lease.mounted_writable(),
         read_only=lease.read_only,
         state_volume=state_volume_name(root, state_scope),
         config_home_env=login.config_home_env,

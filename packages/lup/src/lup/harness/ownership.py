@@ -120,6 +120,33 @@ class GeneratedArtifacts(BaseModel, frozen=True):
         """The artifact generated at ``path``, where the generator owns one."""
         return self.by_path.get(path)
 
+    def held(self, homes: Collection[str] = ADAPTER_HOMES) -> list[Path]:
+        """What a session is held from rewriting: each plugin whole, every other file alone.
+
+        A plugin's directory, ``<home>/plugins/<name>``, is where both
+        runtimes' recipes write the plugin they compile, and nothing else
+        lives there — so it is held as one directory, which also refuses a
+        file planted beside the generated ones, a skill the runtime would
+        load that no declaration made. Everything else the proof lists sits
+        among files that are not generated — ``settings.local.json`` beside
+        the project settings — and is held file by file.
+        """
+        plugins = [Path(home) / "plugins" for home in homes]
+
+        def unit(path: Path) -> Path:
+            """The plugin directory holding this artifact, or the artifact itself."""
+            return next(
+                (
+                    directory / path.relative_to(directory).parts[0]
+                    for directory in plugins
+                    if directory in path.parents
+                    and len(path.relative_to(directory).parts) > 1
+                ),
+                path,
+            )
+
+        return sorted({unit(Path(path)) for path in self.by_path})
+
 
 def proof_artifact(root: Path, proof: Path) -> OwnedArtifact:
     """The manifest, as the generated artifact it is but never lists.

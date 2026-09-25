@@ -71,7 +71,12 @@ class LaunchSentinels(BaseModel, frozen=True):
         return {SENTINEL_VARIABLE: self.host, NONCE_VARIABLE: self.nonce}
 
 
-def ledger_path(root: Path, nonce: str, ledger: str = ".lup/preflight") -> Path:
+def ledger_directory(root: Path, ledger: str = ".lup/preflight") -> Path:
+    """Where every launch in this checkout writes its measurement, one file each."""
+    return root / ledger
+
+
+def ledger_path(root: Path, nonce: str) -> Path:
     """Where this launch's measurement is written, named for the launch.
 
     Named rather than shared, and that is not tidiness. One file per checkout
@@ -80,7 +85,12 @@ def ledger_path(root: Path, nonce: str, ledger: str = ".lup/preflight") -> Path:
     same class of wrong answer as an inherited variable, arrived at from the
     other direction.
     """
-    return root / ledger / f"{nonce}.json"
+    return ledger_directory(root) / f"{nonce}.json"
+
+
+def mount_table(root: Path, ledger: str = ".lup/boundary.json") -> Path:
+    """Where a contained launch writes the mount table its gate explains refusals from."""
+    return root / ledger
 
 
 def record_preflight(
@@ -160,7 +170,7 @@ def reopened(
     return [*argv, resume]
 
 
-def retire_mount_table(root: Path, ledger: str = ".lup/boundary.json") -> None:
+def retire_mount_table(root: Path) -> None:
     """Take away a mount table that describes a boundary this launch is not behind.
 
     ``record_boundary`` writes the table on every *contained* launch and
@@ -172,7 +182,7 @@ def retire_mount_table(root: Path, ledger: str = ".lup/boundary.json") -> None:
     rewriting as the answer -- this is the half of that answer the posture
     with no table to write was missing.
     """
-    (root / ledger).unlink(missing_ok=True)
+    mount_table(root).unlink(missing_ok=True)
 
 
 def release_ledger(root: Path, nonce: str) -> None:
@@ -199,7 +209,7 @@ def sweep_ledgers(root: Path, older_than: timedelta = timedelta(days=7)) -> int:
     somebody is still using, which is the property that makes sweeping safe to
     do on the way in.
     """
-    directory = root / ".lup" / "preflight"
+    directory = ledger_directory(root)
     if not directory.is_dir():
         return 0
     cutoff = datetime.now(UTC) - older_than
