@@ -57,12 +57,16 @@ value. [harness.md](harness.md) walks that pipeline, and
 [platform-differentiation.md](platform-differentiation.md) records every
 difference the seam admits.
 
-## Structured output has one mechanism
+## Structured output has one contract
 
-Each typed turn binds `submit_output` to its Pydantic schema and a fresh
-store; native structured-output modes remain off. Validation and an optional
-reflection gate run before persistence. A missing submission cannot be
-represented as a successful typed result.
+A typed turn is asked for a Pydantic model, and its result either carries a
+validated instance of it or the turn raises. Each adapter carries the schema
+the way its runtime can hold it: on Claude the turn binds `submit_output` to
+the schema and a fresh store, with native structured output off; on Codex the
+schema rides the turn's own strict `outputSchema`, or an `output_json` string
+carrier where the schema falls outside the strict subset. Either way the same
+Pydantic validation and optional reflection gate run before persistence, and a
+missing submission cannot be represented as a successful typed result.
 
 ## Agents are chosen, never inferred
 
