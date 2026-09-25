@@ -40,7 +40,7 @@ from lup.devtools.supervisor.doors import (
     show_status,
 )
 from lup.devtools.supervisor.page import SUPERVISOR_PORT
-from lup.providers.profiles import ProfileDirectory
+from lup.providers.profiles import DefaultHomeProfile, ProfileDirectory
 from lup.workspace.paths import project_root
 
 
@@ -347,6 +347,12 @@ def create_resolve_app(
             admitted, run_id, answer or [], start_new
         ):
             return
+        # Resolved before a detached child is started, which resolves it again
+        # and would meet a refused profile after this command reported a run.
+        try:
+            account = directory.account(profile)
+        except (KeyError, DefaultHomeProfile) as error:
+            raise typer.BadParameter(str(error), param_hint="--profile") from error
         if detach:
             if adapter is None:
                 raise typer.BadParameter(
@@ -396,7 +402,7 @@ def create_resolve_app(
             # core still holds a composition, so ending a run without the flag
             # takes the first declared adapter and never asks it for anything.
             targets.resolve(adapter or next(iter(targets.builders)), project_root())[0],
-            directory.account(profile),
+            account,
             run_id,
             answer or [],
             abort,

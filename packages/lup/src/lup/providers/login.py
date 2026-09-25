@@ -103,6 +103,16 @@ class ProviderLogin(BaseModel, frozen=True):
     environment selected" and this is not consulted.
     """
 
+    ambient_home_nameable: bool = True
+    """Whether naming ``ambient_home`` outright selects what naming nothing does.
+
+    ``False`` where the runtime reads state beside that home only while the
+    variable is unset, so a session pointed at the very home it would have
+    chosen anyway opens on state its account never wrote. No profile may name
+    such a home: the one account it could mean is the one naming no profile
+    already selects, and leaving the profile unset is how to reach it.
+    """
+
     editor_lockfiles: str = ""
     """Subdirectory of the configuration home an editor rendezvous sits in.
 
@@ -138,6 +148,17 @@ class ProviderLogin(BaseModel, frozen=True):
         """
         named = environ.get(self.config_home_env, "")
         return Path(named) if named else self.ambient_home
+
+    def nameable(self, home: Path) -> bool:
+        """Whether a profile may point this runtime at that home by name.
+
+        Both sides are expanded and resolved before they are compared, so a
+        spelling with ``~`` or ``..``, and a symlink onto the ambient home,
+        all name the ambient home.
+        """
+        return self.ambient_home_nameable or (
+            home.expanduser().resolve() != self.ambient_home.expanduser().resolve()
+        )
 
     def editor_rendezvous(self, environ: StringMap) -> Path | None:
         """Where an editor on this machine keeps its lockfiles, if it can.

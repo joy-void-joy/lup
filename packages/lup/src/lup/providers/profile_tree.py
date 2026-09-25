@@ -108,7 +108,9 @@ class TreeProfileRegistrar(ProfileRegistrar):
         caller naming one elsewhere is asking for something a directory
         profile cannot be rather than for a variation on one. An account
         whose home already exists elsewhere is reached by making that path a
-        symlink, which resolves like any other.
+        symlink, which resolves like any other — except onto the runtime's
+        default home, which the directory refuses however it is reached,
+        because naming no profile is what selects that account.
 
         The first profile a project starts becomes its selection, matching
         what registering the first account into a personal registry does:
@@ -119,7 +121,9 @@ class TreeProfileRegistrar(ProfileRegistrar):
             raise ValueError(
                 f"a directory profile keeps its configuration home at {home}, "
                 f"derived from the name — {config_dir} cannot be one; symlink "
-                "that path to point this profile at a home already elsewhere"
+                "that path to point this profile at a home already elsewhere, "
+                "other than the runtime's default home, which naming no profile "
+                "already selects"
             )
         home.mkdir(parents=True, exist_ok=True)
         if self.folders.active() is None:

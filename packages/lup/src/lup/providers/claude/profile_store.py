@@ -18,7 +18,7 @@ from lup.providers.claude.config import (
     ClaudeProfileSelection,
 )
 from lup.providers.claude.login import CLAUDE_LOGIN
-from lup.providers.profiles import ProfileNames, ProfileRegistrar
+from lup.providers.profiles import ProfileNames, ProfileRegistrar, named_home
 
 REGISTRY_PATH = Path.home() / ".lup" / "profiles.json"
 
@@ -65,12 +65,19 @@ class AccountFile:
         publish_atomic(self.registry_path, registry)
 
     def resolver_registry(self) -> ClaudeProfileRegistry:
-        """Project personal storage into immutable runtime selection data."""
+        """Project personal storage into immutable runtime selection data.
+
+        A stored profile naming the default home has no projection, since a
+        typed selection cannot hold one; it is refused by name here, before
+        the selection would refuse it without one.
+        """
         registry = self.load_registry()
         return ClaudeProfileRegistry(
             profiles={
                 name: ClaudeProfileSelection(
-                    config_directory=Path(account.config_dir).expanduser()
+                    config_directory=named_home(
+                        CLAUDE_LOGIN, name, Path(account.config_dir).expanduser()
+                    )
                 )
                 for name, account in registry.profiles.items()
             },
@@ -78,24 +85,27 @@ class AccountFile:
         )
 
     def resolve_config_dir(self, name: str | None = None) -> Path:
-        """Resolve explicit, active, then default through the typed registry.
+        """Resolve explicit, active, then default, as the typed registry does.
 
         The default names no home, so it answers with the one the process
         environment selects: the home a session opened under that default
         runs in, which a reader of its login has to agree with.
+
+        Only the profile resolved is judged, rather than the whole registry
+        projected first: one stored profile naming the default home refuses
+        itself, and a different name beside it still resolves, as it does
+        for a launch.
         """
-        registry = self.resolver_registry()
+        registry = self.load_registry()
         selected = name or registry.active
+        if selected is None:
+            # lup: ignore[os-environ] — the environment an unnamed profile inherits
+            return CLAUDE_LOGIN.selected_home(dict(os.environ))
         try:
-            selection = (
-                registry.default if selected is None else registry.profiles[selected]
-            )
+            account = registry.profiles[selected]
         except KeyError as error:
             raise KeyError(f"unknown Claude profile {selected!r}") from error
-        if selection.config_directory is not None:
-            return selection.config_directory
-        # lup: ignore[os-environ] — the environment an unnamed profile inherits
-        return CLAUDE_LOGIN.selected_home(dict(os.environ))
+        return named_home(CLAUDE_LOGIN, selected, Path(account.config_dir).expanduser())
 
 
 class ClaudeProfileNames(ProfileNames):
@@ -116,14 +126,22 @@ class ClaudeProfileNames(ProfileNames):
 
 
 class ClaudeProfileRegistrar(ProfileRegistrar):
-    """Atomically add, select, and forget accounts in the personal registry."""
+    """Atomically add, select, and forget accounts in the personal registry.
+
+    A profile naming the default home is refused on the way in and on being
+    selected, and forgetting it stays open: that is how a registry written
+    before the refusal is repaired.
+    """
 
     def __init__(self, accounts: AccountFile | None = None) -> None:
         self.accounts = accounts or AccountFile()
 
     def add_profile(self, name: str, config_dir: Path | None = None) -> Path:
-        home = (
-            config_dir if config_dir is not None else self.accounts.homes_root() / name
+        home = named_home(
+            CLAUDE_LOGIN,
+            name,
+            config_dir if config_dir is not None else self.accounts.homes_root() / name,
+            registered=False,
         )
         registry = self.accounts.load_registry()
         profiles = dict(registry.profiles)
@@ -142,6 +160,7 @@ class ClaudeProfileRegistrar(ProfileRegistrar):
         registry = self.accounts.load_registry()
         if name not in registry.profiles:
             raise KeyError(name)
+        named_home(CLAUDE_LOGIN, name, Path(registry.profiles[name].config_dir))
         self.accounts.save_registry(registry.model_copy(update={"active": name}))
 
     def remove_profile(self, name: str) -> None:

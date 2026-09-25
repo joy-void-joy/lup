@@ -20,6 +20,7 @@ from lup.providers.claude.profile_store import (
     ClaudeProfileNames,
     ClaudeProfileRegistrar,
 )
+from lup.providers.profiles import DefaultHomeProfile
 
 
 @pytest.fixture
@@ -109,6 +110,23 @@ def test_unknown_profile_resolution_is_a_loud_error(
 
     with pytest.raises(KeyError, match="unknown Claude profile 'ghost'"):
         accounts.resolve_config_dir("ghost")
+
+
+def test_a_stored_default_home_refuses_itself_rather_than_its_neighbours(
+    accounts: AccountFile,
+) -> None:
+    """Resolution judges the name asked for, as a launch does, not the whole file."""
+    accounts.registry_path.write_text(
+        '{"profiles":{"main":{"config_dir":"~/.claude"},'
+        '"work":{"config_dir":"/homes/work-claude"}},"active":"main"}',
+        encoding="utf-8",
+    )
+
+    assert accounts.resolve_config_dir("work") == Path("/homes/work-claude")
+    with pytest.raises(KeyError, match="unknown Claude profile 'ghost'"):
+        accounts.resolve_config_dir("ghost")
+    with pytest.raises(DefaultHomeProfile, match="profile 'main'"):
+        accounts.resolve_config_dir()
 
 
 def test_registry_updates_replace_the_file_atomically(

@@ -25,13 +25,15 @@ def create_profile_app(directory: ProfileDirectory) -> typer.Typer:
     def acting(act: Callable[[], Profile]) -> Profile:
         """Answer for what an origin refuses, rather than tracebacking.
 
-        Both refusals arrive already worded: :class:`UnknownProfile` carries
-        the roster a launcher reports the same way, and an origin that
-        derives its profiles from something else — a directory the project
-        keeps, rather than a registry of its own — cannot honour every
-        curation the tree offers and says so with a ``ValueError`` whose
-        message is the explanation. Rendering theirs is what keeps this tree
-        and the launcher from wording the same refusal two ways.
+        Every refusal arrives already worded: :class:`UnknownProfile` carries
+        the roster a launcher reports the same way, :class:`DefaultHomeProfile`
+        refuses a profile naming the default home in the words a launch
+        refuses it in, and an origin that derives its profiles
+        from something else — a directory the project keeps, rather than a
+        registry of its own — cannot honour every curation the tree offers
+        and says so with a ``ValueError`` whose message is the explanation.
+        Rendering theirs is what keeps this tree and the launcher from wording
+        the same refusal two ways.
         """
         try:
             return act()
@@ -58,7 +60,8 @@ def create_profile_app(directory: ProfileDirectory) -> typer.Typer:
             typer.Option(
                 "--config-dir",
                 help="Configuration home to register, instead of the one this "
-                "project would keep for that name",
+                "project would keep for that name; never the runtime's default "
+                "home, which naming no profile already selects",
             ),
         ] = None,
     ) -> None:
