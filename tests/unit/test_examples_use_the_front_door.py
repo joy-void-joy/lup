@@ -77,6 +77,46 @@ def test_no_example_opens_a_session_through_an_adapter(path: Path) -> None:
     assert not openers, f"{path.name} imports {openers[0][1]!r}, an internal engine"
 
 
+def imported_modules(tree: ast.Module) -> list[str]:
+    """Every module the file imports, whichever statement spells it."""
+    modules: list[str] = []
+    for node in ast.walk(tree):
+        match node:
+            case ast.ImportFrom(module=str(module)):
+                modules.append(module)
+            case ast.Import(names=aliases):
+                modules.extend(alias.name for alias in aliases)
+            case _:
+                pass
+    return modules
+
+
+@pytest.mark.parametrize("path", example_sources(), ids=lambda p: p.name)
+def test_an_example_imports_the_library_not_this_application(path: Path) -> None:
+    """An example runs wherever lup is installed, so it reads nothing under `src/`.
+
+    What it demonstrates is the library; a value it needs from a project — a
+    hook set, a vocabulary — it declares itself. Reaching into this
+    repository's application package makes the example one only this checkout
+    can run.
+    """
+    applications = [
+        package.name
+        for package in (EXAMPLES.parent / "src").iterdir()
+        if (package / "__init__.py").is_file()
+    ]
+    reached = [
+        module
+        for module in imported_modules(ast.parse(path.read_text(encoding="utf-8")))
+        if module.split(".")[0] in applications
+    ]
+
+    assert not reached, (
+        f"{path.name} imports {reached[0]!r} from this repository's application; "
+        "declare what the example needs in the example itself"
+    )
+
+
 def test_every_example_that_runs_a_turn_names_the_root() -> None:
     """Stated over the corpus, so the property cannot decay one file at a time.
 
