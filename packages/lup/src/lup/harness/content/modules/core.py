@@ -30,6 +30,7 @@ from lup.harness.content.docs import (
     orchestration,
     patterns,
     permissions,
+    trust,
 )
 from lup.harness.content.docs.catalog import page
 from lup.harness.content.modules.specs import CORE
@@ -49,12 +50,15 @@ def documents() -> list[DocumentEntry]:
     resolver's page, and no project stops publishing how an edit is judged.
     The quality pipeline is not among them: its subject is what has to be
     green before a branch lands, which is the git loop's, and it names that
-    module's hook installer.
+    module's hook installer. How a launch is approved before it runs on the
+    host is here too: every project launches, and the wall it describes stands
+    whichever workflows a project took.
     """
     return [
         page("library", "library.md", lambda context: library.document(context.layout)),
         page("architecture", "architecture.md", lambda _: architecture.DOCUMENT),
         page("permissions", "permissions.md", lambda _: permissions.DOCUMENT),
+        page("trust", "trust.md", lambda _: trust.DOCUMENT),
         page(
             "native_capabilities",
             "native-capabilities.md",

@@ -53,6 +53,7 @@ from lup.policy.kernel.edit import (
 )
 from lup.policy.relay import CapturedFileReview, PersistentQuestion, QuestionRelay
 from lup.policy.review import (
+    FilePreview,
     ReviewedFile,
     reviewed_files,
     reviewed_preview,
@@ -62,6 +63,21 @@ from lup.sandbox.rail import repository_layout, sibling_worktrees
 
 if TYPE_CHECKING:
     from fastapi import BackgroundTasks, FastAPI
+
+
+type ReviewPreview = Callable[[PersistentQuestion], FilePreview]
+"""How a reviewer's surface learns the files one question proposes to change.
+
+A seam rather than a call, because not every question carries its files in its
+own arguments. A parked tool call does, and :func:`captured_preview` reads them
+there; a launch question names two trees in a store only its launcher holds,
+and that launcher hands the inbox a reader for them.
+"""
+
+
+def captured_preview(question: PersistentQuestion) -> FilePreview:
+    """What a parked call proposes, read off its own arguments and preimages."""
+    return reviewed_preview(question, patch_review)
 
 
 class ReviewRoot(BaseModel, frozen=True):
@@ -99,11 +115,13 @@ class ReviewSummary(BaseModel, frozen=True):
 
     @classmethod
     def of(
-        cls, root: Path, question: PersistentQuestion, principal: str
+        cls,
+        root: Path,
+        question: PersistentQuestion,
+        principal: str,
+        preview: ReviewPreview = captured_preview,
     ) -> "ReviewSummary":
-        return cls.from_files(
-            root, question, principal, reviewed_files(question, patch_review)
-        )
+        return cls.from_files(root, question, principal, preview(question).files)
 
     @classmethod
     def from_files(
@@ -509,9 +527,20 @@ class ReviewDetail(BaseModel, frozen=True):
 
     @classmethod
     def of(
-        cls, root: Path, entry: PersistentQuestion, principal: str
+        cls,
+        root: Path,
+        entry: PersistentQuestion,
+        principal: str,
+        reading: ReviewPreview = captured_preview,
+        notified: bool = True,
     ) -> "ReviewDetail":
-        preview = reviewed_preview(entry, patch_review)
+        """Everything one question shows, its files read the way ``reading`` reads them.
+
+        ``notified`` is whether this surface keeps notification diagnostics at
+        all: a surface that never notifies anybody shows none rather than
+        reading a record some other surface may have left.
+        """
+        preview = reading(entry)
         files = [ReviewFile.of(change, entry.file_reviews) for change in preview.files]
         payload = entry.operation.payload
         requested = payload["command"] if "command" in payload else None
@@ -528,7 +557,9 @@ class ReviewDetail(BaseModel, frozen=True):
             command=command,
             preview_unavailable=preview.unavailable,
             preview_notice=preview.notice,
-            notification=ReviewNotifications(root=root).read(entry),
+            notification=ReviewNotifications(root=root).read(entry)
+            if notified
+            else None,
         )
 
 
@@ -888,9 +919,11 @@ class ReviewQueue(BaseModel, frozen=True):
     errors: list[ReviewError] = []
 
     @classmethod
-    def read(cls, root: Path) -> "ReviewQueue":
+    def read(
+        cls, root: Path, log: Path = Path(".lup/questions.jsonl")
+    ) -> "ReviewQueue":
         try:
-            return cls(root=root, questions=relay(root).questions())
+            return cls(root=root, questions=relay(root, log).questions())
         except (OSError, ValueError) as error:
             return cls(
                 root=root, errors=[ReviewError(root=str(root), message=str(error))]
@@ -898,11 +931,22 @@ class ReviewQueue(BaseModel, frozen=True):
 
 
 class ReviewStore(BaseModel, frozen=True):
-    """Read only operator-selected queues and answer their exact records."""
+    """Read only operator-selected queues and answer their exact records.
+
+    ``log`` is where each root's relay is read from: relative, the checkout's
+    own queue beneath each root; absolute, one relay kept somewhere else and
+    shown against the roots, which is how a launcher asks from its own state
+    about a checkout it does not trust yet. ``preview`` reads each question's
+    files, and ``notify`` is whether an answer is carried to a requester --
+    a question nobody is waiting on in a session has nobody to wake.
+    """
 
     roots: tuple[Path, ...]
     principal: str = "operator"
     discover: bool = False
+    log: Path = Path(".lup/questions.jsonl")
+    preview: ReviewPreview = captured_preview
+    notify: bool = True
 
     def scan_roots(self) -> ReviewScan:
         if not self.roots or not self.discover:
@@ -917,11 +961,11 @@ class ReviewStore(BaseModel, frozen=True):
         return self.scan_roots().roots
 
     def read_root(self, root: Path) -> ReviewInbox:
-        queue = ReviewQueue.read(root)
+        queue = ReviewQueue.read(root, self.log)
         return ReviewInbox(
             roots=[ReviewRoot.of(root)],
             reviews=[
-                ReviewSummary.of(root, entry, self.principal)
+                ReviewSummary.of(root, entry, self.principal, self.preview)
                 for entry in queue.questions
             ],
             errors=queue.errors,
@@ -944,7 +988,7 @@ class ReviewStore(BaseModel, frozen=True):
         from fastapi import HTTPException
 
         scan = self.scan_roots()
-        queues = [ReviewQueue.read(root) for root in scan.roots]
+        queues = [ReviewQueue.read(root, self.log) for root in scan.roots]
         for queue in queues:
             for entry in queue.questions:
                 if ReviewSummary.key_for(queue.root, entry.id) == key:
@@ -958,7 +1002,9 @@ class ReviewStore(BaseModel, frozen=True):
 
     def detail(self, key: str) -> ReviewDetail:
         located = self.locate(key)
-        return ReviewDetail.of(located.root, located.question, self.principal)
+        return ReviewDetail.of(
+            located.root, located.question, self.principal, self.preview, self.notify
+        )
 
     def answer(
         self,
@@ -979,13 +1025,24 @@ class ReviewStore(BaseModel, frozen=True):
         if decision.approved and (reason := stale_preimages(entry)):
             raise HTTPException(status_code=409, detail=reason)
         try:
-            settled = relay(located.root).answer(
+            settled = relay(located.root, self.log).answer(
                 entry.id, self.principal, decision.approved, decision.note
             )
         except ValueError as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
         if settled.answer is None:
             raise HTTPException(status_code=409, detail=f"Review is {settled.state}")
+        if not self.notify:
+            return ReviewDecision(
+                review=ReviewDetail.of(
+                    located.root, settled, self.principal, self.preview, notified=False
+                ),
+                notification=ReviewNotification(
+                    queued=False,
+                    woken=False,
+                    detail="Decision recorded; its asker reads it from the relay.",
+                ),
+            )
         notifications = ReviewNotifications(root=located.root)
         attempt = notifications.prepare(settled)
 
@@ -998,15 +1055,28 @@ class ReviewStore(BaseModel, frozen=True):
             background.add_task(notifications.complete, settled, attempt, deliver)
             notification = attempt.notification
         return ReviewDecision(
-            review=ReviewDetail.of(located.root, settled, self.principal),
+            review=ReviewDetail.of(located.root, settled, self.principal, self.preview),
             notification=notification,
         )
 
 
 def review_app(
-    url: str, token: str, roots: tuple[Path, ...], *, discover: bool = False
+    url: str,
+    token: str,
+    roots: tuple[Path, ...],
+    *,
+    discover: bool = False,
+    log: Path = Path(".lup/questions.jsonl"),
+    preview: ReviewPreview = captured_preview,
+    notify: bool = True,
 ) -> "FastAPI":
-    """Build an authenticated browser surface over the durable review queues."""
+    """Build an authenticated browser surface over the durable review queues.
+
+    ``log``, ``preview`` and ``notify`` are :class:`ReviewStore`'s: the
+    defaults are the operator's inbox over the checkouts' own queues, and a
+    launcher asking about a checkout from its own state passes its relay, its
+    reader, and no notification.
+    """
     from fastapi import BackgroundTasks, Request
     from fastapi.responses import JSONResponse, Response, StreamingResponse
 
@@ -1022,7 +1092,9 @@ def review_app(
     if discover:
         roots = tuple(dict.fromkeys(anchor(root) for root in roots))
     app = bundle_app("Review inbox", url, "reviews")
-    store = ReviewStore(roots=roots, discover=discover)
+    store = ReviewStore(
+        roots=roots, discover=discover, log=log, preview=preview, notify=notify
+    )
 
     @app.middleware("http")
     async def authorize(
