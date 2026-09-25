@@ -68,7 +68,7 @@ type Asker = Callable[
 ]
 """What obtains the operator's answer to one launch question; replaced in tests."""
 
-MANIFEST = PurePosixPath("pyproject.toml")
+FREE_ZONE_DECLARATION = PurePosixPath("pyproject.toml")
 """The file whose ``[tool.lup.trust]`` table declares the free zones."""
 
 REGENERATION = ["harness", "generate", "all"]
@@ -76,7 +76,7 @@ REGENERATION = ["harness", "generate", "all"]
 
 
 def declared_in(
-    zone: HostZone, store: ObjectStore, manifest: PurePosixPath = MANIFEST
+    zone: HostZone, store: ObjectStore, manifest: PurePosixPath = FREE_ZONE_DECLARATION
 ) -> FreeZones:
     """The free zones the zone's own manifest declares, read from the snapshot.
 
@@ -149,7 +149,9 @@ def generated_only(before: HostZone, after: HostZone, store: ObjectStore) -> boo
 
 
 def zones_to_read(
-    record: TrustRecord, checkout: LiveCheckout, manifest: PurePosixPath = MANIFEST
+    record: TrustRecord,
+    checkout: LiveCheckout,
+    manifest: PurePosixPath = FREE_ZONE_DECLARATION,
 ) -> FreeZones:
     """The free zones this launch reads the checkout under.
 

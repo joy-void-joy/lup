@@ -786,6 +786,11 @@ def audit_constant_declarations(
     written, and reporting the copy would ask for a second one nothing can act
     on.
     """
+    # lup: defer: pooled by bare name, so one module's parameter default
+    # named MANIFEST made an unrelated MANIFEST in devtools/dev/conflicts.py
+    # read as caller-replaceable, and its reasoned ignore as spurious; a
+    # module-qualified name (where the default resolves to) would keep two
+    # modules' constants apart
     overridable = {
         name for source in sources for name in default_position_names(source.text)
     }

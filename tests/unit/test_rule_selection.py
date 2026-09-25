@@ -14,7 +14,6 @@ import pytest
 from typer.testing import CliRunner
 
 import lup.devtools.dev.rules as rules_mod
-import lup_template.harness.catalog as catalog
 from lup.providers.claude.harness import ClaudeSpellings
 from lup.providers.harness import claude_prompt_renderer
 from lup.harness.codescan.antipatterns import (
@@ -82,10 +81,9 @@ def test_the_documented_command_writes_the_reference_this_repository_is_held_to(
     wrong, and the page claimed a rule the gate there does not enforce.
     """
     monkeypatch.setattr(rules_mod, "project_root", lambda: tmp_path)
-    retiring = declared_here().model_copy(
-        update={
-            "hooks": catalog.declared_hook_set().model_copy(update={"rules": RETIRED})
-        }
+    declared = declared_here()
+    retiring = declared.model_copy(
+        update={"project": declared.project.model_copy(update={"rules": RETIRED})}
     )
     app = create_dev_app(
         declared=lambda: retiring,
