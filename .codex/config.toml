@@ -12,34 +12,34 @@ hooks = true
 [mcp_servers.notes]
 command = "uv"
 args = ["run", "--directory", ".", "lup-devtools", "agent", "serve-tools", "--runtime", "codex", "--server", "notes", "--session", "harness"]
-env_vars = ["LUP_COORDINATION_MEMBER", "LUP_COORDINATION_NAME", "LUP_MAX_RECURSIVE_AGENT"]
+env_vars = ["LUP_COORDINATION_MEMBER", "LUP_COORDINATION_NAME", "LUP_MAX_RECURSIVE_AGENT", "UV_PROJECT_ENVIRONMENT"]
 startup_timeout_sec = 60.0
 default_tools_approval_mode = "approve"
 
 [mcp_servers.sandbox]
 command = "uv"
 args = ["run", "--directory", ".", "lup-devtools", "agent", "serve-tools", "--runtime", "codex", "--server", "sandbox", "--session", "harness"]
-env_vars = ["LUP_COORDINATION_MEMBER", "LUP_COORDINATION_NAME", "LUP_MAX_RECURSIVE_AGENT"]
+env_vars = ["LUP_COORDINATION_MEMBER", "LUP_COORDINATION_NAME", "LUP_MAX_RECURSIVE_AGENT", "UV_PROJECT_ENVIRONMENT"]
 startup_timeout_sec = 60.0
 default_tools_approval_mode = "approve"
 
 [mcp_servers.codeintel]
 command = "uv"
 args = ["run", "--directory", ".", "lup-devtools", "agent", "serve-tools", "--runtime", "codex", "--server", "codeintel", "--session", "harness"]
-env_vars = ["LUP_COORDINATION_MEMBER", "LUP_COORDINATION_NAME", "LUP_MAX_RECURSIVE_AGENT"]
+env_vars = ["LUP_COORDINATION_MEMBER", "LUP_COORDINATION_NAME", "LUP_MAX_RECURSIVE_AGENT", "UV_PROJECT_ENVIRONMENT"]
 startup_timeout_sec = 60.0
 default_tools_approval_mode = "approve"
 
 [mcp_servers.coordination]
 command = "uv"
 args = ["run", "--directory", ".", "lup-devtools", "agent", "serve-tools", "--runtime", "codex", "--server", "coordination", "--session", "harness"]
-env_vars = ["LUP_COORDINATION_MEMBER", "LUP_COORDINATION_NAME", "LUP_MAX_RECURSIVE_AGENT"]
+env_vars = ["LUP_COORDINATION_MEMBER", "LUP_COORDINATION_NAME", "LUP_MAX_RECURSIVE_AGENT", "UV_PROJECT_ENVIRONMENT"]
 startup_timeout_sec = 60.0
 default_tools_approval_mode = "approve"
 
 [mcp_servers.ledger]
 command = "uv"
 args = ["run", "--directory", ".", "lup-devtools", "agent", "serve-tools", "--runtime", "codex", "--server", "ledger", "--session", "harness"]
-env_vars = ["LUP_COORDINATION_MEMBER", "LUP_COORDINATION_NAME", "LUP_MAX_RECURSIVE_AGENT"]
+env_vars = ["LUP_COORDINATION_MEMBER", "LUP_COORDINATION_NAME", "LUP_MAX_RECURSIVE_AGENT", "UV_PROJECT_ENVIRONMENT"]
 startup_timeout_sec = 60.0
 default_tools_approval_mode = "approve"

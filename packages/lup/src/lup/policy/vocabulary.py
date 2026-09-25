@@ -668,12 +668,15 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
     ]
 
 
-def review_queue_rules() -> list[ShellSubcommandRule]:
+def review_queue_rules(
+    *, dev_operations: Sequence[ShellOperationRule] = ()
+) -> list[ShellSubcommandRule]:
     """Accepting review decisions or replacement policy is an operator action."""
     return [
         ShellSubcommandRule(
             name="dev",
             operations=[
+                *dev_operations,
                 *[
                     ShellOperationRule(
                         name=action,
@@ -791,7 +794,22 @@ def runner_target_rules(
         RunnerTargetRule(
             name=name,
             effects=[declare("runs_declared_target")],
-            subcommands=review_queue_rules() if name == "lup-devtools" else [],
+            subcommands=review_queue_rules(
+                dev_operations=[
+                    ShellOperationRule(
+                        name="pyright-environment",
+                        parents=["migrate"],
+                        effects=[
+                            declare("writes_path", scope="protected", write="overwrite")
+                        ],
+                        probe_flags=["--dry-run"],
+                        reason="retiring Pyright environment defaults rewrites protected pyproject.toml",
+                        recovery="Review the change with --dry-run before applying the migration.",
+                    )
+                ]
+            )
+            if name == "lup-devtools"
+            else [],
         )
         for name in (*ambient, *session_opening, *also)
     ]

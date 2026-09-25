@@ -78,6 +78,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev tracker reopen` | Reopen an issue, here or on a declared tracker. |
 | `dev tracker list` | Which repositories this project may reach, and what each is for. |
 | `dev migrate map` | Print the relocation that repoints an importer across a range. |
+| `dev migrate pyright-environment` | Retire unchanged scaffold Pyright environment defaults. |
 | `dev migrate pending` | What a project standing at that commit still owes, beyond the map. |
 | `dev migrate check` | Refuse a capability that went with no migration speaking for it. |
 | `dev library status` | Report where the lup library is resolved from. |

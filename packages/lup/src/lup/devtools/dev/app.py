@@ -1381,6 +1381,24 @@ def create_dev_app(
             for move in unmapped:
                 typer.echo(f"  {move.spelled()}")
 
+    @migrate_app.command("pyright-environment")
+    def migrate_pyright_environment_cmd(
+        dry_run: Annotated[
+            bool, typer.Option("--dry-run", help="Describe changes without writing")
+        ] = False,
+    ) -> None:
+        """Retire unchanged scaffold Pyright environment defaults.
+
+        Custom and partial selectors, inherited configurations, and a separate
+        pyrightconfig.json remain the project's own declarations.
+        """
+        changes = migrations.retire_pyright_environment(project_root(), dry_run=dry_run)
+        if not changes:
+            typer.echo("No unchanged scaffold Pyright environment defaults to retire.")
+            return
+        for change in changes:
+            typer.echo(f"{'Would change' if dry_run else 'Changed'}: {change}")
+
     @migrate_app.command("pending")
     def migrate_pending_cmd(
         revision: Annotated[

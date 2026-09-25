@@ -27,6 +27,7 @@ diligent one.
 from pathlib import Path
 
 import sh
+import tomlkit
 from pydantic import BaseModel
 
 from lup.devtools.dev.branches import detect_base_branch
@@ -138,6 +139,41 @@ class RenderedMigrations(BaseModel, frozen=True):
 
 DECLARED: list[Migration] = [
     Migration(
+        subjects=["tool.pyright.venvPath", "tool.pyright.venv", "pyright_environment"],
+        reason=(
+            "the scaffold leaves Python environment selection to the project "
+            "interpreter, because a fixed .venv takes precedence over the "
+            "language server's selected interpreter and can resolve stale packages"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Retire the unchanged scaffold venvPath='.' and venv='.venv' "
+                    "pair. Custom or partial environment settings, inherited "
+                    "configurations, and pyrightconfig.json are preserved. "
+                    "Use --dry-run to review the manifest change first."
+                ),
+                command=[
+                    "uv",
+                    "run",
+                    "lup-devtools",
+                    "dev",
+                    "migrate",
+                    "pyright-environment",
+                ],
+            ),
+            MigrationStep(
+                instruction=(
+                    "Replace calls to lup.devtools.dev.check.pyright_environment "
+                    "with lup.devtools.launcher.project_python(root), which returns "
+                    "the selected interpreter path or None. Pass that path through "
+                    "Pyright's --pythonpath option or python.pythonPath language-server "
+                    "setting instead of overriding venvPath and venv."
+                ),
+            ),
+        ],
+    ),
+    Migration(
         subjects=["setup conversation chatgpt", "setup conversation claude"],
         reason=(
             "conversation authentication belongs to the conversation module, "
@@ -180,6 +216,30 @@ something, and every entry leaves at the next release, rendered into that
 release's changelog section by `version bump`. A list that grows is a release
 overdue rather than a record to reorganise.
 """
+
+
+def retire_pyright_environment(root: Path, *, dry_run: bool = False) -> list[str]:
+    """Remove only the scaffold's unchanged environment selectors.
+
+    These defaults name a physical installation, while the project launcher
+    selects the interpreter used for a session. A customized or incomplete
+    pair belongs to the adopter. An extending configuration may deliberately
+    override its base with this pair, so it also stays untouched.
+    """
+    manifest = root / "pyproject.toml"
+    document = tomlkit.parse(manifest.read_text(encoding="utf-8"))
+    match document.unwrap():
+        case {"tool": {"pyright": {"venvPath": ".", "venv": ".venv"} as config}} if (
+            "extends" not in config
+        ):
+            settings = document["tool"]["pyright"]
+            del settings["venvPath"]
+            del settings["venv"]
+        case _:
+            return []
+    if not dry_run:
+        manifest.write_text(tomlkit.dumps(document), encoding="utf-8")
+    return ["pyproject.toml: remove scaffold Pyright venvPath='.' and venv='.venv'"]
 
 
 def unapplied(
