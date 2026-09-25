@@ -64,7 +64,7 @@ on; only the carrier differs.
 
 ``outer`` states the sandbox off rather than leaving it unsaid, so the
 session and the policy kernel judging it agree on which wall is load-bearing
-— :meth:`~lup.providers.claude.runtime.ClaudeSandboxConfig.posture` reads
+— :meth:`~lup.providers.claude.ClaudeSandboxConfig.posture` reads
 this same object. Unsaid, the CLI would answer from a settings file the
 spawned session may not even read. ``none`` says nothing on purpose: no
 sandbox key is sent, and whatever the runtime's own configuration decides is
