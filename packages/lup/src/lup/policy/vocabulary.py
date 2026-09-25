@@ -1760,6 +1760,23 @@ def git_rule(
     )
 
 
+def protected_branches(rules: list[ShellCommandRule]) -> list[str]:
+    """The branches a vocabulary asks about before a forced push reaches them.
+
+    Read off the declared push row rather than declared a second time, so a
+    tool forcing a push on the caller's behalf refuses exactly the branches a
+    forced push spelled out in the shell would have put to the user.
+    """
+    return [
+        branch
+        for rule in rules
+        if rule.name == "git"
+        for subcommand in rule.subcommands
+        if subcommand.name == "push"
+        for branch in subcommand.protected_refs
+    ]
+
+
 def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
     """Compile the gh surface by what each operation does beyond this machine.
 
