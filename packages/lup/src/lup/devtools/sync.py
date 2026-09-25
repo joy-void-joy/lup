@@ -393,12 +393,18 @@ def ensure_ref_symlink(name: str, target: str) -> None:
 
     ``refs/`` (gitignored) is a directory of by-name shortcuts into the
     repos this project tracks for sync, wherever each one actually lives —
-    a user-configured path, or a clone under ``.cache/sync/``. It exists
+    a user-configured path, or a clone under the cache. It exists
     so commands and humans can reach a tracked repo as ``refs/<name>`` without
     knowing or re-deriving its real location (e.g. ``/lup:import`` does
     ``cd refs/<project> && git log``). Every time a project is materialized the
     link is re-pointed at its current path; a pre-existing non-symlink at that
     name is left untouched so we never clobber real files.
+
+    Always a working tree where the repository has one: the worktree attached
+    to a bare repository rather than its bare half, whether the registration
+    named a path or a URL. So `uv run --directory refs/<name>` runs that
+    project's own tooling in either case, and a worktree cut from there lands
+    beside it under the same ``tree/``.
     """
     link = refs_dir() / name
     target_path = Path(target).resolve()
@@ -961,14 +967,18 @@ def accessible_roots(
     on the host, before the boundary and on the only side that can reach the
     forge -- and only where nothing is on disk yet, because
     :func:`ensure_local` also fetches, and opening a session is not a review.
+    `refs/<name>` is pointed at whatever is mounted either way, so a clone
+    another project on this machine materialized first is reachable here by
+    the same name the workflows use.
 
     What is mounted is always a working tree, never the bare half of a clone.
-    `lease_for` reads a bare directory as a repository whose every worktree
-    belongs to somebody else and holds all of them read-only, so a session
-    handed one would get a checkout it cannot work in and siblings it cannot
-    write -- a boundary nobody declared rather than the mode the registration
-    named. So a clone found without one has a worktree attached here, which
-    costs no network and is the one write locating a project may do.
+    The lease is the same either way -- `lease_for` holds every worktree of
+    the repository writable, its shared `config` and `hooks/` read-only --
+    but the edit authority the launch grants is not: a worktree mount accepts
+    that checkout's own policy and no other, where a bare one grants every
+    worktree the clone holds, somebody else's among them. So a clone found
+    without one has a worktree attached here, which costs no network and is
+    the one write locating a project may do.
 
     A registration that asked for a mount and cannot be located is reported
     and skipped -- whether it named neither a path nor a URL, or its
@@ -995,6 +1005,12 @@ def accessible_roots(
             if project.get("required"):
                 report(missing_checkout(project).spelled())
             return None
+        ensure_ref_symlink(project["name"], str(opened))
+        # lup: defer: a worktree /lup:upstream cuts beside this one is no granted
+        # destination -- `harness policy-refresh` accepts one only beneath a
+        # mounted bare half -- so its edits are referred until a launch mounts the
+        # clone's bare half by hand; decide whether a clone this machine
+        # materialized, which only its registrants work in, mounts its bare half
         return AccessibleRoot(path=opened.resolve(), writable=project["mount"] == "rw")
 
     return [
@@ -1318,7 +1334,7 @@ def ensure_local(
             Path(path), "origin"
         ):
             refresh(name, Path(path), report)
-        ensure_ref_symlink(name, path)
+        ensure_ref_symlink(name, str(found.checkout))
         return found
 
     url = transport_url(proj)
@@ -1711,7 +1727,7 @@ def setup_project(
         record_checkpoint(effective, found, head)
 
     save_local(local_data)
-    ensure_ref_symlink(name, str(resolved))
+    ensure_ref_symlink(name, str(found.checkout))
     typer.echo(f"Set '{name}' local path to {resolved}")
     if branch:
         typer.echo(f"  Tracking branch: {branch}")
