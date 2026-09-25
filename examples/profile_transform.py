@@ -1,16 +1,16 @@
-"""Resolve a Claude profile into its configured session factory."""
+"""Resolve a Claude profile onto the agent it configures."""
 
 import asyncio
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from lup import Claude
 from lup.providers.claude.config import (
     ClaudeProfileRegistry,
     ClaudeProfileSelection,
     claude_profile_selector,
 )
-from lup.providers.claude import Claude
 
 
 class Summary(BaseModel, frozen=True):
@@ -32,8 +32,8 @@ async def main() -> None:
         },
         active="work",
     )
-    client = claude_profile_selector(registry).session_factory(base)
-    result = await client.query("Describe immutable configuration.", Summary)
+    agent = claude_profile_selector(registry).session_factory(base)
+    result = await agent.ask("Describe immutable configuration.", Summary)
     print(result.output.summary)
 
 
