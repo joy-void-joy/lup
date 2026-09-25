@@ -519,6 +519,35 @@ def test_the_command_hands_everything_after_the_runtime_to_the_launch(
     assert commands == [["harness", "claude", "--network", "host", "--root", "x"]]
 
 
+def test_a_host_shim_naming_a_mode_reaches_the_launch_intact(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``exec lup-launch "$runtime" --mode <name> "$@"`` — the mode is the project's word."""
+    commands: list[list[str]] = []
+
+    def recorded(
+        start: Path,
+        command: list[str],
+        ask: Asker,
+        console: Console,
+        # lup: ignore[dict-str-payload] — the environment map
+        inherited: dict[str, str],
+    ) -> None:
+        commands.append(command)
+
+    monkeypatch.setattr(launcher, "trusted_launch", recorded)
+    monkeypatch.chdir(checkout)
+
+    result = CliRunner().invoke(
+        launcher.app, ["codex", "--mode", "free", "--continue", "--memory", "12g"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert commands == [
+        ["harness", "codex", "--mode", "free", "--continue", "--memory", "12g"]
+    ]
+
+
 def test_status_says_what_this_machine_approved(
     checkout: Path, launches: Launches, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
