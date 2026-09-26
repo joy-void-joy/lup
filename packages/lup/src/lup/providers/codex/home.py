@@ -282,8 +282,6 @@ def settled_codex_config(account: str, changes: list[SettingChange]) -> str:
     return tomlkit.dumps(document)
 
 
-# lup: ignore[constant-declaration] — where a home keeps the settings it was
-# last installed with, which the host settling the next launch reads back
 SEED_RECORD = f"{RECORD}/config.json"
 """The record of what a launch last installed as a home's base settings."""
 
