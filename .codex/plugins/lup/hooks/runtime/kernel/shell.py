@@ -45,6 +45,7 @@ from .words import (
     archive_lands_on_nothing,
     confined_to_recoverable_roots,
     refuses_generated_plugin_write,
+    protected_deletion,
     env_payload,
     xargs_payload,
 )
@@ -526,6 +527,9 @@ def decide_segment_words(
     )
     if refused is not None:
         return refused
+    deleted = protected_deletion(words, context["path_rules"], context["checkout_root"])
+    if deleted is not None:
+        return deleted
     recoverable = confined_to_recoverable_roots(
         words,
         context["path_roles"],

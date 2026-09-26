@@ -5,6 +5,7 @@
 import posixpath
 from collections.abc import Sequence
 from fnmatch import fnmatchcase
+from pathlib import PurePosixPath
 from typing import TypedDict
 
 from .archives import archive_targets, archive_write
@@ -1034,6 +1035,102 @@ def protected_write_target(
                 protected_path_reason(word, matched),
                 recovery=matched["recovery"],
             )
+    return None
+
+
+def expands_to(word: str, name: str) -> bool:
+    """Whether one name in a word could be this name once the shell expands it.
+
+    A literal name is only itself. A glob reaches what it matches, except a
+    leading-dot name, which the shell's expansion skips unless the glob starts
+    with a dot too -- so `*` does not reach `.claude` and `.*` does.
+    """
+    if word == name:
+        return True
+    if not any(character in word for character in "*?["):
+        return False
+    if name.startswith(".") and not word.startswith("."):
+        return False
+    return fnmatchcase(name, word)
+
+
+def deletes_protected(operand: str, row: PathRuleRow) -> bool:
+    """Whether deleting this operand deletes a path the rule protects.
+
+    The rule's own match, and two readings an edit never needs because an
+    edit names one file: a directory holding the protected path (`rm -r .`)
+    and a glob that could expand to it (`rm *.md`). Both are read only for a
+    rule naming a path, since a prefix or a part names no one file to hold.
+    """
+    if path_rule_matches(operand, True, row):
+        return True
+    if row["kind"] not in ("exact", "subtree"):
+        return False
+    held = PurePosixPath(posixpath.normpath(row["value"])).parts
+    named = PurePosixPath(posixpath.normpath(operand)).parts
+    return len(named) <= len(held) and all(
+        expands_to(word, name) for word, name in zip(named, held)
+    )
+
+
+def git_rm_operands(words: list[str]) -> list[str] | None:
+    """The pathspecs a `git rm` removes, or ``None`` where it removes nothing.
+
+    A dry run removes nothing. `--cached` is read like any other flag: it
+    leaves the working copy, but the next commit deletes the file from the
+    project, which is the change a protected file's owner is asked about.
+    """
+    if len(words) < 3 or posixpath.basename(words[0]) != "git" or words[1] != "rm":
+        return None
+    operands: list[str] = []
+    literal = False
+    for word in words[2:]:
+        if literal or not word.startswith("-"):
+            operands.append(word)
+            continue
+        if word in ("-n", "--dry-run"):
+            return None
+        literal = word == "--"
+    return operands
+
+
+def deleted_operands(words: list[str]) -> list[str]:
+    """What `rm` or `git rm` deletes, and nothing for any other command."""
+    match posixpath.basename(words[0]):
+        case "git":
+            return git_rm_operands(words) or []
+        case "rm":
+            return path_verb_operands(words)["operands"]
+        case _:
+            return []
+
+
+def protected_deletion(
+    words: list[str], path_rules: list[PathRuleRow], checkout: str = ""
+) -> KernelDecision | None:
+    """Ask before `rm` or `git rm` deletes a path the declared rules protect.
+
+    Both rows answer what a delete costs, and a capture of the checkout
+    settles that -- which is the wrong question about a file protected by
+    whose it is. The recoverable-roots grant already defers to ownership, but
+    only on the path it grants, so a protected file beside an operand it did
+    not cover, under a directory, behind a glob, or named through `git rm`
+    reached the capture instead. Read here, before any grant, for every
+    operand, from the spelling the rules are anchored at.
+    """
+    for operand in deleted_operands(words):
+        spelled = repository_relative(operand, checkout)
+        matched = next(
+            (row for row in path_rules if deletes_protected(spelled, row)), None
+        )
+        if matched is None:
+            continue
+        reason = (
+            protected_path_reason(operand, matched)
+            if path_rule_matches(spelled, True, matched)
+            else f"{operand} would delete {matched['value']}: {matched['reason']}"
+        )
+        return KernelDecision("ask", reason, recovery=matched["recovery"])
     return None
 
 

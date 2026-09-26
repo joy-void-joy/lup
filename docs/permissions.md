@@ -191,6 +191,13 @@ reports the strongest effect and says nothing about how many reasons reached
 it. And a `# lup: escalate[decision]:` marker keeps its question either way:
 the agent asked to be judged, and evidence does not overrule the request.
 
+A delete of a protected path is asked before any of this is read, because a
+capture answers what the loss costs and a protected file is protected by
+whose it is. `rm` and `git rm` — `--cached` included, since the next commit
+deletes the file from the project — ask when any operand is the protected
+path, a directory holding it (`rm -r .`), or a glob that could expand to it
+(`rm *.md`), whatever the other operands are. A dry run deletes nothing.
+
 **And it is written down**, which is what makes the relaxation honest rather
 than merely quieter. The lattice asks about everything unjudged for an
 *observability* reason, and a deferral is the one verdict that reaches nobody

@@ -936,6 +936,26 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="rm -rf /", effect="ask"),
     DecisionCase(input="rm .claude/settings.local.json", effect="ask"),
     DecisionCase(input="rm -rf .claude/skills", effect="ask"),
+    # A protected file is protected by whose it is, so a capture that could
+    # rebuild it settles nothing: its delete asks by every route that reaches
+    # it -- `git rm`, `--cached` included, since the next commit deletes it
+    # from the project; beside another operand; under a directory; behind a
+    # glob; or spelled absolutely. A dry run deletes nothing.
+    DecisionCase(input="git rm README.md", effect="ask", existing=["README.md"]),
+    DecisionCase(input="git rm --cached README.md", effect="ask"),
+    DecisionCase(input="git rm -- README.md", effect="ask"),
+    DecisionCase(input="git -C . rm README.md", effect="ask"),
+    DecisionCase(input="git rm -r .", effect="ask"),
+    DecisionCase(input="git rm pyproject.toml", effect="ask"),
+    DecisionCase(input="git rm -n README.md", effect="allow"),
+    DecisionCase(input="git rm tmp/x.py", effect="ask", existing=["tmp/x.py"]),
+    DecisionCase(input="rm README.md tmp/x", effect="ask", existing=["tmp/x"]),
+    DecisionCase(input="rm -r .", effect="ask"),
+    DecisionCase(input="rm *.md", effect="ask"),
+    DecisionCase(input="rm *", effect="ask"),
+    DecisionCase(input="cd tmp && rm ../README.md", effect="ask"),
+    DecisionCase(input="rm tmp/*.md", effect="allow"),
+    DecisionCase(input="rm -rf tmp/*", effect="allow"),
     DecisionCase(input="rm .claude/plugins/../settings.json", effect="ask"),
     # A generated plugin tree is a build product the running runtime already
     # loaded, so writing one by hand changes nothing it will honor and the

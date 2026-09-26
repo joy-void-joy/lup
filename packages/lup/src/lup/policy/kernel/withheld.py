@@ -28,6 +28,7 @@ from .decision import KernelDecision
 from .lex import placed_path, placed_redirects
 from .rows import RefusedPathRow
 from .syntax import Redirect, Script, Word, WordPart, word_text
+from .words import expands_to
 
 # lup: ignore[library-default] — the shell builtins that write their operands to stdout
 PRINTING_BUILTINS = ("echo", "printf", "print")
@@ -45,13 +46,7 @@ def could_name(pattern: str, name: str) -> bool:
     itself. Without that exception `cat *` in any directory would read as
     naming `.netrc`.
     """
-    if fnmatchcase(name, pattern):
-        return True
-    if not any(character in name for character in "*?["):
-        return False
-    if pattern.startswith(".") and not name.startswith("."):
-        return False
-    return fnmatchcase(pattern, name)
+    return fnmatchcase(name, pattern) or expands_to(name, pattern)
 
 
 def covered_by(pattern: str, name: str) -> bool:

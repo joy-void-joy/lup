@@ -52,3 +52,45 @@ def test_launch_authority_writes_remain_protected(path: str) -> None:
 
     assert decision.effect == "ask"
     assert "protected" in decision.rule
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git rm README.md",
+        "git rm --cached README.md",
+        "rm README.md tmp/x",
+        "rm -r .",
+        "rm *.md",
+    ],
+)
+def test_a_capture_does_not_settle_deleting_a_human_owned_file(
+    command: str, tmp_path: Path
+) -> None:
+    """Ownership is the question, and a checkout snapshot answers cost."""
+    hooks = declared_hook_set()
+    policy = ShellPolicy(
+        hooks.resolved_shell_rules(),
+        path_rules=declared_path_rules(hooks),
+        runner_targets=list(hooks.runner_targets),
+        recovered=True,
+    )
+
+    decision = policy.decide(ShellCommand(command=command, cwd=tmp_path))
+
+    assert decision.effect == "ask"
+    assert "captured and restorable" not in decision.reason
+
+
+def test_a_capture_still_settles_deleting_what_nobody_owns(tmp_path: Path) -> None:
+    hooks = declared_hook_set()
+    policy = ShellPolicy(
+        hooks.resolved_shell_rules(),
+        path_rules=declared_path_rules(hooks),
+        runner_targets=list(hooks.runner_targets),
+        recovered=True,
+    )
+
+    decision = policy.decide(ShellCommand(command="git rm docs/x.md", cwd=tmp_path))
+
+    assert decision.effect == "allow"
