@@ -347,8 +347,10 @@ A `$(...)` result standing in an argument's place carries the same.
 A command word nobody can read — `$CMD`, a `$(...)` result — could be any
 program, so the words after it decide: it is read as each program one of
 whose verbs they name, and the abstention it earns as written is the floor.
-`$CMD push --force origin feat` asks as `git push --force` does, on every
-posture. `$CMD push origin feat` could be a push that asks nothing, so it
+The verb is found past that program's own globals, and the reading judges
+them too. `$CMD push --force origin feat` asks as `git push --force` does, on
+every posture, and so does `$CMD -c core.sshCommand=x push --force origin
+feat`. `$CMD push origin feat` could be a push that asks nothing, so it
 keeps the abstention: refused with no boundary, and run inside one. Words
 naming no program's verb — `$EDITOR file`, `"$PYTHON" x.py` — read nothing in.
 
