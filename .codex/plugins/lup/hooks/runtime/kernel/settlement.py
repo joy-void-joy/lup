@@ -755,12 +755,24 @@ class ContainedEffects(SettlementRule):
     them returns ``defer``, because a rule that describes an operation has
     said something about it. This row answers the operations no rule
     described at all, which is the one verdict the effects can never reach.
+
+    A word nobody could read in a command the vocabulary did describe is not
+    that. Every command the word could make was judged, and a container
+    settles it only where the widest of their harms stays inside:
+    `git push $X origin feat` could be a forced push or a deletion, which land
+    on the remote whatever holds the process. The native sandbox is not asked
+    the same, because it confines the call itself, and a call it leaves alone
+    -- a push among them -- is not bounded by it at all.
     """
 
     id = "contained-effects"
 
     def reached(self, facts: SettlementFacts) -> KernelDecision | None:
-        if facts.decision.effect != "defer" or not facts.bounded():
+        decision = facts.decision
+        if decision.effect != "defer" or not facts.bounded():
+            return None
+        held = facts.sandbox_confined or facts.stays_inside(decision.reach)
+        if decision.unread and not held:
             return None
         return facts.decision.revised(
             effect="allow",

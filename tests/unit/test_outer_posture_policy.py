@@ -87,6 +87,14 @@ SETTLED_INSIDE = [
     pytest.param(
         "uv run lup-devtools harness codex --mount /srv/data", "ask", id="child-mount"
     ),
+    # Every command the unread word could make stays inside, so the container
+    # settles it exactly as it settles the literal.
+    pytest.param("make $TARGET", "ask", id="make-unread-target"),
+    pytest.param(
+        "uv run lup-devtools harness claude --sandbox $X",
+        "deny",
+        id="child-unread-sandbox",
+    ),
 ]
 """Rows whose harm stays in the container: the host answer, and allow under outer."""
 
@@ -115,11 +123,24 @@ GUARDED = [
     pytest.param(
         "git -c core.pager=less $OP origin --delete b", "deny", id="pager-unread"
     ),
+    # An unread argument could be a guarded flag or operand, and a push or a
+    # merge it could make lands on the remote whatever holds the process.
+    pytest.param("git push $X origin feat", "deny", id="unread-push-flag"),
+    pytest.param(
+        "git push --force-with-lease origin $X", "deny", id="unread-lease-refspec"
+    ),
+    pytest.param("git push origin $X", "deny", id="unread-push-refspec"),
+    pytest.param("gh pr merge $X", "deny", id="unread-merge-flag"),
+    pytest.param("ls && git push $X origin feat", "deny", id="read-then-unread-push"),
+    pytest.param("make x && git push $X origin feat", "ask", id="ask-beside-unread"),
 ]
 """Rows whose harm reaches past the container: the same answer on every posture."""
 
 CHILD_INNER = "uv run lup-devtools harness claude --sandbox inner"
 """A child as confined as its parent, which no posture asks about."""
+
+UNGUARDED_UNREAD = "ls $X"
+"""An unread word under a command that guards nothing, which no posture asks about."""
 
 
 @pytest.fixture(params=["claude", "codex"])
@@ -291,6 +312,16 @@ def test_a_child_as_confined_as_its_parent_asks_on_no_posture(
     assert set(previewed(CHILD_INNER, checkout, monkeypatch).values()) == {"allow"}
 
 
+def test_an_unread_word_under_a_command_guarding_nothing_asks_on_no_posture(
+    runtime: Runtime, checkout: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert {
+        met(runtime, posture, UNGUARDED_UNREAD, checkout)
+        for posture in ("none", "inner", "outer")
+    } == {"allow"}
+    assert set(previewed(UNGUARDED_UNREAD, checkout, monkeypatch).values()) == {"allow"}
+
+
 def test_a_loopback_port_this_container_holds_is_its_own(
     runtime: Runtime, checkout: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -385,6 +416,27 @@ def test_a_composed_line_carries_every_part_it_objected_to() -> None:
 
     assert composed.effect == "ask"
     assert composed.reach is None
+
+
+def test_an_unread_argument_carries_the_reach_of_every_command_it_could_make() -> None:
+    """Settled inside only where every reading's harm would stay there."""
+    assert contained_decision("git push $X origin feat", []).effect == "deny"
+    assert contained_decision("rg $X foo", []).effect == "allow"
+    assert contained_decision("rg $X foo", [], sandboxed=True).effect == "allow"
+
+
+def test_an_unread_deferral_settles_only_on_a_reach_it_stated_inside() -> None:
+    """A reading that stated no reach keeps the refusal; unjudged work does not."""
+    unread = KernelDecision(
+        "defer", "an argument nobody read", abstention="boundary_settle", unread=True
+    )
+    unjudged = KernelDecision("defer", "nobody looked", abstention="boundary_settle")
+    facts = [
+        SettlementFacts(decision, contained=True, inside_placement=True)
+        for decision in (unread, unread.revised(reach="container"), unjudged)
+    ]
+
+    assert [settle(fact).effect for fact in facts] == ["deny", "allow", "allow"]
 
 
 def test_a_reach_outside_the_vocabulary_is_refused_where_it_is_declared() -> None:
