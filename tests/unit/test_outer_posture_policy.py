@@ -35,7 +35,8 @@ from lup.policy.assets.host import (
     landed_targets,
     lent_mount_points,
 )
-from lup.policy.kernel.decision import KernelDecision
+from lup.policy.kernel.commands import unread_programs
+from lup.policy.kernel.decision import KernelDecision, carrying_readings
 from lup.policy.kernel.effects import declare
 from lup.policy.kernel.fetch import decide_fetch, loopback_port
 from lup.policy.kernel.rows import TargetLandingRow, UrlScopeRow, landing_rows
@@ -91,6 +92,9 @@ SETTLED_INSIDE = [
     # settles it exactly as it settles the literal.
     pytest.param("make $TARGET", "ask", id="make-unread-target"),
     pytest.param(
+        "$CMD -c core.pager=less push origin feat", "ask", id="unread-command-pager"
+    ),
+    pytest.param(
         "uv run lup-devtools harness claude --sandbox $X",
         "deny",
         id="child-unread-sandbox",
@@ -133,8 +137,46 @@ GUARDED = [
     pytest.param("gh pr merge $X", "deny", id="unread-merge-flag"),
     pytest.param("ls && git push $X origin feat", "deny", id="read-then-unread-push"),
     pytest.param("make x && git push $X origin feat", "ask", id="ask-beside-unread"),
+    # A substitution result stands where the same words do.
+    pytest.param("git push $(cat f) origin feat", "deny", id="substituted-push-word"),
+    pytest.param("gh pr merge $(cat f)", "deny", id="substituted-merge-word"),
+    # An unread command word could be each program whose verbs follow it.
+    pytest.param("$CMD push --force origin feat", "ask", id="unread-command-force"),
+    # Found past the program's own globals, which its reading judges too.
+    pytest.param(
+        "$CMD -c core.sshCommand=x push --force origin feat",
+        "ask",
+        id="unread-command-behind-guarded-global",
+    ),
+    pytest.param(
+        "$CMD -C /tmp push --force origin feat",
+        "ask",
+        id="unread-command-behind-value-global",
+    ),
+    pytest.param(
+        "$(which git) push --force origin feat", "ask", id="substituted-command-force"
+    ),
 ]
 """Rows whose harm reaches past the container: the same answer on every posture."""
+
+UNREAD_COMMAND_AS_BEFORE = [
+    pytest.param("$EDITOR file", id="editor"),
+    pytest.param('"$PYTHON" x.py', id="interpreter"),
+    pytest.param("$PAGER out.txt", id="pager"),
+    # Each could be a program nothing here asks about, so nothing moves.
+    pytest.param("$CMD push origin feat", id="could-be-plain-push"),
+    pytest.param("$CMD pr merge 12", id="could-be-plain-merge"),
+]
+"""Command words nobody can read and no reading objects to: refused with no
+boundary, and confined by either."""
+
+UNREAD_BEYOND_THE_CONTAINER = [
+    pytest.param("$CMD push $X origin feat", id="could-be-unread-push"),
+]
+"""A reading reaching past the container: refused there as with no boundary.
+
+The runtime's own sandbox confines a command it cannot name, as it always has,
+so the inner posture is not asserted here."""
 
 CHILD_INNER = "uv run lup-devtools harness claude --sandbox inner"
 """A child as confined as its parent, which no posture asks about."""
@@ -322,6 +364,32 @@ def test_an_unread_word_under_a_command_guarding_nothing_asks_on_no_posture(
     assert set(previewed(UNGUARDED_UNREAD, checkout, monkeypatch).values()) == {"allow"}
 
 
+@pytest.mark.parametrize("command", UNREAD_COMMAND_AS_BEFORE)
+def test_an_unread_command_word_no_reading_objects_to_is_answered_as_before(
+    runtime: Runtime, checkout: Path, monkeypatch: pytest.MonkeyPatch, command: str
+) -> None:
+    expected: dict[Posture, str] = {"none": "deny", "inner": "allow", "outer": "allow"}
+
+    assert {
+        posture: met(runtime, posture, command, checkout) for posture in expected
+    } == expected
+    assert previewed(command, checkout, monkeypatch) == expected
+
+
+@pytest.mark.parametrize("command", UNREAD_BEYOND_THE_CONTAINER)
+def test_an_unread_command_word_reaching_past_the_container_is_refused_in_it(
+    runtime: Runtime, checkout: Path, monkeypatch: pytest.MonkeyPatch, command: str
+) -> None:
+    met_under = {
+        posture: met(runtime, posture, command, checkout)
+        for posture in ("none", "outer")
+    }
+    preview = previewed(command, checkout, monkeypatch)
+
+    assert met_under == {"none": "deny", "outer": "deny"}
+    assert (preview["none"], preview["outer"]) == ("deny", "deny")
+
+
 def test_a_loopback_port_this_container_holds_is_its_own(
     runtime: Runtime, checkout: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -437,6 +505,39 @@ def test_an_unread_deferral_settles_only_on_a_reach_it_stated_inside() -> None:
     ]
 
     assert [settle(fact).effect for fact in facts] == ["deny", "allow", "allow"]
+
+
+def test_a_deferral_carries_its_readings_only_where_one_objects() -> None:
+    """A word every reading of which is allowed stays work nobody judged."""
+    deferral = KernelDecision("defer", "nobody read it", abstention="boundary_settle")
+    allowed = KernelDecision("allow", "reads")
+    pushed = KernelDecision("ask", "pushes", reach="host_later")
+
+    assert not carrying_readings(deferral, (allowed,)).unread
+    carried = carrying_readings(deferral, (allowed, pushed))
+    assert (carried.unread, carried.reach) == (True, "host_later")
+
+
+def test_an_unread_command_word_could_be_each_program_its_verbs_name() -> None:
+    assert "git" in unread_programs(["$CMD", "push", "origin", "feat"], ROWS)
+    assert "gh" in unread_programs(["$CMD", "pr", "merge", "12"], ROWS)
+    assert unread_programs(["$EDITOR", "file"], ROWS) == []
+    assert unread_programs(["git", "push", "origin", "feat"], ROWS) == []
+
+
+def test_an_unread_command_word_is_found_past_the_programs_own_globals() -> None:
+    guarded = ["$CMD", "-c", "core.sshCommand=x", "push", "--force", "origin", "b"]
+
+    assert "git" in unread_programs(guarded, ROWS)
+    assert "git" in unread_programs(["$CMD", "-C", "/tmp", "push"], ROWS)
+
+
+def test_an_unread_command_word_takes_the_strictest_program_it_could_be() -> None:
+    forced = contained_decision("$CMD push --force origin feat", [])
+
+    assert forced.effect == "ask"
+    assert "`$CMD` could not be read and could be `git`" in forced.reason
+    assert contained_decision("$CMD push origin feat", []).effect == "allow"
 
 
 def test_a_reach_outside_the_vocabulary_is_refused_where_it_is_declared() -> None:

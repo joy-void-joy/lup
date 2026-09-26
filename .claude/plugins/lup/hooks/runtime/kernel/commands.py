@@ -13,6 +13,7 @@ from .decision import (
     KernelDecision,
     SUBSTITUTION_SENTINEL,
     SandboxPlacement,
+    carrying_readings,
     joined_decision,
     objecting_reach,
     unjudged,
@@ -43,7 +44,6 @@ from .effects import (
     purpose_of,
     verdict_for,
 )
-from .semantics import Reach
 from .words import (
     INTERPRETERS,
     carried_setting,
@@ -575,27 +575,26 @@ def forced_update(row: ShellRuleRow, arguments: list[str]) -> str:
     return ""
 
 
-def unread_argument_reach(
+def unread_argument_readings(
     row: ShellRuleRow, arguments: list[str], guarding: list[str], measured: WriteFacts
-) -> Reach | None:
-    """Where the harm of every command an unread argument could make would land.
+) -> tuple[KernelDecision, ...]:
+    """Every command an unread argument could make, judged.
 
     The word could be any flag the row guards, and is read as each in turn
     beside the words that can be read; the others nobody can read are left
     out, so a line of several reads each flag once rather than every
     combination of what each could be. It could as well be an operand, and a
     row that judges its operands -- a destination, a refspec -- asks about
-    one on its own effects. ``None`` where a reading that objects stated no
-    reach, or none objects, which no container settles.
+    one on its own effects.
     """
     legible = [word for word in arguments if not opaque_argument(word)]
-    readings = [
+    flagged = tuple(
         apply_command_row(row, [*legible, flag], measured)
         for flag in dict.fromkeys(guarding)
-    ]
+    )
     if row["ask_destinations"] or row["ask_refspecs"]:
-        readings.append(row_verdict(row, "ask", row["reason"]))
-    return objecting_reach(tuple(readings))
+        return (*flagged, row_verdict(row, "ask", row["reason"]))
+    return flagged
 
 
 def apply_command_row(
@@ -755,12 +754,12 @@ def apply_command_row(
         if opaque is not None:
             # Nobody judged it as written, and yet every command it could make
             # was, so a container settles it only where each would stay inside.
-            return unjudged(
-                f"argument {opaque!r} could expand into a guarded flag — bind"
-                " it to a literal value first"
-            ).revised(
-                unread=True,
-                reach=unread_argument_reach(row, arguments, guarding, measured),
+            return carrying_readings(
+                unjudged(
+                    f"argument {opaque!r} could expand into a guarded flag — bind"
+                    " it to a literal value first"
+                ),
+                unread_argument_readings(row, arguments, guarding, measured),
             )
         guarded = next(
             (
@@ -906,7 +905,6 @@ def split_subcommand(
     which no container holds, as well as a pager, which one does.
     """
     ask_flags = default["ask_flags"] if default else []
-    value_flags = default["value_flags"] if default else []
     setting_flags = default["setting_flags"] if default else []
     asked: list[KernelDecision] = []
     position = 0
@@ -920,7 +918,7 @@ def split_subcommand(
             following = arguments[position + 1 :]
             named = carried_setting(word, setting_flags, following)
             if settles_unguarded(word, following, default):
-                position += named["words"]
+                position += global_width(word, following, default)
                 continue
             # A setting the row can read, and which only runs a program where
             # the session runs, carries what the flags declared. One that
@@ -942,10 +940,41 @@ def split_subcommand(
             if question.reach is None:
                 return question
             asked.append(question)
-            position += named["words"]
+            position += global_width(word, following, default)
             continue
-        position += 2 if word in value_flags else 1
+        position += global_width(word, arguments[position + 1 :], default)
     return Subcommand(word="", remainder=[], asked=asked)
+
+
+def global_width(word: str, following: list[str], default: ShellRuleRow | None) -> int:
+    """How many words one global before the verb takes, its value among them.
+
+    Spelled once for both walks that step over a command's globals -- the one
+    judging them and the one only finding the verb -- so the two cannot stop
+    on different words.
+    """
+    if default is None:
+        return 1
+    if flag_matches(word, default["ask_flags"]):
+        return carried_setting(word, default["setting_flags"], following)["words"]
+    return 2 if word in default["value_flags"] else 1
+
+
+def verb_word(arguments: list[str], default: ShellRuleRow | None) -> str:
+    """The verb a command's words name past its globals, judging none of them.
+
+    Where :func:`split_subcommand` stops at a global no container settles,
+    because that global answers for the whole command, this goes on to the
+    word it steps over them to: which verb follows is a question about the
+    words, and a guarded global in front of it does not change the answer.
+    """
+    position = 0
+    while position < len(arguments):
+        word = arguments[position]
+        if not word.startswith("-"):
+            return word
+        position += global_width(word, arguments[position + 1 :], default)
+    return ""
 
 
 def global_flag_question(
@@ -1194,7 +1223,8 @@ def strictest_reading(
     could be any of them, and a container settles the question only where the
     harm of each would stay inside it: `codex l$OP` asks as an unknown word
     does, which a container holds, and could be `codex login`, which it does
-    not.
+    not. A deferral kept as the spelling's own verdict carries them the same
+    way, marked as standing for what the word could be.
     """
     strictest = max(
         readings,
@@ -1207,6 +1237,9 @@ def strictest_reading(
     ) <= STRENGTH.index(decided.effect):
         if readings and decided.effect in ("ask", "deny"):
             return decided.revised(reach=reach)
+        if decided.effect == "defer":
+            read = tuple(reading["decision"] for reading in readings)
+            return carrying_readings(decided, read)
         return decided
     word = strictest["word"]
     named = (
@@ -1228,6 +1261,37 @@ def strictest_reading(
             " rather than as the strictest one it could be."
         )
     )
+
+
+def unread_programs(words: list[str], rows: list[ShellRuleRow]) -> list[str]:
+    """The programs a command word nobody can read could be, by the verbs after it.
+
+    Any program at all, as far as the word goes, so the words after it decide:
+    one counts where they, walked as its own, name one of its verbs --
+    `$CMD push origin feat` could be `git push`, and `$CMD pr merge 12` could
+    be `gh pr merge`. The walk steps over that program's own globals, a
+    guarded one among them, so `$CMD -c core.sshCommand=x push` is still read
+    as `git`, and the reading judges the global too. A legible part narrows
+    it to the names it could finish.
+    Where the words name no program's verb -- `$EDITOR file`, `"$PYTHON" x.py`
+    -- nothing is read in, and the word keeps the abstention it had.
+    """
+    prefix = unread_prefix(posixpath.basename(words[0]))
+    if prefix is None:
+        return []
+
+    def names_verb(program: str) -> bool:
+        matches = [row for row in rows if row["command"] == program]
+        default = next((row for row in matches if not row["subcommand"]), None)
+        verb = verb_word(words[1:], default)
+        return any(row["subcommand"] and row["subcommand"] == verb for row in matches)
+
+    programs = dict.fromkeys(
+        row["command"]
+        for row in rows
+        if row["subcommand"] and row["command"].startswith(prefix)
+    )
+    return [program for program in programs if names_verb(program)]
 
 
 def unread_readings(

@@ -670,14 +670,38 @@ def objecting_reach(
     of what the word could make: `make x && git push $X origin feat` asks
     about a recipe the container holds, and could push anything anywhere.
     """
-    stated = [
-        part.reach
-        for part in parts
-        if part.effect in ("ask", "deny") or (part.effect == "defer" and part.unread)
-    ]
+    stated = [part.reach for part in parts if objecting(part)]
     if not stated or any(word is None for word in stated):
         return None
     return max((word for word in order if word in stated), key=order.index)
+
+
+def objecting(part: "KernelDecision") -> bool:
+    """Whether a verdict puts something a boundary has to answer for.
+
+    A question or a refusal does, and so does a deferral for a word nobody
+    could read, which stands for whatever the word could make.
+    """
+    return part.effect in ("ask", "deny") or (part.effect == "defer" and part.unread)
+
+
+def carrying_readings(
+    deferral: KernelDecision, readings: tuple[KernelDecision, ...]
+) -> KernelDecision:
+    """A deferral for a word nobody could read, carrying where its readings land.
+
+    Marked only where one of them objects. A word whose every reading is
+    allowed could only become that, or a program the vocabulary does not
+    know, which a container confines as it confines anything unjudged: so
+    `$CMD push origin feat` is settled there, since the `git push` it could
+    be asks nothing. Where one objects, the deferral carries the widest reach
+    of all of them, the deferral's own among them, and a container settles it
+    only where that stays inside.
+    """
+    parts = (deferral, *readings)
+    if not any(objecting(part) for part in parts):
+        return deferral
+    return deferral.revised(unread=True, reach=objecting_reach(parts))
 
 
 def joined_checkpoint(

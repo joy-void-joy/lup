@@ -323,6 +323,17 @@ could be, so a measured container settles it only where each would stay
 inside: `rg $X foo` and a child launch's `--sandbox $X` run there, while
 `git push $X origin feat` and `gh pr merge $X` are refused as they are
 without one, since each could force, delete or merge on the remote.
+A `$(...)` result standing in an argument's place carries the same.
+
+A command word nobody can read — `$CMD`, a `$(...)` result — could be any
+program, so the words after it decide: it is read as each program one of
+whose verbs they name, and the abstention it earns as written is the floor.
+The verb is found past that program's own globals, and the reading judges
+them too. `$CMD push --force origin feat` asks as `git push --force` does, on
+every posture, and so does `$CMD -c core.sshCommand=x push --force origin
+feat`. `$CMD push origin feat` could be a push that asks nothing, so it
+keeps the abstention: refused with no boundary, and run inside one. Words
+naming no program's verb — `$EDITOR file`, `"$PYTHON" x.py` — read nothing in.
 
 ### A write that carries its own content
 
