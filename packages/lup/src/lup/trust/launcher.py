@@ -47,7 +47,7 @@ from lup.devtools.dev.questions import captured_preview
 from lup.devtools.launcher import CONSOLE_SCRIPT
 from lup.harness.ownership import OWNERSHIP_FILENAME, OwnershipManifest
 from lup.policy.relay import PersistentQuestion, QuestionRelay
-from lup.trust.answer import Preview, asked_and_answered
+from lup.trust.answer import Preview, ReviewSurfaces
 from lup.trust.handoff import (
     Executor,
     Runner,
@@ -492,21 +492,19 @@ def launch(
             case ["run", *devtools]:
                 command = devtools
                 named = shlex.join([CONSOLE_SCRIPT, *devtools])
+                surfaces = ReviewSurfaces(console, named, port, open_page)
+                handed = surfaces.run
             case _:
                 command = ["harness", runtime, *context.args]
                 named = runtime
-
-        def ask(
-            question: PersistentQuestion,
-            relay: QuestionRelay,
-            preview: Preview,
-            checkout: Path,
-        ) -> PersistentQuestion:
-            return asked_and_answered(
-                question, checkout, relay, preview, console, port, open_page
+                surfaces = ReviewSurfaces(console, named, port, open_page)
+                handed = surfaces.launch
+        try:
+            trusted_launch(
+                start, command, named, surfaces.ask, console, inherited, handed
             )
-
-        trusted_launch(start, command, named, ask, console, inherited)
+        finally:
+            surfaces.close()
     except TrustError as error:
         console.print(str(error), markup=False)
         raise typer.Exit(2) from error

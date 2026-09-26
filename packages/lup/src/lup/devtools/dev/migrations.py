@@ -156,6 +156,25 @@ DECLARED: list[Migration] = [
         ],
     ),
     Migration(
+        subjects=["asked_and_answered"],
+        reason=(
+            "a launch question's inbox outlives the answer, to tell the tab that "
+            "answered it what the launch does next and to send it on to the page "
+            "a handed-over command opens, so asking is one part of an object "
+            "that also hands the launch over"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Build a ReviewSurfaces from lup.trust.answer with the console "
+                    "and what answering runs, pass its ask as the asker, its "
+                    "launch or run as the executor, and close it once the launch "
+                    "is handed over."
+                )
+            ),
+        ],
+    ),
+    Migration(
         subjects=[
             "Baseline.counted",
             "ApprovedBase.counted",

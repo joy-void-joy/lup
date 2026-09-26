@@ -36,6 +36,7 @@ from rich.panel import Panel
 from rich.table import Table
 from lup.devtools.conversation.app import create_conversation_setup_app
 from lup.devtools.envfiles import CheckoutEnv, ContainedHint, EnvFile, HostSecrets
+from lup.trust.tab import shown_to_operator
 from lup.devtools.harness.profile_app import create_profile_app
 from lup.providers.profiles import ProfileDirectory
 from lup.types import EnvName, EnvVars
@@ -120,7 +121,7 @@ def open_browser(url: str) -> None:
     """Open a URL in the default browser, with fallback message."""
     console.print(f"  Opening [link={url}]{url}[/link]")
     try:
-        webbrowser.open(url)
+        shown_to_operator(url)
     except (webbrowser.Error, OSError):
         console.print(f"  [dim]Could not open browser. Go to: {url}[/dim]")
 

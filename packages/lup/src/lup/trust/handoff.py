@@ -264,6 +264,39 @@ def executed(handoff: Handoff) -> None:
     os.execvpe(handoff.argv[0], handoff.argv, handoff.environment)
 
 
+def beside(handoff: Handoff) -> sh.RunningCommand:
+    """Start one hand-off as a child on this terminal, for a launcher that stays.
+
+    What stays is the review's inbox, to send its tab to the page the command
+    opens; the command still owns the terminal, its input and its output.
+    Every exit status is the command's to report, so none is raised here.
+    """
+    sys.stdout.flush()
+    sys.stderr.flush()
+    return sh.Command(handoff.argv[0])(
+        *handoff.argv[1:],
+        _env=handoff.environment,
+        _bg=True,
+        _bg_exc=False,
+        _in=sys.stdin,
+        _out=sys.stdout,
+        _err=sys.stderr,
+        _ok_code=list(range(256)),
+        _return_cmd=True,
+    )
+
+
+def exit_status(running: sh.RunningCommand) -> int:
+    """How a command started :func:`beside` this launcher ended, as a shell says it."""
+    try:
+        return running.wait().exit_code
+    except sh.SignalException as error:
+        return 128 + abs(error.exit_code)
+
+
+type Spawner = Callable[[Handoff], sh.RunningCommand]
+"""What starts a hand-off beside the launcher; replaced in tests."""
+
 type Executor = Callable[[Handoff], None]
 """What starts the project's launch once it is approved; replaced in tests."""
 

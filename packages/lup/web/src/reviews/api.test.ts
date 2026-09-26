@@ -3,7 +3,7 @@ import { answerReview, followInbox, readInbox, readReviewLink, reviewLink, takeT
 
 const originalFetch = globalThis.fetch;
 const originalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
-const snapshot = { roots: [], reviews: [], errors: [] };
+const snapshot = { roots: [], reviews: [], errors: [], continuation: null };
 
 afterEach(() => {
   if (originalStorage !== undefined) Object.defineProperty(globalThis, "localStorage", originalStorage);

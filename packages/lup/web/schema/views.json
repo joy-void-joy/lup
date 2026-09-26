@@ -546,6 +546,34 @@
       "title": "ConcernView",
       "type": "object"
     },
+    "Continuation": {
+      "additionalProperties": false,
+      "description": "What a tab that answered a launch's question is told once the launch goes on.\n\nA launcher's inbox serves one question and stops. What it says after the\nanswer is what the operator's tab shows in its place: what the launch is\ndoing, and the page the launched command opened, which the tab goes to\nrather than a second one opening beside it.",
+      "properties": {
+        "final": {
+          "default": false,
+          "title": "Final",
+          "type": "boolean"
+        },
+        "message": {
+          "default": "",
+          "title": "Message",
+          "type": "string"
+        },
+        "url": {
+          "default": "",
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "message",
+        "url",
+        "final"
+      ],
+      "title": "Continuation",
+      "type": "object"
+    },
     "CriteriaCarriedEvent": {
       "additionalProperties": false,
       "description": "A human took an acceptance over criteria the reviewer left unmet.\n\nThe bar is theirs, so waiving part of it is theirs too, and the waiver\nis worth more than the verdict it produced: whoever lands this concern\ninherits work that does not meet everything it was admitted against,\nand only this says which parts and on whose word.",
@@ -2576,6 +2604,17 @@
       "additionalProperties": false,
       "description": "A complete snapshot of the configured review queues.",
       "properties": {
+        "continuation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Continuation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "errors": {
           "default": [],
           "items": {
@@ -2603,7 +2642,8 @@
       "required": [
         "roots",
         "reviews",
-        "errors"
+        "errors",
+        "continuation"
       ],
       "title": "ReviewInbox",
       "type": "object"

@@ -31,7 +31,7 @@ from lup.sandbox.rail import AccessibleRoot, fleet_lease
 from lup.trust import launcher
 from lup.trust.answer import Preview
 from lup.trust.approved import APPROVED_TREE_ENV
-from lup.trust.handoff import Handoff, Runner
+from lup.trust.handoff import Executor, Handoff, Runner
 from lup.trust.launcher import Asker, trusted_launch
 from lup.trust.record import StateLocation, TrustState
 from lup.trust.review import OPERATOR, TRUST_TOOL
@@ -505,6 +505,7 @@ class Handed:
         self.starts: list[Path] = []
         self.commands: list[list[str]] = []
         self.named: list[str] = []
+        self.handing: list[str] = []
 
     def __call__(
         self,
@@ -515,10 +516,12 @@ class Handed:
         console: Console,
         # lup: ignore[dict-str-payload] — the environment map
         inherited: dict[str, str],
+        execute: Executor,
     ) -> None:
         self.starts.append(start)
         self.commands.append(command)
         self.named.append(named)
+        self.handing.append(execute.__name__)
 
 
 def test_the_command_hands_everything_after_the_runtime_to_the_launch(
@@ -547,6 +550,7 @@ def test_the_command_hands_everything_after_the_runtime_to_the_launch(
         ["harness", "claude", "--network", "host", "--root", "x"]
     ]
     assert handed.named == ["claude"]
+    assert handed.handing == ["launch"]
 
 
 def test_a_host_shim_naming_a_mode_reaches_the_launch_intact(
@@ -581,6 +585,7 @@ def test_run_hands_a_devtools_command_over_rather_than_a_launch(
     assert result.exit_code == 0, result.output
     assert handed.commands == [["setup", "gemini", "--help"]]
     assert handed.named == ["lup-devtools setup gemini --help"]
+    assert handed.handing == ["run"]
 
 
 def test_run_without_a_command_runs_nothing(
