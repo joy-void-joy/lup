@@ -1628,6 +1628,13 @@ def decide_uv(
     measured = no_write_facts() if facts is None else facts
     spelled = words
     normalized = uv_command_words(words)
+    # Asking uv what it is names no verb, which is how the reading below fails,
+    # and changes nothing: `uv --version` was refused as though a global had
+    # hidden one. Only the informational globals, and nothing beside them.
+    if len(words) > 1 and all(
+        word in ("--version", "-V", "--help", "-h") for word in words[1:]
+    ):
+        return KernelDecision("allow", "uv reports its own version or usage")
     if normalized is None:
         return KernelDecision(
             "deny", "uv global options do not identify a literal command to judge"

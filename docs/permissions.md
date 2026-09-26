@@ -259,7 +259,8 @@ the dependency effect at every placement, and `uv publish` asks as the
 external mutation an upload is. Their listing verbs (`uv pip list`, `show`,
 `freeze`, `check`, `tree`; `uv tool list`, `dir`) read, and a verb neither
 names falls to the question. A global option uv does not document leaves
-the verb unread, and is refused. The tool `uvx` or `uv tool run` runs is the
+the verb unread, and is refused; `uv --version` and `uv -V` name no verb and
+change nothing, so they read. The tool `uvx` or `uv tool run` runs is the
 first operand past their own options, read by the grammar `uvx --help`
 lists: an interpreter there is refused as a bare one is, however the options
 before it are spelled (`uvx --from foo python -c 1`), and an option the

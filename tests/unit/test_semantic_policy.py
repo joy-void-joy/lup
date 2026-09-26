@@ -685,6 +685,10 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="uv --quiet run python -c x", effect="deny"),
     DecisionCase(input="uv --python 3.12 add x", effect="deny"),
     DecisionCase(input="uv --cache-dir", effect="deny"),
+    # Asking uv what it is names no verb and changes nothing.
+    DecisionCase(input="uv --version", effect="allow"),
+    DecisionCase(input="uv -V", effect="allow"),
+    DecisionCase(input="uv --version add x", effect="deny"),
     DecisionCase(input="uvx python -c 1", effect="deny"),
     # The tool is found past uvx's own options, and `uv tool run` is uvx by
     # its other name: an interpreter behind either is refused however the

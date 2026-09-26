@@ -191,7 +191,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/commands.py",
       "category": "generated",
-      "sha256": "b973c0effb6dce2e63ea3d5ee2340badc20a9941a53a28ff69698130d7ac68a8",
+      "sha256": "35a8dc69abb316808c794b89ad8c292a522d5ec5fe5c5d1426c3b660816de2b8",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
