@@ -849,7 +849,7 @@
     {
       "path": "docs/trust.md",
       "category": "generated",
-      "sha256": "cd9411d5b3553ed4fe1a2104aa6a9b1ac27267615db12d130af8670f9378f0fc",
+      "sha256": "3a0fcd2fa30de04eed9503490e16da32d748c00d4963de6b2e7b27633a7971ea",
       "semantic_id": "docs.trust",
       "executable": false
     },

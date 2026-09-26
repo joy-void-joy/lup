@@ -32,9 +32,9 @@ export with the terminal handed through, so a prompt can hide what is typed.
 A rejected review runs nothing. Launcher options go before the runtime or
 `run`: `--root` names the checkout (default: the one enclosing the working
 directory), `--port` the loopback port of its review inbox (default: any free
-one), `--no-open` keeps the browser closed, and `--status` prints what this
-machine approved and launches nothing. Without the `web` extra the launcher
-still works, and asks at the terminal only.
+one), `--no-open` keeps the browser closed and answers at the terminal, and
+`--status` prints what this machine approved and launches nothing. Without
+the `web` extra the launcher still works, and asks at the terminal only.
 
 ## What is fingerprinted
 
@@ -90,16 +90,41 @@ question shows the complete zone and says so. Binary content is shown as its
 size and object id rather than decoded lossily, and an executable bit that
 appears or changes is listed as its own entry.
 
-The question is answered in the launcher's own review inbox — the surface `dev
-questions serve` serves, run by the installed launcher's code over the
+Before anything opens, the terminal says once why it asks: whose host code,
+whether this is its first run on the machine or what changed since the last
+approval — counted by top directory, not listed file by file — how the free
+zones move, and what runs once approved:
+
+```text
+adlib's host code changed since your last approval on this machine (4 files):
+  docs/    1 added
+  src/     1 changed, 1 added
+  uv.lock  1 removed
+lup-devtools setup gemini runs after you approve.
+```
+
+The question is then answered in the launcher's own review inbox — the surface
+`dev questions serve` serves, run by the installed launcher's code over the
 launcher's own relay, on loopback behind a capability only the printed address
-carries — or at the terminal (`a` approve, `r` reject, `d` show every diff),
-whichever answers first. It is never read from the checkout's
-`.lup/questions.jsonl`: that file is writable from inside the container, where
-no gate remains to stop a session answering its own question. A rejection ends
-the launch with nothing from the checkout having run. A launch interrupted
-while it waits leaves its question pending, and the next launch over the same
-trees asks that question rather than a second one.
+carries, and opened in the browser — or at the terminal (`a` approve, `r`
+reject, `d` show every diff), whichever answers first. It is never read from
+the checkout's `.lup/questions.jsonl`: that file is writable from inside the
+container, where no gate remains to stop a session answering its own
+question. A rejection ends the launch with nothing from the checkout having
+run. A launch interrupted while it waits leaves its question pending, and the
+next launch over the same trees asks that question rather than a second one.
+
+The inbox serves that one question and then stops, having told its tab what
+happens next. A session's launch tells the tab it opens in the terminal. A
+command `lup-launch run` hands over runs beside the launcher instead, told
+through `LUP_REVIEW_TAB` where to hand the first page it opens, and the tab
+goes on to that page — `lup-launch run setup dashboard` continues in the tab
+that approved it, rather than opening a second one — after which the inbox
+stops; a command that opens no page ends the inbox when it ends. A page is
+handed only this way, never opened twice: a command opens its pages through
+`lup.trust.tab.shown_to_operator`, which opens a new tab wherever no review
+waits — a launch that asked nothing, `--no-open`, a later page. Where the
+operator closed the review's tab, the launcher opens the page itself.
 
 ## Where the approval lives
 
