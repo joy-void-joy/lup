@@ -183,11 +183,11 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `harness egress` | Report or remove the network boundary this project&#x27;s sessions run behind. |
 | `harness claude` | Generate/reconcile Claude artifacts and launch the verified plugin. |
 | `harness codex` | Generate/reconcile Codex artifacts and launch without updating the CLI. |
-| `harness profile list` | Show every profile, and which one a launch selects by default. |
-| `harness profile add` | Register a runtime configuration home under a name. |
-| `harness profile use` | Select the profile a launch uses when none is named. |
-| `harness profile remove` | Forget a profile, leaving its configuration home on disk. |
-| `harness profile migrate` | Move profiles a checkout or the old ~/.lup registry kept into your lup config home. |
+| `harness profile list` | Show every profile, local and global, and which one a launch selects. |
+| `harness profile add` | Register a runtime configuration home under a name, in this checkout. |
+| `harness profile use` | Select the profile a launch uses when none is named, in this checkout. |
+| `harness profile remove` | Forget a profile in this checkout, leaving its configuration home on disk. |
+| `harness profile migrate` | Move this checkout&#x27;s profiles, and the old ~/.lup registry&#x27;s, to global. |
 | `harness codex-plugin install` | Install the declared plugin and verify native discovery in the selected home. |
 
 ## `ledger`
@@ -258,11 +258,11 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `setup timezone` | Set timezone. |
 | `setup conversation chatgpt` | Open a browser to authenticate ChatGPT conversation access. |
 | `setup conversation claude` | Open a browser to authenticate Claude conversation access. |
-| `setup profile list` | Show every profile, and which one a launch selects by default. |
-| `setup profile add` | Register a runtime configuration home under a name. |
-| `setup profile use` | Select the profile a launch uses when none is named. |
-| `setup profile remove` | Forget a profile, leaving its configuration home on disk. |
-| `setup profile migrate` | Move profiles a checkout or the old ~/.lup registry kept into your lup config home. |
+| `setup profile list` | Show every profile, local and global, and which one a launch selects. |
+| `setup profile add` | Register a runtime configuration home under a name, in this checkout. |
+| `setup profile use` | Select the profile a launch uses when none is named, in this checkout. |
+| `setup profile remove` | Forget a profile in this checkout, leaving its configuration home on disk. |
+| `setup profile migrate` | Move this checkout&#x27;s profiles, and the old ~/.lup registry&#x27;s, to global. |
 
 ## `sync`
 

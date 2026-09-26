@@ -1601,7 +1601,7 @@ def run_resolve(
         from lup.providers.codex.install import install_codex_plugin
 
         from lup.providers.codex.home import CodexWorktreeHomeStore, select_codex_home
-        from lup.providers.profile_tree import user_profile_directory
+        from lup.providers.profile_tree import profile_directory
 
         def codex_policy_environment(target: str, environment: EnvVars) -> EnvVars:
             """Point a Codex session at a home carrying this project's policy.
@@ -1623,9 +1623,7 @@ def run_resolve(
             """
             if target != "codex":
                 return {}
-            codex_account = user_profile_directory(CODEX_LOGIN).launch_home(
-                account.name
-            )
+            codex_account = profile_directory(CODEX_LOGIN).launch_home(account.name)
             store = (
                 CodexWorktreeHomeStore()
                 if codex_account is None

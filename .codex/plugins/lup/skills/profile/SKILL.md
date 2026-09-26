@@ -37,6 +37,11 @@ It marks the selected profile, gives each one's configuration home, and says
 which hold a login. Report the home as well as the name: two profiles differ
 by nothing a person can see except where their credentials live.
 
+Each profile is `local`, kept in this checkout, or `global`, shared by every
+checkout the person opens. A name resolves to the local one first, and the
+roster says where a global profile is shadowed by a local one of the same
+name; report which of the two a name would open.
+
 Which profile *this* session is on is a separate question, and the roster does
 not answer it — the roster is about what a launch would select, and a running
 session was launched with whatever it was launched with. Read the environment
@@ -48,6 +53,11 @@ that it is one no profile claims.
 ```bash
 uv run lup-devtools harness profile use <name>
 ```
+
+That selects it for this checkout, overriding the global selection here. Add
+`--global` only when the person asked for the selection every checkout takes
+without one of its own; it can name only a global profile, and a checkout's
+own selection still answers inside that checkout, as the command says.
 
 Then say plainly that the running session is unaffected and the next one will
 take it. A person who asked to "switch" and was given this has been answered

@@ -1,9 +1,12 @@
-"""The command tree over whichever origin holds a project's runtime accounts.
+"""The command tree over the registries that hold a project's runtime accounts.
 
 Mounted wherever a project already talks about profiles — beside the native
 launchers as ``harness profile``, or inside a setup wizard — so the roster a
 launch selects from is curated in one vocabulary no matter which tree the
 caller reached it through.
+
+Every command acts on this checkout's own profiles unless ``--global`` names
+the ones every checkout shares, the way ``git config`` does.
 """
 
 from collections.abc import Callable
@@ -13,13 +16,22 @@ from typing import Annotated
 import typer
 
 from lup.providers.profile_migration import migrate_profiles
-from lup.providers.profiles import Profile, ProfileDirectory
+from lup.providers.profiles import Profile, ProfileDirectory, ProfileScope
 from lup.providers.user_config import UserConfigFile
 from lup.workspace.paths import project_root
 
+GLOBAL_OPT = Annotated[
+    bool,
+    typer.Option(
+        "--global",
+        help="Act on the global profiles every checkout shares, beside your "
+        "lup config, instead of this checkout's own",
+    ),
+]
+
 
 def create_profile_app(directory: ProfileDirectory) -> typer.Typer:
-    """Wire the profile command tree over one project's profile origin."""
+    """Wire the profile command tree over one project's profile registries."""
     app = typer.Typer(
         no_args_is_help=True,
         help="Inspect and curate the accounts a launch can select",
@@ -43,9 +55,25 @@ def create_profile_app(directory: ProfileDirectory) -> typer.Typer:
         except (KeyError, ValueError) as error:
             raise typer.BadParameter(str(error)) from error
 
+    def scope(shared: bool) -> ProfileScope:
+        """The registry a command acts on: this checkout's unless ``--global``."""
+        return "global" if shared else "local"
+
+    def shadowing(entry: Profile) -> str:
+        """What answers for this entry's name here, where it is not this entry."""
+        if entry.resolved:
+            return ""
+        winner = directory.profile(entry.name)
+        return f"; shadowed by the {winner.scope} {winner.name}"
+
     @app.command("list")
     def list_command() -> None:
-        """Show every profile, and which one a launch selects by default."""
+        """Show every profile, local and global, and which one a launch selects.
+
+        ``*`` marks the profile a launch naming none opens. A name kept both
+        locally and globally resolves to the local one in this checkout, and
+        the global entry says it is shadowed.
+        """
         entries = directory.entries()
         if not entries:
             typer.echo("No profiles yet — add one with `profile add`")
@@ -53,11 +81,15 @@ def create_profile_app(directory: ProfileDirectory) -> typer.Typer:
         for entry in entries:
             selected = "*" if entry.active else " "
             login = "logged in" if entry.logged_in else "no login yet"
-            typer.echo(f"{selected} {entry.name}  {entry.config_dir}  ({login})")
+            typer.echo(
+                f"{selected} {entry.name}  {entry.scope}  {entry.config_dir}"
+                f"  ({login}{shadowing(entry)})"
+            )
 
     @app.command("add")
     def add_command(
         name: Annotated[str, typer.Argument(help="Name for the account")],
+        shared: GLOBAL_OPT = False,
         config_dir: Annotated[
             Path | None,
             typer.Option(
@@ -68,9 +100,11 @@ def create_profile_app(directory: ProfileDirectory) -> typer.Typer:
             ),
         ] = None,
     ) -> None:
-        """Register a runtime configuration home under a name."""
-        entry = acting(lambda: directory.add(name, config_dir))
-        typer.echo(f"Added {entry.name}: {entry.config_dir}")
+        """Register a runtime configuration home under a name, in this checkout."""
+        entry = acting(lambda: directory.add(name, config_dir, scope(shared)))
+        typer.echo(f"Added {entry.scope} {entry.name}: {entry.config_dir}")
+        if not entry.resolved:
+            typer.echo(f"Not used here{shadowing(entry)}")
         if not entry.logged_in:
             typer.echo(
                 "No login there yet — sign one in by starting the runtime with "
@@ -80,18 +114,36 @@ def create_profile_app(directory: ProfileDirectory) -> typer.Typer:
     @app.command("use")
     def use_command(
         name: Annotated[str, typer.Argument(help="Profile to select")],
+        shared: GLOBAL_OPT = False,
     ) -> None:
-        """Select the profile a launch uses when none is named."""
-        entry = acting(lambda: directory.use(name))
-        typer.echo(f"Active profile: {entry.name} ({entry.config_dir})")
+        """Select the profile a launch uses when none is named, in this checkout.
+
+        Recorded in this checkout's ``.lup/profiles/.active``, which overrides
+        the global selection here; ``--global`` records it as the ``profile``
+        in your lup config instead, for every checkout without its own.
+        """
+        entry = acting(lambda: directory.use(name, scope(shared)))
+        reach = "every checkout" if shared else "this checkout"
+        typer.echo(
+            f"Selected {entry.name} for {reach}: here it opens the {entry.scope} "
+            f"{entry.config_dir}"
+        )
+        if not entry.active:
+            typer.echo(
+                f"This checkout's own selection, {directory.active_name()}, "
+                "still answers here"
+            )
 
     @app.command("remove")
     def remove_command(
         name: Annotated[str, typer.Argument(help="Profile to forget")],
+        shared: GLOBAL_OPT = False,
     ) -> None:
-        """Forget a profile, leaving its configuration home on disk."""
-        entry = acting(lambda: directory.remove(name))
-        typer.echo(f"Removed {entry.name} — left {entry.config_dir} on disk")
+        """Forget a profile in this checkout, leaving its configuration home on disk."""
+        entry = acting(lambda: directory.remove(name, scope(shared)))
+        typer.echo(
+            f"Removed {entry.scope} {entry.name} — left {entry.config_dir} on disk"
+        )
 
     @app.command("migrate")
     def migrate_command(
@@ -103,7 +155,13 @@ def create_profile_app(directory: ProfileDirectory) -> typer.Typer:
             ),
         ] = None,
     ) -> None:
-        """Move profiles a checkout or the old ~/.lup registry kept into your lup config home."""
+        """Move this checkout's profiles, and the old ~/.lup registry's, to global.
+
+        Optional: a checkout's own profiles keep working where they are, and
+        moving one shares its login with every checkout instead. The old
+        ``~/.lup/profiles.json`` registry is read by nothing, so its accounts
+        reach a launch only once moved.
+        """
         migration = migrate_profiles(checkout or project_root(), UserConfigFile())
         for line in migration.lines():
             typer.echo(line)

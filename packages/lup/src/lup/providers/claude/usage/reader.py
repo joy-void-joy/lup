@@ -18,7 +18,7 @@ from pydantic import BaseModel, ValidationError
 
 from lup.providers.claude.harness import ClaudeSpellings
 from lup.providers.claude.login import CLAUDE_LOGIN
-from lup.providers.profile_tree import user_profile_directory
+from lup.providers.profile_tree import profile_directory
 from lup.providers.profiles import DefaultHomeProfile, ProfileDirectory, UnknownProfile
 from lup.providers.claude.usage.api import (
     ModelUsageEntry,
@@ -305,11 +305,11 @@ class ClaudeUsageReader(UsageReader):
 def claude_usage_entry(profiles: ProfileDirectory | None = None) -> UsageEntry:
     """This runtime's place in the usage sub-app, for an application to name.
 
-    ``profiles`` is the origin a launch resolves names against, the person's
-    own unless an application keeps another, so ``--profile`` reads the
-    account a launch of that name opens.
+    ``profiles`` is what a launch resolves names against — this checkout's
+    profiles, then the global ones, unless an application keeps others — so
+    ``--profile`` reads the account a launch of that name opens.
     """
-    directory = profiles or user_profile_directory(CLAUDE_LOGIN)
+    directory = profiles or profile_directory(CLAUDE_LOGIN)
 
     def opened(profile: str | None) -> UsageReader:
         """The reader for the home a launch naming that profile runs under.

@@ -6,10 +6,12 @@ Add fixtures here that are used across multiple test files.
 import os
 import warnings
 from collections.abc import Iterator
+from functools import cache
 from pathlib import Path
 
 import pytest
 
+import lup.providers.profile_tree as profile_tree
 from lup.devtools.gitguard import TEST_IDENTITY, GuardVerdict, RepositoryWatch
 from lup.harness.environment import launcher_decided_names
 from lup.providers.identity import RUNTIME_DECIDED_ENV
@@ -66,6 +68,27 @@ def personal_config_withheld(
         environment.setenv(
             "XDG_CONFIG_HOME", str(tmp_path_factory.mktemp("xdg-config"))
         )
+        yield
+
+
+@pytest.fixture(autouse=True)
+def checkout_profiles_withheld(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Iterator[None]:
+    """Resolve profiles as though the checkout under test kept none of its own.
+
+    For the reason the personal config is withheld above: a developer's own
+    ``.lup/profiles`` — a profile, an ``.active`` selecting it — sits in the
+    checkout the suite runs from, and a name resolves through it first. Each
+    test reads an empty checkout of its own, made the first time it asks.
+    """
+
+    @cache
+    def checkout() -> Path:
+        return tmp_path_factory.mktemp("checkout")
+
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr(profile_tree, "project_root", checkout)
         yield
 
 

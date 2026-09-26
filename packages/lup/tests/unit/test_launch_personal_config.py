@@ -15,6 +15,7 @@ import sh
 import typer
 
 import lup.devtools.harness.launch as launch
+import lup.providers.profile_tree as profile_tree
 from lup.providers.claude.config_home import (
     ClaudeConfigHome,
     load_document,
@@ -23,7 +24,7 @@ from lup.providers.claude.config_home import (
 )
 from lup.providers.claude.login import CLAUDE_CONFIG_DIR, CLAUDE_LOGIN
 from lup.providers.codex.login import CODEX_LOGIN
-from lup.providers.profile_tree import user_profile_directory
+from lup.providers.profile_tree import profile_directory
 from lup.providers.user_config import UserConfigFile
 from lup.types import EnvVars
 from lup.providers.claude.usage.reader import ClaudeUsageReader, claude_usage_entry
@@ -89,6 +90,7 @@ def launched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Launched:
         lambda *a, **k: launch.LaunchOpening(sandbox=launch.LaunchSandbox.INNER),
     )
     monkeypatch.setattr(launch, "project_root", lambda: project)
+    monkeypatch.setattr(profile_tree, "project_root", lambda: project)
     monkeypatch.setattr(launch, "ambient_config_home", lambda *a, **k: tmp_path)
     monkeypatch.setattr(launch, "session_argv", argv)
     monkeypatch.setattr(launch, "claude_sandbox_arguments", settings_document)
@@ -134,7 +136,7 @@ def claude(
     launch.launch_claude(
         composition(),
         [],
-        user_profile_directory(CLAUDE_LOGIN, config),
+        profile_directory(CLAUDE_LOGIN, config),
         None,
         model,
         False,
@@ -155,7 +157,9 @@ def test_a_person_who_wrote_nothing_launches_on_lups_defaults(
 def test_a_fresh_project_inherits_the_persons_account_theme_and_defaults(
     config: UserConfigFile, launched: Launched
 ) -> None:
-    home = user_profile_directory(CLAUDE_LOGIN, config).add("work").config_dir
+    home = (
+        profile_directory(CLAUDE_LOGIN, config).add("work", scope="global").config_dir
+    )
     writes(
         config,
         'profile = "work"\ntier = "balanced"\neffort = "high"\n\n'
@@ -367,7 +371,7 @@ def test_codex_derives_its_worktree_home_from_the_selected_account(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """One name, one account: the profile a Claude launch opens, on Codex too."""
-    user_profile_directory(CLAUDE_LOGIN, config).add("work")
+    profile_directory(CLAUDE_LOGIN, config).add("work", scope="global")
     stores: list[dict[str, object]] = []
 
     def store(**named: object) -> Mock:
@@ -390,10 +394,10 @@ def test_the_usage_display_reads_the_account_a_launch_opens(
     config: UserConfigFile, launched: Launched, named: str | None
 ) -> None:
     """One resolution for both, so a name cannot read one account and open another."""
-    accounts = user_profile_directory(CLAUDE_LOGIN, config)
-    accounts.add("personal")
-    accounts.add("work")
-    accounts.use("work")
+    accounts = profile_directory(CLAUDE_LOGIN, config)
+    accounts.add("personal", scope="global")
+    accounts.add("work", scope="global")
+    accounts.use("work", "global")
     claude_reader = claude_usage_entry().open(named)
     codex_reader = codex_usage_entry().open(named)
 
@@ -403,3 +407,74 @@ def test_the_usage_display_reads_the_account_a_launch_opens(
     assert isinstance(codex_reader, CodexUsageReader)
     assert str(claude_reader.config_dir) == launched.environment[CLAUDE_CONFIG_DIR]
     assert codex_reader.home == config.profiles_root() / "work" / "codex-home"
+
+
+@pytest.mark.parametrize("named", ["work", None], ids=["named", "selected"])
+def test_the_usage_display_and_a_launch_agree_on_the_checkouts_own_profile(
+    config: UserConfigFile, launched: Launched, tmp_path: Path, named: str | None
+) -> None:
+    """A checkout's profile of a name wins over the global one, for both."""
+    accounts = profile_directory(CLAUDE_LOGIN, config)
+    accounts.add("work", scope="global")
+    accounts.add("work")
+    accounts.use("work")
+    kept = tmp_path / "fresh-project" / ".lup" / "profiles" / "work"
+    claude_reader = claude_usage_entry().open(named)
+    codex_reader = codex_usage_entry().open(named)
+
+    launch.launch_claude(composition(), [], accounts, named, None, False)
+
+    assert isinstance(claude_reader, ClaudeUsageReader)
+    assert isinstance(codex_reader, CodexUsageReader)
+    assert launched.environment[CLAUDE_CONFIG_DIR] == str(kept / "claude-config")
+    assert str(claude_reader.config_dir) == launched.environment[CLAUDE_CONFIG_DIR]
+    assert codex_reader.home == kept / "codex-home"
+
+
+def test_a_launch_opens_a_checkouts_profile_and_says_nothing_of_moving_it(
+    config: UserConfigFile,
+    launched: Launched,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A checkout's own profiles are read where they are, with no notice."""
+    kept = tmp_path / "fresh-project" / ".lup" / "profiles"
+    (kept / "work" / CLAUDE_LOGIN.home_subdir).mkdir(parents=True)
+    (kept / ".active").write_text("work\n", encoding="utf-8")
+
+    claude(config)
+
+    said = capsys.readouterr()
+    assert launched.environment[CLAUDE_CONFIG_DIR] == str(
+        kept / "work" / CLAUDE_LOGIN.home_subdir
+    )
+    assert "migrate" not in said.out + said.err
+    assert str(kept) not in said.out + said.err
+
+
+def test_codex_derives_its_worktree_home_from_the_checkouts_selected_account(
+    config: UserConfigFile,
+    launched: Launched,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The checkout's ``.active`` beats the config file's selection on Codex too."""
+    accounts = profile_directory(CODEX_LOGIN, config)
+    accounts.add("me", scope="global")
+    accounts.add("work")
+    accounts.use("work")
+    kept = tmp_path / "fresh-project" / ".lup" / "profiles" / "work"
+    stores: list[dict[str, object]] = []
+
+    def store(**named: object) -> Mock:
+        stores.append(named)
+        return Mock(
+            publish=Mock(return_value=False), return_settings=Mock(return_value=[])
+        )
+
+    monkeypatch.setattr(launch, "CodexWorktreeHomeStore", store)
+
+    launch.launch_codex(composition(), [], None, None, None, False, False)
+
+    assert config.load().profile == "me"
+    assert stores == [{"account_home": kept / "codex-home", "theme": None}]

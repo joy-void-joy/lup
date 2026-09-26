@@ -801,33 +801,40 @@ DECLARED: list[Migration] = [
             "ClaudeProfileRegistrar.remove_profile",
         ],
         reason=(
-            "profiles lived in each checkout's .lup/profiles or in the personal "
-            "registry at ~/.lup/profiles.json, so every new repository opened "
-            "its accounts signed out; they live once per person now, a "
-            "directory per name beside the per-user config at "
-            "$XDG_CONFIG_HOME/lup (~/.config/lup), a home per runtime inside "
-            "each, selected by that config.toml's profile"
+            "an account lived either in one checkout's .lup/profiles or in the "
+            "personal registry at ~/.lup/profiles.json, which held Claude homes "
+            "only, so a new repository opened its accounts signed out; global "
+            "profiles now live once per person, a directory per name beside the "
+            "per-user config at $XDG_CONFIG_HOME/lup (~/.config/lup), a home per "
+            "runtime inside each, selected by that config.toml's profile — and "
+            "a checkout's own .lup/profiles still comes first, its .active "
+            "overriding that selection"
         ),
         steps=[
             MigrationStep(
                 instruction=(
-                    "Move the accounts already kept once: this moves each "
-                    "checkout's .lup/profiles/<name> and the old registry's homes, "
-                    "links a home registered elsewhere, and carries the selection "
-                    "where the config file records none. Launches say so while "
-                    "an old location still holds accounts."
+                    "Move the old registry's accounts, which nothing reads any "
+                    "more: this moves the homes it made, links a home registered "
+                    "elsewhere, and carries its selection where the config file "
+                    "records none. A checkout's .lup/profiles keeps working where "
+                    "it is, and the same command moves it too, only if its "
+                    "accounts should be shared by every checkout."
                 ),
                 command=["uv", "run", "lup-devtools", "harness", "profile", "migrate"],
             ),
             MigrationStep(
                 instruction=(
-                    "Build profile directories with user_profile_directory(login) "
-                    "from lup.providers.profile_tree wherever "
+                    "Build profile directories with profile_directory(login) from "
+                    "lup.providers.profile_tree wherever "
                     "local_profile_directory(root, login) or a ProfileDirectory "
-                    "over ClaudeProfileNames and ClaudeProfileRegistrar was built. "
-                    "ProfileFolders takes the UserConfigFile whose profiles_root() "
-                    "it keeps, and the selection is UserConfigFile.load().profile "
-                    "rather than an .active file."
+                    "over ClaudeProfileNames and ClaudeProfileRegistrar was built: "
+                    "it resolves a name through the checkout's .lup/profiles, "
+                    "then the global profiles, and takes checkout= for a root "
+                    "other than the project's. A ProfileDirectory is built over a "
+                    "list of ProfileRegistry, narrowest scope first, and "
+                    "ProfileFolders takes its root, the login's home_subdir and "
+                    "a ProfileSelection: ActiveFile for a checkout, "
+                    "ConfigSelection for the config file's profile."
                 )
             ),
             MigrationStep(
@@ -836,6 +843,46 @@ DECLARED: list[Migration] = [
                     "or codex_usage_entry(executable, profiles); codex_usage_entry "
                     "takes no home any more, and `usage codex --profile NAME` reads "
                     "that account's Codex home rather than refusing the name."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "user_profile_directory",
+            "ProfileFolders.active",
+            "ProfileFolders.select",
+            "legacy_notice",
+            "legacy_sources",
+            "announce_legacy_profiles",
+        ],
+        reason=(
+            "a checkout's .lup/profiles went unread once profiles moved beside "
+            "the per-user config, so a project keeping local profiles lost them; "
+            "a name resolves through the checkout's profiles again, then the "
+            "global ones, and a launch no longer says to move them"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Call profile_directory(login, config, checkout) from "
+                    "lup.providers.profile_tree where user_profile_directory was "
+                    "called; it answers local profiles first, and curates them "
+                    "unless scope='global' is passed to add, use or remove."
+                )
+            ),
+            MigrationStep(
+                instruction=(
+                    "Read and record a root's selection through "
+                    "ProfileFolders.selection, whose recorded() and record(name) "
+                    "replace ProfileFolders.active() and select(name)."
+                )
+            ),
+            MigrationStep(
+                instruction=(
+                    "Drop calls to legacy_notice, legacy_sources and "
+                    "announce_legacy_profiles: a checkout's profiles are read "
+                    "where they are, so nothing is left to announce."
                 )
             ),
         ],

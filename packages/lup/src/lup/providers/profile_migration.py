@@ -1,11 +1,12 @@
-"""Bring accounts from where lup used to keep them into the person's config home.
+"""Move accounts into the global profiles beside the person's lup config.
 
-Two places held profiles before one did: a checkout's ``.lup/profiles/<name>/``,
-one directory per account holding a home per runtime, and the personal
-registry at ``~/.lup/profiles.json``, naming a Claude home per account —
-``~/.lup/homes/<name>`` unless one was registered elsewhere. Nothing reads
-either any more, so an account left in one is an account no launch can
-select; this moves what they hold, once, into
+Two places hold accounts a checkout alone can reach. A checkout's own
+``.lup/profiles/<name>/`` is still read, first, by every launch in it; moving
+one is a choice to share it with every checkout, never a repair. The old
+personal registry at ``~/.lup/profiles.json``, naming a Claude home per
+account — ``~/.lup/homes/<name>`` unless one was registered elsewhere — is
+read by nothing, so an account left there is one no launch can select. This
+moves what either holds, once, into
 :meth:`~lup.providers.user_config.UserConfigFile.profiles_root`.
 
 Moving rather than copying, because a login is a rotating chain: two copies
@@ -26,6 +27,7 @@ from pydantic import BaseModel
 
 from lup.channels.models import publish_atomic
 from lup.providers.claude.login import CLAUDE_LOGIN
+from lup.providers.profile_tree import checkout_profiles
 from lup.providers.user_config import UserConfigFile
 
 type MoveOutcome = Literal["moved", "linked", "kept", "refused"]
@@ -49,7 +51,7 @@ class LegacyRegistry(BaseModel, frozen=True):
 
 
 class ProfileMove(BaseModel, frozen=True):
-    """What became of one account found in an old location."""
+    """What became of one account found in a checkout or the old registry."""
 
     name: str
     source: Path
@@ -95,36 +97,6 @@ class ProfileMigration(BaseModel, frozen=True):
 def legacy_home() -> Path:
     """Where the old personal registry and the homes it made lived."""
     return Path.home() / ".lup"
-
-
-def checkout_profiles(root: Path) -> Path:
-    """Where a checkout used to keep its own profiles."""
-    return root / ".lup" / "profiles"
-
-
-def legacy_sources(root: Path, old_home: Path | None = None) -> list[Path]:
-    """Every old location still holding something a launch would miss."""
-    registry = (old_home or legacy_home()) / "profiles.json"
-    kept = checkout_profiles(root)
-    return [
-        *([kept] if kept.is_dir() and any(kept.iterdir()) else []),
-        *([registry] if registry.is_file() else []),
-    ]
-
-
-def legacy_notice(
-    root: Path, config: UserConfigFile, old_home: Path | None = None
-) -> str | None:
-    """What a launch says while an old location still holds accounts."""
-    sources = legacy_sources(root, old_home)
-    if not sources:
-        return None
-    named = " and ".join(str(source) for source in sources)
-    return (
-        f"Profiles now live in {config.profiles_root()}, shared by every "
-        f"checkout; {named} still hold accounts no launch selects. Move them "
-        "once with `lup-devtools harness profile migrate`."
-    )
 
 
 def moved(source: Path, destination: Path) -> bool:
@@ -234,7 +206,7 @@ def migrate_registry(config: UserConfigFile, old_home: Path) -> list[ProfileMove
 def migrate_profiles(
     root: Path, config: UserConfigFile, old_home: Path | None = None
 ) -> ProfileMigration:
-    """Move every account both old locations hold, and carry one selection over.
+    """Move what the checkout and the old registry hold, and carry a selection over.
 
     The checkout's selection is preferred to the old registry's; either
     becomes the person's only where their config file records none, since a

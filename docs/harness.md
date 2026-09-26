@@ -233,8 +233,8 @@ half lives in `packages/lup/src/lup/devtools/harness/`:
   nobody uses
 - `policy_refresh.py` — accepting changed destination policy bytes for a
   live, already granted launch
-- `profile_app.py` — the command tree over whichever origin holds the
-  runtime accounts, and the one-time move out of their old locations
+- `profile_app.py` — the command tree over the local and global registries
+  holding the runtime accounts, and the optional move from local to global
 - `sandbox.py` — exercising the Python sandbox through its container and
   persistent REPL
 - `generated_paths.py` — which file each typed declaration compiles to
@@ -658,6 +658,7 @@ opened for the first time starts signed in, in their theme, on their defaults:
 ```toml
 # ~/.config/lup/config.toml — every key optional, each defaulting to lup's own
 profile = "work"            # the account a launch runs as when none is named
+                            # and the checkout's .active selects none
 effort = "high"             # unset: xhigh, or the model's highest rung below it
 tier = "strongest"          # the model when nothing names one; "inherit" leaves
                             # it to the runtime
@@ -688,40 +689,63 @@ file, and without undoing a change the account took meanwhile. A contained
 session's theme is its config volume's for now.
 
 A profile names one account and the configuration home it runs under. Each
-profile is a directory beside that file — `profiles/<name>/`, with each
-runtime's home in the subdirectory that runtime's login names (`claude-config/`
-for Claude Code, `codex-home/` for Codex) — so one name is one account on both
-runtimes, and every checkout resolves it the same way. A project may still
+profile is a directory, with each runtime's home in the subdirectory that
+runtime's login names (`claude-config/` for Claude Code, `codex-home/` for
+Codex), so one name is one account on both runtimes. Two places keep them:
+
+| Where | Reach | Selected by |
+| --- | --- | --- |
+| `.lup/profiles/<name>/` in the checkout | local: this checkout only | `.lup/profiles/.active` |
+| `profiles/<name>/` beside `config.toml` | global: every checkout | `config.toml`'s `profile` |
+
+A name resolves through the local profiles first, then the global ones, so a
+checkout's own profile of a name wins inside it. Naming none takes the
+checkout's `.active` where it has one, else `config.toml`'s `profile`, each
+resolved the same way; naming none with neither recorded leaves whatever home
+the surrounding environment already selected, so a session launched from
+inside another stays on the account it was started under. A project may still
 supply an origin of its own through the harness, resolver and setup trees;
 naming none takes these.
 
-`harness profile` and `setup profile` curate them — `list`, `add`, `use`,
-`remove`, `migrate` — `harness claude --profile` selects one for a single
-launch, and `profile=NAME` on a `Claude` or `Codex` declaration opens every
-session as it. Naming none selects the one `config.toml` records; naming none
-with none recorded leaves whatever home the surrounding environment already
-selected, so a session launched from inside another stays on the account it was
-started under. A declaration naming no profile stays on its process's account
-rather than taking the recorded one, for the same reason. A name nothing
+`harness profile` and `setup profile` curate them, acting on the checkout's
+own profiles unless `--global` names the shared ones, as `git config` does:
+
+| Command | Without `--global` | With `--global` |
+| --- | --- | --- |
+| `add NAME` | starts `.lup/profiles/NAME/` | starts `profiles/NAME/` beside `config.toml` |
+| `use NAME` | writes `.lup/profiles/.active`; may name a global profile | writes `config.toml`'s `profile`; only a global profile |
+| `remove NAME` | names the local directory to remove | names the global directory to remove |
+
+`list` shows both, each marked `local` or `global`, with `*` on the profile a
+launch naming none opens, and says where a global profile is shadowed by a
+local one of the same name. The first profile added where nothing is selected
+yet becomes the selection, in the place it was added; one added beside a
+selection leaves it standing.
+
+`harness claude --profile` selects one for a single launch, and `profile=NAME`
+on a `Claude` or `Codex` declaration opens every session as it, both resolved
+local first. A declaration naming no profile stays on its process's account
+rather than taking the recorded one, for the reason above. A name nothing
 answers to is refused with the roster that would have answered, at the
 launcher, the command tree and the declaration alike, and `usage claude` and
-`usage codex` resolve `--profile` the same way a launch does.
+`usage codex` resolve `--profile` the same way a launch does. A Codex launch
+derives its worktree home from the selected account by the same order.
 
 A profile's home is derived from its name, so `add --config-dir` pointing
 elsewhere is refused, and `remove` says to remove the directory rather than
 forgetting it: the directory is the profile and it holds the login. Where that
-profile is the selected one, it names the `profile` line recording the
-selection as well, since a selection left naming a removed profile refuses
-every launch that names none. To point one at a home that already exists,
-symlink that subdirectory at it.
+profile is the selected one, it names what records the selection as well — the
+`.active` file or the `profile` line — since a selection left naming a removed
+profile refuses every launch that names none. To point one at a home that
+already exists, symlink that subdirectory at it.
 
-Profiles used to live in each checkout's `.lup/profiles/`, and in the personal
-registry at `~/.lup/profiles.json`. `harness profile migrate` moves both once:
-each checkout profile and each home the registry made, a runtime's home at a
+`harness profile migrate` is optional. It moves a checkout's local profiles to
+global, for accounts that should be shared by every checkout, and the accounts
+of the old personal registry at `~/.lup/profiles.json`, which nothing reads any
+more: each profile and each home the registry made, a runtime's home at a
 time; a home registered somewhere of the person's own is linked rather than
 moved; a name already present keeps what it holds and the source is left and
-reported; the old selection is carried where `config.toml` records none. A
-launch says so while an old location still holds accounts.
+reported; the old selection is carried where `config.toml` records none.
 
 No profile may name Claude Code's default home, `~/.claude`, however it is
 spelled or reached — a symlinked directory profile included. A profile exports

@@ -54,9 +54,11 @@ class UserConfig(BaseModel, frozen=True, extra="forbid"):
     """One person's standing answers, each defaulting to lup's own."""
 
     profile: str | None = None
-    """The account a launch runs as when none is named: a directory under
-    ``profiles/``, holding that account's home for each runtime. Unset, a
-    launch keeps whichever home its environment already selects."""
+    """The account a launch runs as when none is named and the checkout's own
+    ``.lup/profiles/.active`` selects none: a directory under ``profiles/``,
+    holding that account's home for each runtime, unless the checkout keeps a
+    profile of that name, which wins there. Unset, a launch keeps whichever
+    home its environment already selects."""
 
     theme: UserTheme = UserTheme()
 
