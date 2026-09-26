@@ -35,7 +35,7 @@ from lup.policy.assets.host import (
     landed_targets,
     lent_mount_points,
 )
-from lup.policy.kernel.decision import KernelDecision
+from lup.policy.kernel.decision import KernelDecision, carrying_readings
 from lup.policy.kernel.effects import declare
 from lup.policy.kernel.fetch import decide_fetch, loopback_port
 from lup.policy.kernel.rows import TargetLandingRow, UrlScopeRow, landing_rows
@@ -437,6 +437,17 @@ def test_an_unread_deferral_settles_only_on_a_reach_it_stated_inside() -> None:
     ]
 
     assert [settle(fact).effect for fact in facts] == ["deny", "allow", "allow"]
+
+
+def test_a_deferral_carries_its_readings_only_where_one_objects() -> None:
+    """A word every reading of which is allowed stays work nobody judged."""
+    deferral = KernelDecision("defer", "nobody read it", abstention="boundary_settle")
+    allowed = KernelDecision("allow", "reads")
+    pushed = KernelDecision("ask", "pushes", reach="host_later")
+
+    assert not carrying_readings(deferral, (allowed,)).unread
+    carried = carrying_readings(deferral, (allowed, pushed))
+    assert (carried.unread, carried.reach) == (True, "host_later")
 
 
 def test_a_reach_outside_the_vocabulary_is_refused_where_it_is_declared() -> None:
