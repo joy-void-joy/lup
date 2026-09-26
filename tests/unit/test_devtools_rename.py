@@ -16,6 +16,7 @@ from pathlib import Path
 from lup_template.devtools.dev.init import (
     PACKAGE_IMPORT_RE,
     PACKAGE_STRING_ANCHOR_RE,
+    drop_build_record,
     find_stale_references,
     is_renamer_module,
     rename_pattern_in_file,
@@ -108,3 +109,31 @@ class TestStaleReferenceReport:
         renamer.write_text('OLD = "lup_template"\n')
 
         assert find_stale_references(tmp_path) == []
+
+
+class TestBuildRecord:
+    """The old name's egg-info would keep registering the old devtools application."""
+
+    def test_the_old_build_record_goes_with_the_rename(self, tmp_path: Path) -> None:
+        record = tmp_path / "lup_template.egg-info"
+        record.mkdir()
+        (record / "entry_points.txt").write_text(
+            "[lup.devtools]\napplication = lup_template.devtools.main:app\n"
+        )
+
+        said = drop_build_record(tmp_path, dry_run=False)
+
+        assert not record.exists()
+        assert said == [
+            "  src/lup_template.egg-info/: removed, the build's record of the old name"
+        ]
+
+    def test_a_dry_run_names_it_and_keeps_it(self, tmp_path: Path) -> None:
+        record = tmp_path / "lup_template.egg-info"
+        record.mkdir()
+
+        assert drop_build_record(tmp_path, dry_run=True) != []
+        assert record.is_dir()
+
+    def test_nothing_is_said_where_no_build_ran(self, tmp_path: Path) -> None:
+        assert drop_build_record(tmp_path, dry_run=False) == []

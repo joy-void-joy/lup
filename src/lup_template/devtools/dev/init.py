@@ -18,6 +18,7 @@ Examples::
 """
 
 import re
+import shutil
 from collections.abc import Iterator
 from pathlib import Path
 import tomlkit
@@ -359,6 +360,24 @@ def drop_scaffold_demonstrations(
     return [f"  {path.as_posix()}: removed" for path in present]
 
 
+def drop_build_record(src_dir: Path, dry_run: bool) -> list[str]:
+    """Remove the build's record of the package under its old name.
+
+    setuptools writes ``src/lup_template.egg-info`` at every build and never
+    removes it, and an editable install puts ``src/`` on the import path. Left
+    behind, the record still registers the old ``lup.devtools`` application
+    beside the renamed one, and ``lup-devtools`` refuses to choose between
+    them. It is ignored build output, which the next build writes under the
+    new name.
+    """
+    record = src_dir / "lup_template.egg-info"
+    if not record.is_dir():
+        return []
+    if not dry_run:
+        shutil.rmtree(record)
+    return [f"  src/{record.name}/: removed, the build's record of the old name"]
+
+
 def mention_pattern(path: Path) -> re.Pattern[str]:
     """How a line names this path, in each spelling one can take.
 
@@ -481,6 +500,7 @@ def rename_package(
         typer.echo("Renaming package directory...")
         git("mv", str(old_pkg), str(new_pkg), _cwd=str(root))
         all_changes.append(f"  src/lup_template/ -> src/{new_name}/")
+    all_changes.extend(drop_build_record(src_dir, dry_run))
 
     typer.echo()
     if dry_run:
