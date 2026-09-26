@@ -38,7 +38,9 @@ def project_application() -> typer.Typer:
                 f"application, where a project's environment holds one:\n{named}\n"
                 "One the project no longer declares, such as its package under the "
                 "name it had before a rename, stays through `uv run`, which only "
-                "adds; `uv sync` in the project removes it.",
+                "adds. `uv sync --reinstall-package <the project's name, above>` "
+                "removes it and keeps the `lup-devtools` script both installed; a "
+                "plain `uv sync` removes that script with it.",
                 err=True,
             )
             raise typer.Exit(1)

@@ -35,7 +35,7 @@ def test_a_package_left_behind_by_a_rename_is_named_with_what_removes_it(
     said = capsys.readouterr().err
     assert "before_rename: before_rename.devtools.main:app" in said
     assert "after_rename: after_rename.devtools.main:app" in said
-    assert "`uv sync` in the project removes it" in said
+    assert "`uv sync --reinstall-package <the project's name, above>`" in said
 
 
 def test_an_environment_with_no_project_says_what_installs_one(
