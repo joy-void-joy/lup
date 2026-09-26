@@ -359,7 +359,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/withheld.py",
       "category": "generated",
-      "sha256": "00f97664c0f14d7e656b03e00560b470bc72f5e1207c1abf15edc6d6c371c047",
+      "sha256": "18263492b61d8c8f71f521ea60c8acaa9b20debae4f9ab5ec4f5e30d4afaaf32",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

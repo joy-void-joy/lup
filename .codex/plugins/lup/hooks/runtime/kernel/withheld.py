@@ -89,6 +89,11 @@ def reaches(pattern: str, path: str, component: bool = True) -> bool:
     `~/.ssh/id_rsa`, `$HOME/.ssh/id_rsa`, `/home/u/.ssh/id_rsa` and
     `.ssh/id_rsa` read from a `cd` into one are the same file, and a word
     naming some other directory's `.ssh/id_rsa` is key material all the same.
+
+    Matching wherever a path ends has one cost a glob would make everyday:
+    `.*` in any directory reaches `~/.netrc`. So a run of names that is all
+    glob reaches a pattern spelled from ``~`` only where the word spells the
+    home it stands in -- `~/.*` does, `ls -d .*` in a checkout does not.
     """
     wanted = PurePosixPath(pattern).parts
     anchored = wanted[:1] == ("/",)
@@ -97,7 +102,23 @@ def reaches(pattern: str, path: str, component: bool = True) -> bool:
     names = PurePosixPath(posixpath.normpath(path)).parts[1 if absolute else 0 :]
     if anchored:
         return absolute and spans(wanted, names, component)
-    return any(spans(wanted, names[start:], component) for start in range(len(names)))
+    return any(
+        spans(wanted, names[start:], component)
+        and (literal_among(names[start:]) or spelled_home(names[:start]))
+        for start in range(len(names))
+    )
+
+
+def literal_among(names: tuple[str, ...]) -> bool:
+    """Whether any of these names is spelled out rather than globbed."""
+    return any(not any(mark in name for mark in "*?[") for name in names)
+
+
+def spelled_home(names: tuple[str, ...]) -> bool:
+    """Whether a path's leading names end in a spelling of a home directory."""
+    return bool(names) and (
+        names[-1].startswith("~") or names[-1] in ("$HOME", "${HOME}")
+    )
 
 
 def withheld_row(path: str, rows: list[RefusedPathRow]) -> RefusedPathRow | None:

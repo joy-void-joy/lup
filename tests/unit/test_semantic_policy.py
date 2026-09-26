@@ -1707,6 +1707,11 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="cat ~/.ssh/*.pub", effect="allow"),
     DecisionCase(input="cat ~/.ssh/known_hosts ~/.ssh/config", effect="allow"),
     DecisionCase(input="cat * | wc -l", effect="allow"),
+    # A run of names that is all glob reaches a home's file only where the
+    # word spells the home: `.*` in the checkout names no login.
+    DecisionCase(input="ls -d .*", effect="allow"),
+    DecisionCase(input="cat ~/.*", effect="deny"),
+    DecisionCase(input="du -sh $HOME/.*", effect="deny"),
     DecisionCase(input="cat src/auth.json", effect="allow"),
     DecisionCase(input="cat .env", effect="allow"),
     DecisionCase(input="uv run pytest > tmp/out.txt", effect="allow"),

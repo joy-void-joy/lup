@@ -325,7 +325,9 @@ the root (`/proc/*/environ`) names that place; one spelled from `~/` or `**/`
 names whatever path its trailing names end, since the kernel knows no home —
 `~/.ssh/id_rsa`, `$HOME/.ssh/id_rsa` and `/home/u/.ssh/id_rsa` are one file.
 A glob reaches what it could expand to, except a dot-named file an unspelled
-dot skips, and `exempt` passes a word only when all it could name is exempt:
+dot skips, and a run of names that is all glob reaches a home's file only
+where the word spells the home: `~/.*` is refused, `ls -d .*` in the checkout
+is not. `exempt` passes a word only when all it could name is exempt:
 `~/.ssh/*.pub` reads, `~/.ssh/*` does not.
 
 The library's default is `credential_files()`: everything in `~/.ssh` but
