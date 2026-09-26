@@ -211,6 +211,15 @@ whose it is. `rm` and `git rm` — `--cached` included, since the next commit
 deletes the file from the project — ask when any operand is the protected
 path, a directory holding it (`rm -r .`), or a glob that could expand to it
 (`rm *.md`), whatever the other operands are. A dry run deletes nothing.
+The operands are found past git's own globals, the way the row walk finds
+the subcommand, and placed from the directory a `cd` or `git -C` left: `git
+--no-pager rm README.md`, `git -c color.ui=false rm README.md` and `cd docs
+&& git rm ../README.md` ask as `git rm README.md` does, a restore of a
+protected file asks by the same spellings, and a patch handed to `git
+--no-pager apply` is read afterwards like any other. Only the readings that
+*grant* — a restore from a named ref, a restore of paths with nothing
+pending — read the subcommand where it is written, since a global they did
+not model could change what they cover, and missing one costs a question.
 
 **And it is written down**, which is what makes the relaxation honest rather
 than merely quieter. The lattice asks about everything unjudged for an

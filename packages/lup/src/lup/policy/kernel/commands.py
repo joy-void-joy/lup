@@ -1728,8 +1728,10 @@ def git_restore_source(words: list[str]) -> KernelDecision | None:
     from a named commit, so committed state stays recoverable through the
     reflog. The index-sourced form and opaque words fall through to the
     restore row's ask.
+
+    A grant, so the subcommand is read where it is written.
     """
-    parsed = git_restore_operands(words)
+    parsed = git_restore_operands(words, 1)
     if parsed is None or parsed["source"] is None:
         return None
     return KernelDecision(
@@ -1756,8 +1758,11 @@ def git_restore_unchanged(
     reason: what a path costs to rebuild is the wrong question about a file
     protected by whose it is, and the two gates read one table so they cannot
     come to differ about one.
+
+    A grant, so the subcommand is read where it is written; the segment
+    reading asks the ownership half again past git's globals.
     """
-    parsed = git_restore_operands(words)
+    parsed = git_restore_operands(words, 1)
     if parsed is None or parsed["source"] is not None:
         return None
     if not all(path in recoverable_targets for path in parsed["paths"]):

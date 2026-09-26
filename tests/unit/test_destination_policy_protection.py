@@ -58,6 +58,11 @@ def test_launch_authority_writes_remain_protected(path: str) -> None:
     "command",
     [
         "git rm README.md",
+        "git --no-pager rm README.md",
+        "git -P rm README.md",
+        "git --literal-pathspecs rm README.md",
+        "git -c color.ui=false rm README.md",
+        "cd docs && git rm ../README.md",
         "git rm --cached README.md",
         "rm README.md tmp/x",
         "rm -r .",

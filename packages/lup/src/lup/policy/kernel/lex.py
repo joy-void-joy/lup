@@ -51,6 +51,7 @@ from .words import (
     git_apply_words,
     global_span,
     git_restore_operands,
+    git_rm_operands,
     opaque_argument,
     path_verb_operands,
     protected_write_target,
@@ -1184,7 +1185,7 @@ def shell_patch_operands(command: str, rows: list[ShellRuleRow]) -> list[str]:
     return [
         placed
         for segment in read_segments(command, rows)
-        for patch in git_apply_words(segment["words"])
+        for patch in git_apply_words(segment["words"], rows)
         for placed in [placed_path(patch["path"], segment["directory"])]
         if placed is not None
     ]
@@ -1220,7 +1221,7 @@ def shell_path_verb_targets(command: str, rows: list[ShellRuleRow]) -> list[str]
     return [
         placed
         for segment in read_segments(command, rows)
-        for operand in verb_path_words(segment["words"])
+        for operand in verb_path_words(segment["words"], rows)
         for placed in [placed_path(operand["path"], segment["directory"])]
         if placed is not None
     ]
@@ -1316,9 +1317,9 @@ def path_words(words: list[str], rows: list[ShellRuleRow]) -> list[PathWord]:
         for flag in row["write_flags"]
     ]
     return [
-        *verb_path_words(words),
+        *verb_path_words(words, rows),
         *flag_write_words(words, declared),
-        *git_apply_words(words),
+        *git_apply_words(words, rows),
     ]
 
 
@@ -1401,11 +1402,20 @@ def placed_words(
     return [placed.get(index, word) for index, word in enumerate(read)]
 
 
-def verb_path_words(words: list[str]) -> list[PathWord]:
-    """The words one segment's path-writing verb reads its operands out of."""
-    restore = git_restore_operands(words)
+def verb_path_words(words: list[str], rows: list[ShellRuleRow]) -> list[PathWord]:
+    """The words one segment's path-writing verb reads its operands out of.
+
+    A restore's and a removal's are found past git's globals, as every reader
+    naming paths finds them: `git --no-pager restore <path>` rewrites the
+    path, and a reading that missed it placed nothing and asked the host about
+    nothing.
+    """
+    restore = git_restore_operands(words, global_span(words, rows))
     if restore is not None:
         return restore["named"]
+    removed = git_rm_operands(words, rows)
+    if removed is not None:
+        return removed
     archived = archive_write(words)
     if archived is not None:
         return archived["named"]
@@ -1417,7 +1427,7 @@ def verb_path_words(words: list[str]) -> list[PathWord]:
     return path_verb_operands(words)["named"]
 
 
-def written_verb_words(words: list[str]) -> list[PathWord]:
+def written_verb_words(words: list[str], rows: list[ShellRuleRow]) -> list[PathWord]:
     """The words one segment's path verb writes, out of those it acts on.
 
     :func:`verb_path_words` names a copy's sources and a link's target too,
@@ -1427,7 +1437,7 @@ def written_verb_words(words: list[str]) -> list[PathWord]:
     of the loss: they are at their paths unchanged afterwards. A move keeps
     every operand, because its source is unlinked.
     """
-    named = verb_path_words(words)
+    named = verb_path_words(words, rows)
     executable = posixpath.basename(words[0]) if words else ""
     if executable not in ("cp", "ln") or len(named) < 2:
         return named
@@ -1444,7 +1454,7 @@ def shell_written_targets(command: str, rows: list[ShellRuleRow]) -> list[str]:
     return [
         placed
         for segment in read_segments(command, rows)
-        for operand in written_verb_words(segment["words"])
+        for operand in written_verb_words(segment["words"], rows)
         for placed in [placed_path(operand["path"], segment["directory"])]
         if placed is not None
     ]

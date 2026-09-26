@@ -3150,6 +3150,59 @@ def test_a_recoverable_grant_never_covers_a_protected_path(tmp_path: Path) -> No
     assert effect("git restore README.md") == "ask"
 
 
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        "git {verb} {path}",
+        "git --no-pager {verb} {path}",
+        "git -P {verb} {path}",
+        "git --literal-pathspecs {verb} {path}",
+        "git -c color.ui=false {verb} {path}",
+        "git -C . --no-pager {verb} {path}",
+        "cd src && git {verb} ../{path}",
+        "git -C src {verb} ../{path}",
+    ],
+)
+@pytest.mark.parametrize("verb", ["rm", "restore"])
+def test_a_git_global_does_not_move_a_protected_file_past_its_question(
+    spelling: str, verb: str, tmp_path: Path
+) -> None:
+    """Every spelling of one removal or restore reaches the owner's question.
+
+    Read where the subcommand was written second, `git --no-pager rm
+    README.md` and `git -c color.ui=false rm README.md` named no operand, and
+    a capture settled a delete of a human-owned file that the plain spelling
+    asks about. The same held for a restore, and for a removal spelled from
+    the directory a `cd` or `git -C` left. A file nobody owns is settled by
+    the capture by every spelling alike, canonically and in the shipped
+    kernel.
+    """
+    (tmp_path / "src").mkdir()
+    committed_tree(tmp_path, "README.md", "notes.md", "src/x.py")
+    policy = ShellPolicy(
+        SHELL_RULES,
+        path_rules=[human_owned_path_rule("README.md")],
+        runner_targets=FIXTURE_RUNNER_TARGETS,
+        recovered=True,
+    )
+    bundled = load_bundled_kernel(tmp_path / "runtime", "shell")
+    committed = ["README.md", "notes.md", "src/x.py"]
+    for path, effect in (("README.md", "ask"), ("notes.md", "allow")):
+        command = spelling.format(verb=verb, path=path)
+        decided = policy.decide(ShellCommand(command=command, cwd=tmp_path))
+        assert decided.effect == effect, (command, decided.reason)
+        generated = bundled.decide_shell(
+            command,
+            policy.rules,
+            path_rules=policy.path_rules,
+            existing_targets=committed,
+            tracked_targets=committed,
+            recoverable_targets=committed,
+            recovered=True,
+        )
+        assert generated.effect == effect, (command, generated.reason)
+
+
 def test_restoring_a_file_that_holds_no_pending_work_changes_nothing(
     tmp_path: Path,
 ) -> None:

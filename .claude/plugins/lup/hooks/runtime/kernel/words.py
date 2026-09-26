@@ -650,19 +650,33 @@ def global_span(words: list[str], rows: list[ShellRuleRow]) -> int:
     boundary tells them apart.
 
     ``len(words)`` where every word is a flag and no subcommand is named.
+
+    Stepped the way :func:`~lup.policy.kernel.commands.split_subcommand`
+    steps, because a reader finding the subcommand one word away from where
+    the row walk found it answers about a different command: a value flag
+    consumes the word after it, and a setting flag consumes the setting it
+    carries there, so `git -c color.ui=false rm` names `rm` and not the
+    setting. Every reader that refuses or asks about a subcommand's operands
+    finds them from here, so `git --no-pager rm README.md` is read as the
+    `git rm README.md` it runs. A reader that grants keeps reading the
+    subcommand where it is written: a global it did not model could change
+    what the grant covers, and a grant missed only costs a question.
     """
     executable = posixpath.basename(words[0])
-    value_flags = [
-        flag
-        for row in rows
-        if row["command"] == executable and not row["subcommand"]
-        for flag in row["value_flags"]
+    defaults = [
+        row for row in rows if row["command"] == executable and not row["subcommand"]
     ]
+    value_flags = [flag for row in defaults for flag in row["value_flags"]]
+    setting_flags = [flag for row in defaults for flag in row["setting_flags"]]
     position = 1
     while position < len(words):
-        if not words[position].startswith("-"):
+        word = words[position]
+        if not word.startswith("-"):
             return position
-        position += 2 if words[position] in value_flags else 1
+        if word in value_flags:
+            position += 2
+            continue
+        position += carried_setting(word, setting_flags, words[position + 1 :])["words"]
     return len(words)
 
 
@@ -749,19 +763,23 @@ class RestoreOperands(TypedDict):
     to put one back after resolving it against the restore's directory."""
 
 
-def git_restore_operands(words: list[str]) -> RestoreOperands | None:
+def git_restore_operands(words: list[str], at: int) -> RestoreOperands | None:
     """Split ``git restore`` into the ref it reads from and the paths it writes.
 
     ``None`` where the line is not a restore, carries a flag beyond the source
     and target selectors, or holds a word that expands at run time — each of
     which leaves the restore row's ask to answer for it, because a flag this
     does not know could move which paths are touched.
+
+    ``at`` is where the caller reads the subcommand: a grant reads it where it
+    is written, and a reader naming paths reads it past git's globals, from
+    :func:`global_span`.
     """
-    if len(words) < 3 or posixpath.basename(words[0]) != "git" or words[1] != "restore":
+    if posixpath.basename(words[0]) != "git" or words[at : at + 1] != ["restore"]:
         return None
     source: str | None = None
     named: list[PathWord] = []
-    position = 2
+    position = at + 1
     while position < len(words):
         word = words[position]
         if word == "--source" and position + 1 < len(words):
@@ -787,18 +805,23 @@ def git_restore_operands(words: list[str]) -> RestoreOperands | None:
     return RestoreOperands(source=source, paths=paths, named=named)
 
 
-def git_apply_words(words: list[str]) -> list[PathWord]:
+def git_apply_words(words: list[str], rows: list[ShellRuleRow]) -> list[PathWord]:
     """Which words a `git apply` reads its patch files out of.
 
     The words rather than the paths, because where each sits in the command is
     what resolves it: a list of paths alone cannot say which of them a `-C`
     moved, and every reader here places a path from the word that named it.
+
+    Found past git's globals, because what the patch touches is judged from
+    these: read only where `apply` was written second, `git --no-pager apply`
+    handed nobody its patch, and a protected file it rewrote went unasked.
     """
-    if len(words) < 3 or posixpath.basename(words[0]) != "git" or words[1] != "apply":
+    at = global_span(words, rows)
+    if posixpath.basename(words[0]) != "git" or words[at : at + 1] != ["apply"]:
         return []
     return [
         PathWord(at=index, prefix="", path=word)
-        for index, word in enumerate(words[2:], start=2)
+        for index, word in enumerate(words[at + 1 :], start=at + 1)
         if not word.startswith("-") and word != "--" and not opaque_argument(word)
     ]
 
@@ -1111,20 +1134,30 @@ def deletes_protected(operand: str, row: PathRuleRow) -> bool:
     )
 
 
-def git_rm_operands(words: list[str]) -> list[str] | None:
+def git_rm_operands(
+    words: list[str], rows: list[ShellRuleRow]
+) -> list[PathWord] | None:
     """The pathspecs a `git rm` removes, or ``None`` where it removes nothing.
 
     A dry run removes nothing. `--cached` is read like any other flag: it
     leaves the working copy, but the next commit deletes the file from the
     project, which is the change a protected file's owner is asked about.
+
+    Found past git's globals: `git --no-pager rm README.md` and `git -c
+    color.ui=false rm README.md` remove what `git rm README.md` removes, and
+    read where `rm` was written second they reached the capture instead. The
+    words rather than the paths, so the segment reading places each from the
+    directory a `cd` or `git -C` left -- `cd src && git rm ../README.md` is
+    the same removal.
     """
-    if len(words) < 3 or posixpath.basename(words[0]) != "git" or words[1] != "rm":
+    at = global_span(words, rows)
+    if posixpath.basename(words[0]) != "git" or words[at : at + 1] != ["rm"]:
         return None
-    operands: list[str] = []
+    operands: list[PathWord] = []
     literal = False
-    for word in words[2:]:
+    for index, word in enumerate(words[at + 1 :], start=at + 1):
         if literal or not word.startswith("-"):
-            operands.append(word)
+            operands.append(PathWord(at=index, prefix="", path=word))
             continue
         if word in ("-n", "--dry-run"):
             return None
@@ -1132,11 +1165,11 @@ def git_rm_operands(words: list[str]) -> list[str] | None:
     return operands
 
 
-def deleted_operands(words: list[str]) -> list[str]:
+def deleted_operands(words: list[str], rows: list[ShellRuleRow]) -> list[str]:
     """What `rm` or `git rm` deletes, and nothing for any other command."""
     match posixpath.basename(words[0]):
         case "git":
-            return git_rm_operands(words) or []
+            return [named["path"] for named in git_rm_operands(words, rows) or []]
         case "rm":
             return path_verb_operands(words)["operands"]
         case _:
@@ -1144,7 +1177,10 @@ def deleted_operands(words: list[str]) -> list[str]:
 
 
 def protected_deletion(
-    words: list[str], path_rules: list[PathRuleRow], checkout: str = ""
+    words: list[str],
+    path_rules: list[PathRuleRow],
+    rows: list[ShellRuleRow],
+    checkout: str = "",
 ) -> KernelDecision | None:
     """Ask before `rm` or `git rm` deletes a path the declared rules protect.
 
@@ -1156,7 +1192,7 @@ def protected_deletion(
     reached the capture instead. Read here, before any grant, for every
     operand, from the spelling the rules are anchored at.
     """
-    for operand in deleted_operands(words):
+    for operand in deleted_operands(words, rows):
         spelled = repository_relative(operand, checkout)
         matched = next(
             (row for row in path_rules if deletes_protected(spelled, row)), None

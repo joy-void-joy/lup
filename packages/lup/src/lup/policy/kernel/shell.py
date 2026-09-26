@@ -39,6 +39,7 @@ from .words import (
     dangerous_assignment_reason,
     dangerous_env_name,
     effective_command,
+    global_span,
     is_help_probe,
     is_trusted_script,
     opaque_argument,
@@ -568,6 +569,13 @@ def decide_segment_words(
             f"the git ext transport in {transport!r} can run commands",
         )
     if executable == "git":
+        # lup: defer: the segment reading consumes `--work-tree` before these
+        # grants read the words, so `git --work-tree=/tmp restore --source=HEAD
+        # README.md` and `git --work-tree /tmp checkout HEAD -- README.md` are
+        # granted as a restore of this checkout while they overwrite a tree
+        # outside it that no reflog or capture holds. Decide whether a consumed
+        # `--work-tree` withdraws the grants or places their operands in that
+        # tree, where the write scope would then answer for them.
         recognized = (
             git_checkout_pathspec(words)
             or git_restore_source(words)
@@ -578,6 +586,20 @@ def decide_segment_words(
         )
         if recognized is not None:
             return recognized
+        # The readings above grant, so they read the subcommand where it is
+        # written: a global they did not model could change what they cover.
+        # One answer among them is a question rather than a grant -- a restore
+        # reaching a protected file -- and that is owed however the restore
+        # was spelled, so it is asked again past git's globals and only the
+        # question is kept. `git --no-pager restore README.md` is the restore.
+        at = global_span(words, context["rows"])
+        owned = git_restore_unchanged(
+            [words[0], *words[at:]],
+            context["recoverable_targets"],
+            context["path_rules"],
+        )
+        if owned is not None and owned.effect != "allow":
+            return owned
     refused = refuses_generated_plugin_write(
         words,
         context["path_roles"],
@@ -586,7 +608,9 @@ def decide_segment_words(
     )
     if refused is not None:
         return refused
-    deleted = protected_deletion(words, context["path_rules"], context["checkout_root"])
+    deleted = protected_deletion(
+        words, context["path_rules"], context["rows"], context["checkout_root"]
+    )
     if deleted is not None:
         return deleted
     # `tee f` writes what `> f` writes, and the write walk judged its files
