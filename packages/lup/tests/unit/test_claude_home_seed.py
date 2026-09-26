@@ -8,11 +8,12 @@ return that carried a hook would run it on the host; one that carried a
 """
 
 import json
-import subprocess
+
 from pathlib import Path
 
 import pytest
 
+from lup.harness.assets.home_seed import apply
 from lup.harness.image import Image
 from lup.harness.requirements import Manifest
 from lup.providers.claude.config_home import ClaudeConfigHome
@@ -208,11 +209,11 @@ def test_key_bindings_come_back_only_where_the_session_changed_them(
 def test_the_entrypoint_applies_a_written_seed_to_a_volume(
     tmp_path: Path, account: ClaudeConfigHome
 ) -> None:
-    """The image's own seeding lines, run against a directory standing in for the volume."""
-    rendered = Image().dockerfile(Manifest())
+    """The program the image runs at start, run against a directory standing in for the volume."""
     image = Image()
-    block = rendered[rendered.index(f"seed={image.home_seed}") :]
-    block = block[: block.index("\nfi\n") + 4]
+    rendered = image.dockerfile(Manifest())
+    assert f'python3 /opt/lup/home-seed.py {image.home_seed} "$config"' in rendered
+    assert "COPY <<'HOMESEED' /opt/lup/home-seed.py" in rendered
     seed = ClaudeHomeSeed.compose(account, UserConfig.model_validate({"editor": "vim"}))
     written = seed.write(tmp_path / "seed")
     volume = tmp_path / "volume"
@@ -220,13 +221,10 @@ def test_the_entrypoint_applies_a_written_seed_to_a_volume(
     (volume / ".claude.json").write_text('{"numStartups": 3}', encoding="utf-8")
     (volume / "settings.json").write_text('{"hooks": {"x": 1}}', encoding="utf-8")
     (volume / "keybindings.json").write_text("stale", encoding="utf-8")
-    script = f"config={volume}\n" + block.replace(
-        f"seed={image.home_seed}", f"seed={written}"
-    )
 
-    subprocess.run(["sh", "-c", script], check=True)
+    apply(written, volume)
     (written / "replace" / "keybindings.json").unlink()
-    subprocess.run(["sh", "-c", script], check=True)
+    apply(written, volume)
 
     assert json.loads((volume / "settings.json").read_text()) == seed.settings
     assert json.loads((volume / ".claude.json").read_text()) == {

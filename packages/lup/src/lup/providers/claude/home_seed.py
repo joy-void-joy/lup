@@ -111,6 +111,32 @@ class ClaudeHomeSeed(BaseModel, frozen=True):
             ),
         )
 
+    @classmethod
+    def applied(cls, directory: Path) -> "ClaudeHomeSeed":
+        """What a seed came to against a volume, read back from where the launch wrote it.
+
+        The files a three-way settle wrote (see
+        :func:`~lup.devtools.harness.config_volume.settle_home_seed`): the
+        settings as applied, the document with only its preferences kept,
+        and the key bindings.
+        """
+        keybindings = directory / KEYBINDINGS
+        return cls(
+            settings=load_document(directory / WORKSPACE_SETTINGS),
+            document={
+                key: value
+                for key, value in load_document(
+                    directory / CLAUDE_HOME_DOCUMENT
+                ).items()
+                if document_homed(key)
+            },
+            keybindings=(
+                keybindings.read_text(encoding="utf-8")
+                if keybindings.is_file()
+                else None
+            ),
+        )
+
     def write(self, directory: Path) -> Path:
         """Lay the seed out as the image's entrypoint applies one.
 

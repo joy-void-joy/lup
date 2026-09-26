@@ -29,7 +29,7 @@ from lup.providers.profile_migration import legacy_notice
 from lup.providers.profile_tree import user_profile_directory
 from lup.providers.profiles import DefaultHomeProfile, ProfileDirectory
 from lup.providers.user_config import UserConfig, UserConfigFile
-from lup.devtools.harness.config_volume import named_file
+from lup.devtools.harness.config_volume import HomeSeedPlaces, named_file
 from lup.devtools.harness.contained import contained_argv, read_config_home
 from lup.providers.claude.confinement import CLAUDE_SANDBOX_OFF
 from lup.providers.claude.model_choice import (
@@ -123,7 +123,9 @@ from lup.sessions.recursion import MAX_RECURSIVE_AGENT_ENV
 from lup.types import EnvVars, JsonObject, JsonValue
 from lup.workspace.paths import agent_version, harness_runs_path, project_root
 from lup.providers.codex.home import (
+    SEED_RECORD,
     CodexWorktreeHomeStore,
+    seeded_codex_settings,
     select_codex_home,
 )
 from lup.devtools.harness.composition import NativeTargets
@@ -1679,7 +1681,7 @@ def session_argv(
     authenticate: Callable[[list[str], Path, bool], None] | None = None,
     member: LaunchedMember | None = None,
     prepare: Callable[[list[str], Path], None] | None = None,
-    home_seed: Path | None = None,
+    home_seed: HomeSeedPlaces | None = None,
 ) -> list[str]:
     """The argv that opens a session, inside the declared container or on the host.
 
@@ -2093,8 +2095,13 @@ def launch_claude(
             settle_claude_theme(account, personal.theme.claude)
     except ClaudeConfigUnreadable as error:
         raise typer.BadParameter(str(error)) from error
-    seeded_at = (
-        seed.write(Path(mkdtemp(prefix="lup-home-seed-"))) if seed is not None else None
+    seeded_at = Path(mkdtemp(prefix="lup-home-seed-")) if seed is not None else None
+    places = (
+        HomeSeedPlaces(
+            seed=seed.write(seeded_at / "seed"), applied=seeded_at / "applied"
+        )
+        if seed is not None and seeded_at is not None
+        else None
     )
     # Only a volume the seed reached is compared with it: before the
     # container starts, the volume still holds the previous session's
@@ -2137,9 +2144,9 @@ def launch_claude(
                 mounts,
                 devices,
                 member=member,
-                home_seed=seeded_at,
+                home_seed=places,
             )
-            seed_applied = seeded_at is not None
+            seed_applied = places is not None
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True
     except KeyboardInterrupt:
@@ -2158,12 +2165,14 @@ def launch_claude(
         # session's dispatcher is still reading.
         release_ledger(project_root(), sentinels.nonce)
         transcript.close(succeeded=succeeded, interrupted=interrupted)
-        if seed is not None and seed_applied:
+        if places is not None and seed_applied:
+            # Measured against what this launch applied, which is the
+            # seed settled against whatever a running session had changed.
             carry_claude_home(
                 composition.recipe.source.image,
                 project_root(),
                 profiles.login,
-                seed,
+                ClaudeHomeSeed.applied(places.applied),
                 account,
                 config,
                 personal,
@@ -2234,8 +2243,40 @@ def carry_claude_home(
         typer.echo("Kept in the container: " + ", ".join(stayed))
 
 
+def settled_codex_seed(image: Image, theirs: JsonObject) -> JsonObject:
+    """What a contained Codex home will be given, and where the person's settings won.
+
+    The three-way merge the home's own installation runs
+    (:func:`~lup.providers.codex.home.seeded_codex_settings`), run first on
+    the volume as it stands, so the launch knows what its session starts
+    from and can say which settings a running session had changed too.
+    """
+    files = read_config_home(
+        image, project_root(), CODEX_LOGIN, ["config.toml", SEED_RECORD]
+    )
+    current = named_file(files, "config.toml")
+    recorded = named_file(files, SEED_RECORD)
+    seeded = seeded_codex_settings(
+        current.text() if current is not None else None,
+        recorded.text() if recorded is not None else None,
+        theirs,
+    )
+    for conflict in seeded.conflicts:
+        Notice(
+            text=(
+                f"Settings: {conflict} was changed both by a session still "
+                "running in this repository and in your own settings; yours win."
+            ),
+            urgency="warning",
+        ).say()
+    return seeded.settings
+
+
 def carry_codex_home(
-    store: CodexWorktreeHomeStore, image: Image | None, config: UserConfigFile
+    store: CodexWorktreeHomeStore,
+    image: Image | None,
+    config: UserConfigFile,
+    applied: JsonObject | None = None,
 ) -> None:
     """Bring back what a Codex session changed of the person's, and say what stayed.
 
@@ -2260,7 +2301,9 @@ def carry_codex_home(
             ).say()
             return
         left = read.text()
-    returned = store.return_settings(project_root(), config, current=left)
+    returned = store.return_settings(
+        project_root(), config, current=left, applied=applied
+    )
     if returned.carried():
         typer.echo(
             "Returned the Codex settings this session changed: "
@@ -2413,6 +2456,9 @@ def launch_codex(
     # Only a volume the settings reached is compared with them: before the
     # container's home is prepared, it still holds the previous session's.
     installed: list[Path] = []
+    # What a contained session's volume was given, settled three ways
+    # against a session that may still be running there.
+    applied: list[JsonObject] = []
     home = select_codex_home(codex_home, environment, project_root(), profile, store)
     selected_home = home.path
     selected_profile = (
@@ -2477,6 +2523,15 @@ def launch_codex(
             store.publish(project_root())
 
     def prepare(prefix: list[str], native_home: Path) -> None:
+        if prefix and selected_profile is not None:
+            applied.append(
+                settled_codex_seed(
+                    composition.recipe.source.image,
+                    selected_profile.personal_settings(
+                        CodexMarketplace.declared(project_root()) is not None
+                    ),
+                )
+            )
         prepare_codex_plugin(
             prefix,
             native_home,
@@ -2532,6 +2587,7 @@ def launch_codex(
                 store,
                 composition.recipe.source.image if sandbox.contained() else None,
                 config,
+                applied[0] if applied else None,
             )
         if checkpoint is not None:
             checkpoint(provider="codex")

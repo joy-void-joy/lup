@@ -24,6 +24,7 @@ from tomlkit.container import Container
 from tomlkit.items import Table
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
+from lup.harness.assets.home_seed import RECORD, three_way
 from lup.providers.codex.harness_runtime import CodexPluginInstaller, PluginCacheConfig
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.marketplace import CodexMarketplace
@@ -279,6 +280,46 @@ def settled_codex_config(account: str, changes: list[SettingChange]) -> str:
         else:
             table[change.path[-1]] = change.value
     return tomlkit.dumps(document)
+
+
+# lup: ignore[constant-declaration] — where a home keeps the settings it was
+# last installed with, which the host settling the next launch reads back
+SEED_RECORD = f"{RECORD}/config.json"
+"""The record of what a launch last installed as a home's base settings."""
+
+
+class CodexSeed(BaseModel, frozen=True):
+    """What one launch's settings come to against a home a session may be running in."""
+
+    settings: JsonObject
+    conflicts: list[str] = []
+    """Settings both a running session and the person changed, where the person won."""
+
+
+def seeded_codex_settings(
+    current: str | None, recorded: str | None, theirs: JsonObject
+) -> CodexSeed:
+    """Merge a launch's settings into a home's three ways, against the last launch's.
+
+    ``current`` is the home's configuration as it stands, ``recorded`` what the
+    last launch installed (:data:`SEED_RECORD`), ``theirs`` this launch's
+    personal settings. A setting only a running session changed keeps its
+    value, one only the person changed takes theirs, and where both changed
+    the person's wins and is named. With no record, the settings replace.
+    """
+    ours = personal_settings(current) if current is not None else {}
+    base = (
+        TypeAdapter(JsonObject).validate_json(recorded)
+        if recorded is not None
+        else ours
+    )
+    merged = three_way(base, ours, theirs)
+    return CodexSeed(
+        settings=TypeAdapter(JsonObject).validate_python(
+            merged.value if isinstance(merged.value, dict) else {}
+        ),
+        conflicts=merged.conflicts,
+    )
 
 
 def read_credential(path: Path) -> CodexCredential | None:
@@ -547,7 +588,11 @@ class CodexWorktreeHomeStore:
         )
 
     def return_settings(
-        self, worktree: Path, config: UserConfigFile, current: str | None = None
+        self,
+        worktree: Path,
+        config: UserConfigFile,
+        current: str | None = None,
+        applied: JsonObject | None = None,
     ) -> CodexSettingsReturn:
         """Carry back every personal setting a session changed, each where it belongs.
 
@@ -555,7 +600,9 @@ class CodexWorktreeHomeStore:
         the account, so a setting the person changed in their own home while
         this session ran is not undone by a session that never touched it.
         ``current`` is the configuration the session left, where it ran
-        somewhere other than this home — a container's volume, read back.
+        somewhere other than this home — a container's volume, read back —
+        and ``applied`` what that home was given, where a three-way settle
+        kept what another session running there had changed.
         Sorted by :mod:`lup.providers.codex.preferences`: a portable
         setting to the lup config (to the account where the lup config
         would refuse it), another returning one to the account's own
@@ -570,10 +617,14 @@ class CodexWorktreeHomeStore:
             if current is not None
             else (held.read_text(encoding="utf-8") if held.is_file() else None)
         )
-        if not record.is_file() or left is None:
+        if left is None or (applied is None and not record.is_file()):
             return CodexSettingsReturn()
-        launched = TypeAdapter(JsonObject).validate_json(
-            record.read_text(encoding="utf-8")
+        launched = (
+            applied
+            if applied is not None
+            else TypeAdapter(JsonObject).validate_json(
+                record.read_text(encoding="utf-8")
+            )
         )
         now = personal_settings(left)
         changes = list(changed_settings(launched, now))

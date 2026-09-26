@@ -29,6 +29,15 @@ from pathlib import Path
 import sh
 from pydantic import BaseModel
 
+from lup.harness.assets.home_seed import (
+    RECORD,
+    SeedFile,
+    merged_names,
+    read_tree,
+    settle,
+    text_of,
+    write,
+)
 from lup.harness.image import ContainerEngine
 from lup.harness.notice import Notice
 from lup.providers.login import ProviderLogin
@@ -250,6 +259,57 @@ class HomeFile(BaseModel, frozen=True):
 def named_file(files: list[HomeFile], name: str) -> HomeFile | None:
     """The file of that name among those read, if the volume had it."""
     return next((held for held in files if held.name == name), None)
+
+
+class HomeSeedPlaces(BaseModel, frozen=True):
+    """Where one launch lays its seed out, and where it learns what the seed came to.
+
+    ``seed`` is laid out as :attr:`~lup.harness.image.Image.home_seed`
+    describes and mounted read-only; ``applied`` is written on the host with
+    each file the seed comes to against the volume as it stands, which is what
+    the session starts from and what its changes are measured against.
+    """
+
+    seed: Path
+    applied: Path
+
+
+def settle_home_seed(
+    helper: HomeHelper, volume: str, places: HomeSeedPlaces
+) -> list[Notice]:
+    """Work out what a seed comes to against a volume, and say what it overrides.
+
+    The same three-way merge the image's entrypoint applies at start
+    (:mod:`lup.harness.assets.home_seed`), run here first on what the volume
+    holds, so the launch knows what it applied — each session's own seed —
+    and can say where the person's settings overrode a key a running session
+    had changed too. A volume that cannot be read is taken as empty, which
+    the entrypoint's own merge then corrects in the session's favour.
+    """
+    seed = read_tree(places.seed)
+    managed = (text_of(seed, "managed") or "").split()
+    names = [*managed, *merged_names(seed)]
+    try:
+        held = [
+            SeedFile(file.name, file.text())
+            for file in helper.read(volume, [*names, RECORD])
+        ]
+    except (sh.CommandNotFound, sh.ErrorReturnCode):
+        held = []
+    settled = settle(seed, held, managed)
+    for outcome in settled:
+        write(places.applied / outcome.file.name, outcome.file.text)
+    return [
+        Notice(
+            text=(
+                f"Settings: {conflict} was changed both by a session still running "
+                "in this repository and in your own settings; yours win."
+            ),
+            urgency="warning",
+        )
+        for outcome in settled
+        for conflict in outcome.conflicts
+    ]
 
 
 class RuntimeVolume(BaseModel, frozen=True):

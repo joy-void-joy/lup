@@ -70,7 +70,9 @@ from lup.devtools.harness.environments import (
 from lup.devtools.harness.config_volume import (
     HomeFile,
     HomeHelper,
+    HomeSeedPlaces,
     RuntimeVolume,
+    settle_home_seed,
     split_config_volumes,
 )
 from lup.sandbox.attribution import WRITE_REFUSAL_MARKERS
@@ -1638,7 +1640,7 @@ def contained_argv(
     accessible: list[AccessibleRoot] = [],
     lease: Lease | None = None,
     devices: list[Device] = [],
-    home_seed: Path | None = None,
+    home_seed: HomeSeedPlaces | None = None,
 ) -> list[str]:
     """The argv that opens a session in this project's container.
 
@@ -1741,22 +1743,27 @@ def contained_argv(
     # Before anything mounts a runtime's volume: the entrypoint writes a fresh
     # home's document on first start, and a split keeps what a volume already
     # holds, so a probe opened first would leave the old document behind.
+    helper = HomeHelper(
+        engine=client,
+        tag=tag,
+        uid=root.stat().st_uid,
+        gid=root.stat().st_gid,
+        config_home=image.config_home,
+    )
     said.add(
         split_config_volumes(
             root,
-            HomeHelper(
-                engine=client,
-                tag=tag,
-                uid=root.stat().st_uid,
-                gid=root.stat().st_gid,
-                config_home=image.config_home,
-            ),
+            helper,
             [
                 RuntimeVolume(login=runtime, volume=state_volume_name(root, runtime))
                 for runtime in runtime_logins()
             ],
         )
     )
+    # After the split, so the seed is settled against the volume a session
+    # will open, and before any container starts and applies it.
+    if home_seed is not None:
+        said.add(settle_home_seed(helper, state_volume_name(root, login), home_seed))
     said.add(
         swept_notice(
             retired,
@@ -1888,7 +1895,7 @@ def contained_argv(
         inherited_environment=inherited_environment,
         environments=held_environments(root, accessible, image.project_environment),
         devices=granted_devices.granted,
-        home_seed=home_seed,
+        home_seed=home_seed.seed if home_seed is not None else None,
         trust_document=login.trust_document,
     )
 

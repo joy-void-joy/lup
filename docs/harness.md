@@ -696,7 +696,11 @@ Anywhere else — a Codex session's worktree home, and every contained session's
 config volume — a launch seeds the home with the account's settings, this
 file winning, and carries back what the session changed of the person's when
 it closes, measured against the seed so a change the account took meanwhile
-is not undone. Only preferences come back: the theme and the editor mode to
+is not undone. A volume's seed is merged three ways against what the last
+launch seeded, so a second launch leaves a setting alone that a session still
+running there changed — it returns when that session closes — and where the
+person's settings changed the same one, theirs win and the launch names it.
+Only preferences come back: the theme and the editor mode to
 this file, a key its `[claude.settings]` or `[codex.settings]` table holds
 back into that table, and any other display or input preference to the
 account's own settings (Claude Code's `settings.json`, its configuration

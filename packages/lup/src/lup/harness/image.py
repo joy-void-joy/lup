@@ -562,9 +562,9 @@ class Image(BaseModel, frozen=True):
         description=(
             "Read-only directory of settings a launch hands the config home, "
             "applied at every start: each name listed in its ``managed`` file "
-            "is replaced by the one under ``replace/``, or removed where that "
-            "has none, and each JSON object under ``merge/`` is merged key by "
-            "key into the home's file of the same name. Offered outside the "
+            "is merged three ways with the home's against what the last launch "
+            "seeded, as is each key of each JSON object under ``merge/`` in the "
+            "home's file of the same name. Offered outside the "
             "home for the reason the credential is: the home is the "
             "session's to write, and the seed is the person's"
         ),
@@ -837,6 +837,9 @@ class Image(BaseModel, frozen=True):
         seeding = (Path(__file__).parent / "assets" / "credential_seed.py").read_text(
             encoding="utf-8"
         )
+        home_seeding = (Path(__file__).parent / "assets" / "home_seed.py").read_text(
+            encoding="utf-8"
+        )
         shim_names = " ".join(self.clipboard.shims)
         # Quoted, because `ENV name=value` takes whitespace as separating
         # *more* pairs: an unquoted `GIT_SSH_COMMAND=ssh -o BatchMode=yes`
@@ -943,25 +946,11 @@ if [ -n "${{LUP_CREDENTIAL_NAME:-}}" ]; then
 fi
 # The person's settings, handed over at every start rather than once: a file
 # seeded once is the person's settings as they stood the day this volume was
-# made. A managed name the seed holds replaces the home's; one it lacks is
-# removed, so what the person deleted does not come back from the volume.
-# A merged document keeps everything the runtime recorded in it.
-seed={self.home_seed}
-if [ -f "$seed/managed" ]; then
-  while IFS= read -r name; do
-    if [ -f "$seed/replace/$name" ]; then
-      cp "$seed/replace/$name" "$config/$name.lup" && mv "$config/$name.lup" "$config/$name"
-    else
-      rm -f "$config/$name"
-    fi
-  done < "$seed/managed"
-  for merging in "$seed"/merge/.[!.]* "$seed"/merge/*; do
-    [ -f "$merging" ] || continue
-    name=$(basename "$merging")
-    [ -f "$config/$name" ] || printf '{{}}' > "$config/$name"
-    jq -s '.[0] + .[1]' "$config/$name" "$merging" > "$config/$name.lup" \\
-      && mv "$config/$name.lup" "$config/$name"
-  done
+# made. Merged three ways against what the last launch seeded rather than
+# copied over, because another session may be running in this volume and
+# have changed a setting it has yet to carry back.
+if [ -f "{self.home_seed}/managed" ]; then
+  python3 /opt/lup/home-seed.py {self.home_seed} "$config"
 fi
 
 # One credential, two consumers. The token crosses the boundary by name --
@@ -980,6 +969,9 @@ ENTRYPOINT ["/usr/local/bin/lup-entrypoint"]
 COPY <<'CREDENTIAL' /opt/lup/credential-seed.py
 {seeding}
 CREDENTIAL
+COPY <<'HOMESEED' /opt/lup/home-seed.py
+{home_seeding}
+HOMESEED
 
 # What `BROWSER` names, so a sign-in inside can reach a browser outside. The
 # pipe it writes to is mounted per launch; with nothing mounted the script
