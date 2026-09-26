@@ -24,6 +24,7 @@ import typer
 from pydantic import BaseModel, ValidationError
 
 from lup.devtools.sync import SessionDefaults
+from lup.harness.companions import PortsGiven
 from lup.harness.image import ContainerPrivileges, Image, MemoryLimit
 from lup.harness.models import Harness, SessionMode
 from lup.harness.notice import Notice
@@ -161,6 +162,12 @@ class SessionSettings(BaseModel, frozen=True):
     a launch's flag moves one service and leaves the machine's say about the
     rest standing, so the two are merged rather than one replacing the other.
     """
+    followed: PortsGiven = {}
+    """The ports this checkout's companions were given, which a service following one relays to.
+
+    Known only once the companions are joined, so a launch settles it with
+    :meth:`beside`; a moved port above still wins over it.
+    """
 
     @classmethod
     def resolved(
@@ -260,9 +267,11 @@ class SessionSettings(BaseModel, frozen=True):
                     else declared.privileges
                 ),
                 "services": (
-                    declared.services.with_ports(self.services.value)
+                    declared.services.following(self.followed).with_ports(
+                        self.services.value
+                    )
                     if self.services is not None
-                    else declared.services
+                    else declared.services.following(self.followed)
                 ),
                 "held": declared.held.model_copy(
                     update={
@@ -275,6 +284,10 @@ class SessionSettings(BaseModel, frozen=True):
                 ),
             }
         )
+
+    def beside(self, given: PortsGiven) -> "SessionSettings":
+        """These settings with the ports this checkout's companions were given."""
+        return self.model_copy(update={"followed": given})
 
     def origins(self) -> SettingOrigins:
         """Where the container's own settings came from."""

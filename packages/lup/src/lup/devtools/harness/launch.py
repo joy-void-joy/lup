@@ -1834,6 +1834,12 @@ def session_argv(
                     )
                 ]
             )
+        # On the host the session shares the host's loopback, so each service
+        # is where it listens here -- its own checkout's companion's port,
+        # where it follows one -- told under the variable a container reads.
+        declared = composition.recipe.source.image
+        served = settings.image(declared) if settings is not None else declared
+        environment.update(served.services.environment(False))
         if prepare is not None:
             prepare([], config_home)
         if authenticate is not None:
@@ -2192,8 +2198,9 @@ def launch_claude(
             if mode is None
             else mode.opened("claude", transcript.journal, transcribing)
         )
-        # Started once the launch is cleared to open, so the declaration
-        # naming them is the approved one; stopped when the session ends.
+        # Joined once the launch is cleared to open, so the declaration
+        # naming them is the approved one; let go when the session ends, and
+        # stopped by the last session in this checkout to let go.
         with (
             companions_running(
                 running_beside,
@@ -2204,7 +2211,7 @@ def launch_claude(
             ) as alongside,
             opening as session,
         ):
-            cleared.banner.add(alongside)
+            cleared.banner.add(alongside.notices)
             environment.update(session)
             argv = session_argv(
                 "claude",
@@ -2221,7 +2228,7 @@ def launch_claude(
                 mounts,
                 [*devices, *(session_mode.devices if session_mode else [])],
                 member=member,
-                settings=settings,
+                settings=settings.beside(alongside.ports),
                 read_only=compiled.mounts(),
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
@@ -2532,8 +2539,9 @@ def launch_codex(
     if plugin_root is not None and session_mode is not None:
         scope = mode_home_scope(session_mode, scope)
     try:
-        # Started once the launch is cleared to open, so the declaration
-        # naming them is the approved one; stopped when the session ends.
+        # Joined once the launch is cleared to open, so the declaration
+        # naming them is the approved one; let go when the session ends, and
+        # stopped by the last session in this checkout to let go.
         with (
             companions_running(
                 running_beside,
@@ -2544,7 +2552,7 @@ def launch_codex(
             ) as alongside,
             opening as session,
         ):
-            cleared.banner.add(alongside)
+            cleared.banner.add(alongside.notices)
             environment.update(session)
             argv = session_argv(
                 "codex",
@@ -2563,7 +2571,7 @@ def launch_codex(
                 authenticate=authenticate,
                 prepare=prepare,
                 state_scope=scope,
-                settings=settings,
+                settings=settings.beside(alongside.ports),
                 read_only=compiled.mounts(),
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)

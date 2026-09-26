@@ -6,6 +6,7 @@ from unittest.mock import Mock
 import pytest
 
 import lup.devtools.harness.launch as launch
+from lup.harness.services import HostServices
 from lup.harness.clipboard import ClipboardBridge
 from lup.policy.identity import POLICY_ROOT_ENV
 from lup.providers.claude.login import CLAUDE_LOGIN
@@ -41,6 +42,7 @@ def test_interactive_launch_replaces_inherited_policy_root_and_forwards_it(
     composition.recipe.source.image.config_home = "/cfg"
     composition.recipe.source.image.forge.sourced.return_value = ""
     composition.recipe.source.image.clipboard = ClipboardBridge()
+    composition.recipe.source.image.services = HostServices()
     composition.clipboard_transport = "commands"
     environment: EnvVars = {POLICY_ROOT_ENV: str(tmp_path / "inherited-project")}
 

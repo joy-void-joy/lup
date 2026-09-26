@@ -637,12 +637,64 @@ asks before `sudo`.
 A filtered session has no route to the host. A service it must reach there
 is declared in `Image.services` with its port and, optionally, the variable
 the session reads its address from; the launcher relays exactly those over a
-socket per service and the session calls `http://127.0.0.1:<port>`.
+socket per service and the session calls `http://127.0.0.1:<port>`. A session
+on the host is handed the same variable, naming the port the service listens
+on.
 
-`Harness.companions` are processes each launch runs on the host beside the
-session — a preview server, a watcher — started once the launch is cleared to
-open, logged under `~/.cache/lup/companions/`, said in the banner, and
-stopped with everything they started when the session ends.
+`Harness.companions` are processes run on the host beside a checkout's
+sessions — a preview server, a watcher — started once a launch is cleared to
+open, logged under `~/.cache/lup/companions/`, and said in the banner. One
+runs per checkout, shared by its sessions: the first session in a checkout
+starts it (the banner says `started`), a later one reuses it (`reused (2
+sessions)`), and each holds a lease, so it is stopped, with everything it
+started, when the last of them ends. A launcher that died holding a lease is
+swept by the next launch in that checkout, and what it held runs until then.
+Launches racing for one take a lock, so it starts once. It counts as alive
+while its process runs and every port it declares answers; one that stopped
+answering, or that runs a declaration since changed, is replaced, and the
+sessions sharing it keep their leases on its replacement. Nothing is on its
+input, since the launch that started it may end first, so a tool that stops
+at the end of its input needs its flag for running on.
+
+```python
+HostCompanion(
+    name="preview",
+    command=["bun", "serve", "--port", "{ports.ui}", "--pieces", "{ports.pieces}"],
+    ports={"ui": 8777, "pieces": 8779},
+    url="http://127.0.0.1:{ports.ui}/",
+    open=True,
+)
+```
+
+`ports` names the ports a companion listens on, each at the number it
+prefers. A checkout is given the preferred port where it is free and no other
+checkout keeps it, else the next such port above it, and keeps what it was
+given in `~/.cache/lup/companions/<checkout>/<name>/state.json`, so the same
+checkout comes back to the same address; declaring another preference chooses
+afresh. `{ports.<name>}` in `command` and `url` is the port the checkout was
+given, and a placeholder naming no declared port is refused. `open=True`
+opens the url in the operator's browser when a session starts the companion,
+never when one reuses it; a browser that will not open is a banner line.
+
+A host service that is one of the checkout's companions follows its port:
+
+```python
+HostService(
+    name="listener",
+    port=8778,
+    companion_port="listener.http",
+    variable="LISTENER_URL",
+)
+```
+
+The relay goes to the port the checkout's `listener` companion was given for
+`http`, while the session keeps calling the service where it was declared —
+`inside_port`, else `port` — under the same variable, so every checkout's
+sessions call one address and each reaches its own listener. `port` is where
+the relay goes when the companion has not been given one. A `--host-service`
+flag or `sync.json.local`'s `session.services` still wins over the
+companion's port, and a `companion_port` naming no declared companion port is
+refused.
 
 A companion needing a secret no session may hold — a listener's API key —
 names it in `HostCompanion.secrets`. The launch reads exactly those keys from

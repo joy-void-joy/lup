@@ -45,6 +45,20 @@ def process_start_token(pid: int) -> str | None:
     return rest[19]
 
 
+def process_is_zombie(pid: int) -> bool:
+    """Whether ``pid`` has exited and only waits for its parent to collect it.
+
+    A zombie still answers a signal, so :func:`process_is_alive` counts it;
+    anything asking whether a process still *runs* asks this too.
+    """
+    try:
+        raw = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+    except OSError:
+        return False
+    rest = raw.rpartition(")")[2].split()  # lup: ignore[string-split] — /proc stat
+    return bool(rest) and rest[0] == "Z"
+
+
 def process_is_alive(pid: int, start_token: str | None) -> bool:
     """Whether the process that created a container is still running.
 

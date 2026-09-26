@@ -2205,6 +2205,37 @@ class Harness(BaseModel, frozen=True):
         ]
 
     @model_validator(mode="after")
+    def companion_names_are_unique(self) -> "Harness":
+        """Refuse two companions under one name, which would start and stop each other.
+
+        A companion's name keys what every checkout keeps of it.
+        """
+        names = [companion.name for companion in self.companions]
+        if len(names) != len(dict.fromkeys(names)):
+            raise ValueError(f"harness companion names must be unique: {names}")
+        return self
+
+    @model_validator(mode="after")
+    def services_follow_declared_companions(self) -> "Harness":
+        """Refuse a service following a port no companion declares, which nothing gives it."""
+        declared = {
+            reference: port
+            for companion in self.companions
+            for reference, port in companion.references(companion.ports).items()
+        }
+        dangling = [
+            f"{service.name} follows {service.companion_port}"
+            for service in self.image.services.services
+            if service.companion_port and service.companion_port not in declared
+        ]
+        if dangling:
+            raise ValueError(
+                f"host services follow no declared companion port: "
+                f"{'; '.join(dangling)}; declared: {', '.join(declared) or 'none'}"
+            )
+        return self
+
+    @model_validator(mode="after")
     def unique_semantic_ids(self) -> "Harness":
         ids = self.declared_ids
         if len(ids) != len(dict.fromkeys(ids)):
