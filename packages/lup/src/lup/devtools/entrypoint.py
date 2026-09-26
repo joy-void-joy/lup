@@ -30,17 +30,21 @@ def project_application() -> typer.Typer:
             raise typer.Exit(1)
         case registrations:
             named = "\n".join(
-                f"  {entry.dist.name if entry.dist else 'unnamed'}: {entry.value}"
+                f"  {entry.value}, from {entry.dist.name} in {entry.dist.locate_file('')}"
+                if entry.dist
+                else f"  {entry.value}"
                 for entry in registrations
             )
             typer.echo(
-                "More than one installed distribution registers a 'lup.devtools' "
-                f"application, where a project's environment holds one:\n{named}\n"
-                "One the project no longer declares, such as its package under the "
-                "name it had before a rename, stays through `uv run`, which only "
-                "adds. `uv sync --reinstall-package <the project's name, above>` "
-                "removes it and keeps the `lup-devtools` script both installed; a "
-                "plain `uv sync` removes that script with it.",
+                "More than one distribution registers a 'lup.devtools' application, "
+                f"where a project's environment holds one:\n{named}\n"
+                "The one the project no longer declares, its package under a name it "
+                "had before a rename, is one of two leftovers. In the package "
+                "source's folder, it is a build's `<name>.egg-info`, which the "
+                "editable install reads: delete that folder. In the environment, "
+                "`uv run` kept it, since it only adds: `uv sync --reinstall-package "
+                "<the project's name>` removes it and keeps the `lup-devtools` "
+                "script both installed, which a plain `uv sync` removes with it.",
                 err=True,
             )
             raise typer.Exit(1)
