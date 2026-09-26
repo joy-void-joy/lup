@@ -19,6 +19,13 @@ declared has no socket, and the container has no other way out to the host.
 
 Under the ``host`` network the container shares the host's loopback already,
 so nothing is relayed and the session is pointed at the service's own port.
+
+A service that is one of the checkout's own host companions names the
+companion's port it listens on (``companion_port``) rather than a fixed one:
+each checkout's companion is given a port of its own, and the relay follows
+it, while the session keeps calling the port the service was declared at —
+so a session in a second checkout reaches its own listener, never the
+first's. A machine's or a launch's override of the port still wins.
 """
 
 import atexit
@@ -32,6 +39,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, model_validator
 
+from lup.harness.companions import PortsGiven
 from lup.harness.notice import Notice
 from lup.types import EnvVars
 
@@ -60,7 +68,20 @@ class HostService(BaseModel, frozen=True):
     port: int = Field(
         ge=1,
         le=65535,
-        description="The port it listens on, on the host's loopback",
+        description=(
+            "The port it listens on, on the host's loopback. Following a "
+            "companion, the port until this checkout's companion is given one"
+        ),
+    )
+    companion_port: str = Field(
+        default="",
+        pattern=r"^([a-z][a-z0-9_-]*\.[a-z][a-z0-9_-]*)?$",
+        description=(
+            "`<companion>.<port>`: the host companion whose named port this "
+            "service listens on, as each checkout was given it. The relay "
+            "follows that port, and the session still reaches the service "
+            "where it was declared to; empty follows none"
+        ),
     )
     inside_port: int | None = Field(
         default=None,
@@ -112,6 +133,22 @@ class HostService(BaseModel, frozen=True):
     def address(self, port: int) -> str:
         """The address the session is given, reaching a relay or the host itself."""
         return f"{self.scheme}://127.0.0.1:{port}"
+
+    def following(self, given: PortsGiven) -> "HostService":
+        """This service on the port its companion was given, reached where declared.
+
+        The host side moves to the checkout's port and the session's side is
+        pinned where the declaration put it, so a session in any checkout
+        calls the same address and reaches its own checkout's companion.
+        """
+        if self.companion_port not in given:
+            return self
+        return self.model_copy(
+            update={
+                "inside_port": self.reached_at(),
+                "port": given[self.companion_port],
+            }
+        )
 
 
 class RelayHandler(socketserver.BaseRequestHandler):
@@ -275,7 +312,9 @@ class HostServices(BaseModel, frozen=True):
             return []
         how = "relayed by name" if relayed else "on the shared host loopback"
         reached = ", ".join(
-            f"{service.name} → host port {service.port}" for service in self.services
+            f"{service.name} → host port {service.port}"
+            + (f" ({service.companion_port})" if service.companion_port else "")
+            for service in self.services
         )
         return [
             Notice(
@@ -283,6 +322,12 @@ class HostServices(BaseModel, frozen=True):
                 urgency="boundary",
             )
         ]
+
+    def following(self, given: PortsGiven) -> "HostServices":
+        """These services with each companion's port this checkout was given."""
+        return self.model_copy(
+            update={"services": [service.following(given) for service in self.services]}
+        )
 
     def with_ports(self, ports: ServicePorts) -> "HostServices":
         """These services with the host ports a machine or a launch moved them to.

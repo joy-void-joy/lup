@@ -11,6 +11,10 @@ is the engine's; what it pins is every half this repository owns: the relay
 carries the bytes, the argv mounts only the relay and stays on the internal
 network, the entrypoint listens where the session is told to call, and the
 overrides land where they are said to.
+
+A service that is one of the checkout's host companions follows the port that
+checkout's companion was given: the relay reaches it there, while the session
+keeps calling the port declared, and an override still wins.
 """
 
 import socket
@@ -18,15 +22,20 @@ import threading
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 import typer
 
+import lup.devtools.harness.launch as launch
 from lup.devtools.harness.posture import LaunchOverrides, SessionSettings
+from lup.harness.companions import HostCompanion
 from lup.harness.image import Docker, Image
 from lup.harness.models import Harness, PromptDocument
 from lup.harness.requirements import Manifest
 from lup.harness.services import HostService, HostServices
+from lup.providers.claude.login import CLAUDE_LOGIN
+from lup.types import EnvVars
 
 
 class Greeting(BaseHTTPRequestHandler):
@@ -194,3 +203,129 @@ def test_an_override_naming_no_declared_service_stops_the_launch() -> None:
         SessionSettings.resolved(
             harness, None, LaunchOverrides(services={"elsewhere": 9000})
         )
+
+
+def harness_following(preferred: int) -> Harness:
+    """A listener companion, and the host service following its port."""
+    return Harness(
+        generator_version="0",
+        plugins=[],
+        guidance=PromptDocument(parts=[]),
+        companions=[
+            HostCompanion(
+                name="listener", command=["listen"], ports={"http": preferred}
+            )
+        ],
+        image=Image(
+            services=HostServices(
+                services=[
+                    HostService(
+                        name="listener",
+                        port=preferred,
+                        companion_port="listener.http",
+                        variable="STUDIO_LISTENER_URL",
+                    )
+                ]
+            )
+        ),
+    )
+
+
+@pytest.fixture
+def listening() -> Iterator[int]:
+    """Something answering on a free loopback port, as a checkout's listener would."""
+    with socket.socket() as server:
+        server.bind(("127.0.0.1", 0))
+        server.listen()
+        yield server.getsockname()[1]
+
+
+def test_the_relay_follows_the_port_the_checkout_was_given(listening: int) -> None:
+    """The host side is the checkout's port; the session's side stays where declared."""
+    harness = harness_following(8778)
+    settings = SessionSettings.resolved(harness).beside({"listener.http": listening})
+
+    services = settings.image(harness.image).services
+    relayed = services.serve()
+
+    [service] = services.services
+    assert service.port == listening
+    assert service.reached_at() == 8778
+    assert services.environment(True) == {
+        "STUDIO_LISTENER_URL": "http://127.0.0.1:8778",
+        "LUP_HOST_SERVICES": "listener:8778",
+    }
+    assert services.environment(False) == {
+        "STUDIO_LISTENER_URL": f"http://127.0.0.1:{listening}"
+    }
+    assert relayed is not None
+    with socket.socket(socket.AF_UNIX) as client:
+        client.connect(str(relayed / "listener.sock"))
+        client.sendall(b"ping")
+    assert services.notice(True, "declared by the project")[0].text == (
+        f"Host services (declared by the project): listener → host port "
+        f"{listening} (listener.http), relayed by name"
+    )
+
+
+def test_a_machine_override_still_wins_over_the_companion_port() -> None:
+    harness = harness_following(8778)
+    settings = SessionSettings.resolved(
+        harness, {"services": {"listener": 9100}}
+    ).beside({"listener.http": 8790})
+
+    [service] = settings.image(harness.image).services.services
+
+    assert service.port == 9100
+    assert service.reached_at() == 8778
+
+
+def test_a_service_following_no_declared_companion_port_is_refused() -> None:
+    with pytest.raises(ValueError, match="listener follows listener.https"):
+        Harness(
+            generator_version="0",
+            plugins=[],
+            guidance=PromptDocument(parts=[]),
+            companions=[
+                HostCompanion(name="listener", command=["listen"], ports={"http": 1})
+            ],
+            image=Image(
+                services=HostServices(
+                    services=[
+                        HostService(
+                            name="listener",
+                            port=8778,
+                            companion_port="listener.https",
+                        )
+                    ]
+                )
+            ),
+        )
+
+
+def test_a_session_on_the_host_is_told_where_its_checkout_listener_is(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No relay on the host: the variable names the port the companion was given."""
+    monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
+    monkeypatch.setattr(launch, "accessible_roots", lambda *args: [])
+    monkeypatch.setattr(launch, "settle_boundary", Mock())
+    monkeypatch.setattr(launch, "say_opening", Mock())
+    harness = harness_following(8778)
+    composition = Mock()
+    composition.recipe.source = harness
+    environment: EnvVars = {}
+
+    launch.session_argv(
+        "claude",
+        [],
+        composition,
+        Mock(hooks=None),
+        tmp_path,
+        CLAUDE_LOGIN,
+        launch.LaunchSandbox.NONE,
+        environment,
+        settings=SessionSettings.resolved(harness).beside({"listener.http": 8790}),
+    )
+
+    assert environment["STUDIO_LISTENER_URL"] == "http://127.0.0.1:8790"

@@ -1834,6 +1834,12 @@ def session_argv(
                     )
                 ]
             )
+        # On the host the session shares the host's loopback, so each service
+        # is where it listens here -- its own checkout's companion's port,
+        # where it follows one -- told under the variable a container reads.
+        declared = composition.recipe.source.image
+        served = settings.image(declared) if settings is not None else declared
+        environment.update(served.services.environment(False))
         if prepare is not None:
             prepare([], config_home)
         if authenticate is not None:
@@ -2222,7 +2228,7 @@ def launch_claude(
                 mounts,
                 [*devices, *(session_mode.devices if session_mode else [])],
                 member=member,
-                settings=settings,
+                settings=settings.beside(alongside.ports),
                 read_only=compiled.mounts(),
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
@@ -2565,7 +2571,7 @@ def launch_codex(
                 authenticate=authenticate,
                 prepare=prepare,
                 state_scope=scope,
-                settings=settings,
+                settings=settings.beside(alongside.ports),
                 read_only=compiled.mounts(),
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)

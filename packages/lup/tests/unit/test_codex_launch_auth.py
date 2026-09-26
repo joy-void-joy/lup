@@ -8,6 +8,7 @@ import sh
 import typer
 
 import lup.devtools.harness.launch as launch
+from lup.harness.services import HostServices
 from lup.harness.clipboard import ClipboardBridge, ClipboardTransport
 from lup.harness.egress import SessionEgress
 from lup.sandbox.models import NetworkMode
@@ -168,6 +169,7 @@ def test_session_authentication_uses_the_same_execution_boundary(
     composition.recipe.source.image.config_home = "/cfg"
     composition.recipe.source.image.forge.sourced.return_value = ""
     composition.recipe.source.image.clipboard = ClipboardBridge()
+    composition.recipe.source.image.services = HostServices()
     composition.recipe.source.image.egress = SessionEgress(mode=network)
     composition.clipboard_transport = transport
     plugin = Mock(hooks=None)

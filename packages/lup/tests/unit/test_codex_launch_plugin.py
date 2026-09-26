@@ -13,6 +13,7 @@ import lup.providers.codex.install as installation
 import lup.providers.codex.runtime as runtime
 import lup.providers.codex.home as codex_home
 import lup.providers.codex.selection as codex_selection
+from lup.harness.services import HostServices
 from lup.harness.clipboard import ClipboardBridge
 from lup.policy.identity import POLICY_ROOT_ENV
 from lup.providers.codex.login import CODEX_HOME, CODEX_LOGIN
@@ -35,6 +36,7 @@ def boundary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Mock:
     composition.recipe.source.image.config_home = "/cfg"
     composition.recipe.source.image.forge.sourced.return_value = ""
     composition.recipe.source.image.clipboard = ClipboardBridge()
+    composition.recipe.source.image.services = HostServices()
     composition.clipboard_transport = "commands"
     monkeypatch.setattr(launch, "accessible_roots", lambda *args: [])
     monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
