@@ -384,31 +384,24 @@ class Joining(BaseModel, frozen=True):
 
 def started(
     companion: HostCompanion, joining: Joining, ports: CompanionPorts
-) -> LiveProcess | Notice:
-    """Start one companion on the ports given, answering with its process or why not."""
-    filled = companion.at(ports)
-    program, *arguments = filled.command
-    try:
-        with Path(os.devnull).open("rb") as nothing:
-            running = sh.Command(program)(
-                *arguments,
-                _bg=True,
-                _bg_exc=False,
-                _new_session=True,
-                _cwd=str(joining.root / companion.directory),
-                _env=joining.environment(companion),
-                _in=nothing,
-                _out=str(joining.slot(companion).log()),
-                _err_to_out=True,
-                _return_cmd=True,
-            )
-    except sh.CommandNotFound:
-        return Notice(
-            text=(
-                f"Companion {companion.name}: {program} is not installed here, "
-                "so it was not started"
-            ),
-            urgency="boundary",
+) -> LiveProcess:
+    """Start one companion on the ports given, answering with its process.
+
+    Raises :class:`sh.CommandNotFound` where its program is not installed here.
+    """
+    program, *arguments = companion.at(ports).command
+    with Path(os.devnull).open("rb") as nothing:
+        running = sh.Command(program)(
+            *arguments,
+            _bg=True,
+            _bg_exc=False,
+            _new_session=True,
+            _cwd=str(joining.root / companion.directory),
+            _env=joining.environment(companion),
+            _in=nothing,
+            _out=str(joining.slot(companion).log()),
+            _err_to_out=True,
+            _return_cmd=True,
         )
     return LiveProcess.of(running.pid)
 
@@ -515,9 +508,16 @@ def joining_anew(
         slot.write(state)
     given = state.given()
     yield from missing_secrets(companion, joining.hosted, joining.store)
-    process = started(companion, joining, given)
-    if isinstance(process, Notice):
-        yield process
+    try:
+        process = started(companion, joining, given)
+    except sh.CommandNotFound:
+        yield Notice(
+            text=(
+                f"Companion {companion.name}: {companion.command[0]} is not "
+                "installed here, so it was not started"
+            ),
+            urgency="boundary",
+        )
         return
     running = RunningCompanion(
         process=process, declared=companion, handed=joining.handed(companion)
