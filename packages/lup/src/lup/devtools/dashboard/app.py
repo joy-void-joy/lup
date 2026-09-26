@@ -95,6 +95,11 @@ class IntegrationStep(SetupStep[EnvScope], frozen=True):
             )
             if part
         )
+        refused = self.integration.refusal()
+        if refused:
+            return StepStanding(
+                done=status.ok, detail=detail, offered=False, blocked=refused
+            )
         if self.integration.setup_func is not None and not self.integration.fields:
             return StepStanding(
                 done=status.ok,
@@ -122,6 +127,9 @@ class IntegrationStep(SetupStep[EnvScope], frozen=True):
         }
 
     async def run(self, scope: EnvScope, answers: StepAnswers) -> StepOutcome:
+        refused = self.integration.refusal()
+        if refused:
+            return StepOutcome(ok=False, message=refused)
         given = self.answered(answers)
         if not given:
             return StepOutcome(ok=False, message="Nothing was filled in.")

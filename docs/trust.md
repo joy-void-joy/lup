@@ -184,7 +184,12 @@ it asks for a secret is the moment code a session rewrote would want to run.
 Through the launcher it runs from the export the operator just approved, and
 the prompt hides what is typed. `setup status` says which store each
 integration keeps its keys in, and names a host-only key found in `.env.local`
-with the command that moves it.
+with the command that moves it. Inside a container, where the image sets
+`LUP_CONTAINED`, every host-only write — an integration's prompt, `setup
+secret`, the move, the dashboard — is refused before anything is typed, naming
+the `lup-launch run setup ...` command to run on the host. That is a hint
+rather than a boundary: it turns a secret saved into the container's own
+configuration into an instruction, and nothing more.
 
 ## What this does not cover
 

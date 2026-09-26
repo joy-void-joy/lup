@@ -20,7 +20,7 @@ from typer.testing import CliRunner
 from lup.devtools import setup
 from lup.devtools.dashboard.app import create_dashboard
 from lup.devtools.dashboard.wizard import WizardView
-from lup.devtools.envfiles import CheckoutEnv, HostSecrets
+from lup.devtools.envfiles import CheckoutEnv, HostOnlyRefused, HostSecrets
 from lup.devtools.setup import Integration, PromptField, create_setup_app
 from lup.trust.approved import APPROVED_TREE_ENV
 
@@ -362,3 +362,111 @@ async def test_the_dashboard_reports_a_host_only_key_left_in_env_local(
     [gemini] = [step for step in view.steps if step.slug == "gemini"]
     assert not gemini.standing.done
     assert "lup-launch run setup gemini" in gemini.standing.detail
+
+
+# -- inside a container ------------------------------------------------------------
+
+
+@pytest.fixture
+def contained(checkout: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The same checkout, seen from a process the image says is contained."""
+    monkeypatch.setenv("LUP_CONTAINED", "1")
+    return checkout
+
+
+def refused(arguments: list[str], answers: str = "") -> str:
+    """Run the setup command tree expecting it to refuse, and answer what it said."""
+    result = CliRunner().invoke(
+        create_setup_app([GEMINI, TIMEZONE]), arguments, input=answers
+    )
+    assert result.exit_code == 1, result.output
+    return result.output
+
+
+def test_a_host_only_integration_is_refused_inside_a_container(
+    contained: Path, config: Path
+) -> None:
+    """Refused before the prompt, so the secret is never typed into the session."""
+    said = refused(["gemini"], f"{SECRET}\n")
+
+    assert "LUP_CONTAINED is set" in said
+    assert "`lup-launch run setup gemini`" in said
+    assert f"{KEY}:" not in said
+    assert not store_path(config).exists()
+    assert holding(contained, SECRET) == []
+
+
+def test_a_key_by_name_is_refused_inside_a_container(
+    contained: Path, config: Path
+) -> None:
+    said = refused(["secret", KEY], f"{SECRET}\n")
+
+    assert f"`lup-launch run setup secret {KEY}`" in said
+    assert not store_path(config).exists()
+
+
+def test_the_move_is_refused_inside_a_container(contained: Path, config: Path) -> None:
+    (contained / ".env.local").write_text(f"{KEY}={SECRET}\n", encoding="utf-8")
+
+    said = refused(["gemini"], "y\n")
+
+    assert "Move it there?" not in said
+    assert CheckoutEnv(path=contained / ".env.local").read() == {KEY: SECRET}
+    assert not store_path(config).exists()
+
+
+def test_the_walk_skips_a_host_only_integration_inside_a_container(
+    contained: Path, config: Path
+) -> None:
+    said = invoked([], "Europe/Paris\n")
+
+    assert "Gemini: This runs inside a lup container" in said
+    assert "`lup-launch run setup gemini`" in said
+    assert CheckoutEnv(path=contained / ".env.local").read() == {
+        "AGENT_TIMEZONE": "Europe/Paris"
+    }
+    assert not store_path(config).exists()
+
+
+async def test_the_dashboard_withholds_a_host_only_step_inside_a_container(
+    contained: Path, config: Path
+) -> None:
+    async with dashboard() as http:
+        drawn = await http.get("/api/wizard?scope=env")
+        response = await http.post(
+            "/api/wizard/gemini/run?scope=env",
+            json={"answers": [{"key": KEY, "value": SECRET}]},
+        )
+        ordinary = await http.post(
+            "/api/wizard/timezone/run?scope=env",
+            json={"answers": [{"key": "AGENT_TIMEZONE", "value": "UTC"}]},
+        )
+
+    view = WizardView.model_validate(drawn.json())
+    [gemini] = [step for step in view.steps if step.slug == "gemini"]
+    assert not gemini.standing.offered
+    assert "`lup-launch run setup gemini`" in gemini.standing.blocked
+    assert not response.json()["outcome"]["ok"]
+    assert "`lup-launch run setup gemini`" in response.json()["outcome"]["message"]
+    assert ordinary.json()["outcome"]["ok"]
+    assert not store_path(config).exists()
+
+
+def test_the_store_itself_refuses_a_write_inside_a_container(
+    contained: Path, config: Path
+) -> None:
+    """What stops a surface that forgot to ask from writing the wrong store silently."""
+    with pytest.raises(HostOnlyRefused, match="lup-launch run setup"):
+        HostSecrets.of("adlib").write({KEY: SECRET})
+
+    assert not (config / "lup").exists()
+
+
+def test_a_zero_says_the_process_is_not_contained(
+    checkout: Path, config: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LUP_CONTAINED", "0")
+
+    invoked(["gemini"], f"{SECRET}\n")
+
+    assert HostSecrets.of("adlib").read() == {KEY: SECRET}

@@ -62,6 +62,37 @@ class SecretsLocation(BaseSettings, populate_by_name=True):
         return home / "lup" / "secrets"
 
 
+class ContainedHint(BaseSettings, populate_by_name=True):
+    """Whether this process says it runs inside a lup container, as the image bakes it.
+
+    A hint rather than a boundary: the image sets ``LUP_CONTAINED`` and a
+    process can unset it. What it catches is the honest mistake -- the wizard
+    run inside a session -- which would otherwise write a host-only secret into
+    the container's own configuration home, where the host's companions never
+    read it and the session can, and report it saved.
+    """
+
+    lup_contained: str = Field(default="", validation_alias="LUP_CONTAINED")
+
+    def refusal(self, command: str) -> str:
+        """Why a host-only write is refused here, naming the host command; "" on the host.
+
+        ``command`` is what follows ``lup-launch run``, such as ``setup gemini``.
+        """
+        if self.lup_contained in ("", "0"):
+            return ""
+        return (
+            "This runs inside a lup container (LUP_CONTAINED is set), where a "
+            "host-only secret would land in the container's own configuration "
+            "rather than the operator's host store. Set it from a host terminal: "
+            f"`lup-launch run {command}`."
+        )
+
+
+class HostOnlyRefused(RuntimeError):
+    """A host-only write attempted where the host store is not the host's."""
+
+
 class EnvFile(BaseModel, ABC, frozen=True):
     """One dotenv file the wizard keeps answers in, and says a key lives in.
 
@@ -194,6 +225,14 @@ class HostSecrets(EnvFile, frozen=True):
         return 0o600
 
     def prepare(self) -> None:
-        """Make the directory, and hold it to its owner whatever made it first."""
+        """Make the directory, and hold it to its owner whatever made it first.
+
+        Refused inside a container, before anything is made: whatever surface
+        asked should have refused already, naming its own command, and this is
+        what stops one that did not from writing into the wrong store silently.
+        """
+        refused = ContainedHint().refusal("setup")
+        if refused:
+            raise HostOnlyRefused(refused)
         self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.path.parent.chmod(0o700)

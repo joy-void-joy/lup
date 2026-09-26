@@ -35,7 +35,7 @@ from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 from lup.devtools.conversation.app import create_conversation_setup_app
-from lup.devtools.envfiles import CheckoutEnv, EnvFile, HostSecrets
+from lup.devtools.envfiles import CheckoutEnv, ContainedHint, EnvFile, HostSecrets
 from lup.devtools.harness.profile_app import create_profile_app
 from lup.providers.profiles import ProfileDirectory
 from lup.types import EnvName, EnvVars
@@ -211,8 +211,23 @@ class Integration(BaseModel):
             f"`lup-launch run setup {self.command}` moves it"
         )
 
+    def refusal(self) -> str:
+        """Why this integration cannot be set up in this process, or nothing.
+
+        A host-only integration inside a container: its answers would land in
+        the container's own configuration, not the host store, so it is
+        refused before anybody types a secret into the session.
+        """
+        if not self.host_only:
+            return ""
+        return ContainedHint().refusal(f"setup {self.command}")
+
     def run(self) -> EnvVars:
         """Run the setup flow and return env vars to write."""
+        refused = self.refusal()
+        if refused:
+            console.print(f"[red]{escape(refused)}[/]")
+            raise typer.Exit(1)
         self.offer_move()
         if self.setup_func is not None:
             return self.setup_func()
@@ -409,6 +424,10 @@ def create_setup_app(
                 "name each key in capitals, digits and underscores, such as "
                 "GEMINI_API_KEY"
             ) from error
+        refused = ContainedHint().refusal(" ".join(["setup", "secret", *named]))
+        if refused:
+            console.print(f"[red]{escape(refused)}[/]")
+            raise typer.Exit(1)
         store = host_secrets()
         held = store.read()
         console.print(f"[dim]Kept in {escape(store.said())}[/]")
@@ -447,6 +466,12 @@ def create_setup_app(
         )
         say_status(integrations)
         for integration in integrations:
+            # Skipped rather than ending the walk: the others belong here.
+            refused = integration.refusal()
+            if refused:
+                said = f"{integration.name}: {refused}"
+                console.print(f"[yellow]{escape(said)}[/]")
+                continue
             save_and_confirm(integration.run(), integration.store())
         console.print()
         console.rule("[bold green]Setup complete[/]")
