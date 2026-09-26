@@ -16,6 +16,7 @@ from .decision import (
     unjudged,
 )
 from .edit import path_rule_matches, protected_path_reason
+from .programs import grammar
 from .roles import (
     GENERATED_PLUGIN_RECOVERY,
     GENERATED_PLUGIN_REFUSAL,
@@ -187,6 +188,114 @@ UV_GLOBAL_VALUE_OPTIONS = (
 
 The vocabulary's uv row takes them as its default ``value_flags``, so the walker
 finds a declared uv verb past them exactly as the kernel's own reading does."""
+
+UV_TOOL_RUN_GRAMMAR = grammar(
+    valued=(
+        *UV_GLOBAL_VALUE_OPTIONS,
+        "--from",
+        "-w",
+        "--with",
+        "--with-editable",
+        "--with-requirements",
+        "-c",
+        "--constraints",
+        "-b",
+        "--build-constraints",
+        "--overrides",
+        "--env-file",
+        "--python-platform",
+        "--torch-backend",
+        "--index",
+        "--default-index",
+        "-i",
+        "--index-url",
+        "--extra-index-url",
+        "-f",
+        "--find-links",
+        "--index-strategy",
+        "--keyring-provider",
+        "-P",
+        "--upgrade-package",
+        "--upgrade-group",
+        "--resolution",
+        "--prerelease",
+        "--prerelease-package",
+        "--fork-strategy",
+        "--exclude-newer",
+        "--exclude-newer-package",
+        "--no-sources-package",
+        "--reinstall-package",
+        "--link-mode",
+        "-C",
+        "--config-setting",
+        "--config-settings-package",
+        "--no-build-isolation-package",
+        "--no-build-package",
+        "--no-binary-package",
+        "--refresh-package",
+        "-p",
+        "--python",
+    ),
+    flags=(
+        "--isolated",
+        "--no-env-file",
+        "--lfs",
+        "-V",
+        "--version",
+        "--no-index",
+        "-U",
+        "--upgrade",
+        "--no-sources",
+        "--reinstall",
+        "--compile-bytecode",
+        "--no-build-isolation",
+        "--no-build",
+        "--no-binary",
+        "-n",
+        "--no-cache",
+        "--refresh",
+        "--managed-python",
+        "--no-managed-python",
+        "--no-python-downloads",
+        "-q",
+        "--quiet",
+        "-v",
+        "--verbose",
+        "--system-certs",
+        "--native-tls",
+        "--offline",
+        "--no-progress",
+        "--no-config",
+        "-h",
+        "--help",
+    ),
+)
+"""How `uvx` and `uv tool run` spell their options ahead of the tool they run.
+
+The tool is the first operand past these, which is where an interpreter handed
+inline code has to be seen: `uvx --from foo python -c 1` runs Python exactly
+as `uvx python -c 1` does. An option not listed here could consume the next
+word, so it leaves the tool unread rather than guessed at."""
+
+
+def operand_positions(words: list[str], value_flags: Sequence[str]) -> list[int]:
+    """Where a command's operands stand, each value flag's value stepped over.
+
+    A verb chosen from among operands is chosen from these. Read as every word
+    not beginning with a dash, a value flag's value was an operand too, so
+    `uv pip --cache-dir list install x` named `list` as the verb it runs.
+    """
+    positions: list[int] = []
+    valued = False
+    for index, word in enumerate(words):
+        if valued:
+            valued = False
+            continue
+        if word.startswith("-"):
+            valued = word in value_flags
+            continue
+        positions.append(index)
+    return positions
 
 
 def uv_command_words(words: list[str]) -> list[str] | None:

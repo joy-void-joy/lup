@@ -680,6 +680,23 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="uv --python 3.12 add x", effect="deny"),
     DecisionCase(input="uv --cache-dir", effect="deny"),
     DecisionCase(input="uvx python -c 1", effect="deny"),
+    # The tool is found past uvx's own options, and `uv tool run` is uvx by
+    # its other name: an interpreter behind either is refused however the
+    # options before it are spelled, and an option nothing lists could take
+    # the next word, so it leaves the tool unread and refuses too.
+    DecisionCase(input="uvx --quiet python -c 1", effect="deny"),
+    DecisionCase(input="uvx -q python -c 1", effect="deny"),
+    DecisionCase(input="uvx --from foo python -c 1", effect="deny"),
+    DecisionCase(input="uvx -qU python -c 1", effect="deny"),
+    DecisionCase(input="uvx python@3.12 -c 1", effect="deny"),
+    DecisionCase(input="uvx -- python -c 1", effect="deny"),
+    DecisionCase(input="uvx --frobnicate x python -c 1", effect="deny"),
+    DecisionCase(input="uv tool run python -c 1", effect="deny"),
+    DecisionCase(input="uv tool run --quiet python -c 1", effect="deny"),
+    DecisionCase(input="uv --quiet tool run python -c 1", effect="deny"),
+    DecisionCase(input="uv tool --cache-dir /tmp/c run python -c 1", effect="deny"),
+    DecisionCase(input="uvx -p 3.12 ruff", effect="ask"),
+    DecisionCase(input="uv tool run --from ruff ruff check", effect="ask"),
     DecisionCase(input="uv sync", effect="ask"),
     DecisionCase(input="uv sync --all-extras", effect="ask"),
     DecisionCase(input="uv sync --frozen --index-url https://x", effect="ask"),

@@ -41,6 +41,7 @@ from .effects import (
 )
 from .words import (
     UV_GLOBAL_VALUE_OPTIONS,
+    UV_TOOL_RUN_GRAMMAR,
     INTERPRETERS,
     carried_setting,
     command_words,
@@ -50,6 +51,7 @@ from .words import (
     git_restore_operands,
     key_matches,
     opaque_argument,
+    operand_positions,
     protected_write_target,
     refspec_effects,
     sed_invocation,
@@ -1528,6 +1530,47 @@ def declared_target_decision(
     )
 
 
+def decide_tool_run(spelled: str, arguments: list[str]) -> KernelDecision | None:
+    """Refuse a tool run handed an interpreter, or one whose tool is unread.
+
+    `uvx` and `uv tool run` fetch a tool and run it, and where the tool is an
+    interpreter what it runs is whatever follows -- inline code as often as
+    not, which leaves nothing behind to review. The tool is the first operand
+    past the options, read by their own grammar: read as the word after the
+    command, `uvx --from foo python -c 1` and `uvx -q python -c 1` handed the
+    interpreter over unseen while `uvx python -c 1` was refused. A version
+    pinned onto the name (`python@3.12`) names the interpreter still. An
+    option the grammar does not list could take the next word, so it leaves
+    the tool unread and refuses rather than guessing.
+
+    ``None`` where neither holds, which leaves the row's question standing.
+    """
+    reading = read_program(["uvx", *arguments], {"uvx": UV_TOOL_RUN_GRAMMAR})
+    subject = reading["subject"]
+    if reading["kind"] == "unread":
+        unread = (
+            "an option this policy does not read"
+            if subject.startswith("-")
+            else "a name only the run resolves"
+        )
+        return KernelDecision(
+            "deny",
+            f"{spelled} {subject}: {unread}, so the tool it runs is unread",
+            recovery="Name the tool literally, and spell an option's value with"
+            " `=` or run the tool without it.",
+        )
+    tool = posixpath.basename(subject).partition("@")[0]
+    if reading["kind"] == "script" and tool in INTERPRETERS:
+        return KernelDecision(
+            "deny",
+            f"{spelled} {subject}: inline code leaves nothing behind to review",
+            recovery="Write the code to a named script file and run it through"
+            " `uv run python <script>`; a bare interpreter is refused even"
+            " over a file.",
+        )
+    return None
+
+
 def decide_uv(
     words: list[str],
     runner_targets: list[RunnerTargetRow],
@@ -1766,6 +1809,15 @@ def decide_uv(
             )
         if bare_target and len(run_words) == 2 and run_words[1] == "--help":
             return KernelDecision("allow", "command help is read-only")
+    # `uv tool run` is `uvx` by its other name, so the tool it runs is read by
+    # the same grammar, past uv's globals on either side of `run`.
+    if subcommand == "tool":
+        verbs = operand_positions(words[2:], UV_GLOBAL_VALUE_OPTIONS)
+        at = 2 + verbs[0] if verbs else len(words)
+        if words[at : at + 1] == ["run"]:
+            refused = decide_tool_run("uv tool run", [*words[2:at], *words[at + 1 :]])
+            if refused is not None:
+                return refused
     # A verb the vocabulary declares -- `pip`, `tool`, `publish` -- is walked
     # from the command as spelled, so the row walker finds it past uv's global
     # options exactly as it finds any subcommand, and what it answers is the

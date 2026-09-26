@@ -93,6 +93,7 @@ from .commands import (
     decide_download_words,
     decide_gh_words,
     decide_sed_words,
+    decide_tool_run,
     decide_uv,
     git_checkout_pathspec,
     git_restore_source,
@@ -692,14 +693,9 @@ def decide_segment_words(
     if executable in ("awk", "gawk", "mawk"):
         return decide_awk_words(words)
     if executable == "uvx":
-        if len(words) > 1 and posixpath.basename(words[1]) in INTERPRETERS:
-            return KernelDecision(
-                "deny",
-                f"uvx {words[1]}: inline code leaves nothing behind to review",
-                recovery="Write the code to a named script file and run it through"
-                " `uv run python <script>`; a bare interpreter is refused even"
-                " over a file.",
-            )
+        refused = decide_tool_run("uvx", words[1:])
+        if refused is not None:
+            return refused
         return decide_command_rows(words, context["rows"], write_facts(context))
     if executable == "uv" and len(words) > 1:
         return decide_uv(
