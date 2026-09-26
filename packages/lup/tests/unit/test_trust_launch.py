@@ -12,6 +12,7 @@ import hashlib
 import io
 import json
 import os
+from collections.abc import Iterator
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -91,6 +92,7 @@ class Launches:
         self.handed: list[Handoff] = []
         self.regenerated: list[Handoff] = []
         self.regeneration: Runner = unchanged
+        self.holder: int | None = None
         self.output = io.StringIO()
 
     def ask(
@@ -133,6 +135,7 @@ class Launches:
             self.execute,
             self.regenerate,
             self.location,
+            self.holder,
         )
 
     def files(self, index: int = -1) -> list[str]:
@@ -653,3 +656,129 @@ def test_a_registration_carrying_the_launchers_state_is_refused(
     refuse_host_only_mounts(own, host_only_directories())
     with pytest.raises(typer.BadParameter, match="the launcher's approvals"):
         refuse_host_only_mounts(whole_state, host_only_directories())
+
+
+def ended() -> int:
+    """The id of a process that has already ended, as a finished launch's is."""
+    finished = sh.Command("true")(_bg=True, _return_cmd=True)
+    finished.wait()
+    return finished.pid
+
+
+@pytest.fixture
+def running() -> Iterator[sh.RunningCommand]:
+    """A process still running, as a live session's launch is."""
+    sleeper = sh.Command("sleep")("60", _bg=True, _bg_exc=False, _return_cmd=True)
+    yield sleeper
+    try:
+        sleeper.kill()
+    except ProcessLookupError:
+        return
+
+
+def exported_from(handoff: Handoff) -> Path:
+    """The export one hand-off runs from."""
+    return Path(handoff.environment[APPROVED_TREE_ENV])
+
+
+def compiled_for(handoff: Handoff) -> Path:
+    """Where the bytecode compiled from a hand-off's export is kept, made to exist."""
+    export = exported_from(handoff)
+    compiled = Path(handoff.environment["PYTHONPYCACHEPREFIX"]) / export.relative_to(
+        export.anchor
+    )
+    compiled.mkdir(parents=True)
+    (compiled / "app.cpython-314.pyc").write_bytes(b"bytecode")
+    return compiled
+
+
+def test_a_new_export_removes_the_one_its_worktree_ran_before(
+    checkout: Path, launches: Launches
+) -> None:
+    """With the bytecode compiled from it; the worktree's environment stays."""
+    launches.holder = ended()
+    launches.launch(checkout)
+    before = exported_from(launches.handed[0])
+    compiled = compiled_for(launches.handed[0])
+    environment = Path(launches.handed[0].environment["UV_PROJECT_ENVIRONMENT"])
+    environment.mkdir(parents=True)
+    write(checkout, "src/app.py", "print('changed')\n")
+
+    launches.launch(checkout)
+
+    after = exported_from(launches.handed[1])
+    assert after != before
+    assert (after / "src" / "app.py").read_text() == "print('changed')\n"
+    assert not before.exists()
+    assert not compiled.exists()
+    assert environment.is_dir()
+    assert sorted(path.name for path in before.parent.iterdir()) == [after.name]
+
+
+def test_an_export_a_running_launch_uses_is_kept_until_it_ends(
+    checkout: Path, launches: Launches, running: sh.RunningCommand
+) -> None:
+    launches.holder = running.pid
+    launches.launch(checkout)
+    before = exported_from(launches.handed[0])
+    write(checkout, "src/app.py", "print('changed')\n")
+    launches.holder = ended()
+
+    launches.launch(checkout)
+    assert before.is_dir()
+
+    running.kill()
+    with pytest.raises(sh.SignalException):
+        running.wait()
+    launches.launch(checkout)
+    assert not before.exists()
+    assert exported_from(launches.handed[2]).is_dir()
+
+
+def test_each_worktree_keeps_the_export_it_launched_last(
+    checkout: Path, launches: Launches, tmp_path: Path
+) -> None:
+    launches.holder = ended()
+    launches.launch(checkout)
+    sibling = tmp_path / "sibling"
+    run_git(checkout, "worktree", "add", "-q", str(sibling), "-b", "sibling")
+    write(sibling, "src/app.py", "print('the sibling's own')\n")
+
+    launches.launch(sibling)
+
+    main, other = (exported_from(handed) for handed in launches.handed)
+    assert main != other
+    assert main.is_dir() and other.is_dir()
+
+
+def test_the_export_generation_ran_from_is_let_go(
+    checkout: Path, launches: Launches
+) -> None:
+    """Generation leases the export it runs from only while it runs."""
+    write(checkout, "generated/settings.json", "{}\n")
+    write(
+        checkout,
+        "generated/.lup-ownership.json",
+        proof({"generated/settings.json": "{}\n"}),
+    )
+    run_git(checkout, "add", "-A")
+    run_git(checkout, "commit", "-q", "-m", "generated tree")
+
+    def regenerated(_handoff: Handoff) -> bool:
+        write(checkout, "generated/settings.json", '{"new": true}\n')
+        write(
+            checkout,
+            "generated/.lup-ownership.json",
+            proof({"generated/settings.json": '{"new": true}\n'}),
+        )
+        return True
+
+    launches.regeneration = regenerated
+    launches.holder = ended()
+    launches.launch(checkout)
+
+    [ran_from] = launches.regenerated
+    launched = exported_from(launches.handed[0])
+    assert exported_from(ran_from) != launched
+    assert not exported_from(ran_from).exists()
+    assert sorted(path.name for path in launched.parent.iterdir()) == [launched.name]

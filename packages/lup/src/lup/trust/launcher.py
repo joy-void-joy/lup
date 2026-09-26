@@ -47,7 +47,15 @@ from lup.devtools.launcher import CONSOLE_SCRIPT
 from lup.harness.ownership import OWNERSHIP_FILENAME, OwnershipManifest
 from lup.policy.relay import PersistentQuestion, QuestionRelay
 from lup.trust.answer import Preview, asked_and_answered
-from lup.trust.handoff import Executor, Runner, executed, handoff, materialized, ran
+from lup.trust.handoff import (
+    Executor,
+    Runner,
+    executed,
+    exported,
+    handoff,
+    ran,
+    released,
+)
 from lup.trust.objects import ObjectStore
 from lup.trust.record import Approval, StateLocation, TrustRecord, TrustState
 from lup.trust.review import (
@@ -251,6 +259,7 @@ def regenerated_approval(
     regenerate: Runner,
     console: Console,
     command: list[str] = REGENERATION,
+    holder: int | None = None,
 ) -> str:
     """Run the approved generation from its export, and approve the tree it leaves.
 
@@ -258,8 +267,14 @@ def regenerated_approval(
     tree otherwise stays as approved, and the launch that follows regenerates
     and reports on its own terms.
     """
-    export = materialized(store, approved.tree, state.export(approved.tree))
-    if not regenerate(handoff(state, export.path, checkout.root, command, inherited)):
+    export = exported(state, store, approved.tree, holder)
+    try:
+        completed = regenerate(
+            handoff(state, export.path, checkout.root, command, inherited)
+        )
+    finally:
+        released(state, approved.tree, holder)
+    if not completed:
         console.print(
             "The approved generation did not complete; the launch reports why.",
             markup=False,
@@ -297,6 +312,7 @@ def trusted_launch(
     execute: Executor = executed,
     regenerate: Runner = ran,
     location: StateLocation | None = None,
+    holder: int | None = None,
 ) -> None:
     """Establish trust in the checkout at ``start``, then hand ``command`` to its launch.
 
@@ -305,6 +321,10 @@ def trusted_launch(
     ``named`` is what the question says answering runs: the runtime, or the
     command. Nothing of the checkout is executed before ``execute`` is
     called, and ``execute`` is never called for a zone nobody approved.
+
+    ``holder`` is the process that runs from the export, and so keeps it
+    from being pruned while it does: this one, unset, which the hand-off
+    replaces and so keeps for the whole launch.
     """
     checkout = LiveCheckout.at(start, inherited)
     state = TrustState.of(checkout.identity(), checkout.common, location)
@@ -324,11 +344,19 @@ def trusted_launch(
             checkout, state, store, zone, read_under, kept, named, ask, console
         )
         launched = regenerated_approval(
-            checkout, state, store, narrowed, kept, inherited, regenerate, console
+            checkout,
+            state,
+            store,
+            narrowed,
+            kept,
+            inherited,
+            regenerate,
+            console,
+            holder=holder,
         )
     with state.locked():
         state.write(state.read().approved([], checkout.root, launched, kept.free))
-    export = materialized(store, launched, state.export(launched))
+    export = exported(state, store, launched, holder)
     for link in export.withheld:
         console.print(
             f"Withheld the link {link}: it points outside the approved tree.",

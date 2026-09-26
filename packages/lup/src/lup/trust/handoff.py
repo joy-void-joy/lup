@@ -39,7 +39,7 @@ from pydantic import BaseModel
 from lup.devtools.launcher import CONSOLE_SCRIPT
 from lup.trust.approved import APPROVED_TREE_ENV
 from lup.trust.objects import ObjectStore
-from lup.trust.record import TrustState
+from lup.trust.record import ExportLease, TrustState
 from lup.trust.zone import snapshot
 from lup.types import EnvVars
 
@@ -118,6 +118,55 @@ def materialized(store: ObjectStore, tree: str, destination: Path) -> Export:
             raise
         shutil.rmtree(staging)
     return Export(path=destination, withheld=withheld)
+
+
+def exported(
+    state: TrustState, store: ObjectStore, tree: str, holder: int | None = None
+) -> Export:
+    """One approved tree on disk for a process to run from, and no export nothing uses.
+
+    Under the record's lock, so a launch pruning never removes an export
+    another launch is between materializing and leasing. The lease is taken
+    for ``holder`` (this process, unset) before anything runs from the
+    export, and every export the record does not keep is removed: each
+    worktree's latest, and every one a running process leases, stay.
+    """
+    lease = ExportLease.of(tree, holder if holder is not None else os.getpid())
+    with state.locked():
+        record = state.read().leased(lease)
+        state.write(record)
+        export = materialized(store, tree, state.export(tree))
+        pruned(state, [tree, *record.exports_kept()])
+    return export
+
+
+def released(state: TrustState, tree: str, holder: int | None = None) -> None:
+    """Let go of an export a process ran from and no longer does."""
+    lease = ExportLease.of(tree, holder if holder is not None else os.getpid())
+    with state.locked():
+        state.write(state.read().released(lease))
+
+
+def pruned(state: TrustState, kept: list[str]) -> list[Path]:
+    """Remove every export not ``kept``, with the bytecode compiled from it.
+
+    A partial export an interrupted launch left behind goes too: exports are
+    only written under the record's lock, so none is being written now.
+    """
+    exports = state.root / "exports"
+    if not exports.is_dir():
+        return []
+    removed = [
+        directory
+        for directory in sorted(exports.iterdir())
+        if directory.name not in kept
+    ]
+    for directory in removed:
+        shutil.rmtree(directory)
+        compiled = state.pycache() / directory.relative_to(directory.anchor)
+        if compiled.is_dir():
+            shutil.rmtree(compiled)
+    return removed
 
 
 def written(

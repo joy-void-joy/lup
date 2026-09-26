@@ -32,6 +32,11 @@ from pydantic import BaseModel, Field, ValidationError
 from pydantic_settings import BaseSettings
 
 from lup.policy.relay import QuestionRelay
+from lup.sandbox.process import (
+    process_is_alive,
+    process_is_zombie,
+    process_start_token,
+)
 from lup.trust.objects import ObjectStore
 from lup.trust.zone import TrustError
 
@@ -78,6 +83,26 @@ class WorktreeApproval(BaseModel, frozen=True):
     tree: str
 
 
+class ExportLease(BaseModel, frozen=True):
+    """One process running from an export, which keeps that export on disk."""
+
+    tree: str
+    pid: int
+    started: str | None = None
+    """When the process started, so a reused id is not taken for it."""
+
+    @classmethod
+    def of(cls, tree: str, pid: int) -> "ExportLease":
+        """A lease on ``tree`` by the process running under ``pid`` now."""
+        return cls(tree=tree, pid=pid, started=process_start_token(pid))
+
+    def held(self) -> bool:
+        """Whether the process holding it still runs."""
+        return process_is_alive(self.pid, self.started) and not process_is_zombie(
+            self.pid
+        )
+
+
 class TrustRecord(BaseModel, frozen=True):
     """Everything approved for one repository, read before anything of it runs."""
 
@@ -91,6 +116,40 @@ class TrustRecord(BaseModel, frozen=True):
 
     approvals: list[Approval] = []
     worktrees: list[WorktreeApproval] = []
+    leases: list[ExportLease] = []
+    """The processes running from an export, each keeping its export on disk."""
+
+    def leased(self, lease: ExportLease) -> "TrustRecord":
+        """This record with one more process running from an export, less the dead."""
+        return self.model_copy(
+            update={
+                "leases": [
+                    *(held for held in self.leases if held.held() and held != lease),
+                    lease,
+                ]
+            }
+        )
+
+    def released(self, lease: ExportLease) -> "TrustRecord":
+        """This record without one lease, and without any whose process has gone."""
+        return self.model_copy(
+            update={
+                "leases": [
+                    held for held in self.leases if held.held() and held != lease
+                ]
+            }
+        )
+
+    def exports_kept(self) -> list[str]:
+        """The exports worth keeping: each worktree's latest, and every one in use.
+
+        A worktree whose directory is gone keeps nothing, since only a launch
+        from it would run its export again, and the store rebuilds one.
+        """
+        return [
+            *(item.tree for item in self.worktrees if item.worktree.is_dir()),
+            *(held.tree for held in self.leases if held.held()),
+        ]
 
     def approves(self, tree: str) -> bool:
         """Whether this exact tree was ever approved here."""
