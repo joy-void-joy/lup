@@ -27,6 +27,7 @@ import lup.devtools.dev.history as history
 import lup.devtools.dev.undo as undo
 import lup.devtools.dev.model_config as model_config_mod
 import lup.devtools.dev.model_catalog as model_catalog_mod
+import lup.devtools.dev.settings_schema as settings_schema_mod
 import lup.devtools.dev.environment as environment_mod
 import lup.devtools.dev.pending as pending_mod
 import lup.devtools.dev.plugin as plugin_mod
@@ -980,6 +981,33 @@ def create_dev_app(
             typer.echo(line)
         if check_only and not all(drift.settled() for drift in drifts):
             typer.echo(f"Run `{model_catalog_mod.MODELS_COMMAND}`.", err=True)
+            raise typer.Exit(1)
+
+    @app.command("settings")
+    def settings_cmd(
+        check_only: Annotated[
+            bool,
+            typer.Option("--check", help="Fail where the CLI's settings keys moved"),
+        ] = False,
+    ) -> None:
+        """Read the settings keys Claude Code takes from its CLI, and compile their types.
+
+        Rewrites the snapshot the Claude provider commits and the key types
+        compiled from it, which the settings flow decisions are typed
+        against. The gate never runs this — it needs the CLI installed — and
+        instead refuses a compiled key no decision names.
+        """
+        moved = settings_schema_mod.refresh_settings_schema(
+            settings_schema_mod.SettingsSchemaSource(), project_root(), check=check_only
+        )
+        typer.echo(
+            "claude: settings keys "
+            + ("differ from the committed snapshot" if moved else "match the snapshot")
+        )
+        for line in moved:
+            typer.echo(line)
+        if check_only and moved:
+            typer.echo(f"Run `{settings_schema_mod.SETTINGS_COMMAND}`.", err=True)
             raise typer.Exit(1)
 
     @app.command("modules")
