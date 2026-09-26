@@ -1357,6 +1357,13 @@ def shell_posture_targets(command: str, rows: list[ShellRuleRow]) -> list[str]:
     place and every reader takes as landing somewhere lent.
     """
     segments = read_segments(command, rows)
+    # lup: defer: an unread verb is walked here as spelled, so a landing only
+    # one of its readings declares -- `gh repo cl$OP o/r <dir>` could be `gh
+    # repo clone` -- goes unnamed, while the verdict carries that reading's
+    # reach. Unreachable while every gated command with a landing row refuses
+    # an unknown verb with a reach no container holds (git, gh); name each
+    # verb reading's landing here, from the spellings `unread_readings` judges,
+    # before a row makes it reachable.
     landed = [
         placed
         for segment in segments
