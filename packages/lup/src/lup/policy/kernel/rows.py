@@ -71,6 +71,30 @@ class DisplacedTargetRow(TypedDict):
     lands: str
 
 
+type TargetLanding = Literal["container", "checkout", "host"]
+"""Where one path an operation names lands, as the launch that holds it sees it.
+
+``container`` is nothing the host shares: the image's own directories, the
+container's temporary root, gone when the container is. ``checkout`` is the
+session's own working tree -- mounted from the host, and the tree the session
+was opened to work in. ``host`` is anything else the host lent: another
+project, a cache a later launch reads, a credential file, a config volume.
+"""
+
+
+class TargetLandingRow(TypedDict):
+    """One path an operation names, and where the host that measured it says it lands.
+
+    Measured by the host, which reads the launch's ledger and its own mount
+    table, and handed to the kernel as data, which reads neither. A path the
+    host did not classify has no row, and a reader of these rows treats a
+    missing one as landing nowhere it can vouch for.
+    """
+
+    path: str
+    lands: TargetLanding
+
+
 type PathRoleName = Literal["production", "test", "data", "scratch"]
 
 type PathRoleKind = Literal["subtree", "contains_part"]
@@ -406,6 +430,12 @@ class ShellRuleRow(TypedDict):
     falls back to, where an absence test over the whole argument list would
     turn ``git something-new`` into an allow.
 
+    ``outward_settings`` are the guarded settings whose effect leaves the
+    session's own machine: a credential helper hands a lent secret to a
+    program, and a URL rewrite sends a push somewhere no destination guard
+    read. The rest of ``guarded_settings`` run a program where the session
+    runs, which a container holds; these keep their question inside one too.
+
     ``write_flags`` name the options whose value is a path the command writes
     — ``sort -o``, ``yq -i``, ``git log --output``. Among the ``ask_flags``
     they would leave that list holding two unlike things: a flag that lands a
@@ -538,6 +568,9 @@ class ShellRuleRow(TypedDict):
     guarded_keys: list[str]
     setting_flags: list[str]
     guarded_settings: list[str]
+    outward_settings: list[str]
+    landing_operands: int
+    landing_flags: list[str]
     bare_reads: bool
     value_flags: list[str]
     directory_flags: list[str]
@@ -573,6 +606,9 @@ type ShellRowField = Literal[
     "guarded_keys",
     "setting_flags",
     "guarded_settings",
+    "outward_settings",
+    "landing_operands",
+    "landing_flags",
     "bare_reads",
     "value_flags",
     "directory_flags",
@@ -590,7 +626,7 @@ a hook — and a permission that never happens looks exactly like one granted.
 
 def shell_row_values(
     row: ShellRuleRow,
-) -> dict[ShellRowField, str | bool | list[str] | list[EffectRow]]:
+) -> dict[ShellRowField, str | bool | int | list[str] | list[EffectRow]]:
     """Every field of one erased row, as a mapping, in declaration order.
 
     Declared beside the shape rather than at the renderer that needs it, so a
@@ -630,6 +666,9 @@ def shell_row_values(
         "guarded_keys": row["guarded_keys"],
         "setting_flags": row["setting_flags"],
         "guarded_settings": row["guarded_settings"],
+        "outward_settings": row["outward_settings"],
+        "landing_operands": row["landing_operands"],
+        "landing_flags": row["landing_flags"],
         "bare_reads": row["bare_reads"],
         "value_flags": row["value_flags"],
         "directory_flags": row["directory_flags"],
@@ -812,3 +851,25 @@ def unproduced_cause(reported: str | None) -> UnproducedCause:
         case "missing" | "irregular" | "unreadable" | "refused":
             return reported
     return "unreadable"
+
+
+def landing_rows(pairs: list[list[str]]) -> list[TargetLandingRow]:
+    """The host's ``[path, landing]`` pairs as rows, each landing read as a word.
+
+    The host half returns plain data, since it may reach nothing of the
+    kernel's. A landing that is not one of the three words is read as ``host``
+    -- the place nobody can vouch for -- and so is a pair of the wrong shape,
+    under a path no target spells: dropping it would leave the operation
+    with one fewer path that could have kept its question.
+    """
+
+    def row(pair: list[str]) -> list[TargetLandingRow]:
+        match pair:
+            case [path, "container" | "checkout" | "host" as lands]:
+                return [TargetLandingRow(path=path, lands=lands)]
+            case [path, _]:
+                return [TargetLandingRow(path=path, lands="host")]
+            case _:
+                return [TargetLandingRow(path="$", lands="host")]
+
+    return [landed for pair in pairs for landed in row(pair)]

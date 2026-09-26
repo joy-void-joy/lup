@@ -22,7 +22,7 @@ reshape, and costs the person nothing at all.
 """
 
 from .decision import DecisionEffect, SandboxPlacement
-from .semantics import ReviewPurpose
+from .semantics import REACHES, Reach, ReviewPurpose
 
 from typing import Literal, TypedDict
 
@@ -33,6 +33,11 @@ class EffectRow(TypedDict):
     Data rather than an object because the erased rows are serialized into
     ``policy_data.py`` and read back by a script with no ``lup`` importable.
     The behaviour lives in the member classes below, which this names.
+
+    ``reach`` is where the harm this effect's question guards against lands,
+    one of :data:`~lup.policy.kernel.semantics.REACHES`. A string rather than
+    the literal for the reason the other axes are: the compiled table is read
+    back as plain data, and :func:`declare` is where the word is checked.
     """
 
     kind: str
@@ -40,9 +45,10 @@ class EffectRow(TypedDict):
     write: str
     reviewed: bool
     reason: str
+    reach: str
 
 
-type EffectRowField = Literal["kind", "scope", "write", "reviewed", "reason"]
+type EffectRowField = Literal["kind", "scope", "write", "reviewed", "reason", "reach"]
 """Every axis name one declared effect carries.
 
 Closed and enumerable on the same terms as
@@ -68,6 +74,7 @@ def effect_row_values(row: EffectRow) -> dict[EffectRowField, str | bool]:
         "write": row["write"],
         "reviewed": row["reviewed"],
         "reason": row["reason"],
+        "reach": row["reach"],
     }
 
 
@@ -160,6 +167,23 @@ class Effect:
     saying "the gates see this" against a verdict that never asked.
     """
 
+    reach: Reach = "host_later"
+    """Where the harm this member guards against lands, unless a row says.
+
+    The widest word is the default, because a member nobody placed is one
+    whose question should hold wherever the session runs: a reach written too
+    narrow relaxes a question inside a container, and one written too wide
+    only keeps asking it.
+    """
+
+    def default_reach(self, scope: str) -> Reach:
+        """Where this member's harm lands for one scope, before a row overrides it.
+
+        The member's own word for every scope unless the scope changes what is
+        at stake, which is a fact about the member rather than the row.
+        """
+        return self.reach
+
     def verdict(
         self, row: EffectRow, evidence: EffectEvidence, placement: SandboxPlacement
     ) -> DecisionEffect:
@@ -200,6 +224,7 @@ class ChangesNothing(Effect):
     """
 
     kind = "changes_nothing"
+    reach: Reach = "container"
     observes = True
 
     def verdict(
@@ -224,6 +249,7 @@ class ReadsPath(Effect):
     """
 
     kind = "reads_path"
+    reach: Reach = "container"
     observes = True
     scopes = ["project", "outside", "secret"]
     """Anywhere the checkout covers, anywhere it does not, and key material.
@@ -232,6 +258,10 @@ class ReadsPath(Effect):
     reading reviewable source are the same act with the same answer, so both
     are ``project`` rather than two words this verdict would treat alike.
     """
+
+    def default_reach(self, scope: str) -> Reach:
+        """Key material is a lent secret wherever it is read from."""
+        return "credential" if scope == "secret" else self.reach
 
     def verdict(
         self, row: EffectRow, evidence: EffectEvidence, placement: SandboxPlacement
@@ -276,6 +306,7 @@ class WritesPath(Effect):
     """
 
     kind = "writes_path"
+    reach: Reach = "mount"
     scopes = ["scratch", "production", "protected", "outside", "unbounded"]
     """Which tree the path belongs to, which is most of what the answer turns on.
 
@@ -317,6 +348,14 @@ class WritesPath(Effect):
     *declared* row could never state, which is what left `git apply` unable
     to say that its result is read.
     """
+
+    def default_reach(self, scope: str) -> Reach:
+        """A protected path is one of the settings this policy runs from.
+
+        Every other scope is a path, and where the write lands is what its
+        targets say.
+        """
+        return "lup" if scope == "protected" else self.reach
 
     def verdict(
         self, row: EffectRow, evidence: EffectEvidence, placement: SandboxPlacement
@@ -368,6 +407,7 @@ class DestroysUncaptured(Effect):
     """
 
     kind = "destroys_uncaptured"
+    reach: Reach = "mount"
     scopes = ["targeted", "boundary_wide", "unrecoverable"]
     """The checkpoint vocabulary, read here as what a loss is rather than as
     what a command must arrange before it runs."""
@@ -432,6 +472,7 @@ class ReadsEnvironment(Effect):
     """
 
     kind = "reads_environment"
+    reach: Reach = "container"
 
     def verdict(
         self, row: EffectRow, evidence: EffectEvidence, placement: SandboxPlacement
@@ -481,6 +522,7 @@ class MutatesRepository(Effect):
     """
 
     kind = "mutates_repository"
+    reach: Reach = "container"
 
     def verdict(
         self, row: EffectRow, evidence: EffectEvidence, placement: SandboxPlacement
@@ -596,6 +638,7 @@ class InstallsDependency(Effect):
     """
 
     kind = "installs_dependency"
+    reach: Reach = "dependency"
 
     def verdict(
         self, row: EffectRow, evidence: EffectEvidence, placement: SandboxPlacement
@@ -619,6 +662,7 @@ class MaterializesLockfile(Effect):
     """
 
     kind = "materializes_lockfile"
+    reach: Reach = "dependency"
 
     def verdict(
         self, row: EffectRow, evidence: EffectEvidence, placement: SandboxPlacement
@@ -640,6 +684,7 @@ class RunsDeclaredTarget(Effect):
     """
 
     kind = "runs_declared_target"
+    reach: Reach = "container"
 
     def verdict(
         self, row: EffectRow, evidence: EffectEvidence, placement: SandboxPlacement
@@ -713,6 +758,7 @@ class EscapesContainment(Effect):
     """
 
     kind = "escapes_containment"
+    reach: Reach = "container"
 
     def verdict(
         self, row: EffectRow, evidence: EffectEvidence, placement: SandboxPlacement
@@ -781,6 +827,7 @@ def declare(
     write: str = "",
     reviewed: bool = False,
     reason: str = "",
+    reach: str = "",
     members: list[Effect] = EFFECT_MEMBERS,
 ) -> EffectRow:
     """One effect as a rule states it, with every axis checked at declaration.
@@ -821,8 +868,17 @@ def declare(
     agent session", reason=…)`` asks, in the project's own words -- and a
     concern that genuinely is a new *kind* of thing belongs in this list,
     where every runtime compiling it gets the judgement.
+
+    ``reach`` is where the harm lands, defaulted from the member and stated
+    by a row whose effect lands somewhere its kind does not: an exported
+    variable and a lent credential agent are both a changed environment, and
+    only one of them dies with the container. Checked against the closed
+    vocabulary, because a misspelled reach would otherwise be a question that
+    relaxes nowhere, silently -- or, spelled as the narrow word, everywhere.
     """
     member = member_for(kind, members)
+    if reach and reach not in REACHES:
+        raise ValueError(f"{kind!r} reaches no {reach!r} — a reach is one of {REACHES}")
     if member.scopes and scope not in member.scopes:
         raise ValueError(
             f"{kind!r} reads no scope {scope!r} — it answers for {member.scopes}"
@@ -834,8 +890,52 @@ def declare(
     if reviewed and not member.reviewable:
         raise ValueError(f"{kind!r} reads no route — only a write is reviewed")
     return EffectRow(
-        kind=kind, scope=scope, write=write, reviewed=reviewed, reason=reason
+        kind=kind,
+        scope=scope,
+        write=write,
+        reviewed=reviewed,
+        reason=reason,
+        reach=reach or member.default_reach(scope),
     )
+
+
+def joined_reach(rows: list[EffectRow], order: list[Reach] = REACHES) -> Reach | None:
+    """Where the harm of every declared effect together lands: the widest of them.
+
+    ``None`` where nothing was declared, which is not the narrowest answer but
+    no answer: a verdict whose effects nobody stated keeps its question
+    wherever the session runs. A word outside the vocabulary reads the same
+    way, since the compiled table is data and a word it carries unchecked
+    placed nothing.
+    """
+    stated = [row["reach"] for row in rows]
+    if not stated or any(word not in order for word in stated):
+        return None
+    return max((word for word in order if word in stated), key=order.index)
+
+
+def question_reach(
+    rows: list[EffectRow],
+    evidence: EffectEvidence | None = None,
+    placement: SandboxPlacement = "ambient",
+    members: list[Effect] = EFFECT_MEMBERS,
+) -> Reach | None:
+    """Where the harm a rule's question is about lands: the effects that raised it.
+
+    A clone declares the fetch that reaches a declared host, the write that
+    creates a directory, and the arrival of somebody's code -- and only the
+    last is what anybody is asked about. So the reach is joined over the
+    effects whose own answer is not a permission, and over all of them where
+    none of them objects, which is the question a caller escalated by some
+    other route and has to be answered for the whole of what was declared.
+    """
+    measured = EffectEvidence() if evidence is None else evidence
+    asking = [
+        row
+        for row in rows
+        if member_for(row["kind"], members).verdict(row, measured, placement) != "allow"
+    ]
+    return joined_reach(asking or rows)
 
 
 def external_effects(effect_class: str) -> list[EffectRow]:

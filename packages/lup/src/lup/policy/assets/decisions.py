@@ -33,7 +33,9 @@ from host import (
     defers_unjudged,
     note_asked,
     delivers,
+    host_held_ports,
     measured_boundary,
+    measured_landings,
     unleased_write_targets,
     readonly_write_targets,
     script_run_nudge,
@@ -73,7 +75,7 @@ from kernel.edit import (
     relocated_suppressions,
 )
 from kernel.effects import STRENGTH
-from kernel.fetch import decide_fetch
+from kernel.fetch import decide_fetch, loopback_port
 from kernel.peers import (
     decide_foreign_claim,
     decide_peer_listing,
@@ -97,12 +99,13 @@ from kernel.rows import (
     RewriteReading,
     RewrittenDocumentRow,
     UnproducedDocumentRow,
+    landing_rows,
     unproduced_cause,
 )
 from kernel.spawns import decide_spawn
 from kernel.words import INTERPRETERS
 from kernel.roles import displaced_targets, is_session_scratch_target
-from kernel.shell import decide_shell, sandbox_excluded
+from kernel.shell import decide_shell, sandbox_excluded, shell_posture_targets
 from kernel.tools import decide_tool
 from policy_data import (
     ACCEPTANCE_GUARD,
@@ -327,6 +330,25 @@ def bash_decision(
             ],
             PATH_ROLES,
         ),
+        # Where each path the command changes lands, for the one row that
+        # reads it: inside a measured container, a question whose harm stays
+        # there is settled without anybody.
+        landings=(
+            landing_rows(
+                measured_landings(
+                    shell_posture_targets(command, SHELL_RULES), boundary, cwd
+                )
+            )
+            if inside and delivers(boundary, "inside_placement")
+            else []
+        ),
+        # Read only where the line names this machine's loopback at all, since
+        # it walks every process this container can see.
+        host_ports=(
+            held_loopback_ports(boundary)
+            if any(host in command for host in ("localhost", "127.", "::1"))
+            else []
+        ),
         recovered=bool(reference),
     )
     # The gates an edit is judged by, over the writes this command carries the
@@ -483,16 +505,37 @@ def fetch_decision(url: str, root: Path | None = None) -> KernelDecision:
     surfaces. Read here rather than passed, because this entry point is what
     a dispatcher calls and a dispatcher holds nothing but the call.
     """
+    boundary = measured_boundary(root)
+    port = loopback_port(url)
     verdict = decide_fetch(
         url,
         ALLOWED_FETCH_SCOPES,
         DENIED_FETCH_SCOPES,
-        "defer" if defers_unjudged(measured_boundary(root)) else "ask",
+        "defer" if defers_unjudged(boundary) else "ask",
+        host_listener=port is not None and port in held_loopback_ports(boundary),
     )
     if verdict.effect != "ask":
         return verdict
     note_asked(root, approval_fingerprint("fetch", url, root), "fetch", url)
     return verdict
+
+
+def held_loopback_ports(
+    boundary: dict[str, list[str]], proc: Path = Path("/proc")
+) -> list[int]:
+    """The loopback ports this session's container does not own, where that matters.
+
+    Only inside a container the launch measured placing its work there: a
+    container sharing the host's network shares its loopback, and a port is
+    this session's own only where one of the container's processes holds the
+    listener -- the rest are the operator's services on the same address.
+    Elsewhere nothing is withheld, since the scopes were declared for the
+    machine the session runs on. A socket table nobody can read withholds
+    every port.
+    """
+    if not contained(boundary) or not delivers(boundary, "inside_placement"):
+        return []
+    return host_held_ports(proc)
 
 
 def refused_tool_decision(name: str, values: list[str]) -> KernelDecision | None:

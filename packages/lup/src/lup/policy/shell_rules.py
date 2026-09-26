@@ -341,6 +341,21 @@ class ShellOperationRule(BaseModel, frozen=True):
     The subcommand's column, for a verb nested beneath one: `dev init upstream
     --dry-run` prints the registration it would write and writes none, so the
     question its effects raise is about an effect the probe never performs."""
+    setting_flags: list[str] = []
+    """Guarded flags whose value names the setting the question is about.
+
+    The command's column, for an operation whose guarded flag takes a value
+    and only some values are worth a question: a launch's `--sandbox none`
+    opens a session with no boundary, and `--sandbox outer` opens one with the
+    strongest. Read against :attr:`guarded_settings` in the two spellings a
+    command's own globals are read in."""
+    guarded_settings: list[str] = []
+    """Which values those flags must name for the question to stand."""
+    landing_operands: int = 0
+    """The subcommand's column, for an operation that writes where an operand
+    says: `gh repo clone <repo> <dir>` writes the second."""
+    landing_flags: list[str] = []
+    """Flags whose value is a place this operation writes: `--dir`, `--output`."""
     sandbox: SandboxPlacement = ROOT_SANDBOX
     checkpoint: CheckpointRequirement = ROOT_CHECKPOINT
     reviewer: ReviewerRequirement = ROOT_REVIEWER
@@ -390,6 +405,15 @@ class ShellSubcommandRule(BaseModel, frozen=True):
     probe_flags: list[str] = []
     frozen_flags: list[str] = []
     guarded_keys: list[str] = []
+    landing_operands: int = 0
+    """The operand, counted from one, from which every operand is a place written.
+
+    What a question whose harm lands on paths reads its targets from, where no
+    other reader names them: `git clone <repo> <dir>` writes the second.
+    Zero where no operand does. Declared and nothing names one, the operation
+    writes where it runs."""
+    landing_flags: list[str] = []
+    """Flags whose value is a place this operation writes: `--dir`, `--output`."""
     operations: list[ShellOperationRule] = []
     sandbox: SandboxPlacement = ROOT_SANDBOX
     checkpoint: CheckpointRequirement = ROOT_CHECKPOINT
@@ -562,6 +586,22 @@ class ShellCommandRule(SelectableRule, frozen=True):
     list, and on a subcommand-gated command's own row it would also answer for
     the verbs that fell off the enumeration.
     """
+    outward_settings: list[str] = []
+    """Which of those settings reach beyond the machine the session runs on.
+
+    A credential helper hands a lent secret to the program it names, and a
+    URL rewrite sends the next push somewhere no destination guard read. The
+    rest of the guarded settings run a program where the session runs, which
+    a container holds -- so these are the ones whose question stands inside
+    one too, stated rather than inferred from which pattern they look like.
+    """
+    landing_operands: int = 0
+    """The operand, counted from one, from which every operand is a place written.
+
+    The subcommand's column, for a command with no subcommand: `chmod <mode>
+    <file>...` changes the files from the second operand on."""
+    landing_flags: list[str] = []
+    """Flags whose value is a place this command writes."""
     bare_reads: bool = False
     """Whether this command only reads when handed no arguments at all.
 
@@ -710,8 +750,11 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
                 frozen_flags=[],
                 write_markers=[],
                 guarded_keys=[],
-                setting_flags=[],
-                guarded_settings=[],
+                setting_flags=list(operation.setting_flags),
+                guarded_settings=list(operation.guarded_settings),
+                outward_settings=[],
+                landing_operands=operation.landing_operands,
+                landing_flags=list(operation.landing_flags),
                 bare_reads=False,
                 value_flags=[],
                 directory_flags=[],
@@ -741,6 +784,9 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             guarded_keys=list(subcommand.guarded_keys),
             setting_flags=[],
             guarded_settings=[],
+            outward_settings=[],
+            landing_operands=subcommand.landing_operands,
+            landing_flags=list(subcommand.landing_flags),
             bare_reads=False,
             value_flags=[],
             directory_flags=[],
@@ -772,6 +818,9 @@ def erase_shell_rules(rules: list[ShellCommandRule]) -> list[ShellRuleRow]:
             guarded_keys=list(command.guarded_keys),
             setting_flags=list(command.setting_flags),
             guarded_settings=list(command.guarded_settings),
+            outward_settings=list(command.outward_settings),
+            landing_operands=command.landing_operands,
+            landing_flags=list(command.landing_flags),
             bare_reads=command.bare_reads,
             value_flags=list(command.value_flags),
             directory_flags=list(command.directory_flags),

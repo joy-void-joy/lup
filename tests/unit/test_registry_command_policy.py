@@ -61,6 +61,10 @@ WIDENING = [
         "follows this pin",
         id="repin-joined",
     ),
+]
+"""Every writer that widens what a launch reaches, and what its question names."""
+
+LENDING = [
     pytest.param("harness claude --mount /srv/data", "folder or device", id="lend-rw"),
     pytest.param(
         "harness codex --mount-ro /srv/data", "folder or device", id="lend-ro"
@@ -69,7 +73,11 @@ WIDENING = [
         "harness claude --device nvidia.com/gpu=all", "folder or device", id="lend-gpu"
     ),
 ]
-"""Every writer that widens what a launch reaches, and what its question names."""
+"""A launcher's flag lending the one session it opens a folder or a device.
+
+Asked on the host, where the engine the launch reaches can bind any folder the
+operator owns. From inside a container measured around the session there is
+no engine socket to lend a host folder through, so `outer` settles it."""
 
 BOOKKEEPING = [
     pytest.param("sync status", id="status"),
@@ -166,6 +174,22 @@ def test_a_command_that_widens_a_later_launch_asks(
     assert widens in reason
     assert {placed.effect for placed in preview.readings} == {effect}
     assert all(widens in placed.reason for placed in preview.readings)
+
+
+@pytest.mark.parametrize(("command", "widens"), LENDING)
+def test_a_launch_lending_a_host_folder_asks_from_a_host_posture(
+    runtime: Runtime, checkout: Path, command: str, widens: str
+) -> None:
+    effect, reason = met(runtime, command, checkout)
+    readings = {
+        placed.placement: placed for placed in previewed(command, checkout).readings
+    }
+
+    assert effect == "ask"
+    assert widens in reason
+    assert {readings[name].effect for name in ("none", "inner")} == {effect}
+    assert all(widens in readings[name].reason for name in ("none", "inner"))
+    assert readings["outer"].effect == "allow"
 
 
 @pytest.mark.parametrize("command", BOOKKEEPING)

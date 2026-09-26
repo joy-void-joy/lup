@@ -177,3 +177,46 @@ covers settings, rules, visibility, secrets, variables, and environments.
 ``opaque`` is an external mutation whose effect the classifier cannot name,
 which is the one that must never read as compensable by default.
 """
+
+type Reach = Literal[
+    "container",
+    "mount",
+    "dependency",
+    "credential",
+    "lup",
+    "host_later",
+]
+"""Where the harm an operation's question guards against would land.
+
+The one fact that decides what a question is worth inside a container
+measured around the session. The walls stand whatever the operation does,
+so what remains to ask about is whatever the walls do not hold:
+
+* ``container`` — the harm stays inside: a process killed, a variable
+  exported, a package installed into the image, a program a flag names. It
+  goes when the container does.
+* ``mount`` — the harm lands on the paths the operation names, which may be
+  the container's own or a directory the host lent it. Only a target that
+  lands on nothing the host shares keeps the harm inside.
+* ``dependency`` — code arriving from a package index, which a later build or
+  import reaches after nobody is watching, in the container or out of it.
+* ``credential`` — a secret the launch lent the session, or a variable that
+  swaps the identity a later command acts as.
+* ``lup`` — this policy's own machinery: its settings, its ledger, its gates.
+* ``host_later`` — beyond the container or after it: another machine, a
+  remote, a published artifact, a cache the host reads again.
+
+Ordered narrowest first, and only the first two ever relax: the join of an
+operation's reaches is the widest, so one guarded effect keeps the whole
+operation's question.
+"""
+
+REACHES: list[Reach] = [
+    "container",
+    "mount",
+    "dependency",
+    "credential",
+    "lup",
+    "host_later",
+]
+"""Every reach, narrowest first, which is what makes a join a maximum."""

@@ -48,7 +48,7 @@ from kernel.edit import (
     relocated_suppressions,
 )
 from kernel.effects import STRENGTH
-from kernel.fetch import decide_fetch
+from kernel.fetch import decide_fetch, loopback_port
 from kernel.peers import (
     decide_foreign_claim,
     decide_peer_listing,
@@ -72,12 +72,13 @@ from kernel.rows import (
     RewriteReading,
     RewrittenDocumentRow,
     UnproducedDocumentRow,
+    landing_rows,
     unproduced_cause,
 )
 from kernel.spawns import decide_spawn
 from kernel.words import INTERPRETERS
 from kernel.roles import displaced_targets, is_session_scratch_target
-from kernel.shell import decide_shell, sandbox_excluded
+from kernel.shell import decide_shell, sandbox_excluded, shell_posture_targets
 from kernel.tools import decide_tool
 from policy_data import (
     ACCEPTANCE_GUARD,
@@ -158,11 +159,57 @@ def execution_write_refusal(path_text: str, root: Path | None) -> str:
         for scope in scopes
         if path.is_relative_to(Path(scope).resolve())
     ]
+    # A path under no root the lease names, inside a container this launch
+    # measured, is the container's own unless the host lent it some other way:
+    # nothing a write there lands on outlives the container or reaches the host.
+    if not matches and container_owned(path, boundary):
+        return ""
     if not matches or not min(
         allowed for depth, allowed in matches if depth == max(row[0] for row in matches)
     ):
         return f"{path} is outside this launch's writable boundary"
     return ""
+
+
+def container_owned(
+    path: Path,
+    measured: dict[str, list[str]],
+    mountinfo: Path = Path("/proc/self/mountinfo"),
+) -> bool:
+    """Whether one resolved path is the measured container's own.
+
+    Only inside a container the launch measured placing its work there, and
+    only where this process's mount table can be read: a table nobody can read
+    vouches for nothing, and the answer that keeps a refusal is no.
+    """
+    if not contained(measured) or not delivers(measured, "inside_placement"):
+        return False
+    try:
+        lent = lent_mount_points(mountinfo.read_text())
+    except OSError:
+        return False
+    shared = host_shared_roots(measured, lent, str(Path.home()))
+    return not any(path.is_relative_to(scope) for scope in shared)
+
+
+def measured_landings(
+    targets: list[str],
+    measured: dict[str, list[str]],
+    root: Path | None = None,
+    mountinfo: Path = Path("/proc/self/mountinfo"),
+) -> list[list[str]]:
+    """Where each target lands, as this launch's lease and this mount table say.
+
+    Asked by a caller that already knows the session runs in a container:
+    the question these answer is asked only there. A mount table nobody
+    can read places every target on the host, which keeps every question.
+    """
+    try:
+        lent = lent_mount_points(mountinfo.read_text())
+    except OSError:
+        return [[target, "host"] for target in targets]
+    shared = host_shared_roots(measured, lent, str(Path.home()))
+    return landed_targets(targets, shared, root)
 
 
 def destination_policy_binding(path_text: str, root: Path | None) -> str:
@@ -2341,6 +2388,175 @@ def unleased_write_targets(
     ]
 
 
+def lent_mount_points(mountinfo: str) -> list[str]:
+    """Every mount point here whose filesystem is a slice the host lent.
+
+    Read off a mount table in the ``/proc/<pid>/mountinfo`` format, one
+    space-separated record per mount. A mount whose root inside its own
+    filesystem is not that filesystem's top is a bind: a directory, a volume
+    or a single file handed in from somewhere else -- the checkout, a cache
+    volume, the credential seed, the peer inbox. A filesystem mounted whole --
+    the image's own root, ``proc``, a ``tmpfs`` the container made -- is the
+    container's. The one whole filesystem a launch lends is a lease root at a
+    disk's top, which the lease names.
+
+    The record's fields are named where they are read: proc(5) fixes the
+    first five as the mount's id, its parent's, the device, the root within
+    that device's filesystem, and the mount point. A record too short to carry
+    them is not a mount and is skipped.
+    """
+
+    def lent(record: list[str]) -> list[str]:
+        match record:
+            case [_mount_id, _parent_id, _device, root, mount_point, *_] if root != "/":
+                # The table escapes a space, a tab, a newline and a backslash
+                # as three octal digits and leaves every other byte as UTF-8.
+                raw = mount_point.encode("utf-8").decode("unicode_escape")
+                return [raw.encode("latin-1").decode("utf-8", "replace")]
+            case _:
+                return []
+
+    return [
+        point
+        for record in csv.reader(mountinfo.splitlines(), delimiter=" ")
+        for point in lent(record)
+    ]
+
+
+def host_shared_roots(
+    measured: dict[str, list[str]], mounted: list[str], home: str
+) -> list[str]:
+    """Every root a path the host can see lies under, as this launch knows them.
+
+    The lease's writable and read-only roots -- a home-relative grant expanded
+    against ``home``, the way the host's own tools will read it -- and every
+    mount point the mount table says the host lent. The machine's temporary
+    root is the one lease entry left out: a container's `/tmp` is its own and
+    goes with it, which is what the settlement already reads it as.
+    """
+    leased = [
+        *(measured["writable_roots"] if "writable_roots" in measured else []),
+        *(measured["read_only_roots"] if "read_only_roots" in measured else []),
+    ]
+    expanded = [
+        home + scope[1:] if scope == "~" or scope.startswith("~/") else scope
+        for scope in leased
+    ]
+    return [
+        *(scope for scope in expanded if Path(scope) != Path("/tmp")),
+        *mounted,
+    ]
+
+
+def landed_targets(
+    targets: list[str], shared: list[str], root: Path | None = None
+) -> list[list[str]]:
+    """Place each target: this checkout, somewhere else the host shares, or the container.
+
+    Pairs of ``[path, landing]``, one per target, in the order given. Resolved
+    against ``root``, the session's own checkout, so a link is followed to
+    where it lands. A target no one can read -- an expansion, a substitution,
+    a directory a `cd` left unknown -- lands ``host``: nothing here can vouch
+    for where it goes, and that is the answer that keeps a question.
+    """
+    where = Path.cwd() if root is None else root
+    checkout = where.resolve()
+
+    def landing(target: str) -> str:
+        if "$" in target or "`" in target:
+            return "host"
+        resolved = (where / target).resolve()
+        if resolved.is_relative_to(checkout):
+            return "checkout"
+        if any(resolved.is_relative_to(scope) for scope in shared):
+            return "host"
+        return "container"
+
+    return [[target, landing(target)] for target in targets]
+
+
+def host_held_ports(proc: Path) -> list[int]:
+    """The ports a process this container cannot see is listening on.
+
+    A container sharing the host's network shares its loopback, so a port
+    there may be the operator's own service. The socket tables under ``proc``
+    list every listener in that network, one space-padded record per socket;
+    the descriptors under each visible process name the sockets this
+    container's processes hold. A listener whose socket no visible process
+    holds is the host's, and its port is one of these.
+
+    Every port where the tables cannot be read: the reading that keeps the
+    question.
+
+    A record's fields are named where they are read, in the order proc(5)
+    fixes: slot, local address, remote address, state -- ``0A`` is listening
+    -- the queues, the timer, retransmits, uid, timeout, and the socket inode.
+    """
+
+    # A descriptor can close between listing a process's table and reading
+    # one entry -- the listing's own, in this process -- so each is read
+    # alone, and one that went takes only itself with it.
+    def link(entry: Path) -> list[str]:
+        try:
+            return [str(entry.readlink())]
+        except OSError:
+            return []
+
+    def links(descriptors: Path) -> list[str]:
+        try:
+            entries = list(descriptors.iterdir())
+        except OSError:
+            return []
+        return [target for entry in entries for target in link(entry)]
+
+    try:
+        tables = [
+            (proc / "net" / name).read_text().splitlines()[1:]
+            for name in ("tcp", "tcp6")
+            if (proc / "net" / name).exists()
+        ]
+    except OSError:
+        return list(range(1, 65536))
+    held = {
+        link.removeprefix("socket:[").removesuffix("]")
+        for descriptors in proc.glob("[0-9]*/fd")
+        for link in links(descriptors)
+        if link.startswith("socket:[")
+    }
+
+    def unheld(record: list[str]) -> list[int]:
+        match record:
+            case [
+                _slot,
+                local,
+                _remote,
+                "0A",
+                _queues,
+                _timer,
+                _tries,
+                _uid,
+                _wait,
+                inode,
+                *_,
+            ] if inode not in held:
+                # lup: ignore[string-split] — the table's `address:port` field, hex on both sides, which no parser reads
+                _address, _, bound = local.rpartition(":")
+                return [int(bound, 16)]
+            case _:
+                return []
+
+    return sorted(
+        {
+            port
+            for table in tables
+            for record in csv.reader(
+                [line.strip() for line in table], delimiter=" ", skipinitialspace=True
+            )
+            for port in unheld(record)
+        }
+    )
+
+
 def readonly_write_targets(
     targets: list[str], measured: dict[str, list[str]], root: Path | None = None
 ) -> list[str]:
@@ -2804,6 +3020,25 @@ def bash_decision(
             ],
             PATH_ROLES,
         ),
+        # Where each path the command changes lands, for the one row that
+        # reads it: inside a measured container, a question whose harm stays
+        # there is settled without anybody.
+        landings=(
+            landing_rows(
+                measured_landings(
+                    shell_posture_targets(command, SHELL_RULES), boundary, cwd
+                )
+            )
+            if inside and delivers(boundary, "inside_placement")
+            else []
+        ),
+        # Read only where the line names this machine's loopback at all, since
+        # it walks every process this container can see.
+        host_ports=(
+            held_loopback_ports(boundary)
+            if any(host in command for host in ("localhost", "127.", "::1"))
+            else []
+        ),
         recovered=bool(reference),
     )
     # The gates an edit is judged by, over the writes this command carries the
@@ -2960,16 +3195,37 @@ def fetch_decision(url: str, root: Path | None = None) -> KernelDecision:
     surfaces. Read here rather than passed, because this entry point is what
     a dispatcher calls and a dispatcher holds nothing but the call.
     """
+    boundary = measured_boundary(root)
+    port = loopback_port(url)
     verdict = decide_fetch(
         url,
         ALLOWED_FETCH_SCOPES,
         DENIED_FETCH_SCOPES,
-        "defer" if defers_unjudged(measured_boundary(root)) else "ask",
+        "defer" if defers_unjudged(boundary) else "ask",
+        host_listener=port is not None and port in held_loopback_ports(boundary),
     )
     if verdict.effect != "ask":
         return verdict
     note_asked(root, approval_fingerprint("fetch", url, root), "fetch", url)
     return verdict
+
+
+def held_loopback_ports(
+    boundary: dict[str, list[str]], proc: Path = Path("/proc")
+) -> list[int]:
+    """The loopback ports this session's container does not own, where that matters.
+
+    Only inside a container the launch measured placing its work there: a
+    container sharing the host's network shares its loopback, and a port is
+    this session's own only where one of the container's processes holds the
+    listener -- the rest are the operator's services on the same address.
+    Elsewhere nothing is withheld, since the scopes were declared for the
+    machine the session runs on. A socket table nobody can read withholds
+    every port.
+    """
+    if not contained(boundary) or not delivers(boundary, "inside_placement"):
+        return []
+    return host_held_ports(proc)
 
 
 def refused_tool_decision(name: str, values: list[str]) -> KernelDecision | None:

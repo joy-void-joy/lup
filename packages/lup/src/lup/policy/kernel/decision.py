@@ -5,6 +5,8 @@ from typing import Literal, TypedDict, Unpack
 from .semantics import (
     AbstentionPurpose,
     Capability,
+    REACHES,
+    Reach,
     RefusalCause,
     ReviewPurpose,
     ReviewerRequirement,
@@ -250,6 +252,7 @@ class Revision(TypedDict, total=False):
     rule: str
     evaluator: str
     recovery: str
+    reach: Reach | None
 
 
 class KernelDecision:
@@ -376,6 +379,15 @@ class KernelDecision:
     rather than inside it, so the person deciding reads what is at stake and
     the agent learns its way round if the answer is no.
     """
+    reach: Reach | None
+    """Where the harm this verdict guards against lands, or ``None`` if unstated.
+
+    Read by one settlement row: inside a container measured around the
+    session, a question whose harm stays inside it asks nobody anything they
+    need to answer. Derived from the effects the rule declared, so a verdict
+    reached by code that declared none carries ``None`` and keeps its question
+    wherever the session runs -- the reading that fails closed.
+    """
 
     def __init__(
         self,
@@ -396,6 +408,7 @@ class KernelDecision:
         rule: str = "",
         evaluator: str = "",
         recovery: str = "",
+        reach: Reach | None = None,
     ) -> None:
         if effect not in ("allow", "ask", "deny", "defer"):
             raise ValueError(f"invalid kernel decision effect {effect!r}")
@@ -419,6 +432,7 @@ class KernelDecision:
         self.rule = rule
         self.evaluator = evaluator
         self.recovery = recovery
+        self.reach = reach
         # Only a verdict this policy actually reached is placed: a refusal is
         # not softened by where the operation would have run, and a deferral
         # hands the whole question over, placement included.
@@ -456,6 +470,7 @@ class KernelDecision:
             changes["rule"] if "rule" in changes else self.rule,
             changes["evaluator"] if "evaluator" in changes else self.evaluator,
             changes["recovery"] if "recovery" in changes else self.recovery,
+            changes["reach"] if "reach" in changes else self.reach,
         )
 
     def placed(self, escapable: bool, contained: bool = False) -> "KernelDecision":
@@ -619,6 +634,24 @@ def contributions(decision: KernelDecision) -> tuple[KernelDecision, ...]:
     summary fields, which carry the join rather than the reasons.
     """
     return decision.findings or (decision,)
+
+
+def objecting_reach(
+    parts: tuple["KernelDecision", ...], order: list[Reach] = REACHES
+) -> Reach | None:
+    """Where the harm of every part that asks or refuses lands: the widest of them.
+
+    A composed verdict's own reach, which is what makes it safe to compose
+    again. A line is joined from its segments and a segment from what rode in
+    it -- an assignment and the command behind it -- so a reader of one level
+    of parts meets verdicts that are themselves joins, and each has to carry
+    all of what its parts objected to rather than the first part's word.
+    ``None`` where any objecting part stated none, or none objects at all.
+    """
+    stated = [part.reach for part in parts if part.effect in ("ask", "deny")]
+    if not stated or any(word is None for word in stated):
+        return None
+    return max((word for word in order if word in stated), key=order.index)
 
 
 def recovery_dischargeable(decision: KernelDecision) -> bool:

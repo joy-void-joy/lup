@@ -58,11 +58,45 @@ def scope_text(scope: UrlScopeRow) -> str:
     return f"{scope['scheme']}://{host}{port}{scope['path_prefix']}"
 
 
+def loopback_port(url: str) -> int | None:
+    """The port a URL reaches on this machine's own loopback, or ``None``.
+
+    Loopback is ``localhost`` and names beneath it, the IPv4 loopback block,
+    and the IPv6 loopback address. A URL naming no port reaches its scheme's
+    default; one whose scheme has none, or that does not parse, is not read as
+    reaching a port at all.
+    """
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        hostname = parsed.hostname or ""
+        port = parsed.port
+    except ValueError:
+        return None
+    local = (
+        hostname == "localhost"
+        or hostname.endswith(".localhost")
+        or hostname == "::1"
+        or hostname.startswith("127.")
+    )
+    if not local:
+        return None
+    if port is not None:
+        return port
+    match parsed.scheme:
+        case "http":
+            return 80
+        case "https":
+            return 443
+        case _:
+            return None
+
+
 def decide_fetch(
     url: str,
     allowed_scopes: list[UrlScopeRow],
     denied_scopes: list[UrlScopeRow],
     unjudged_ambient: UnjudgedAmbient = "ask",
+    host_listener: bool = False,
 ) -> KernelDecision:
     """Deny matching scopes first, allow declared scopes, and ask otherwise.
 
@@ -83,6 +117,13 @@ def decide_fetch(
     bounds that. A container is exactly as exposed to what an unlisted origin
     says as a bare host is, so containment is not an argument for reading
     one.
+
+    ``host_listener`` is the host's measurement that a loopback URL reaches a
+    port some process outside this session's container listens on. A
+    container sharing the host's network shares its loopback, so the scope a
+    project declares for its own development servers would also admit the
+    operator's services; the declared scopes are not consulted for such a URL,
+    and it is answered as one no scope names.
     """
     try:
         parsed = urllib.parse.urlsplit(url)
@@ -111,9 +152,13 @@ def decide_fetch(
         ),
         None,
     )
-    if allowed is not None:
+    if allowed is not None and not host_listener:
         return KernelDecision("allow", allowed["reason"])
-    outside = f"{url} is outside every declared fetch scope"
+    outside = (
+        f"{url} reaches a port a process outside this container listens on"
+        if host_listener
+        else f"{url} is outside every declared fetch scope"
+    )
     if unjudged_ambient == "defer":
         return KernelDecision("defer", outside, abstention="provider_native")
     return KernelDecision("ask", outside, recovery=SCOPES_HINT)

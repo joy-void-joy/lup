@@ -15,6 +15,7 @@ from .semantics import (
     RefusalCause,
     Capability,
     AbstentionPurpose,
+    Reach,
 )
 
 
@@ -43,6 +44,7 @@ class DecisionWire(TypedDict):
     rule: str
     evaluator: str
     recovery: str
+    reach: Reach | None
 
 
 class EditRequest(TypedDict):
@@ -80,6 +82,7 @@ def decision_wire(decision: KernelDecision) -> DecisionWire:
         rule=decision.rule,
         evaluator=decision.evaluator,
         recovery=decision.recovery,
+        reach=decision.reach,
     )
 
 
@@ -135,6 +138,18 @@ def valid_decision(value: WireValue | DecisionWire) -> TypeGuard[DecisionWire]:
             ),
         ),
         ("abstention", (None, "provider_native", "boundary_settle")),
+        (
+            "reach",
+            (
+                None,
+                "container",
+                "mount",
+                "dependency",
+                "credential",
+                "lup",
+                "host_later",
+            ),
+        ),
     ):
         if value[name] not in choices:
             raise ValueError(f"destination decision has invalid {name}")
@@ -167,6 +182,7 @@ def read_decision(value: WireValue | DecisionWire) -> KernelDecision:
         rule=row["rule"],
         evaluator=row["evaluator"],
         recovery=row["recovery"],
+        reach=row["reach"],
     )
 
 

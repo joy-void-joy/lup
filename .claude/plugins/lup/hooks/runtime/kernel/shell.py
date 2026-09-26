@@ -14,6 +14,7 @@ from .decision import (
     SUBSTITUTION_SENTINEL,
     CheckpointRequirement,
     SandboxPlacement,
+    objecting_reach,
     unjudged,
 )
 from .settlement import SettlementFacts, settle
@@ -25,6 +26,7 @@ from .rows import (
     PathRoleRow,
     PathRuleRow,
     DisplacedTargetRow,
+    TargetLandingRow,
     RewrittenDocumentRow,
     RunnerTargetRow,
     UnproducedDocumentRow,
@@ -32,9 +34,13 @@ from .rows import (
     UrlScopeRow,
 )
 from .words import (
+    BINDING_BUILTINS,
     INTERPRETERS,
     asks_before_removing_a_directory,
+    binding_reach,
+    bound_names,
     command_words,
+    dangerous_assignment,
     dangerous_assignment_reason,
     dangerous_env_name,
     effective_command,
@@ -64,8 +70,13 @@ from .lex import (
     list_commands,
     parse_shell,
     parse_shell_words,
+    placed_path,
     placed_words,
+    read_segments,
     redirection_verdict,
+    shell_flag_write_targets,
+    shell_path_verb_targets,
+    shell_write_targets,
     simple_commands,
     substitutions,
 )
@@ -86,6 +97,8 @@ from .commands import (
     git_restore_source,
     git_restore_unchanged,
     git_symbolic_ref_read,
+    landing_words,
+    matched_command_row,
 )
 
 ESCALATE_RE = re.compile(
@@ -134,6 +147,14 @@ class ShellContext(TypedDict):
     them for one thing only, the scratch exception to the generated-plugin
     refusal, which a spelling under this checkout's scratch earns only where
     the host found nothing moving the bytes elsewhere."""
+
+    host_ports: list[int]
+    """Loopback ports a process outside this session's container listens on.
+
+    Carried for `curl` for the reason ``unjudged_ambient`` is: it is the one
+    verb that hands its question to the fetch scopes, and a scope admitting
+    this machine's loopback admits the operator's services on it wherever a
+    container shares the host's network."""
 
     unjudged_ambient: UnjudgedAmbient
     """The profile's answer for what nothing classified, carried for `curl`.
@@ -231,6 +252,7 @@ def shell_context(
     rewritten_documents: list[RewrittenDocumentRow] | None = None,
     unproduced_documents: list[UnproducedDocumentRow] | None = None,
     displaced_targets: list[DisplacedTargetRow] | None = None,
+    host_ports: list[int] | None = None,
 ) -> ShellContext:
     """Bundle one classification's declarations, normalizing absent lists.
 
@@ -262,6 +284,7 @@ def shell_context(
         contained=contained,
         checkout_root=checkout_root,
         displaced_targets=displaced_targets or [],
+        host_ports=host_ports or [],
         unjudged_ambient=unjudged_ambient,
         antipattern_rows=antipattern_rows or {},
         edit_rules=edit_rules or [],
@@ -510,6 +533,7 @@ def decide_segment_words(
             context["allowed_scopes"],
             context["denied_scopes"],
             context["unjudged_ambient"],
+            context["host_ports"],
         )
     if executable == "gh" and len(words) > 1 and words[1] == "api":
         return decide_gh_api_words(words)
@@ -536,7 +560,13 @@ def decide_segment_words(
             context["target_tables"],
             write_facts(context),
         )
-    return decide_command_rows(words, context["rows"], write_facts(context))
+    decided = decide_command_rows(words, context["rows"], write_facts(context))
+    # A variable a later command sees stays in this process, unless it is one
+    # that swaps who that command acts as: the row states the first, and the
+    # names say which one this is.
+    if executable in BINDING_BUILTINS and decided.reach == "container":
+        return decided.revised(reach=binding_reach(bound_names(words[1:])))
+    return decided
 
 
 def decide_shell_segment(
@@ -575,8 +605,15 @@ def decide_shell_segment(
     words = effective["words"]
     dangerous = effective["dangerous"]
     if dangerous:
-        return KernelDecision(
-            "ask", dangerous_assignment_reason("assigning", dangerous)
+        # The command the binding rides on is judged beside it. The binding's
+        # own question stands either way, and a boundary that settles that
+        # question must not settle the push it rode in on:
+        # `PYTHONPATH=x git push --delete origin b` asks about both.
+        assigned = dangerous_assignment("assigning", dangerous)
+        if not words:
+            return assigned
+        return joined_decision(
+            [assigned, decide_shell_segment(words, context, directory)]
         )
     if not words:
         return unjudged("shell segment has no command")
@@ -675,7 +712,7 @@ def read_bindings(
         names.append(word)
     dangerous = [name for name in names or ["REPLY"] if dangerous_env_name(name)]
     if dangerous:
-        return KernelDecision("ask", dangerous_assignment_reason("binding", dangerous))
+        return dangerous_assignment("binding", dangerous)
     for name in names or ["REPLY"]:
         bindings = bind_name(bindings, name, None)
     return bindings
@@ -817,11 +854,7 @@ def decide_simple(
         ]
         if dangerous:
             return Walked(
-                decisions=[
-                    KernelDecision(
-                        "ask", dangerous_assignment_reason("assigning", dangerous)
-                    )
-                ],
+                decisions=[dangerous_assignment("assigning", dangerous)],
                 bindings=bindings,
                 stopped=False,
             )
@@ -1024,6 +1057,7 @@ def classify_shell(
     rewritten_documents: list[RewrittenDocumentRow] | None = None,
     unproduced_documents: list[UnproducedDocumentRow] | None = None,
     displaced_targets: list[DisplacedTargetRow] | None = None,
+    host_ports: list[int] | None = None,
 ) -> KernelDecision:
     """Conservatively classify every command in one shell command line.
 
@@ -1065,6 +1099,7 @@ def classify_shell(
         rewritten_documents=rewritten_documents,
         unproduced_documents=unproduced_documents,
         displaced_targets=displaced_targets,
+        host_ports=host_ports,
     )
     tree = parse_shell(command)
     if isinstance(tree, KernelDecision):
@@ -1116,10 +1151,15 @@ def joined_decision(decisions: list[KernelDecision]) -> KernelDecision:
     parts = tuple(decisions)
     denied = next((item for item in decisions if item.effect == "deny"), None)
     if denied is not None:
-        return denied.revised(findings=parts)
+        return denied.revised(findings=parts, reach=objecting_reach(parts))
     asked = next((item for item in decisions if item.effect == "ask"), None)
     if asked is not None:
-        return asked.revised(sandbox=placement, checkpoint=restoration, findings=parts)
+        return asked.revised(
+            sandbox=placement,
+            checkpoint=restoration,
+            findings=parts,
+            reach=objecting_reach(parts),
+        )
     deferred = next((item for item in decisions if item.effect == "defer"), None)
     if deferred is not None:
         return deferred.revised(findings=parts)
@@ -1214,6 +1254,8 @@ def decide_shell(
     unleased_targets: list[str] | None = None,
     readonly_targets: list[str] | None = None,
     displaced_targets: list[DisplacedTargetRow] | None = None,
+    host_ports: list[int] | None = None,
+    landings: list[TargetLandingRow] | None = None,
     antipattern_rows: dict[str, list[AntiPatternRow]] | None = None,
     edit_rules: list[EditRuleRow] | None = None,
     import_boundaries: list[ImportBoundaryRow] | None = None,
@@ -1332,6 +1374,10 @@ def decide_shell(
                 # reads off a spelling it has to be able to trust: the scratch
                 # exception to the generated-plugin refusal.
                 displaced_targets=displaced_targets,
+                # The loopback ports the operator's own processes hold, which a
+                # container sharing their network reaches through the same
+                # scope its own development servers are declared under.
+                host_ports=host_ports,
             ),
             escalation=reading.request,
             contained=contained,
@@ -1345,6 +1391,50 @@ def decide_shell(
             unleased=unleased_targets,
             readonly=readonly_targets,
             displaced=displaced_targets,
+            landings=landings,
             hint=hint,
+        )
+    )
+
+
+def shell_posture_targets(command: str, rows: list[ShellRuleRow]) -> list[str]:
+    """Every path this command names as a place it changes, for the posture question.
+
+    What :class:`~lup.policy.kernel.settlement.ContainedJudgement` asks the
+    host to place: whether each lands in the container, in the session's own
+    checkout, or somewhere else the host lent. The readers every other
+    question already trusts -- redirections, a path verb's operands, a write
+    flag's value -- and the landing a row declares, read off the row the same
+    walk the verdict takes reaches.
+
+    Over-naming is safe here and under-naming is not, the opposite of the
+    lease question: a path named that the command never writes can only keep
+    a question, and one missed could let a harm on it through. So a segment
+    whose directory a `cd` left unreadable names ``$``, which no host can
+    place and every reader takes as landing somewhere lent.
+    """
+    segments = read_segments(command, rows)
+    landed = [
+        placed
+        for segment in segments
+        if segment["directory"] is not None and segment["words"]
+        for matched in [matched_command_row(segment["words"], rows)]
+        if not isinstance(matched, KernelDecision)
+        for word in landing_words(matched)
+        for placed in [placed_path(word, segment["directory"])]
+        if placed is not None
+    ]
+    unplaced = (
+        ["$"] if any(segment["directory"] is None for segment in segments) else []
+    )
+    return list(
+        dict.fromkeys(
+            [
+                *shell_write_targets(command),
+                *shell_path_verb_targets(command, rows),
+                *shell_flag_write_targets(command, rows),
+                *landed,
+                *unplaced,
+            ]
         )
     )

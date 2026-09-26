@@ -28,12 +28,13 @@ pass it is in.
 from .decision import (
     SANDBOX_TRAPPED_REASON,
     KernelDecision,
+    contributions,
     recovery_dischargeable,
 )
 from .escalation import EscalationRequest
 from .roles import is_temporary_root_target
-from .rows import DisplacedTargetRow
-from .semantics import CheckpointEvidence, UnjudgedAmbient
+from .rows import DisplacedTargetRow, TargetLandingRow
+from .semantics import CheckpointEvidence, Reach, UnjudgedAmbient
 
 # Every sentence below is one settlement row's own wording, declared beside the
 # row that returns it: a caller passing different words would be stating a
@@ -54,6 +55,10 @@ RECOVERED_LOSS = " — allowed without asking: {held}"
 CHECKPOINT_FAILED = " — the snapshot that would have made this undoable failed"
 # lup: ignore[constant-declaration] — a row's own wording
 NO_REVIEWER = ", and nobody who could approve it is reachable from this session"
+# lup: ignore[constant-declaration] — a row's own wording
+CONTAINED_JUDGED = (
+    " — allowed without asking: what it changes stays inside this container"
+)
 
 
 class SettlementFacts:
@@ -77,6 +82,7 @@ class SettlementFacts:
     unleased: list[str]
     readonly: list[str]
     displaced: list[DisplacedTargetRow]
+    landings: list[TargetLandingRow]
     hint: str
 
     def __init__(
@@ -94,6 +100,7 @@ class SettlementFacts:
         unleased: list[str] | None = None,
         readonly: list[str] | None = None,
         displaced: list[DisplacedTargetRow] | None = None,
+        landings: list[TargetLandingRow] | None = None,
         hint: str = "",
     ) -> None:
         self.decision = decision
@@ -109,6 +116,7 @@ class SettlementFacts:
         self.unleased = unleased or []
         self.readonly = readonly or []
         self.displaced = displaced or []
+        self.landings = landings or []
         self.hint = hint
 
     def asks(self, kind: str) -> bool:
@@ -151,6 +159,36 @@ class SettlementFacts:
         """
         return self.contained and self.inside_placement
 
+    def stays_inside(self, reach: Reach | None) -> bool:
+        """Whether harm of this reach, against these targets, stays in the container.
+
+        Asked only where :meth:`container_private` holds, and answered from
+        what the host measured about each path the operation names. Harm that
+        lands in the container stays there unless a path the operation names
+        is one the host lent it from elsewhere -- the session's own checkout is
+        the tree it was opened to work in, and a kill or an export does not
+        reach a sibling project. Harm that lands on the paths themselves stays
+        only where every one is the container's own, and an operation naming
+        none has said nothing a container could hold. Every other reach is the
+        answer no: that is what naming it was for.
+        """
+        match reach:
+            case "container":
+                return all(row["lands"] != "host" for row in self.landings)
+            case "mount":
+                return bool(self.landings) and all(
+                    row["lands"] == "container" for row in self.landings
+                )
+            case _:
+                return False
+
+    def lands_inside(self, target: str) -> bool:
+        """Whether the host measured one named path as the container's own."""
+        return any(
+            row["path"] == target and row["lands"] == "container"
+            for row in self.landings
+        )
+
     def rewritten(self, decision: KernelDecision) -> "SettlementFacts":
         """These same facts, with a row's rewrite standing as the verdict."""
         return SettlementFacts(
@@ -167,6 +205,7 @@ class SettlementFacts:
             unleased=self.unleased,
             readonly=self.readonly,
             displaced=self.displaced,
+            landings=self.landings,
             hint=self.hint,
         )
 
@@ -383,11 +422,16 @@ class UnleasedWrite(SettlementRule):
         # capture was meant to protect. The measurement is what carries it,
         # so the exception is spelled against `container_private` rather than
         # against the path: uncontained, that same word is the operator's own
-        # `/tmp`, shared with every other process on the machine.
+        # `/tmp`, shared with every other process on the machine. Any other
+        # path the host measured as the container's own is the same case: the
+        # lease enumerates what came from the host, and this came from nowhere.
         reported = [
             target
             for target in facts.unleased
-            if not (facts.container_private() and is_temporary_root_target(target))
+            if not (
+                facts.container_private()
+                and (is_temporary_root_target(target) or facts.lands_inside(target))
+            )
         ]
         if not reported or facts.decision.effect not in ("allow", "defer"):
             return None
@@ -528,6 +572,66 @@ class ProviderNative(SettlementRule):
         if facts.decision.abstention == "provider_native":
             return facts.decision
         return None
+
+
+class ContainedJudgement(SettlementRule):
+    """A judged question whose harm the measured container holds, settled inside.
+
+    The other half of what :class:`ContainedEffects` answers for work nobody
+    judged. A rule asks or refuses on behalf of somebody -- the operator's
+    processes, their mounted files, a remote, a lent secret -- and each rule
+    says, through the effects it declares, where that harm would land. Inside
+    a container this launch measured around the session, harm that lands in
+    the container lands on nothing anybody else has: a killed process, an
+    exported variable, a package in the image, a file under a directory the
+    host never lent. So the question it raises is one nobody needs to answer,
+    and it is settled as a permission rather than handed to a boundary.
+
+    Every reason the verdict asks or refuses has to stay inside, read over the
+    contributions rather than their join, for the reason
+    :class:`RecoveredLoss` reads them that way: one segment killing a process
+    beside one pushing to a remote keeps the whole line's question.
+
+    Only the measured container moves it. The native sandbox confines one call
+    at a time on the operator's own machine, so the processes, packages and
+    directories it leaves reachable are the operator's; a verdict relaxed for
+    it would be relaxed on the host.
+
+    Below the rows that cannot be moved -- a hard prohibition, a missing
+    channel, a placement with nowhere to go, a read-only hole -- and below the
+    escalation rows, whose question the agent asked for and keeps. Above the
+    capture, the reviewer and the refusal rows, because each of those would
+    otherwise answer a question this row says was never worth asking: a
+    capture discharging it, a missing reviewer refusing it, and a judged
+    refusal standing on a harm nothing outside the container would meet.
+    """
+
+    id = "contained-judgement"
+
+    def reached(self, facts: SettlementFacts) -> KernelDecision | None:
+        decision = facts.decision
+        if not facts.container_private():
+            return None
+        if decision.effect not in ("ask", "deny") or decision.hard:
+            return None
+        if facts.escalation is not None or decision.sandbox == "outside":
+            return None
+        if decision.cause in ("capability", "unreadable"):
+            return None
+        judged = [
+            part for part in contributions(decision) if part.effect in ("ask", "deny")
+        ]
+        if not judged or not all(facts.stays_inside(part.reach) for part in judged):
+            return None
+        return decision.revised(
+            effect="allow",
+            reason=decision.reason + CONTAINED_JUDGED,
+            sandbox="inside",
+            purpose=None,
+            cause=None,
+            recovery="",
+            abstention=None,
+        )
 
 
 class RecoveredLoss(SettlementRule):
@@ -757,6 +861,7 @@ SETTLEMENT_ORDER: list[SettlementRule] = [
     ReadOnlyWrite(),
     DisplacedWrite(),
     ProviderNative(),
+    ContainedJudgement(),
     RecoveredLoss(),
     UnreachableReviewer(),
     ContainedEffects(),
@@ -789,6 +894,11 @@ above ``RecoveredLoss`` for the same reason taken one step further: a
 read-only region is not a loss a capture could put back but a place nothing
 writes, so it refuses an ``ask`` as well. ``Standing`` is last because it speaks
 for everything.
+
+``ContainedJudgement`` sits after every row whose answer nothing moves and
+before the three that answer a question -- a capture discharging it, a missing
+reviewer refusing it, a judged refusal standing -- because inside a measured
+container a question whose harm stays there is one those rows need never see.
 """
 
 
