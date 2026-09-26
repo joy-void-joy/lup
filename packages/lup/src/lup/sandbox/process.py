@@ -11,6 +11,8 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 
+from lup.types import EnvVars
+
 
 def decode_output(output: bytes | Iterator[bytes] | None) -> str:
     """Decode bytes output to string, handling None and errors."""
@@ -43,6 +45,28 @@ def process_start_token(pid: int) -> str | None:
     if len(rest) < 20:
         return None
     return rest[19]
+
+
+def running_environments() -> Iterator[EnvVars]:
+    """The environment of every process this user may read, where the system shows it.
+
+    Linux keeps each in ``/proc/<pid>/environ``; another user's process, one
+    that ended while it was read, and a system without ``/proc`` yield
+    nothing, so a caller treats the answer as what is known to run.
+    """
+    table = Path("/proc")
+    if not table.is_dir():
+        return
+    for entry in table.iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            raw = (entry / "environ").read_bytes()
+        except OSError:
+            continue
+        # lup: ignore[string-split] — /proc environ is NUL-separated NAME=value records
+        records = [os.fsdecode(record).partition("=") for record in raw.split(b"\0")]
+        yield {name: value for name, _equals, value in records if name}
 
 
 def process_is_zombie(pid: int) -> bool:

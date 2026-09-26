@@ -30,9 +30,9 @@ export with the terminal handed through, so a prompt can hide what is typed.
 A rejected review runs nothing. Launcher options go before the runtime or
 `run`: `--root` names the checkout (default: the one enclosing the working
 directory), `--port` the loopback port of its review inbox (default: any free
-one), `--no-open` keeps the browser closed, and `--status` prints what this
-machine approved and launches nothing. Without the `web` extra the launcher
-still works, and asks at the terminal only.
+one), `--no-open` keeps the browser closed and answers at the terminal, and
+`--status` prints what this machine approved and launches nothing. Without
+the `web` extra the launcher still works, and asks at the terminal only.
 
 ## What is fingerprinted
 
@@ -88,16 +88,41 @@ question shows the complete zone and says so. Binary content is shown as its
 size and object id rather than decoded lossily, and an executable bit that
 appears or changes is listed as its own entry.
 
-The question is answered in the launcher's own review inbox — the surface `dev
-questions serve` serves, run by the installed launcher's code over the
+Before anything opens, the terminal says once why it asks: whose host code,
+whether this is its first run on the machine or what changed since the last
+approval — counted by top directory, not listed file by file — how the free
+zones move, and what runs once approved:
+
+```text
+adlib's host code changed since your last approval on this machine (4 files):
+  docs/    1 added
+  src/     1 changed, 1 added
+  uv.lock  1 removed
+lup-devtools setup gemini runs after you approve.
+```
+
+The question is then answered in the launcher's own review inbox — the surface
+`dev questions serve` serves, run by the installed launcher's code over the
 launcher's own relay, on loopback behind a capability only the printed address
-carries — or at the terminal (`a` approve, `r` reject, `d` show every diff),
-whichever answers first. It is never read from the checkout's
-`.lup/questions.jsonl`: that file is writable from inside the container, where
-no gate remains to stop a session answering its own question. A rejection ends
-the launch with nothing from the checkout having run. A launch interrupted
-while it waits leaves its question pending, and the next launch over the same
-trees asks that question rather than a second one.
+carries, and opened in the browser — or at the terminal (`a` approve, `r`
+reject, `d` show every diff), whichever answers first. It is never read from
+the checkout's `.lup/questions.jsonl`: that file is writable from inside the
+container, where no gate remains to stop a session answering its own
+question. A rejection ends the launch with nothing from the checkout having
+run. A launch interrupted while it waits leaves its question pending, and the
+next launch over the same trees asks that question rather than a second one.
+
+The inbox serves that one question and then stops, having told its tab what
+happens next. A session's launch tells the tab it opens in the terminal. A
+command `lup-launch run` hands over runs beside the launcher instead, told
+through `LUP_REVIEW_TAB` where to hand the first page it opens, and the tab
+goes on to that page — `lup-launch run setup dashboard` continues in the tab
+that approved it, rather than opening a second one — after which the inbox
+stops; a command that opens no page ends the inbox when it ends. A page is
+handed only this way, never opened twice: a command opens its pages through
+`lup.trust.tab.shown_to_operator`, which opens a new tab wherever no review
+waits — a launch that asked nothing, `--no-open`, a later page. Where the
+operator closed the review's tab, the launcher opens the page itself.
 
 ## Where the approval lives
 
@@ -106,19 +131,30 @@ mounts: `$XDG_STATE_HOME/lup/trust/<repository>-<digest>/` (`~/.local/state`
 where the variable is unset), one directory per repository, shared by its
 worktrees.
 
-| path | holds |
-| --- | --- |
-| `record.json` | every approved tree, the approved free zones, and the tree each worktree last launched from |
-| `objects.git` | a bare repository holding every snapshot as a git tree: `git --git-dir <it> ls-tree -r <tree>` lists one |
-| `questions.jsonl` | the relay launch questions are asked and answered through |
-| `exports/<tree>/` | each approved tree, materialized for a launch to run from |
-| `environments/`, `pycache/` | the Python environments and bytecode the launches run with |
+| path | holds | roughly costs |
+| --- | --- | --- |
+| `record.json` | every approved tree, the approved free zones, the tree each worktree last launched from, and the launches still running from an export | kilobytes |
+| `objects.git` | a bare repository holding every snapshot as a git tree: `git --git-dir <it> ls-tree -r <tree>` lists one | the host zone once, then only what each approval changed |
+| `questions.jsonl` | the relay launch questions are asked and answered through | a line per question |
+| `exports/<tree>/` | an approved tree, materialized for a launch to run from | the host zone's size each, so tens of megabytes for a sizeable project |
+| `environments/<worktree>-<digest>/` | the Python environment a worktree's launches run in | a full environment each, often hundreds of megabytes |
+| `pycache/` | the bytecode compiled from the exports | a fraction of an export each |
 
 The snapshots are written and read by the launcher in Python rather than
 through `git`, so no configuration of anybody's runs while it hashes, and every
 object read is re-hashed: a corrupt or substituted one is refused rather than
-shown as approved. Exports are kept; remove `exports/` between launches to
-reclaim the space.
+shown as approved.
+
+Exports are pruned whenever one is materialized, under the record's lock: what
+stays is the export each existing worktree last launched from, and every
+export something still runs from. The launcher leases the export it hands off
+to under its own process id, which the hand-off keeps, so a session's export
+stays for as long as it runs; and on Linux any process whose environment names
+an export in `LUP_APPROVED_TREE` keeps it too, which is how a host companion
+started beside a launch keeps its export after the launch has ended. The
+bytecode compiled from a pruned export goes with it. Environments are kept, one per worktree, since syncing a fresh
+one is the slow part of a launch; remove the one of a worktree that is gone
+to reclaim it.
 
 No launch mounts this directory, and a contained launch refuses one whose
 mounts would carry it into the container — a registration naming the home

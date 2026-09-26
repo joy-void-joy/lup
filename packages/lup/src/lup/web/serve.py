@@ -15,7 +15,6 @@ it ends up on.
 """
 
 import mimetypes
-import webbrowser
 from collections.abc import Callable
 from importlib import resources
 from importlib.resources.abc import Traversable
@@ -27,6 +26,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, Response
 from jinja2 import Environment, StrictUndefined, Template
 
+from lup.trust.tab import shown_to_operator
 from lup.web.loopback import guard_loopback_host, refuse_non_loopback
 
 
@@ -152,5 +152,5 @@ def serve_local_page(
     url = f"http://{host}:{port}"
     typer.echo(f"{surface}: {url}")
     if open_page:
-        webbrowser.open(url)
+        shown_to_operator(url)
     uvicorn.run(build(url), host=host, port=port)

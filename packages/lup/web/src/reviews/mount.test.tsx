@@ -53,10 +53,12 @@ describe("review inbox page", () => {
   let stream: ReadableStreamDefaultController<Uint8Array> | null = null;
   let streamingAborted = false;
   let requests: { path: string; method: string; body: unknown; authorization: string | null }[] = [];
-  const inbox = () => ({ roots: [root], reviews: rows, errors: [] });
+  let continuation: { message: string; url: string; final: boolean } | null = null;
+  const inbox = () => ({ roots: [root], reviews: rows, errors: [], continuation });
 
   beforeEach(() => {
     detail = review();
+    continuation = null;
     details = new Map([[detail.summary.key, detail]]);
     rows = [{ ...summary }];
     answerStatus = 200;
@@ -918,5 +920,35 @@ describe("review inbox page", () => {
     await click(one<HTMLElement>(shown.root, ".queue-row"));
     await until(() => shown?.root.querySelector(".request .reason")?.textContent === summary.reason, "the explicit checkout selection");
     expect(window.location.hash).toBe("#review=q1&root=tree");
+  });
+
+  test("a launcher's inbox sends its tab on to the page the launched command opened", async () => {
+    const page = await open();
+    const navigated: string[] = [];
+    const replace = window.location.replace.bind(window.location);
+    window.location.replace = (url: string | URL) => { navigated.push(String(url)); };
+    try {
+      continuation = { message: "Approved: lup-devtools setup dashboard is starting in your terminal.", url: "", final: false };
+      await act(async () => stream?.enqueue(new TextEncoder().encode(`${JSON.stringify(inbox())}\n`)));
+      await until(() => page.root.querySelector(".continuation")?.textContent?.includes("is starting") ?? false, "what the launch is doing");
+      expect(navigated).toEqual([]);
+      continuation = { message: "Opening http://127.0.0.1:8900", url: "http://127.0.0.1:8900", final: true };
+      await act(async () => stream?.enqueue(new TextEncoder().encode(`${JSON.stringify(inbox())}\n`)));
+      await until(() => navigated.length === 1, "the tab sent on to the page");
+      expect(navigated).toEqual(["http://127.0.0.1:8900"]);
+    } finally {
+      window.location.replace = replace;
+    }
+  });
+
+  test("a launcher's inbox that has said its last closes rather than reconnecting", async () => {
+    const page = await open();
+    continuation = { message: "Approved: claude opens in your terminal.", url: "", final: true };
+    await act(async () => stream?.enqueue(new TextEncoder().encode(`${JSON.stringify(inbox())}\n`)));
+    await until(() => page.root.textContent?.includes("This inbox has closed") ?? false, "the closing word");
+    await act(async () => stream?.error(new Error("Connection lost")));
+    await until(() => page.root.textContent?.includes("Closed") ?? false, "the closed status");
+    expect(page.root.textContent).not.toContain("Reconnecting");
+    expect(requests.filter((request) => request.path === "api/events")).toHaveLength(1);
   });
 });

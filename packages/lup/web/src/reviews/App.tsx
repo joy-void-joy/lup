@@ -141,6 +141,7 @@ export function App() {
   current.current = selected;
   liveInbox.current = inbox;
   const rows = inbox?.reviews ?? [];
+  const continuation = inbox?.continuation ?? null;
   const pending = rows.filter((row) => row.state === "pending");
   const visible = rows.filter((row) => filter === "pending" ? row.state === "pending" : row.state !== "pending");
   const position = visible.findIndex((row) => row.key === selected);
@@ -237,6 +238,10 @@ export function App() {
           setAccessDenied(true);
           return;
         }
+        if (liveInbox.current?.continuation?.final === true) {
+          setConnection("Closed");
+          return;
+        }
         setConnection(`Reconnecting — ${String(failure)}`);
         timer = setTimeout(() => void connect(), 3000);
       }
@@ -244,6 +249,13 @@ export function App() {
     void connect();
     return () => { controller.abort(); clearTimeout(timer); };
   }, [token, retry]);
+
+  const continueTo = continuation?.url ?? "";
+  useEffect(() => {
+    // A launcher's inbox sends its tab on to the page the launched command
+    // opened, in place of that command opening a second tab.
+    if (continueTo !== "") window.location.replace(continueTo);
+  }, [continueTo]);
 
   useEffect(() => {
     if (selected === "") return;
@@ -393,6 +405,10 @@ export function App() {
           {inbox?.roots.map((root) => <p key={root.id}><code>{root.path}</code></p>)}</details>
       </aside>
       <main className="stage">
+        {continuation !== null && continuation.message !== "" && <section className="continuation" role="status">
+          <h2>{continuation.message}</h2>
+          {continuation.final && continuation.url === "" && <p>This inbox has closed; you can close this tab.</p>}
+        </section>}
         {inbox?.errors.map((issue) => <p className="notice" role="alert" key={issue.root}>{issue.root}: {issue.message}</p>)}
         {error !== "" && <p className="error" role="alert">{error}</p>}
         {decision !== null && <div className="decision-receipt" role="status">

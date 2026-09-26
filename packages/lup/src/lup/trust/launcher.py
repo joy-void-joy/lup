@@ -34,6 +34,7 @@ the files regenerating it rewrote.
 import hashlib
 import os
 import shlex
+import tomllib
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 from typing import Annotated
@@ -46,8 +47,16 @@ from lup.devtools.dev.questions import captured_preview
 from lup.devtools.launcher import CONSOLE_SCRIPT
 from lup.harness.ownership import OWNERSHIP_FILENAME, OwnershipManifest
 from lup.policy.relay import PersistentQuestion, QuestionRelay
-from lup.trust.answer import Preview, asked_and_answered
-from lup.trust.handoff import Executor, Runner, executed, handoff, materialized, ran
+from lup.trust.answer import Preview, ReviewSurfaces
+from lup.trust.handoff import (
+    Executor,
+    Runner,
+    executed,
+    exported,
+    handoff,
+    ran,
+    released,
+)
 from lup.trust.objects import ObjectStore
 from lup.trust.record import Approval, StateLocation, TrustRecord, TrustState
 from lup.trust.review import (
@@ -55,6 +64,7 @@ from lup.trust.review import (
     TrustPreview,
     asked_once,
     baseline,
+    explanation,
     freed,
     launch_question,
     question_reason,
@@ -94,6 +104,30 @@ def declared_in(
     if entry is None or entry.mode not in ("100644", "100755"):
         return FreeZones()
     return declared_free_zones(store.read(entry.oid, "blob"))
+
+
+def project_named(
+    zone: HostZone,
+    store: ObjectStore,
+    otherwise: str,
+    manifest: PurePosixPath = FREE_ZONE_DECLARATION,
+) -> str:
+    """What the zone's own manifest calls the project, read from the snapshot as data.
+
+    ``otherwise`` where it names none: the terminal needs a name to say, and
+    the checkout's directory is the one the operator launched from.
+    """
+    entry = zone.at(manifest)
+    if entry is None or entry.mode not in ("100644", "100755"):
+        return otherwise
+    try:
+        table = tomllib.loads(store.read(entry.oid, "blob").decode("utf-8"))
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError):
+        return otherwise
+    match table:
+        case {"project": {"name": str(name)}}:
+            return name
+    return otherwise
 
 
 def proofs(zone: HostZone, store: ObjectStore) -> dict[PurePosixPath, str]:
@@ -196,13 +230,9 @@ def operator_approval(
             "declares are not the ones the zone was read under; launch again."
         )
     base_tree = record.base_for(checkout.root)
-    reason = question_reason(
-        named,
-        checkout.root,
-        baseline(store, base_tree),
-        zone,
-        freed(declared, record.free),
-    )
+    base = baseline(store, base_tree)
+    free_sentence = freed(declared, record.free)
+    reason = question_reason(named, checkout.root, base, zone, free_sentence)
     evidence = TrustEvidence(
         worktree=str(checkout.root),
         runtime=named,
@@ -213,6 +243,9 @@ def operator_approval(
     )
     relay = state.relay()
     question = asked_once(relay, launch_question(checkout.root, evidence, reason))
+    project = project_named(zone, store, checkout.root.name)
+    for line in explanation(project, named, base, zone, free_sentence):
+        console.print(line, markup=False, highlight=False)
     answered = ask(
         question,
         relay,
@@ -251,6 +284,7 @@ def regenerated_approval(
     regenerate: Runner,
     console: Console,
     command: list[str] = REGENERATION,
+    holder: int | None = None,
 ) -> str:
     """Run the approved generation from its export, and approve the tree it leaves.
 
@@ -258,8 +292,14 @@ def regenerated_approval(
     tree otherwise stays as approved, and the launch that follows regenerates
     and reports on its own terms.
     """
-    export = materialized(store, approved.tree, state.export(approved.tree))
-    if not regenerate(handoff(state, export.path, checkout.root, command, inherited)):
+    export = exported(state, store, approved.tree, holder)
+    try:
+        completed = regenerate(
+            handoff(state, export.path, checkout.root, command, inherited)
+        )
+    finally:
+        released(state, approved.tree, holder)
+    if not completed:
         console.print(
             "The approved generation did not complete; the launch reports why.",
             markup=False,
@@ -297,6 +337,7 @@ def trusted_launch(
     execute: Executor = executed,
     regenerate: Runner = ran,
     location: StateLocation | None = None,
+    holder: int | None = None,
 ) -> None:
     """Establish trust in the checkout at ``start``, then hand ``command`` to its launch.
 
@@ -305,6 +346,10 @@ def trusted_launch(
     ``named`` is what the question says answering runs: the runtime, or the
     command. Nothing of the checkout is executed before ``execute`` is
     called, and ``execute`` is never called for a zone nobody approved.
+
+    ``holder`` is the process that runs from the export, and so keeps it
+    from being pruned while it does: this one, unset, which the hand-off
+    replaces and so keeps for the whole launch.
     """
     checkout = LiveCheckout.at(start, inherited)
     state = TrustState.of(checkout.identity(), checkout.common, location)
@@ -324,11 +369,19 @@ def trusted_launch(
             checkout, state, store, zone, read_under, kept, named, ask, console
         )
         launched = regenerated_approval(
-            checkout, state, store, narrowed, kept, inherited, regenerate, console
+            checkout,
+            state,
+            store,
+            narrowed,
+            kept,
+            inherited,
+            regenerate,
+            console,
+            holder=holder,
         )
     with state.locked():
         state.write(state.read().approved([], checkout.root, launched, kept.free))
-    export = materialized(store, launched, state.export(launched))
+    export = exported(state, store, launched, holder)
     for link in export.withheld:
         console.print(
             f"Withheld the link {link}: it points outside the approved tree.",
@@ -439,21 +492,19 @@ def launch(
             case ["run", *devtools]:
                 command = devtools
                 named = shlex.join([CONSOLE_SCRIPT, *devtools])
+                surfaces = ReviewSurfaces(console, named, port, open_page)
+                handed = surfaces.run
             case _:
                 command = ["harness", runtime, *context.args]
                 named = runtime
-
-        def ask(
-            question: PersistentQuestion,
-            relay: QuestionRelay,
-            preview: Preview,
-            checkout: Path,
-        ) -> PersistentQuestion:
-            return asked_and_answered(
-                question, checkout, relay, preview, console, port, open_page
+                surfaces = ReviewSurfaces(console, named, port, open_page)
+                handed = surfaces.launch
+        try:
+            trusted_launch(
+                start, command, named, surfaces.ask, console, inherited, handed
             )
-
-        trusted_launch(start, command, named, ask, console, inherited)
+        finally:
+            surfaces.close()
     except TrustError as error:
         console.print(str(error), markup=False)
         raise typer.Exit(2) from error

@@ -9,21 +9,39 @@ question between them.
 
 import io
 import os
+import socket
+import sys
+import threading
+import time
 from pathlib import Path
 from typing import Final
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 import sh
+import typer
 from fastapi import FastAPI
 import httpx
 from httpx import ASGITransport, AsyncClient
 from rich.console import Console
 
 from lup.devtools.dev import questions
-from lup.devtools.dev.questions import ReviewDecision, ReviewDetail, ReviewInbox
+from lup.devtools.dev.questions import (
+    Continuation,
+    ReviewDecision,
+    ReviewDetail,
+    ReviewInbox,
+)
 from lup.policy.relay import QuestionRelay
 from lup.trust import answer as answering
-from lup.trust.answer import InboxServer, Preview, TerminalAnswerer, asked_and_answered
+from lup.trust.answer import (
+    InboxServer,
+    Preview,
+    ReviewSurfaces,
+    TerminalAnswerer,
+    Told,
+)
+from lup.trust.handoff import Handoff
 from lup.trust.objects import ObjectStore
 from lup.trust.review import (
     OPERATOR,
@@ -32,6 +50,7 @@ from lup.trust.review import (
     asked_once,
     launch_question,
 )
+from lup.trust.tab import REVIEW_TAB_ENV
 from lup.trust.zone import FreeZones, LiveCheckout, TrustError, host_zone
 from lup.web import serve as web_serve
 from lup.web.serve import page_app
@@ -194,21 +213,21 @@ def test_a_question_nothing_could_answer_is_refused_rather_than_waited_on(
     asked = Asked(tmp_path)
 
     def uninstalled(
-        root: Path, relay: QuestionRelay, preview: Preview, port: int = 0
+        root: Path,
+        relay: QuestionRelay,
+        preview: Preview,
+        port: int = 0,
+        told: Told | None = None,
     ) -> InboxServer:
         raise ImportError(f"no web extra to serve {root} from {relay.path}")
 
     monkeypatch.setattr(answering, "InboxServer", uninstalled)
+    surfaces = ReviewSurfaces(
+        Console(file=io.StringIO()), "claude", stream=io.StringIO()
+    )
 
     with pytest.raises(TrustError, match="nothing can answer"):
-        asked_and_answered(
-            asked.question,
-            asked.root,
-            asked.relay,
-            asked.preview,
-            Console(file=io.StringIO()),
-            stream=io.StringIO(),
-        )
+        surfaces.ask(asked.question, asked.relay, asked.preview, asked.root)
 
 
 def test_the_same_question_in_another_launch_is_not_a_second_question(
@@ -248,3 +267,241 @@ def test_the_launchers_inbox_serves_its_relay_on_its_own_loopback_port(
     [row] = ReviewInbox.model_validate(listed.json()).reviews
     assert row.id == asked.question.id
     assert not server.thread.is_alive()
+
+
+PAGE_COMMAND = Path(__file__).parent / "fixtures" / "page_command.py"
+"""A command that serves a page and opens it, as ``lup-launch run`` hands one over."""
+
+
+class Tab:
+    """The operator's tab on a launcher's inbox: it answers there, then follows what it is told.
+
+    As the page does, over the inbox's own API: the pending question is
+    answered with its fingerprint, and the snapshot is read until it carries
+    a page to go to, says its last, or the inbox stops answering. A tab that
+    does not follow is one the operator closed.
+    """
+
+    def __init__(self, approve: bool = True, follows: bool = True) -> None:
+        self.approve = approve
+        self.follows = follows
+        self.opened: list[str] = []
+        self.told: list[Continuation] = []
+        self.thread: threading.Thread | None = None
+
+    def browser(self, address: str) -> bool:
+        """Open a page: the first is the inbox, and is followed; the rest are recorded."""
+        self.opened.append(address)
+        if self.follows and self.thread is None:
+            self.thread = threading.Thread(
+                target=self.follow, args=(address,), daemon=True
+            )
+            self.thread.start()
+        return True
+
+    def read(self, base: str, headers: dict[str, str]) -> ReviewInbox:
+        return ReviewInbox.model_validate(
+            httpx.get(f"{base}/api/reviews", headers=headers, timeout=10).json()
+        )
+
+    def follow(self, address: str) -> None:
+        link = urlparse(address)
+        base = f"{link.scheme}://{link.netloc}"
+        [token] = parse_qs(link.fragment)["token"]
+        headers = {"Authorization": f"Bearer {token}"}
+        [row] = self.read(base, headers).reviews
+        detail = ReviewDetail.model_validate(
+            httpx.get(
+                f"{base}/api/reviews/{row.key}", headers=headers, timeout=10
+            ).json()
+        )
+        httpx.post(
+            f"{base}/api/reviews/{row.key}/answer",
+            headers={**headers, "Origin": base},
+            json={
+                "approved": self.approve,
+                "note": "",
+                "fingerprint": detail.question.fingerprint,
+            },
+            timeout=10,
+        )
+        for _ in range(1500):
+            try:
+                told = self.read(base, headers).continuation
+            except httpx.TransportError:
+                return
+            if told is not None and (not self.told or self.told[-1] != told):
+                self.told.append(told)
+            if told is not None and (told.url or told.final):
+                return
+            time.sleep(0.02)
+
+    def done(self) -> None:
+        """Wait for the tab to have stopped following."""
+        if self.thread is not None:
+            self.thread.join(timeout=30)
+
+
+def free_port() -> int:
+    """A loopback port nothing listens on, for a command's page."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+def page_command(port: int, lasting: float = 1.0, status: int = 3) -> Handoff:
+    """A hand-off of a command that serves a page on ``port`` (none at 0) and exits."""
+    return Handoff(
+        argv=[sys.executable, str(PAGE_COMMAND), str(port), str(lasting), str(status)],
+        # lup: ignore[os-environ] — the child imports lup from this interpreter's
+        # environment; BROWSER keeps a page it opened itself from reaching a real one
+        environment={**os.environ, "BROWSER": "true"},
+    )
+
+
+def child(handoff: Handoff) -> sh.RunningCommand:
+    """Start a hand-off beside the test, its output kept out of the test's terminal."""
+    return sh.Command(handoff.argv[0])(
+        *handoff.argv[1:],
+        _env=handoff.environment,
+        _bg=True,
+        _bg_exc=False,
+        _ok_code=list(range(256)),
+        _return_cmd=True,
+    )
+
+
+def surfaces_for(tab: Tab, named: str, open_page: bool = True) -> ReviewSurfaces:
+    return ReviewSurfaces(
+        Console(file=io.StringIO()),
+        named,
+        open_page=open_page,
+        stream=io.StringIO(),
+        browser=tab.browser,
+        spawn=child,
+        heard_within=5.0,
+    )
+
+
+def refused(address: str) -> bool:
+    """Whether nothing answers at an inbox's address any more."""
+    try:
+        httpx.get(address, timeout=2)
+    except httpx.TransportError:
+        return True
+    return False
+
+
+def test_a_session_launch_tells_the_tab_and_stops_the_inbox(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asked = Asked(tmp_path)
+    tab = Tab()
+    surfaces = surfaces_for(tab, "claude")
+    handed: list[Handoff] = []
+    monkeypatch.setattr(answering, "executed", handed.append)
+
+    answered = surfaces.ask(asked.question, asked.relay, asked.preview, asked.root)
+    [inbox] = tab.opened
+    surfaces.launch(page_command(0))
+    tab.done()
+
+    assert answered.state == "approved"
+    assert tab.told[-1] == Continuation(
+        message="Approved: claude opens in your terminal.", final=True
+    )
+    assert len(handed) == 1
+    assert surfaces.inbox is None
+    assert refused(inbox)
+
+
+def test_a_run_sends_the_tab_to_the_page_its_command_opened(tmp_path: Path) -> None:
+    """The same tab goes on to the page; no second one opens, and the inbox stops."""
+    asked = Asked(tmp_path)
+    tab = Tab()
+    surfaces = surfaces_for(tab, "lup-devtools setup dashboard")
+    port = free_port()
+
+    surfaces.ask(asked.question, asked.relay, asked.preview, asked.root)
+    [inbox] = tab.opened
+    with pytest.raises(typer.Exit) as ended:
+        surfaces.run(page_command(port, lasting=1.0, status=3))
+    tab.done()
+
+    page = f"http://127.0.0.1:{port}/"
+    assert tab.told[-1] == Continuation(message=f"Opening {page}", url=page, final=True)
+    assert tab.opened == [inbox]
+    assert ended.value.exit_code == 3
+    assert surfaces.inbox is None
+    assert refused(inbox)
+
+
+def test_a_command_opening_no_page_ends_the_inbox_when_it_ends(tmp_path: Path) -> None:
+    asked = Asked(tmp_path)
+    tab = Tab()
+    surfaces = surfaces_for(tab, "lup-devtools setup secret GEMINI_API_KEY")
+
+    surfaces.ask(asked.question, asked.relay, asked.preview, asked.root)
+    [inbox] = tab.opened
+    with pytest.raises(typer.Exit) as ended:
+        surfaces.run(page_command(0, lasting=0.2, status=0))
+    tab.done()
+
+    assert tab.told[-1] == Continuation(
+        message="lup-devtools setup secret GEMINI_API_KEY has finished in your terminal.",
+        final=True,
+    )
+    assert ended.value.exit_code == 0
+    assert refused(inbox)
+
+
+def test_a_page_whose_tab_was_closed_opens_in_a_new_one(tmp_path: Path) -> None:
+    asked = Asked(tmp_path)
+    asked.relay.answer(asked.question.id, OPERATOR, True, "answered before the tab")
+    tab = Tab(follows=False)
+    surfaces = surfaces_for(tab, "lup-devtools setup dashboard")
+    surfaces.heard_within = 0.3
+    port = free_port()
+
+    surfaces.ask(asked.question, asked.relay, asked.preview, asked.root)
+    with pytest.raises(typer.Exit):
+        surfaces.run(page_command(port, lasting=1.0))
+
+    [inbox, page] = tab.opened
+    assert page == f"http://127.0.0.1:{port}/"
+    assert refused(inbox)
+
+
+def test_without_a_tab_a_run_is_handed_over_as_a_launch_is(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``--no-open``: no browser at all, and the command opens its own pages."""
+    asked = Asked(tmp_path)
+    asked.relay.answer(asked.question.id, OPERATOR, True, "answered at the terminal")
+    tab = Tab()
+    surfaces = surfaces_for(tab, "lup-devtools setup dashboard", open_page=False)
+    handed: list[Handoff] = []
+    monkeypatch.setattr(answering, "executed", handed.append)
+
+    surfaces.ask(asked.question, asked.relay, asked.preview, asked.root)
+    surfaces.run(page_command(free_port()))
+
+    assert tab.opened == []
+    assert len(handed) == 1
+    assert REVIEW_TAB_ENV not in handed[0].environment
+    assert surfaces.inbox is None
+
+
+def test_a_rejection_tells_the_tab_that_nothing_ran(tmp_path: Path) -> None:
+    asked = Asked(tmp_path)
+    tab = Tab(approve=False)
+    surfaces = surfaces_for(tab, "claude")
+
+    answered = surfaces.ask(asked.question, asked.relay, asked.preview, asked.root)
+    tab.done()
+
+    assert answered.state == "rejected"
+    assert tab.told[-1] == Continuation(
+        message="Rejected: nothing from this checkout ran.", final=True
+    )
+    assert surfaces.inbox is None

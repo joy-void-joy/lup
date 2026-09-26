@@ -19,7 +19,6 @@ from lup.devtools.dev.review_notifications import (
 import asyncio
 import hmac
 import secrets
-import webbrowser
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from datetime import datetime
 from difflib import SequenceMatcher
@@ -37,6 +36,7 @@ from rich.console import Console
 from rich.syntax import Syntax
 
 from lup.channels.models import Door
+from lup.trust.tab import shown_to_operator
 from lup.coordination.repository import RepositoryPeers
 from lup.coordination.roster import RosterMember
 from lup.coordination.wake import wake
@@ -197,12 +197,40 @@ class ReviewError(BaseModel, frozen=True):
     message: str
 
 
+class Continuation(BaseModel, frozen=True):
+    """What a tab that answered a launch's question is told once the launch goes on.
+
+    A launcher's inbox serves one question and stops. What it says after the
+    answer is what the operator's tab shows in its place: what the launch is
+    doing, and the page the launched command opened, which the tab goes to
+    rather than a second one opening beside it.
+    """
+
+    message: str = ""
+    """What the launch is doing now, as the tab says it."""
+    url: str = ""
+    """The page the launched command opened, which the tab goes to; empty for none."""
+    final: bool = False
+    """Whether the inbox stops once this is served, so the tab stops listening."""
+
+
+type ContinuationSource = Callable[[], Continuation | None]
+"""What an inbox asks for the continuation it serves, ``None`` while there is none."""
+
+
+def no_continuation() -> Continuation | None:
+    """The operator's own inbox, which serves many questions and goes on serving."""
+    return None
+
+
 class ReviewInbox(BaseModel, frozen=True):
     """A complete snapshot of the configured review queues."""
 
     roots: list[ReviewRoot]
     reviews: list[ReviewSummary] = []
     errors: list[ReviewError] = []
+    continuation: Continuation | None = None
+    """What a launcher's inbox tells the tab once its question is answered."""
 
 
 class ReviewLine(BaseModel, frozen=True):
@@ -947,6 +975,7 @@ class ReviewStore(BaseModel, frozen=True):
     log: Path = Path(".lup/questions.jsonl")
     preview: ReviewPreview = captured_preview
     notify: bool = True
+    continued: ContinuationSource = no_continuation
 
     def scan_roots(self) -> ReviewScan:
         if not self.roots or not self.discover:
@@ -982,6 +1011,7 @@ class ReviewStore(BaseModel, frozen=True):
                 reverse=True,
             ),
             errors=scan.errors + [error for queue in queues for error in queue.errors],
+            continuation=self.continued(),
         )
 
     def locate(self, key: str) -> LocatedReview:
@@ -1069,13 +1099,15 @@ def review_app(
     log: Path = Path(".lup/questions.jsonl"),
     preview: ReviewPreview = captured_preview,
     notify: bool = True,
+    continued: ContinuationSource = no_continuation,
 ) -> "FastAPI":
     """Build an authenticated browser surface over the durable review queues.
 
-    ``log``, ``preview`` and ``notify`` are :class:`ReviewStore`'s: the
-    defaults are the operator's inbox over the checkouts' own queues, and a
-    launcher asking about a checkout from its own state passes its relay, its
-    reader, and no notification.
+    ``log``, ``preview``, ``notify`` and ``continued`` are
+    :class:`ReviewStore`'s: the defaults are the operator's inbox over the
+    checkouts' own queues, and a launcher asking about a checkout from its own
+    state passes its relay, its reader, no notification, and what its tab is
+    told once the question is answered.
     """
     from fastapi import BackgroundTasks, Request
     from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -1093,7 +1125,12 @@ def review_app(
         roots = tuple(dict.fromkeys(anchor(root) for root in roots))
     app = bundle_app("Review inbox", url, "reviews")
     store = ReviewStore(
-        roots=roots, discover=discover, log=log, preview=preview, notify=notify
+        roots=roots,
+        discover=discover,
+        log=log,
+        preview=preview,
+        notify=notify,
+        continued=continued,
     )
 
     @app.middleware("http")
@@ -1205,7 +1242,7 @@ def create_questions_app(root: Path) -> typer.Typer:
         browser_url = f"{url}/#token={token}"
         typer.echo(f"Review inbox: {browser_url}")
         if open_page:
-            webbrowser.open(browser_url)
+            shown_to_operator(browser_url)
         uvicorn.run(app, host=host, port=port, access_log=False)
 
     @app.command("list")

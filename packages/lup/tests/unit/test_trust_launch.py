@@ -12,6 +12,7 @@ import hashlib
 import io
 import json
 import os
+from collections.abc import Iterator
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -30,7 +31,7 @@ from lup.sandbox.rail import AccessibleRoot, fleet_lease
 from lup.trust import launcher
 from lup.trust.answer import Preview
 from lup.trust.approved import APPROVED_TREE_ENV
-from lup.trust.handoff import Handoff, Runner
+from lup.trust.handoff import Executor, Handoff, Runner
 from lup.trust.launcher import Asker, trusted_launch
 from lup.trust.record import StateLocation, TrustState
 from lup.trust.review import OPERATOR, TRUST_TOOL
@@ -91,6 +92,8 @@ class Launches:
         self.handed: list[Handoff] = []
         self.regenerated: list[Handoff] = []
         self.regeneration: Runner = unchanged
+        self.holder: int | None = None
+        self.said_before_asking: list[str] = []
         self.output = io.StringIO()
 
     def ask(
@@ -101,6 +104,7 @@ class Launches:
         root: Path,
     ) -> PersistentQuestion:
         self.asked.append(question)
+        self.said_before_asking.append(self.output.getvalue())
         self.shown.append(preview(question))
         self.relays.append(relay)
         relay.answer(question.id, OPERATOR, self.approve, "decided by the test")
@@ -133,6 +137,7 @@ class Launches:
             self.execute,
             self.regenerate,
             self.location,
+            self.holder,
         )
 
     def files(self, index: int = -1) -> list[str]:
@@ -500,6 +505,7 @@ class Handed:
         self.starts: list[Path] = []
         self.commands: list[list[str]] = []
         self.named: list[str] = []
+        self.handing: list[str] = []
 
     def __call__(
         self,
@@ -510,10 +516,12 @@ class Handed:
         console: Console,
         # lup: ignore[dict-str-payload] — the environment map
         inherited: dict[str, str],
+        execute: Executor,
     ) -> None:
         self.starts.append(start)
         self.commands.append(command)
         self.named.append(named)
+        self.handing.append(execute.__name__)
 
 
 def test_the_command_hands_everything_after_the_runtime_to_the_launch(
@@ -542,6 +550,7 @@ def test_the_command_hands_everything_after_the_runtime_to_the_launch(
         ["harness", "claude", "--network", "host", "--root", "x"]
     ]
     assert handed.named == ["claude"]
+    assert handed.handing == ["launch"]
 
 
 def test_a_host_shim_naming_a_mode_reaches_the_launch_intact(
@@ -576,6 +585,7 @@ def test_run_hands_a_devtools_command_over_rather_than_a_launch(
     assert result.exit_code == 0, result.output
     assert handed.commands == [["setup", "gemini", "--help"]]
     assert handed.named == ["lup-devtools setup gemini --help"]
+    assert handed.handing == ["run"]
 
 
 def test_run_without_a_command_runs_nothing(
@@ -653,3 +663,200 @@ def test_a_registration_carrying_the_launchers_state_is_refused(
     refuse_host_only_mounts(own, host_only_directories())
     with pytest.raises(typer.BadParameter, match="the launcher's approvals"):
         refuse_host_only_mounts(whole_state, host_only_directories())
+
+
+def ended() -> int:
+    """The id of a process that has already ended, as a finished launch's is."""
+    finished = sh.Command("true")(_bg=True, _return_cmd=True)
+    finished.wait()
+    return finished.pid
+
+
+@pytest.fixture
+def running() -> Iterator[sh.RunningCommand]:
+    """A process still running, as a live session's launch is."""
+    sleeper = sh.Command("sleep")("60", _bg=True, _bg_exc=False, _return_cmd=True)
+    yield sleeper
+    try:
+        sleeper.kill()
+    except ProcessLookupError:
+        return
+
+
+def exported_from(handoff: Handoff) -> Path:
+    """The export one hand-off runs from."""
+    return Path(handoff.environment[APPROVED_TREE_ENV])
+
+
+def compiled_for(handoff: Handoff) -> Path:
+    """Where the bytecode compiled from a hand-off's export is kept, made to exist."""
+    export = exported_from(handoff)
+    compiled = Path(handoff.environment["PYTHONPYCACHEPREFIX"]) / export.relative_to(
+        export.anchor
+    )
+    compiled.mkdir(parents=True)
+    (compiled / "app.cpython-314.pyc").write_bytes(b"bytecode")
+    return compiled
+
+
+def test_a_new_export_removes_the_one_its_worktree_ran_before(
+    checkout: Path, launches: Launches
+) -> None:
+    """With the bytecode compiled from it; the worktree's environment stays."""
+    launches.holder = ended()
+    launches.launch(checkout)
+    before = exported_from(launches.handed[0])
+    compiled = compiled_for(launches.handed[0])
+    environment = Path(launches.handed[0].environment["UV_PROJECT_ENVIRONMENT"])
+    environment.mkdir(parents=True)
+    write(checkout, "src/app.py", "print('changed')\n")
+
+    launches.launch(checkout)
+
+    after = exported_from(launches.handed[1])
+    assert after != before
+    assert (after / "src" / "app.py").read_text() == "print('changed')\n"
+    assert not before.exists()
+    assert not compiled.exists()
+    assert environment.is_dir()
+    assert sorted(path.name for path in before.parent.iterdir()) == [after.name]
+
+
+def test_an_export_a_running_launch_uses_is_kept_until_it_ends(
+    checkout: Path, launches: Launches, running: sh.RunningCommand
+) -> None:
+    launches.holder = running.pid
+    launches.launch(checkout)
+    before = exported_from(launches.handed[0])
+    write(checkout, "src/app.py", "print('changed')\n")
+    launches.holder = ended()
+
+    launches.launch(checkout)
+    assert before.is_dir()
+
+    running.kill()
+    with pytest.raises(sh.SignalException):
+        running.wait()
+    launches.launch(checkout)
+    assert not before.exists()
+    assert exported_from(launches.handed[2]).is_dir()
+
+
+def test_each_worktree_keeps_the_export_it_launched_last(
+    checkout: Path, launches: Launches, tmp_path: Path
+) -> None:
+    launches.holder = ended()
+    launches.launch(checkout)
+    sibling = tmp_path / "sibling"
+    run_git(checkout, "worktree", "add", "-q", str(sibling), "-b", "sibling")
+    write(sibling, "src/app.py", "print('the sibling's own')\n")
+
+    launches.launch(sibling)
+
+    main, other = (exported_from(handed) for handed in launches.handed)
+    assert main != other
+    assert main.is_dir() and other.is_dir()
+
+
+def test_the_export_generation_ran_from_is_let_go(
+    checkout: Path, launches: Launches
+) -> None:
+    """Generation leases the export it runs from only while it runs."""
+    write(checkout, "generated/settings.json", "{}\n")
+    write(
+        checkout,
+        "generated/.lup-ownership.json",
+        proof({"generated/settings.json": "{}\n"}),
+    )
+    run_git(checkout, "add", "-A")
+    run_git(checkout, "commit", "-q", "-m", "generated tree")
+
+    def regenerated(_handoff: Handoff) -> bool:
+        write(checkout, "generated/settings.json", '{"new": true}\n')
+        write(
+            checkout,
+            "generated/.lup-ownership.json",
+            proof({"generated/settings.json": '{"new": true}\n'}),
+        )
+        return True
+
+    launches.regeneration = regenerated
+    launches.holder = ended()
+    launches.launch(checkout)
+
+    [ran_from] = launches.regenerated
+    launched = exported_from(launches.handed[0])
+    assert exported_from(ran_from) != launched
+    assert not exported_from(ran_from).exists()
+    assert sorted(path.name for path in launched.parent.iterdir()) == [launched.name]
+
+
+def test_a_first_launch_says_why_it_asks_before_it_asks(
+    checkout: Path, launches: Launches
+) -> None:
+    """Once, in the words a reader needs: whose code, first run, where, and what then."""
+    launches.launch(checkout, ["setup", "gemini"], "lup-devtools setup gemini")
+
+    [said] = launches.said_before_asking
+    assert said.splitlines() == [
+        "studio-under-test's host code has not been approved on this machine yet "
+        "(first run, 4 files):",
+        "  .gitignore      1 file",
+        "  pyproject.toml  1 file",
+        "  src/            1 file",
+        "  uv.lock         1 file",
+        "Free zones declared: studio/, tmp/.",
+        "lup-devtools setup gemini runs after you approve.",
+    ]
+
+
+def test_a_change_is_said_by_top_directory_before_it_is_asked_about(
+    checkout: Path, launches: Launches
+) -> None:
+    launches.launch(checkout)
+    write(checkout, "src/app.py", "print('changed')\n")
+    write(checkout, "src/extra.py", "print('added')\n")
+    write(checkout, "docs/guide.md", "# guide\n")
+    run_git(checkout, "add", "-A")
+    (checkout / "uv.lock").unlink()
+    already = len(launches.output.getvalue())
+
+    launches.launch(checkout)
+
+    said = launches.said_before_asking[1][already:]
+    assert said.splitlines() == [
+        "studio-under-test's host code changed since your last approval on this "
+        "machine (4 files):",
+        "  docs/    1 added",
+        "  src/     1 changed, 1 added",
+        "  uv.lock  1 removed",
+        "claude runs after you approve.",
+    ]
+
+
+def test_an_export_a_process_still_runs_from_is_kept(
+    checkout: Path, launches: Launches
+) -> None:
+    """As a companion a launch started runs from it, outliving the launch with no lease."""
+    launches.holder = ended()
+    launches.launch(checkout)
+    before = exported_from(launches.handed[0])
+    companion = sh.Command("sleep")(
+        "60",
+        _bg=True,
+        _bg_exc=False,
+        _return_cmd=True,
+        _env={"PATH": os.defpath, APPROVED_TREE_ENV: str(before)},
+    )
+    write(checkout, "src/app.py", "print('changed')\n")
+    try:
+        launches.launch(checkout)
+        assert before.is_dir()
+    finally:
+        companion.kill()
+        with pytest.raises(sh.SignalException):
+            companion.wait()
+
+    launches.launch(checkout)
+
+    assert not before.exists()

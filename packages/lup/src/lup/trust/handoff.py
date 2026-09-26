@@ -37,9 +37,10 @@ import sh
 from pydantic import BaseModel
 
 from lup.devtools.launcher import CONSOLE_SCRIPT
+from lup.sandbox.process import running_environments
 from lup.trust.approved import APPROVED_TREE_ENV
 from lup.trust.objects import ObjectStore
-from lup.trust.record import TrustState
+from lup.trust.record import ExportLease, TrustState
 from lup.trust.zone import snapshot
 from lup.types import EnvVars
 
@@ -118,6 +119,71 @@ def materialized(store: ObjectStore, tree: str, destination: Path) -> Export:
             raise
         shutil.rmtree(staging)
     return Export(path=destination, withheld=withheld)
+
+
+def exported(
+    state: TrustState, store: ObjectStore, tree: str, holder: int | None = None
+) -> Export:
+    """One approved tree on disk for a process to run from, and no export nothing uses.
+
+    Under the record's lock, so a launch pruning never removes an export
+    another launch is between materializing and leasing. The lease is taken
+    for ``holder`` (this process, unset) before anything runs from the
+    export, and every export the record does not keep is removed: each
+    worktree's latest, and every one a running process leases, stay.
+    """
+    lease = ExportLease.of(tree, holder if holder is not None else os.getpid())
+    with state.locked():
+        record = state.read().leased(lease)
+        state.write(record)
+        export = materialized(store, tree, state.export(tree))
+        pruned(state, [tree, *record.exports_kept(), *run_from(state)])
+    return export
+
+
+def run_from(state: TrustState) -> list[str]:
+    """Every export a process still runs from, as its environment names it.
+
+    Everything a launch starts inherits the export it was handed off from:
+    the session, its tool servers, and a companion the launch started beside
+    it, which may outlive the launch and hold no lease of its own.
+    """
+    exports = state.root / "exports"
+    return [
+        Path(environment[APPROVED_TREE_ENV]).name
+        for environment in running_environments()
+        if APPROVED_TREE_ENV in environment
+        and Path(environment[APPROVED_TREE_ENV]).parent == exports
+    ]
+
+
+def released(state: TrustState, tree: str, holder: int | None = None) -> None:
+    """Let go of an export a process ran from and no longer does."""
+    lease = ExportLease.of(tree, holder if holder is not None else os.getpid())
+    with state.locked():
+        state.write(state.read().released(lease))
+
+
+def pruned(state: TrustState, kept: list[str]) -> list[Path]:
+    """Remove every export not ``kept``, with the bytecode compiled from it.
+
+    A partial export an interrupted launch left behind goes too: exports are
+    only written under the record's lock, so none is being written now.
+    """
+    exports = state.root / "exports"
+    if not exports.is_dir():
+        return []
+    removed = [
+        directory
+        for directory in sorted(exports.iterdir())
+        if directory.name not in kept
+    ]
+    for directory in removed:
+        shutil.rmtree(directory)
+        compiled = state.pycache() / directory.relative_to(directory.anchor)
+        if compiled.is_dir():
+            shutil.rmtree(compiled)
+    return removed
 
 
 def written(
@@ -214,6 +280,39 @@ def executed(handoff: Handoff) -> None:
     # terminal belongs to; `sh` starts a child and cannot replace its caller
     os.execvpe(handoff.argv[0], handoff.argv, handoff.environment)
 
+
+def beside(handoff: Handoff) -> sh.RunningCommand:
+    """Start one hand-off as a child on this terminal, for a launcher that stays.
+
+    What stays is the review's inbox, to send its tab to the page the command
+    opens; the command still owns the terminal, its input and its output.
+    Every exit status is the command's to report, so none is raised here.
+    """
+    sys.stdout.flush()
+    sys.stderr.flush()
+    return sh.Command(handoff.argv[0])(
+        *handoff.argv[1:],
+        _env=handoff.environment,
+        _bg=True,
+        _bg_exc=False,
+        _in=sys.stdin,
+        _out=sys.stdout,
+        _err=sys.stderr,
+        _ok_code=list(range(256)),
+        _return_cmd=True,
+    )
+
+
+def exit_status(running: sh.RunningCommand) -> int:
+    """How a command started :func:`beside` this launcher ended, as a shell says it."""
+    try:
+        return running.wait().exit_code
+    except sh.SignalException as error:
+        return 128 + abs(error.exit_code)
+
+
+type Spawner = Callable[[Handoff], sh.RunningCommand]
+"""What starts a hand-off beside the launcher; replaced in tests."""
 
 type Executor = Callable[[Handoff], None]
 """What starts the project's launch once it is approved; replaced in tests."""

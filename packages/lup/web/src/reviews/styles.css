@@ -135,6 +135,9 @@ details h4 { margin: .8rem 0 .3rem; }
 .error { color: #8a3028; background: #fcefeb; border-color: #e4beb6; }
 .decision-receipt { background: #eaf4ee; border-color: #bcd6c7; }
 .decision-receipt p { margin: .4rem 0 0; }
+.continuation { flex: none; margin: 0; padding: .7rem .9rem; border: 1px solid #bcd6c7; background: #eaf4ee; border-radius: 5px; overflow-wrap: anywhere; }
+.continuation h2 { margin: 0; font-size: 1rem; }
+.continuation p { margin: .4rem 0 0; color: var(--muted); }
 .decision { flex: none; display: flex; flex-direction: column; max-height: 40dvh; position: sticky; bottom: 0; z-index: 2; border-top: 1px solid var(--line); padding: .45rem .25rem; background: #fff; }
 .comment-editor { font-size: .78rem; }
 .comment-editor[open] { flex: 1; min-height: 0; max-height: 25vh; overflow: auto; }
