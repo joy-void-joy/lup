@@ -93,7 +93,7 @@ async def test_a_terminal_only_flow_is_drawn_and_withheld(
     google = step_named(WizardView.model_validate(response.json()), "google")
 
     assert not google.standing.offered
-    assert "lup-devtools setup google" in google.standing.blocked
+    assert "lup-launch run setup google" in google.standing.blocked
 
 
 async def test_dashboard_writes_only_declared_integration_fields(

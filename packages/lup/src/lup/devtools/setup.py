@@ -1,8 +1,8 @@
 """Reusable setup-wizard framework for project integrations.
 
 Walks a project's declared integrations, prompting for what each one
-needs, writing the answers to ``.env.local``, and reporting what is
-already configured.
+needs, writing the answers where the integration keeps them, and reporting
+what is already configured.
 
 Nothing here names a service: an application declares its own
 ``Integration`` list and composes the command tree with
@@ -11,22 +11,34 @@ slug, env keys, intro text, and the ``PromptField`` list to prompt for —
 and their subcommand is generated from that. A bespoke flow (OAuth files,
 detection, validation) supplies ``setup_func`` instead, and ``status_func``
 overrides the display when env-key presence isn't the whole story.
+
+Answers go to ``.env.local`` in the checkout, where the application reads
+them -- and so can every session. An integration declared ``host_only``
+keeps its keys in the operator's host store instead
+(:mod:`lup.devtools.envfiles`), for a secret only a host companion may hold.
+Prompts, the status table and the dashboard read and write whichever store
+an integration names, and each says which one that is. Run the wizard
+through ``lup-launch run setup``, so the code that asks for a secret is code
+its operator approved rather than whatever a session last left in the
+checkout.
 """
 
 import webbrowser
 from collections.abc import Callable, Iterable
 from pathlib import Path
+from typing import Annotated
 
 import typer
-from dotenv import dotenv_values, set_key, unset_key
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 from lup.devtools.conversation.app import create_conversation_setup_app
+from lup.devtools.envfiles import CheckoutEnv, EnvFile, HostSecrets
 from lup.devtools.harness.profile_app import create_profile_app
 from lup.providers.profiles import ProfileDirectory
-from lup.types import EnvVars
+from lup.types import EnvName, EnvVars
 from lup.workspace.paths import project_root
 
 console = Console()
@@ -44,61 +56,50 @@ ENV_LOCAL = PROJECT_ROOT / ".env.local"
 
 
 # =====================================================================
-# .env.local helpers
+# The two stores
 # =====================================================================
 
 
-def read_env_local() -> EnvVars:
-    """Read .env.local values (empty dict when the file is missing).
+def env_local() -> CheckoutEnv:
+    """The checkout's ``.env.local``, which the application and every session read."""
+    return CheckoutEnv(path=ENV_LOCAL)
 
-    ``dotenv`` owns the parse — the same parser pydantic-settings reads the
-    file with at runtime, so the wizard sees exactly the values the app sees.
-    """
-    if not ENV_LOCAL.exists():
-        return {}
-    return {k: v for k, v in dotenv_values(ENV_LOCAL).items() if v is not None}
+
+def host_secrets() -> HostSecrets:
+    """This project's host store, which no session reads."""
+    return HostSecrets.for_checkout(PROJECT_ROOT)
+
+
+def read_env_local() -> EnvVars:
+    """Read .env.local values (empty dict when the file is missing)."""
+    return env_local().read()
 
 
 def write_env_local(values: EnvVars) -> None:
-    """Update keys in .env.local, preserving existing lines, comments, order.
-
-    ``dotenv.set_key`` rewrites a ``KEY=...`` line in place and appends
-    missing keys, leaving comments, blank lines, and ordering untouched —
-    the write half pydantic-settings does not provide.
-    """
-    if not values:
-        return
-
-    ENV_LOCAL.touch()
-    for key, value in values.items():
-        set_key(ENV_LOCAL, key, value, quote_mode="never")
+    """Update keys in .env.local, preserving existing lines, comments, order."""
+    env_local().write(values)
 
 
 def clear_env_file(path: Path, keys: Iterable[str]) -> None:
     """Drop keys from an env file. Idempotent — a no-op for keys it does not hold.
 
-    The inverse of :func:`write_env_local`, preserving what that preserves:
-    ``dotenv.unset_key`` removes one ``KEY=...`` line and leaves the comments,
-    blank lines, and ordering around it alone. The path is a parameter because
-    an application may keep more than one env file — one per profile, say — and
-    only it knows which of them a reset is aimed at.
+    The path is a parameter because an application may keep more than one env
+    file — one per profile, say — and only it knows which of them a reset is
+    aimed at.
     """
-    if not path.exists():
-        return
-    for key in keys:
-        unset_key(path, key)
+    CheckoutEnv(path=path).clear(keys)
 
 
 def clear_env_local(keys: Iterable[str]) -> None:
     """Drop keys from .env.local, the file :func:`write_env_local` writes."""
-    clear_env_file(ENV_LOCAL, keys)
+    env_local().clear(keys)
 
 
-def save_and_confirm(values: EnvVars) -> None:
-    """Write values to .env.local and print confirmation."""
+def save_and_confirm(values: EnvVars, store: EnvFile) -> None:
+    """Write values to the store they belong in, and say which one that was."""
     if values:
-        write_env_local(values)
-        console.print("[green]Saved to .env.local[/]")
+        store.write(values)
+        console.print(f"[green]Saved to {escape(store.said())}[/]")
 
 
 def mask(value: str, show: int = 6) -> str:
@@ -136,7 +137,10 @@ class PromptField(BaseModel):
     prompt: str = Field(description="Prompt label shown to the user")
     secret: bool = Field(
         default=True,
-        description="Hide the current value as the prompt default (true for tokens)",
+        description=(
+            "Hide what is typed, and the current value as the prompt default "
+            "(true for tokens)"
+        ),
     )
     parse: Callable[[str], object] | None = Field(
         default=None,
@@ -176,20 +180,78 @@ class Integration(BaseModel):
         default=None,
         description="Custom status checker (default: checks env_keys)",
     )
+    host_only: bool = Field(
+        default=False,
+        description=(
+            "Keep every key this integration writes in the operator's host "
+            "store, outside every checkout, rather than in .env.local: for a "
+            "secret only a host companion may hold and no session may read"
+        ),
+    )
+
+    def keys(self) -> list[str]:
+        """Every key this integration reads or asks for, once each."""
+        return list(dict.fromkeys([*self.env_keys, *(f.key for f in self.fields)]))
+
+    def store(self) -> EnvFile:
+        """Where this integration's answers are kept."""
+        return host_secrets() if self.host_only else env_local()
+
+    def misplaced(self, local: EnvVars) -> list[str]:
+        """This integration's host-only keys found in ``.env.local``, where sessions read them."""
+        return [key for key in self.keys() if key in local] if self.host_only else []
+
+    def misplacement(self, local: EnvVars) -> str:
+        """The sentence saying a host-only key sits in ``.env.local``, or nothing."""
+        found = self.misplaced(local)
+        if not found:
+            return ""
+        return (
+            f"{', '.join(found)} also in .env.local, which every session reads: "
+            f"`lup-launch run setup {self.command}` moves it"
+        )
 
     def run(self) -> EnvVars:
         """Run the setup flow and return env vars to write."""
+        self.offer_move()
         if self.setup_func is not None:
             return self.setup_func()
         return self.run_prompts()
+
+    def offer_move(self) -> None:
+        """Offer to take this integration's host-only keys out of ``.env.local``.
+
+        Written to the host store before they are cleared from the checkout,
+        so an interruption between the two leaves a copy too many rather than
+        none. Where the host store holds a value of its own, that one stays.
+        """
+        local = env_local()
+        present = local.read()
+        found = self.misplaced(present)
+        if not found:
+            return
+        store = host_secrets()
+        console.print(
+            f"[yellow]{', '.join(found)} is in .env.local, inside the checkout, "
+            f"where every session can read it. {self.name} keeps it in "
+            f"{escape(store.said())}.[/]"
+        )
+        if not typer.confirm("Move it there?", default=True):
+            return
+        held = store.read()
+        store.write({key: present[key] for key in found if key not in held})
+        local.clear(found)
+        console.print(f"[green]Moved to {escape(store.said())}[/]")
 
     def run_prompts(self) -> EnvVars:
         """Standard token flow: header, reconfigure check, intro, prompts."""
         console.print()
         console.rule(f"[bold]{self.name}[/]")
+        store = self.store()
+        console.print(f"[dim]Kept in {escape(store.said())}[/]")
         console.print()
 
-        env = read_env_local()
+        env = store.read()
         # Gate re-entry only for secrets, which can't be shown as defaults;
         # non-secret fields echo their current value, so re-walking is cheap.
         guards_secret = any(f.secret for f in self.fields)
@@ -212,6 +274,7 @@ class Integration(BaseModel):
                 field.prompt,
                 default=current,
                 show_default=bool(current) and not field.secret,
+                hide_input=field.secret,
             ).strip()
             if not raw:
                 continue
@@ -244,24 +307,41 @@ class Integration(BaseModel):
 
 
 def build_status_table(integrations: list[Integration]) -> Table:
-    """Build a rich table showing configuration status."""
-    env = read_env_local()
+    """Build a rich table showing configuration status, and where each is kept.
+
+    Each integration is judged on the store it names, so a host-only key
+    counts as configured only where the host store holds it; one left in
+    ``.env.local`` is said beside it, with the command that moves it.
+    """
+    local = read_env_local()
     table = Table(show_header=False, box=None, padding=(0, 2))
     table.add_column("Status", width=3)
     table.add_column("Integration", min_width=30)
+    table.add_column("Kept in")
     table.add_column("Detail", style="dim")
     for integration in integrations:
-        status = integration.check_status(env)
+        store = integration.store()
+        status = integration.check_status(store.read())
         status_text = "[green]OK[/]" if status.ok else "[red]--[/]"
-        table.add_row(status_text, integration.name, status.detail)
+        detail = "; ".join(
+            part for part in (status.detail, integration.misplacement(local)) if part
+        )
+        table.add_row(status_text, integration.name, store.label(), detail)
     return table
+
+
+def say_status(integrations: list[Integration]) -> None:
+    """Print the status table, and where the host store is when anything uses it."""
+    console.print(build_status_table(integrations))
+    if any(integration.host_only for integration in integrations):
+        console.print(f"  Host store: {host_secrets().path}", markup=False)
 
 
 def make_setup_command(integration: Integration) -> Callable[[], None]:
     """Build a zero-argument command that runs one integration's setup."""
 
     def run_one() -> None:
-        save_and_confirm(integration.run())
+        save_and_confirm(integration.run(), integration.store())
 
     return run_one
 
@@ -303,11 +383,47 @@ def create_setup_app(
     def status() -> None:
         """Show current integration status."""
         console.print()
-        console.print(build_status_table(integrations))
+        say_status(integrations)
         active = profiles.active() if profiles is not None else None
         if active is not None:
             console.print(f"  Active profile: [bold]{active.name}[/]")
         console.print()
+
+    @app.command("secret")
+    def secret(
+        keys: Annotated[
+            list[str],
+            typer.Argument(help="The env keys to set, such as GEMINI_API_KEY"),
+        ],
+    ) -> None:
+        """Set host-only keys by name, into the host store no session reads.
+
+        For a key a host companion names that no integration declares: each
+        is asked for with the typing hidden, and a blank answer keeps what the
+        store holds.
+        """
+        try:
+            named = TypeAdapter(list[EnvName]).validate_python(keys)
+        except ValidationError as error:
+            raise typer.BadParameter(
+                "name each key in capitals, digits and underscores, such as "
+                "GEMINI_API_KEY"
+            ) from error
+        store = host_secrets()
+        held = store.read()
+        console.print(f"[dim]Kept in {escape(store.said())}[/]")
+        answered = {
+            key: typer.prompt(
+                key,
+                default=held[key] if key in held else "",
+                show_default=False,
+                hide_input=True,
+            ).strip()
+            for key in named
+        }
+        save_and_confirm(
+            {key: value for key, value in answered.items() if value}, store
+        )
 
     for integration in integrations:
         app.command(integration.command, help=integration.help)(
@@ -329,15 +445,13 @@ def create_setup_app(
                 expand=False,
             )
         )
-        console.print(build_status_table(integrations))
+        say_status(integrations)
         for integration in integrations:
-            values = integration.run()
-            if values:
-                write_env_local(values)
+            save_and_confirm(integration.run(), integration.store())
         console.print()
         console.rule("[bold green]Setup complete[/]")
         console.print()
-        console.print(build_status_table(integrations))
+        say_status(integrations)
         console.print()
 
     return app

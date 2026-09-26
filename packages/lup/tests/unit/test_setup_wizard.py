@@ -245,7 +245,7 @@ async def test_a_terminal_only_flow_is_drawn_as_one_and_cannot_be_run() -> None:
     standing = step.standing(EnvScope())
 
     assert not standing.offered
-    assert "lup-devtools setup google" in standing.blocked
+    assert "lup-launch run setup google" in standing.blocked
 
     outcome = await Wizard([step]).run(EnvScope(), "google", StepAnswers())
     assert not outcome.ok

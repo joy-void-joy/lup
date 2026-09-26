@@ -248,6 +248,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | Command | What it does |
 | --- | --- |
 | `setup status` | Show current integration status. |
+| `setup secret` | Set host-only keys by name, into the host store no session reads. |
 | `setup slack` | Set up Slack tokens. |
 | `setup google` | Set up Google OAuth. |
 | `setup notion` | Set up Notion integration. |
