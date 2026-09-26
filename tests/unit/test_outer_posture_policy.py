@@ -106,6 +106,15 @@ GUARDED = [
     pytest.param("eval ls", "deny", id="eval"),
     pytest.param("codex l$OP", "ask", id="unread-verb-could-be-login"),
     pytest.param("codex $OP hi", "deny", id="unread-verb-strictest-held-inside"),
+    pytest.param(
+        "git -c core.pager=less push --force origin feat", "ask", id="pager-force"
+    ),
+    pytest.param(
+        "git -c core.pager=less push --delete origin b", "ask", id="pager-delete"
+    ),
+    pytest.param(
+        "git -c core.pager=less $OP origin --delete b", "deny", id="pager-unread"
+    ),
 ]
 """Rows whose harm reaches past the container: the same answer on every posture."""
 
@@ -256,6 +265,17 @@ def test_a_target_the_host_lent_from_outside_the_checkout_keeps_the_question(
 ) -> None:
     """Mode bits on a sibling project are that project's, whatever wall stands."""
     command = f"chmod 777 {checkout.parent / 'sibling' / 'x'}"
+
+    assert met(runtime, "outer", command, checkout) == "ask"
+    assert previewed(command, checkout, monkeypatch)["outer"] == "ask"
+
+
+def test_a_setting_a_container_holds_leaves_the_verb_its_landing(
+    runtime: Runtime, checkout: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pager beside a clone is read past, so the clone's lent target is placed."""
+    target = checkout.parent / "sibling" / "r"
+    command = f"git -c core.pager=less clone https://github.com/o/r {target}"
 
     assert met(runtime, "outer", command, checkout) == "ask"
     assert previewed(command, checkout, monkeypatch)["outer"] == "ask"

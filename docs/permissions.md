@@ -93,7 +93,9 @@ objecting part stays inside is settled as a permission: `kill`, `make`, an
 exported `PYTHONPATH`, `git -c core.pager=…`, `git rebase -x`, a system
 package install, a nested `codex` session, a clone into a directory the
 container owns, and a child launched with `--sandbox none` or `--mount`.
-What names a place — a redirection, a path verb's operand, a write flag, the
+A setting is judged beside the verb it rides on, as a binding is: `git -c
+core.pager=… push --force` keeps the push's question, and a clone behind it
+still has its landing placed. What names a place — a redirection, a path verb's operand, a write flag, the
 landing a row declares (`git clone <repo> <dir>`, `gh release download -D`) —
 is placed by the host against the lease and its own mount table: in this
 checkout, somewhere else the host lent, or the container's own. A path

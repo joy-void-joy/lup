@@ -13,6 +13,7 @@ from .decision import (
     KernelDecision,
     SUBSTITUTION_SENTINEL,
     SandboxPlacement,
+    joined_decision,
     objecting_reach,
     unjudged,
     unlisted,
@@ -829,11 +830,14 @@ class Subcommand(TypedDict):
     """The subcommand word a command line names, and the arguments after it.
 
     ``word`` is empty when the line carried only global flags, which leaves
-    the default row to answer for it.
+    the default row to answer for it. ``asked`` are the questions guarded
+    globals before it put that a container could settle, each to be joined
+    with the verdict on the verb rather than standing in for it.
     """
 
     word: str
     remainder: list[str]
+    asked: list[KernelDecision]
 
 
 def split_subcommand(
@@ -865,15 +869,24 @@ def split_subcommand(
     commands execute, which is not what the command in front of them did.
     Unreadable keeps its question: a value that expands at run time, or a
     spelling this cannot separate from the flag, is one nobody can weigh.
+
+    A question placed by nobody settles nowhere, so it answers for the whole
+    command. One a container could settle does not: the walk steps over its
+    setting and goes on to the verb, and the question is joined with that
+    verb's verdict -- `git -c core.pager=less push --force` is a force push,
+    which no container holds, as well as a pager, which one does.
     """
     ask_flags = default["ask_flags"] if default else []
     value_flags = default["value_flags"] if default else []
     setting_flags = default["setting_flags"] if default else []
+    asked: list[KernelDecision] = []
     position = 0
     while position < len(arguments):
         word = arguments[position]
         if not word.startswith("-"):
-            return Subcommand(word=word, remainder=arguments[position + 1 :])
+            return Subcommand(
+                word=word, remainder=arguments[position + 1 :], asked=asked
+            )
         if flag_matches(word, ask_flags) and default is not None:
             following = arguments[position + 1 :]
             named = carried_setting(word, setting_flags, following)
@@ -891,14 +904,19 @@ def split_subcommand(
                 and not opaque_argument(named["value"])
                 and not key_matches(named["value"], default["outward_settings"])
             )
-            return global_flag_question(
+            question = global_flag_question(
                 default,
                 executable,
                 word,
                 reached=default["flag_effects"] if inward else [],
             )
+            if question.reach is None:
+                return question
+            asked.append(question)
+            position += named["words"]
+            continue
         position += 2 if word in value_flags else 1
-    return Subcommand(word="", remainder=[])
+    return Subcommand(word="", remainder=[], asked=asked)
 
 
 def global_flag_question(
@@ -947,10 +965,13 @@ class MatchedRow(TypedDict):
     ``arguments`` are what :func:`apply_command_row` reads: everything after
     the command word for a command's own row, and everything after the
     subcommand -- operation words included -- for a row beneath one.
+    ``asked`` are the questions the guarded globals before the subcommand put,
+    which :func:`beside_globals` joins with the row's verdict.
     """
 
     row: ShellRuleRow
     arguments: list[str]
+    asked: list[KernelDecision]
 
 
 def decide_command_rows(
@@ -987,7 +1008,25 @@ def decide_as_spelled(
     matched = matched_command_row(words, rows)
     if isinstance(matched, KernelDecision):
         return matched
-    return apply_command_row(matched["row"], matched["arguments"], measured)
+    return beside_globals(
+        apply_command_row(matched["row"], matched["arguments"], measured),
+        matched["asked"],
+    )
+
+
+def beside_globals(
+    decided: KernelDecision, asked: list[KernelDecision]
+) -> KernelDecision:
+    """A command's verdict joined with the questions its guarded globals put.
+
+    The verdict leads, because it is about the act, and each global's question
+    is one more thing the same answer settles. Joined as a line joins its
+    segments, so a container settles the whole only where every part that
+    objects stays inside it.
+    """
+    if not asked:
+        return decided
+    return joined_decision([decided, *asked])
 
 
 def matched_command_row(
@@ -1015,6 +1054,7 @@ def matched_command_row(
         return MatchedRow(
             row=next(row for row in matches if not row["subcommand"]),
             arguments=arguments,
+            asked=[],
         )
     default = next((row for row in matches if not row["subcommand"]), None)
     split = split_subcommand(executable, arguments, default)
@@ -1029,11 +1069,12 @@ def matched_command_row(
     # answer) <id> --as operator` both reach the target's allow. Decide what an
     # unread verb earns: unjudged still defers inside a sandbox, where either
     # write lands in the checkout, so perhaps the strictest row it could name
+    asked = split["asked"]
     subrows = [row for row in matches if subword and row["subcommand"] == subword]
     if not subrows:
         if default is None:
             return unlisted(f"{executable} {subword} is not classified")
-        return MatchedRow(row=default, arguments=arguments)
+        return MatchedRow(row=default, arguments=arguments, asked=asked)
     if any(row["operation"] for row in subrows):
         operands = [word for word in remainder if not word.startswith("-")]
         opword = next(iter(operands), "")
@@ -1045,12 +1086,14 @@ def matched_command_row(
         ]
         if oprows:
             matched = max(oprows, key=lambda row: len(row["operation_path"]))
-            return MatchedRow(row=matched, arguments=remainder)
+            return MatchedRow(row=matched, arguments=remainder, asked=asked)
         subdefault = next((row for row in subrows if not row["operation"]), None)
         if subdefault is not None:
-            return MatchedRow(row=subdefault, arguments=remainder)
-        return unlisted(f"{executable} {subword} {opword} is not classified")
-    return MatchedRow(row=subrows[0], arguments=remainder)
+            return MatchedRow(row=subdefault, arguments=remainder, asked=asked)
+        return beside_globals(
+            unlisted(f"{executable} {subword} {opword} is not classified"), asked
+        )
+    return MatchedRow(row=subrows[0], arguments=remainder, asked=asked)
 
 
 def landing_words(matched: MatchedRow) -> list[str]:
@@ -1193,10 +1236,11 @@ def unread_readings(
     split = (
         split_subcommand(executable, words[1:], default)
         if gated
-        else Subcommand(word="", remainder=words[1:])
+        else Subcommand(word="", remainder=words[1:], asked=[])
     )
     if isinstance(split, KernelDecision):
-        # A guarded global already asks, whatever the verb and flags after it.
+        # A guarded global no container settles already asks, whatever the verb
+        # and flags after it.
         return []
     # Where the verb stands: every word before it is a global, and every word
     # after it the verb's own. Nothing is global to a command without verbs,
