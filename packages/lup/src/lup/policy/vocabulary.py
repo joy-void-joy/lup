@@ -2304,6 +2304,22 @@ def docker_rule() -> ShellCommandRule:
     return ShellCommandRule(
         name="docker",
         effects=[declare("mutates_environment", scope="docker")],
+        # docker's own globals that consume the word after them, as `docker
+        # --help` lists them. Unlisted, the walk read that word as the
+        # subcommand: `docker --context version rm -f x` was `docker version`
+        # and allowed, while docker removes the container.
+        value_flags=[
+            "-c",
+            "--context",
+            "--config",
+            "-H",
+            "--host",
+            "-l",
+            "--log-level",
+            "--tlscacert",
+            "--tlscert",
+            "--tlskey",
+        ],
         subcommands=[
             *queries,
             noun(

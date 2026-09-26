@@ -1616,6 +1616,13 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="docker system prune", effect="ask"),
     DecisionCase(input="docker compose up", effect="ask"),
     DecisionCase(input="docker rm abc123", effect="ask"),
+    # docker's own globals consume the word after them, so the subcommand is
+    # found past that word rather than read as it.
+    DecisionCase(input="docker --context version rm -f abc123", effect="ask"),
+    DecisionCase(input="docker -H ps rm -f abc123", effect="ask"),
+    DecisionCase(input="docker -l ps rm abc123", effect="ask"),
+    DecisionCase(input="docker --context prod ps", effect="allow"),
+    DecisionCase(input="docker -c prod container ls", effect="allow"),
     DecisionCase(input="docker $verb ps", effect="ask"),
     # Codex: `queue` reaches another session and is refused in favour of the
     # recorded stream, which is the act `lup.policy.kernel.peers` already
