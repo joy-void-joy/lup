@@ -590,7 +590,10 @@ class ContainedJudgement(SettlementRule):
     Every reason the verdict asks or refuses has to stay inside, read over the
     contributions rather than their join, for the reason
     :class:`RecoveredLoss` reads them that way: one segment killing a process
-    beside one pushing to a remote keeps the whole line's question.
+    beside one pushing to a remote keeps the whole line's question. The
+    verdict's own reach has to stay inside as well, because a reader can widen
+    it past what its parts name: a word nobody can read carries the reach of
+    every command it could be, while its parts are the one it was read as.
 
     Only the measured container moves it. The native sandbox confines one call
     at a time on the operator's own machine, so the processes, packages and
@@ -621,7 +624,9 @@ class ContainedJudgement(SettlementRule):
         judged = [
             part for part in contributions(decision) if part.effect in ("ask", "deny")
         ]
-        if not judged or not all(facts.stays_inside(part.reach) for part in judged):
+        if not judged or not all(
+            facts.stays_inside(part.reach) for part in (decision, *judged)
+        ):
             return None
         return decision.revised(
             effect="allow",

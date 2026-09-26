@@ -347,6 +347,18 @@ def test_a_verdict_nobody_placed_keeps_its_question() -> None:
     assert settled.effect == "ask"
 
 
+def test_a_verdict_wider_than_its_parts_keeps_its_question() -> None:
+    """A reach widened past what the parts name is read, not only the parts."""
+    part = KernelDecision(
+        "ask", "a pager runs where the session runs", reach="container"
+    )
+    widened = part.revised(findings=(part, part), reach="credential")
+
+    settled = settle(SettlementFacts(widened, contained=True, inside_placement=True))
+
+    assert settled.effect == "ask"
+
+
 def test_a_composed_line_carries_every_part_it_objected_to() -> None:
     """A join is itself joined, so each level carries all of what its parts asked."""
     composed = contained_decision("PYTHONPATH=x git push --delete origin b", [])
