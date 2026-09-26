@@ -31,12 +31,36 @@ takes. What the plugin ships, what `docs/` publishes, what the CLI serves and
 what a session is offered are all derived from that one answer.
 [harness.md](harness.md) is the guide; this is only where the files are.
 
+### Setup and host-only secrets
+
+`lup-launch run setup` walks the declarative `INTEGRATIONS` registry in the
+terminal, and `lup-launch run setup <command>` runs one integration. Run it
+through the launcher rather than as `uv run lup-devtools setup`: the wizard is
+checkout code, and the moment it asks for a secret is the moment code a
+session rewrote would want to run. Through the launcher it runs only once the
+operator approved the checkout, from that approved copy, and a prompt for a
+secret hides what is typed.
+
+Answers go to `.env.local`, where the application reads them — and so can
+every session, since it sits in the checkout they mount. A secret only a host
+companion may hold, such as the key a listener calls a paid API with, belongs
+to an integration declared `host_only=True`: its keys are kept in the
+operator's host store, `$XDG_CONFIG_HOME/lup/secrets/<project>.env`
+(`~/.config` where the variable is unset), outside every checkout and never
+mounted into a container. Only the companions naming a key in
+`HostCompanion.secrets` receive it; `setup secret <KEY>` sets a key no
+integration declares. `setup status` says which store each integration keeps
+its keys in, and names a host-only key left in `.env.local` with the command
+that moves it. [trust.md](trust.md) has the whole of it, under *Host-only
+secrets*.
+
 ### The setup dashboard
 
-`uv run lup-devtools setup dashboard` serves a local browser interface at
+`lup-launch run setup dashboard` serves a local browser interface at
 `http://127.0.0.1:8765`. It is the web face of the same declarative
-`INTEGRATIONS` registry that `uv run lup-devtools setup` walks in the
-terminal: a domain customizes the registry once and gets both.
+`INTEGRATIONS` registry that `setup` walks in the terminal: a domain
+customizes the registry once and gets both, and each integration says which
+store it keeps its keys in.
 
 A progress-oriented wizard covers first setup; an all-integrations view covers
 later maintenance. Browser forms are generated only for declarative
@@ -48,10 +72,10 @@ bundle, and bun is needed only to change it — and `--no-open` and `--port`
 cover the cases where the defaults do not fit.
 
 `--host` takes only a loopback address, and every request's `Host` header is
-checked against one. The page writes credentials into `.env.local`, and a
-local bind alone leaves that reachable by DNS rebinding from any page the
-browser has open. Both halves are `lup.web.loopback`, shared with the
-resolver's supervisor page; see [supervisor.md](supervisor.md).
+checked against one. The page writes credentials into `.env.local` and the
+host store, and a local bind alone leaves that reachable by DNS rebinding
+from any page the browser has open. Both halves are `lup.web.loopback`,
+shared with the resolver's supervisor page; see [supervisor.md](supervisor.md).
 
 ### The sync registry
 

@@ -87,7 +87,9 @@ The boundary is deliberate: outside events arrive here, and only here.
 and personal overrides and is gitignored. `.env.local` wins where both
 declare a value. `ANTHROPIC_API_KEY` is read straight from the environment by
 the SDK; everything else is loaded through pydantic-settings in
-`agent/config.py`, which is the only module that reads the environment.
+`agent/config.py`, which is the only module that reads the environment. A
+secret no session may read is kept out of both, in the operator's host store
+(see *Setup and host-only secrets* below).
 
 ```bash
 # .env.local — secrets and overrides

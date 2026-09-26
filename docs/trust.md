@@ -21,15 +21,20 @@ environment and never from the checkout's:
 uv tool install 'lup[web] @ git+https://github.com/joy-void-joy/lup@<commit>#subdirectory=packages/lup'
 lup-launch claude            # instead of: uv run lup-devtools harness claude
 lup-launch codex --network bridge
+lup-launch run setup gemini  # instead of: uv run lup-devtools setup gemini
 ```
 
 Everything after the runtime is handed to the project's own `harness
-<runtime>` unchanged. Launcher options go before the runtime: `--root` names
-the checkout (default: the one enclosing the working directory), `--port` the
-loopback port of its review inbox (default: any free one), `--no-open` keeps
-the browser closed, and `--status` prints what this machine approved and
-launches nothing. Without the `web` extra the launcher still works, and asks
-at the terminal only.
+<runtime>` unchanged. `lup-launch run <command...>` hands any other
+`lup-devtools` command over the same way: the same host zone, the same
+question, the same recorded approval, and the command run from the approved
+export with the terminal handed through, so a prompt can hide what is typed.
+A rejected review runs nothing. Launcher options go before the runtime or
+`run`: `--root` names the checkout (default: the one enclosing the working
+directory), `--port` the loopback port of its review inbox (default: any free
+one), `--no-open` keeps the browser closed, and `--status` prints what this
+machine approved and launches nothing. Without the `web` extra the launcher
+still works, and asks at the terminal only.
 
 ## What is fingerprinted
 
@@ -117,6 +122,11 @@ object read is re-hashed: a corrupt or substituted one is refused rather than
 shown as approved. Exports are kept; remove `exports/` between launches to
 reclaim the space.
 
+No launch mounts this directory, and a contained launch refuses one whose
+mounts would carry it into the container — a registration naming the home
+directory, say — since a session that could write the record could approve
+its own next launch.
+
 ## The hand-off
 
 Once approved, the launcher materializes the tree into `exports/<tree>/` and
@@ -146,6 +156,36 @@ every change to its sources — once for the change, and again for the files
 regenerating it rewrote. A change the proof does not vouch for, such as a
 session writing while generation ran, is left for the next launch to ask about.
 
+## Host-only secrets
+
+A key a host companion calls with and no session may hold — the API key a
+listener uses, say — is declared host-only twice: `Integration(host_only=True)`
+for the setup wizard that asks for it, and `HostCompanion(secrets=[...])` for
+the companion that uses it. The wizard keeps such keys out of `.env.local`,
+which sits in the checkout every session mounts, and in the operator's host
+store instead: `$XDG_CONFIG_HOME/lup/secrets/<project>.env` (`~/.config` where
+the variable is unset), named by the `[project]` table of the approved
+manifest. The directory and the file are their owner's alone (0700 and 0600)
+from the moment they exist, and every write replaces the file whole.
+
+Only a companion naming a key receives it, in its own environment, read from
+the store when it starts — never from the launch's environment, so a key the
+operator's shell exports reaches no other companion. The session receives
+none: the launch takes every host-only name out of the environment it hands
+the session and the container engine, a contained session is handed
+variables by name alone, and a contained launch refuses a mount that would
+carry the store's directory into the container. A companion naming a key the
+store lacks still starts, and the banner names the command that sets it.
+
+Set them through the launcher — `lup-launch run setup gemini`, or `lup-launch
+run setup secret GEMINI_API_KEY` for a key no integration declares — never
+with `uv run lup-devtools setup`. The wizard is checkout code, and the moment
+it asks for a secret is the moment code a session rewrote would want to run.
+Through the launcher it runs from the export the operator just approved, and
+the prompt hides what is typed. `setup status` says which store each
+integration keeps its keys in, and names a host-only key found in `.env.local`
+with the command that moves it.
+
 ## What this does not cover
 
 - **Repository writers that run a toolchain** in the live checkout run on the
@@ -161,15 +201,15 @@ session writing while generation ran, is left for the next launch to ask about.
   pins those paths.
 - **Host postures.** `--sandbox inner` and `--sandbox none` open the session on
   the host, where its tool servers run checkout code by design; the check
-  covers the launch, not the session. Such a session also inherits
-  `LUP_APPROVED_TREE`, so a registry command it runs reads and writes the
-  export rather than the checkout.
+  covers the launch, not the session. Such a session runs as the operator,
+  so it can read the host store of secrets: the store keeps them from
+  contained sessions only.
 - **Anything run outside the launcher.** `uv run` in the checkout on the host
   uses the checkout's own `.venv`, and a plain `claude` or `codex` there reads
   the checkout's settings; neither passes through this check.
-- **Files the application reads relative to its working directory**, such as
-  settings loaded from `.env.local`, are read from the live checkout; keep
-  anything that names a program out of them.
-- **Commands other than the launch.** A `dev` command run through an export
-  meets code that assumes its package lies under the checkout's root; the
-  launcher only ever hands off `harness`.
+- **Files read relative to the working directory**, such as settings loaded
+  from `.env.local`, are read from the live checkout, by a launch and by a
+  command `lup-launch run` hands over alike: the code is the approved copy,
+  the working directory is not. Keep anything that names a program out of
+  them, and any secret a session must not read, which belongs in the host
+  store.

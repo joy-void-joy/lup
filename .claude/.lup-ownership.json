@@ -751,7 +751,7 @@
     {
       "path": "docs/harness.md",
       "category": "generated",
-      "sha256": "fe7b5acefa93baa490951023a563f448ace20b71fe627f527cda415b2b34744b",
+      "sha256": "3a243c8d26552a2e562edcf607855a186be33fc9d8dabf769d058af962d2c900",
       "semantic_id": "docs.harness",
       "executable": false
     },
@@ -842,14 +842,14 @@
     {
       "path": "docs/template.md",
       "category": "generated",
-      "sha256": "dd4b0b304400ce36ff8cd1fcca14751ccd1dff342aae6f69d22de56ccae21da2",
+      "sha256": "ffbb93519e22b7c20f1510c7a9c98f3588949fd5d15eea797c5b8e3a18a746e5",
       "semantic_id": "docs.template",
       "executable": false
     },
     {
       "path": "docs/trust.md",
       "category": "generated",
-      "sha256": "28c4a54e304a6f9162e014cb128f87edf4f021a45b2c4a9acf1edb0ef5f85c36",
+      "sha256": "179b3913ed2e4ac05984a1c33b12860aae15a511517753b8941e19307db416c2",
       "semantic_id": "docs.trust",
       "executable": false
     },
