@@ -155,6 +155,27 @@ DECLARED: list[Migration] = [
             ),
         ],
     ),
+    Migration(
+        subjects=[
+            "Baseline.counted",
+            "ApprovedBase.counted",
+            "FirstLaunch.counted",
+            "UnreadableBase.counted",
+        ],
+        reason=(
+            "a baseline answers which paths changed and how, which the terminal "
+            "groups by top directory before it asks; the counts are derived "
+            "from those paths rather than answered beside them"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Count a baseline's change with "
+                    "ZoneChange.of(base.changed(current)) from lup.trust.review."
+                )
+            ),
+        ],
+    ),
 ]
 """Every break this library has taken since its last release, and what to do.
 

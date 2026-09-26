@@ -93,6 +93,7 @@ class Launches:
         self.regenerated: list[Handoff] = []
         self.regeneration: Runner = unchanged
         self.holder: int | None = None
+        self.said_before_asking: list[str] = []
         self.output = io.StringIO()
 
     def ask(
@@ -103,6 +104,7 @@ class Launches:
         root: Path,
     ) -> PersistentQuestion:
         self.asked.append(question)
+        self.said_before_asking.append(self.output.getvalue())
         self.shown.append(preview(question))
         self.relays.append(relay)
         relay.answer(question.id, OPERATOR, self.approve, "decided by the test")
@@ -782,3 +784,46 @@ def test_the_export_generation_ran_from_is_let_go(
     assert exported_from(ran_from) != launched
     assert not exported_from(ran_from).exists()
     assert sorted(path.name for path in launched.parent.iterdir()) == [launched.name]
+
+
+def test_a_first_launch_says_why_it_asks_before_it_asks(
+    checkout: Path, launches: Launches
+) -> None:
+    """Once, in the words a reader needs: whose code, first run, where, and what then."""
+    launches.launch(checkout, ["setup", "gemini"], "lup-devtools setup gemini")
+
+    [said] = launches.said_before_asking
+    assert said.splitlines() == [
+        "studio-under-test's host code has not been approved on this machine yet "
+        "(first run, 4 files):",
+        "  .gitignore      1 file",
+        "  pyproject.toml  1 file",
+        "  src/            1 file",
+        "  uv.lock         1 file",
+        "Free zones declared: studio/, tmp/.",
+        "lup-devtools setup gemini runs after you approve.",
+    ]
+
+
+def test_a_change_is_said_by_top_directory_before_it_is_asked_about(
+    checkout: Path, launches: Launches
+) -> None:
+    launches.launch(checkout)
+    write(checkout, "src/app.py", "print('changed')\n")
+    write(checkout, "src/extra.py", "print('added')\n")
+    write(checkout, "docs/guide.md", "# guide\n")
+    run_git(checkout, "add", "-A")
+    (checkout / "uv.lock").unlink()
+    already = len(launches.output.getvalue())
+
+    launches.launch(checkout)
+
+    said = launches.said_before_asking[1][already:]
+    assert said.splitlines() == [
+        "studio-under-test's host code changed since your last approval on this "
+        "machine (4 files):",
+        "  docs/    1 added",
+        "  src/     1 changed, 1 added",
+        "  uv.lock  1 removed",
+        "claude runs after you approve.",
+    ]

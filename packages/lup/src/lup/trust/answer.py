@@ -125,15 +125,6 @@ def unified(preview: FilePreview) -> list[Syntax | str]:
     ]
 
 
-def summary(question: PersistentQuestion, preview: FilePreview) -> list[str]:
-    """What the terminal says before it asks: the reason, and every path involved."""
-    return [
-        question.reason,
-        *([preview.notice] if preview.notice else []),
-        *[f"  {change.operation():<9} {change.path}" for change in preview.files],
-    ]
-
-
 def settled(relay: QuestionRelay, question: PersistentQuestion) -> PersistentQuestion:
     """The question as the relay holds it now, which is the only authority."""
     found = relay.find(question.id)
@@ -149,7 +140,9 @@ class TerminalAnswerer:
 
     Polls the relay between keystrokes, so an answer given in the browser ends
     the prompt; a letter typed here is recorded through the same relay, whose
-    transaction lets only the first answer stand.
+    transaction lets only the first answer stand. What the question is about
+    was said before the inbox opened; the prompt only asks, and ``d`` shows
+    every diff.
     """
 
     def __init__(
@@ -160,20 +153,23 @@ class TerminalAnswerer:
         stream: IO[str] = sys.stdin,
         interval: float = 0.5,
         interactive: bool | None = None,
+        inbox: bool = True,
     ) -> None:
         """``interactive`` is whether to read ``stream`` at all; unset, it is read
         exactly when it is a terminal, since a pipe nobody types into would only
-        ever answer with its end."""
+        ever answer with its end. ``inbox`` is whether an inbox answers too."""
         self.relay = relay
         self.preview = preview
         self.console = console
         self.stream = stream
         self.interval = interval
         self.interactive = stream.isatty() if interactive is None else interactive
+        self.inbox = inbox
 
     def prompt(self) -> None:
+        elsewhere = " — or answer in the inbox" if self.inbox else ""
         self.console.print(
-            "Approve this launch? [a]pprove, [r]eject, [d]iff — or answer in the inbox: ",
+            f"Approve? [a]pprove, [r]eject, [d] every diff{elsewhere}: ",
             end="",
             markup=False,
         )
@@ -192,8 +188,6 @@ class TerminalAnswerer:
 
     def __call__(self, question: PersistentQuestion) -> PersistentQuestion:
         preview = self.preview(question)
-        for line in summary(question, preview):
-            self.console.print(line, markup=False, highlight=False)
         reading = self.interactive
         if reading:
             self.prompt()

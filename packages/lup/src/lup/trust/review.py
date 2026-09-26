@@ -25,6 +25,7 @@ import os
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
+from typing import Literal
 from uuid import uuid4
 
 from pydantic import BaseModel
@@ -68,6 +69,23 @@ class TrustEvidence(BaseModel, frozen=True):
     declared: list[str]
 
 
+type ChangeKind = Literal["added", "changed", "removed"]
+"""How one path of the zone differs from its base."""
+
+
+class ChangedPath(BaseModel, frozen=True):
+    """One path of the zone that differs from its base, and how."""
+
+    path: PurePosixPath
+    kind: ChangeKind
+
+    def top(self) -> str:
+        """Where the terminal groups it: its top directory, or itself at the root."""
+        if len(self.path.parts) > 1:
+            return f"{self.path.parts[0]}/"
+        return self.path.as_posix()
+
+
 class ZoneChange(BaseModel, frozen=True):
     """How one reading of the zone differs from its base, counted for a sentence."""
 
@@ -75,8 +93,32 @@ class ZoneChange(BaseModel, frozen=True):
     changed: int = 0
     removed: int = 0
 
+    @classmethod
+    def of(cls, paths: list[ChangedPath]) -> "ZoneChange":
+        """These paths, counted by how each differs."""
+        kinds = [path.kind for path in paths]
+        return cls(
+            added=kinds.count("added"),
+            changed=kinds.count("changed"),
+            removed=kinds.count("removed"),
+        )
+
     def total(self) -> int:
         return self.added + self.changed + self.removed
+
+    def said(self) -> str:
+        """The counts that are not zero, as the terminal says them: ``3 changed, 1 added``."""
+        counts = [
+            (self.changed, "changed"),
+            (self.added, "added"),
+            (self.removed, "removed"),
+        ]
+        return ", ".join(f"{count} {kind}" for count, kind in counts if count)
+
+
+def files(count: int) -> str:
+    """A number of files, spelled for a sentence."""
+    return f"{count} file" if count == 1 else f"{count} files"
 
 
 def document(entry: ZoneEntry | None, store: ObjectStore) -> str | None:
@@ -193,8 +235,8 @@ class Baseline(BaseModel, ABC, frozen=True):
     """
 
     @abstractmethod
-    def counted(self, current: HostZone) -> ZoneChange:
-        """How many paths were added, changed and removed against this baseline."""
+    def changed(self, current: HostZone) -> list[ChangedPath]:
+        """Every path that differs from this baseline, and how."""
 
     @abstractmethod
     def shown(self, root: Path, current: HostZone, store: ObjectStore) -> FilePreview:
@@ -204,22 +246,38 @@ class Baseline(BaseModel, ABC, frozen=True):
     def sentence(self, change: ZoneChange) -> str:
         """What the question says about the change, after saying what answering runs."""
 
+    @abstractmethod
+    def headline(self, project: str, change: ZoneChange) -> str:
+        """Why the terminal is asking, in the first line it says before it does."""
+
+    @abstractmethod
+    def tally(self, change: ZoneChange) -> str:
+        """What changed in one top directory, as the lines after the headline say it."""
+
 
 class ApprovedBase(Baseline, frozen=True):
     """The approved snapshot a change is measured against, read whole."""
 
     zone: HostZone
 
-    def counted(self, current: HostZone) -> ZoneChange:
+    def changed(self, current: HostZone) -> list[ChangedPath]:
         before = {entry.path: entry for entry in self.zone.entries}
         after = {entry.path: entry for entry in current.entries}
-        return ZoneChange(
-            added=sum(1 for path in after if path not in before),
-            changed=sum(
-                1 for path in after if path in before and before[path] != after[path]
-            ),
-            removed=sum(1 for path in before if path not in after),
-        )
+        return [
+            ChangedPath(
+                path=path,
+                kind=(
+                    "added"
+                    if path not in before
+                    else "removed"
+                    if path not in after
+                    else "changed"
+                ),
+            )
+            for path in sorted({*before, *after}, key=lambda item: item.parts)
+            if (before[path] if path in before else None)
+            != (after[path] if path in after else None)
+        ]
 
     def shown(self, root: Path, current: HostZone, store: ObjectStore) -> FilePreview:
         return FilePreview(files=changes(root, self.zone, current, store))
@@ -230,12 +288,21 @@ class ApprovedBase(Baseline, frozen=True):
             f"{change.changed} changed and {change.removed} removed."
         )
 
+    def headline(self, project: str, change: ZoneChange) -> str:
+        return (
+            f"{project}'s host code changed since your last approval on this "
+            f"machine ({files(change.total())}):"
+        )
+
+    def tally(self, change: ZoneChange) -> str:
+        return change.said()
+
 
 class FirstLaunch(Baseline, frozen=True):
     """Nothing from this repository has been approved on this machine."""
 
-    def counted(self, current: HostZone) -> ZoneChange:
-        return ZoneChange(added=len(current.entries))
+    def changed(self, current: HostZone) -> list[ChangedPath]:
+        return [ChangedPath(path=entry.path, kind="added") for entry in current.entries]
 
     def shown(self, root: Path, current: HostZone, store: ObjectStore) -> FilePreview:
         return FilePreview(
@@ -252,6 +319,15 @@ class FirstLaunch(Baseline, frozen=True):
             f"host zone as it stands ({change.added} files)."
         )
 
+    def headline(self, project: str, change: ZoneChange) -> str:
+        return (
+            f"{project}'s host code has not been approved on this machine yet "
+            f"(first run, {files(change.total())}):"
+        )
+
+    def tally(self, change: ZoneChange) -> str:
+        return files(change.total())
+
 
 class UnreadableBase(Baseline, frozen=True):
     """An approval whose objects are missing or corrupt, and why."""
@@ -259,8 +335,8 @@ class UnreadableBase(Baseline, frozen=True):
     tree: str
     reason: str
 
-    def counted(self, current: HostZone) -> ZoneChange:
-        return ZoneChange(added=len(current.entries))
+    def changed(self, current: HostZone) -> list[ChangedPath]:
+        return [ChangedPath(path=entry.path, kind="added") for entry in current.entries]
 
     def shown(self, root: Path, current: HostZone, store: ObjectStore) -> FilePreview:
         return FilePreview(
@@ -277,6 +353,16 @@ class UnreadableBase(Baseline, frozen=True):
             f" The approved snapshot could not be read ({self.reason}): review "
             f"the complete host zone ({change.added} files)."
         )
+
+    def headline(self, project: str, change: ZoneChange) -> str:
+        return (
+            f"{project}'s last approval on this machine could not be read "
+            f"({self.reason}), so all of its host code is up for review "
+            f"({files(change.total())}):"
+        )
+
+    def tally(self, change: ZoneChange) -> str:
+        return files(change.total())
 
 
 def baseline(store: ObjectStore, tree: str | None) -> Baseline:
@@ -338,7 +424,7 @@ def freed(declared: FreeZones, approved: list[PurePosixPath] | None) -> str:
     """The sentence saying how a checkout's free zones differ from the approved ones."""
     if approved is None:
         return (
-            f" Free zones declared: {', '.join(declared.spelled())}."
+            f"Free zones declared: {', '.join(declared.spelled())}."
             if declared.free
             else ""
         )
@@ -351,7 +437,7 @@ def freed(declared: FreeZones, approved: list[PurePosixPath] | None) -> str:
         *(f"+ {zone.as_posix()}/" for zone in added),
         *(f"- {zone.as_posix()}/" for zone in removed),
     ]
-    return f" Free zones would change: {', '.join(spelled)}."
+    return f"Free zones would change: {', '.join(spelled)}."
 
 
 def launch_question(
@@ -415,4 +501,37 @@ def question_reason(
     opening = (
         f"Launching {named} from {root} runs this checkout's code on this machine."
     )
-    return opening + base.sentence(base.counted(current)) + free_sentence
+    return (
+        opening
+        + base.sentence(ZoneChange.of(base.changed(current)))
+        + (f" {free_sentence}" if free_sentence else "")
+    )
+
+
+def explanation(
+    project: str,
+    named: str,
+    base: Baseline,
+    current: HostZone,
+    free_sentence: str,
+) -> list[str]:
+    """What the terminal says once, before the inbox opens: why it asks, and what then.
+
+    Why, in one line; what changed, one line per top directory, so a first
+    run of a large project is a screenful rather than a listing of every
+    file; how the free zones move, where they do; and what approving runs.
+    Every file and its diff are the inbox's, and the terminal's on ``d``.
+    """
+    paths = base.changed(current)
+    tops = sorted({path.top() for path in paths})
+    width = max((len(top) for top in tops), default=0)
+    return [
+        base.headline(project, ZoneChange.of(paths)),
+        *(
+            f"  {top:<{width}}  "
+            + base.tally(ZoneChange.of([path for path in paths if path.top() == top]))
+            for top in tops
+        ),
+        *([free_sentence] if free_sentence else []),
+        f"{named} runs after you approve.",
+    ]

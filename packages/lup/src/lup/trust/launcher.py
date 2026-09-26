@@ -34,6 +34,7 @@ the files regenerating it rewrote.
 import hashlib
 import os
 import shlex
+import tomllib
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 from typing import Annotated
@@ -63,6 +64,7 @@ from lup.trust.review import (
     TrustPreview,
     asked_once,
     baseline,
+    explanation,
     freed,
     launch_question,
     question_reason,
@@ -102,6 +104,30 @@ def declared_in(
     if entry is None or entry.mode not in ("100644", "100755"):
         return FreeZones()
     return declared_free_zones(store.read(entry.oid, "blob"))
+
+
+def project_named(
+    zone: HostZone,
+    store: ObjectStore,
+    otherwise: str,
+    manifest: PurePosixPath = FREE_ZONE_DECLARATION,
+) -> str:
+    """What the zone's own manifest calls the project, read from the snapshot as data.
+
+    ``otherwise`` where it names none: the terminal needs a name to say, and
+    the checkout's directory is the one the operator launched from.
+    """
+    entry = zone.at(manifest)
+    if entry is None or entry.mode not in ("100644", "100755"):
+        return otherwise
+    try:
+        table = tomllib.loads(store.read(entry.oid, "blob").decode("utf-8"))
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError):
+        return otherwise
+    match table:
+        case {"project": {"name": str(name)}}:
+            return name
+    return otherwise
 
 
 def proofs(zone: HostZone, store: ObjectStore) -> dict[PurePosixPath, str]:
@@ -204,13 +230,9 @@ def operator_approval(
             "declares are not the ones the zone was read under; launch again."
         )
     base_tree = record.base_for(checkout.root)
-    reason = question_reason(
-        named,
-        checkout.root,
-        baseline(store, base_tree),
-        zone,
-        freed(declared, record.free),
-    )
+    base = baseline(store, base_tree)
+    free_sentence = freed(declared, record.free)
+    reason = question_reason(named, checkout.root, base, zone, free_sentence)
     evidence = TrustEvidence(
         worktree=str(checkout.root),
         runtime=named,
@@ -221,6 +243,9 @@ def operator_approval(
     )
     relay = state.relay()
     question = asked_once(relay, launch_question(checkout.root, evidence, reason))
+    project = project_named(zone, store, checkout.root.name)
+    for line in explanation(project, named, base, zone, free_sentence):
+        console.print(line, markup=False, highlight=False)
     answered = ask(
         question,
         relay,
