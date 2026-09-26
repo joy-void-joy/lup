@@ -37,6 +37,7 @@ import sh
 from pydantic import BaseModel
 
 from lup.devtools.launcher import CONSOLE_SCRIPT
+from lup.sandbox.process import running_environments
 from lup.trust.approved import APPROVED_TREE_ENV
 from lup.trust.objects import ObjectStore
 from lup.trust.record import ExportLease, TrustState
@@ -136,8 +137,24 @@ def exported(
         record = state.read().leased(lease)
         state.write(record)
         export = materialized(store, tree, state.export(tree))
-        pruned(state, [tree, *record.exports_kept()])
+        pruned(state, [tree, *record.exports_kept(), *run_from(state)])
     return export
+
+
+def run_from(state: TrustState) -> list[str]:
+    """Every export a process still runs from, as its environment names it.
+
+    Everything a launch starts inherits the export it was handed off from:
+    the session, its tool servers, and a companion the launch started beside
+    it, which may outlive the launch and hold no lease of its own.
+    """
+    exports = state.root / "exports"
+    return [
+        Path(environment[APPROVED_TREE_ENV]).name
+        for environment in running_environments()
+        if APPROVED_TREE_ENV in environment
+        and Path(environment[APPROVED_TREE_ENV]).parent == exports
+    ]
 
 
 def released(state: TrustState, tree: str, holder: int | None = None) -> None:

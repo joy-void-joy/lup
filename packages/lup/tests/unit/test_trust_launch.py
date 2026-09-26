@@ -832,3 +832,31 @@ def test_a_change_is_said_by_top_directory_before_it_is_asked_about(
         "  uv.lock  1 removed",
         "claude runs after you approve.",
     ]
+
+
+def test_an_export_a_process_still_runs_from_is_kept(
+    checkout: Path, launches: Launches
+) -> None:
+    """As a companion a launch started runs from it, outliving the launch with no lease."""
+    launches.holder = ended()
+    launches.launch(checkout)
+    before = exported_from(launches.handed[0])
+    companion = sh.Command("sleep")(
+        "60",
+        _bg=True,
+        _bg_exc=False,
+        _return_cmd=True,
+        _env={"PATH": os.defpath, APPROVED_TREE_ENV: str(before)},
+    )
+    write(checkout, "src/app.py", "print('changed')\n")
+    try:
+        launches.launch(checkout)
+        assert before.is_dir()
+    finally:
+        companion.kill()
+        with pytest.raises(sh.SignalException):
+            companion.wait()
+
+    launches.launch(checkout)
+
+    assert not before.exists()
