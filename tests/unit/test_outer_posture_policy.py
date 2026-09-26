@@ -104,6 +104,8 @@ GUARDED = [
     pytest.param("PYTHONPATH=x git push --delete origin b", "ask", id="binding-push"),
     pytest.param("kill 1 && git push --delete origin b", "ask", id="kill-then-delete"),
     pytest.param("eval ls", "deny", id="eval"),
+    pytest.param("codex l$OP", "ask", id="unread-verb-could-be-login"),
+    pytest.param("codex $OP hi", "deny", id="unread-verb-strictest-held-inside"),
 ]
 """Rows whose harm reaches past the container: the same answer on every posture."""
 

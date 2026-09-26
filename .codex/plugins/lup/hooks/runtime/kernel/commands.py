@@ -13,6 +13,7 @@ from .decision import (
     KernelDecision,
     SUBSTITUTION_SENTINEL,
     SandboxPlacement,
+    objecting_reach,
     unjudged,
     unlisted,
 )
@@ -1115,15 +1116,25 @@ def strictest_reading(
     The reason names the word and the command it was read as ahead of that
     command's own reason, because whoever answers is being asked about a
     command they were not shown.
+
+    Whichever verdict is kept carries the reach of every one that objects,
+    the spelling's own among them. The verdict names one command, but the word
+    could be any of them, and a container settles the question only where the
+    harm of each would stay inside it: `codex l$OP` asks as an unknown word
+    does, which a container holds, and could be `codex login`, which it does
+    not.
     """
     strictest = max(
         readings,
         key=lambda reading: STRENGTH.index(reading["decision"].effect),
         default=None,
     )
+    reach = objecting_reach((decided, *(reading["decision"] for reading in readings)))
     if strictest is None or STRENGTH.index(
         strictest["decision"].effect
     ) <= STRENGTH.index(decided.effect):
+        if readings and decided.effect in ("ask", "deny"):
+            return decided.revised(reach=reach)
         return decided
     word = strictest["word"]
     named = (
@@ -1137,7 +1148,8 @@ def strictest_reading(
             reason=(
                 f"{named} could not be read and could be"
                 f" `{strictest['spelled']}`: {strictest['decision'].reason}"
-            )
+            ),
+            reach=reach,
         )
         .advising(
             "Spell that word out, and the command is judged as the one it is"
