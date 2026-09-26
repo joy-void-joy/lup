@@ -9,7 +9,8 @@ session may sync into has a container-private directory bound at that name.
 
 from pathlib import Path
 
-from lup.devtools.harness.contained import environment_directory, held_environments
+from lup.devtools.harness.contained import held_environments
+from lup.devtools.harness.environments import environment_directory
 from lup.execution.shell import git
 from lup.sandbox.rail import AccessibleRoot
 

@@ -181,6 +181,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `harness binds` | Check, inside a session, that every read-only bind it launched with holds. |
 | `harness sandbox-check` | Evaluate arithmetic in a disposable Python sandbox without network access. |
 | `harness image` | Render the container image this project&#x27;s sessions run in. |
+| `harness clean` | List everything lup keeps for contained sessions, and what nothing points at. |
 | `harness egress` | Report or remove the network boundary this project&#x27;s sessions run behind. |
 | `harness claude` | Generate/reconcile Claude artifacts and launch the verified plugin. |
 | `harness codex` | Generate/reconcile Codex artifacts and launch without updating the CLI. |

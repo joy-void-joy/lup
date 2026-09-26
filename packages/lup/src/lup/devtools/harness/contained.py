@@ -62,6 +62,11 @@ from lup.devtools.dev.traces import ARCHIVE_DIRECTORY_NAME
 from lup.harness.terminal import host_timezone
 from lup.providers.login import ProviderLogin
 from lup.providers.runtime_homes import runtime_logins
+from lup.devtools.harness.environments import (
+    HeldEnvironment,
+    claimed,
+    sweep_environments,
+)
 from lup.devtools.harness.config_volume import (
     HomeFile,
     HomeHelper,
@@ -79,6 +84,7 @@ from lup.sandbox.rail import (
     in_repository,
     prepared_across,
     repository_layout,
+    sibling_worktrees,
     worker_lease,
     working_trees,
 )
@@ -157,30 +163,6 @@ def state_volume_name(root: Path, login: ProviderLogin) -> str:
     files when it closes, so the volume holds state rather than decisions.
     """
     return f"lup-{login.state_volume}-{repository_layout(root).name()}"
-
-
-def environment_directory(root: Path, cache: Path | None = None) -> Path:
-    """Where one project root's container-side environment lives on the host.
-
-    Per root rather than per repository, unlike the config home above, and for
-    the opposite reason: that one holds decisions worth sharing across
-    worktrees, and this one holds an environment that *is* the checkout it was
-    synced from -- a venv records absolute interpreter paths and the project
-    installed into it, so two worktrees sharing one is the collision again at
-    a smaller scale.
-
-    Named by the directory and a digest of its whole path, because the
-    readable half is not unique: the documented workflow makes worktrees named
-    for their branch, and two repositories both holding a `dev` would land on
-    one directory. The digest settles that, and the name in front is what
-    makes a listing legible to whoever has to clear one out.
-
-    Outside every checkout, so nothing here is reachable from a session's own
-    tree or visible to the host's git.
-    """
-    held = cache or Path.home() / ".cache" / "lup" / "environments"
-    digest = hashlib.sha256(str(root).encode()).hexdigest()[:12]
-    return held / f"{root.name}-{digest}"
 
 
 # lup: ignore[constant-declaration] — an identity this repository defines, not a
@@ -314,6 +296,70 @@ def retire_images(tags: list[str], engine: ContainerEngine) -> list[str]:
             continue
         gone.append(tag)
     return gone
+
+
+def finished_containers(engine: ContainerEngine, keep: str) -> list[str]:
+    """Every stopped container lup labelled as an egress proxy, but ``keep``.
+
+    A proxy is left standing when it stops, deliberately: its log is the
+    only copy of why, and :func:`start_egress` reads it before clearing
+    it. That holds for the project being launched, which is ``keep``;
+    another project's stopped proxy is one nobody reads until that
+    project launches, and a machine with many projects keeps one each.
+    """
+    try:
+        listed = sh.Command(engine.binary)(
+            "ps",
+            "-a",
+            "--filter",
+            f"label={PROXY_LABEL}",
+            "--filter",
+            "status=exited",
+            "--format",
+            "{{.Names}}",
+        )
+    except (sh.CommandNotFound, sh.ErrorReturnCode):
+        return []
+    return [name for name in str(listed).split() if name != keep]
+
+
+def sweep_containers(engine: ContainerEngine, keep: str) -> list[str]:
+    """Remove every finished container, answering the ones that went."""
+    gone: list[str] = []
+    for name in finished_containers(engine, keep):
+        try:
+            sh.Command(engine.binary)("rm", name)
+        except (sh.CommandNotFound, sh.ErrorReturnCode):
+            continue
+        gone.append(name)
+    return gone
+
+
+def swept_notice(
+    images: list[str], environments: list[HeldEnvironment], containers: list[str]
+) -> list[Notice]:
+    """Say what a launch cleared away, once, where anything went."""
+    parts = [
+        *([f"images {', '.join(images)}"] if images else []),
+        *(
+            ["environments of " + ", ".join(str(held.root) for held in environments)]
+            if environments
+            else []
+        ),
+        *([f"stopped containers {', '.join(containers)}"] if containers else []),
+    ]
+    if not parts:
+        return []
+    return [
+        Notice(
+            text=(
+                "Cleared what nothing points at any more: "
+                + "; ".join(parts)
+                + ". `harness clean` lists the rest."
+            ),
+            urgency="detail",
+        )
+    ]
 
 
 def name_for_checkout(tag: str, readable: str, engine: ContainerEngine) -> None:
@@ -1561,8 +1607,7 @@ def held_environments(
 
     def prepared(project: Path) -> Path:
         """One root's directory and its mount point, before anything binds them."""
-        directory = environment_directory(project, cache)
-        directory.mkdir(parents=True, exist_ok=True)
+        directory = claimed(project, cache)
         (project / name).mkdir(exist_ok=True)
         return directory
 
@@ -1686,9 +1731,13 @@ def contained_argv(
     said.add(resolution.said)
     rendered = image.dockerfile(manifest)
     tag = image_tag(rendered)
-    if not image_matches(tag, rendered, client):
+    built = not image_matches(tag, rendered, client)
+    if built:
         build_image(image, manifest, tag, client, root)
     name_for_checkout(tag, checkout_tag(root), client)
+    # A build is what leaves an image behind, so it is the moment to sweep:
+    # the checkout's own tag has just moved off whatever it ran before.
+    retired = retire_images(superseded_images(client, tag), client) if built else []
     # Before anything mounts a runtime's volume: the entrypoint writes a fresh
     # home's document on first start, and a split keeps what a volume already
     # holds, so a probe opened first would leave the old document behind.
@@ -1706,6 +1755,13 @@ def contained_argv(
                 RuntimeVolume(login=runtime, volume=state_volume_name(root, runtime))
                 for runtime in runtime_logins()
             ],
+        )
+    )
+    said.add(
+        swept_notice(
+            retired,
+            sweep_environments([root, *sibling_worktrees(root)]),
+            sweep_containers(client, keep=image.egress.proxy_name(root.name)),
         )
     )
     reached_at = start_egress(image.egress, root.name, client, root)

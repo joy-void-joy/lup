@@ -2552,7 +2552,10 @@ def worktree_left_as_mount_point(path: str) -> bool:
 
 def run_deletion(plan: DeletionPlan, force: bool) -> None:
     """Carry out a plan whose preflight passed, reporting what actually ran."""
-    from lup.devtools.dev.worktree import refuse_live_worktree_removal
+    from lup.devtools.dev.worktree import (
+        refuse_live_worktree_removal,
+        said_environment_removed,
+    )
 
     completed: list[str] = []
 
@@ -2572,6 +2575,7 @@ def run_deletion(plan: DeletionPlan, force: bool) -> None:
                 git("worktree", "remove", *(["--force"] if force else []), worktree)
                 typer.echo(f"Removed worktree: {worktree}")
                 completed.append("removed worktree")
+                said_environment_removed(Path(worktree))
             except sh.ErrorReturnCode as error:
                 if not worktree_left_as_mount_point(worktree):
                     # `git worktree remove` unregisters before its final rmdir,

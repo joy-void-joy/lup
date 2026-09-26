@@ -936,6 +936,24 @@ DECLARED: list[Migration] = [
         ],
     ),
     Migration(
+        subjects=["environment_directory"],
+        reason=(
+            "a contained session's project environments outlived their "
+            "worktrees with nothing saying whose they were; each is claimed "
+            "when made and swept once its checkout is gone, by a module of "
+            "their own"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Import environment_directory from "
+                    "lup.devtools.harness.environments rather than "
+                    "lup.devtools.harness.contained."
+                )
+            ),
+        ],
+    ),
+    Migration(
         subjects=["return_settings", "SettingChange", "changed_settings"],
         reason=(
             "a Codex session's every changed setting went back to the "

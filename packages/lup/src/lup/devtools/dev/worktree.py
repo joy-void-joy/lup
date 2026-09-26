@@ -24,6 +24,7 @@ from lup.policy.assets.host import project_environment
 from lup.web.build import dependencies_behind, restore_dependencies
 from lup.devtools.layout import find_tree_dir, get_tree_dir
 from lup.devtools.clipboard import copy_to_clipboard
+from lup.devtools.harness.environments import remove_worktree_environment
 from lup.execution.shell import git
 from lup.devtools.pointer_trust import judged_roots
 from lup.sandbox.pointers import tree_checkouts
@@ -980,6 +981,18 @@ def refuse_live_worktree_removal(path: Path) -> None:
         raise typer.Exit(1)
 
 
+def said_environment_removed(path: Path) -> None:
+    """Remove the container environment a removed worktree had, and say so.
+
+    From a session inside a container the host's environments are not
+    here to remove, so nothing is said; the next launch on the host sweeps
+    every environment whose worktree is gone.
+    """
+    removed = remove_worktree_environment(path)
+    if removed is not None:
+        typer.echo(f"Removed its container environment: {removed}")
+
+
 def remove(name: str, force: bool) -> None:
     """Remove a git worktree.
 
@@ -1009,6 +1022,7 @@ def remove(name: str, force: bool) -> None:
             args.append("--force")
         git(*args)
         typer.echo(f"Removed worktree: {path}")
+        said_environment_removed(path)
     except sh.ErrorReturnCode as e:
         typer.echo(f"Error removing worktree: {attributed_stderr(e)}", err=True)
         if not force:

@@ -16,6 +16,7 @@ from typing import Annotated
 
 import typer
 
+import lup.devtools.harness.clean as clean
 import lup.devtools.harness.doctor as doctor
 import lup.devtools.harness.drift as drift
 import lup.devtools.harness.launch as launch
@@ -28,7 +29,9 @@ from lup.devtools.harness.composition import NativeTargets, claude_profile_direc
 from lup.ledger.models import LedgerNode
 from lup.ledger.store import LedgerLayout
 from lup.observability.sessions import SessionRecorder, session_recorder
+from lup.devtools.harness.config_volume import HomeHelper
 from lup.devtools.harness.contained import (
+    checkout_tag,
     image_tag,
     report_egress,
     retire_images,
@@ -42,6 +45,7 @@ from lup.harness.notice import Banner
 from lup.harness.releases import resolved_agent_clis
 from lup.harness.requirements import Manifest
 from lup.providers.profiles import ProfileDirectory
+from lup.providers.runtime_homes import runtime_logins
 from lup.devtools.harness.drift import RepositoryWriter
 from lup.workspace.paths import project_root
 from lup.policy.assets.host import boundary_description
@@ -384,6 +388,55 @@ def create_harness_app(
                 return
             for tag in retire_images(finished, client.engine()):
                 typer.echo(f"removed {tag}")
+
+    @app.command("clean")
+    def clean_command(
+        yes: Annotated[
+            bool,
+            typer.Option(
+                "--yes", help="Remove what nothing points at, not just list it"
+            ),
+        ] = False,
+    ) -> None:
+        """List everything lup keeps for contained sessions, and what nothing points at.
+
+        Images, volumes, project environments and egress proxies, each with its
+        size and what points at it. A dry run unless ``--yes``: then this
+        repository's old shared config home is split into one per runtime, and
+        every image no checkout points at, every environment whose checkout is
+        gone, every stopped proxy and every sandbox workspace no container
+        holds is removed. A repository's own config home is never removed here.
+        """
+        root = project_root()
+        compositions = targets.resolve(targets.every, root)
+        image = compositions[0].recipe.source.image
+        client = detected_client()
+        engine = client.engine() if client is not None else None
+        helper = (
+            HomeHelper(
+                engine=engine,
+                tag=checkout_tag(root),
+                uid=root.stat().st_uid,
+                gid=root.stat().st_gid,
+                config_home=image.config_home,
+            )
+            if engine is not None
+            else None
+        )
+        logins = runtime_logins()
+        held = clean.inventory(root, image, engine, logins, helper)
+        for line in clean.listing(held, engine):
+            typer.echo(line)
+        finished = [item for item in held if item.finished]
+        if not yes:
+            typer.echo(
+                f"{len(finished)} finished; `harness clean --yes` removes them."
+                if finished
+                else "Nothing is finished."
+            )
+            return
+        for notice in clean.cleaned(root, held, engine, logins, helper):
+            typer.echo(notice.text)
 
     @app.command("egress")
     def egress_command(
