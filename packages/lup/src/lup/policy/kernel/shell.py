@@ -75,9 +75,10 @@ from .lex import (
     parse_shell,
     parse_shell_words,
     placed_words,
-    redirection_verdict,
+    named_write_verdict,
     simple_commands,
     substitutions,
+    tee_operands,
 )
 from .syntax import Command, Script, Word, readable_prefix, word_text
 from .effects import declared_verdict, member_for
@@ -96,6 +97,7 @@ from .commands import (
     git_restore_source,
     git_restore_unchanged,
     git_symbolic_ref_read,
+    row_verdict,
 )
 
 ESCALATE_RE = re.compile(
@@ -522,7 +524,10 @@ def decide_interpreter_words(
 
 
 def decide_segment_words(
-    words: list[str], context: ShellContext, directory: str | None = ""
+    words: list[str],
+    context: ShellContext,
+    directory: str | None = "",
+    operands_judged: bool = False,
 ) -> KernelDecision:
     """Classify one command's words against the vocabulary and handlers.
 
@@ -531,6 +536,12 @@ def decide_segment_words(
     the word list a segment settles to, so a construct that recurses into a
     payload — ``xargs``, ``find -exec`` — goes back through the segment and
     meets the same reading of it.
+
+    ``operands_judged`` says the line's write walk
+    (:func:`~lup.policy.kernel.lex.named_write_verdict`) has already judged
+    the files these words write, which it does for the words a command
+    itself carries. A payload is handed operands no word names -- `find
+    -exec tee {}` writes every file it finds -- so it is never set there.
     """
     executable = posixpath.basename(words[0])
     # No program is spelled with a leading dash, so reaching one means a
@@ -578,6 +589,32 @@ def decide_segment_words(
     deleted = protected_deletion(words, context["path_rules"], context["checkout_root"])
     if deleted is not None:
         return deleted
+    # `tee f` writes what `> f` writes, and the write walk judged its files
+    # the way it judges a redirection target. The row asking about every tee
+    # has nothing left to add, and keeping it is what gave the two spellings
+    # of one write two answers. It still speaks for the verdict, so a table
+    # that declares no tee leaves it unlisted rather than allowed, and one
+    # that refuses tee keeps the refusal.
+    teed = next(
+        (row for row in context["rows"] if row["command"] == "tee"),
+        None,
+    )
+    if (
+        operands_judged
+        and teed is not None
+        and executable == "tee"
+        and tee_operands(words) is not None
+        and declared_verdict(
+            teed["effects"],
+            teed["refuses"],
+            unresolved_evidence(write_facts(context)),
+            "inside" if context["contained"] else "ambient",
+        )
+        != "deny"
+    ):
+        return row_verdict(
+            teed, "allow", "tee's files are judged as a redirection's are"
+        )
     recoverable = confined_to_recoverable_roots(
         words,
         context["path_roles"],
@@ -652,7 +689,10 @@ def decide_segment_words(
 
 
 def decide_shell_segment(
-    segment: list[str], context: ShellContext, directory: str | None = ""
+    segment: list[str],
+    context: ShellContext,
+    directory: str | None = "",
+    operands_judged: bool = False,
 ) -> KernelDecision:
     """Classify one parsed shell segment, letting a help probe soften the effect.
 
@@ -711,7 +751,7 @@ def decide_shell_segment(
         return unjudged(
             "a command substitution result could become a guarded flag"
         ).advising("Run it in its own call and splice the literal output.")
-    decision = decide_segment_words(words, context, directory)
+    decision = decide_segment_words(words, context, directory, operands_judged)
     if is_help_probe(words[1:]):
         return decision.revised(
             effect="allow",
@@ -966,7 +1006,11 @@ def decide_simple(
             return Walked(decisions=[extended], bindings=bindings, stopped=True)
         return Walked(decisions=[], bindings=extended, stopped=False)
     return Walked(
-        decisions=[decide_shell_segment(texts, context, command["directory"])],
+        decisions=[
+            decide_shell_segment(
+                texts, context, command["directory"], operands_judged=True
+            )
+        ],
         bindings=bindings,
         stopped=False,
     )
@@ -1208,7 +1252,7 @@ def classify_shell(
         read = bind_script(readable_prefix(command))
         if not read["items"]:
             return tree
-        redirected = redirection_verdict(
+        redirected = named_write_verdict(
             read,
             existing_targets,
             path_roles,
@@ -1231,7 +1275,7 @@ def classify_shell(
     withheld = withheld_redirect(tree, checkout_root, context["refused_paths"])
     if withheld is not None:
         return withheld
-    redirected = redirection_verdict(
+    redirected = named_write_verdict(
         tree,
         existing_targets,
         path_roles,

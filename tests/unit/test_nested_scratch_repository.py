@@ -334,6 +334,57 @@ def test_a_shell_write_into_another_repository_keeps_its_question(
     assert asked in reason
 
 
+@pytest.mark.parametrize(
+    ("written", "effect"),
+    [
+        pytest.param("date {into}tmp/kit/run.log", "allow", id="own-scratch"),
+        pytest.param(
+            "date {into}{base}/checkout/tmp/kit/run.log", "allow", id="own-absolute"
+        ),
+        pytest.param(
+            "date {into}{base}/sibling/tmp/kit/run.log", None, id="sibling-scratch"
+        ),
+        pytest.param("date {into}../elsewhere/src/run.log", "ask", id="beside"),
+        pytest.param("cd tmp && date {into}../README.md", "ask", id="after-cd"),
+        pytest.param('cd "$D" && date {into}run.log', None, id="after-unread-cd"),
+    ],
+)
+def test_a_redirect_and_a_tee_into_one_file_get_one_verdict(
+    runtime: Runtime, base: Path, written: str, effect: str | None
+) -> None:
+    """`> f` and `| tee f` land the same bytes at the same path.
+
+    Measured before this, from a session in one checkout writing into a
+    sibling worktree's scratch: the redirection was allowed inside the
+    sandbox and `tee` asked in both placements, and `tee` into this
+    checkout's own scratch spelled absolutely asked where the redirection
+    allowed. The tee's row asked about every tee and was relaxed only by
+    grants that read a relative spelling. The redirection, for its part, was
+    judged as spelled after a `cd`: `cd "$D" && date > run.log` created a
+    file at the top of the checkout, wherever `$D` was. Both are now judged
+    by one reading of one path.
+
+    Two effects are not pinned here. This layout sits wherever the test
+    runner makes its temporary directory, and under the machine's temporary
+    root every path is scratch; and an unread `cd` is the runtime's to
+    answer. What holds everywhere is that the two spellings agree, and
+    `test_semantic_policy.py` pins both answers on paths no temporary root
+    holds.
+    """
+    answers = {
+        spelling: verdict(
+            runtime,
+            shell("PreToolUse", written.format(into=into, base=base), base),
+            base,
+        )[0]
+        for spelling, into in (("redirect", "> "), ("tee", "| tee "))
+    }
+
+    assert answers["tee"] == answers["redirect"]
+    if effect is not None:
+        assert answers["redirect"] == effect
+
+
 def test_a_command_writing_into_the_kit_is_not_reported_afterwards(
     runtime: Runtime, base: Path
 ) -> None:

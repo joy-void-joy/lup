@@ -48,7 +48,7 @@ from lup.policy.kernel.lex import (
     authored_writes,
     command_segments,
     parse_shell,
-    redirection_verdict,
+    named_write_verdict,
     shell_flag_write_targets,
     shell_path_verb_targets,
     shell_sed_rewrites,
@@ -180,7 +180,7 @@ def parse_shell_segments(command: str) -> list[ShellSegment] | None:
     would otherwise wave through `echo x > .git/HEAD` as an `echo`.
     """
     tree = parse_shell(command)
-    if isinstance(tree, KernelDecision) or redirection_verdict(tree) is not None:
+    if isinstance(tree, KernelDecision) or named_write_verdict(tree) is not None:
         return None
     segments = command_segments(tree)
     return [ShellSegment(words=words) for words in segments] if segments else None

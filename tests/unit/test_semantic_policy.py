@@ -886,6 +886,28 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="echo x > /tmp/other/file", effect="allow"),
     DecisionCase(input="TMPDIR=/etc; echo x > $TMPDIR/passwd", effect="ask"),
     DecisionCase(input="for TMPDIR in /etc; do echo x > $TMPDIR/f; done", effect="ask"),
+    # `tee f` writes what `> f` writes, so the two spellings of one write get
+    # one verdict: an outside file asks unless the session is confined, a
+    # target only the run resolves asks, a protected file asks by name, and
+    # a directory a `cd` moved to is where each one lands. A `tee` handed its
+    # operands by `find -exec` or `xargs` writes files no word names, and an
+    # option this does not read leaves its files unread; each keeps its ask.
+    DecisionCase(input="date > /srv/other/tmp/x.txt", effect="ask"),
+    DecisionCase(input="date | tee /srv/other/tmp/x.txt", effect="ask"),
+    DecisionCase(input="date > /srv/other/tmp/x.txt", effect="ask", sandboxed=True),
+    DecisionCase(input="date | tee /srv/other/tmp/x.txt", effect="ask", sandboxed=True),
+    DecisionCase(input="date | tee tmp/x.txt", effect="allow"),
+    DecisionCase(input="date | tee -a notes.log", effect="allow"),
+    DecisionCase(input="date | tee a$X", effect="ask"),
+    DecisionCase(input="date | tee a$X", effect="ask", sandboxed=True),
+    DecisionCase(input="date | tee README.md", effect="ask"),
+    DecisionCase(input="cd tests && date > ../README.md", effect="ask"),
+    DecisionCase(input="cd tests && date | tee ../README.md", effect="ask"),
+    DecisionCase(input='cd "$D" && date > run.log', effect="deny"),
+    DecisionCase(input='cd "$D" && date | tee run.log', effect="deny"),
+    DecisionCase(input="find . -exec tee {} \\;", effect="ask"),
+    DecisionCase(input="ls | xargs tee", effect="ask"),
+    DecisionCase(input="date | tee --output-error=warn f", effect="ask"),
     # Publishing is how work becomes reviewable, so the verbs that put a
     # branch and its pull request in front of a reader are ordinary. What
     # keeps the ask is what a second attempt cannot restore, and what reaches
@@ -3404,6 +3426,46 @@ def test_redirecting_over_a_file_costs_what_deleting_it_costs(
     # Ownership is a different question from cost, and still answers first.
     (tmp_path / "README.md").write_text("human\n", encoding="utf-8")
     assert effect("echo x > README.md") == "ask"
+
+
+def test_a_tee_and_a_redirect_answer_alike_in_a_confined_session(
+    tmp_path: Path,
+) -> None:
+    """A confined session writes outside the checkout by both spellings or neither.
+
+    Measured before this: `date > <another checkout>/tmp/x.txt` was allowed in
+    a contained session, where the write row reads the boundary, and `date |
+    tee` of the same path asked in every placement, because its row asked
+    about every tee and named a loss no capture holds. The canonical policy
+    and the bundled kernel are asked the same questions.
+    """
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    bundled = load_bundled_kernel(tmp_path, "shell")
+    policy = ShellPolicy(
+        SHELL_RULES,
+        contained=True,
+        path_roles=FIXTURE_PATH_ROLES,
+        path_rules=FIXTURE_PATH_RULES,
+    )
+    for into in ("> ", "| tee "):
+        for target, effect in (
+            ("/srv/other/tmp/x.txt", "allow"),
+            ("tmp/x.txt", "allow"),
+            ("a$X", "ask"),
+            ("README.md", "ask"),
+        ):
+            command = f"date {into}{target}"
+            canonical = policy.decide(ShellCommand(command=command, cwd=checkout))
+            assembled = bundled.decide_shell(
+                command,
+                policy.rules,
+                contained=True,
+                path_roles=FIXTURE_PATH_ROLES,
+                path_rules=policy.path_rules,
+            )
+            assert canonical.effect == effect, command
+            assert assembled.effect == effect, command
 
 
 @pytest.mark.parametrize(

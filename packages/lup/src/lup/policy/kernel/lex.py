@@ -433,11 +433,6 @@ def placed_redirects(script: Script) -> list[PlacedRedirect]:
     return found
 
 
-def all_redirects(script: Script) -> list[Redirect]:
-    """Every redirection a list carries, for a reader that needs no placement."""
-    return [placed["redirect"] for placed in placed_redirects(script)]
-
-
 def all_pipelines(script: Script) -> list[Pipeline]:
     """Every pipeline a list runs, nested lists included, substitutions not."""
     found: list[Pipeline] = []
@@ -828,11 +823,17 @@ def carried_writes(tree: Script) -> list[AuthoredWrite]:
                     appends.append(">>" in operator)
             content = carried_text(words, bodies, incoming) if legible else None
             piped = tee_operands(words)
+            # An operand that names no path is illegible for the reason a
+            # redirection target is, and the tee is judged by that path alone.
             landings = [
                 *(
                     []
                     if piped is None
-                    else [(path, piped["append"]) for path in piped["paths"]]
+                    else [
+                        (path, piped["append"])
+                        for path in piped["paths"]
+                        if spells_its_path(path)
+                    ]
                 ),
                 *([(targets[0], appends[0])] if len(targets) == 1 else []),
             ]
@@ -886,11 +887,76 @@ def resolve_redirection(
     recoverable_targets: list[str] | None = None,
     contained: bool = False,
     checkout_root: str = "",
+    landing: list[str] | None = None,
+    tracked_targets: list[str] | None = None,
+    displaced_targets: list[DisplacedTargetRow] | None = None,
+    directory: str | None = "",
+) -> KernelDecision | None:
+    """Classify one redirection, or ``None`` where it is safe.
+
+    The operator decides whether it writes at all: a heredoc, a descriptor
+    duplication and a read open nothing. Where it does, its target is judged
+    by :func:`written_path_verdict`, which is the judgement a `tee` operand
+    gets too, at the file it names from ``directory`` -- where the command
+    carrying it runs. Judged as spelled, `cd tests && ls > ../README.md` was
+    a create outside the checkout rather than an overwrite of a human-owned
+    file, while the host stat'd the file the command reaches. ``landing`` is
+    where the line's carried writes land, placed the same way.
+    """
+    operator = redirect["operator"]
+    if redirect["heredoc"]:
+        return None
+    if "&" in operator and (operator[-1].isdigit() or operator[-1] == "-"):
+        return None
+    if not redirect["target"]:
+        return KernelDecision(
+            "ask",
+            f"file redirection {operator} names no target, so where it"
+            " writes is unknown",
+        )
+    if not redirection_writes(operator):
+        return None
+    spelled = word_text(redirect["target"][0])
+    if writes_to_a_stream(spelled):
+        return None
+    placed = placed_path(spelled, directory)
+    if placed is None:
+        return unjudged(
+            f"the redirection target {spelled} is named from a directory a `cd`"
+            " left unreadable"
+        ).advising("Spell the path in full, or run the command in its own call.")
+    return written_path_verdict(
+        placed,
+        "the redirection",
+        existing_targets,
+        path_roles,
+        path_rules,
+        contained,
+        checkout_root,
+        placed in (landing or []),
+        tracked_targets,
+        displaced_targets,
+    )
+
+
+def written_path_verdict(
+    spelled: str,
+    writer: str,
+    existing_targets: list[str] | None = None,
+    path_roles: list[PathRoleRow] | None = None,
+    path_rules: list[PathRuleRow] | None = None,
+    contained: bool = False,
+    checkout_root: str = "",
     carried: bool = False,
     tracked_targets: list[str] | None = None,
     displaced_targets: list[DisplacedTargetRow] | None = None,
 ) -> KernelDecision | None:
-    """Classify one redirection, or ``None`` where it is safe.
+    """Classify one path a command opens and writes whole, or ``None`` where safe.
+
+    ``writer`` names the spelling in the reason -- the redirection, the tee
+    -- and nothing else about it is consulted: `> f` and `| tee f` land the
+    same bytes at the same path, so a difference between their answers could
+    only be a difference in which code happened to read them.
 
     What a write costs decides it, exactly as it decides for ``rm`` and
     ``cp``. Creating a file destroys nothing, so it passes once the caller
@@ -913,22 +979,6 @@ def resolve_redirection(
     checkout's own scratch is exempt, where no generated tree lands, and a
     target the host found landing elsewhere is not exempted by its spelling.
     """
-    operator = redirect["operator"]
-    if redirect["heredoc"]:
-        return None
-    if "&" in operator and (operator[-1].isdigit() or operator[-1] == "-"):
-        return None
-    if not redirect["target"]:
-        return KernelDecision(
-            "ask",
-            f"file redirection {operator} names no target, so where it"
-            " writes is unknown",
-        )
-    if not redirection_writes(operator):
-        return None
-    spelled = word_text(redirect["target"][0])
-    if writes_to_a_stream(spelled):
-        return None
     refused = refuses_generated_plugin_target(
         spelled, path_roles, checkout_root, displaced_targets
     )
@@ -948,7 +998,7 @@ def resolve_redirection(
     # of the things a role recognizes *through* the variable that names it:
     # `$TMPDIR/out.txt` spells no path and is still scratch.
     if scope == "unbounded":
-        return unlocated_write(f"the redirection target {spelled}")
+        return unlocated_write(f"{writer} target {spelled}")
     existing = existing_targets is None or spelled in existing_targets
     if unread_over_tracked(
         scope, carried, existing, spelled in (tracked_targets or [])
@@ -977,13 +1027,39 @@ def resolve_redirection(
     written = "overwrites" if existing else "creates"
     return KernelDecision(
         decided,
-        f"the redirection {written} {spelled}, {SCOPE_PHRASES[scope]}",
+        f"{writer} {written} {spelled}, {SCOPE_PHRASES[scope]}",
         checkpoint=write_checkpoint(scope),
         purpose="unrecovered_local_mutation",
     )
 
 
-def redirection_verdict(
+def tee_targets(script: Script) -> list[str]:
+    """Every file a `tee` in this list writes through its own operands, placed.
+
+    Only the operands the command itself names. A `tee` handed operands by
+    `xargs` or `find -exec` writes files no word here spells, so it is not
+    read here and keeps its own row's question. An operand whose directory a
+    `cd` left unreadable is not placed, and the segment reading answers it.
+    """
+    return [
+        placed
+        for command in simple_commands(script)
+        if command["kind"] == "simple"
+        for tee in [
+            tee_operands(
+                effective_command([word_text(word) for word in command["words"]])[
+                    "words"
+                ]
+            )
+        ]
+        if tee is not None
+        for path in tee["paths"]
+        for placed in [placed_path(path, command["directory"])]
+        if placed is not None
+    ]
+
+
+def named_write_verdict(
     script: Script,
     existing_targets: list[str] | None = None,
     path_roles: list[PathRoleRow] | None = None,
@@ -994,35 +1070,52 @@ def redirection_verdict(
     tracked_targets: list[str] | None = None,
     displaced_targets: list[DisplacedTargetRow] | None = None,
 ) -> KernelDecision | None:
-    """The first redirection in a command that is not safe, judged as it is met.
+    """The first file this line opens and writes whole that is not safe.
+
+    Two spellings name such a file: a redirection's target and a `tee`
+    operand. Both are judged by :func:`written_path_verdict`, so `> f` and
+    `| tee f` reach one answer for one path. Measured before this, a write
+    into a sibling checkout's `tmp/` was allowed by the redirection inside
+    the sandbox and asked by `tee` in both placements.
 
     Each is told whether the command carries the bytes it writes, because that
     is what decides who judges the content: the edit gates read a write whose
     content is in the call, and nothing reads one produced by running.
     """
-    landing = {write["path"] for write in carried_writes(script)}
+    landing = [write["path"] for write in carried_writes(script)]
+    redirected = [
+        resolve_redirection(
+            carried["redirect"],
+            existing_targets,
+            path_roles,
+            path_rules,
+            recoverable_targets,
+            contained,
+            checkout_root,
+            landing,
+            tracked_targets,
+            displaced_targets,
+            carried["directory"],
+        )
+        for carried in placed_redirects(script)
+    ]
+    teed = [
+        written_path_verdict(
+            path,
+            "the tee",
+            existing_targets,
+            path_roles,
+            path_rules,
+            contained,
+            checkout_root,
+            path in landing,
+            tracked_targets,
+            displaced_targets,
+        )
+        for path in tee_targets(script)
+    ]
     return next(
-        (
-            decided
-            for redirect in all_redirects(script)
-            for decided in [
-                resolve_redirection(
-                    redirect,
-                    existing_targets,
-                    path_roles,
-                    path_rules,
-                    recoverable_targets,
-                    contained,
-                    checkout_root,
-                    bool(redirect["target"])
-                    and word_text(redirect["target"][0]) in landing,
-                    tracked_targets,
-                    displaced_targets,
-                )
-            ]
-            if decided is not None
-        ),
-        None,
+        (decided for decided in [*redirected, *teed] if decided is not None), None
     )
 
 

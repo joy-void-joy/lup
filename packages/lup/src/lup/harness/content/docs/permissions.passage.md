@@ -387,6 +387,15 @@ own tree it **asks**, because the same bytes arriving through an `Edit` or an
 ways past it: redirect into a scratch path and move the result in once it has
 been read, or carry the content in the command.
 
+`tee f` is the same write as `> f`, and it gets the same judgement from the
+same code: `| tee` and `>` into one path reach one verdict in every
+placement, and `tee -a` is judged as `>>` is. Each is read at the file it
+reaches from the directory a `cd` left, so `cd tests && date > ../README.md`
+is a write to the human-owned README, and a `cd` nothing can read leaves
+the target unjudged. A `tee` handed its operands by `find -exec` or
+`xargs` is not one of these: it writes files no word of the command
+names, so it keeps its own question.
+
 Asking rather than refusing is the whole concession to the premise. Nothing
 can read this write in advance, and refusing on that ground would refuse the
 only writes for which that is unavoidable — so a human is asked instead, and

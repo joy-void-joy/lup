@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "9f5ddff7cb489c870031969a5aa3833c1003fa47ab576e495aa8de2b13b81bff",
+  "source_digest": "4294cf9513765f4e3c434a35f6aed35184e2c5966fe39e90a9beabfb1c4835b1",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -254,7 +254,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/lex.py",
       "category": "generated",
-      "sha256": "aa613e715244d32874c7e28ebcd0735cb698ffcdc5fe3537a2af1b1d6f669152",
+      "sha256": "55a9357102c44804d18828e870a6d951693152f4e9b0232ff388e2fa7464fb95",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -317,7 +317,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/shell.py",
       "category": "generated",
-      "sha256": "f1ea75ce831b68df72921db638a4128eb0b7570a34a1666142ed4efac3051694",
+      "sha256": "af6a953ed354432ba7f97dbcc4dd2e1149a6fb21b316996f9909f9b2677bf319",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
