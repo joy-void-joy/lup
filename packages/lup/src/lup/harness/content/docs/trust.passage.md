@@ -106,19 +106,28 @@ mounts: `$XDG_STATE_HOME/lup/trust/<repository>-<digest>/` (`~/.local/state`
 where the variable is unset), one directory per repository, shared by its
 worktrees.
 
-| path | holds |
-| --- | --- |
-| `record.json` | every approved tree, the approved free zones, and the tree each worktree last launched from |
-| `objects.git` | a bare repository holding every snapshot as a git tree: `git --git-dir <it> ls-tree -r <tree>` lists one |
-| `questions.jsonl` | the relay launch questions are asked and answered through |
-| `exports/<tree>/` | each approved tree, materialized for a launch to run from |
-| `environments/`, `pycache/` | the Python environments and bytecode the launches run with |
+| path | holds | roughly costs |
+| --- | --- | --- |
+| `record.json` | every approved tree, the approved free zones, the tree each worktree last launched from, and the launches still running from an export | kilobytes |
+| `objects.git` | a bare repository holding every snapshot as a git tree: `git --git-dir <it> ls-tree -r <tree>` lists one | the host zone once, then only what each approval changed |
+| `questions.jsonl` | the relay launch questions are asked and answered through | a line per question |
+| `exports/<tree>/` | an approved tree, materialized for a launch to run from | the host zone's size each, so tens of megabytes for a sizeable project |
+| `environments/<worktree>-<digest>/` | the Python environment a worktree's launches run in | a full environment each, often hundreds of megabytes |
+| `pycache/` | the bytecode compiled from the exports | a fraction of an export each |
 
 The snapshots are written and read by the launcher in Python rather than
 through `git`, so no configuration of anybody's runs while it hashes, and every
 object read is re-hashed: a corrupt or substituted one is refused rather than
-shown as approved. Exports are kept; remove `exports/` between launches to
-reclaim the space.
+shown as approved.
+
+Exports are pruned whenever one is materialized, under the record's lock: what
+stays is the export each existing worktree last launched from, and every
+export a launch still running holds — the launcher leases the export it hands
+off to under its own process id, which the hand-off keeps, so a session's
+export stays for as long as it runs. The bytecode compiled from a pruned export
+goes with it. Environments are kept, one per worktree, since syncing a fresh
+one is the slow part of a launch; remove the one of a worktree that is gone
+to reclaim it.
 
 No launch mounts this directory, and a contained launch refuses one whose
 mounts would carry it into the container — a registration naming the home
