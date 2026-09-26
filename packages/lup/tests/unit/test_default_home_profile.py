@@ -37,7 +37,7 @@ from lup.harness.messaging import SessionInboxes
 from lup.providers.claude.login import CLAUDE_CONFIG_DIR, CLAUDE_LOGIN
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.login import ProviderLogin
-from lup.providers.profile_tree import user_profile_directory
+from lup.providers.profile_tree import profile_directory
 from lup.providers.profiles import DefaultHomeProfile, ProfileDirectory
 from lup.providers.user_config import UserConfigFile
 
@@ -62,7 +62,7 @@ def config(tmp_path: Path) -> UserConfigFile:
 
 @pytest.fixture
 def directory(config: UserConfigFile) -> ProfileDirectory:
-    return user_profile_directory(CLAUDE_LOGIN, config)
+    return profile_directory(CLAUDE_LOGIN, config)
 
 
 def symlinked(
@@ -197,7 +197,7 @@ def test_a_stored_default_home_is_refused_wherever_it_would_be_launched(
         lambda: registered.launch_home("main"),
         lambda: registered.account(None),
         lambda: registered.use("main"),
-        lambda: registered.add("main"),
+        lambda: registered.add("main", scope="global"),
     ]:
         with pytest.raises(DefaultHomeProfile, match="profile remove main"):
             refused()
@@ -212,7 +212,7 @@ def test_removing_a_stored_default_home_restores_the_default_account(
 ) -> None:
     """The way out the refusal names has to be open, and has to arrive."""
     with pytest.raises(ValueError, match="remove that directory") as said:
-        registered.remove("main")
+        registered.remove("main", "global")
     assert "`profile` line" in str(said.value)
 
     shutil.rmtree(config.profiles_root() / "main")
@@ -220,7 +220,7 @@ def test_removing_a_stored_default_home_restores_the_default_account(
 
     assert registered.launch_home(None) is None
     assert registered.account(None).variables == {}
-    assert registered.names.names() == ["work"]
+    assert [entry.name for entry in registered.entries()] == ["work"]
 
 
 def test_replacing_a_linked_default_home_with_its_own_repairs_it(
@@ -240,7 +240,7 @@ def test_a_profile_is_refused_the_default_home_rather_than_advised_to_link(
     """Its own refusal would say to symlink that path, which is the trap itself."""
     login = own_default(tmp_path)
     config = UserConfigFile(tmp_path / "lup")
-    tree = user_profile_directory(login, config)
+    tree = profile_directory(login, config)
 
     with pytest.raises(DefaultHomeProfile, match=WAY_OUT) as raised:
         tree.add("main", login.ambient_home)
@@ -255,10 +255,10 @@ def test_a_profile_symlinked_onto_the_default_home_is_refused(
     login = own_default(tmp_path)
     config = UserConfigFile(tmp_path / "lup")
     symlinked(config, "main", login, login.ambient_home)
-    tree = user_profile_directory(login, config)
+    tree = profile_directory(login, config)
 
     for refused in [
-        lambda: tree.add("main"),
+        lambda: tree.add("main", scope="global"),
         lambda: tree.use("main"),
         lambda: tree.launch_home("main"),
         lambda: tree.account("main"),
@@ -267,7 +267,7 @@ def test_a_profile_symlinked_onto_the_default_home_is_refused(
             refused()
 
     assert [entry.name for entry in tree.entries()] == ["main"]
-    assert tree.names.active_profile() is None, "a refused add selected it anyway"
+    assert tree.active_name() is None, "a refused add selected it anyway"
 
 
 def test_a_codex_profile_may_link_its_default_home(tmp_path: Path) -> None:
@@ -279,7 +279,7 @@ def test_a_codex_profile_may_link_its_default_home(tmp_path: Path) -> None:
     config = UserConfigFile(tmp_path / "lup")
     home = symlinked(config, "main", login, login.ambient_home)
 
-    assert user_profile_directory(login, config).launch_home("main") == home
+    assert profile_directory(login, config).launch_home("main") == home
 
 
 # The command trees and entry points a person reaches all of this through.

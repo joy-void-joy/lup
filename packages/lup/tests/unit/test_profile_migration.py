@@ -16,7 +16,7 @@ import pytest
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.profile_migration import legacy_notice, migrate_profiles
-from lup.providers.profile_tree import user_profile_directory
+from lup.providers.profile_tree import profile_directory
 from lup.providers.user_config import UserConfigFile
 
 
@@ -42,7 +42,7 @@ def test_a_checkouts_profiles_move_with_their_selection(
 ) -> None:
     migration = migrate_profiles(checkout, config, tmp_path / "old-home")
 
-    home = user_profile_directory(CLAUDE_LOGIN, config).launch_home(None)
+    home = profile_directory(CLAUDE_LOGIN, config).launch_home(None)
     assert home is not None
     assert home == config.profiles_root() / "work" / CLAUDE_LOGIN.home_subdir
     assert CLAUDE_LOGIN.logged_in(home)
@@ -135,7 +135,7 @@ def test_the_old_registry_moves_homes_it_made_and_links_the_rest(
 
     outcomes = {move.name: move.outcome for move in migration.moves}
     assert outcomes == {"main": "refused", "side": "linked", "work": "moved"}
-    directory = user_profile_directory(CLAUDE_LOGIN, config)
+    directory = profile_directory(CLAUDE_LOGIN, config)
     assert directory.launch_home("work") == (
         config.profiles_root() / "work" / "claude-config"
     )

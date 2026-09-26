@@ -307,7 +307,7 @@ def create_setup_app(
         console.print(build_status_table(integrations))
         active = profiles.active() if profiles is not None else None
         if active is not None:
-            console.print(f"  Active profile: [bold]{active.name}[/]")
+            console.print(f"  Active profile: [bold]{active.name}[/] ({active.scope})")
         console.print()
 
     for integration in integrations:

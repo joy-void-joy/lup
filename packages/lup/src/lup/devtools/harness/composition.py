@@ -40,23 +40,23 @@ from lup.devtools.harness.generate import (
 )
 from lup.harness.evidence import WireContract
 from lup.harness.models import CapabilityEvidence, PromptDocument
-from lup.providers.profile_tree import user_profile_directory
+from lup.providers.profile_tree import profile_directory
 from lup.providers.profiles import ProfileDirectory
 
 
 def claude_profile_directory() -> ProfileDirectory:
     """The Claude side of the accounts this person keeps, as a directory to curate.
 
-    What a project falls back to when it names no origin of its own: the
-    per-user profiles every checkout shares, so an account signed in once
-    opens in every repository.
+    What a project falls back to when it names no origin of its own: this
+    checkout's own profiles, then the global ones every checkout shares, so
+    an account signed in once opens in every repository.
     """
-    return user_profile_directory(CLAUDE_LOGIN)
+    return profile_directory(CLAUDE_LOGIN)
 
 
 def codex_profile_directory() -> ProfileDirectory:
     """The Codex side of the same accounts, one name meaning one person on both."""
-    return user_profile_directory(CODEX_LOGIN)
+    return profile_directory(CODEX_LOGIN)
 
 
 type NativeCapabilityEvidence = (

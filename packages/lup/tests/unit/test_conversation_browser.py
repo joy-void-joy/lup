@@ -15,7 +15,7 @@ from lup.devtools.conversation import app as conversation_app
 from lup.devtools.conversation import browser
 from lup.devtools.conversation import chatgpt
 from lup.devtools.conversation import selection
-from lup.providers.profile_tree import user_profile_directory
+from lup.providers.profile_tree import profile_directory
 from lup.providers.user_config import UserConfigFile
 from lup.devtools.setup import create_setup_app
 
@@ -115,8 +115,8 @@ async def test_login_finishes_when_the_browser_window_closes(
 def test_a_named_codex_profile_keeps_chatgpt_web_state_beside_its_home(
     tmp_path: Path,
 ) -> None:
-    profiles = user_profile_directory(CODEX_LOGIN, UserConfigFile(tmp_path / "lup"))
-    profile = profiles.add("work")
+    profiles = profile_directory(CODEX_LOGIN, UserConfigFile(tmp_path / "lup"))
+    profile = profiles.add("work", scope="global")
 
     directory = profiles.state_dir("work", "chatgpt-web")
 
@@ -127,8 +127,8 @@ def test_a_named_codex_profile_keeps_chatgpt_web_state_beside_its_home(
 def test_the_active_profile_supplies_browser_state_when_none_is_named(
     tmp_path: Path,
 ) -> None:
-    profiles = user_profile_directory(CODEX_LOGIN, UserConfigFile(tmp_path / "lup"))
-    profiles.add("work")
+    profiles = profile_directory(CODEX_LOGIN, UserConfigFile(tmp_path / "lup"))
+    profiles.add("work", scope="global")
 
     assert profiles.state_dir(None, "chatgpt-web") == (
         tmp_path / "lup" / "profiles" / "work" / "chatgpt-web"
@@ -138,8 +138,8 @@ def test_the_active_profile_supplies_browser_state_when_none_is_named(
 def test_chatgpt_command_reuses_the_active_codex_profile_container(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    profiles = user_profile_directory(CODEX_LOGIN, UserConfigFile(tmp_path / "lup"))
-    profiles.add("work")
+    profiles = profile_directory(CODEX_LOGIN, UserConfigFile(tmp_path / "lup"))
+    profiles.add("work", scope="global")
     opened: list[Path] = []
 
     async def retain(

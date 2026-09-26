@@ -17,7 +17,7 @@ from pydantic import ValidationError
 
 from lup.providers.codex.harness import CodexSpellings
 from lup.providers.codex.login import CODEX_LOGIN
-from lup.providers.profile_tree import user_profile_directory
+from lup.providers.profile_tree import profile_directory
 from lup.providers.profiles import DefaultHomeProfile, ProfileDirectory, UnknownProfile
 from lup.providers.codex.usage.api import (
     AccountUsage,
@@ -170,13 +170,14 @@ def codex_usage_entry(
 ) -> UsageEntry:
     """This runtime's place in the usage sub-app, for an application to name.
 
-    ``profiles`` is where ``--profile`` finds its account, the person's own
-    unless an application keeps another: one name is one account on every
-    runtime, so the name that selects a Claude login selects its Codex login.
+    ``profiles`` is where ``--profile`` finds its account, this checkout's then
+    the global ones unless an application keeps others: one name is one
+    account on every runtime, so the name that selects a Claude login selects
+    its Codex login.
     Naming none reads the selection, else whichever home the environment
     selects, as a launch would.
     """
-    directory = profiles or user_profile_directory(CODEX_LOGIN)
+    directory = profiles or profile_directory(CODEX_LOGIN)
 
     def opened(profile: str | None) -> UsageReader:
         """The reader for the home that profile selects, refused in its own words."""

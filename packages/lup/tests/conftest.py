@@ -8,11 +8,13 @@ the library ships.
 import os
 import warnings
 from collections.abc import Iterator
+from functools import cache
 from pathlib import Path
 
 import pytest
 
 import lup.devtools.harness.launch as launch
+import lup.providers.profile_tree as profile_tree
 from lup.devtools.gitguard import TEST_IDENTITY, GuardVerdict, RepositoryWatch
 from lup.harness.environment import launcher_decided_names
 from lup.providers.claude.config_home import ClaudeConfigHome, selected_config_home
@@ -72,6 +74,31 @@ def personal_config_withheld(
         environment.setenv(
             "XDG_CONFIG_HOME", str(tmp_path_factory.mktemp("xdg-config"))
         )
+        yield
+
+
+@pytest.fixture(autouse=True)
+def checkout_profiles_withheld(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Iterator[None]:
+    """Resolve profiles as though the checkout under test kept none of its own.
+
+    For the reason the personal config is withheld above: a developer's own
+    ``.lup/profiles`` — a profile, an ``.active`` selecting it — sits in the
+    checkout the suite runs from, and a name resolves through it first. The
+    checkout a profile directory reads when none is named is an empty one of
+    each test's own, made the first time the test asks, since adding a
+    profile writes there by default and one test's must not reach the next.
+    Its own patch rather than the ``monkeypatch`` fixture, which an autouse
+    fixture would set up first and so undo last, after a guard that runs git.
+    """
+
+    @cache
+    def checkout() -> Path:
+        return tmp_path_factory.mktemp("checkout")
+
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr(profile_tree, "project_root", checkout)
         yield
 
 

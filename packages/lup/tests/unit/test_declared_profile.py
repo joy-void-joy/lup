@@ -18,7 +18,7 @@ from lup.providers.claude.runtime import ClaudeSessionOpener
 from lup.providers.codex import Codex
 from lup.providers.codex.login import CODEX_HOME
 from lup.providers.codex.runtime import CodexSessionOpener
-from lup.providers.profile_tree import user_profile_directory
+from lup.providers.profile_tree import profile_directory
 from lup.providers.profiles import DefaultHomeProfile, UnknownProfile
 from lup.providers.user_config import UserConfigFile
 
@@ -38,7 +38,7 @@ def writes(config: UserConfigFile, content: str) -> None:
 def test_one_profile_name_is_one_account_on_both_runtimes(
     config: UserConfigFile, tmp_path: Path
 ) -> None:
-    user_profile_directory(CLAUDE_LOGIN, config).add("work")
+    profile_directory(CLAUDE_LOGIN, config).add("work", scope="global")
     work = config.profiles_root() / "work"
 
     claude = ClaudeSessionOpener(Claude(profile="work", cwd=tmp_path)).compiled()
@@ -51,7 +51,7 @@ def test_one_profile_name_is_one_account_on_both_runtimes(
 def test_a_named_profile_wins_over_a_home_the_environment_names(
     config: UserConfigFile, tmp_path: Path
 ) -> None:
-    user_profile_directory(CLAUDE_LOGIN, config).add("work")
+    profile_directory(CLAUDE_LOGIN, config).add("work", scope="global")
 
     compiled = ClaudeSessionOpener(
         Claude(profile="work", environment={CLAUDE_CONFIG_DIR: "/elsewhere"})
@@ -63,7 +63,7 @@ def test_a_named_profile_wins_over_a_home_the_environment_names(
 def test_an_unknown_profile_is_refused_listing_the_known_ones(
     config: UserConfigFile, tmp_path: Path
 ) -> None:
-    user_profile_directory(CLAUDE_LOGIN, config).add("work")
+    profile_directory(CLAUDE_LOGIN, config).add("work", scope="global")
 
     for opener in [
         ClaudeSessionOpener(Claude(profile="ghost")),
@@ -90,7 +90,7 @@ def test_naming_no_profile_stays_on_the_surrounding_account(
     config: UserConfigFile, tmp_path: Path
 ) -> None:
     """The person's selection is a launch's to apply, not a nested session's."""
-    user_profile_directory(CLAUDE_LOGIN, config).add("work")
+    profile_directory(CLAUDE_LOGIN, config).add("work", scope="global")
     assert config.load().profile == "work"
 
     claude = ClaudeSessionOpener(

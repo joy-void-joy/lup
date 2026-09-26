@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field, ValidationError
 from lup.harness.devices import Device
 from lup.providers.login import NativeHomeScope, ProviderLogin
 from lup.providers.profile_migration import legacy_notice
-from lup.providers.profile_tree import user_profile_directory
+from lup.providers.profile_tree import profile_directory
 from lup.providers.profiles import DefaultHomeProfile, ProfileDirectory
 from lup.providers.user_config import UserConfig, UserConfigFile
 from lup.devtools.harness.contained import contained_argv
@@ -2271,10 +2271,10 @@ def launch_codex(
         ),
     )
     # The account a worktree home is derived from, and returns its login and
-    # settings to: the person's selected profile, one name meaning the same
-    # account here as on Claude, else the operator's own default home.
+    # settings to: the selected profile, this checkout's then the global one,
+    # resolved as on Claude, else the operator's own default home.
     try:
-        account_home = user_profile_directory(CODEX_LOGIN, config).launch_home(None)
+        account_home = profile_directory(CODEX_LOGIN, config).launch_home(None)
     except (KeyError, DefaultHomeProfile) as error:
         raise typer.BadParameter(str(error)) from error
     store = CodexWorktreeHomeStore(
