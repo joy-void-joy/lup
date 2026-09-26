@@ -1578,6 +1578,24 @@ SHELL_POLICY_CASES = [
         input='uv run --python "$(cat v.txt)" lup-devtools dev check', effect="deny"
     ),
     DecisionCase(input='uv run "$(cat t.txt)" dev check', effect="deny"),
+    # The target is found the way uv finds it: past uv's globals, and past
+    # the options of `run` with their values. A value is not the target, and a
+    # global in front of `run` still reaches one.
+    DecisionCase(
+        input='uv --quiet run lup-devtools dev pr update 22 --body "$(cat x)"',
+        effect="allow",
+    ),
+    DecisionCase(
+        input='uv run -q lup-devtools dev pr update 22 --body "$(cat x)"',
+        effect="allow",
+    ),
+    DecisionCase(
+        input='uv run --package lup-devtools frobnicate "$(cat x)"', effect="deny"
+    ),
+    DecisionCase(
+        input='uv run --refresh-package lup-devtools python "$(cat x)"',
+        effect="deny",
+    ),
     DecisionCase(input="uv run ./pytest", effect="deny"),
     DecisionCase(input="uv run /tmp/tool --help", effect="deny"),
     DecisionCase(input="printf . | xargs find . -delete", effect="ask"),

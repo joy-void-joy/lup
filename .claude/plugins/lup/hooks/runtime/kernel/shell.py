@@ -48,6 +48,8 @@ from .words import (
     refuses_generated_plugin_write,
     protected_deletion,
     env_payload,
+    uv_command_words,
+    uv_run_words,
     xargs_payload,
 )
 from .bindings import (
@@ -793,16 +795,26 @@ def uv_post_target_words_safe(
     the trust literal arguments already receive there. An unknown word at or
     before the target could become a uv flag, a flag value, or the target
     itself, so any such word keeps the conservative gate.
+
+    The target is found as `decide_uv` finds it, past uv's globals and the
+    options of `run` with their values: read as the first word not beginning
+    with a dash, `uv run --refresh-package lup-devtools python $(...)` named
+    the blessed target where it names a package, and `uv --quiet run
+    lup-devtools $(...)` named no `run` at all.
     """
-    if len(words) < 3 or words[1] != "run":
+    normalized = uv_command_words(words)
+    if normalized is None or normalized[1:2] != ["run"]:
         return False
-    for word in words[2:]:
-        if opaque_argument(word):
-            return False
-        if word.startswith("-"):
-            continue
-        return "/" not in word and any(row["name"] == word for row in runner_targets)
-    return False
+    run_words = uv_run_words(normalized)
+    options = normalized[2 : len(normalized) - len(run_words)]
+    if not run_words or any(opaque_argument(word) for word in options):
+        return False
+    target = run_words[0]
+    return (
+        not opaque_argument(target)
+        and "/" not in target
+        and any(row["name"] == target for row in runner_targets)
+    )
 
 
 def argument_safe_words(words: list[str], context: ShellContext) -> bool:
