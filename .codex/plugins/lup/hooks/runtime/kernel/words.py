@@ -23,6 +23,7 @@ from .roles import (
     path_role,
     repository_relative,
 )
+from .semantics import Reach
 from .rows import (
     DisplacedTargetRow,
     PathRoleRow,
@@ -89,6 +90,10 @@ DANGEROUS_ENV_NAMES = (
 )
 # lup: ignore[library-default] — variable prefixes the OS, those runtimes, and these tools read to redirect execution or retarget a command
 DANGEROUS_ENV_PREFIXES = ("LD_", "DYLD_", "PYTHON", "GIT_", "GH_", "BASH_FUNC_")
+# lup: ignore[library-default] — variable prefixes that swap the identity, token or repository a later git, gh or ssh acts on
+OUTWARD_ENV_PREFIXES = ("GIT_", "GH_", "GITHUB_", "SSH_")
+# lup: ignore[library-default] — the shell builtins that bind or unbind a variable a later command sees
+BINDING_BUILTINS = ("export", "declare", "typeset", "readonly", "local", "unset")
 # lup: ignore[library-default] — real interpreter executables; omitting one is a hole, not a preference
 INTERPRETERS = (
     "python",
@@ -1198,6 +1203,42 @@ def dangerous_assignment_reason(verb: str, names: list[str]) -> str:
     variables = f"variables {spelled}" if len(names) > 1 else f"variable {spelled}"
     return (
         f"{verb} the security-sensitive {variables}, which can change how commands run"
+    )
+
+
+def binding_reach(names: list[str]) -> Reach:
+    """Where binding these variables reaches, as the question about them weighs it.
+
+    Most of them redirect what runs -- a search path, a preloaded library, an
+    interpreter's module path -- and what runs is this process and its
+    children, which a container holds. A few swap who a later command acts as
+    or where it acts: the repository git touches, the token gh sends, the
+    agent ssh asks. Those are the lent credentials, whichever wall stands --
+    and so is a name nobody can read, which might be any of them.
+    """
+    if any(
+        not name.isidentifier() or name.startswith(prefix)
+        for name in names
+        for prefix in OUTWARD_ENV_PREFIXES
+    ):
+        return "credential"
+    return "container"
+
+
+def bound_names(arguments: list[str]) -> list[str]:
+    """The variable names an `export`-like builtin's arguments bind or unbind.
+
+    Options are skipped and a `NAME=value` word is read for its name, which is
+    all these builtins take -- so the names are exactly what a later command
+    sees changed.
+    """
+    return [word.partition("=")[0] for word in arguments if not word.startswith("-")]
+
+
+def dangerous_assignment(verb: str, names: list[str]) -> KernelDecision:
+    """The question a security-sensitive binding earns, and where its harm lands."""
+    return KernelDecision(
+        "ask", dangerous_assignment_reason(verb, names), reach=binding_reach(names)
     )
 
 

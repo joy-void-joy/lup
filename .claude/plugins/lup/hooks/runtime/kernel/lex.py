@@ -920,6 +920,9 @@ def resolve_redirection(
             "ask",
             f"file redirection {operator} names no target, so where it"
             " writes is unknown",
+            # The shell refuses the line before anything is opened, so nothing
+            # is written anywhere a container does not hold.
+            reach="container",
         )
     if not redirection_writes(operator):
         return None

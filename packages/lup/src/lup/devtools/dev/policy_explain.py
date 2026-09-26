@@ -22,7 +22,6 @@ from pydantic import AnyHttpUrl, BaseModel
 from lup.devtools.utils import output_json
 from lup.harness.enforcement import (
     declared_scope,
-    measured_containment,
     semantic_policy_for,
 )
 from lup.harness.models import HookSet
@@ -48,22 +47,33 @@ EFFECT_STYLES: StringMap = {
 
 
 class Placement(BaseModel, frozen=True):
-    """One placement a subject is read under, and the flag it sets."""
+    """One placement a subject is read under, named as the launcher spells it.
+
+    The two walls a launch can stand up are different facts and are set
+    apart: ``sandboxed`` is the runtime's own per-call sandbox, which `inner`
+    arms on the operator's machine, and ``contained`` is the container `outer`
+    measures around the whole session. Read as one flag, the container's
+    answer and the sandbox's were given under a single heading, and a question
+    only the container settles could not be told from one both settle.
+    """
 
     name: str
     sandboxed: bool
+    contained: bool
 
 
 PLACEMENTS: list[Placement] = [
-    Placement(name="sandboxed", sandboxed=True),
-    Placement(name="unsandboxed", sandboxed=False),
+    Placement(name="none", sandboxed=False, contained=False),
+    Placement(name="inner", sandboxed=True, contained=False),
+    Placement(name="outer", sandboxed=False, contained=True),
 ]
-"""Both placements, rather than whichever this process happens to be in.
+"""Every placement, rather than whichever this process happens to be in.
 
 Placement is the single fact that moves the most verdicts -- an unclassified
-command is settled by containment inside and refused outside -- so a reader
+command is settled by a boundary and refused without one, and a question whose
+harm stays in a container is settled only by the container -- so a reader
 given one answer has to know which one they were given before they can use it,
-and a reader given both never has to ask.
+and a reader given all three never has to ask.
 """
 
 
@@ -146,27 +156,27 @@ def read_under(
 ) -> PolicyReading:
     """Classify one input under one placement's composition of the policy.
 
-    The placement decides containment as well as the native sandbox, because
-    the kernel joins them -- a boundary stands when either does -- and the
-    launcher spells them with one flag: `--sandbox none` opens on the host
-    with no container *and* the runtime's own sandbox off, where `outer` and
-    `inner` each stand one of the walls up. Read separately, the unsandboxed
-    row inherited the container measured around this process and answered the
-    bounded question twice, under two headings.
+    The placement decides containment as well as the native sandbox, the way
+    the launcher's one flag does: `none` opens on the host with neither wall,
+    `inner` stands the runtime's own sandbox up there, and `outer` stands a
+    container up with the runtime's sandbox off inside it. Both facts come from
+    the placement rather than from the ledger this process runs behind, so a
+    reading taken inside a contained session says what happens without the
+    container -- the question the guidance sends an agent here to ask -- and a
+    reading taken on the host can still say what happens inside one.
 
-    Which is the reading a session is least able to notice and most likely to
-    act on: the guidance sends an agent here before it spends a turn, from
-    inside a contained session, to find out what happens without the
-    boundary -- and got told what happens with it.
+    What an `outer` reading measures, it measures here: which paths this
+    machine's mount table lends from elsewhere, and which loopback ports a
+    process out of sight holds. Inside a container those are the session's own
+    answers; on a host they place the checkout as lent and little else.
     """
-    held = measured_containment(cwd)
     policy = semantic_policy_for(
         hooks,
         sandbox_active=placement.sandboxed,
         autonomous=autonomous,
         recovered=True,
-        contained=held.contained and placement.sandboxed,
-        inside_placement=held.inside_placement and placement.sandboxed,
+        contained=placement.contained,
+        inside_placement=placement.contained,
     )
     match kind:
         case "shell":
@@ -259,18 +269,23 @@ def declared_scopes(kind: str, hooks: HookSet) -> list[str]:
 
 
 def chosen_placements(
-    sandbox: bool | None, placements: list[Placement] = PLACEMENTS
+    name: str | None, placements: list[Placement] = PLACEMENTS
 ) -> list[Placement]:
     """Which placements to read, given a caller who may have pinned one.
 
-    ``None`` is both, which is the answer a reader wants and the default. A
-    pinned flag narrows rather than switches, so the one thing a caller can ask
-    for is a subset of what they would otherwise have been shown -- there is no
-    setting under which this reports an answer the unpinned form would not.
+    ``None`` is every one, which is the answer a reader wants and the default.
+    A pinned name narrows rather than switches, so the one thing a caller can
+    ask for is a subset of what they would otherwise have been shown -- there
+    is no setting under which this reports an answer the unpinned form would
+    not. A name no placement carries is refused with the names that exist.
     """
-    if sandbox is None:
+    if name is None:
         return placements
-    return [placement for placement in placements if placement.sandboxed == sandbox]
+    chosen = [placement for placement in placements if placement.name == name]
+    if not chosen:
+        known = ", ".join(placement.name for placement in placements)
+        raise ValueError(f"no placement {name!r}: expected one of {known}")
+    return chosen
 
 
 def explain(
@@ -279,20 +294,21 @@ def explain(
     autonomous: bool,
     as_json: bool,
     hooks: HookSet,
-    sandbox: bool | None = None,
+    placement: str | None = None,
     styles: StringMap = EFFECT_STYLES,
 ) -> None:
     """Print every placement's verdict, exiting non-zero when none of them allow.
 
-    A subject both placements agree on prints once, because repeating an answer
-    to say it did not change is how a table teaches its reader to stop reading
-    it. One that differs prints both, which is the case the reader came for.
+    A subject every placement agrees on prints once, because repeating an
+    answer to say it did not change is how a table teaches its reader to stop
+    reading it. One that differs prints each, which is the case the reader
+    came for.
     """
     root = Path.cwd()
     try:
         verdicts = [
             verdict_for(
-                subject, kind, autonomous, root, hooks, chosen_placements(sandbox)
+                subject, kind, autonomous, root, hooks, chosen_placements(placement)
             )
             for subject in subjects
         ]

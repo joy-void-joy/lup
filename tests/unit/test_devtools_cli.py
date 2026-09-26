@@ -28,7 +28,6 @@ from lup.providers.codex.home import CodexWorktreeHomeStore
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.login import ProviderLogin
 from lup.workspace.paths import project_root
-from lup.harness.enforcement import MeasuredContainment
 from lup_template.harness.catalog import declared_hook_set
 from lup_template.devtools.main import app
 from lup.devtools.sync import load_json
@@ -337,17 +336,17 @@ def effect_of(arguments: list[str], environment: dict[str, str | None]) -> str:
 
 
 def test_dev_policy_answers_for_every_placement_rather_than_one() -> None:
-    """Both answers, so no reader has to know which session they were given.
+    """Every answer, so no reader has to know which session they were given.
 
     The guidance sends a reader here *before* they spend a turn, and placement
     is the fact that moves the most verdicts — an unclassified command is
-    settled by containment inside the boundary and refused outside it. One
-    answer leaves the reader holding a guess about which session it described,
-    and the guess is invisible, which is the worst property an answer can have.
+    settled by either boundary and refused without one. One answer leaves the
+    reader holding a guess about which session it described, and the guess is
+    invisible, which is the worst property an answer can have.
 
-    So the environment stops deciding what they are told. The pinning flags
-    below narrow this rather than switching it, which is why no setting reports
-    an answer the default would have withheld.
+    So the environment stops deciding what they are told. The pinning flag
+    below narrows this rather than switching it, which is why no setting
+    reports an answer the default would have withheld.
     """
     result = runner.invoke(
         app,
@@ -355,57 +354,65 @@ def test_dev_policy_answers_for_every_placement_rather_than_one() -> None:
         env={"LUP_SANDBOX_ACTIVE": None},
     )
     readings = json.loads(result.stdout)[0]["readings"]
-    assert [reading["placement"] for reading in readings] == [
-        "sandboxed",
-        "unsandboxed",
-    ]
-    assert [reading["effect"] for reading in readings] == ["allow", "ask"]
+    assert [reading["placement"] for reading in readings] == ["none", "inner", "outer"]
+    assert [reading["effect"] for reading in readings] == ["ask", "allow", "allow"]
 
 
-def test_the_unsandboxed_reading_ignores_the_container_around_this_process(
-    monkeypatch: pytest.MonkeyPatch,
+def test_the_unbounded_reading_ignores_the_container_around_this_process(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The row that answers for no boundary, asked from behind one.
 
-    Not hypothetical, and not reachable from a clean checkout: containment is
-    measured from the `.lup/preflight` ledger the launch wrote, so the case
-    above passed everywhere except the one place `dev policy` is actually
-    read -- inside a contained session, which is where the guidance sends an
-    agent before it spends a turn. Both rows reported the bounded answer,
-    under two headings, and the row a reader consults to find out what the
-    boundary is doing for them said it was doing nothing.
-
-    Measured here rather than left to the environment, for the same reason
-    the case above pins the sandbox flag: a suite that reads the session's own
-    ledger passes or fails on where it was run.
+    Not hypothetical: `dev policy` is read inside a contained session, which is
+    where the guidance sends an agent before it spends a turn, and a reading
+    that took containment from the ledger the launch wrote reported the
+    bounded answer under the heading of the unbounded one. The placement is
+    what decides both walls, so a launch measured as a container changes
+    none of the three readings.
     """
-    monkeypatch.setattr(
-        policy_explain,
-        "measured_containment",
-        lambda _cwd: MeasuredContainment(contained=True, inside_placement=True),
+    ledger = tmp_path / ".lup" / "preflight" / "launch.json"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text(
+        json.dumps({"contained": ["yes"], "delivered": ["inside_placement"]}),
+        encoding="utf-8",
     )
+    monkeypatch.setenv("LUP_BOUNDARY_NONCE", "launch")
+    monkeypatch.delenv("LUP_BOUNDARY_ROOT", raising=False)
 
     verdict = policy_explain.verdict_for(
         "frobnicate",
         "shell",
         autonomous=False,
-        cwd=Path.cwd(),
+        cwd=tmp_path,
         hooks=declared_hook_set(),
     )
 
-    assert [reading.effect for reading in verdict.readings] == ["allow", "ask"]
+    assert [reading.effect for reading in verdict.readings] == ["ask", "allow", "allow"]
 
 
-def test_either_boundary_stays_askable_for_explicitly() -> None:
-    """The flag still narrows to one placement, and the environment still cannot.
+@pytest.mark.parametrize(
+    ("placement", "effect"),
+    [("none", "ask"), ("inner", "allow"), ("outer", "allow")],
+)
+def test_each_placement_stays_askable_for_explicitly(
+    placement: str, effect: str
+) -> None:
+    """The flag narrows to one placement, and the environment still cannot.
 
-    Kept because a caller scripting against this wants one row rather than two,
-    and because dropping it would have been a capability removed for the
-    convenience of the change that replaced it.
+    Kept because a caller scripting against this wants one row rather than
+    three, whatever the session running it measured about itself.
     """
     assert (
-        effect_of(["--no-sandbox", "frobnicate"], {"LUP_SANDBOX_ACTIVE": "1"}) == "ask"
+        effect_of(["--placement", placement, "frobnicate"], {"LUP_SANDBOX_ACTIVE": "1"})
+        == effect
     )
-    assert (
-        effect_of(["--sandbox", "frobnicate"], {"LUP_SANDBOX_ACTIVE": None}) == "allow"
+
+
+def test_a_placement_nobody_launches_is_refused_with_the_ones_that_exist() -> None:
+    """A misspelled placement names the three, rather than answering for none."""
+    result = runner.invoke(
+        app, ["dev", "policy", "--placement", "sandboxed", "frobnicate"]
     )
+
+    assert result.exit_code != 0
+    assert "none, inner, outer" in result.output

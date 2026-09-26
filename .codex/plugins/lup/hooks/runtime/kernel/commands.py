@@ -37,6 +37,7 @@ from .effects import (
     EffectRow,
     declare,
     declared_verdict,
+    question_reach,
     purpose_of,
     verdict_for,
 )
@@ -66,7 +67,7 @@ from .words import (
     write_scope,
     written_targets,
 )
-from .fetch import decide_fetch
+from .fetch import decide_fetch, loopback_port
 from .semantics import UnjudgedAmbient
 
 # lup: ignore[constant-declaration] — refusal wording, declared with its verdict
@@ -95,6 +96,7 @@ def row_verdict(
     effects: list[EffectRow] | None = None,
     arguments: list[str] | None = None,
     asked: KernelDecision | None = None,
+    reached: list[EffectRow] | None = None,
 ) -> KernelDecision:
     """One row's verdict, carrying every fact the row states about itself.
 
@@ -132,6 +134,14 @@ def row_verdict(
     besides -- so the caller that recognized the flag states what the question
     is now about, rather than leaving it read off the operation nobody asked
     about.
+
+    The reach is read off the same effects, and ``reached`` narrows it where
+    the question is about something those effects do not describe. A guarded
+    flag on a row that declared nothing about the flag is the case: the row's
+    effects say what the plain command does, and a `--pre` that runs a program
+    is none of it -- so the question carries the reach the flag declared, and
+    none where it declared nothing, which keeps it asking inside a container.
+    A question another reading already put, ``asked``, carries its own.
     """
     if row["operator_only"]:
         return KernelDecision(
@@ -164,6 +174,30 @@ def row_verdict(
             if effect in ("ask", "deny")
             else ""
         ),
+        reach=(
+            asked.reach
+            if asked is not None
+            else question_reach(declared if reached is None else reached)
+        ),
+    )
+
+
+def settles_unguarded(word: str, following: list[str], row: ShellRuleRow) -> bool:
+    """Whether a guarded flag names a setting its row declared unremarkable.
+
+    The one reading :func:`split_subcommand` gives a command's globals, offered
+    to any row that declares which of its guarded flags carry a setting. Only a
+    legible value outside the guarded ones stands the flag down: a value that
+    expands at run time, or a spelling that cannot be separated from the flag,
+    is one nobody can weigh, and keeps the question.
+    """
+    if not flag_matches(word, row["setting_flags"]):
+        return False
+    named = carried_setting(word, row["setting_flags"], following)
+    return (
+        bool(named["value"])
+        and not opaque_argument(named["value"])
+        and not key_matches(named["value"], row["guarded_settings"])
     )
 
 
@@ -372,6 +406,9 @@ def flag_write_verdict(
         row["reason"] or "this flag writes a file",
         write_checkpoint(answered["scope"]),
         arguments=arguments,
+        # Where the file lands, rather than what the plain command does: `sort`
+        # reads, and `sort -o` over somebody's file is a write to it.
+        reached=[declare("writes_path", scope=answered["scope"])],
     )
 
 
@@ -697,8 +734,10 @@ def apply_command_row(
         guarded = next(
             (
                 word
-                for word in arguments
-                if not probing and flag_matches(word, row["ask_flags"])
+                for position, word in enumerate(arguments)
+                if not probing
+                and flag_matches(word, row["ask_flags"])
+                and not settles_unguarded(word, arguments[position + 1 :], row)
             ),
             None,
         )
@@ -709,6 +748,13 @@ def apply_command_row(
                 row["reason"] or f"{guarded} requires approval",
                 effects=[*row["effects"], *row["flag_effects"]],
                 arguments=arguments,
+                # What the flag adds is what the flag's effects say, and a flag
+                # that declared none was placed by nobody.
+                reached=(
+                    [*row["effects"], *row["flag_effects"]]
+                    if row["flag_effects"]
+                    else []
+                ),
             )
         # After the ask-flags, so a command carrying both keeps the stronger
         # question: `sort --compress-program=x -o out.txt` runs a program
@@ -822,36 +868,54 @@ def split_subcommand(
     ask_flags = default["ask_flags"] if default else []
     value_flags = default["value_flags"] if default else []
     setting_flags = default["setting_flags"] if default else []
-    guarded_settings = default["guarded_settings"] if default else []
     position = 0
     while position < len(arguments):
         word = arguments[position]
         if not word.startswith("-"):
             return Subcommand(word=word, remainder=arguments[position + 1 :])
         if flag_matches(word, ask_flags) and default is not None:
-            named = carried_setting(word, setting_flags, arguments[position + 1 :])
-            if (
-                named["value"]
-                and not opaque_argument(named["value"])
-                and not key_matches(named["value"], guarded_settings)
-            ):
+            following = arguments[position + 1 :]
+            named = carried_setting(word, setting_flags, following)
+            if settles_unguarded(word, following, default):
                 position += named["words"]
                 continue
-            return global_flag_question(default, executable, word)
+            # A setting the row can read, and which only runs a program where
+            # the session runs, carries what the flags declared. One that
+            # reaches past this machine, one that cannot be read, and a global
+            # that is not a setting at all -- `--exec-path` chooses the very
+            # helpers a push runs -- were placed by nobody.
+            inward = (
+                flag_matches(word, setting_flags)
+                and bool(named["value"])
+                and not opaque_argument(named["value"])
+                and not key_matches(named["value"], default["outward_settings"])
+            )
+            return global_flag_question(
+                default,
+                executable,
+                word,
+                reached=default["flag_effects"] if inward else [],
+            )
         position += 2 if word in value_flags else 1
     return Subcommand(word="", remainder=[])
 
 
 def global_flag_question(
-    default: ShellRuleRow, executable: str, flag: str
+    default: ShellRuleRow, executable: str, flag: str, reached: list[EffectRow]
 ) -> KernelDecision:
     """The question a guarded global puts, whatever verb follows it.
 
     Asked of the command's own row, for the placement it carries, and asked
     before the verb is judged: the global changes how every verb runs.
+    ``reached`` is what the global's setting declared it reaches, and nothing
+    where no declaration placed it, which keeps the question inside a
+    container too.
     """
     return row_verdict(
-        default, "ask", f"{executable} global flag {flag} changes how the command runs"
+        default,
+        "ask",
+        f"{executable} global flag {flag} changes how the command runs",
+        reached=reached,
     )
 
 
@@ -874,6 +938,18 @@ def declares_command(executable: str, rows: list[ShellRuleRow]) -> bool:
     the forms it named, including spellings nobody thought of.
     """
     return any(row["command"] == executable for row in rows)
+
+
+class MatchedRow(TypedDict):
+    """The row one command's words reach, and the words it is applied to.
+
+    ``arguments`` are what :func:`apply_command_row` reads: everything after
+    the command word for a command's own row, and everything after the
+    subcommand -- operation words included -- for a row beneath one.
+    """
+
+    row: ShellRuleRow
+    arguments: list[str]
 
 
 def decide_command_rows(
@@ -907,6 +983,23 @@ def decide_as_spelled(
     unread verb names no row and falls to the default above it -- which is
     why nothing but :func:`decide_command_rows` answers with this alone.
     """
+    matched = matched_command_row(words, rows)
+    if isinstance(matched, KernelDecision):
+        return matched
+    return apply_command_row(matched["row"], matched["arguments"], measured)
+
+
+def matched_command_row(
+    words: list[str], rows: list[ShellRuleRow]
+) -> MatchedRow | KernelDecision:
+    """Walk a command's words to the row that answers for them, by name and depth.
+
+    Separate from the verdict so a reader asking *which* row and *which*
+    operands -- where a clone lands, say -- walks the same globals, the same
+    subcommand and the same operation path the verdict does, rather than
+    guessing them from positions. A walk that ends without a row is the verdict
+    that says so.
+    """
     executable = posixpath.basename(words[0])
     matches = [row for row in rows if row["command"] == executable]
     if not matches:
@@ -918,8 +1011,9 @@ def decide_as_spelled(
         return unlisted(f"command {executable!r} is not classified")
     arguments = words[1:]
     if not any(row["subcommand"] for row in matches):
-        return apply_command_row(
-            next(row for row in matches if not row["subcommand"]), arguments, measured
+        return MatchedRow(
+            row=next(row for row in matches if not row["subcommand"]),
+            arguments=arguments,
         )
     default = next((row for row in matches if not row["subcommand"]), None)
     split = split_subcommand(executable, arguments, default)
@@ -938,7 +1032,7 @@ def decide_as_spelled(
     if not subrows:
         if default is None:
             return unlisted(f"{executable} {subword} is not classified")
-        return apply_command_row(default, arguments, measured)
+        return MatchedRow(row=default, arguments=arguments)
     if any(row["operation"] for row in subrows):
         operands = [word for word in remainder if not word.startswith("-")]
         opword = next(iter(operands), "")
@@ -950,12 +1044,47 @@ def decide_as_spelled(
         ]
         if oprows:
             matched = max(oprows, key=lambda row: len(row["operation_path"]))
-            return apply_command_row(matched, remainder, measured)
+            return MatchedRow(row=matched, arguments=remainder)
         subdefault = next((row for row in subrows if not row["operation"]), None)
         if subdefault is not None:
-            return apply_command_row(subdefault, remainder, measured)
+            return MatchedRow(row=subdefault, arguments=remainder)
         return unlisted(f"{executable} {subword} {opword} is not classified")
-    return apply_command_row(subrows[0], remainder, measured)
+    return MatchedRow(row=subrows[0], arguments=remainder)
+
+
+def landing_words(matched: MatchedRow) -> list[str]:
+    """The words naming where a matched row's operation writes, as its row declares.
+
+    Empty where the row declares no landing. Declared and nothing names one,
+    the operation writes where it runs, spelled ``.``. Operands are the literal
+    words after the operation path that are neither options nor an option's
+    value, up to a ``--`` that hands the rest to another program; the row says
+    from which operand on they name a place.
+    """
+    row = matched["row"]
+    if not row["landing_operands"] and not row["landing_flags"]:
+        return []
+    arguments = matched["arguments"]
+    ended = arguments.index("--") if "--" in arguments else len(arguments)
+    carried = [
+        (
+            position,
+            carried_setting(word, row["landing_flags"], arguments[position + 1 :]),
+        )
+        for position, word in enumerate(arguments[:ended])
+        if flag_matches(word, row["landing_flags"])
+    ]
+    consumed = {position + 1 for position, named in carried if named["words"] == 2}
+    operands = [
+        word
+        for position, word in enumerate(arguments[:ended])
+        if position not in consumed and not word.startswith("-")
+    ][len(row["operation_path"]) :]
+    landed = [
+        *(operands[row["landing_operands"] - 1 :] if row["landing_operands"] else []),
+        *(named["value"] for _position, named in carried if named["value"]),
+    ]
+    return landed or ["."]
 
 
 class Reading(TypedDict):
@@ -1070,7 +1199,8 @@ def unread_readings(
             Reading(
                 word=word,
                 spelled=flag,
-                decision=global_flag_question(default, executable, flag),
+                # A setting nobody can read was placed by nobody.
+                decision=global_flag_question(default, executable, flag, reached=[]),
             )
             for word in words[1:verb]
             if default is not None
@@ -1459,6 +1589,7 @@ def decide_curl_words(
     allowed_scopes: list[UrlScopeRow],
     denied_scopes: list[UrlScopeRow],
     unjudged_ambient: UnjudgedAmbient = "ask",
+    host_ports: Sequence[int] = (),
 ) -> KernelDecision:
     """Allow only read-method curl against the declared fetch scopes.
 
@@ -1515,7 +1646,11 @@ def decide_curl_words(
         return unjudged("curl has no URL")
     for url in urls:
         verdict = decide_fetch(
-            curl_url(url), allowed_scopes, denied_scopes, unjudged_ambient
+            curl_url(url),
+            allowed_scopes,
+            denied_scopes,
+            unjudged_ambient,
+            host_listener=loopback_port(curl_url(url)) in host_ports,
         )
         if verdict.effect != "allow":
             return verdict

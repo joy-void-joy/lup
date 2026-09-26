@@ -71,6 +71,45 @@ Two things a rule states that are not effects:
 - `sandbox` — where an invocation has to run, whatever it earns. The axis
   below.
 
+#### Where the harm lands, and what the container settles
+
+Every effect also carries a `reach`: where the harm its question guards
+against would land. The member states a default and a row overrides it where
+its effect lands somewhere its kind does not.
+
+| Reach | The harm lands | Inside the measured container |
+|---|---|---|
+| `container` | in processes, variables, packages and programs the session runs | settled, unless a path it names is one the host lent from outside this checkout |
+| `mount` | on the paths the operation names | settled where every named path is the container's own |
+| `dependency` | in code arriving from an index, which a later build runs | keeps its question |
+| `credential` | on a secret the launch lent, or the identity a later command acts as | keeps its question |
+| `lup` | on this policy's own settings and machinery | keeps its question |
+| `host_later` | beyond the container or after it: a remote, another machine, a cache the host reads | keeps its question |
+
+The settlement row `contained-judgement` reads it. Only where the launch
+measured a container placing its work inside itself — the `outer` posture,
+not the runtime's own sandbox — a judged ask or refusal whose every
+objecting part stays inside is settled as a permission: `kill`, `make`, an
+exported `PYTHONPATH`, `git -c core.pager=…`, `git rebase -x`, a system
+package install, a nested `codex` session, a clone into a directory the
+container owns, and a child launched with `--sandbox none` or `--mount`.
+What names a place — a redirection, a path verb's operand, a write flag, the
+landing a row declares (`git clone <repo> <dir>`, `gh release download -D`) —
+is placed by the host against the lease and its own mount table: in this
+checkout, somewhere else the host lent, or the container's own. A path
+nobody can read, and a mount table nobody can read, land on the host. A
+reach nobody stated — any verdict reached by code rather than a declared
+effect — keeps its question everywhere, which is why `sudo` (whose payload
+is not judged), `ss -K` (the host's network), and a `git -c` setting that
+hands over a credential or retargets a remote do.
+
+A decision escalation keeps the question the agent asked for, and a hard
+prohibition, a missing channel and a read-only hole are settled before the
+row is read. The same measured container makes a loopback fetch ask when a
+process the container cannot see holds the port: sharing the host's network
+means sharing its loopback, and the scope declared for this machine's own
+development servers would otherwise admit the operator's.
+
 And the columns that say what a *word* adds or removes, each answering one
 question the row alone cannot:
 
@@ -113,6 +152,7 @@ The rows, in order, each stating its own claim:
 | `read-only-write` | `ReadOnlyWrite` | A write landing in a read-only region this launch measured, refused. |
 | `displaced-write` | `DisplacedWrite` | A write whose target does not land where its spelling says it does. |
 | `provider-native` | `ProviderNative` | A rule looked and handed the decision to the provider&#x27;s own mode. |
+| `contained-judgement` | `ContainedJudgement` | A judged question whose harm the measured container holds, settled inside. |
 | `recovered-loss` | `RecoveredLoss` | A question about a loss a proven capture already put somewhere safe. |
 | `unreachable-reviewer` | `UnreachableReviewer` | A question in a session no eligible reviewer can be reached from. |
 | `contained-effects` | `ContainedEffects` | Nobody judged it, and everything it can do is confined: run it inside. |
@@ -841,13 +881,22 @@ session was interrupted about, and a verdict census lists what each row
 earns, so both go on agreeing when a de-escalation quietly stops firing.
 
 The corpus is swept once per posture a session runs in — interactive, worker,
-contained, and contained worker — because a verdict is only ever reached for
-somebody, and a rule that starts asking where nobody is there to answer stops
-a session rather than interrupting one. `--autonomous`, `--headless` and
-`--trapped` name one posture and ask about that one instead. Pass a file for
+inner, inner worker, outer, and outer worker — because a verdict is only ever
+reached for somebody, and a rule that starts asking where nobody is there to
+answer stops a session rather than interrupting one. `--autonomous`,
+`--headless`, `--trapped` (the runtime's own sandbox) and `--outer` (the
+container) name one posture and ask about that one instead. Pass a file for
 a question this project has not settled — a candidate corpus, or the commands
 a recorded session was actually stopped for — asked from the posture those
 same flags name.
+
+`dev policy` answers under all three placements the launcher spells —
+`none`, `inner` and `outer` — and `--placement` narrows it to one. Each
+placement decides both walls itself rather than inheriting the ledger of the
+session asking, so a reading taken inside a container still says what a host
+session is told. An `outer` reading measures what only a container can: which
+paths this machine's mount table lends from elsewhere, and which loopback
+ports a process out of sight holds.
 
 Only what must keep allowing belongs in that corpus. A command that asks
 today is either a defect to fix or a question somebody meant, and neither is

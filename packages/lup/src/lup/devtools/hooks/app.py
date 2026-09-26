@@ -115,6 +115,7 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
         autonomous: bool,
         interactive: bool,
         trapped: bool = False,
+        contained: bool = False,
     ) -> Decision:
         """This project's declaration, taken through the shared classifier.
 
@@ -122,7 +123,9 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
         what a command earns must not answer it differently, or the sweep is
         checking a policy nobody runs.
         """
-        return classify_shell(declared(), command, autonomous, interactive, trapped)
+        return classify_shell(
+            declared(), command, autonomous, interactive, trapped, contained
+        )
 
     @app.command("classify")
     def classify_command(
@@ -151,6 +154,13 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
                 help="Judge as a confined session whose runtime cannot escape",
             ),
         ] = False,
+        outer: Annotated[
+            bool,
+            typer.Option(
+                "--outer",
+                help="Judge as a session inside the container `outer` measures",
+            ),
+        ] = False,
         as_json: Annotated[bool, typer.Option("--json", help="Emit JSON")] = False,
     ) -> None:
         """Say what the policy decides about one shell command, and why.
@@ -175,7 +185,7 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
         asked = command_text(command, file)
         report(
             asked,
-            shell_decision(asked, autonomous, not headless, trapped),
+            shell_decision(asked, autonomous, not headless, trapped, outer),
             as_json,
             foreign_warnings(asked),
         )
@@ -213,6 +223,13 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
             typer.Option(
                 "--trapped",
                 help="Judge as a confined session whose runtime cannot escape",
+            ),
+        ] = False,
+        outer: Annotated[
+            bool,
+            typer.Option(
+                "--outer",
+                help="Judge as a session inside the container `outer` measures",
             ),
         ] = False,
         as_json: Annotated[bool, typer.Option("--json", help="Emit JSON")] = False,
@@ -258,19 +275,21 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
         )
         shapes = (
             list(SESSION_SHAPES)
-            if file is None and not (autonomous or headless or trapped)
+            if file is None and not (autonomous or headless or trapped or outer)
             else [
                 SessionShape(
                     what=", ".join(
                         [
                             "worker" if autonomous else "attended",
                             *(["headless"] if headless else []),
-                            *(["contained"] if trapped else []),
+                            *(["inner"] if trapped else []),
+                            *(["outer"] if outer else []),
                         ]
                     ),
                     autonomous=autonomous,
                     interactive=not headless,
                     trapped=trapped,
+                    contained=outer,
                 )
             ]
         )
@@ -279,7 +298,11 @@ def create_hooks_app(declared: Callable[[], HookSet]) -> typer.Typer:
                 shape,
                 command,
                 shell_decision(
-                    command, shape.autonomous, shape.interactive, shape.trapped
+                    command,
+                    shape.autonomous,
+                    shape.interactive,
+                    shape.trapped,
+                    shape.contained,
                 ),
             )
             for shape in shapes

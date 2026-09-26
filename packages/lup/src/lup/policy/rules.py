@@ -25,7 +25,7 @@ from lup.policy.kernel.edit import (
     decide_edit,
     path_rule_matches as kernel_path_rule_matches,
 )
-from lup.policy.kernel.fetch import decide_fetch
+from lup.policy.kernel.fetch import decide_fetch, loopback_port
 from lup.policy.kernel.semantics import UnjudgedAmbient
 from lup.policy.assets.host import (
     declared_identity,
@@ -33,7 +33,9 @@ from lup.policy.assets.host import (
     directory_write_targets,
     empty_directory_targets,
     foreign_repository,
+    host_held_ports,
     measured_boundary,
+    measured_landings,
     outside_this_project,
     readonly_write_targets,
     recoverable_write_targets,
@@ -67,9 +69,15 @@ from lup.policy.kernel.rows import (
     RewrittenDocumentRow,
     UnproducedDocumentRow,
     UrlScopeRow,
+    landing_rows,
     unproduced_cause,
 )
-from lup.policy.kernel.shell import decide_shell, decide_shell_segment, shell_context
+from lup.policy.kernel.shell import (
+    decide_shell,
+    decide_shell_segment,
+    shell_context,
+    shell_posture_targets,
+)
 from lup.policy.edit_rules import EditRule, erase_edit_rules
 from lup.policy.imports import ImportBoundary
 from lup.policy.assets.host import worktree_path, worktree_root
@@ -136,6 +144,11 @@ class FetchPolicy(DecisionPolicy[FetchUrl]):
     ``unjudged_ambient`` is the same declaration the shell family reads for a
     command nothing classified, taken here so a profile that declared the
     seamless posture gets it on both surfaces rather than on one.
+
+    ``contained`` says the session sits in a container sharing the host's
+    network, where a loopback port is the session's own only if one of the
+    container's processes holds its listener -- the dispatcher's reading,
+    taken from this machine's socket tables.
     """
 
     def __init__(
@@ -143,18 +156,24 @@ class FetchPolicy(DecisionPolicy[FetchUrl]):
         allowed: list[UrlScope],
         denied: list[UrlScope],
         unjudged_ambient: UnjudgedAmbient = "ask",
+        contained: bool = False,
     ) -> None:
         self.allowed = list(allowed)
         self.denied = list(denied)
         self.unjudged_ambient: UnjudgedAmbient = unjudged_ambient
+        self.contained = contained
 
     def decide(self, event: FetchUrl) -> Decision:
+        port = loopback_port(str(event.url))
         return pydantic_decision(
             decide_fetch(
                 str(event.url),
                 [url_scope_row(scope) for scope in self.allowed],
                 [url_scope_row(scope) for scope in self.denied],
                 self.unjudged_ambient,
+                host_listener=self.contained
+                and port is not None
+                and port in host_held_ports(Path("/proc")),
             )
         )
 
@@ -471,6 +490,26 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 checkout_root=str(root),
                 inside_placement=self.inside_placement,
                 relayed=self.relayed,
+                # The same two measurements a dispatcher takes inside a
+                # container, taken wherever this composition was told it is
+                # in one -- so a reading of that posture from a host checkout
+                # places each path by this machine's own mount table.
+                landings=(
+                    landing_rows(
+                        measured_landings(
+                            shell_posture_targets(event.command, self.rules),
+                            measured_boundary(root),
+                            root,
+                        )
+                    )
+                    if self.contained and self.inside_placement
+                    else []
+                ),
+                host_ports=(
+                    host_held_ports(Path("/proc"))
+                    if self.contained and self.inside_placement
+                    else []
+                ),
             )
         )
         # Strongest wins, the rule every other join in this policy uses. The

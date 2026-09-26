@@ -54,28 +54,47 @@ class SessionShape(BaseModel, frozen=True):
     The cost of the extra postures is that a rule which genuinely means to
     stop an everyday command in one of them has to say so here, which is the
     same trade the corpus itself makes and for the same reason.
+
+    ``trapped`` is the runtime's own sandbox on the operator's machine, which
+    `inner` arms; ``contained`` is the container `outer` measures around the
+    session. They are separate walls answering separate rows, so a posture
+    names which one stands.
     """
 
     what: str
     autonomous: bool
     interactive: bool
     trapped: bool
+    contained: bool = False
 
 
 SESSION_SHAPES = (
     SessionShape(what="interactive", autonomous=False, interactive=True, trapped=False),
     SessionShape(what="worker", autonomous=True, interactive=False, trapped=False),
-    SessionShape(what="contained", autonomous=False, interactive=True, trapped=True),
+    SessionShape(what="inner", autonomous=False, interactive=True, trapped=True),
+    SessionShape(what="inner worker", autonomous=True, interactive=False, trapped=True),
     SessionShape(
-        what="contained worker", autonomous=True, interactive=False, trapped=True
+        what="outer",
+        autonomous=False,
+        interactive=True,
+        trapped=False,
+        contained=True,
+    ),
+    SessionShape(
+        what="outer worker",
+        autonomous=True,
+        interactive=False,
+        trapped=False,
+        contained=True,
     ),
 )
 """The postures a session of this vocabulary runs in, swept one by one.
 
-The two axes that change which row answers, crossed rather than sampled: who
-is there to answer a question, and whether the runtime can put a call outside
-its boundary. Three of the four are cheap to state and none of them was
-measured before, so the cross is what the corpus is worth.
+The axes that change which row answers, crossed rather than sampled: who is
+there to answer a question, and which wall -- none, the runtime's sandbox, or
+the container -- the session runs behind. Each is cheap to state, and a
+tightening that shows only behind one wall is invisible to a sweep of the
+others.
 """
 
 

@@ -108,6 +108,13 @@ class JudgedCommand(BaseModel, frozen=True):
     the same word: `dd of=x` writes `x`, and a row that only knew a marker was
     present left the scope column claiming a capture covered wherever it
     pointed. Named here, the path is read like any other destination."""
+    reach: str = ""
+    """Where the harm this command's question guards against lands, where the
+    group's effect does not say: `kill` destroys a process the container owns,
+    `ssh` reaches another machine, and both are one loss nothing captures."""
+    landing_operands: int = 0
+    """The operand, counted from one, from which every operand is a place this
+    command changes: `chmod <mode> <file>...` changes the second on."""
 
 
 def read_only_rules(
@@ -228,8 +235,17 @@ def judged_ask_rules(
             reason="copying over files requires approval",
             checkpoint="boundary_wide",
         ),
-        JudgedCommand(name="chmod", reason="changing permissions requires approval"),
-        JudgedCommand(name="chown", reason="changing ownership requires approval"),
+        JudgedCommand(
+            name="chmod",
+            reason="changing permissions requires approval",
+            reach="container",
+            landing_operands=2,
+        ),
+        JudgedCommand(
+            name="chown",
+            reason="changing ownership requires approval",
+            landing_operands=2,
+        ),
         JudgedCommand(
             name="ln",
             reason="creating links requires approval",
@@ -261,14 +277,23 @@ def judged_ask_rules(
             # and the other carries none.
             bare_reads=True,
             reason="mounting a filesystem requires approval",
+            reach="container",
         ),
         JudgedCommand(
             name="truncate",
             reason="truncating files requires approval",
             checkpoint="boundary_wide",
         ),
-        JudgedCommand(name="kill", reason="terminating processes requires approval"),
-        JudgedCommand(name="pkill", reason="terminating processes requires approval"),
+        JudgedCommand(
+            name="kill",
+            reason="terminating processes requires approval",
+            reach="container",
+        ),
+        JudgedCommand(
+            name="pkill",
+            reason="terminating processes requires approval",
+            reach="container",
+        ),
         JudgedCommand(
             name="command",
             # Reached only in the query shape: every other spelling runs the
@@ -311,9 +336,15 @@ def judged_ask_rules(
         ),
         JudgedCommand(name="sudo", reason="privilege escalation requires approval"),
         JudgedCommand(name="doas", reason="privilege escalation requires approval"),
-        JudgedCommand(name="ssh", reason="remote access requires approval"),
-        JudgedCommand(name="scp", reason="remote copies require approval"),
-        JudgedCommand(name="rsync", reason="remote sync requires approval"),
+        JudgedCommand(
+            name="ssh", reason="remote access requires approval", reach="host_later"
+        ),
+        JudgedCommand(
+            name="scp", reason="remote copies require approval", reach="host_later"
+        ),
+        JudgedCommand(
+            name="rsync", reason="remote sync requires approval", reach="host_later"
+        ),
         JudgedCommand(
             name="wget",
             reason="downloading files requires approval",
@@ -323,26 +354,67 @@ def judged_ask_rules(
             name="make",
             read_verbs=["-n", "--dry-run", "--just-print", "-q", "--question"],
             reason="make runs whatever its recipes say",
+            reach="container",
         ),
         JudgedCommand(
             name="npm",
             read_verbs=["ls", "list", "view", "outdated", "why", "explain"],
             reason="package tools fetch and run code",
+            reach="dependency",
         ),
         JudgedCommand(
             name="pnpm",
             reason="package tools fetch and run code",
+            reach="dependency",
         ),
         JudgedCommand(
             name="yarn",
             reason="package tools fetch and run code",
+            reach="dependency",
         ),
-        JudgedCommand(name="apt", reason="system package changes require approval"),
-        JudgedCommand(name="apt-get", reason="system package changes require approval"),
-        JudgedCommand(name="pacman", reason="system package changes require approval"),
-        JudgedCommand(name="brew", reason="system package changes require approval"),
-        JudgedCommand(name="systemctl", reason="service management requires approval"),
-        JudgedCommand(name="crontab", reason="schedule changes require approval"),
+        JudgedCommand(
+            name="apt",
+            reason="system package changes require approval",
+            reach="container",
+        ),
+        JudgedCommand(
+            name="apt-get",
+            reason="system package changes require approval",
+            reach="container",
+        ),
+        JudgedCommand(
+            name="pacman",
+            reason="system package changes require approval",
+            reach="container",
+        ),
+        JudgedCommand(
+            name="brew",
+            reason="system package changes require approval",
+            reach="container",
+        ),
+        JudgedCommand(
+            name="systemctl",
+            reason="service management requires approval",
+            reach="container",
+        ),
+        JudgedCommand(
+            name="crontab",
+            reason="schedule changes require approval",
+            reach="container",
+        ),
+        # The system package managers change the image a container runs and go
+        # with it. These build what the AUR's user-submitted recipes say and
+        # install the result, which is a dependency arriving however
+        # ephemeral the system it lands in.
+        *(
+            JudgedCommand(
+                name=helper,
+                reason="an AUR helper builds and installs what a user-submitted"
+                " recipe says",
+                effects=[declare("installs_dependency", scope="AUR package")],
+            )
+            for helper in ("yay", "paru", "pikaur", "trizen", "aurman", "pakku")
+        ),
     ),
 ) -> list[ShellCommandRule]:
     """Commands that ask on every production path, with the reason each carries.
@@ -357,11 +429,17 @@ def judged_ask_rules(
             # The checkpoint column read as behaviour rather than as a
             # requirement: it already names what capture would put back what
             # this destroys, which is the whole of what the loss row asks.
-            effects=[declare("destroys_uncaptured", scope=command.checkpoint)],
+            effects=command.effects
+            or [
+                declare(
+                    "destroys_uncaptured", scope=command.checkpoint, reach=command.reach
+                )
+            ],
             read_verbs=command.read_verbs,
             write_markers=command.write_markers,
             write_flags=command.write_flags,
             bare_reads=command.bare_reads,
+            landing_operands=command.landing_operands,
             checkpoint=command.checkpoint,
             reason=command.reason,
             recovery=command.recovery,
@@ -435,19 +513,31 @@ def reaching_builtin_rules(
             name="export",
             reason="an exported variable changes what later commands see",
             recovery="Set it on the command that needs it.",
-            effects=[declare("mutates_environment", scope="shell variable")],
+            effects=[
+                declare(
+                    "mutates_environment", scope="shell variable", reach="container"
+                )
+            ],
         ),
         JudgedCommand(
             name="declare",
             reason="a declared variable changes what later commands see",
             recovery="Set it on the command that needs it.",
-            effects=[declare("mutates_environment", scope="shell variable")],
+            effects=[
+                declare(
+                    "mutates_environment", scope="shell variable", reach="container"
+                )
+            ],
         ),
         JudgedCommand(
             name="unset",
             reason="unsetting a variable changes what later commands see",
             recovery="Set it on the command that needs it.",
-            effects=[declare("mutates_environment", scope="shell variable")],
+            effects=[
+                declare(
+                    "mutates_environment", scope="shell variable", reach="container"
+                )
+            ],
         ),
     ),
 ) -> list[ShellCommandRule]:
@@ -546,7 +636,11 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             # The agent is the user's, not this session's, and it outlives the
             # session either way -- which is machine state that is neither
             # this checkout nor another host.
-            effects=[declare("mutates_environment", scope="credential agent")],
+            effects=[
+                declare(
+                    "mutates_environment", scope="credential agent", reach="credential"
+                )
+            ],
             refuses="credential-agent changes stay with the user",
             allow_flags=["-l", "-L"],
             reason="credential-agent changes stay with the user",
@@ -554,7 +648,11 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
         ),
         ShellCommandRule(
             name="ssh-agent",
-            effects=[declare("mutates_environment", scope="credential agent")],
+            effects=[
+                declare(
+                    "mutates_environment", scope="credential agent", reach="credential"
+                )
+            ],
             refuses="credential-agent lifecycle stays with the user",
             reason="credential-agent lifecycle stays with the user",
             recovery="Ask the user to run it.",
@@ -567,6 +665,13 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             # `--compress-program` names a program run over the temporaries.
             write_flags=["-o", "--output"],
             ask_flags=["--compress-program"],
+            flag_effects=[
+                declare(
+                    "runs_undeclared_program",
+                    scope="a program a flag names",
+                    reach="container",
+                )
+            ],
             reason="a sort flag that writes a file or runs a program requires approval",
         ),
         ShellCommandRule(
@@ -586,6 +691,13 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             name="rg",
             effects=[declare("reads_path", scope="project")],
             ask_flags=["--pre", "--hostname-bin", "--search-zip", "-z"],
+            flag_effects=[
+                declare(
+                    "runs_undeclared_program",
+                    scope="a program a flag names",
+                    reach="container",
+                )
+            ],
             reason="a ripgrep flag that runs another program requires approval",
         ),
         ShellCommandRule(
@@ -622,6 +734,13 @@ def guarded_tool_rules() -> list[ShellCommandRule]:
             effects=[declare("reads_path", scope="project")],
             write_flags=["--output", "-output"],
             ask_flags=["--shell", "-shell"],
+            flag_effects=[
+                declare(
+                    "runs_undeclared_program",
+                    scope="a program a flag names",
+                    reach="container",
+                )
+            ],
             reason=(
                 "an xmllint flag that writes files or opens a shell requires approval"
             ),
@@ -809,23 +928,37 @@ def devtools_rules() -> list[ShellSubcommandRule]:
                 # A launch from inside a session opens a session of its own, and
                 # these flags lend it what no registration names -- for that one
                 # launch, the widening a registration makes for every launch
-                # after it. `--generate-only` launches nothing, so lends nothing.
+                # after it -- or open it with no boundary at all. `--generate-only`
+                # launches nothing, so lends nothing.
+                #
+                # Both stay inside a container the parent runs in: there is no
+                # engine socket to lend a host folder through, and a child with
+                # no sandbox of its own is still behind the parent's walls.
                 *[
                     ShellOperationRule(
                         name=launcher,
-                        ask_flags=["--mount", "--mount-ro", "--device"],
+                        ask_flags=["--mount", "--mount-ro", "--device", "--sandbox"],
+                        setting_flags=["--sandbox"],
+                        guarded_settings=["none"],
                         flag_effects=[
-                            declare("mutates_environment", scope="launch boundary")
+                            declare(
+                                "mutates_environment",
+                                scope="launch boundary",
+                                reach="container",
+                            ),
+                            declare("escapes_containment", scope="child launch"),
                         ],
                         probe_flags=["--generate-only"],
                         reason=(
                             "`--mount`, `--mount-ro` and `--device` hand a host "
-                            "folder or device to the session this launches"
+                            "folder or device to the session this launches, and "
+                            "`--sandbox none` opens it with no boundary"
                         ),
                         recovery=(
                             "`--generate-only` generates without launching. A "
-                            "session that needs another folder or device is the "
-                            "user's to open, from their own terminal."
+                            "session that needs another folder, a device or no "
+                            "boundary is the user's to open, from their own "
+                            "terminal."
                         ),
                     )
                     for launcher in ("claude", "codex")
@@ -1278,6 +1411,13 @@ def git_rule(
             name="grep",
             effects=[declare("reads_path", scope="project")],
             ask_flags=["-O", "--open-files-in-pager"],
+            flag_effects=[
+                declare(
+                    "runs_undeclared_program",
+                    scope="a program a flag names",
+                    reach="container",
+                )
+            ],
             reason="opening matches in an arbitrary program requires approval",
         ),
         ShellSubcommandRule(
@@ -1286,6 +1426,13 @@ def git_rule(
             # replaying them ordinary and `--exec` a separate question.
             effects=[declare("mutates_repository", scope="reversible")],
             ask_flags=["-x", "--exec"],
+            flag_effects=[
+                declare(
+                    "runs_undeclared_program",
+                    scope="a program a flag names",
+                    reach="container",
+                )
+            ],
             reason="replaying commits through a shell command requires approval",
         ),
         # Both reach a declared remote and land objects in the store. Only
@@ -1336,13 +1483,18 @@ def git_rule(
         ),
         # The same arrival `gh repo clone` is, reached by the other spelling:
         # a whole tree of somebody's code, landing where a build can run it.
+        # Where the tree lands is the whole of what the question weighs: a
+        # clone into a directory the container owns reaches nothing a build
+        # outside it would run, and one into the checkout is the arrival.
         ShellSubcommandRule(
             name="clone",
             effects=[
-                declare("fetches", scope="undeclared"),
-                declare("installs_dependency", scope="repository"),
+                declare("fetches", scope="undeclared", reach="mount"),
+                declare("installs_dependency", scope="repository", reach="mount"),
                 declare("writes_path", scope="production", write="create"),
             ],
+            landing_operands=2,
+            landing_flags=["--separate-git-dir"],
             reason="cloning fetches external code",
         ),
         ShellSubcommandRule(
@@ -1772,6 +1924,25 @@ def git_rule(
         # and `--exec-path` and `--super-prefix` carry one too.
         setting_flags=["-c", "--config-env"],
         guarded_settings=guarded_config,
+        # What a guarded setting runs, it runs where the session runs -- a
+        # pager, an editor, a merge driver -- except for these: a credential
+        # helper is handed a lent secret, and the rest decide where the next
+        # fetch or push goes, past every guard a destination meets.
+        flag_effects=[
+            declare(
+                "runs_undeclared_program",
+                scope="a program a setting names",
+                reach="container",
+            )
+        ],
+        outward_settings=[
+            "credential.helper",
+            "credential.*.helper",
+            "core.sshcommand",
+            "url.*.insteadof",
+            "remote.*.url",
+            "remote.*.pushurl",
+        ],
         sandbox=sandbox,
         subcommands=[*leaf, *guarded],
         reason="this git subcommand is not classified as read-only or reversible",
@@ -1869,7 +2040,13 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
             for name in names
         ]
 
-    def lands(names: list[str], scope: str, reason: str) -> list[ShellOperationRule]:
+    def lands(
+        names: list[str],
+        scope: str,
+        reason: str,
+        operands: int = 0,
+        flags: Sequence[str] = (),
+    ) -> list[ShellOperationRule]:
         """Fetches that leave somebody else's code on the disk.
 
         Not the same act as the queries above, and the difference is not that
@@ -1888,15 +2065,22 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
         always asked and `gh repo clone` always allowed, which is the same
         code arriving in the same tree by two spellings and the divergence
         this model exists to make unrepresentable.
+
+        ``operands`` and ``flags`` say where the bytes land, because that is
+        the whole of what the trust question weighs inside a container: a
+        tree landing in a directory the container owns reaches nothing a build
+        outside it runs.
         """
         return [
             ShellOperationRule(
                 name=name,
                 effects=[
                     declare("fetches", scope="declared"),
-                    declare("installs_dependency", scope=scope),
+                    declare("installs_dependency", scope=scope, reach="mount"),
                     declare("writes_path", scope="production", write="create"),
                 ],
+                landing_operands=operands,
+                landing_flags=list(flags),
                 reason=reason,
             )
             for name in names
@@ -2059,6 +2243,7 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                         ["download"],
                         "workflow artifact",
                         "a workflow artifact is code from a build",
+                        flags=["-D", "--dir"],
                     ),
                 ],
             ),
@@ -2073,6 +2258,7 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                         ["clone"],
                         "repository",
                         "cloning brings a repository's code into this tree",
+                        operands=2,
                     ),
                     *judged(
                         ["create", "fork", "rename", "archive", "delete", "edit"],
@@ -2090,6 +2276,7 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                         ["download"],
                         "release asset",
                         "a release asset is a published binary",
+                        flags=["-D", "--dir", "-O", "--output"],
                     ),
                     *judged(
                         ["create", "upload", "edit", "delete"],
@@ -2176,6 +2363,7 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                         ["clone"],
                         "gist",
                         "a gist is somebody's code, cloned into this tree",
+                        operands=2,
                     ),
                     *judged(
                         ["create", "edit", "delete"],
@@ -2491,7 +2679,13 @@ def codex_rule() -> ShellCommandRule:
         return [
             ShellSubcommandRule(
                 name=name,
-                effects=[declare("runs_undeclared_program", scope=f"codex {name}")],
+                effects=[
+                    declare(
+                        "runs_undeclared_program",
+                        scope=f"codex {name}",
+                        reach="container",
+                    )
+                ],
                 reason=f"`codex {name}` opens an agent or a server of its own",
             )
             for name in names
@@ -2499,7 +2693,7 @@ def codex_rule() -> ShellCommandRule:
 
     return ShellCommandRule(
         name="codex",
-        effects=[declare("runs_undeclared_program", scope="codex")],
+        effects=[declare("runs_undeclared_program", scope="codex", reach="container")],
         # Every global that consumes the following word, so a value is never
         # read as the subcommand. `--image` takes several, which this reading
         # cannot express; it lands on the ask the bare form already carries.
@@ -2555,7 +2749,13 @@ def codex_rule() -> ShellCommandRule:
             ),
             ShellSubcommandRule(
                 name="debug",
-                effects=[declare("runs_undeclared_program", scope="codex debug")],
+                effects=[
+                    declare(
+                        "runs_undeclared_program",
+                        scope="codex debug",
+                        reach="container",
+                    )
+                ],
                 reason="this codex debug tool is not one that only renders",
                 operations=[
                     ShellOperationRule(
@@ -2590,7 +2790,13 @@ def codex_rule() -> ShellCommandRule:
             ),
             ShellSubcommandRule(
                 name="app-server",
-                effects=[declare("runs_undeclared_program", scope="codex app-server")],
+                effects=[
+                    declare(
+                        "runs_undeclared_program",
+                        scope="codex app-server",
+                        reach="container",
+                    )
+                ],
                 reason="the app server is the process every Codex session runs in",
                 operations=[
                     ShellOperationRule(
@@ -2613,7 +2819,11 @@ def codex_rule() -> ShellCommandRule:
             *[
                 ShellSubcommandRule(
                     name=name,
-                    effects=[declare("mutates_environment", scope="codex")],
+                    effects=[
+                        declare(
+                            "mutates_environment", scope="codex", reach="credential"
+                        )
+                    ],
                     reason="stored Codex credentials are what every session runs as",
                 )
                 for name in ("login", "logout")

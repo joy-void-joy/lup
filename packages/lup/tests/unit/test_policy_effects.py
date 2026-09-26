@@ -29,7 +29,12 @@ def effect(
 ) -> EffectRow:
     """One declared effect, with the axes a row leaves unconstrained empty."""
     return EffectRow(
-        kind=kind, scope=scope, write=write, reviewed=reviewed, reason="probe"
+        kind=kind,
+        scope=scope,
+        write=write,
+        reviewed=reviewed,
+        reason="probe",
+        reach="host_later",
     )
 
 

@@ -462,7 +462,7 @@ class RenderedField(BaseModel, frozen=True):
     """
 
     name: str
-    value: str | bool | list[str] | list[EffectRow]
+    value: str | bool | int | list[str] | list[EffectRow]
 
 
 def mapping_rows_literal(rows: list[list[RenderedField]]) -> str:
