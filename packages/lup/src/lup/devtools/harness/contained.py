@@ -25,6 +25,7 @@ import os
 import shlex
 import stat
 import time
+from datetime import UTC, datetime
 from collections import deque
 from contextlib import nullcontext
 from ipaddress import IPv4Address
@@ -62,6 +63,7 @@ from lup.devtools.dev.traces import ARCHIVE_DIRECTORY_NAME
 from lup.harness.terminal import host_timezone
 from lup.providers.login import ProviderLogin
 from lup.providers.runtime_homes import runtime_logins
+from lup.devtools.harness.superseded import SupersededFile
 from lup.devtools.harness.environments import (
     HeldEnvironment,
     claimed,
@@ -72,8 +74,11 @@ from lup.devtools.harness.config_volume import (
     HomeHelper,
     HomeSeedPlaces,
     RuntimeVolume,
+    kept_for_superseded,
     settle_home_seed,
     split_config_volumes,
+    sweep_superseded,
+    swept_superseded_notice,
 )
 from lup.sandbox.attribution import WRITE_REFUSAL_MARKERS
 from lup.devtools.pointer_trust import judged_roots, store_exposure
@@ -1750,6 +1755,9 @@ def contained_argv(
         gid=root.stat().st_gid,
         config_home=image.config_home,
     )
+    superseded = SupersededFile()
+    kept_for = kept_for_superseded()
+    now = datetime.now(UTC)
     said.add(
         split_config_volumes(
             root,
@@ -1758,6 +1766,14 @@ def contained_argv(
                 RuntimeVolume(login=runtime, volume=state_volume_name(root, runtime))
                 for runtime in runtime_logins()
             ],
+            superseded,
+            kept_for,
+            now,
+        )
+    )
+    said.add(
+        swept_superseded_notice(
+            sweep_superseded(client, superseded, kept_for, now), kept_for
         )
     )
     # After the split, so the seed is settled against the volume a session

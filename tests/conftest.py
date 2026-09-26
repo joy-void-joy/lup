@@ -61,11 +61,14 @@ def personal_config_withheld(
     theme, a tier, a selected profile — answers the question a test meant to
     put to the code. Pointed at an empty directory rather than unset, which
     would fall back to that same file. See :mod:`lup.providers.user_config`.
+    The state lup keeps for the person is withheld the same way: a record
+    of the volumes a split superseded is the developer's, not a test's.
     """
     with pytest.MonkeyPatch.context() as environment:
         environment.setenv(
             "XDG_CONFIG_HOME", str(tmp_path_factory.mktemp("xdg-config"))
         )
+        environment.setenv("XDG_STATE_HOME", str(tmp_path_factory.mktemp("xdg-state")))
         yield
 
 

@@ -932,8 +932,10 @@ DECLARED: list[Migration] = [
                     "state_volume_name(root, scope), drop state_scope= from "
                     "contained_argv and session_argv, and read existing_volumes "
                     "from lup.devtools.harness.config_volume. The superseded "
-                    "per-worktree notice is gone: split_config_volumes moves "
-                    "and removes those volumes."
+                    "per-worktree notice is gone: split_config_volumes copies "
+                    "those volumes and records them as superseded, and "
+                    "sweep_superseded removes them once the person's days have "
+                    "passed."
                 )
             ),
         ],

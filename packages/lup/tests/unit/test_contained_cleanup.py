@@ -9,6 +9,7 @@ own removal carries, and the dry run.
 """
 
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -18,6 +19,8 @@ import sh
 import lup.devtools.harness.clean as clean
 import lup.devtools.harness.contained as contained
 from lup.devtools.dev.worktree import said_environment_removed
+from lup.devtools.harness.config_volume import HomeHelper
+from lup.devtools.harness.superseded import SupersededFile, SupersededRecord
 from lup.devtools.harness.environments import (
     claim_of,
     claimed,
@@ -84,6 +87,24 @@ def test_removing_a_worktree_removes_its_environment_and_says_so(
     assert remove_worktree_environment(worktree) is None
 
 
+NOW = datetime(2026, 9, 25, 12, tzinfo=UTC)
+
+
+def kept(tmp_path: Path) -> clean.Kept:
+    """A record holding one volume another repository's split superseded yesterday,
+    and one an old session still holds."""
+    record = SupersededFile(tmp_path / "state")
+    if not record.path().is_file():
+        record.save(
+            SupersededRecord().with_superseded(
+                ["lup-cfg-gone-repo", "lup-cfg-held"],
+                ["lup-claude-gone-repo"],
+                NOW - timedelta(days=1),
+            )
+        )
+    return clean.Kept(record, timedelta(days=14), NOW)
+
+
 class Engine:
     """An engine answering from fixed listings, recording what it was told to do."""
 
@@ -96,11 +117,14 @@ class Engine:
         self.volumes = [
             "lup-claude-lup",
             "lup-cfg-other",
+            "lup-cfg-gone-repo",
+            "lup-cfg-held",
             "lup-sandbox-ws-1",
             "lup-uv",
             "someone-elses",
         ]
         self.proxies = {"lup-egress-lup": "running", "lup-egress-old": "exited"}
+        self.attached = {"lup-cfg-held": "an-old-session"}
         self.done: list[list[str]] = []
 
     def __call__(self, *arguments: str) -> str:
@@ -118,13 +142,15 @@ class Engine:
             case ["ps", "-a", "--filter", held, "--format", _] if held.startswith(
                 "volume="
             ):
-                return ""
+                return self.attached.get(held.removeprefix("volume="), "")
             case ["ps", "-a", "--filter", _, "--filter", "status=exited", *_]:
                 return "\n".join(n for n, s in self.proxies.items() if s == "exited")
             case ["ps", "-a", "--filter", _, "--format", _]:
                 return "\n".join(self.proxies)
-            case ["run", *_]:
-                return "4\t/lup-sized/0\n"
+            case ["run", *rest]:
+                return "\n".join(
+                    f"4\t{word}" for word in rest if word.startswith("/lup-sized/")
+                )
         self.done.append(words)
         return ""
 
@@ -155,7 +181,12 @@ def test_the_dry_run_lists_everything_and_marks_what_nothing_points_at(
     root.mkdir()
     claimed(tmp_path / "gone")
 
-    held = clean.inventory(root, Image(), Podman(), [CLAUDE_LOGIN, CODEX_LOGIN], None)
+    helper = HomeHelper(
+        engine=Podman(), tag="lup-agent:dev", uid=1, gid=1, config_home="/cfg"
+    )
+    held = clean.inventory(
+        root, Image(), Podman(), [CLAUDE_LOGIN, CODEX_LOGIN], helper, kept(tmp_path)
+    )
     listed = "\n".join(clean.listing(held, Podman()))
 
     finished = sorted(item.name for item in held if item.finished)
@@ -165,10 +196,15 @@ def test_the_dry_run_lists_everything_and_marks_what_nothing_points_at(
             "lup-sandbox-ws-1",
             str(environment_directory(tmp_path / "gone")),
             "lup-egress-old",
+            "lup-cfg-gone-repo",
         ]
     )
     assert "lup-agent:0123456789ab" not in finished
     assert "a repository's config home" in listed
+    assert "lup-cfg-gone-repo  — superseded by lup-claude-gone-repo" in listed
+    assert "a launch removes it from 2026-10-08" in listed
+    assert "4.0 KB  lup-cfg-gone-repo" in listed
+    assert "held by an-old-session" in listed
     assert "another repository's old config home" in listed
     assert "a cache this project declares" in listed
     assert "not lup's to judge" not in listed
@@ -181,18 +217,20 @@ def test_yes_removes_only_what_is_finished(tmp_path: Path, engine: Engine) -> No
     gone = claimed(tmp_path / "gone")
     kept_root = tmp_path / "kept"
     kept_root.mkdir()
-    kept = claimed(kept_root)
+    alive = claimed(kept_root)
     logins = [CLAUDE_LOGIN, CODEX_LOGIN]
-    held = clean.inventory(root, Image(), Podman(), logins, None)
+    held = clean.inventory(root, Image(), Podman(), logins, None, kept(tmp_path))
 
-    said = clean.cleaned(root, held, Podman(), logins, None)
+    said = clean.cleaned(root, held, Podman(), logins, None, kept(tmp_path))
 
     assert ["rmi", "lup-agent:ba9876543210"] in engine.done
     assert ["volume", "rm", "lup-sandbox-ws-1"] in engine.done
     assert ["rm", "lup-egress-old"] in engine.done
+    assert ["volume", "rm", "lup-cfg-gone-repo"] in engine.done
+    assert ["volume", "rm", "lup-cfg-held"] not in engine.done
     assert not any("lup-claude-lup" in words for words in engine.done)
-    assert not gone.exists() and kept.exists()
-    assert "Removed 4" in said[-1].text
+    assert not gone.exists() and alive.exists()
+    assert "Removed 5" in said[-1].text
 
 
 def test_a_launch_sweeps_other_projects_stopped_proxies_but_not_its_own(

@@ -11,6 +11,7 @@ A launch command exists exactly when its adapter is among those targets: a
 project generating one native tree is not offered a launcher for the other.
 """
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -29,7 +30,8 @@ from lup.devtools.harness.composition import NativeTargets, claude_profile_direc
 from lup.ledger.models import LedgerNode
 from lup.ledger.store import LedgerLayout
 from lup.observability.sessions import SessionRecorder, session_recorder
-from lup.devtools.harness.config_volume import HomeHelper
+from lup.devtools.harness.config_volume import HomeHelper, kept_for_superseded
+from lup.devtools.harness.superseded import SupersededFile
 from lup.devtools.harness.contained import (
     checkout_tag,
     image_tag,
@@ -424,7 +426,8 @@ def create_harness_app(
             else None
         )
         logins = runtime_logins()
-        held = clean.inventory(root, image, engine, logins, helper)
+        kept = clean.Kept(SupersededFile(), kept_for_superseded(), datetime.now(UTC))
+        held = clean.inventory(root, image, engine, logins, helper, kept)
         for line in clean.listing(held, engine):
             typer.echo(line)
         finished = [item for item in held if item.finished]
@@ -435,7 +438,7 @@ def create_harness_app(
                 else "Nothing is finished."
             )
             return
-        for notice in clean.cleaned(root, held, engine, logins, helper):
+        for notice in clean.cleaned(root, held, engine, logins, helper, kept):
             typer.echo(notice.text)
 
     @app.command("egress")

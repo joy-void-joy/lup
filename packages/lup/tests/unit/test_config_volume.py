@@ -8,6 +8,7 @@ engine kept in memory — its idempotence, its refusal to touch a volume an
 open session holds, and what it says about entries nobody declares.
 """
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -16,6 +17,9 @@ import sh
 
 import lup.devtools.harness.config_volume as config_volume
 from lup.devtools.harness.config_volume import (
+    kept_for_superseded,
+    sweep_superseded,
+    swept_superseded_notice,
     HomeHelper,
     HomeSplit,
     LegacyVolumes,
@@ -25,6 +29,8 @@ from lup.devtools.harness.config_volume import (
 from lup.harness.image import Podman
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.providers.codex.login import CODEX_LOGIN
+from lup.devtools.harness.superseded import SupersededFile
+from lup.providers.user_config import UserConfigFile
 
 LOGINS = [CLAUDE_LOGIN, CODEX_LOGIN]
 
@@ -36,6 +42,7 @@ class MemoryEngine:
         self.volumes = volumes
         self.attached: dict[str, list[str]] = {}
         self.refuse_removal: list[str] = []
+        self.fail_copies = 0
         self.calls: list[list[str]] = []
 
     def __call__(self, *arguments: str) -> str:
@@ -65,6 +72,9 @@ class MemoryEngine:
             case "ls":
                 return "\n".join(self.volumes.get(source, {}))
             case "cp":
+                if self.fail_copies:
+                    self.fail_copies -= 1
+                    raise sh.ErrorReturnCode_1("cp", b"", b"no space")
                 target = next(m.split(":")[0] for m in mounts if not m.endswith(":ro"))
                 held = self.volumes.setdefault(target, {})
                 for word in words:
@@ -87,23 +97,6 @@ def repository(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     root = tmp_path / "dev"
     root.mkdir()
     return root
-
-
-def moved(root: Path, engine: MemoryEngine, monkeypatch: pytest.MonkeyPatch) -> str:
-    """Run one split against the engine in memory, answering what it said."""
-    monkeypatch.setattr(sh, "Command", lambda binary: engine)
-    helper = HomeHelper(
-        engine=Podman(), tag="lup-agent:dev", uid=1000, gid=1000, config_home="/cfg"
-    )
-    said = split_config_volumes(
-        root,
-        helper,
-        [
-            RuntimeVolume(login=CLAUDE_LOGIN, volume="lup-claude-lup"),
-            RuntimeVolume(login=CODEX_LOGIN, volume="lup-codex-lup"),
-        ],
-    )
-    return "\n".join(notice.text for notice in said)
 
 
 def test_each_entry_goes_to_the_runtimes_that_declare_it() -> None:
@@ -150,8 +143,57 @@ def test_a_repository_answers_for_its_shared_digest_and_worktree_volumes(
     assert "lup-cfg-other" not in legacy.every()
 
 
-def test_the_split_moves_each_runtimes_files_and_removes_the_old_volumes(
-    repository: Path, monkeypatch: pytest.MonkeyPatch
+def test_the_helper_runs_as_the_session_without_its_entrypoint_or_network() -> None:
+    helper = HomeHelper(
+        engine=Podman(), tag="lup-agent:dev", uid=1000, gid=1001, config_home="/cfg"
+    )
+
+    argv = helper.argv("ls", ["v:/lup-split-from:ro"], ["-A", "/lup-split-from"])
+
+    assert argv[:5] == ["podman", "run", "--rm", "--network", "none"]
+    assert "--userns=keep-id" in argv and "1000:1001" in argv
+    assert argv[argv.index("--entrypoint") + 1] == "ls"
+    assert argv[-3:] == ["lup-agent:dev", "-A", "/lup-split-from"]
+
+
+NOW = datetime(2026, 9, 25, 12, tzinfo=UTC)
+KEPT = timedelta(days=14)
+
+
+@pytest.fixture
+def record(tmp_path: Path) -> SupersededFile:
+    """Where this test's superseded volumes are recorded."""
+    return SupersededFile(tmp_path / "state")
+
+
+def moved(
+    root: Path,
+    engine: MemoryEngine,
+    monkeypatch: pytest.MonkeyPatch,
+    record: SupersededFile,
+    now: datetime = NOW,
+) -> str:
+    """Run one split against the engine in memory, answering what it said."""
+    monkeypatch.setattr(sh, "Command", lambda binary: engine)
+    helper = HomeHelper(
+        engine=Podman(), tag="lup-agent:dev", uid=1000, gid=1000, config_home="/cfg"
+    )
+    said = split_config_volumes(
+        root,
+        helper,
+        [
+            RuntimeVolume(login=CLAUDE_LOGIN, volume="lup-claude-lup"),
+            RuntimeVolume(login=CODEX_LOGIN, volume="lup-codex-lup"),
+        ],
+        record,
+        KEPT,
+        now,
+    )
+    return "\n".join(notice.text for notice in said)
+
+
+def test_the_split_copies_each_runtimes_files_and_keeps_the_old_volumes(
+    repository: Path, monkeypatch: pytest.MonkeyPatch, record: SupersededFile
 ) -> None:
     engine = MemoryEngine(
         {
@@ -170,39 +212,46 @@ def test_the_split_moves_each_runtimes_files_and_removes_the_old_volumes(
         }
     )
 
-    said = moved(repository, engine, monkeypatch)
+    said = moved(repository, engine, monkeypatch, record)
 
-    assert engine.volumes == {
-        "lup-claude-lup": {
-            ".claude.json": "claude document",
-            "history.jsonl": "both",
-            "mystery": "?",
-        },
-        "lup-codex-lup": {
-            "auth.json": "codex login (old)",
-            "history.jsonl": "both",
-            "mystery": "?",
-            ".claude.json": "entrypoint seed",
-        },
+    assert engine.volumes["lup-claude-lup"] == {
+        ".claude.json": "claude document",
+        "history.jsonl": "both",
+        "mystery": "?",
     }
+    assert engine.volumes["lup-codex-lup"] == {
+        "auth.json": "codex login (old)",
+        "history.jsonl": "both",
+        "mystery": "?",
+        ".claude.json": "entrypoint seed",
+    }
+    assert {"lup-cfg-lup", "lup-cfg-lup-codex-abc", "lup-cfg-feat-x"} <= set(
+        engine.volumes
+    )
+    assert record.load().names() == [
+        "lup-cfg-lup",
+        "lup-cfg-lup-codex-abc",
+        "lup-cfg-feat-x",
+    ]
+    assert "now lives in lup-claude-lup, lup-codex-lup" in said
+    assert "until 2026-10-09" in said
     assert "no runtime declares mystery" in said
-    assert "lup-cfg-lup, lup-cfg-lup-codex-abc, lup-cfg-feat-x" in said
     assert ".claude.json.tmp.1.a" in said
 
 
-def test_a_second_split_finds_nothing_left_to_move(
-    repository: Path, monkeypatch: pytest.MonkeyPatch
+def test_a_second_split_finds_nothing_left_to_copy(
+    repository: Path, monkeypatch: pytest.MonkeyPatch, record: SupersededFile
 ) -> None:
     engine = MemoryEngine({"lup-cfg-lup": {"auth.json": "codex login"}})
-    moved(repository, engine, monkeypatch)
+    moved(repository, engine, monkeypatch, record)
     engine.calls.clear()
 
-    assert moved(repository, engine, monkeypatch) == ""
+    assert moved(repository, engine, monkeypatch, record) == ""
     assert [call for call in engine.calls if call[0] == "run"] == []
 
 
 def test_an_interrupted_split_finishes_without_overwriting_what_came_since(
-    repository: Path, monkeypatch: pytest.MonkeyPatch
+    repository: Path, monkeypatch: pytest.MonkeyPatch, record: SupersededFile
 ) -> None:
     engine = MemoryEngine(
         {
@@ -210,41 +259,86 @@ def test_an_interrupted_split_finishes_without_overwriting_what_came_since(
             "lup-claude-lup": {".claude.json": "written since"},
         }
     )
-    engine.refuse_removal = ["lup-cfg-lup"]
+    engine.fail_copies = 1
 
-    first = moved(repository, engine, monkeypatch)
-    engine.refuse_removal = []
-    moved(repository, engine, monkeypatch)
+    first = moved(repository, engine, monkeypatch, record)
+    assert "the next launch tries again" in first
+    assert record.load().names() == []
+    moved(repository, engine, monkeypatch, record)
 
-    assert "could not remove lup-cfg-lup" in first
     assert engine.volumes["lup-claude-lup"] == {
         ".claude.json": "written since",
         "projects": "transcripts",
     }
-    assert "lup-cfg-lup" not in engine.volumes
+    assert record.load().names() == ["lup-cfg-lup"]
 
 
 def test_a_volume_an_open_session_holds_postpones_the_whole_split(
-    repository: Path, monkeypatch: pytest.MonkeyPatch
+    repository: Path, monkeypatch: pytest.MonkeyPatch, record: SupersededFile
 ) -> None:
     engine = MemoryEngine({"lup-cfg-lup": {"auth.json": "codex login"}})
     engine.attached = {"lup-cfg-lup": ["lup-dev-session"]}
 
-    said = moved(repository, engine, monkeypatch)
+    said = moved(repository, engine, monkeypatch, record)
 
     assert "waits for the first launch after it closes" in said
     assert "lup-dev-session" in said
     assert list(engine.volumes) == ["lup-cfg-lup"]
+    assert record.load().names() == []
 
 
-def test_the_helper_runs_as_the_session_without_its_entrypoint_or_network() -> None:
-    helper = HomeHelper(
-        engine=Podman(), tag="lup-agent:dev", uid=1000, gid=1001, config_home="/cfg"
-    )
+def superseded_after_a_split(
+    repository: Path, monkeypatch: pytest.MonkeyPatch, record: SupersededFile
+) -> MemoryEngine:
+    """An engine whose old shared volume a split superseded at :data:`NOW`."""
+    engine = MemoryEngine({"lup-cfg-lup": {"auth.json": "codex login"}})
+    moved(repository, engine, monkeypatch, record)
+    return engine
 
-    argv = helper.argv("ls", ["v:/lup-split-from:ro"], ["-A", "/lup-split-from"])
 
-    assert argv[:5] == ["podman", "run", "--rm", "--network", "none"]
-    assert "--userns=keep-id" in argv and "1000:1001" in argv
-    assert argv[argv.index("--entrypoint") + 1] == "ls"
-    assert argv[-3:] == ["lup-agent:dev", "-A", "/lup-split-from"]
+def test_a_superseded_volume_stays_until_its_days_have_passed(
+    repository: Path, monkeypatch: pytest.MonkeyPatch, record: SupersededFile
+) -> None:
+    engine = superseded_after_a_split(repository, monkeypatch, record)
+
+    early = sweep_superseded(Podman(), record, KEPT, NOW + timedelta(days=13))
+    due = sweep_superseded(Podman(), record, KEPT, NOW + timedelta(days=14))
+
+    assert early == []
+    assert due == ["lup-cfg-lup"]
+    assert "lup-cfg-lup" not in engine.volumes
+    assert record.load().names() == []
+    assert "lup-cfg-lup" in swept_superseded_notice(due, KEPT)[0].text
+
+
+def test_clean_yes_removes_a_superseded_volume_before_its_days(
+    repository: Path, monkeypatch: pytest.MonkeyPatch, record: SupersededFile
+) -> None:
+    engine = superseded_after_a_split(repository, monkeypatch, record)
+
+    assert sweep_superseded(Podman(), record, KEPT, NOW, early=True) == ["lup-cfg-lup"]
+    assert "lup-cfg-lup" not in engine.volumes
+
+
+def test_a_superseded_volume_a_container_holds_is_never_removed(
+    repository: Path, monkeypatch: pytest.MonkeyPatch, record: SupersededFile
+) -> None:
+    engine = superseded_after_a_split(repository, monkeypatch, record)
+    engine.attached = {"lup-cfg-lup": ["an-old-session"]}
+
+    late = NOW + timedelta(days=90)
+    assert sweep_superseded(Podman(), record, KEPT, late) == []
+    assert sweep_superseded(Podman(), record, KEPT, late, early=True) == []
+    assert "lup-cfg-lup" in engine.volumes
+    assert record.load().names() == ["lup-cfg-lup"]
+
+
+def test_the_days_a_superseded_volume_is_kept_are_the_persons_to_set(
+    tmp_path: Path,
+) -> None:
+    config = UserConfigFile(tmp_path / "lup")
+    assert kept_for_superseded(config) == timedelta(days=14)
+
+    config.record({("cleanup", "superseded_volumes_after_days"): 3})
+
+    assert kept_for_superseded(config) == timedelta(days=3)

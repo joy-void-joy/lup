@@ -28,6 +28,7 @@ containers
     lifecycles of their own and are not this command's to judge.
 """
 
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
@@ -42,6 +43,7 @@ from lup.devtools.harness.config_volume import (
     existing_volumes,
     remove_volume,
     split_config_volumes,
+    sweep_superseded,
 )
 from lup.devtools.harness.contained import (
     IMAGE_PREFIX,
@@ -52,6 +54,7 @@ from lup.devtools.harness.contained import (
     superseded_images,
 )
 from lup.devtools.harness.environments import HeldEnvironment, recorded_environments
+from lup.devtools.harness.superseded import SupersededFile
 from lup.harness.egress import PROXY_LABEL
 from lup.harness.image import ContainerEngine, Image
 from lup.harness.notice import Notice
@@ -85,6 +88,15 @@ class Held(BaseModel, frozen=True):
         marker = "remove" if self.finished else "keep  "
         size = f"{self.size:>9}" if self.size else " " * 9
         return f"  {marker} {size}  {self.name}  — {self.why}"
+
+
+class Kept:
+    """What decides how long a superseded volume stays: the record, the person's days, now."""
+
+    def __init__(self, record: SupersededFile, after: timedelta, now: datetime) -> None:
+        self.record = record
+        self.after = after
+        self.now = now
 
 
 class ListedImage(BaseModel, frozen=True):
@@ -164,11 +176,14 @@ def volumes(
     image: Image,
     logins: list[ProviderLogin],
     helper: HomeHelper | None,
+    kept: Kept,
 ) -> list[Held]:
     """Every volume lup named, sized, with what points at each."""
     names = [name for name in existing_volumes(engine) if name.startswith("lup-")]
     worktrees = [root.name, *(path.name for path in sibling_worktrees(root))]
-    ours = LegacyVolumes.found(root, names, logins, worktrees).every()
+    recorded = kept.record.load()
+    unsplit = [name for name in names if name not in recorded.names()]
+    ours = LegacyVolumes.found(root, unsplit, logins, worktrees).every()
     homes = [f"lup-{login.state_volume}-" for login in logins]
     caches = [cache.name for cache in image.caches]
 
@@ -176,11 +191,23 @@ def volumes(
         held = attached_containers(name, engine)
         if held:
             return Held(kind="volume", name=name, why=f"held by {', '.join(held)}")
+        superseded = [item for item in recorded.volumes if item.name == name]
+        if superseded:
+            removal = superseded[0].removal_date(kept.after).isoformat()
+            return Held(
+                kind="volume",
+                name=name,
+                why=(
+                    f"superseded by {', '.join(superseded[0].moved_into)}; "
+                    f"a launch removes it from {removal}"
+                ),
+                finished=True,
+            )
         if name in ours:
             return Held(
                 kind="volume",
                 name=name,
-                why="this repository's old config home: split into one per runtime",
+                why="this repository's old config home: copied into one per runtime",
                 finished=True,
             )
         if any(name.startswith(home) for home in homes):
@@ -259,12 +286,13 @@ def inventory(
     engine: ContainerEngine | None,
     logins: list[ProviderLogin],
     helper: HomeHelper | None,
+    kept: Kept,
 ) -> list[Held]:
     """Everything lup keeps for contained sessions on this machine."""
     engined = (
         [
             *images(engine, root),
-            *volumes(root, engine, image, logins, helper),
+            *volumes(root, engine, image, logins, helper, kept),
             *containers(engine),
         ]
         if engine is not None
@@ -307,8 +335,14 @@ def cleaned(
     engine: ContainerEngine | None,
     logins: list[ProviderLogin],
     helper: HomeHelper | None,
+    kept: Kept,
 ) -> list[Notice]:
-    """Remove every finished thing, answering what went."""
+    """Remove every finished thing, answering what went.
+
+    This repository's old config home is copied into the per-runtime
+    volumes first, and every superseded volume — that one included — is
+    removed now, whatever its date; one a container holds is kept.
+    """
     finished = [item for item in held if item.finished]
     split = (
         split_config_volumes(
@@ -318,8 +352,16 @@ def cleaned(
                 RuntimeVolume(login=login, volume=state_volume_name(root, login))
                 for login in logins
             ],
+            kept.record,
+            kept.after,
+            kept.now,
         )
         if helper is not None
+        else []
+    )
+    superseded = (
+        sweep_superseded(engine, kept.record, kept.after, kept.now, early=True)
+        if engine is not None
         else []
     )
     gone = [
@@ -347,7 +389,7 @@ def cleaned(
     environments_gone = [item for item in finished if item.kind == "environment"]
     for item in environments_gone:
         HeldEnvironment(directory=Path(item.name)).remove()
-    gone = [*gone, *(item.name for item in environments_gone)]
+    gone = [*gone, *superseded, *(item.name for item in environments_gone)]
     return [
         *split,
         Notice(

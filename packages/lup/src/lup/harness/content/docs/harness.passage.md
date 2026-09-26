@@ -627,6 +627,9 @@ verbose = true
 
 [codex.settings.tui]        # Codex configuration, leaf by leaf, over the account's
 animations = false
+
+[cleanup]
+superseded_volumes_after_days = 14   # an old config volume's history, kept this long
 ```
 
 A value is chosen the same way everywhere: lup's default, then this file, then
@@ -674,9 +677,16 @@ A contained session's config home is a volume per repository and runtime,
 shares its login, trust and transcripts, and neither runtime reads the
 other's. The first launch that finds the older shared `lup-cfg-<repo>` splits
 it by what each runtime declares it keeps — an entry neither declares goes to
-both, said aloud — moves Codex's per-settings-digest volumes into its own,
-and removes those with the per-worktree `lup-cfg-<worktree>` volumes that
-came before; a volume an open session still holds postpones the split.
+both, said aloud — and copies Codex's per-settings-digest volumes into its
+own; a volume an open session still holds postpones the split. The old
+volumes, and the per-worktree `lup-cfg-<worktree>` ones that came before,
+are kept rather than removed: each is recorded as superseded in
+`$XDG_STATE_HOME/lup` (`~/.local/state/lup`), the launch says where its
+history went and the day it goes, and any launch or `harness clean`
+removes it once `[cleanup] superseded_volumes_after_days` (14 unless this
+file says otherwise) have passed — never while a container holds it.
+`harness clean` lists each with its size and that date, and
+`harness clean --yes` removes them sooner.
 
 What contained sessions leave on the machine is swept as it goes: a launch
 that builds an image removes the ones no checkout points at, every launch
