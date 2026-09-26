@@ -253,6 +253,7 @@ class Revision(TypedDict, total=False):
     evaluator: str
     recovery: str
     reach: Reach | None
+    unread: bool
 
 
 class KernelDecision:
@@ -387,6 +388,20 @@ class KernelDecision:
     need to answer. Derived from the effects the rule declared, so a verdict
     reached by code that declared none carries ``None`` and keeps its question
     wherever the session runs -- the reading that fails closed.
+
+    On a deferral it is the widest of the readings an unread word could take,
+    carried where ``unread`` says there were any.
+    """
+    unread: bool
+    """Whether this deferral stands for a word nobody could read in a judged command.
+
+    Work nobody judged is confined by whatever holds the process, so a
+    container settles it. A command the vocabulary judges, with a word that
+    could still become a guarded flag or operand, is different: every command
+    the word could make was judged, and ``reach`` is where the widest of their
+    harms would land -- a remote a push reaches, a merged pull request. A
+    container settles it only where that stays inside, and a reading that
+    stated no reach leaves ``None``, which never does.
     """
 
     def __init__(
@@ -409,6 +424,7 @@ class KernelDecision:
         evaluator: str = "",
         recovery: str = "",
         reach: Reach | None = None,
+        unread: bool = False,
     ) -> None:
         if effect not in ("allow", "ask", "deny", "defer"):
             raise ValueError(f"invalid kernel decision effect {effect!r}")
@@ -433,6 +449,7 @@ class KernelDecision:
         self.evaluator = evaluator
         self.recovery = recovery
         self.reach = reach
+        self.unread = unread
         # Only a verdict this policy actually reached is placed: a refusal is
         # not softened by where the operation would have run, and a deferral
         # hands the whole question over, placement included.
@@ -471,6 +488,7 @@ class KernelDecision:
             changes["evaluator"] if "evaluator" in changes else self.evaluator,
             changes["recovery"] if "recovery" in changes else self.recovery,
             changes["reach"] if "reach" in changes else self.reach,
+            changes["unread"] if "unread" in changes else self.unread,
         )
 
     def placed(self, escapable: bool, contained: bool = False) -> "KernelDecision":
@@ -647,8 +665,16 @@ def objecting_reach(
     of parts meets verdicts that are themselves joins, and each has to carry
     all of what its parts objected to rather than the first part's word.
     ``None`` where any objecting part stated none, or none objects at all.
+
+    A deferral for a word nobody could read objects as well, with the reach
+    of what the word could make: `make x && git push $X origin feat` asks
+    about a recipe the container holds, and could push anything anywhere.
     """
-    stated = [part.reach for part in parts if part.effect in ("ask", "deny")]
+    stated = [
+        part.reach
+        for part in parts
+        if part.effect in ("ask", "deny") or (part.effect == "defer" and part.unread)
+    ]
     if not stated or any(word is None for word in stated):
         return None
     return max((word for word in order if word in stated), key=order.index)
@@ -704,7 +730,11 @@ def joined_decision(decisions: list[KernelDecision]) -> KernelDecision:
         )
     deferred = next((item for item in decisions if item.effect == "defer"), None)
     if deferred is not None:
-        return deferred.revised(findings=parts)
+        return deferred.revised(
+            findings=parts,
+            reach=objecting_reach(parts),
+            unread=any(item.unread for item in decisions if item.effect == "defer"),
+        )
     reached = dict.fromkeys(item.rule for item in decisions if item.rule)
     return KernelDecision(
         "allow",

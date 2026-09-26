@@ -43,6 +43,7 @@ from .effects import (
     purpose_of,
     verdict_for,
 )
+from .semantics import Reach
 from .words import (
     INTERPRETERS,
     carried_setting,
@@ -574,6 +575,29 @@ def forced_update(row: ShellRuleRow, arguments: list[str]) -> str:
     return ""
 
 
+def unread_argument_reach(
+    row: ShellRuleRow, arguments: list[str], guarding: list[str], measured: WriteFacts
+) -> Reach | None:
+    """Where the harm of every command an unread argument could make would land.
+
+    The word could be any flag the row guards, and is read as each in turn
+    beside the words that can be read; the others nobody can read are left
+    out, so a line of several reads each flag once rather than every
+    combination of what each could be. It could as well be an operand, and a
+    row that judges its operands -- a destination, a refspec -- asks about
+    one on its own effects. ``None`` where a reading that objects stated no
+    reach, or none objects, which no container settles.
+    """
+    legible = [word for word in arguments if not opaque_argument(word)]
+    readings = [
+        apply_command_row(row, [*legible, flag], measured)
+        for flag in dict.fromkeys(guarding)
+    ]
+    if row["ask_destinations"] or row["ask_refspecs"]:
+        readings.append(row_verdict(row, "ask", row["reason"]))
+    return objecting_reach(tuple(readings))
+
+
 def apply_command_row(
     row: ShellRuleRow, arguments: list[str], facts: WriteFacts | None = None
 ) -> KernelDecision:
@@ -729,9 +753,14 @@ def apply_command_row(
             None,
         )
         if opaque is not None:
+            # Nobody judged it as written, and yet every command it could make
+            # was, so a container settles it only where each would stay inside.
             return unjudged(
                 f"argument {opaque!r} could expand into a guarded flag — bind"
                 " it to a literal value first"
+            ).revised(
+                unread=True,
+                reach=unread_argument_reach(row, arguments, guarding, measured),
             )
         guarded = next(
             (

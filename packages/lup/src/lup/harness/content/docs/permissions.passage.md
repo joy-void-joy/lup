@@ -318,6 +318,11 @@ What the legible part rules out is not read in — `sync st$X` can only be
 `sync status` — and a program guarding nothing answers an unread word as it
 always did. A word opening on its expansion in an argument's place keeps
 the abstention above: it could as well be the path or the ref beside it.
+The abstention carries the reach of every guarded flag or operand the word
+could be, so a measured container settles it only where each would stay
+inside: `rg $X foo` and a child launch's `--sandbox $X` run there, while
+`git push $X origin feat` and `gh pr merge $X` are refused as they are
+without one, since each could force, delete or merge on the remote.
 
 ### A write that carries its own content
 

@@ -45,6 +45,7 @@ class DecisionWire(TypedDict):
     evaluator: str
     recovery: str
     reach: Reach | None
+    unread: bool
 
 
 class EditRequest(TypedDict):
@@ -83,6 +84,7 @@ def decision_wire(decision: KernelDecision) -> DecisionWire:
         evaluator=decision.evaluator,
         recovery=decision.recovery,
         reach=decision.reach,
+        unread=decision.unread,
     )
 
 
@@ -95,7 +97,7 @@ def valid_decision(value: WireValue | DecisionWire) -> TypeGuard[DecisionWire]:
     for name in ("reason", "escalated", "rule", "evaluator", "recovery"):
         if not isinstance(value[name], str):
             raise ValueError(f"destination decision {name} must be text")
-    for name in ("unlisted", "hard"):
+    for name in ("unlisted", "hard", "unread"):
         if not isinstance(value[name], bool):
             raise ValueError(f"destination decision {name} must be boolean")
     for name, choices in (
@@ -183,6 +185,7 @@ def read_decision(value: WireValue | DecisionWire) -> KernelDecision:
         evaluator=row["evaluator"],
         recovery=row["recovery"],
         reach=row["reach"],
+        unread=row["unread"],
     )
 
 
