@@ -847,6 +847,7 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                                 scope.path_prefix,
                                 reason=scope.reason,
                                 include_subdomains=scope.include_subdomains,
+                                any_port=scope.any_port,
                             )
                             for scope in source.allowed_fetch
                         ],
@@ -856,6 +857,7 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                                 scope.path_prefix,
                                 reason=scope.reason,
                                 include_subdomains=scope.include_subdomains,
+                                any_port=scope.any_port,
                             )
                             for scope in source.denied_fetch
                         ],
