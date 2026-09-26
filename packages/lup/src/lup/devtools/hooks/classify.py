@@ -9,7 +9,7 @@ checking a policy nobody runs.
 
 from collections.abc import Sequence
 
-from lup.harness.enforcement import measured_containment, semantic_policy_for
+from lup.harness.enforcement import semantic_policy_for
 from lup.harness.models import HookSet
 from lup.policy.everyday import SESSION_SHAPES, SessionShape
 from lup.policy.models import Decision, ShellCommand
@@ -24,6 +24,7 @@ def shell_decision(
     autonomous: bool = False,
     interactive: bool = True,
     trapped: bool = False,
+    contained: bool = False,
 ) -> Decision:
     """Classify one shell command exactly as a live session would.
 
@@ -42,24 +43,24 @@ def shell_decision(
     snapshots the tree before every command, and a reader asking what they will
     be asked about should be told what a session is told.
 
-    Containment follows ``trapped`` rather than the ledger this process runs
-    behind, because the shapes swept here are postures rather than readings of
-    this session: two of the four are named for having a boundary and two for
-    not. Taken from the measurement, an untrapped shape inherited the
-    container around the sweep and reported the bounded answer under the
-    unbounded name — so the corpus could only be swept honestly from a
-    checkout no contained session had ever launched in, which is the one place
-    nobody runs it.
+    ``contained`` is the other wall: the container `outer` measures around the
+    whole session, with the runtime's sandbox off inside it. It comes from the
+    posture rather than the ledger this process runs behind, because the
+    shapes swept here are postures rather than readings of this session.
+    Taken from the measurement, a shape named for no container inherited the
+    one around the sweep and reported the bounded answer under the unbounded
+    name — so the corpus could only be swept honestly from a checkout no
+    contained session had ever launched in, which is the one place nobody
+    runs it.
     """
-    held = measured_containment(project_root())
     policy = semantic_policy_for(
         hooks,
         autonomous=autonomous,
         interactive=interactive,
         sandbox_active=trapped,
         recovered=True,
-        contained=held.contained and trapped,
-        inside_placement=held.inside_placement and trapped,
+        contained=contained,
+        inside_placement=contained,
     )
     return policy.decide(ShellCommand(command=command, cwd=project_root()))
 
@@ -113,6 +114,7 @@ def stopped_everyday(
                 autonomous=shape.autonomous,
                 interactive=shape.interactive,
                 trapped=shape.trapped,
+                contained=shape.contained,
             )
         ]
         if decision.effect != "allow"

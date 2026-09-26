@@ -1601,11 +1601,12 @@ def create_dev_app(
                 "--kind", help="Input: shell, fetch, edit path, or edit-batch JSON"
             ),
         ] = "shell",
-        sandbox: Annotated[
-            bool | None,
+        placement: Annotated[
+            str | None,
             typer.Option(
-                "--sandbox/--no-sandbox",
-                help="Show only this placement's answer (default: show both)",
+                "--placement",
+                help="Show only this placement's answer: none, inner or outer"
+                " (default: show every one)",
             ),
         ] = None,
         autonomous: Annotated[
@@ -1626,14 +1627,14 @@ def create_dev_app(
         # Every placement, not this session's. The guidance sends a reader here
         # before they spend a turn, and one answer leaves them holding a guess
         # about which session it described -- an invisible guess, which is the
-        # worst kind. Both answers cost one extra composition and end the guess.
+        # worst kind. Every answer costs one composition and ends the guess.
         policy_explain.explain(
             subjects,
             kind,
             autonomous,
             as_json,
             declared().hooks,
-            sandbox,
+            placement,
         )
 
     @app.command("vocabulary")
