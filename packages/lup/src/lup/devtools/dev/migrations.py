@@ -155,6 +155,27 @@ DECLARED: list[Migration] = [
             ),
         ],
     ),
+    Migration(
+        subjects=["stopped"],
+        reason=(
+            "a host companion is shared by every session in its checkout and "
+            "can outlive the launch that started it, so it is stopped through "
+            "its process group by whichever launch lets go of it last, rather "
+            "than through the handle of the launch that started it"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Hold companions with companions_running from "
+                    "lup.devtools.harness.companions, which stops each one when "
+                    "the last session holding it lets go, and yields a Beside: "
+                    "its notices are the banner's lines, its ports what the "
+                    "checkout was given. Stop a process group of your own with "
+                    "LiveProcess.of(pid).stop(grace) from the same module."
+                )
+            ),
+        ],
+    ),
 ]
 """Every break this library has taken since its last release, and what to do.
 
