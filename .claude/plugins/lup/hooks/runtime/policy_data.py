@@ -23008,6 +23008,14 @@ REFUSED_PATHS: list[RefusedPathRow] = [
         "reason": "this path holds a key or a login, and reading it writes the secret into this transcript",
         "recovery": "Let the program that uses it read it -- ssh, git, gh and the cloud clients each do -- and ask the user for anything that needs its contents.",
     },
+    {
+        "paths": [
+            "/tmp/lup-inbox/**",
+        ],
+        "exempt": [],
+        "reason": "a session's inbox socket is its wake handle, and a frame written to it starts that session's turn with text no roster records",
+        "recovery": "Reach the peer with `coordination_send` instead: it records the message where every session in this clone can read it, and wakes the peer through this inbox itself.",
+    },
 ]
 
 SECRET_VARIABLES: list[str] = [

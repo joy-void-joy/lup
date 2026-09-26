@@ -60,7 +60,7 @@ from lup.devtools.project import DevProject
 from lup.harness.contracts import NativeSpellings
 from lup.harness.enforcement import declared_role_rows
 from lup.policy.boundary import depends_on
-from lup.coordination.policy import peer_policy
+from lup.coordination.policy import inbox_refusal, peer_policy
 from lup.policy.refused_tools import RefusedTool
 from lup.workspace.paths import (
     declared_project_root,
@@ -834,7 +834,9 @@ def portable_harness(
             # The library's key and login files, and the logins of the two
             # runtimes this project runs on, each spelled by its own login
             # declaration: a session reads neither its own token nor the
-            # other runtime's.
+            # other runtime's. And the directory this image binds session
+            # inboxes in, read off the image rather than spelled, so a peer
+            # is reached through the roster rather than a raw frame.
             refused_paths=[
                 credential_files(
                     also=[
@@ -842,6 +844,7 @@ def portable_harness(
                         *CODEX_LOGIN.withheld_logins(),
                     ]
                 ),
+                *inbox_refusal(agent_image().inboxes.directory),
             ],
             # Which checker answers for an edit is this project's toolchain,
             # not the library's, and it is named rather than located: the

@@ -138,12 +138,17 @@ def named_paths(word: str) -> list[str]:
     """Every string one word could name a file by.
 
     The word itself, and the value an option or an operand attaches after
-    `=` -- `--file=<path>`, `if=<path>` -- which names a file exactly as the
-    word standing alone would.
+    `=` or `:` -- `--file=<path>`, `if=<path>`, socat's
+    `UNIX-CONNECT:<path>,<options>`, scp's `host:<path>` -- which names a file
+    exactly as the word standing alone would, with socat's trailing options
+    read off. Reading a word's tail as a path it is not costs nothing unless
+    the tail names a withheld one.
     """
     # lup: ignore[string-split] — an argv word's attached value, whose only parser is the program's own
-    value = word.partition("=")[2]
-    return [word, value] if value else [word]
+    tails = [tail for tail in (word.partition(mark)[2] for mark in "=:") if tail]
+    # lup: ignore[string-split] — socat's own address grammar, options after the first comma
+    heads = [tail.partition(",")[0] for tail in tails]
+    return list(dict.fromkeys([word, *tails, *heads]))
 
 
 def withheld_path(

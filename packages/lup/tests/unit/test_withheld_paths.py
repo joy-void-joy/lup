@@ -72,6 +72,9 @@ def test_a_pattern_reaches_what_its_anchor_says(
         ("../../tmp/inbox/dev.sock", "", True),
         ("inbox/dev.sock", "/tmp", True),
         ("inbox/dev.sock", None, False),
+        ("UNIX-CONNECT:/tmp/inbox/dev.sock,retry=3", "", True),
+        ("host:~/.ssh/id_rsa", "", True),
+        ("HEAD:README.md", "", False),
         ("README.md", "", False),
     ],
 )

@@ -325,7 +325,8 @@ server-chosen name — leaves the invocation unread.
 `HookSet.refused_paths` declares paths no word of any shell command may
 name, each with the reason and the route to take instead, and
 `lup.policy.kernel.withheld` reads every operand of every command — a value
-attached after `=` included — and every redirection target against them. A
+attached after `=` or `:` included, socat's trailing `,options` read off —
+and every redirection target against them. A
 match denies whichever verb it sits under, because which operands a program
 reads is that program's grammar: `cat`, `head`, `less`, `grep -r`, `base64`,
 `xxd`, a `cp` source, a `tar` or `zip` member, a script's argument, a `cd`
@@ -477,6 +478,15 @@ so renaming the coordination directory moves the compiled hook with it. A
 project declaring none has both calls left entirely to the runtime's own
 permissions, which is what a repository whose sessions never coordinate should
 pay for them.
+
+The shell has a third way to reach a peer: its inbox socket, the wake handle
+the launcher binds under the image's `SessionInboxes.directory`, which takes a
+raw frame and starts that session's turn with nothing on the roster.
+`lup.coordination.policy.inbox_refusal` withholds that directory as a
+`refused_paths` row built from the image's own declaration, so every spelling
+of a connection the kernel reads — a socat `UNIX-CONNECT`/`UNIX-CLIENT`/
+`UNIX-SENDTO`/`ABSTRACT-*` address, `nc -U`, `ncat -U`, `curl
+--unix-socket`, a redirection — is refused with `coordination_send` named.
 
 A deliberate send to a peer is not walled off. The `# lup: escalate:` marker in
 any of the call's own inputs turns the refusal into the approval question the

@@ -1729,6 +1729,37 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="du -sh $HOME/.*", effect="deny"),
     DecisionCase(input="cat src/auth.json", effect="allow"),
     DecisionCase(input="cat .env", effect="allow"),
+    # A peer's inbox socket is its wake handle: a raw frame starts its turn
+    # with nothing on the roster, so the directory the image binds inboxes in
+    # is refused by every spelling of a connection the kernel can read.
+    DecisionCase(input="socat - UNIX-CONNECT:/tmp/lup-inbox/dev.sock", effect="deny"),
+    DecisionCase(
+        input="socat - UNIX-CONNECT:/tmp/lup-inbox/dev.sock",
+        effect="deny",
+        sandboxed=True,
+    ),
+    DecisionCase(input="socat - UNIX-CLIENT:/tmp/lup-inbox/dev.sock", effect="deny"),
+    DecisionCase(input="socat - UNIX-SENDTO:/tmp/lup-inbox/dev.sock", effect="deny"),
+    DecisionCase(
+        input="socat - ABSTRACT-CONNECT:/tmp/lup-inbox/dev.sock", effect="deny"
+    ),
+    DecisionCase(
+        input="socat - UNIX-CONNECT:/tmp/lup-inbox/dev.sock,retry=3", effect="deny"
+    ),
+    DecisionCase(input="nc -U /tmp/lup-inbox/dev.sock", effect="deny"),
+    DecisionCase(input="ncat -U /tmp/lup-inbox/dev.sock", effect="deny"),
+    DecisionCase(
+        input="curl --unix-socket /tmp/lup-inbox/dev.sock http://x/", effect="deny"
+    ),
+    DecisionCase(
+        input="curl --unix-socket=/tmp/lup-inbox/dev.sock http://x/", effect="deny"
+    ),
+    DecisionCase(input="echo '{}' > /tmp/lup-inbox/dev.sock", effect="deny"),
+    DecisionCase(input="cd /tmp && nc -U lup-inbox/dev.sock", effect="deny"),
+    DecisionCase(
+        input="socat - UNIX-CONNECT:/tmp/app.sock", effect="allow", sandboxed=True
+    ),
+    DecisionCase(input="git show HEAD:README.md", effect="allow"),
     DecisionCase(input="uv run pytest > tmp/out.txt", effect="allow"),
     # find -exec payloads recurse; the sed scanner reads the full stdout-only
     # grammar; curl is screened to read methods against the fetch scopes.
