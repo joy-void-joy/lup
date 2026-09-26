@@ -905,7 +905,6 @@ def split_subcommand(
     which no container holds, as well as a pager, which one does.
     """
     ask_flags = default["ask_flags"] if default else []
-    value_flags = default["value_flags"] if default else []
     setting_flags = default["setting_flags"] if default else []
     asked: list[KernelDecision] = []
     position = 0
@@ -919,7 +918,7 @@ def split_subcommand(
             following = arguments[position + 1 :]
             named = carried_setting(word, setting_flags, following)
             if settles_unguarded(word, following, default):
-                position += named["words"]
+                position += global_width(word, following, default)
                 continue
             # A setting the row can read, and which only runs a program where
             # the session runs, carries what the flags declared. One that
@@ -941,10 +940,41 @@ def split_subcommand(
             if question.reach is None:
                 return question
             asked.append(question)
-            position += named["words"]
+            position += global_width(word, following, default)
             continue
-        position += 2 if word in value_flags else 1
+        position += global_width(word, arguments[position + 1 :], default)
     return Subcommand(word="", remainder=[], asked=asked)
+
+
+def global_width(word: str, following: list[str], default: ShellRuleRow | None) -> int:
+    """How many words one global before the verb takes, its value among them.
+
+    Spelled once for both walks that step over a command's globals -- the one
+    judging them and the one only finding the verb -- so the two cannot stop
+    on different words.
+    """
+    if default is None:
+        return 1
+    if flag_matches(word, default["ask_flags"]):
+        return carried_setting(word, default["setting_flags"], following)["words"]
+    return 2 if word in default["value_flags"] else 1
+
+
+def verb_word(arguments: list[str], default: ShellRuleRow | None) -> str:
+    """The verb a command's words name past its globals, judging none of them.
+
+    Where :func:`split_subcommand` stops at a global no container settles,
+    because that global answers for the whole command, this goes on to the
+    word it steps over them to: which verb follows is a question about the
+    words, and a guarded global in front of it does not change the answer.
+    """
+    position = 0
+    while position < len(arguments):
+        word = arguments[position]
+        if not word.startswith("-"):
+            return word
+        position += global_width(word, arguments[position + 1 :], default)
+    return ""
 
 
 def global_flag_question(
@@ -1239,7 +1269,10 @@ def unread_programs(words: list[str], rows: list[ShellRuleRow]) -> list[str]:
     Any program at all, as far as the word goes, so the words after it decide:
     one counts where they, walked as its own, name one of its verbs --
     `$CMD push origin feat` could be `git push`, and `$CMD pr merge 12` could
-    be `gh pr merge`. A legible part narrows it to the names it could finish.
+    be `gh pr merge`. The walk steps over that program's own globals, a
+    guarded one among them, so `$CMD -c core.sshCommand=x push` is still read
+    as `git`, and the reading judges the global too. A legible part narrows
+    it to the names it could finish.
     Where the words name no program's verb -- `$EDITOR file`, `"$PYTHON" x.py`
     -- nothing is read in, and the word keeps the abstention it had.
     """
@@ -1250,10 +1283,8 @@ def unread_programs(words: list[str], rows: list[ShellRuleRow]) -> list[str]:
     def names_verb(program: str) -> bool:
         matches = [row for row in rows if row["command"] == program]
         default = next((row for row in matches if not row["subcommand"]), None)
-        split = split_subcommand(program, words[1:], default)
-        return not isinstance(split, KernelDecision) and any(
-            row["subcommand"] and row["subcommand"] == split["word"] for row in matches
-        )
+        verb = verb_word(words[1:], default)
+        return any(row["subcommand"] and row["subcommand"] == verb for row in matches)
 
     programs = dict.fromkeys(
         row["command"]

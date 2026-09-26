@@ -92,6 +92,9 @@ SETTLED_INSIDE = [
     # settles it exactly as it settles the literal.
     pytest.param("make $TARGET", "ask", id="make-unread-target"),
     pytest.param(
+        "$CMD -c core.pager=less push origin feat", "ask", id="unread-command-pager"
+    ),
+    pytest.param(
         "uv run lup-devtools harness claude --sandbox $X",
         "deny",
         id="child-unread-sandbox",
@@ -139,6 +142,17 @@ GUARDED = [
     pytest.param("gh pr merge $(cat f)", "deny", id="substituted-merge-word"),
     # An unread command word could be each program whose verbs follow it.
     pytest.param("$CMD push --force origin feat", "ask", id="unread-command-force"),
+    # Found past the program's own globals, which its reading judges too.
+    pytest.param(
+        "$CMD -c core.sshCommand=x push --force origin feat",
+        "ask",
+        id="unread-command-behind-guarded-global",
+    ),
+    pytest.param(
+        "$CMD -C /tmp push --force origin feat",
+        "ask",
+        id="unread-command-behind-value-global",
+    ),
     pytest.param(
         "$(which git) push --force origin feat", "ask", id="substituted-command-force"
     ),
@@ -509,6 +523,13 @@ def test_an_unread_command_word_could_be_each_program_its_verbs_name() -> None:
     assert "gh" in unread_programs(["$CMD", "pr", "merge", "12"], ROWS)
     assert unread_programs(["$EDITOR", "file"], ROWS) == []
     assert unread_programs(["git", "push", "origin", "feat"], ROWS) == []
+
+
+def test_an_unread_command_word_is_found_past_the_programs_own_globals() -> None:
+    guarded = ["$CMD", "-c", "core.sshCommand=x", "push", "--force", "origin", "b"]
+
+    assert "git" in unread_programs(guarded, ROWS)
+    assert "git" in unread_programs(["$CMD", "-C", "/tmp", "push"], ROWS)
 
 
 def test_an_unread_command_word_takes_the_strictest_program_it_could_be() -> None:
