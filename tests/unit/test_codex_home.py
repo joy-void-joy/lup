@@ -10,6 +10,7 @@ import pytest
 import tomlkit
 from tomlkit.items import Table
 
+from lup.providers.user_config import UserConfigFile
 from lup.types import EnvVars
 from lup.providers.codex.home import (
     CodexWorktreeHomeStore,
@@ -256,7 +257,10 @@ def test_a_theme_the_config_names_wins_in_the_home_and_leaves_the_account(
 
     assert home_theme(scoped) == "dracula"
     assert home_theme(account) == "zenburn"
-    assert store.return_settings(worktree) == []
+    assert (
+        store.return_settings(worktree, UserConfigFile(tmp_path / "lup")).carried()
+        == []
+    )
     assert home_theme(account) == "zenburn"
 
 
@@ -267,7 +271,7 @@ def chosen_in_session(scoped: Path, theme: str) -> None:
     (scoped / "config.toml").write_text(tomlkit.dumps(config), encoding="utf-8")
 
 
-def test_a_sessions_theme_returns_to_the_account_with_its_file(
+def test_a_sessions_theme_returns_to_the_lup_config_and_its_file_to_the_account(
     tmp_path: Path,
 ) -> None:
     account = tmp_path / "account"
@@ -279,11 +283,15 @@ def test_a_sessions_theme_returns_to_the_account_with_its_file(
     (scoped / "themes" / "mine.tmTheme").write_text("mine", encoding="utf-8")
     chosen_in_session(scoped, "mine")
 
-    assert store.return_settings(worktree) == ["tui.theme"]
-    assert home_theme(account) == "mine"
+    config = UserConfigFile(tmp_path / "lup")
+    assert store.return_settings(worktree, config).carried() == ["theme.codex"]
+    assert config.load().theme.codex == "mine"
+    assert home_theme(account) is None
     assert (account / "themes" / "mine.tmTheme").read_text(encoding="utf-8") == "mine"
 
-    elsewhere = CodexWorktreeHomeStore(account).prepare(worktree_of(tmp_path, "new"))
+    elsewhere = CodexWorktreeHomeStore(
+        account, theme=config.load().theme.codex
+    ).prepare(worktree_of(tmp_path, "new"))
     assert home_theme(elsewhere) == "mine"
     assert (elsewhere / "themes" / "mine.tmTheme").is_file()
 
@@ -300,7 +308,9 @@ def test_lups_filled_theme_never_returns_to_the_account(tmp_path: Path) -> None:
     config["model"] = "gpt-chosen"
     (scoped / "config.toml").write_text(tomlkit.dumps(config), encoding="utf-8")
 
-    assert store.return_settings(worktree) == ["model"]
+    returned = store.return_settings(worktree, UserConfigFile(tmp_path / "lup"))
+    assert returned.carried() == []
+    assert returned.session == ["model"]
     assert home_theme(account) is None
 
 
@@ -322,10 +332,12 @@ def test_a_sessions_theme_returns_without_undoing_the_accounts_meanwhile(
     )
     chosen_in_session(scoped, "dracula")
 
-    assert store.return_settings(worktree) == ["tui.theme"]
+    config = UserConfigFile(tmp_path / "lup")
+    assert store.return_settings(worktree, config).carried() == ["theme.codex"]
     settings = tomlkit.parse((account / "config.toml").read_text(encoding="utf-8"))
     assert settings["model"] == "gpt-meanwhile"
-    assert home_theme(account) == "dracula"
+    assert home_theme(account) == "zenburn"
+    assert config.load().theme.codex == "dracula"
 
 
 def test_an_account_theme_changed_meanwhile_is_not_undone(tmp_path: Path) -> None:
@@ -341,7 +353,10 @@ def test_an_account_theme_changed_meanwhile_is_not_undone(tmp_path: Path) -> Non
         ACCOUNT_CONFIG + '\n[tui]\ntheme = "monokai"\n', encoding="utf-8"
     )
 
-    assert store.return_settings(worktree) == []
+    assert (
+        store.return_settings(worktree, UserConfigFile(tmp_path / "lup")).carried()
+        == []
+    )
     assert home_theme(account) == "monokai"
 
 
@@ -396,7 +411,7 @@ def test_a_setting_changed_in_the_account_reaches_an_existing_home(
     assert str(worktree.resolve()) in settings["projects"]
 
 
-def test_a_session_change_returns_to_the_account_and_reaches_a_new_checkout(
+def test_a_session_preference_returns_to_the_account_and_reaches_a_new_checkout(
     tmp_path: Path,
 ) -> None:
     """The reset this ends: a preference set in one project, absent in the next."""
@@ -410,28 +425,35 @@ def test_a_session_change_returns_to_the_account_and_reaches_a_new_checkout(
     config = tomlkit.parse((scoped / "config.toml").read_text(encoding="utf-8"))
     config["notice"] = {"hide_full_access_warning": True}
     config["model"] = "gpt-chosen"
+    config["file_opener"] = "none"
+    config["tui"]["animations"] = False
     config["plugins"] = {"lup@first": {"enabled": True}}
     (scoped / "config.toml").write_text(tomlkit.dumps(config), encoding="utf-8")
+    person = UserConfigFile(tmp_path / "lup")
 
-    carried = store.return_settings(first)
+    returned = store.return_settings(first, person)
 
-    assert carried == ["model", "notice"]
+    assert returned.carried() == ["file_opener", "tui.animations"]
+    assert returned.session == ["model"]
+    assert returned.withheld == ["notice"]
     kept = (account / "config.toml").read_text(encoding="utf-8")
     assert kept.startswith("# mine")
     account_settings = tomlkit.parse(kept)
-    assert account_settings["model"] == "gpt-chosen"
-    assert account_settings["notice"] == {"hide_full_access_warning": True}
+    assert account_settings["model"] == "gpt-personal"
+    assert account_settings["file_opener"] == "none"
+    assert "notice" not in account_settings
     assert "lup@first" not in account_settings["plugins"]
     assert str(first.resolve()) not in account_settings.get("projects", {})
-    assert store.return_settings(first) == []
+    assert store.return_settings(first, person).carried() == []
 
     second = tmp_path / "second"
     second.mkdir()
     fresh = tomlkit.parse(
         (store.prepare(second) / "config.toml").read_text(encoding="utf-8")
     )
-    assert fresh["model"] == "gpt-chosen"
-    assert fresh["notice"] == {"hide_full_access_warning": True}
+    assert fresh["model"] == "gpt-personal"
+    assert fresh["file_opener"] == "none"
+    assert fresh["tui"]["animations"] is False
 
 
 def test_a_session_leaves_an_account_change_made_meanwhile_alone(
@@ -449,7 +471,10 @@ def test_a_session_leaves_an_account_change_made_meanwhile_alone(
         ACCOUNT_CONFIG.replace("gpt-personal", "gpt-meanwhile"), encoding="utf-8"
     )
 
-    assert store.return_settings(worktree) == []
+    assert (
+        store.return_settings(worktree, UserConfigFile(tmp_path / "lup")).carried()
+        == []
+    )
     settings = tomlkit.parse((account / "config.toml").read_text(encoding="utf-8"))
     assert settings["model"] == "gpt-meanwhile"
 

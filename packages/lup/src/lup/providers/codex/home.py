@@ -14,7 +14,6 @@ seeded with once.
 import asyncio
 import json
 import logging
-from collections.abc import Iterator
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -28,8 +27,16 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from lup.providers.codex.harness_runtime import CodexPluginInstaller, PluginCacheConfig
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.marketplace import CodexMarketplace
+from lup.providers.codex.preferences import (
+    CodexSettingsReturn,
+    SettingChange,
+    changed_settings,
+    codex_setting_flow,
+    setting_leaves,
+)
 from lup.providers.codex.theme import CodexTheme, claude_daltonized_theme
-from lup.types import JsonObject, JsonValue
+from lup.providers.user_config import EditorMode, UserConfigFile
+from lup.types import JsonObject
 from lup.providers.codex.trust import CodexHook, hooks_of, read_hooks, skipped
 from lup.types import EnvVars
 from lup.workspace.paths import declared_project_root, project_root
@@ -62,6 +69,9 @@ PROJECTS_KEY = "projects"
 TUI_KEY = "tui"
 # lup: ignore[constant-declaration] — Codex's own key for the theme drawn
 THEME_KEY = "theme"
+# lup: ignore[constant-declaration] — Codex's own key for opening the composer
+# in vim mode, measured on 0.156.1
+VIM_DEFAULT_KEY = "vim_mode_default"
 # lup: ignore[constant-declaration] — where Codex reads a theme's file from
 THEMES_DIR = "themes"
 
@@ -194,6 +204,28 @@ def themed_codex_config(content: str, named: str | None, fallback: str) -> str:
     return tomlkit.dumps(document)
 
 
+def personalized_codex_config(
+    content: str, settings: JsonObject, editor: EditorMode | None
+) -> str:
+    """A derived configuration with the person's own settings laid over it.
+
+    ``settings`` is the lup config's ``[codex.settings]`` table, each leaf
+    replacing the account's; ``editor`` is its portable editor mode,
+    spelled as the vim default Codex reads. Both win over the account the
+    way the named theme does, and both are written into the derived home
+    rather than passed as launch overrides a session could not change.
+    """
+    leaves = [
+        *setting_leaves(settings),
+        *(
+            [SettingChange(path=(TUI_KEY, VIM_DEFAULT_KEY), value=editor == "vim")]
+            if editor is not None
+            else []
+        ),
+    ]
+    return settled_codex_config(content, leaves) if leaves else content
+
+
 def table_at(
     document: Container, path: tuple[str, ...], create: bool = False
 ) -> Container | Table | None:
@@ -233,34 +265,6 @@ def personal_settings(content: str) -> JsonObject:
         else:
             settings.pop(HOOKS_KEY)
     return settings
-
-
-class SettingChange(BaseModel, frozen=True):
-    """One personal setting a session changed: set to ``value``, or removed.
-
-    ``None`` stands for removed: TOML has no null, so no setting can hold it.
-    """
-
-    path: tuple[str, ...]
-    value: JsonValue | None = None
-
-    def name(self) -> str:
-        """The setting as a person writes its key."""
-        return ".".join(self.path)
-
-
-def changed_settings(
-    before: JsonObject, after: JsonObject, prefix: tuple[str, ...] = ()
-) -> Iterator[SettingChange]:
-    """Every leaf a session set or removed, table by table."""
-    for key in sorted({*before, *after}):
-        old, new = before.get(key), after.get(key)
-        if old == new:
-            continue
-        if isinstance(old, dict) and isinstance(new, dict):
-            yield from changed_settings(old, new, (*prefix, key))
-        else:
-            yield SettingChange(path=(*prefix, key), value=new)
 
 
 def settled_codex_config(account: str, changes: list[SettingChange]) -> str:
@@ -436,6 +440,8 @@ class CodexWorktreeHomeStore:
     told from what the account changed meanwhile. ``theme`` is the one the
     person's lup config names, if it names one; ``fallback_theme`` is lup's
     own, drawn only where neither that nor the account names one.
+    ``editor`` and ``settings`` are the lup config's editor mode and
+    ``[codex.settings]`` table, laid over the account's at every launch.
     """
 
     def __init__(
@@ -445,12 +451,16 @@ class CodexWorktreeHomeStore:
         launched_record: str = ".lup-launched.json",
         theme: str | None = None,
         fallback_theme: CodexTheme | None = None,
+        editor: EditorMode | None = None,
+        settings: JsonObject | None = None,
     ) -> None:
         self.account_home = account_home
         self.scoped_dir = scoped_dir
         self.launched_record = launched_record
         self.theme = theme
         self.fallback_theme = fallback_theme or claude_daltonized_theme()
+        self.editor: EditorMode | None = editor
+        self.settings = settings or {}
 
     def home_for(self, worktree: Path) -> Path:
         """The home belonging to the checkout that encloses one worktree.
@@ -501,9 +511,13 @@ class CodexWorktreeHomeStore:
         account = self.account_home / "config.toml"
         config = scoped_home / "config.toml"
         derived = themed_codex_config(
-            derived_codex_config(
-                account.read_text(encoding="utf-8") if account.is_file() else "",
-                config.read_text(encoding="utf-8") if config.is_file() else "",
+            personalized_codex_config(
+                derived_codex_config(
+                    account.read_text(encoding="utf-8") if account.is_file() else "",
+                    config.read_text(encoding="utf-8") if config.is_file() else "",
+                ),
+                self.settings,
+                self.editor,
             ),
             self.theme,
             self.fallback_theme.slug,
@@ -532,39 +546,61 @@ class CodexWorktreeHomeStore:
             self.account_home / CODEX_LOGIN.credentials_file,
         )
 
-    def return_settings(self, worktree: Path) -> list[str]:
-        """Carry back to the account every personal setting a session changed.
+    def return_settings(
+        self, worktree: Path, config: UserConfigFile, current: str | None = None
+    ) -> CodexSettingsReturn:
+        """Carry back every personal setting a session changed, each where it belongs.
 
         Measured against what the home was derived with rather than against
         the account, so a setting the person changed in their own home while
         this session ran is not undone by a session that never touched it.
-        Written through the parsed document, keeping the account's own lines.
-        Answers the dotted names it carried, none where nothing changed.
+        ``current`` is the configuration the session left, where it ran
+        somewhere other than this home — a container's volume, read back.
+        Sorted by :mod:`lup.providers.codex.preferences`: a portable
+        setting to the lup config (to the account where the lup config
+        would refuse it), another returning one to the account's own
+        ``config.toml`` through its parsed document, keeping its lines;
+        the session's own model and effort, and anything withheld, nowhere.
         """
         scoped_home = self.home_for(worktree)
         record = scoped_home / self.launched_record
-        config = scoped_home / "config.toml"
-        if not record.is_file() or not config.is_file():
-            return []
+        held = scoped_home / "config.toml"
+        left = (
+            current
+            if current is not None
+            else (held.read_text(encoding="utf-8") if held.is_file() else None)
+        )
+        if not record.is_file() or left is None:
+            return CodexSettingsReturn()
         launched = TypeAdapter(JsonObject).validate_json(
             record.read_text(encoding="utf-8")
         )
-        now = personal_settings(config.read_text(encoding="utf-8"))
+        now = personal_settings(left)
         changes = list(changed_settings(launched, now))
-        if not changes:
-            return []
-        account = self.account_home / "config.toml"
-        self.account_home.mkdir(mode=0o700, parents=True, exist_ok=True)
-        account.write_text(
-            settled_codex_config(
-                account.read_text(encoding="utf-8") if account.is_file() else "",
-                changes,
-            ),
-            encoding="utf-8",
-        )
+        returned = CodexSettingsReturn.sorted_out(changes, config.load())
+        account_changes = list(returned.account)
+        try:
+            if returned.portable:
+                config.record(returned.portable)
+        except ValueError:
+            account_changes = [
+                change
+                for change in changes
+                if codex_setting_flow(change.path) == "returns"
+            ]
+        if account_changes:
+            account = self.account_home / "config.toml"
+            self.account_home.mkdir(mode=0o700, parents=True, exist_ok=True)
+            account.write_text(
+                settled_codex_config(
+                    account.read_text(encoding="utf-8") if account.is_file() else "",
+                    account_changes,
+                ),
+                encoding="utf-8",
+            )
         record.write_text(json.dumps(now), encoding="utf-8")
         carried_themes(scoped_home, self.account_home)
-        return [change.name() for change in changes]
+        return returned
 
 
 def select_codex_home(

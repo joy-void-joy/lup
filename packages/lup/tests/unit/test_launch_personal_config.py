@@ -23,6 +23,7 @@ from lup.providers.claude.config_home import (
 )
 from lup.providers.claude.login import CLAUDE_CONFIG_DIR, CLAUDE_LOGIN
 from lup.providers.codex.login import CODEX_LOGIN
+from lup.providers.codex.preferences import CodexSettingsReturn
 from lup.providers.profile_tree import user_profile_directory
 from lup.providers.user_config import UserConfigFile
 from lup.types import EnvVars
@@ -106,7 +107,8 @@ def launched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Launched:
         launch,
         "CodexWorktreeHomeStore",
         lambda **_: Mock(
-            publish=Mock(return_value=False), return_settings=Mock(return_value=[])
+            publish=Mock(return_value=False),
+            return_settings=Mock(return_value=CodexSettingsReturn()),
         ),
     )
     monkeypatch.setattr(
@@ -351,14 +353,22 @@ def test_codex_hands_the_named_theme_to_the_home_not_the_command_line(
     def store(**named: object) -> Mock:
         stores.append(named)
         return Mock(
-            publish=Mock(return_value=False), return_settings=Mock(return_value=[])
+            publish=Mock(return_value=False),
+            return_settings=Mock(return_value=CodexSettingsReturn()),
         )
 
     monkeypatch.setattr(launch, "CodexWorktreeHomeStore", store)
 
     launch.launch_codex(composition(), [], None, None, None, False, False)
 
-    assert stores == [{"account_home": CODEX_LOGIN.ambient_home, "theme": "dracula"}]
+    assert stores == [
+        {
+            "account_home": CODEX_LOGIN.ambient_home,
+            "theme": "dracula",
+            "editor": None,
+            "settings": {},
+        }
+    ]
     assert not any("tui.theme" in argument for argument in launched.arguments)
 
 
@@ -374,7 +384,8 @@ def test_codex_derives_its_worktree_home_from_the_selected_account(
     def store(**named: object) -> Mock:
         stores.append(named)
         return Mock(
-            publish=Mock(return_value=False), return_settings=Mock(return_value=[])
+            publish=Mock(return_value=False),
+            return_settings=Mock(return_value=CodexSettingsReturn()),
         )
 
     monkeypatch.setattr(launch, "CodexWorktreeHomeStore", store)
@@ -382,7 +393,12 @@ def test_codex_derives_its_worktree_home_from_the_selected_account(
     launch.launch_codex(composition(), [], None, None, None, False, False)
 
     assert stores == [
-        {"account_home": config.profiles_root() / "work" / "codex-home", "theme": None}
+        {
+            "account_home": config.profiles_root() / "work" / "codex-home",
+            "theme": None,
+            "editor": None,
+            "settings": {},
+        }
     ]
 
 

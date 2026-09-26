@@ -2234,6 +2234,46 @@ def carry_claude_home(
         typer.echo("Kept in the container: " + ", ".join(stayed))
 
 
+def carry_codex_home(
+    store: CodexWorktreeHomeStore, image: Image | None, config: UserConfigFile
+) -> None:
+    """Bring back what a Codex session changed of the person's, and say what stayed.
+
+    ``image`` is the container a contained session ran in, whose volume
+    holds the configuration it left; ``None`` reads the worktree home a
+    session on the host ran in. A volume that cannot be read moves
+    nothing, said aloud.
+    """
+    left = None
+    if image is not None:
+        read = named_file(
+            read_config_home(image, project_root(), CODEX_LOGIN, ["config.toml"]),
+            "config.toml",
+        )
+        if read is None:
+            Notice(
+                text=(
+                    "Could not read this session's Codex settings back out of "
+                    "its volume, so nothing it changed was returned."
+                ),
+                urgency="warning",
+            ).say()
+            return
+        left = read.text()
+    returned = store.return_settings(project_root(), config, current=left)
+    if returned.carried():
+        typer.echo(
+            "Returned the Codex settings this session changed: "
+            + ", ".join(returned.carried())
+        )
+    stayed = [
+        *(f"{key} (never leaves its home)" for key in returned.withheld),
+        *(f"{key} (the session's own)" for key in returned.session),
+    ]
+    if stayed:
+        typer.echo("Kept in the session's home: " + ", ".join(stayed))
+
+
 def prepare_codex_plugin(
     prefix: list[str],
     home: Path,
@@ -2367,7 +2407,12 @@ def launch_codex(
     store = CodexWorktreeHomeStore(
         account_home=account_home or CODEX_LOGIN.ambient_home,
         theme=personal.theme.codex,
+        editor=personal.editor,
+        settings=personal.codex.settings,
     )
+    # Only a volume the settings reached is compared with them: before the
+    # container's home is prepared, it still holds the previous session's.
+    installed: list[Path] = []
     home = select_codex_home(codex_home, environment, project_root(), profile, store)
     selected_home = home.path
     selected_profile = (
@@ -2440,6 +2485,7 @@ def launch_codex(
             force_install,
             settings=selected_profile,
         )
+        installed.append(native_home)
 
     try:
         with opening as session:
@@ -2477,15 +2523,15 @@ def launch_codex(
         transcript.close(succeeded=succeeded, interrupted=interrupted)
         if home.isolated and store.publish(project_root()):
             typer.echo("Returned the refreshed Codex login to the account home")
-        # lup: defer: a contained session runs in its repository's config
+        # lup: solved: a contained session runs in its repository's config
         # volume, so a setting it changes there — its /theme included — never
         # returns to the account; which home those belong to is the volume's
         # question.
-        carried = store.return_settings(project_root()) if home.isolated else []
-        if carried:
-            typer.echo(
-                f"Returned Codex settings this session changed to "
-                f"{store.account_home}: {', '.join(carried)}"
+        if home.isolated and (installed or not sandbox.contained()):
+            carry_codex_home(
+                store,
+                composition.recipe.source.image if sandbox.contained() else None,
+                config,
             )
         if checkpoint is not None:
             checkpoint(provider="codex")

@@ -15,8 +15,19 @@ key nothing classifies never leaves its container either way.
 """
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel
+
+type SettingFlow = Literal["returns", "withheld", "session"]
+"""Whether a session's change to one setting leaves its container, and why not.
+
+``returns``: a display, input or behaviour preference, carried back to the
+person. ``withheld``: anything that runs code or changes what may run, an
+organization's or an installation's key, or the runtime's own housekeeping
+— never carried out. ``session``: the model and how hard it thinks, the
+session's own to pick. A key no decision names is withheld.
+"""
 
 # lup: ignore[constant-declaration] — the file the snapshot is committed as,
 # which the reader and the command refreshing it both have to name

@@ -39,12 +39,11 @@ falls back to the document's legacy copy, as its own source does. A theme
 seeded into ``settings.json`` is left in place at startup.
 """
 
-from typing import Literal, get_args
+from typing import get_args
 
 from lup.providers.claude.settings_keys import ClaudeDocumentKey, ClaudeSettingKey
+from lup.providers.settings_schema import SettingFlow
 
-type SettingFlow = Literal["returns", "withheld", "session"]
-"""Whether a session's change to one setting leaves its container, and why not."""
 
 # lup: ignore[constant-declaration] — a decision per key of the CLI's own
 # schema, made once here and checked against every release by the gate
