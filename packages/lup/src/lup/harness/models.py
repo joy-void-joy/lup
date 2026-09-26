@@ -2193,6 +2193,17 @@ class Harness(BaseModel, frozen=True):
         ]
 
     @model_validator(mode="after")
+    def companion_names_are_unique(self) -> "Harness":
+        """Refuse two companions under one name, which would start and stop each other.
+
+        A companion's name keys what every checkout keeps of it.
+        """
+        names = [companion.name for companion in self.companions]
+        if len(names) != len(dict.fromkeys(names)):
+            raise ValueError(f"harness companion names must be unique: {names}")
+        return self
+
+    @model_validator(mode="after")
     def unique_semantic_ids(self) -> "Harness":
         ids = self.declared_ids
         if len(ids) != len(dict.fromkeys(ids)):

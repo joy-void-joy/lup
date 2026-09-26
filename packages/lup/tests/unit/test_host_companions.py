@@ -1,8 +1,9 @@
-"""A companion runs on the host for exactly as long as the session beside it.
+"""A companion runs on the host for as long as the session beside it, alone.
 
 Real processes, because what is pinned is process lifetime: started when the
 launch is cleared to open, still running while the session runs, and gone —
-with whatever it started — once the session ends. A program this machine
+with whatever it started — once the only session holding it ends; sharing it
+between sessions is ``test_shared_companions``'s. A program this machine
 does not have is said and skipped rather than failing the launch.
 
 And real environments, because what is pinned about secrets is who holds
@@ -24,7 +25,7 @@ import typer
 
 import lup.devtools.harness.launch as launch
 from lup.devtools.envfiles import HostSecrets, SecretsLocation
-from lup.devtools.harness.companions import companions_running
+from lup.devtools.harness.companions import Beside, companions_running
 from lup.devtools.harness.contained import (
     host_only_directories,
     refuse_host_only_mounts,
@@ -103,8 +104,8 @@ def test_a_companion_runs_while_the_session_does_and_stops_after(
         assert eventually(pidfile.exists)
         child = int(pidfile.read_text(encoding="utf-8"))
         assert alive(child)
-        assert said[0].text.startswith(
-            "Companion preview: http://127.0.0.1:8080 (log: "
+        assert said.notices[0].text.startswith(
+            "Companion preview: started, http://127.0.0.1:8080 (log: "
         )
 
     assert eventually(lambda: not alive(child))
@@ -121,7 +122,7 @@ def test_a_companion_runs_where_it_is_declared_and_logs_beside_the_launch(
     with companions_running(
         [printing_where], tmp_path, tmp_path / "logs", store, PLAIN
     ):
-        log = tmp_path / "logs" / "where.log"
+        log = tmp_path / "logs" / "where" / "where.log"
         assert eventually(
             lambda: log.exists() and log.read_text(encoding="utf-8") != ""
         )
@@ -138,13 +139,13 @@ def test_a_program_this_machine_lacks_is_said_and_skipped(
     with companions_running(
         [missing, present], tmp_path, tmp_path / "logs", store, PLAIN
     ) as said:
-        texts = [notice.text for notice in said]
+        texts = [notice.text for notice in said.notices]
 
     assert texts[0] == (
         "Companion missing: no-such-program-anywhere is not installed here, "
         "so it was not started"
     )
-    assert texts[1].startswith("Companion present: (log: ")
+    assert texts[1].startswith("Companion present: started (log: ")
 
 
 def test_a_companion_directory_stays_inside_the_checkout() -> None:
@@ -191,7 +192,7 @@ def test_a_secret_the_store_lacks_is_said_and_the_companion_starts_anyway(
             lambda: written.exists() and written.read_text(encoding="utf-8") != ""
         )
 
-    assert said[0] == Notice(
+    assert said.notices[0] == Notice(
         text=(
             f"Companion listener: {KEY} not in the host store ({store.path}), so it "
             f"starts without; `lup-launch run setup secret {KEY}` sets it"
@@ -240,8 +241,8 @@ class Launching:
                 runner_arguments.append(args)
                 events.append("companions started")
 
-            def __enter__(self) -> list[object]:
-                return []
+            def __enter__(self) -> Beside:
+                return Beside()
 
             def __exit__(self, *args: object) -> None:
                 events.append("companions stopped")

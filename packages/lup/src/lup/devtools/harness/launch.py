@@ -2192,8 +2192,9 @@ def launch_claude(
             if mode is None
             else mode.opened("claude", transcript.journal, transcribing)
         )
-        # Started once the launch is cleared to open, so the declaration
-        # naming them is the approved one; stopped when the session ends.
+        # Joined once the launch is cleared to open, so the declaration
+        # naming them is the approved one; let go when the session ends, and
+        # stopped by the last session in this checkout to let go.
         with (
             companions_running(
                 running_beside,
@@ -2204,7 +2205,7 @@ def launch_claude(
             ) as alongside,
             opening as session,
         ):
-            cleared.banner.add(alongside)
+            cleared.banner.add(alongside.notices)
             environment.update(session)
             argv = session_argv(
                 "claude",
@@ -2532,8 +2533,9 @@ def launch_codex(
     if plugin_root is not None and session_mode is not None:
         scope = mode_home_scope(session_mode, scope)
     try:
-        # Started once the launch is cleared to open, so the declaration
-        # naming them is the approved one; stopped when the session ends.
+        # Joined once the launch is cleared to open, so the declaration
+        # naming them is the approved one; let go when the session ends, and
+        # stopped by the last session in this checkout to let go.
         with (
             companions_running(
                 running_beside,
@@ -2544,7 +2546,7 @@ def launch_codex(
             ) as alongside,
             opening as session,
         ):
-            cleared.banner.add(alongside)
+            cleared.banner.add(alongside.notices)
             environment.update(session)
             argv = session_argv(
                 "codex",
