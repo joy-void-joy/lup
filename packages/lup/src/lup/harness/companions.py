@@ -12,11 +12,19 @@ A companion runs on the host, as the operator, with the host's network. That
 is the point of it and the reason it is declared where a review reads it: it
 is outside every boundary the session has. A contained session reaches it
 only as any host service, by a declared name.
+
+That is also what makes a companion the one place a secret the session must
+never hold can be used: a listener calling a paid API, say. It names the keys
+it needs in ``secrets``, and the launch hands it exactly those from the
+operator's host store (:mod:`lup.devtools.envfiles`) -- no other companion
+receives them, and the session's own environment has them taken out.
 """
 
 from pathlib import PurePosixPath
 
 from pydantic import BaseModel, Field, field_validator
+
+from lup.types import EnvName
 
 
 class HostCompanion(BaseModel, frozen=True):
@@ -45,6 +53,14 @@ class HostCompanion(BaseModel, frozen=True):
             "What it is for. A companion runs outside every boundary the "
             "session has, and the reason is what lets the next reader decide "
             "whether it still has to"
+        ),
+    )
+    secrets: list[EnvName] = Field(
+        default=[],
+        description=(
+            "Env keys this companion is handed from the operator's host store, "
+            "and it alone. Read from the store and nowhere else, so a key the "
+            "launch's own environment exports does not reach it"
         ),
     )
 

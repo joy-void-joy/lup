@@ -50,7 +50,12 @@ from lup.policy.snapshots import accept_destination_policies, destination_author
 from lup.sandbox.rail import AccessibleRoot, fleet_lease
 from lup.trust.approved import APPROVED_TREE_ENV
 from lup.devtools.dev.git_guards import STANDDOWN_VARIABLE
-from lup.devtools.harness.companions import companions_home, companions_running
+from lup.devtools.envfiles import HostSecrets
+from lup.devtools.harness.companions import (
+    companions_home,
+    companions_running,
+    host_only_names,
+)
 from lup.devtools.harness.modes import (
     MODE_VARIABLE,
     CompiledMode,
@@ -1398,7 +1403,7 @@ def claude_sandbox_arguments(
     return ["--settings", json.dumps(widened)]
 
 
-def session_environment() -> EnvVars:
+def session_environment(withheld: list[str] = []) -> EnvVars:
     """The environment a launched session inherits, less what only the launch reads.
 
     This process's own, made non-interactive, and without the approved
@@ -1407,10 +1412,16 @@ def session_environment() -> EnvVars:
     session inheriting it -- one opened on the host, whose tool servers and
     shell start from this environment -- would read and write the snapshot
     in place of its checkout with every `sync` command it ran.
+
+    ``withheld`` are the host-only names, taken out even where the operator's
+    shell exported them. A contained session is handed variables by name
+    alone, so none of these would cross anyway; out of this environment,
+    they are not in the container engine's either, whatever that engine is
+    configured to pass on -- and a session opened on the host never sees them.
     """
     environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]
     environment.pop(APPROVED_TREE_ENV, None)
-    return environment
+    return {name: value for name, value in environment.items() if name not in withheld}
 
 
 def claude_permission_arguments(
@@ -2139,7 +2150,10 @@ def launch_claude(
             *extra_args,
         ]
     )
-    environment = session_environment()
+    running_beside = composition.recipe.source.companions
+    secrets = HostSecrets.for_checkout(root)
+    withheld = host_only_names(running_beside, secrets.read())
+    environment = session_environment(withheld)
     environment[MAX_RECURSIVE_AGENT_ENV] = str(max_recursive_agent)
     environment.update(mode_environment(session_mode))
     apply_sandbox_environment(
@@ -2182,9 +2196,11 @@ def launch_claude(
         # naming them is the approved one; stopped when the session ends.
         with (
             companions_running(
-                composition.recipe.source.companions,
+                running_beside,
                 project_root(),
                 companions_home(project_root()),
+                secrets,
+                session_environment(withheld),
             ) as alongside,
             opening as session,
         ):
@@ -2394,7 +2410,10 @@ def launch_codex(
             *posture_notices(opened_on, settings, sandbox.contained(), "codex"),
         ]
     )
-    environment = session_environment()
+    running_beside = composition.recipe.source.companions
+    secrets = HostSecrets.for_checkout(project_root())
+    withheld = host_only_names(running_beside, secrets.read())
+    environment = session_environment(withheld)
     environment[MAX_RECURSIVE_AGENT_ENV] = str(max_recursive_agent)
     environment.update(mode_environment(session_mode))
     envelope = [
@@ -2517,9 +2536,11 @@ def launch_codex(
         # naming them is the approved one; stopped when the session ends.
         with (
             companions_running(
-                composition.recipe.source.companions,
+                running_beside,
                 project_root(),
                 companions_home(project_root()),
+                secrets,
+                session_environment(withheld),
             ) as alongside,
             opening as session,
         ):

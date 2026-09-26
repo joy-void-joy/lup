@@ -38,6 +38,7 @@ from rich.console import Console
 from rich.live import Live
 from rich.text import Text
 
+from lup.devtools.envfiles import SecretsLocation
 from lup.devtools.harness.posture import SettingOrigins, origin_said
 from lup.devtools.harness.preflight import (
     LaunchSentinels,
@@ -830,6 +831,56 @@ def refuse_rootful_widening(
         "root. Run a rootless engine, or accept it for this launch with "
         "--allow-rootful-privileges."
     )
+
+
+class HostOnlyDirectory(BaseModel, frozen=True):
+    """A directory on the host no container may carry, whatever asked for the mount."""
+
+    path: Path
+    holds: str
+    """What it keeps, as the refusal names it."""
+
+    moved_by: str
+    """The variable that puts it somewhere else, for when the checkout itself covers it."""
+
+
+def host_only_directories() -> list[HostOnlyDirectory]:
+    """Every directory a session must not reach, where this machine keeps each."""
+    return [
+        HostOnlyDirectory(
+            path=SecretsLocation().directory(),
+            holds="host-only secrets",
+            moved_by="XDG_CONFIG_HOME",
+        ),
+    ]
+
+
+def refuse_host_only_mounts(lease: Lease, held: list[HostOnlyDirectory]) -> None:
+    """Refuse a lease whose mounts would carry a host-only directory into the container.
+
+    A mount of the directory, of one enclosing it, or of one inside it hands
+    the session what the directory exists to keep from it -- whichever
+    registration, flag or checkout asked for the mount. Compared resolved, so
+    a symbolic link spelling either side differently is still the same place.
+    """
+    mounted = [path.resolve() for path in [*lease.mounted_writable(), *lease.read_only]]
+    for directory in held:
+        kept = directory.path.resolve()
+        carrying = next(
+            (
+                path
+                for path in mounted
+                if path == kept or path in kept.parents or kept in path.parents
+            ),
+            None,
+        )
+        if carrying is not None:
+            raise typer.BadParameter(
+                f"The container would mount {carrying}, which carries "
+                f"{directory.path}, where {directory.holds} are kept for the host "
+                "alone. Narrow the registration or --mount naming it, or set "
+                f"{directory.moved_by} to keep that directory outside it."
+            )
 
 
 def launch_record(root: Path) -> list[Path]:
@@ -2021,6 +2072,7 @@ def contained_argv(
         origins,
     )
     lease = held.lease
+    refuse_host_only_mounts(lease, host_only_directories())
     said.add(held.notices)
     said.add(fleet_notice(accessible))
     said.add(
