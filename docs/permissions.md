@@ -328,7 +328,10 @@ sync $OP lup /x --mount rw` asks as `sync setup` does, and `dev questions
 $(echo answer) <id>` is refused as the operator-only verb it could be. A
 word whose legible part begins a guarded flag is read as that flag:
 `--ret$X` asks as `--retire` does, and `git -$X status` as the `-c` global.
-The reason names the word and the command it was read as, in one line.
+The reason names the word and the command it was read as, in one line. The
+verdict carries the reach of every reading that objects, so a measured
+container settles it only where each would stay inside: `codex l$OP` keeps
+its question there, since it could be `codex login`.
 
 What the legible part rules out is not read in — `sync st$X` can only be
 `sync status` — and a program guarding nothing answers an unread word as it
