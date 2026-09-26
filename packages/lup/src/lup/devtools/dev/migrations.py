@@ -848,6 +848,46 @@ DECLARED: list[Migration] = [
         ],
     ),
     Migration(
+        subjects=[
+            "user_profile_directory",
+            "ProfileFolders.active",
+            "ProfileFolders.select",
+            "legacy_notice",
+            "legacy_sources",
+            "announce_legacy_profiles",
+        ],
+        reason=(
+            "a checkout's .lup/profiles went unread once profiles moved beside "
+            "the per-user config, so a project keeping local profiles lost them; "
+            "a name resolves through the checkout's profiles again, then the "
+            "global ones, and a launch no longer says to move them"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Call profile_directory(login, config, checkout) from "
+                    "lup.providers.profile_tree where user_profile_directory was "
+                    "called; it answers local profiles first, and curates them "
+                    "unless scope='global' is passed to add, use or remove."
+                )
+            ),
+            MigrationStep(
+                instruction=(
+                    "Read and record a root's selection through "
+                    "ProfileFolders.selection, whose recorded() and record(name) "
+                    "replace ProfileFolders.active() and select(name)."
+                )
+            ),
+            MigrationStep(
+                instruction=(
+                    "Drop calls to legacy_notice, legacy_sources and "
+                    "announce_legacy_profiles: a checkout's profiles are read "
+                    "where they are, so nothing is left to announce."
+                )
+            ),
+        ],
+    ),
+    Migration(
         subjects=["default_config_home"],
         reason=(
             "three places computed Claude's default configuration home each on "
