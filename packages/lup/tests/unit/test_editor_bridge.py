@@ -63,6 +63,7 @@ def test_a_profile_home_can_never_be_what_the_bridge_resolves(tmp_path: Path) ->
         ambient_home=tmp_path / "home" / ".claude",
         editor_lockfiles="ide",
         home_subdir="claude-config",
+        state_volume="claude",
     )
 
     assert login.editor_rendezvous({}) == login.ambient_home / "ide"

@@ -22,7 +22,7 @@ import typer
 from pydantic import BaseModel, Field, ValidationError
 
 from lup.harness.devices import Device
-from lup.providers.login import NativeHomeScope, ProviderLogin
+from lup.providers.login import ProviderLogin
 from lup.providers.profile_migration import legacy_notice
 from lup.providers.profile_tree import user_profile_directory
 from lup.providers.profiles import DefaultHomeProfile, ProfileDirectory
@@ -1668,7 +1668,6 @@ def session_argv(
     authenticate: Callable[[list[str], Path, bool], None] | None = None,
     member: LaunchedMember | None = None,
     prepare: Callable[[list[str], Path], None] | None = None,
-    state_scope: NativeHomeScope | None = None,
 ) -> list[str]:
     """The argv that opens a session, inside the declared container or on the host.
 
@@ -1800,7 +1799,6 @@ def session_argv(
         # This launch's flags lead and the machine's standing grants follow,
         # settled here beside the roots for the same reason they are.
         devices=[*devices, *granted_devices(told)],
-        state_scope=state_scope,
     )
     # Verified on the way in, rather than asserted. This is §6's whole point
     # and the launch is where it has to happen: the boundary was built two
@@ -2351,11 +2349,6 @@ def launch_codex(
                 devices,
                 authenticate=authenticate,
                 prepare=prepare,
-                state_scope=(
-                    selected_profile.state_scope()
-                    if selected_profile is not None and selected_profile.as_base
-                    else None
-                ),
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True

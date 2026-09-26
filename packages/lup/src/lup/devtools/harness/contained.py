@@ -60,7 +60,13 @@ from lup.coordination.bare.store import STORE_DIR
 from lup.devtools.dev.admission import SLOT_DIRECTORY
 from lup.devtools.dev.traces import ARCHIVE_DIRECTORY_NAME
 from lup.harness.terminal import host_timezone
-from lup.providers.login import NativeHomeScope, ProviderLogin
+from lup.providers.login import ProviderLogin
+from lup.providers.runtime_homes import runtime_logins
+from lup.devtools.harness.config_volume import (
+    HomeHelper,
+    RuntimeVolume,
+    split_config_volumes,
+)
 from lup.sandbox.attribution import WRITE_REFUSAL_MARKERS
 from lup.devtools.pointer_trust import judged_roots, store_exposure
 from lup.sandbox.rail import (
@@ -123,7 +129,7 @@ def checkout_tag(root: Path) -> str:
     return f"lup-agent:{root.name}"
 
 
-# lup: defer: a contained session's config home is one volume per repository,
+# lup: solved: a contained session's config home is one volume per repository,
 # so a first launch in a new repository opens its container on a fresh
 # document. The account, theme, tier and effort now arrive from the person's
 # lup config, but every other preference Claude Code keeps in its home —
@@ -131,29 +137,25 @@ def checkout_tag(root: Path) -> str:
 # each repository's volume. Decide whether those travel from the selected
 # account's home into the volume at launch, or the volume is kept per person
 # rather than per repository, which shares a written hook across projects.
-def state_volume_name(root: Path, scope: NativeHomeScope | None = None) -> str:
-    """The volume carrying this project's container-side config home.
+def state_volume_name(root: Path, login: ProviderLogin) -> str:
+    """The volume carrying one runtime's container-side config home for this project.
 
     Per repository, and keyed on the shared git directory because that is the
     only name every worktree of one repository agrees on. ``root.name`` reads
     as the repository right up until the checkout is a linked worktree -- and
     the documented workflow makes one per feature. Keying on it costs a
-    config home created empty for every branch: the theme back to default,
-    trust re-seeded, each preference set by hand again, and, since a login
-    can be made in here, a sign-in per feature.
+    config home created empty for every branch: trust re-seeded, the history
+    a ``--continue`` reopens gone, and, since a login can be made in here, a
+    sign-in per feature.
 
-    Separate from the caches because it holds decisions rather than
-    artifacts: the trust a fresh config home would otherwise discard, the
-    session state a ``--continue`` reopens, and the stored login.
-
-    An explicit scope partitions this state by the selected settings. Sessions
-    with different base settings then cannot rewrite one another's home;
-    sessions with the same scope retain their native login and history.
+    Per runtime, so one CLI's sessions never read the other's transcripts or
+    credentials (:mod:`lup.devtools.harness.config_volume`). Not per person:
+    a volume every repository shared would carry one project's transcripts
+    and settings into every other. The person's settings reach it by being
+    seeded at each launch, and what a session changes goes back to their own
+    files when it closes, so the volume holds state rather than decisions.
     """
-    repository_volume = f"lup-cfg-{repository_layout(root).name()}"
-    return (
-        scope.volume_name(repository_volume) if scope is not None else repository_volume
-    )
+    return f"lup-{login.state_volume}-{repository_layout(root).name()}"
 
 
 def environment_directory(root: Path, cache: Path | None = None) -> Path:
@@ -178,60 +180,6 @@ def environment_directory(root: Path, cache: Path | None = None) -> Path:
     held = cache or Path.home() / ".cache" / "lup" / "environments"
     digest = hashlib.sha256(str(root).encode()).hexdigest()[:12]
     return held / f"{root.name}-{digest}"
-
-
-def superseded_volume_name(root: Path) -> str:
-    """What this checkout's config home was called while the name was per branch.
-
-    Kept so a launch can say where the settings went. A rename silently
-    hands back an empty config home, which is indistinguishable from the bug
-    it fixes -- and the operator is looking at the same default theme either
-    way.
-    """
-    return f"lup-cfg-{root.name}"
-
-
-def superseded_volume_notice(
-    root: Path, engine: ContainerEngine, existing: list[str]
-) -> list[Notice]:
-    """Say that a config home moved, in the one session that would notice.
-
-    Only when the old volume is still there and the new one is not, which is
-    exactly the launch where the settings appear to have been lost. Said
-    rather than migrated, because which of several per-branch homes should
-    become the repository's is a question only the operator can answer, and
-    a launcher that guessed would overwrite the answer.
-    """
-    superseded, current = superseded_volume_name(root), state_volume_name(root)
-    if superseded == current or superseded not in existing or current in existing:
-        return []
-    return [
-        Notice(
-            text=(
-                f"Config home: now `{current}`, one per repository rather "
-                f"than one per worktree. `{superseded}` still holds this "
-                "worktree's old settings and is not read any more — copy it "
-                f"over with `{engine.binary} run --rm -v "
-                f"{superseded}:/from -v {current}:/to alpine cp -a /from/. "
-                "/to/`, or set your preferences once and remove it."
-            ),
-            urgency="warning",
-        )
-    ]
-
-
-def existing_volumes(engine: ContainerEngine) -> list[str]:
-    """Every volume this engine holds, or nothing when it cannot be asked.
-
-    An engine that will not answer is not a reason to fail a launch that is
-    otherwise fine -- it costs one advisory notice, and the launch says the
-    rest of what it was going to say.
-    """
-    try:
-        listed = sh.Command(engine.binary)("volume", "ls", "--format", "{{.Name}}")
-    except (sh.CommandNotFound, sh.ErrorReturnCode):
-        return []
-    return str(listed).split()
 
 
 # lup: ignore[constant-declaration] — an identity this repository defines, not a
@@ -1644,7 +1592,6 @@ def contained_argv(
     accessible: list[AccessibleRoot] = [],
     lease: Lease | None = None,
     devices: list[Device] = [],
-    state_scope: NativeHomeScope | None = None,
 ) -> list[str]:
     """The argv that opens a session in this project's container.
 
@@ -1740,10 +1687,27 @@ def contained_argv(
     if not image_matches(tag, rendered, client):
         build_image(image, manifest, tag, client, root)
     name_for_checkout(tag, checkout_tag(root), client)
+    # Before anything mounts a runtime's volume: the entrypoint writes a fresh
+    # home's document on first start, and a split keeps what a volume already
+    # holds, so a probe opened first would leave the old document behind.
+    said.add(
+        split_config_volumes(
+            root,
+            HomeHelper(
+                engine=client,
+                tag=tag,
+                uid=root.stat().st_uid,
+                gid=root.stat().st_gid,
+                config_home=image.config_home,
+            ),
+            [
+                RuntimeVolume(login=runtime, volume=state_volume_name(root, runtime))
+                for runtime in runtime_logins()
+            ],
+        )
+    )
     reached_at = start_egress(image.egress, root.name, client, root)
     said.add(image.egress.notice(root.name))
-    if state_scope is None:
-        said.add(superseded_volume_notice(root, client, existing_volumes(client)))
     # Started before the container rather than beside it, because a pipe with
     # no reader blocks its writer: a sign-in that raced the listener would
     # hang on the one step the whole bridge exists to unblock.
@@ -1844,7 +1808,7 @@ def contained_argv(
         gid=root.stat().st_gid,
         writable=lease.writable,
         read_only=lease.read_only,
-        state_volume=state_volume_name(root, state_scope),
+        state_volume=state_volume_name(root, login),
         config_home_env=login.config_home_env,
         credential_file=login.credentials_file,
         credential_renewable=login.renewable,

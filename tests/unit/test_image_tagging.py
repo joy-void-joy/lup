@@ -15,11 +15,10 @@ from lup.devtools.harness.contained import (
     finished_tags,
     image_tag,
     state_volume_name,
-    superseded_volume_name,
-    superseded_volume_notice,
 )
 from lup.execution.shell import git
-from lup.harness.image import Docker
+from lup.providers.claude.login import CLAUDE_LOGIN
+from lup.providers.codex.login import CODEX_LOGIN
 
 BASE = "FROM archlinux:base\nRUN pacman -Syu --noconfirm\n"
 
@@ -138,9 +137,11 @@ def test_every_worktree_of_one_repository_shares_a_config_home(
     home created empty: default theme, trust re-seeded, every preference set
     by hand again, and a sign-in per branch once one can be made inside.
     """
-    one = state_volume_name(repository / "tree" / "feat-one")
-    two = state_volume_name(repository / "tree" / "feat-two")
-    assert one == two == "lup-cfg-project"
+    one = state_volume_name(repository / "tree" / "feat-one", CLAUDE_LOGIN)
+    two = state_volume_name(repository / "tree" / "feat-two", CLAUDE_LOGIN)
+    assert one == two == "lup-claude-project"
+    codex = state_volume_name(repository / "tree" / "feat-one", CODEX_LOGIN)
+    assert codex == "lup-codex-project"
 
 
 def test_a_plain_checkout_and_its_worktrees_answer_the_same_name(
@@ -161,28 +162,5 @@ def test_a_plain_checkout_and_its_worktrees_answer_the_same_name(
     git("-C", str(root), "add", "-A")
     git("-C", str(root), "commit", "-qm", "first")
     git("-C", str(root), "worktree", "add", "-q", str(tmp_path / "feat"), "-b", "feat")
-    assert state_volume_name(root) == "lup-cfg-checkout"
-    assert state_volume_name(tmp_path / "feat") == "lup-cfg-checkout"
-
-
-def test_the_launch_says_where_a_config_home_went(repository: Path) -> None:
-    """A rename hands back an empty config home, which looks like the bug.
-
-    The operator sees the same default theme either way, so the one launch
-    that can tell them apart is the one where the old volume is still there
-    and the new one is not.
-    """
-    worktree = repository / "tree" / "feat-one"
-    said = superseded_volume_notice(
-        worktree, Docker(), [superseded_volume_name(worktree)]
-    )
-    assert "lup-cfg-feat-one" in "\n".join(item.text for item in said)
-
-
-def test_nothing_is_said_once_the_repository_config_home_exists(
-    repository: Path,
-) -> None:
-    """Otherwise the warning outlives what it warns about."""
-    worktree = repository / "tree" / "feat-one"
-    existing = [superseded_volume_name(worktree), state_volume_name(worktree)]
-    assert superseded_volume_notice(worktree, Docker(), existing) == []
+    assert state_volume_name(root, CLAUDE_LOGIN) == "lup-claude-checkout"
+    assert state_volume_name(tmp_path / "feat", CODEX_LOGIN) == "lup-codex-checkout"

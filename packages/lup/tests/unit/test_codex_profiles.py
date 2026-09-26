@@ -12,7 +12,6 @@ import tomlkit
 from typer.testing import CliRunner
 
 import lup.devtools.harness.launch as launch
-import lup.devtools.harness.contained as contained
 import lup.providers.codex.install as installation
 from lup.providers.codex.account import read_account
 from lup.providers.codex.home import CodexHomeSelection
@@ -89,33 +88,6 @@ def test_changed_profile_gets_another_immutable_name(tmp_path: Path) -> None:
     (source / "review.config.toml").write_text('model="gpt-5.5"\n', encoding="utf-8")
     second = CodexProfileSettings.capture(source, "review")
     assert first.installed_name() != second.installed_name()
-
-
-def test_same_effective_settings_reuse_native_state_and_changes_partition_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    settings = CodexProfileSettings(
-        name=None,
-        source_home=tmp_path,
-        as_base=True,
-        settings={"model": "gpt-5.5", "model_reasoning_effort": "high"},
-    )
-    reordered = settings.model_copy(
-        update={
-            "settings": {
-                "model_reasoning_effort": "high",
-                "model": "gpt-5.5",
-            }
-        }
-    )
-    changed = settings.model_copy(update={"settings": {"model": "gpt-6-astra"}})
-    layout = Mock()
-    layout.name.return_value = "fixture"
-    monkeypatch.setattr(contained, "repository_layout", Mock(return_value=layout))
-    volume = contained.state_volume_name(tmp_path, settings.state_scope())
-    assert volume == contained.state_volume_name(tmp_path, reordered.state_scope())
-    assert volume != contained.state_volume_name(tmp_path, changed.state_scope())
-    assert contained.state_volume_name(tmp_path) == "lup-cfg-fixture"
 
 
 @pytest.mark.skipif(shutil.which("codex") is None, reason="Codex CLI is not installed")
@@ -271,11 +243,9 @@ def test_launcher_selects_the_same_settings_for_preparation_auth_and_session(
     if sandbox.contained():
         assert snapshot.as_base
         assert snapshot.settings["model"] == ("gpt-6-astra" if profile else "gpt-5.5")
-        assert call.kwargs["state_scope"] == snapshot.state_scope()
         assert "--profile" not in call.args[1]
         assert authenticate.call_args.kwargs["profile"] is None
     else:
-        assert call.kwargs["state_scope"] is None
         assert authenticate.call_args.kwargs["profile"] == profile
         if profile:
             assert call.args[1] == ["--profile", snapshot.installed_name()]
