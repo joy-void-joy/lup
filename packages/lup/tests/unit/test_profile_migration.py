@@ -1,11 +1,11 @@
-"""Accounts kept where lup used to keep them reach the person's config home once.
+"""Accounts a checkout or the old ``~/.lup`` registry keeps move to global once.
 
-An account left in a checkout's ``.lup/profiles`` or the old ``~/.lup``
-registry is one no launch can select, and a login copied rather than moved
-is two chains that diverge on the first renewal. These pin that a run moves
-each account, carries one selection without overriding the person's, never
-overwrites a name the destination holds, and that running it again finds
-nothing left to do — and that a launch says so while something is left.
+A checkout's ``.lup/profiles`` keeps working where it is, so moving one is a
+choice; an account left in the old registry is one no launch can select; and
+a login copied rather than moved is two chains that diverge on the first
+renewal. These pin that a run moves each account, carries one selection
+without overriding the person's, never overwrites a name the destination
+holds, and that running it again finds nothing left to do.
 """
 
 import json
@@ -15,7 +15,7 @@ import pytest
 
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.providers.codex.login import CODEX_LOGIN
-from lup.providers.profile_migration import legacy_notice, migrate_profiles
+from lup.providers.profile_migration import migrate_profiles
 from lup.providers.profile_tree import profile_directory
 from lup.providers.user_config import UserConfigFile
 
@@ -63,17 +63,17 @@ def test_running_it_again_finds_nothing_to_do(
     assert sorted(config.home.rglob("*")) == settled
 
 
-def test_a_launch_says_where_accounts_are_left_until_they_move(
+def test_a_checkouts_profile_works_where_it_is_and_moving_it_is_optional(
     checkout: Path, config: UserConfigFile, tmp_path: Path
 ) -> None:
-    before = legacy_notice(checkout, config, tmp_path / "old-home")
+    kept = checkout / ".lup" / "profiles" / "work" / CLAUDE_LOGIN.home_subdir
 
+    before = profile_directory(CLAUDE_LOGIN, config, checkout).launch_home(None)
     migrate_profiles(checkout, config, tmp_path / "old-home")
+    after = profile_directory(CLAUDE_LOGIN, config, checkout).launch_home(None)
 
-    assert before is not None
-    assert str(checkout / ".lup" / "profiles") in before
-    assert "harness profile migrate" in before
-    assert legacy_notice(checkout, config, tmp_path / "old-home") is None
+    assert before == kept
+    assert after == config.profiles_root() / "work" / CLAUDE_LOGIN.home_subdir
 
 
 def test_a_selection_the_person_already_made_is_theirs(

@@ -431,6 +431,27 @@ def test_the_usage_display_and_a_launch_agree_on_the_checkouts_own_profile(
     assert codex_reader.home == kept / "codex-home"
 
 
+def test_a_launch_opens_a_checkouts_profile_and_says_nothing_of_moving_it(
+    config: UserConfigFile,
+    launched: Launched,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A checkout's own profiles are read where they are, with no notice."""
+    kept = tmp_path / "fresh-project" / ".lup" / "profiles"
+    (kept / "work" / CLAUDE_LOGIN.home_subdir).mkdir(parents=True)
+    (kept / ".active").write_text("work\n", encoding="utf-8")
+
+    claude(config)
+
+    said = capsys.readouterr()
+    assert launched.environment[CLAUDE_CONFIG_DIR] == str(
+        kept / "work" / CLAUDE_LOGIN.home_subdir
+    )
+    assert "migrate" not in said.out + said.err
+    assert str(kept) not in said.out + said.err
+
+
 def test_codex_derives_its_worktree_home_from_the_checkouts_selected_account(
     config: UserConfigFile,
     launched: Launched,

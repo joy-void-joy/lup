@@ -23,7 +23,6 @@ from pydantic import BaseModel, Field, ValidationError
 
 from lup.harness.devices import Device
 from lup.providers.login import NativeHomeScope, ProviderLogin
-from lup.providers.profile_migration import legacy_notice
 from lup.providers.profile_tree import profile_directory
 from lup.providers.profiles import DefaultHomeProfile, ProfileDirectory
 from lup.providers.user_config import UserConfig, UserConfigFile
@@ -1327,18 +1326,6 @@ def personal_config(config: UserConfigFile) -> UserConfig:
         raise typer.BadParameter(str(refusal)) from refusal
 
 
-def announce_legacy_profiles(root: Path, config: UserConfigFile) -> None:
-    """Say where accounts were left behind, at every launch until they move.
-
-    Moved by a command rather than here, because moving a login is a decision
-    a launch should not take on its way past — and said rather than left,
-    because an account left there is one no launch can select.
-    """
-    notice = legacy_notice(root, config)
-    if notice is not None:
-        Notice(text=notice, urgency="warning").say()
-
-
 def announce_relaxed_rules(relaxed: bool, plugin: Plugin) -> None:
     """Say what a relaxed launch retired, and what it did not.
 
@@ -1988,7 +1975,6 @@ def launch_claude(
         checkpoint(provider="claude")
     plugin = composition.recipe.source.plugins[0]
     announce_relaxed_rules(relaxed, plugin)
-    announce_legacy_profiles(project_root(), config)
     sentinels = LaunchSentinels()
     cleared = ready_to_open(
         composition,
@@ -2245,7 +2231,6 @@ def launch_codex(
         checkpoint(provider="codex")
     plugin = composition.recipe.source.plugins[0]
     announce_relaxed_rules(relaxed, plugin)
-    announce_legacy_profiles(project_root(), config)
     sentinels = LaunchSentinels()
     cleared = ready_to_open(
         composition,
