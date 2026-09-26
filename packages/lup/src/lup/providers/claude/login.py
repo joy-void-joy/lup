@@ -25,6 +25,7 @@ CLAUDE_LOGIN = ProviderLogin(
     editor_lockfiles="ide",
     home_subdir="claude-config",
     state_volume="claude",
+    trust_document=".claude.json",
     # Read off a home Claude Code 2.1.282 wrote, and off the shared volume a
     # contained session had filled beside Codex. `cache`, `history.jsonl`,
     # `plugins`, `sessions` and `skills` are names both runtimes write.

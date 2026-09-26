@@ -1889,6 +1889,7 @@ def contained_argv(
         environments=held_environments(root, accessible, image.project_environment),
         devices=granted_devices.granted,
         home_seed=home_seed,
+        trust_document=login.trust_document,
     )
 
 

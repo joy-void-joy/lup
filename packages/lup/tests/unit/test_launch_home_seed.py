@@ -107,3 +107,27 @@ def test_a_volume_that_cannot_be_read_moves_nothing(
 
     assert "nothing it changed was returned" in capsys.readouterr().out
     assert (account.directory / "settings.json").read_text() == '{"verbose": false}'
+
+
+def test_only_a_runtime_keeping_trust_in_a_document_has_one_seeded(
+    tmp_path: Path,
+) -> None:
+    """A Codex home gains no Claude document from the shared entrypoint."""
+    image = Image()
+
+    def argv(trust_document: str) -> list[str]:
+        return image.session_arguments(
+            tag="lup-agent:x",
+            checkout=tmp_path,
+            uid=1000,
+            gid=1000,
+            writable={},
+            read_only={},
+            state_volume="lup-x",
+            config_home_env="HOME_VARIABLE",
+            trust_document=trust_document,
+        )
+
+    assert "LUP_TRUST_DOCUMENT=.claude.json" in argv(CLAUDE_LOGIN.trust_document)
+    assert not any("LUP_TRUST_DOCUMENT" in word for word in argv(""))
+    assert CLAUDE_LOGIN.trust_document == ".claude.json"

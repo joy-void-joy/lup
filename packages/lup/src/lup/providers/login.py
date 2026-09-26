@@ -138,6 +138,14 @@ class ProviderLogin(BaseModel, frozen=True):
     split drops these rather than carrying them into a fresh volume.
     """
 
+    trust_document: str = ""
+    """The document in this runtime's home that records workspace trust, if any.
+
+    A contained session's entrypoint seeds it and merges the checkout's
+    trust into it at every start. Empty where the runtime keeps trust
+    somewhere a launch writes itself, so its home gains no stray file.
+    """
+
     home_subdir: str
     """Subdirectory this runtime's configuration home takes inside a profile.
 
