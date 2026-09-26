@@ -3496,6 +3496,49 @@ def test_a_server_naming_no_environment_renders_no_key_at_all() -> None:
     assert "env_vars" not in parsed["mcp_servers"]["notes"]
 
 
+def rendered_servers(harness: Harness) -> tuple[JsonObject, JsonObject]:
+    """Each runtime's rendering of the ``notes`` server, Claude's first."""
+    declaration = next(
+        artifact
+        for artifact in compile_claude(harness).artifacts
+        if artifact.path == Path(".claude/plugins/lup/.mcp.json")
+    )
+    claude = json.loads(declaration.content)["mcpServers"]["notes"]
+    codex = tomllib.loads(codex_project_config(harness, CodexSpellings()))
+    return claude, codex["mcp_servers"]["notes"]
+
+
+def test_an_always_loaded_server_is_exempt_only_where_tools_are_deferred() -> None:
+    """A server called dozens of times a session should not cost a search each time.
+
+    Claude Code withholds MCP tool definitions until a search asks for them
+    and exempts a server declaring ``alwaysLoad``. Codex documents no such
+    control, so its config gains no key it would not read; and a server that
+    declares nothing keeps each runtime's own loading.
+    """
+    source = portable_harness()
+    plugin = source.plugins[0]
+    loaded = source.model_copy(
+        update={
+            "plugins": [
+                plugin.model_copy(
+                    update={
+                        "mcp_servers": [
+                            server.model_copy(update={"always_load": True})
+                            for server in plugin.mcp_servers
+                        ]
+                    }
+                )
+            ]
+        }
+    )
+    claude, codex = rendered_servers(loaded)
+    default_claude, default_codex = rendered_servers(source)
+    assert claude["alwaysLoad"] is True
+    assert "alwaysLoad" not in default_claude
+    assert codex == default_codex
+
+
 def test_every_tool_server_asks_for_what_its_launcher_exported() -> None:
     """A Codex session's tool servers answer to the session they belong to.
 

@@ -1268,6 +1268,18 @@ class McpServer(BaseModel, frozen=True):
     as a group that is simply absent rather than as an error naming a limit.
     """
 
+    always_load: bool = False
+    """Whether this server's tools are offered from the first turn, never deferred.
+
+    A runtime that withholds tool definitions until a search asks for them
+    spends a search call each time a deferred tool is wanted. That is a fair
+    price for a server reached now and then, and the wrong one for tools a
+    session calls dozens of times. Claude Code spells this per server, as
+    `alwaysLoad`, and waits at startup for such a server's tools up to its
+    connect deadline; Codex documents no per-server loading control and no
+    deferral, so its config renders nothing for it.
+    """
+
     def command_line(self, runtime: "NativeSpellings") -> list[str]:
         """Spell every argument for the runtime that will spawn this server."""
         return [argument.spell_in(runtime) for argument in self.arguments]
