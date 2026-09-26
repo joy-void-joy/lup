@@ -123,3 +123,57 @@ def test_selecting_a_profile_starts_the_file_where_there_is_none(
     config.select_profile("work")
 
     assert config.load() == UserConfig(profile="work")
+
+
+def test_the_editor_and_each_runtimes_own_settings_are_read(tmp_path: Path) -> None:
+    config = written(
+        tmp_path / "lup",
+        'editor = "vim"\n\n[claude.settings]\nverbose = true\n\n'
+        "[codex.settings.tui]\nanimations = false\n",
+    )
+
+    loaded = config.load()
+
+    assert loaded.editor == "vim"
+    assert loaded.claude.settings == {"verbose": True}
+    assert loaded.codex.settings == {"tui": {"animations": False}}
+
+
+def test_an_editor_mode_no_runtime_takes_is_refused(tmp_path: Path) -> None:
+    config = written(tmp_path / "lup", 'editor = "emacs"\n')
+
+    with pytest.raises(ValueError, match="holds a setting lup cannot read"):
+        config.load()
+
+
+def test_recording_values_keeps_the_persons_lines_and_makes_missing_tables(
+    tmp_path: Path,
+) -> None:
+    config = written(tmp_path / "lup", '# mine\ntier = "balanced"\n')
+
+    config.record({("theme", "claude"): "light", ("editor",): "vim"})
+    config.record({("claude", "settings", "verbose"): True})
+
+    assert "# mine" in config.path().read_text(encoding="utf-8")
+    loaded = config.load()
+    assert (loaded.theme.claude, loaded.editor, loaded.tier) == (
+        "light",
+        "vim",
+        "balanced",
+    )
+    assert loaded.claude.settings == {"verbose": True}
+
+    config.record({("editor",): None, ("codex", "settings", "absent"): None})
+
+    assert config.load().editor is None
+
+
+def test_a_value_lup_could_not_read_back_is_refused_and_nothing_written(
+    tmp_path: Path,
+) -> None:
+    config = written(tmp_path / "lup", 'tier = "balanced"\n')
+
+    with pytest.raises(ValueError):
+        config.record({("theme", "claude"): "not-a-theme", ("editor",): "vim"})
+
+    assert config.path().read_text(encoding="utf-8") == 'tier = "balanced"\n'
