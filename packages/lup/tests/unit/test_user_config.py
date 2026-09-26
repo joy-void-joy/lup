@@ -177,3 +177,19 @@ def test_a_value_lup_could_not_read_back_is_refused_and_nothing_written(
         config.record({("theme", "claude"): "not-a-theme", ("editor",): "vim"})
 
     assert config.path().read_text(encoding="utf-8") == 'tier = "balanced"\n'
+
+
+def test_a_superseded_volume_is_kept_fourteen_days_unless_the_person_says(
+    tmp_path: Path,
+) -> None:
+    assert (
+        UserConfigFile(tmp_path / "unset").load().cleanup.superseded_volumes_after_days
+        == 14
+    )
+    config = written(tmp_path / "lup", "[cleanup]\nsuperseded_volumes_after_days = 3\n")
+
+    assert config.load().cleanup.superseded_volumes_after_days == 3
+    with pytest.raises(ValueError):
+        written(
+            tmp_path / "bad", "[cleanup]\nsuperseded_volumes_after_days = -1\n"
+        ).load()

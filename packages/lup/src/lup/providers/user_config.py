@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Literal
 
 import tomlkit
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 from pydantic_settings import BaseSettings
 from tomlkit.exceptions import TOMLKitError
 from tomlkit.items import Table
@@ -68,6 +68,15 @@ class UserRuntimeSettings(BaseModel, frozen=True, extra="forbid"):
     settings: JsonObject = {}
 
 
+class UserCleanup(BaseModel, frozen=True, extra="forbid"):
+    """How long lup keeps what it replaced before a launch removes it."""
+
+    superseded_volumes_after_days: int = Field(default=14, ge=0)
+    """Days a config volume a split superseded is kept, its history readable,
+    before a launch or `harness clean` removes it; `harness clean --yes`
+    removes it sooner."""
+
+
 class UserConfig(BaseModel, frozen=True, extra="forbid"):
     """One person's standing answers, each defaulting to lup's own."""
 
@@ -98,6 +107,8 @@ class UserConfig(BaseModel, frozen=True, extra="forbid"):
 
     codex: UserRuntimeSettings = UserRuntimeSettings()
     """``[codex.settings]``: Codex configuration handed to every session."""
+
+    cleanup: UserCleanup = UserCleanup()
 
 
 class UserConfigHome(BaseSettings):
