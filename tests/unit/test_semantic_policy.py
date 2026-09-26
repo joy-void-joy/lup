@@ -717,6 +717,24 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="gh api -X DELETE /repos/o/r/x", effect="ask"),
     DecisionCase(input="gh api -f title=x /repos/o/r/issues", effect="ask"),
     DecisionCase(input="gh api --method PATCH /repos/o/r", effect="ask"),
+    # gh hands a flag written before its subcommand to the subcommand it
+    # reaches, and one without `=` takes the next word as its value -- so
+    # `gh -t status api -X DELETE` is `gh api --template status -X DELETE`,
+    # not `gh status`. Every such spelling is refused, at the subcommand and
+    # at a subcommand's operation, and the plain spelling is judged as ever.
+    DecisionCase(input="gh -t status api -X DELETE /repos/o/r", effect="deny"),
+    DecisionCase(input="gh -Xpost api /repos/o/r", effect="deny"),
+    DecisionCase(input="gh --method=DELETE api /repos/o/r", effect="deny"),
+    DecisionCase(input="gh -X DELETE api /repos/o/r", effect="deny"),
+    DecisionCase(input="gh -t status api /repos/o/r", effect="deny", sandboxed=True),
+    DecisionCase(input="gh pr -t view merge 1", effect="deny"),
+    DecisionCase(input="gh -R o/r pr list", effect="deny"),
+    DecisionCase(input="gh pr -R o/r list", effect="deny"),
+    DecisionCase(input="gh -t x auth token", effect="deny"),
+    DecisionCase(input="gh pr list -R o/r", effect="allow"),
+    DecisionCase(input="gh pr merge 1 -R o/r", effect="ask"),
+    DecisionCase(input="gh --help", effect="allow"),
+    DecisionCase(input="gh pr --help", effect="allow"),
     # A read-only form of a writing command allows; the writing form asks.
     DecisionCase(input="tar -tzf archive.tgz", effect="allow"),
     DecisionCase(input="tar -xzf archive.tgz", effect="ask"),

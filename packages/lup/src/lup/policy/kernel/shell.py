@@ -91,7 +91,7 @@ from .commands import (
     decide_awk_words,
     decide_command_rows,
     decide_download_words,
-    decide_gh_api_words,
+    decide_gh_words,
     decide_sed_words,
     decide_uv,
     git_checkout_pathspec,
@@ -683,8 +683,8 @@ def decide_segment_words(
             write_facts(context),
             directory,
         )
-    if executable == "gh" and len(words) > 1 and words[1] == "api":
-        return decide_gh_api_words(words)
+    if executable == "gh":
+        return decide_gh_words(words, context["rows"], write_facts(context))
     if executable == "find":
         return decide_find_words(words, context, directory)
     if executable == "sed":

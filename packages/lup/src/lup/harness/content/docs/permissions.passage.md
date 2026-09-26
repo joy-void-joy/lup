@@ -320,6 +320,14 @@ capture settles — `echo README.md | xargs rm` names its target nowhere a
 rule can read. `sed`/`awk` pass read-only screens, quoted-delimiter heredocs are
 literal data, and `curl` and `wget` are read the way the next section says.
 
+`gh api` is screened by its method and body the way a download is. gh hands
+a flag written before its subcommand to whichever subcommand it reaches, and
+one written there without `=` takes the next word as its value, so `gh -t
+status api -X DELETE` is `gh api` rather than the `gh status` it spells. A
+flag before gh's subcommand, or before the operation of a subcommand that
+has operations, is refused rather than modelled; the same command with its
+flags after the operation is judged by its row.
+
 Quoting is kept past the parse. A `$` inside single quotes, or escaped as
 `\$`, is a dollar sign rather than an expansion, so `rg '$x' src`, `git config
 user.name '$me'` and `sort -o 'a$b' f` are read by the characters they spell.

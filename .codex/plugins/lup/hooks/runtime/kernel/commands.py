@@ -1230,6 +1230,55 @@ def decide_gh_api_words(words: list[str]) -> KernelDecision:
     )
 
 
+def decide_gh_words(
+    words: list[str], rows: list[ShellRuleRow], facts: WriteFacts | None = None
+) -> KernelDecision:
+    """Judge a gh command whose subcommand and operation stand where it wrote them.
+
+    gh finds its subcommand the way cobra does, and cobra does not step over a
+    flag the way this walk does: one written before a subcommand, without an
+    ``=`` and not a switch that level knows, takes the next word as its value,
+    and every flag written there is handed on to the subcommand it reaches.
+    So `gh -t status api -X DELETE x` runs `api` with `--template status`,
+    `gh -Xpost api x` sends a POST, and `gh pr -t view merge 1` merges --
+    each read here as the `gh status`, `gh api` or `gh pr view` it spells.
+
+    Refused rather than modelled. Which word cobra takes as the subcommand
+    turns on which flags each level of gh knows, and reading that would be a
+    second copy of gh's own flag tables to keep in step with every release.
+    A flag before gh's subcommand, or before the operation of a subcommand
+    that has operations, is a spelling nobody needs: the same command with
+    its flags after the operation is read by the rows that declare them, and
+    a help probe is answered before this is asked.
+
+    Past that, ``words[1]`` is the subcommand gh runs, which is what lets `gh
+    api` be screened by its method and body here.
+    """
+    subcommand = words[1:2]
+    grouped = bool(subcommand) and any(
+        row["command"] == "gh"
+        and row["subcommand"] == subcommand[0]
+        and row["operation"]
+        for row in rows
+    )
+    leading = next(
+        (word for word in words[1 : 3 if grouped else 2] if word.startswith("-")),
+        None,
+    )
+    if leading is not None:
+        return KernelDecision(
+            "deny",
+            f"gh hands `{leading}`, written before its subcommand, to whichever"
+            " subcommand it reaches, and a flag there without `=` takes the next"
+            " word as its value, so which subcommand runs is not read here",
+            recovery="Write gh's flags after its subcommand and operation:"
+            " `gh pr merge 1 --repo owner/repo`, `gh api -X GET <endpoint>`.",
+        )
+    if subcommand == ["api"]:
+        return decide_gh_api_words(words)
+    return decide_command_rows(words, rows, facts)
+
+
 def curl_url(word: str) -> str:
     """Spell one downloader operand the way curl and wget resolve it.
 
