@@ -33,9 +33,10 @@ def test_the_repository_root_is_trusted_beside_the_checkout() -> None:
 def test_trust_is_merged_on_every_start_and_the_seed_only_on_the_first() -> None:
     """A document already in the volume is amended, never replaced or skipped."""
     script = entrypoint()
-    seeded = script.index('cp /opt/lup/trust-seed.json "$config/.claude.json"')
+    seeded = script.index('cp /opt/lup/trust-seed.json "$config/$trust"')
     merged = script.index("jq --arg here")
 
-    assert script.index('if [ ! -f "$config/.claude.json" ]') < seeded < merged
+    assert script.index('trust="${LUP_TRUST_DOCUMENT:-}"') < seeded
+    assert script.index('[ ! -f "$config/$trust" ]') < seeded < merged
     assert script.count("fi\n", 0, merged) >= 2
-    assert 'mv "$config/.claude.json.lup" "$config/.claude.json"' in script
+    assert 'mv "$config/$trust.lup" "$config/$trust"' in script

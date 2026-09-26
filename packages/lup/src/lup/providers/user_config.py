@@ -22,17 +22,19 @@ decision silently dropped reads exactly like one never made.
 """
 
 from pathlib import Path
+from typing import Literal
 
 import tomlkit
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 from pydantic_settings import BaseSettings
 from tomlkit.exceptions import TOMLKitError
+from tomlkit.items import Table
 
 from lup.channels.models import write_atomic
 from lup.harness.models import NativeName
 from lup.providers.claude.theme import ClaudeTheme
 from lup.providers.selection import SessionEffort
-from lup.types import ModelTier
+from lup.types import JsonObject, JsonValue, ModelTier
 
 
 class UserTheme(BaseModel, frozen=True, extra="forbid"):
@@ -48,6 +50,31 @@ class UserTheme(BaseModel, frozen=True, extra="forbid"):
 
     claude: ClaudeTheme | None = None
     codex: NativeName | None = None
+
+
+type EditorMode = Literal["normal", "vim"]
+"""How a runtime's prompt takes keys: plainly, or as vim's modes do."""
+
+
+class UserRuntimeSettings(BaseModel, frozen=True, extra="forbid"):
+    """Settings one runtime is handed as written, in that runtime's own keys.
+
+    What the portable keys cannot say, said once for every project: a table
+    here wins over the account's own setting of the same name, the way a
+    portable key does, and a session's change to one of them comes back here
+    rather than to the account, where this table would hide it.
+    """
+
+    settings: JsonObject = {}
+
+
+class UserCleanup(BaseModel, frozen=True, extra="forbid"):
+    """How long lup keeps what it replaced before a launch removes it."""
+
+    superseded_volumes_after_days: int = Field(default=14, ge=0)
+    """Days a config volume a split superseded is kept, its history readable,
+    before a launch or `harness clean` removes it; `harness clean --yes`
+    removes it sooner."""
 
 
 class UserConfig(BaseModel, frozen=True, extra="forbid"):
@@ -72,6 +99,18 @@ class UserConfig(BaseModel, frozen=True, extra="forbid"):
     tier: ModelTier = "strongest"
     """The model a session runs on when nothing names one, as a portable tier
     each runtime spells in its own lineup; ``inherit`` leaves the runtime's."""
+
+    editor: EditorMode | None = None
+    """How every runtime's prompt takes keys: Claude Code's ``editorMode``,
+    Codex's ``tui.vim_mode_default``. Unset, each account's own stands."""
+
+    claude: UserRuntimeSettings = UserRuntimeSettings()
+    """``[claude.settings]``: Claude Code settings handed to every session."""
+
+    codex: UserRuntimeSettings = UserRuntimeSettings()
+    """``[codex.settings]``: Codex configuration handed to every session."""
+
+    cleanup: UserCleanup = UserCleanup()
 
 
 class UserConfigHome(BaseSettings):
@@ -130,10 +169,31 @@ class UserConfigFile:
         Written through the parsed document, so a person's comments and the
         order they wrote things in survive a selection made by a command.
         """
+        self.record({("profile",): name})
+
+    def record(self, values: dict[tuple[str, ...], JsonValue | None]) -> None:
+        """Write each value at its dotted path, ``None`` removing it, and nothing else.
+
+        Written through the parsed document, so a person's comments and the
+        order they wrote things in survive a value a command or a session
+        put there. Refused as a whole, writing nothing, where the result is
+        a file lup could not read back — a value no launch would then accept.
+        """
         document = self.document()
-        if name is None:
-            document.pop("profile", None)
-        else:
-            document["profile"] = name
+        for path, value in values.items():
+            table: tomlkit.TOMLDocument | Table = document
+            for key in path[:-1]:
+                held = table.get(key)
+                if not isinstance(held, Table):
+                    if value is None:
+                        break
+                    table[key] = tomlkit.table()
+                    held = table[key]
+                table = held
+            else:
+                if value is None:
+                    table.pop(path[-1], None)
+                else:
+                    table[path[-1]] = value
         UserConfig.model_validate(document.unwrap())
         write_atomic(self.path(), tomlkit.dumps(document).encode("utf-8"))

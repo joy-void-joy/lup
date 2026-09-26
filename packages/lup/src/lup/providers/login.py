@@ -18,16 +18,6 @@ from pydantic import BaseModel, Field
 from lup.types import EnvVars, StringMap
 
 
-class NativeHomeScope(BaseModel, frozen=True):
-    """Stable native state identity for sessions with the same personal settings."""
-
-    key: str = Field(pattern=r"^[a-z0-9-]+$")
-
-    def volume_name(self, repository_volume: str) -> str:
-        """Partition persistent state without changing shared dependency caches."""
-        return f"{repository_volume}-{self.key}"
-
-
 class HomePreparation(BaseModel, frozen=True):
     """A shipped executable that prepares a runtime's private configuration home."""
 
@@ -121,6 +111,39 @@ class ProviderLogin(BaseModel, frozen=True):
     runtime offers no such bridge, which is a fact about the vendor and not
     an omission -- Codex's extension drives an app-server and spawns its own
     core, so there is no rendezvous to bridge and nothing to mount.
+    """
+
+    state_volume: str = Field(pattern=r"^[a-z0-9-]+$")
+    """This runtime's word in the name of its per-repository state volume.
+
+    A contained session's configuration home is a volume per repository and
+    per runtime, so one runtime's sessions never read another's transcripts
+    or write the files it reads its settings from. Two runtimes sharing a
+    volume is what left a home holding both CLIs' files mixed together.
+    """
+
+    home_entries: list[str] = []
+    """What this runtime keeps at the top of its configuration home, as names or globs.
+
+    The table a volume holding more than one runtime's home is split by:
+    each entry goes to every runtime naming it, so one both runtimes write
+    (a shared cache, a ``sessions`` directory both use) goes to both, and one
+    no runtime names goes to both too, said aloud as unknown.
+    """
+
+    home_debris: list[str] = []
+    """What this runtime leaves at the top of its home that nothing reads again.
+
+    A write it interrupted between its temporary file and the rename, say. A
+    split drops these rather than carrying them into a fresh volume.
+    """
+
+    trust_document: str = ""
+    """The document in this runtime's home that records workspace trust, if any.
+
+    A contained session's entrypoint seeds it and merges the checkout's
+    trust into it at every start. Empty where the runtime keeps trust
+    somewhere a launch writes itself, so its home gains no stray file.
     """
 
     home_subdir: str

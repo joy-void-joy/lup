@@ -9,24 +9,27 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
+from tempfile import mkdtemp
 from typing import Protocol, runtime_checkable
 from uuid import uuid4
 
 import sh
 import typer
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from lup.harness.devices import Device
-from lup.providers.login import NativeHomeScope, ProviderLogin
+from lup.providers.login import ProviderLogin
 from lup.providers.profile_tree import profile_directory
 from lup.providers.profiles import DefaultHomeProfile, ProfileDirectory
 from lup.providers.user_config import UserConfig, UserConfigFile
-from lup.devtools.harness.contained import contained_argv
+from lup.devtools.harness.config_volume import HomeSeedPlaces, named_file
+from lup.devtools.harness.contained import contained_argv, read_config_home
 from lup.providers.claude.confinement import CLAUDE_SANDBOX_OFF
 from lup.providers.claude.model_choice import (
     claude_default_effort,
@@ -46,8 +49,16 @@ from lup.providers.codex.model_choice import (
 )
 from lup.providers.codex.subagents import CodexModelTiers
 from lup.providers.claude.config_home import (
+    CLAUDE_HOME_DOCUMENT,
+    WORKSPACE_SETTINGS,
+    ClaudeConfigHome,
     ClaudeConfigUnreadable,
     selected_config_home,
+)
+from lup.providers.claude.home_seed import (
+    KEYBINDINGS,
+    ClaudeHomeReturn,
+    ClaudeHomeSeed,
 )
 from lup.providers.claude.theme import settle_claude_theme
 from lup.providers.claude.harness import ClaudeSpellings
@@ -63,7 +74,7 @@ from lup.providers.codex.transcripts import CodexTranscripts
 from lup.coordination.identity import MEMBER_ENV, NAME_ENV, LaunchedMember
 from lup.coordination.repository import RepositoryPeers, launched_member
 from lup.harness.environment import non_interactive_environment
-from lup.harness.image import detected_client
+from lup.harness.image import Image, detected_client
 from lup.harness.messaging import SessionInboxes, cleared
 from lup.workspace.edition import shared_git_directory
 from lup.harness.models import HookSet, NativeName, Plugin, Resumption
@@ -113,7 +124,9 @@ from lup.sessions.recursion import MAX_RECURSIVE_AGENT_ENV
 from lup.types import EnvVars, JsonObject, JsonValue
 from lup.workspace.paths import agent_version, harness_runs_path, project_root
 from lup.providers.codex.home import (
+    SEED_RECORD,
     CodexWorktreeHomeStore,
+    seeded_codex_settings,
     select_codex_home,
 )
 from lup.devtools.harness.composition import NativeTargets
@@ -1657,7 +1670,7 @@ def session_argv(
     authenticate: Callable[[list[str], Path, bool], None] | None = None,
     member: LaunchedMember | None = None,
     prepare: Callable[[list[str], Path], None] | None = None,
-    state_scope: NativeHomeScope | None = None,
+    home_seed: HomeSeedPlaces | None = None,
 ) -> list[str]:
     """The argv that opens a session, inside the declared container or on the host.
 
@@ -1789,7 +1802,7 @@ def session_argv(
         # This launch's flags lead and the machine's standing grants follow,
         # settled here beside the roots for the same reason they are.
         devices=[*devices, *granted_devices(told)],
-        state_scope=state_scope,
+        home_seed=home_seed,
     )
     # Verified on the way in, rather than asserted. This is §6's whole point
     # and the launch is where it has to happen: the boundary was built two
@@ -2063,16 +2076,45 @@ def launch_claude(
     # where the account keeps none, replaced only where the person's lup
     # config names one. A session on the host runs in the account's own home,
     # so what it changes there is the account's already.
-    # lup: defer: a contained session runs in its repository's config volume,
+    # lup: solved: a contained session runs in its repository's config volume,
     # so no theme reaches it and none it sets returns to the account; which
     # home a container's theme belongs to is the volume's question.
-    if not sandbox.contained():
-        try:
-            settle_claude_theme(
-                selected_config_home(environment), personal.theme.claude
+    # A contained session runs in its repository's volume instead, so the
+    # account's settings are seeded into it at every start, the person's lup
+    # config winning, and what the session changed of the person's comes
+    # back when it closes.
+    account = selected_config_home(environment)
+    try:
+        seed = (
+            ClaudeHomeSeed.compose(
+                account,
+                personal,
+                model=claude_model_id(personal.tier),
+                effort=(
+                    None
+                    if personal.effort is None
+                    else claude_effort(personal.effort).level
+                ),
             )
-        except ClaudeConfigUnreadable as error:
-            raise typer.BadParameter(str(error)) from error
+            if sandbox.contained()
+            else None
+        )
+        if seed is None:
+            settle_claude_theme(account, personal.theme.claude)
+    except ClaudeConfigUnreadable as error:
+        raise typer.BadParameter(str(error)) from error
+    seeded_at = Path(mkdtemp(prefix="lup-home-seed-")) if seed is not None else None
+    places = (
+        HomeSeedPlaces(
+            seed=seed.write(seeded_at / "seed"), applied=seeded_at / "applied"
+        )
+        if seed is not None and seeded_at is not None
+        else None
+    )
+    # Only a volume the seed reached is compared with it: before the
+    # container starts, the volume still holds the previous session's
+    # settings, and those read against this seed are no session's changes.
+    seed_applied = False
     transcribing = transcribe_session or mode is None or mode.transcribes("claude")
     transcript = start_harness_transcript(
         "claude",
@@ -2110,7 +2152,9 @@ def launch_claude(
                 mounts,
                 devices,
                 member=member,
+                home_seed=places,
             )
+            seed_applied = places is not None
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True
     except KeyboardInterrupt:
@@ -2129,8 +2173,156 @@ def launch_claude(
         # session's dispatcher is still reading.
         release_ledger(project_root(), sentinels.nonce)
         transcript.close(succeeded=succeeded, interrupted=interrupted)
+        if places is not None and seed_applied:
+            # Measured against what this launch applied, which is the
+            # seed settled against whatever a running session had changed.
+            carry_claude_home(
+                composition.recipe.source.image,
+                project_root(),
+                profiles.login,
+                ClaudeHomeSeed.applied(places.applied),
+                account,
+                config,
+                personal,
+            )
+        if seeded_at is not None:
+            shutil.rmtree(seeded_at)
         if checkpoint is not None:
             checkpoint(provider="claude")
+
+
+def carry_claude_home(
+    image: Image,
+    root: Path,
+    login: ProviderLogin,
+    seed: ClaudeHomeSeed,
+    account: ClaudeConfigHome,
+    config: UserConfigFile,
+    personal: UserConfig,
+) -> None:
+    """Bring back what a contained session changed of the person's, and say what stayed.
+
+    Read out of the volume the session ran in and compared with what this
+    launch seeded, so only the session's own changes move. Where the
+    volume cannot be read, nothing moves and the launch says so rather
+    than leaving a changed theme to look as though it never happened.
+    """
+    files = read_config_home(
+        image, root, login, [WORKSPACE_SETTINGS, CLAUDE_HOME_DOCUMENT, KEYBINDINGS]
+    )
+    settings = named_file(files, WORKSPACE_SETTINGS)
+    document = named_file(files, CLAUDE_HOME_DOCUMENT)
+    keybindings = named_file(files, KEYBINDINGS)
+    try:
+        read = [
+            TypeAdapter(JsonObject).validate_json(held.content)
+            for held in (settings, document)
+            if held is not None
+        ]
+    except ValidationError:
+        read = []
+    if settings is None or len(read) != (2 if document is not None else 1):
+        Notice(
+            text=(
+                "Could not read this session's Claude settings back out of "
+                "its volume, so nothing it changed was returned."
+            ),
+            urgency="warning",
+        ).say()
+        return
+    returned = ClaudeHomeReturn.between(
+        seed,
+        read[0],
+        read[1] if document is not None else {},
+        keybindings.text() if keybindings is not None else None,
+        personal,
+    )
+    returned.apply(account, config)
+    if returned.carried():
+        typer.echo(
+            "Returned the Claude settings this session changed: "
+            + ", ".join(returned.carried())
+        )
+    stayed = [
+        *(f"{key} (never leaves a container)" for key in returned.withheld),
+        *(f"{key} (the session's own)" for key in returned.session),
+    ]
+    if stayed:
+        typer.echo("Kept in the container: " + ", ".join(stayed))
+
+
+def settled_codex_seed(image: Image, theirs: JsonObject) -> JsonObject:
+    """What a contained Codex home will be given, and where the person's settings won.
+
+    The three-way merge the home's own installation runs
+    (:func:`~lup.providers.codex.home.seeded_codex_settings`), run first on
+    the volume as it stands, so the launch knows what its session starts
+    from and can say which settings a running session had changed too.
+    """
+    files = read_config_home(
+        image, project_root(), CODEX_LOGIN, ["config.toml", SEED_RECORD]
+    )
+    current = named_file(files, "config.toml")
+    recorded = named_file(files, SEED_RECORD)
+    seeded = seeded_codex_settings(
+        current.text() if current is not None else None,
+        recorded.text() if recorded is not None else None,
+        theirs,
+    )
+    for conflict in seeded.conflicts:
+        Notice(
+            text=(
+                f"Settings: {conflict} was changed both by a session still "
+                "running in this repository and in your own settings; yours win."
+            ),
+            urgency="warning",
+        ).say()
+    return seeded.settings
+
+
+def carry_codex_home(
+    store: CodexWorktreeHomeStore,
+    image: Image | None,
+    config: UserConfigFile,
+    applied: JsonObject | None = None,
+) -> None:
+    """Bring back what a Codex session changed of the person's, and say what stayed.
+
+    ``image`` is the container a contained session ran in, whose volume
+    holds the configuration it left; ``None`` reads the worktree home a
+    session on the host ran in. A volume that cannot be read moves
+    nothing, said aloud.
+    """
+    left = None
+    if image is not None:
+        read = named_file(
+            read_config_home(image, project_root(), CODEX_LOGIN, ["config.toml"]),
+            "config.toml",
+        )
+        if read is None:
+            Notice(
+                text=(
+                    "Could not read this session's Codex settings back out of "
+                    "its volume, so nothing it changed was returned."
+                ),
+                urgency="warning",
+            ).say()
+            return
+        left = read.text()
+    returned = store.return_settings(
+        project_root(), config, current=left, applied=applied
+    )
+    if returned.carried():
+        typer.echo(
+            "Returned the Codex settings this session changed: "
+            + ", ".join(returned.carried())
+        )
+    stayed = [
+        *(f"{key} (never leaves its home)" for key in returned.withheld),
+        *(f"{key} (the session's own)" for key in returned.session),
+    ]
+    if stayed:
+        typer.echo("Kept in the session's home: " + ", ".join(stayed))
 
 
 def prepare_codex_plugin(
@@ -2265,7 +2457,15 @@ def launch_codex(
     store = CodexWorktreeHomeStore(
         account_home=account_home or CODEX_LOGIN.ambient_home,
         theme=personal.theme.codex,
+        editor=personal.editor,
+        settings=personal.codex.settings,
     )
+    # Only a volume the settings reached is compared with them: before the
+    # container's home is prepared, it still holds the previous session's.
+    installed: list[Path] = []
+    # What a contained session's volume was given, settled three ways
+    # against a session that may still be running there.
+    applied: list[JsonObject] = []
     home = select_codex_home(codex_home, environment, project_root(), profile, store)
     selected_home = home.path
     selected_profile = (
@@ -2330,6 +2530,15 @@ def launch_codex(
             store.publish(project_root())
 
     def prepare(prefix: list[str], native_home: Path) -> None:
+        if prefix and selected_profile is not None:
+            applied.append(
+                settled_codex_seed(
+                    composition.recipe.source.image,
+                    selected_profile.personal_settings(
+                        CodexMarketplace.declared(project_root()) is not None
+                    ),
+                )
+            )
         prepare_codex_plugin(
             prefix,
             native_home,
@@ -2338,6 +2547,7 @@ def launch_codex(
             force_install,
             settings=selected_profile,
         )
+        installed.append(native_home)
 
     try:
         with opening as session:
@@ -2358,11 +2568,6 @@ def launch_codex(
                 devices,
                 authenticate=authenticate,
                 prepare=prepare,
-                state_scope=(
-                    selected_profile.state_scope()
-                    if selected_profile is not None and selected_profile.as_base
-                    else None
-                ),
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True
@@ -2380,15 +2585,16 @@ def launch_codex(
         transcript.close(succeeded=succeeded, interrupted=interrupted)
         if home.isolated and store.publish(project_root()):
             typer.echo("Returned the refreshed Codex login to the account home")
-        # lup: defer: a contained session runs in its repository's config
+        # lup: solved: a contained session runs in its repository's config
         # volume, so a setting it changes there — its /theme included — never
         # returns to the account; which home those belong to is the volume's
         # question.
-        carried = store.return_settings(project_root()) if home.isolated else []
-        if carried:
-            typer.echo(
-                f"Returned Codex settings this session changed to "
-                f"{store.account_home}: {', '.join(carried)}"
+        if home.isolated and (installed or not sandbox.contained()):
+            carry_codex_home(
+                store,
+                composition.recipe.source.image if sandbox.contained() else None,
+                config,
+                applied[0] if applied else None,
             )
         if checkpoint is not None:
             checkpoint(provider="codex")

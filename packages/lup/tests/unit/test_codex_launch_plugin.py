@@ -19,7 +19,6 @@ from lup.providers.codex.login import CODEX_HOME, CODEX_LOGIN
 from lup.providers.codex.marketplace import CodexMarketplace
 from lup.providers.codex.trust import CodexHookReport
 from lup.providers.codex.selection import codex_config
-from lup.providers.login import NativeHomeScope
 from lup.providers.selection import SessionRequest
 from lup.types import JsonObject
 from lup.providers.codex.harness_runtime import (
@@ -92,28 +91,6 @@ def test_failed_plugin_preparation_stops_the_launch_before_authentication(
             prepare=Mock(side_effect=RuntimeError("plugin unavailable")),
         )
     authenticate.assert_not_called()
-
-
-def test_settings_scope_reaches_the_container_volume_builder(
-    tmp_path: Path,
-    boundary: Mock,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    opening = Mock(return_value=["podman", "run", "-it", "image"])
-    monkeypatch.setattr(launch, "contained_argv", opening)
-    scope = NativeHomeScope(key="codex-fixture")
-    launch.session_argv(
-        "codex",
-        [],
-        boundary,
-        Mock(hooks=None),
-        tmp_path,
-        CODEX_LOGIN,
-        launch.LaunchSandbox.OUTER,
-        {},
-        state_scope=scope,
-    )
-    assert opening.call_args.kwargs["state_scope"] == scope
 
 
 def test_container_preparation_runs_the_owned_installer_in_the_same_boundary(

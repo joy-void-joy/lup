@@ -557,6 +557,18 @@ class Image(BaseModel, frozen=True):
             "private container renewals and unrelated authorization records"
         ),
     )
+    home_seed: str = Field(
+        default="/opt/lup/home-seed",
+        description=(
+            "Read-only directory of settings a launch hands the config home, "
+            "applied at every start: each name listed in its ``managed`` file "
+            "is merged three ways with the home's against what the last launch "
+            "seeded, as is each key of each JSON object under ``merge/`` in the "
+            "home's file of the same name. Offered outside the "
+            "home for the reason the credential is: the home is the "
+            "session's to write, and the seed is the person's"
+        ),
+    )
     registry_root: str = Field(
         default="/opt/bun",
         description=(
@@ -825,6 +837,9 @@ class Image(BaseModel, frozen=True):
         seeding = (Path(__file__).parent / "assets" / "credential_seed.py").read_text(
             encoding="utf-8"
         )
+        home_seeding = (Path(__file__).parent / "assets" / "home_seed.py").read_text(
+            encoding="utf-8"
+        )
         shim_names = " ".join(self.clipboard.shims)
         # Quoted, because `ENV name=value` takes whitespace as separating
         # *more* pairs: an unquoted `GIT_SSH_COMMAND=ssh -o BatchMode=yes`
@@ -896,8 +911,11 @@ if [ ! -w "$config" ]; then
   echo "lup: remove that volume and the next launch recreates it." >&2
   exit 1
 fi
-if [ ! -f "$config/.claude.json" ]; then
-  cp /opt/lup/trust-seed.json "$config/.claude.json"
+# Only for the runtime that keeps trust in a document of its own, which
+# the launch names; another runtime's home would gain a stray file.
+trust="${{LUP_TRUST_DOCUMENT:-}}"
+if [ -n "$trust" ] && [ ! -f "$config/$trust" ]; then
+  cp /opt/lup/trust-seed.json "$config/$trust"
 fi
 # The checkout this container was started against is the one the operator
 # chose when they wrote the mount and the workdir, so it is trusted here
@@ -911,18 +929,28 @@ fi
 # every start rather than written once, because the document outlives the
 # image in its volume, and a runtime that moves where it looks would
 # otherwise meet a file nothing amends.
-repository=$(git -C "$PWD" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || printf '%s' "$PWD")
-case "$repository" in */.git) repository=${{repository%/.git}} ;; esac
-jq --arg here "$PWD" --arg repository "$repository" \\
-   '.projects[$here] = ((.projects[$here] // {{}}) + {{"hasTrustDialogAccepted": true}})
-    | .projects[$repository] = ((.projects[$repository] // {{}}) + {{"hasTrustDialogAccepted": true}})' \\
-   "$config/.claude.json" > "$config/.claude.json.lup" \\
-  && mv "$config/.claude.json.lup" "$config/.claude.json"
+if [ -n "$trust" ]; then
+  repository=$(git -C "$PWD" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || printf '%s' "$PWD")
+  case "$repository" in */.git) repository=${{repository%/.git}} ;; esac
+  jq --arg here "$PWD" --arg repository "$repository" \\
+     '.projects[$here] = ((.projects[$here] // {{}}) + {{"hasTrustDialogAccepted": true}})
+      | .projects[$repository] = ((.projects[$repository] // {{}}) + {{"hasTrustDialogAccepted": true}})' \\
+     "$config/$trust" > "$config/$trust.lup" \\
+    && mv "$config/$trust.lup" "$config/$trust"
+fi
 # A selected host login is applied once per change. Native renewal remains
 # container-private, and unrelated records in a shared credential file survive.
 if [ -n "${{LUP_CREDENTIAL_NAME:-}}" ]; then
   python3 /opt/lup/credential-seed.py {self.credential_seed} "$config/$LUP_CREDENTIAL_NAME" \\
     --keys "${{LUP_CREDENTIAL_KEYS:-[]}}" --renewable "${{LUP_CREDENTIAL_RENEWABLE:-}}"
+fi
+# The person's settings, handed over at every start rather than once: a file
+# seeded once is the person's settings as they stood the day this volume was
+# made. Merged three ways against what the last launch seeded rather than
+# copied over, because another session may be running in this volume and
+# have changed a setting it has yet to carry back.
+if [ -f "{self.home_seed}/managed" ]; then
+  python3 /opt/lup/home-seed.py {self.home_seed} "$config"
 fi
 
 # One credential, two consumers. The token crosses the boundary by name --
@@ -941,6 +969,9 @@ ENTRYPOINT ["/usr/local/bin/lup-entrypoint"]
 COPY <<'CREDENTIAL' /opt/lup/credential-seed.py
 {seeding}
 CREDENTIAL
+COPY <<'HOMESEED' /opt/lup/home-seed.py
+{home_seeding}
+HOMESEED
 
 # What `BROWSER` names, so a sign-in inside can reach a browser outside. The
 # pipe it writes to is mounted per launch; with nothing mounted the script
@@ -1199,6 +1230,8 @@ USER $UID:$GID
         inherited_environment: list[str] | None = None,
         environments: Mapping[Path, Path] | None = None,
         devices: Sequence[Device] = (),
+        home_seed: Path | None = None,
+        trust_document: str = "",
     ) -> list[str]:
         """The whole argv that opens one agent session inside a container.
 
@@ -1213,6 +1246,14 @@ USER $UID:$GID
         measured -- an unseeded config home discards the workspace's declared
         ``permissions.allow`` with a notice rather than an error, so the
         policy would be off with nothing having failed.
+
+        ``trust_document`` is the file in the config home the runtime keeps
+        workspace trust in, which the entrypoint seeds and merges this
+        checkout's trust into; empty for a runtime that keeps it elsewhere.
+
+        ``home_seed`` is a host directory laid out as :attr:`home_seed`
+        describes, offered read-only and applied by the entrypoint at every
+        start, so the person's settings reach a volume that outlives them.
 
         ``credential`` is offered read-only at :attr:`credential_seed` and
         applied once per host-login change, including the first adoption of
@@ -1360,6 +1401,7 @@ USER $UID:$GID
             f"{state_volume}:{self.config_home}",
             "-e",
             f"{config_home_env}={self.config_home}",
+            *(["-e", f"LUP_TRUST_DOCUMENT={trust_document}"] if trust_document else []),
             *self.run_arguments(checkout, uid, gid, engine, proxy_address),
             *[
                 argument
@@ -1372,6 +1414,11 @@ USER $UID:$GID
             *self.environment_mounts(environments or {}),
             *granted_devices,
             *seeded,
+            *(
+                ["-v", f"{home_seed}:{self.home_seed}:ro"]
+                if home_seed is not None
+                else []
+            ),
             *bridged,
             *opening,
             *clipping,

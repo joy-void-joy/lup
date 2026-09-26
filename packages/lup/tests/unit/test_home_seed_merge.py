@@ -1,0 +1,214 @@
+"""A second launch into a repository's volume does not undo a session still running there.
+
+Every launch seeds the volume with the person's settings, and a volume is
+shared by every session opened in its repository. A seed that replaced the
+files would erase whatever an earlier session, still open, had changed since
+its own launch — before that session could carry it back. These pin the
+three-way merge against the last launch's seed, for both runtimes: a
+session's own change survives another launch and returns when that session
+closes, a change only the person made still arrives, and where both changed
+the same setting the person's wins and is named.
+"""
+
+import json
+from pathlib import Path
+
+import pytest
+
+from lup.devtools.harness.config_volume import (
+    HomeFile,
+    HomeHelper,
+    HomeSeedPlaces,
+    settle_home_seed,
+)
+from lup.harness.assets.home_seed import (
+    ABSENT,
+    Absent,
+    Seeded,
+    apply,
+    read_tree,
+    three_way,
+)
+from lup.harness.image import Podman
+from lup.providers.claude.config_home import ClaudeConfigHome
+from lup.providers.claude.home_seed import ClaudeHomeReturn, ClaudeHomeSeed
+from lup.providers.codex.home import seeded_codex_settings
+from lup.providers.user_config import UserConfig, UserConfigFile
+from lup.types import JsonObject
+
+
+def side(value: Seeded) -> Seeded:
+    """A settings object holding ``theme`` as that value, or lacking it."""
+    return {} if isinstance(value, Absent) else {"theme": value}
+
+
+@pytest.mark.parametrize(
+    ("base", "ours", "theirs", "merged", "conflicts"),
+    [
+        ("dark", "light", "dark", "light", []),
+        ("dark", "dark", "ansi", "ansi", []),
+        ("dark", "light", "ansi", "ansi", ["theme"]),
+        ("dark", "light", "light", "light", []),
+        ("dark", ABSENT, "dark", ABSENT, []),
+        (ABSENT, "light", ABSENT, "light", []),
+    ],
+    ids=[
+        "session-only",
+        "source-only",
+        "both-changed",
+        "both-agree",
+        "session-removed",
+        "session-added",
+    ],
+)
+def test_each_setting_merges_three_ways(
+    base: Seeded, ours: Seeded, theirs: Seeded, merged: Seeded, conflicts: list[str]
+) -> None:
+    result = three_way(side(base), side(ours), side(theirs))
+
+    assert result.value == side(merged)
+    assert result.conflicts == conflicts
+
+
+class Volume:
+    """A config volume as a directory, read the way the launcher's helper reads one."""
+
+    def __init__(self, directory: Path) -> None:
+        self.directory = directory
+        directory.mkdir()
+
+    def read(self, helper: HomeHelper, volume: str, names: list[str]) -> list[HomeFile]:
+        return [
+            HomeFile(name=held.name, content=(held.text or "").encode())
+            for held in read_tree(self.directory)
+            if held.name in names or Path(held.name).parts[0] in names
+        ]
+
+    def settings(self) -> JsonObject:
+        return json.loads((self.directory / "settings.json").read_text())
+
+    def session_sets(self, key: str, value: str) -> None:
+        settings = self.settings()
+        settings[key] = value
+        (self.directory / "settings.json").write_text(json.dumps(settings))
+
+
+class Launch:
+    """One contained Claude launch: its seed settled, applied, and its session's return."""
+
+    def __init__(
+        self,
+        tmp_path: Path,
+        name: str,
+        volume: Volume,
+        account: ClaudeConfigHome,
+        personal: UserConfig,
+    ) -> None:
+        seed = ClaudeHomeSeed.compose(account, personal)
+        self.places = HomeSeedPlaces(
+            seed=seed.write(tmp_path / name / "seed"),
+            applied=tmp_path / name / "applied",
+        )
+        helper = HomeHelper(
+            engine=Podman(), tag="lup-agent:x", uid=1, gid=1, config_home="/cfg"
+        )
+        self.said = settle_home_seed(helper, "lup-claude-x", self.places)
+        apply(self.places.seed, volume.directory)
+        self.volume = volume
+
+    def closes(self, personal: UserConfig) -> ClaudeHomeReturn:
+        document = self.volume.directory / ".claude.json"
+        return ClaudeHomeReturn.between(
+            ClaudeHomeSeed.applied(self.places.applied),
+            self.volume.settings(),
+            json.loads(document.read_text()) if document.is_file() else {},
+            None,
+            personal,
+        )
+
+
+@pytest.fixture
+def volume(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Volume:
+    held = Volume(tmp_path / "volume")
+    monkeypatch.setattr(
+        HomeHelper, "read", lambda self, v, names: held.read(self, v, names)
+    )
+    return held
+
+
+@pytest.fixture
+def account(tmp_path: Path) -> ClaudeConfigHome:
+    directory = tmp_path / "account"
+    directory.mkdir()
+    (directory / "settings.json").write_text(
+        json.dumps({"theme": "dark", "verbose": False})
+    )
+    return ClaudeConfigHome(directory=directory, document=tmp_path / "doc.json")
+
+
+def test_a_second_launch_keeps_a_running_sessions_theme_and_it_returns_at_its_close(
+    tmp_path: Path, volume: Volume, account: ClaudeConfigHome
+) -> None:
+    personal = UserConfig()
+    first = Launch(tmp_path, "first", volume, account, personal)
+    volume.session_sets("theme", "light")
+
+    second = Launch(tmp_path, "second", volume, account, personal)
+
+    assert volume.settings()["theme"] == "light"
+    assert second.said == []
+    config = UserConfigFile(tmp_path / "lup")
+    first_back = first.closes(personal)
+    first_back.apply(account, config)
+    assert first_back.portable == {("theme", "claude"): "light"}
+    assert config.load().theme.claude == "light"
+    assert second.closes(personal).carried() == []
+
+
+def test_where_both_changed_a_setting_the_persons_wins_and_is_named(
+    tmp_path: Path, volume: Volume, account: ClaudeConfigHome
+) -> None:
+    Launch(tmp_path, "first", volume, account, UserConfig())
+    volume.session_sets("theme", "light")
+    volume.session_sets("verbose", "session-only")
+    changed = UserConfig.model_validate({"theme": {"claude": "dark-ansi"}})
+
+    second = Launch(tmp_path, "second", volume, account, changed)
+
+    assert volume.settings()["theme"] == "dark-ansi"
+    assert volume.settings()["verbose"] == "session-only"
+    assert len(second.said) == 1
+    assert "settings.json theme" in second.said[0].text
+
+
+def test_a_setting_only_the_person_changed_still_arrives(
+    tmp_path: Path, volume: Volume, account: ClaudeConfigHome
+) -> None:
+    Launch(tmp_path, "first", volume, account, UserConfig())
+    (account.directory / "settings.json").write_text(
+        json.dumps({"theme": "dark", "verbose": True})
+    )
+
+    second = Launch(tmp_path, "second", volume, account, UserConfig())
+
+    assert volume.settings()["verbose"] is True
+    assert second.said == []
+
+
+def test_a_contained_codex_home_keeps_a_running_sessions_theme(tmp_path: Path) -> None:
+    installed: JsonObject = {"tui": {"theme": "zenburn", "animations": True}}
+    running = '[tui]\ntheme = "dracula"\nanimations = true\n\n[projects."/x"]\ntrust_level = "trusted"\n'
+
+    kept = seeded_codex_settings(running, json.dumps(installed), installed)
+    overridden = seeded_codex_settings(
+        running,
+        json.dumps(installed),
+        {"tui": {"theme": "monokai", "animations": True}},
+    )
+    first = seeded_codex_settings(running, None, installed)
+
+    assert kept.settings == {"tui": {"theme": "dracula", "animations": True}}
+    assert kept.conflicts == []
+    assert overridden.settings["tui"] == {"theme": "monokai", "animations": True}
+    assert overridden.conflicts == ["tui.theme"]
+    assert first.settings == installed and first.conflicts == []

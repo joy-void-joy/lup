@@ -59,6 +59,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev issues` | List the open issues a resolver run would take as evidence. |
 | `dev rules` | Generate the Lup rule and typed-suppression reference. |
 | `dev models` | Read each runtime&#x27;s model lineup from its CLI, and compile its types. |
+| `dev settings` | Read the settings keys Claude Code takes from its CLI, and compile their types. |
 | `dev modules` | Report which modules this project takes, and what each one&#x27;s prose costs. |
 | `dev reach` | Report how this repository&#x27;s work reaches a project built on it. |
 | `dev guidance` | Report what each section of the always-loaded guidance costs. |
@@ -180,6 +181,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `harness binds` | Check, inside a session, that every read-only bind it launched with holds. |
 | `harness sandbox-check` | Evaluate arithmetic in a disposable Python sandbox without network access. |
 | `harness image` | Render the container image this project&#x27;s sessions run in. |
+| `harness clean` | List everything lup keeps for contained sessions, and what nothing points at. |
 | `harness egress` | Report or remove the network boundary this project&#x27;s sessions run behind. |
 | `harness claude` | Generate/reconcile Claude artifacts and launch the verified plugin. |
 | `harness codex` | Generate/reconcile Codex artifacts and launch without updating the CLI. |

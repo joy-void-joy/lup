@@ -951,6 +951,80 @@ DECLARED: list[Migration] = [
             ),
         ],
     ),
+    Migration(
+        subjects=[
+            "NativeHomeScope",
+            "NativeHomeScope.key",
+            "NativeHomeScope.volume_name",
+            "CodexProfileSettings.state_scope",
+            "state_volume_name",
+            "superseded_volume_name",
+            "superseded_volume_notice",
+            "existing_volumes",
+            "ProviderLogin",
+        ],
+        reason=(
+            "a contained session's config home was one volume both runtimes "
+            "wrote into, plus one per Codex settings digest; it is one volume "
+            "per repository and runtime, named by the runtime's login "
+            "declaration, with settings seeded at every launch rather than "
+            "partitioned by volume, and the old volumes split once"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Give every ProviderLogin a state_volume word (and, to have "
+                    "an old shared volume split, the home_entries it keeps). "
+                    "Call state_volume_name(root, login) in place of "
+                    "state_volume_name(root, scope), drop state_scope= from "
+                    "contained_argv and session_argv, and read existing_volumes "
+                    "from lup.devtools.harness.config_volume. The superseded "
+                    "per-worktree notice is gone: split_config_volumes copies "
+                    "those volumes and records them as superseded, and "
+                    "sweep_superseded removes them once the person's days have "
+                    "passed."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=["environment_directory"],
+        reason=(
+            "a contained session's project environments outlived their "
+            "worktrees with nothing saying whose they were; each is claimed "
+            "when made and swept once its checkout is gone, by a module of "
+            "their own"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Import environment_directory from "
+                    "lup.devtools.harness.environments rather than "
+                    "lup.devtools.harness.contained."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=["return_settings", "SettingChange", "changed_settings"],
+        reason=(
+            "a Codex session's every changed setting went back to the "
+            "account, a hook or its model pick included; only preferences "
+            "return now, a portable one to the person's lup config, and "
+            "the decision lives in lup.providers.codex.preferences"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Call return_settings(worktree, UserConfigFile(), current=...) "
+                    "and read what moved from the CodexSettingsReturn it answers "
+                    "(.carried(), .withheld, .session) rather than a list of names; "
+                    "import SettingChange and changed_settings from "
+                    "lup.providers.codex.preferences."
+                )
+            ),
+        ],
+    ),
 ]
 """Every break this library has taken since its last release, and what to do.
 

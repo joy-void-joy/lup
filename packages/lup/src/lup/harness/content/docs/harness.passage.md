@@ -616,10 +616,21 @@ profile = "work"            # the account a launch runs as when none is named
 effort = "high"             # unset: xhigh, or the model's highest rung below it
 tier = "strongest"          # the model when nothing names one; "inherit" leaves
                             # it to the runtime
+editor = "vim"              # both runtimes' prompt: Claude Code's editorMode,
+                            # Codex's tui.vim_mode_default; unset, the account's
 
 [theme]                     # each runtime's own name; unset, the account's own
 claude = "light"            # named, it wins over the account's
 codex = "dracula"
+
+[claude.settings]           # Claude Code settings, as written, over the account's
+verbose = true
+
+[codex.settings.tui]        # Codex configuration, leaf by leaf, over the account's
+animations = false
+
+[cleanup]
+superseded_volumes_after_days = 14   # an old config volume's history, kept this long
 ```
 
 A value is chosen the same way everywhere: lup's default, then this file, then
@@ -637,10 +648,53 @@ nor the account names any, where it fills in lup's colorblind palette — Claude
 Code's `dark-daltonized` and its Codex port `claude-daltonized`. It never
 passes a theme as a launch override, which would outrank the session's own
 choice. A Claude session on the host runs in the account's own home, so what
-it chooses lands there; a Codex session's choice is carried back from its
-worktree home to the account's `config.toml` when it closes, with the theme's
-file, and without undoing a change the account took meanwhile. A contained
-session's theme is its config volume's for now.
+it chooses lands there.
+
+Anywhere else — a Codex session's worktree home, and every contained session's
+config volume — a launch seeds the home with the account's settings, this
+file winning, and carries back what the session changed of the person's when
+it closes, measured against the seed so a change the account took meanwhile
+is not undone. A volume's seed is merged three ways against what the last
+launch seeded, so a second launch leaves a setting alone that a session still
+running there changed — it returns when that session closes — and where the
+person's settings changed the same one, theirs win and the launch names it.
+Only preferences come back: the theme and the editor mode to
+this file, a key its `[claude.settings]` or `[codex.settings]` table holds
+back into that table, and any other display or input preference to the
+account's own settings (Claude Code's `settings.json`, its configuration
+document for the few preferences only that holds, and `keybindings.json`;
+Codex's `config.toml`, with a theme's file). What runs a program or widens
+what may run — hooks, permissions, `env`, helpers, MCP servers, plugins,
+sandbox — never leaves the home it was written in, and a `/model` or effort
+picked in a session stays that session's. Every Claude Code settings key
+carries that decision (`lup.providers.claude.preferences`, typed against the
+keys `dev settings` reads out of the installed CLI, and `dev check` refuses a
+key none decides); Codex ships no schema to read, so a Codex key nobody
+listed stays where it was written. The launch says what it returned and what
+it kept.
+
+A contained session's config home is a volume per repository and runtime,
+`lup-claude-<repo>` and `lup-codex-<repo>`: every worktree of one repository
+shares its login, trust and transcripts, and neither runtime reads the
+other's. The first launch that finds the older shared `lup-cfg-<repo>` splits
+it by what each runtime declares it keeps — an entry neither declares goes to
+both, said aloud — and copies Codex's per-settings-digest volumes into its
+own; a volume an open session still holds postpones the split. The old
+volumes, and the per-worktree `lup-cfg-<worktree>` ones that came before,
+are kept rather than removed: each is recorded as superseded in
+`$XDG_STATE_HOME/lup` (`~/.local/state/lup`), the launch says where its
+history went and the day it goes, and any launch or `harness clean`
+removes it once `[cleanup] superseded_volumes_after_days` (14 unless this
+file says otherwise) have passed — never while a container holds it.
+`harness clean` lists each with its size and that date, and
+`harness clean --yes` removes them sooner.
+
+What contained sessions leave on the machine is swept as it goes: a launch
+that builds an image removes the ones no checkout points at, every launch
+removes project environments whose worktree is gone and other projects'
+stopped egress proxies, and removing a worktree removes its environment.
+`harness clean` lists all of it with sizes and what points at each, and
+`harness clean --yes` removes what nothing does.
 
 A profile names one account and the configuration home it runs under. Each
 profile is a directory, with each runtime's home in the subdirectory that

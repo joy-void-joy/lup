@@ -19,6 +19,7 @@ import sh
 import typer
 from pydantic import BaseModel
 
+from lup.providers.settings_schema import unclassified_settings
 from lup.providers.harness import (
     claude_prompt_renderer,
     codex_prompt_renderer,
@@ -1051,6 +1052,23 @@ def scan_reports(
             counted=bool(cited.checked or cited.failing),
             passed=cited.passed(),
             lines=cited.lines(),
+        )
+
+        # gating — a settings key nobody decided about stays inside a
+        # contained session, which is safe and silently wrong for a
+        # preference, so a key the CLI gained is a question the gate asks
+        # rather than a default it keeps.
+        undecided = unclassified_settings()
+        yield CheckReport(
+            name="settings flow",
+            passed=not undecided,
+            lines=[
+                f"settings flow: FAIL ({len(undecided)} key(s) no flow decides)",
+                *(f"  {key}" for key in undecided),
+                "  Decide each in lup.providers.claude.preferences.",
+            ]
+            if undecided
+            else ["settings flow: ok"],
         )
 
         portable = scan_application_placement(project)

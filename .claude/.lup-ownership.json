@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "165e099fd90cecb07102d1a1d1ef0d16343eea5100146c2c263f079063082fdf",
+  "source_digest": "89f7aa0c1df7939bb6d670f3e98ace789ea826a69238f1318a902df34277bf38",
   "target_requirements": [
     "claude-code"
   ],
@@ -751,7 +751,7 @@
     {
       "path": "docs/harness.md",
       "category": "generated",
-      "sha256": "48d941c42cdba21595e1c0e6748c0567804dca08c36b39ba707b17f62911616b",
+      "sha256": "187a6104dd00c826a4b44b4bba014e7c30ae3345284cd8f2cfd94410f12dd16c",
       "semantic_id": "docs.harness",
       "executable": false
     },
@@ -800,7 +800,7 @@
     {
       "path": "docs/platform-differentiation.md",
       "category": "generated",
-      "sha256": "88b99208f22fbcfb68a2c949d3a5a4e10060bd7b18c08717ee5d61e36bc219f3",
+      "sha256": "96628af00aabb7f3705155c8e1f1e63eb3370cb501d5399dd4a7c7739010d884",
       "semantic_id": "docs.platform-differentiation",
       "executable": false
     },

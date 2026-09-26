@@ -12,9 +12,12 @@ from pydantic import BaseModel, Field, TypeAdapter
 from tomlkit.exceptions import ParseError
 
 from lup.providers.codex.app_server import CodexAppServer
-from lup.providers.codex.home import profile_config_filename
+from lup.providers.codex.home import (
+    SEED_RECORD,
+    profile_config_filename,
+    seeded_codex_settings,
+)
 from lup.providers.codex.harness_runtime import codex_home_lock
-from lup.providers.login import NativeHomeScope
 from lup.types import JsonObject, JsonValue
 
 
@@ -131,10 +134,6 @@ class CodexProfileSettings(BaseModel, frozen=True):
         """An immutable profile name so simultaneous launches cannot replace it."""
         return f"lup-{self.digest()}"
 
-    def state_scope(self) -> NativeHomeScope:
-        """A stable volume for this exact selected base and authentication context."""
-        return NativeHomeScope(key=f"codex-{self.digest()}")
-
     async def normalized(
         self, staging: Path, enforce_policy: bool = False
     ) -> JsonObject:
@@ -193,8 +192,9 @@ class CodexProfileSettings(BaseModel, frozen=True):
     def install(self, home: Path, enforce_policy: bool = False) -> None:
         """Materialize selected settings while preserving native installation/trust.
 
-        Base placement belongs to a home partitioned by :meth:`state_scope`;
-        profile placement leaves the destination base settings untouched.
+        Base placement replaces the home's settings at every launch,
+        keeping what the home installed and trusted; profile placement
+        leaves the destination base settings untouched.
         """
         try:
             if self.name is not None:
@@ -220,6 +220,23 @@ class CodexProfileSettings(BaseModel, frozen=True):
                         else {}
                     )
                     if self.as_base:
+                        # Three ways, so a session still running in this
+                        # home keeps a setting it changed that the person
+                        # did not; the record is what the next launch's
+                        # merge measures from.
+                        record = home / SEED_RECORD
+                        seeded = seeded_codex_settings(
+                            destination.read_text(encoding="utf-8")
+                            if destination.exists()
+                            else None,
+                            record.read_text(encoding="utf-8")
+                            if record.is_file()
+                            else None,
+                            settings,
+                        )
+                        record.parent.mkdir(parents=True, exist_ok=True)
+                        record.write_text(json.dumps(settings), encoding="utf-8")
+                        settings = dict(seeded.settings)
                         for key in ("marketplaces", "plugins", "projects"):
                             if key in existing:
                                 settings[key] = existing[key]
