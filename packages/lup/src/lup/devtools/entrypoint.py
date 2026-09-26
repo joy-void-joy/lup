@@ -17,16 +17,32 @@ import typer
 
 def project_application() -> typer.Typer:
     """Load the one project application registered for this environment."""
-    applications = list(entry_points(group="lup.devtools", name="application"))
-    if len(applications) != 1:
-        typer.echo(
-            "The environment must register exactly one 'lup.devtools' "
-            f"application entry point; found {len(applications)}.",
-            err=True,
-        )
-        raise typer.Exit(1)
+    match list(entry_points(group="lup.devtools", name="application")):
+        case [registered]:
+            application = registered.load()
+        case []:
+            typer.echo(
+                "No installed distribution registers a 'lup.devtools' application, "
+                "so there is no project CLI to run: `uv sync` in the project "
+                "installs it.",
+                err=True,
+            )
+            raise typer.Exit(1)
+        case registrations:
+            named = "\n".join(
+                f"  {entry.dist.name if entry.dist else 'unnamed'}: {entry.value}"
+                for entry in registrations
+            )
+            typer.echo(
+                "More than one installed distribution registers a 'lup.devtools' "
+                f"application, where a project's environment holds one:\n{named}\n"
+                "One the project no longer declares, such as its package under the "
+                "name it had before a rename, stays through `uv run`, which only "
+                "adds; `uv sync` in the project removes it.",
+                err=True,
+            )
+            raise typer.Exit(1)
 
-    application = applications[0].load()
     if not isinstance(application, typer.Typer):
         typer.echo(
             "The 'lup.devtools' application entry point must resolve to a "
