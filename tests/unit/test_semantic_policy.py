@@ -670,6 +670,12 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="uv pip --quiet install x", effect="ask"),
     DecisionCase(input="uv tool --quiet install ruff", effect="ask"),
     DecisionCase(input="uv pip --python 3.12 list", effect="ask"),
+    # A global between the subcommand and its verb consumes its value there
+    # too, so the value is not read as the verb.
+    DecisionCase(input="uv pip --cache-dir list install foo", effect="ask"),
+    DecisionCase(input="uv tool --cache-dir list install foo", effect="ask"),
+    DecisionCase(input="uv pip --directory list install foo", effect="ask"),
+    DecisionCase(input="uv pip --cache-dir /tmp/c list", effect="allow"),
     DecisionCase(input="uv -q pip list", effect="allow"),
     DecisionCase(input="uv --cache-dir /tmp/c tool list", effect="allow"),
     DecisionCase(input="uv pip list --python 3.12", effect="allow"),

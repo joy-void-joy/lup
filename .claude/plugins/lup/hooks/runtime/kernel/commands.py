@@ -901,7 +901,15 @@ def decide_command_rows(
             return unlisted(f"{executable} {subword} is not classified")
         return apply_command_row(default, arguments, measured)
     if any(row["operation"] for row in subrows):
-        operands = [word for word in remainder if not word.startswith("-")]
+        # The command's globals may stand between a subcommand and its verb --
+        # uv takes them anywhere -- so a value one consumes is not an operand:
+        # `uv pip --cache-dir list install x` installs, and does not list.
+        operands = [
+            remainder[at]
+            for at in operand_positions(
+                remainder, default["value_flags"] if default else []
+            )
+        ]
         opword = next(iter(operands), "")
         oprows = [
             row
