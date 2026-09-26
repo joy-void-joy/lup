@@ -95,7 +95,9 @@ from .commands import (
     git_restore_source,
     git_restore_unchanged,
     git_symbolic_ref_read,
+    Reading,
     strictest_reading,
+    unread_programs,
     unread_readings,
     landing_words,
     matched_command_row,
@@ -622,7 +624,27 @@ def decide_shell_segment(
         return unjudged(
             "this segment names a file from a directory a `cd` left unreadable"
         ).advising("Spell the path in full, or run the command in its own call.")
-    words = placed
+    # A command word nobody can read is read as each program whose verb the
+    # words after it name, and the spelling's own verdict is the floor.
+    return strictest_reading(
+        decide_placed_words(placed, context, directory),
+        [
+            Reading(
+                word=placed[0],
+                spelled=program,
+                decision=decide_placed_words(
+                    [program, *placed[1:]], context, directory
+                ),
+            )
+            for program in unread_programs(placed, context["rows"])
+        ],
+    )
+
+
+def decide_placed_words(
+    words: list[str], context: ShellContext, directory: str | None
+) -> KernelDecision:
+    """One segment's verdict once its words are placed, each read as spelled."""
     if SUBSTITUTION_SENTINEL in words[0]:
         return unjudged("a command substitution in command position is not classified")
     if any(

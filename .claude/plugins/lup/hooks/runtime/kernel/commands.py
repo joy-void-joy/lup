@@ -1193,7 +1193,8 @@ def strictest_reading(
     could be any of them, and a container settles the question only where the
     harm of each would stay inside it: `codex l$OP` asks as an unknown word
     does, which a container holds, and could be `codex login`, which it does
-    not.
+    not. A deferral kept as the spelling's own verdict carries them the same
+    way, marked as standing for what the word could be.
     """
     strictest = max(
         readings,
@@ -1206,6 +1207,9 @@ def strictest_reading(
     ) <= STRENGTH.index(decided.effect):
         if readings and decided.effect in ("ask", "deny"):
             return decided.revised(reach=reach)
+        if decided.effect == "defer":
+            read = tuple(reading["decision"] for reading in readings)
+            return carrying_readings(decided, read)
         return decided
     word = strictest["word"]
     named = (
@@ -1227,6 +1231,36 @@ def strictest_reading(
             " rather than as the strictest one it could be."
         )
     )
+
+
+def unread_programs(words: list[str], rows: list[ShellRuleRow]) -> list[str]:
+    """The programs a command word nobody can read could be, by the verbs after it.
+
+    Any program at all, as far as the word goes, so the words after it decide:
+    one counts where they, walked as its own, name one of its verbs --
+    `$CMD push origin feat` could be `git push`, and `$CMD pr merge 12` could
+    be `gh pr merge`. A legible part narrows it to the names it could finish.
+    Where the words name no program's verb -- `$EDITOR file`, `"$PYTHON" x.py`
+    -- nothing is read in, and the word keeps the abstention it had.
+    """
+    prefix = unread_prefix(posixpath.basename(words[0]))
+    if prefix is None:
+        return []
+
+    def names_verb(program: str) -> bool:
+        matches = [row for row in rows if row["command"] == program]
+        default = next((row for row in matches if not row["subcommand"]), None)
+        split = split_subcommand(program, words[1:], default)
+        return not isinstance(split, KernelDecision) and any(
+            row["subcommand"] and row["subcommand"] == split["word"] for row in matches
+        )
+
+    programs = dict.fromkeys(
+        row["command"]
+        for row in rows
+        if row["subcommand"] and row["command"].startswith(prefix)
+    )
+    return [program for program in programs if names_verb(program)]
 
 
 def unread_readings(
