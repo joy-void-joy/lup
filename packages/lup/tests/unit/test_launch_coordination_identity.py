@@ -40,6 +40,7 @@ def uncontained(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(launch, "settle_boundary", lambda *a, **k: None)
     monkeypatch.setattr(launch, "say_opening", lambda *a, **k: None)
     monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
+    monkeypatch.setattr(launch, "carry_claude_home", lambda *a, **k: None)
 
 
 def opened(environment: dict[str, str], tmp_path: Path) -> list[str]:
@@ -187,6 +188,7 @@ def launched(
     profiles.launch_home.return_value = None
     monkeypatch.setattr(launch, "ready_to_open", lambda *a, **k: launch.LaunchOpening())
     monkeypatch.setattr(launch, "project_root", lambda: worktree)
+    monkeypatch.setattr(launch, "carry_claude_home", lambda *a, **k: None)
     monkeypatch.setattr(launch, "ambient_config_home", lambda *a, **k: worktree)
     monkeypatch.setattr(
         launch,

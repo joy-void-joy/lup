@@ -21,6 +21,8 @@ that finds any of them moves what they hold into the split volumes once, by
 what each runtime declares it keeps, and removes them.
 """
 
+import io
+import tarfile
 from fnmatch import fnmatch
 from pathlib import Path
 
@@ -213,6 +215,41 @@ class HomeHelper(BaseModel, frozen=True):
                 f"{self.config_home}/",
             ],
         )
+
+    def read(self, volume: str, names: list[str]) -> list["HomeFile"]:
+        """The named files at the top of a volume, as they stand, and only those it has.
+
+        One archive from one container rather than a container per file, and
+        a name the volume lacks is left out of it rather than failing it.
+        """
+        argv = self.argv(
+            "tar",
+            [f"{volume}:{SPLIT_SOURCE}:ro"],
+            ["-C", SPLIT_SOURCE, "-cf", "-", "--ignore-failed-read", *names],
+        )
+        archive = sh.Command(argv[0])(*argv[1:], _return_cmd=True).stdout
+        with tarfile.open(fileobj=io.BytesIO(archive)) as held:
+            return [
+                HomeFile(name=member.name, content=extracted.read())
+                for member in held.getmembers()
+                if member.isfile() and (extracted := held.extractfile(member))
+            ]
+
+
+class HomeFile(BaseModel, frozen=True):
+    """One file read out of a configuration-home volume."""
+
+    name: str
+    content: bytes
+
+    def text(self) -> str:
+        """The file as the UTF-8 text every file read here is."""
+        return self.content.decode("utf-8")
+
+
+def named_file(files: list[HomeFile], name: str) -> HomeFile | None:
+    """The file of that name among those read, if the volume had it."""
+    return next((held for held in files if held.name == name), None)
 
 
 class RuntimeVolume(BaseModel, frozen=True):

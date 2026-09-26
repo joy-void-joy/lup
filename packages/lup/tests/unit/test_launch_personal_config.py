@@ -89,6 +89,7 @@ def launched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Launched:
         lambda *a, **k: launch.LaunchOpening(sandbox=launch.LaunchSandbox.INNER),
     )
     monkeypatch.setattr(launch, "project_root", lambda: project)
+    monkeypatch.setattr(launch, "carry_claude_home", lambda *a, **k: None)
     monkeypatch.setattr(launch, "ambient_config_home", lambda *a, **k: tmp_path)
     monkeypatch.setattr(launch, "session_argv", argv)
     monkeypatch.setattr(launch, "claude_sandbox_arguments", settings_document)

@@ -63,6 +63,7 @@ from lup.harness.terminal import host_timezone
 from lup.providers.login import ProviderLogin
 from lup.providers.runtime_homes import runtime_logins
 from lup.devtools.harness.config_volume import (
+    HomeFile,
     HomeHelper,
     RuntimeVolume,
     split_config_volumes,
@@ -1592,6 +1593,7 @@ def contained_argv(
     accessible: list[AccessibleRoot] = [],
     lease: Lease | None = None,
     devices: list[Device] = [],
+    home_seed: Path | None = None,
 ) -> list[str]:
     """The argv that opens a session in this project's container.
 
@@ -1830,7 +1832,34 @@ def contained_argv(
         inherited_environment=inherited_environment,
         environments=held_environments(root, accessible, image.project_environment),
         devices=granted_devices.granted,
+        home_seed=home_seed,
     )
+
+
+def read_config_home(
+    image: Image, root: Path, login: ProviderLogin, names: list[str]
+) -> list[HomeFile]:
+    """The named files of one runtime's config volume for this checkout, as they stand.
+
+    Read after a session closes, from the image this checkout last ran and
+    as the identity it ran as, with the volume mounted read-only — so a
+    read changes nothing it reads. Nothing is read where no client
+    answers, or the engine refuses; the caller says the settings stayed.
+    """
+    found = detected_client()
+    if found is None:
+        return []
+    helper = HomeHelper(
+        engine=found.engine(),
+        tag=checkout_tag(root),
+        uid=root.stat().st_uid,
+        gid=root.stat().st_gid,
+        config_home=image.config_home,
+    )
+    try:
+        return helper.read(state_volume_name(root, login), names)
+    except (sh.CommandNotFound, sh.ErrorReturnCode):
+        return []
 
 
 def engine_absence() -> str | None:

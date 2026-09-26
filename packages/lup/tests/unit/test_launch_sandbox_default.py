@@ -79,6 +79,7 @@ def seen(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Mock:
     monkeypatch.setattr(launch, "generate_with_report", lambda *a, **k: None)
     monkeypatch.setattr(launch, "generate_targets", lambda *a, **k: None)
     monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
+    monkeypatch.setattr(launch, "carry_claude_home", lambda *a, **k: None)
     monkeypatch.setattr(launch, "sweep_ledgers", lambda root: 0)
     monkeypatch.setattr(launch, "exclude_sandbox_placeholders", lambda root: [])
     monkeypatch.setattr(launch, "runtime_preflight", recorded.preflight)

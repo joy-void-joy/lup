@@ -557,6 +557,18 @@ class Image(BaseModel, frozen=True):
             "private container renewals and unrelated authorization records"
         ),
     )
+    home_seed: str = Field(
+        default="/opt/lup/home-seed",
+        description=(
+            "Read-only directory of settings a launch hands the config home, "
+            "applied at every start: each name listed in its ``managed`` file "
+            "is replaced by the one under ``replace/``, or removed where that "
+            "has none, and each JSON object under ``merge/`` is merged key by "
+            "key into the home's file of the same name. Offered outside the "
+            "home for the reason the credential is: the home is the "
+            "session's to write, and the seed is the person's"
+        ),
+    )
     registry_root: str = Field(
         default="/opt/bun",
         description=(
@@ -924,6 +936,28 @@ if [ -n "${{LUP_CREDENTIAL_NAME:-}}" ]; then
   python3 /opt/lup/credential-seed.py {self.credential_seed} "$config/$LUP_CREDENTIAL_NAME" \\
     --keys "${{LUP_CREDENTIAL_KEYS:-[]}}" --renewable "${{LUP_CREDENTIAL_RENEWABLE:-}}"
 fi
+# The person's settings, handed over at every start rather than once: a file
+# seeded once is the person's settings as they stood the day this volume was
+# made. A managed name the seed holds replaces the home's; one it lacks is
+# removed, so what the person deleted does not come back from the volume.
+# A merged document keeps everything the runtime recorded in it.
+seed={self.home_seed}
+if [ -f "$seed/managed" ]; then
+  while IFS= read -r name; do
+    if [ -f "$seed/replace/$name" ]; then
+      cp "$seed/replace/$name" "$config/$name.lup" && mv "$config/$name.lup" "$config/$name"
+    else
+      rm -f "$config/$name"
+    fi
+  done < "$seed/managed"
+  for merging in "$seed"/merge/.[!.]* "$seed"/merge/*; do
+    [ -f "$merging" ] || continue
+    name=$(basename "$merging")
+    [ -f "$config/$name" ] || printf '{{}}' > "$config/$name"
+    jq -s '.[0] + .[1]' "$config/$name" "$merging" > "$config/$name.lup" \\
+      && mv "$config/$name.lup" "$config/$name"
+  done
+fi
 
 # One credential, two consumers. The token crosses the boundary by name --
 # `-e {self.forge.token_variable}` with no value, so it never appears in the
@@ -1199,6 +1233,7 @@ USER $UID:$GID
         inherited_environment: list[str] | None = None,
         environments: Mapping[Path, Path] | None = None,
         devices: Sequence[Device] = (),
+        home_seed: Path | None = None,
     ) -> list[str]:
         """The whole argv that opens one agent session inside a container.
 
@@ -1213,6 +1248,10 @@ USER $UID:$GID
         measured -- an unseeded config home discards the workspace's declared
         ``permissions.allow`` with a notice rather than an error, so the
         policy would be off with nothing having failed.
+
+        ``home_seed`` is a host directory laid out as :attr:`home_seed`
+        describes, offered read-only and applied by the entrypoint at every
+        start, so the person's settings reach a volume that outlives them.
 
         ``credential`` is offered read-only at :attr:`credential_seed` and
         applied once per host-login change, including the first adoption of
@@ -1372,6 +1411,11 @@ USER $UID:$GID
             *self.environment_mounts(environments or {}),
             *granted_devices,
             *seeded,
+            *(
+                ["-v", f"{home_seed}:{self.home_seed}:ro"]
+                if home_seed is not None
+                else []
+            ),
             *bridged,
             *opening,
             *clipping,

@@ -59,6 +59,7 @@ def test_claude_checkpoints_before_preflight_and_after_close(
         preflight,
     )
     monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
+    monkeypatch.setattr(launch, "carry_claude_home", lambda *a, **k: None)
     monkeypatch.setattr(launch, "ambient_config_home", lambda *a, **k: tmp_path)
     monkeypatch.setattr(launch, "session_argv", lambda name, *a, **k: [name])
     monkeypatch.setattr(
@@ -122,6 +123,7 @@ def test_codex_checkpoints_before_preflight_and_after_close(
         preflight,
     )
     monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
+    monkeypatch.setattr(launch, "carry_claude_home", lambda *a, **k: None)
     monkeypatch.setattr(launch, "ambient_config_home", lambda *a, **k: tmp_path)
     monkeypatch.setattr(launch, "session_argv", lambda name, *a, **k: [name])
     monkeypatch.setattr(launch, "non_interactive_environment", lambda _environment: {})
@@ -244,6 +246,7 @@ def test_a_launch_names_the_waits_it_spends_silent(
         lambda compositions, writers, in_passing=False: None,
     )
     monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
+    monkeypatch.setattr(launch, "carry_claude_home", lambda *a, **k: None)
     monkeypatch.setattr(launch, "sweep_ledgers", lambda root: 0)
     monkeypatch.setattr(launch, "exclude_sandbox_placeholders", lambda root: [])
     monkeypatch.setattr(launch, "runtime_preflight", lambda *a, **k: [])
