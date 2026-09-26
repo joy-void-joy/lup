@@ -1,17 +1,14 @@
-"""A redirection's question is one a proven capture is allowed to answer.
+"""A redirection's question names its loss, and a capture answers only its own.
 
-The rule asked and said nothing about what it was asking *about*: the verdict
-carried no purpose and the default `unrecoverable` requirement, so
-`recovery_dischargeable` refused it twice over and the snapshot every session
-takes could not retire the question. Nor could any boundary, since
-`ContainedEffects` rewrites a deferral and this is an ask -- which left a
-redirection asking a person behind a container, behind a sandbox, and with the
-tree captured, three answers already in hand.
-
-A file redirection is the textbook unrecovered local mutation: it overwrites
-one named path and a capture of that path puts it back. Saying so is the whole
-change; the rows that refuse a generated tree, a protected path or a
-credential all sit *above* this one and keep their questions untouched.
+A redirection is an unrecovered local mutation, and its verdict says so: the
+purpose is the loss, and the checkpoint is read off where the target lands, so
+the snapshot every session takes retires exactly the questions about files it
+holds. That reading is also what keeps a capture from answering one it does
+not hold. A target only the run resolves -- `cat > $B` -- names no path, and
+nothing says it lands in the checkout the snapshot covers: it asks as the
+local mutation it is, and no capture settles it. The rows that refuse a
+generated tree, a protected path or a credential sit *above* this one and keep
+their questions however complete the capture is.
 """
 
 from lup.policy.kernel.decision import recovery_dischargeable
@@ -22,7 +19,7 @@ from lup.policy.shell_rules import erase_shell_rules
 from lup.policy.vocabulary import default_vocabulary
 
 REDIRECTION = "cat > $B"
-"""A write whose target no relaxation above the fallback can resolve."""
+"""A write whose target only the run resolves."""
 
 
 def rows() -> list[ShellRuleRow]:
@@ -30,27 +27,31 @@ def rows() -> list[ShellRuleRow]:
     return erase_shell_rules(default_vocabulary())
 
 
-def test_a_redirection_asks_about_a_loss_a_capture_can_put_back() -> None:
-    """The question states its own subject, which is what makes it answerable."""
-    decision = decide_shell(REDIRECTION, rows())
+def test_a_redirection_names_its_loss_and_where_it_lands() -> None:
+    """The question states its own subject, and the subject is out of reach.
 
-    assert decision.effect == "ask"
-    assert recovery_dischargeable(decision)
-
-
-def test_a_proven_capture_settles_what_an_absent_one_leaves_standing() -> None:
-    """Both halves, because a capture that was never taken must still ask.
-
-    `absent` and `complete` are the two a session actually reaches here, and
-    the question is worth a person's attention in exactly one of them.
+    Measured before this: the question carried a `targeted` checkpoint, so a
+    snapshot of the checkout settled a write to wherever `$B` pointed.
     """
     decision = decide_shell(REDIRECTION, rows())
 
-    unheld = settle(SettlementFacts(decision, checkpoint="absent"))
-    assert unheld.effect == "ask"
+    assert decision.effect == "ask"
+    assert decision.purpose == "unrecovered_local_mutation"
+    assert decision.checkpoint == "unrecoverable"
+    assert not recovery_dischargeable(decision)
 
-    held = settle(SettlementFacts(decision, checkpoint="complete"))
-    assert held.effect == "allow"
+
+def test_a_proven_capture_does_not_settle_a_target_it_does_not_hold() -> None:
+    """`absent` and `complete` are the two a session actually reaches here.
+
+    Both ask: a capture that completed holds this checkout, and nothing says
+    the write lands in it.
+    """
+    decision = decide_shell(REDIRECTION, rows())
+
+    for checkpoint in ("absent", "complete"):
+        settled = settle(SettlementFacts(decision, checkpoint=checkpoint))
+        assert settled.effect == "ask", checkpoint
 
 
 def test_a_redirection_into_a_protected_path_keeps_its_question() -> None:
