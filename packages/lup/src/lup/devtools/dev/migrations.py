@@ -907,6 +907,9 @@ DECLARED: list[Migration] = [
     Migration(
         subjects=[
             "NativeHomeScope",
+            "NativeHomeScope.key",
+            "NativeHomeScope.volume_name",
+            "CodexProfileSettings.state_scope",
             "state_volume_name",
             "superseded_volume_name",
             "superseded_volume_notice",
