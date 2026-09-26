@@ -616,6 +616,21 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="uv run pytest -m slow", effect="allow"),
     DecisionCase(input="find . -name '*.py' | xargs grep TODO", effect="allow"),
     DecisionCase(input="echo x | xargs rm -rf", effect="ask"),
+    # xargs appends what it reads to the payload, so a payload that changes
+    # anything is changing files the command never names: it asks at any
+    # placement, and a reader of them keeps its verdict.
+    DecisionCase(input="echo README.md | xargs rm", effect="ask"),
+    DecisionCase(input="ls | xargs rm -rf", effect="ask", sandboxed=True),
+    DecisionCase(input="find . -name '*.pyc' | xargs rm", effect="ask"),
+    DecisionCase(input="find . -print0 | xargs -0 rm -f", effect="ask"),
+    DecisionCase(input="xargs rm < tmp/files.txt", effect="ask"),
+    DecisionCase(input="ls tmp | xargs touch", effect="ask"),
+    DecisionCase(input="git diff --name-only | xargs git add", effect="ask"),
+    DecisionCase(input="git ls-files | xargs wc -l", effect="allow"),
+    DecisionCase(input="ls | xargs cat", effect="allow"),
+    DecisionCase(input="ls | xargs -n1 head -1", effect="allow"),
+    DecisionCase(input="ls | xargs -I{} echo {}", effect="allow"),
+    DecisionCase(input="ls | xargs bash -c 'rm $0'", effect="deny"),
     DecisionCase(input="cd /tmp/worktree && uv run pytest", effect="allow"),
     # A frozen restore fetches nothing the lockfile does not pin by integrity
     # hash, which is what `uv run` restores before running, unasked; the

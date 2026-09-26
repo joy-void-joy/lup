@@ -125,3 +125,25 @@ def test_a_patch_sent_outside_the_checkout_is_not_settled_by_its_capture(
         assert "captured and restorable" not in verdict.reason
 
     assert recovered("git reset --hard", tmp_path).effect == "allow"
+
+
+def test_operands_piped_to_xargs_are_not_settled_by_a_capture(
+    tmp_path: Path,
+) -> None:
+    """What xargs appends is on stdin, so no capture was taken of it by name.
+
+    Measured before this, with a snapshot taken: `echo README.md | xargs rm`
+    was allowed as "captured and restorable", judged as a bare `rm` whose
+    missing operands no human-owned rule could match. A reader of the piped
+    names keeps its verdict.
+    """
+    for command in (
+        "echo README.md | xargs rm",
+        "ls | xargs rm -rf",
+        "find . -name '*.pyc' | xargs rm",
+    ):
+        verdict = recovered(command, tmp_path)
+        assert verdict.effect == "ask", command
+        assert "captured and restorable" not in verdict.reason
+
+    assert recovered("git ls-files | xargs grep foo", tmp_path).effect == "allow"

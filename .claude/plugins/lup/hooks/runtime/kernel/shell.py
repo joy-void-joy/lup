@@ -80,7 +80,7 @@ from .lex import (
     substitutions,
 )
 from .syntax import Command, Script, Word, readable_prefix, word_text
-from .effects import declared_verdict
+from .effects import declared_verdict, member_for
 from .commands import (
     SedContext,
     WriteFacts,
@@ -365,6 +365,54 @@ def decide_find_words(
     return decide_command_rows(remaining, context["rows"], write_facts(context))
 
 
+def decide_xargs_words(
+    words: list[str], context: ShellContext, directory: str | None = ""
+) -> KernelDecision:
+    """Judge one `xargs` by its payload, and by what the payload is handed.
+
+    xargs appends the words it reads to the command it runs, so the payload
+    judged as written is the payload with none of its operands: `echo
+    README.md | xargs rm` read as a bare `rm`, which names nothing a
+    human-owned rule could match, and a capture settled it. What those
+    operands are is on stdin, which nothing here reads.
+
+    So a payload keeps its own verdict only where the operands cannot matter
+    to it: a refusal or a deferral stands, and an allow stands where the row
+    that decided it only observes -- `xargs grep`, `xargs wc`, `xargs cat`.
+    Everything else asks, and at a checkpoint no capture settles, because
+    the files it would change are the ones nobody has named.
+    """
+    payload = xargs_payload(words)
+    if not payload:
+        return unjudged("xargs payload is not classified")
+    verdict = decide_shell_segment(payload, context, directory)
+    if verdict.effect in ("deny", "defer"):
+        return verdict
+    deciding = next(
+        (
+            row
+            for row in [*context["rows"], *context["target_tables"]]
+            if verdict.rule and row["rule"] == verdict.rule
+        ),
+        None,
+    )
+    if (
+        verdict.effect == "allow"
+        and deciding is not None
+        and all(member_for(effect["kind"]).observes for effect in deciding["effects"])
+    ):
+        return verdict
+    return KernelDecision(
+        "ask",
+        f"xargs hands `{' '.join(payload)}` operands read from its input, so"
+        " what it changes is named nowhere in the command",
+        checkpoint="unrecoverable",
+        purpose="unrecovered_local_mutation",
+        recovery="Name the files in the command, or loop over a literal list"
+        " of them, so each one can be judged.",
+    )
+
+
 def decide_env_words(
     words: list[str], context: ShellContext, directory: str | None = ""
 ) -> KernelDecision:
@@ -556,10 +604,7 @@ def decide_segment_words(
     if removal is not None:
         return removal
     if executable == "xargs":
-        payload = xargs_payload(words)
-        if not payload:
-            return unjudged("xargs payload is not classified")
-        return decide_shell_segment(payload, context, directory)
+        return decide_xargs_words(words, context, directory)
     if executable == "env":
         return decide_env_words(words, context, directory)
     if executable == "printenv":

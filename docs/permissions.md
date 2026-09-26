@@ -311,7 +311,12 @@ Loops, conditionals, case
 arms, subshells, and brace groups classify recursively over frozen bindings —
 literal assignments instantiate, opaque ones (`read`, globs) gate
 flag-guarded commands. `find -exec` payloads and `timeout`/`nice` wrappers
-recurse, `sed`/`awk` pass read-only screens, quoted-delimiter heredocs are
+recurse. So does an `xargs` payload, and because xargs appends operands read
+from its input, the payload keeps its verdict only where those cannot
+matter: a refusal stands, and an allow stands where the deciding row only
+reads (`xargs grep`, `xargs cat`). Anything else asks at a checkpoint no
+capture settles — `echo README.md | xargs rm` names its target nowhere a
+rule can read. `sed`/`awk` pass read-only screens, quoted-delimiter heredocs are
 literal data, and `curl` and `wget` are read the way the next section says.
 
 ### A download
