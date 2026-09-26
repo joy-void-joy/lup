@@ -654,6 +654,69 @@ def objecting_reach(
     return max((word for word in order if word in stated), key=order.index)
 
 
+def joined_checkpoint(
+    decisions: list[KernelDecision],
+) -> CheckpointRequirement:
+    """What puts back what a whole command line destroys.
+
+    The weakest answer any of its segments gave. One line is one act as far
+    as a person deciding about it is concerned, so a segment nothing restores
+    makes the line one nothing restores -- ``ls && git push --delete`` is not
+    made recoverable by the half that only read.
+    """
+    if any(item.checkpoint == "unrecoverable" for item in decisions):
+        return "unrecoverable"
+    if any(item.checkpoint == "boundary_wide" for item in decisions):
+        return "boundary_wide"
+    return "targeted"
+
+
+def joined_placement(decisions: list[KernelDecision]) -> SandboxPlacement:
+    """Where a whole command runs, given what each of its segments needs.
+
+    One command line is one process, so its segments cannot be placed
+    apart. Confinement outranks escape: a segment that has to stay inside
+    keeps the whole line inside, and only a line where something needs the
+    outside and nothing needs the inside leaves.
+    """
+    if any(item.sandbox == "inside" for item in decisions):
+        return "inside"
+    if any(item.sandbox == "outside" for item in decisions):
+        return "outside"
+    return "ambient"
+
+
+def joined_decision(decisions: list[KernelDecision]) -> KernelDecision:
+    """One verdict for a whole line, from what each of its commands decided."""
+    placement = joined_placement(decisions)
+    restoration = joined_checkpoint(decisions)
+    parts = tuple(decisions)
+    denied = next((item for item in decisions if item.effect == "deny"), None)
+    if denied is not None:
+        return denied.revised(findings=parts, reach=objecting_reach(parts))
+    asked = next((item for item in decisions if item.effect == "ask"), None)
+    if asked is not None:
+        return asked.revised(
+            sandbox=placement,
+            checkpoint=restoration,
+            findings=parts,
+            reach=objecting_reach(parts),
+        )
+    deferred = next((item for item in decisions if item.effect == "defer"), None)
+    if deferred is not None:
+        return deferred.revised(findings=parts)
+    reached = dict.fromkeys(item.rule for item in decisions if item.rule)
+    return KernelDecision(
+        "allow",
+        "every shell segment is declared safe",
+        placement,
+        checkpoint=restoration,
+        rule=next(iter(reached)) if len(reached) == 1 else "",
+        evaluator="shell-vocabulary",
+        findings=parts,
+    )
+
+
 def recovery_dischargeable(decision: KernelDecision) -> bool:
     """Whether a proven capture retires every surviving reason this asks.
 
