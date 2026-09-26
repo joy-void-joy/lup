@@ -618,7 +618,7 @@
     {
       "path": ".codex/plugins/lup/skills/profile/SKILL.md",
       "category": "generated",
-      "sha256": "5dd95c3507606444258beac480406f939b9eaa2f3ae333c94dbf38ec85ec6fd3",
+      "sha256": "5b83b44dc3c017cf19a173351debbc4be898ff314b6e2aaba27f8fe7a0245e57",
       "semantic_id": "skill.profile",
       "executable": false
     },

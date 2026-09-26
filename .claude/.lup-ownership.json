@@ -261,7 +261,7 @@
     {
       "path": ".claude/plugins/lup/commands/profile.md",
       "category": "generated",
-      "sha256": "90925dc1610ff499ac565a9e267ac111d27b70f4c96605a53f6af89ec6ba6838",
+      "sha256": "40c52d335b19ba1c66f5646a0c02aaa92d65fbbb7aad3352afb92f55f40788a8",
       "semantic_id": "skill.profile",
       "executable": false
     },
@@ -751,7 +751,7 @@
     {
       "path": "docs/harness.md",
       "category": "generated",
-      "sha256": "7497340dc4abf0c178aa3814ecb71732bf19408f2963ec1e3adbf490e550cfe9",
+      "sha256": "48d941c42cdba21595e1c0e6748c0567804dca08c36b39ba707b17f62911616b",
       "semantic_id": "docs.harness",
       "executable": false
     },
@@ -800,7 +800,7 @@
     {
       "path": "docs/platform-differentiation.md",
       "category": "generated",
-      "sha256": "164438f0ccbe23deca8a0685ae417afd8f8caf1796ec2a7218d7cf4c3a628a16",
+      "sha256": "88b99208f22fbcfb68a2c949d3a5a4e10060bd7b18c08717ee5d61e36bc219f3",
       "semantic_id": "docs.platform-differentiation",
       "executable": false
     },
