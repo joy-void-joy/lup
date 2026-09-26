@@ -7,16 +7,20 @@ lup-devtools harness <runtime>``::
     lup-launch claude [ARGS...]
 
 Everything after the runtime is handed to the project's own ``harness
-<runtime>`` untouched. Before any of the checkout's code runs, the launcher
-reads the host zone (:mod:`lup.trust.zone`) and compares it with what this
-machine's operator approved (:mod:`lup.trust.record`). The same tree launches
-at once. Anything else -- a first launch, an edit, a commit checked out, a
-change arriving in a sibling worktree, a rewritten machine registry -- is a
-question in the launcher's own review inbox and at the terminal
-(:mod:`lup.trust.answer`), and nothing runs until it is answered. A rejection
-ends the launch there; an approval is recorded on the host and the project's
-launch is handed an export of exactly what was approved
-(:mod:`lup.trust.handoff`).
+<runtime>`` untouched. ``lup-launch run <command...>`` hands any other
+``lup-devtools`` command over the same way -- ``lup-launch run setup gemini``
+-- for the host commands that must not run unreviewed checkout code either:
+the setup wizard above all, which asks for secrets.
+
+Before any of the checkout's code runs, the launcher reads the host zone
+(:mod:`lup.trust.zone`) and compares it with what this machine's operator
+approved (:mod:`lup.trust.record`). The same tree launches at once. Anything
+else -- a first launch, an edit, a commit checked out, a change arriving in a
+sibling worktree, a rewritten machine registry -- is a question in the
+launcher's own review inbox and at the terminal (:mod:`lup.trust.answer`),
+and nothing runs until it is answered. A rejection ends the launch there; an
+approval is recorded on the host and the project's launch is handed an export
+of exactly what was approved (:mod:`lup.trust.handoff`).
 
 One step runs the approved code before the launch proper: after a question is
 answered, the launcher runs the project's generation from the export and
@@ -29,6 +33,7 @@ the files regenerating it rewrote.
 
 import hashlib
 import os
+import shlex
 from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 from typing import Annotated
@@ -38,6 +43,7 @@ from pydantic import ValidationError
 from rich.console import Console
 
 from lup.devtools.dev.questions import captured_preview
+from lup.devtools.launcher import CONSOLE_SCRIPT
 from lup.harness.ownership import OWNERSHIP_FILENAME, OwnershipManifest
 from lup.policy.relay import PersistentQuestion, QuestionRelay
 from lup.trust.answer import Preview, asked_and_answered
@@ -172,7 +178,7 @@ def operator_approval(
     zone: HostZone,
     read_under: FreeZones,
     declared: FreeZones,
-    runtime: str,
+    named: str,
     ask: Asker,
     console: Console,
 ) -> HostZone:
@@ -191,7 +197,7 @@ def operator_approval(
         )
     base_tree = record.base_for(checkout.root)
     reason = question_reason(
-        runtime,
+        named,
         checkout.root,
         baseline(store, base_tree),
         zone,
@@ -199,7 +205,7 @@ def operator_approval(
     )
     evidence = TrustEvidence(
         worktree=str(checkout.root),
-        runtime=runtime,
+        runtime=named,
         base=base_tree,
         current=zone.tree,
         free=read_under.spelled(),
@@ -284,6 +290,7 @@ def regenerated_approval(
 def trusted_launch(
     start: Path,
     command: list[str],
+    named: str,
     ask: Asker,
     console: Console,
     inherited: EnvVars,
@@ -294,10 +301,10 @@ def trusted_launch(
     """Establish trust in the checkout at ``start``, then hand ``command`` to its launch.
 
     ``command`` is what the project's CLI is given after its own name --
-    ``["harness", "claude", ...]`` -- and the word after ``harness`` is the
-    runtime the question names. Nothing of the checkout is executed before
-    ``execute`` is called, and ``execute`` is never called for a zone nobody
-    approved.
+    ``["harness", "claude", ...]``, or ``["setup", "gemini"]`` -- and
+    ``named`` is what the question says answering runs: the runtime, or the
+    command. Nothing of the checkout is executed before ``execute`` is
+    called, and ``execute`` is never called for a zone nobody approved.
     """
     checkout = LiveCheckout.at(start, inherited)
     state = TrustState.of(checkout.identity(), checkout.common, location)
@@ -305,7 +312,6 @@ def trusted_launch(
     record = state.read()
     read_under = zones_to_read(record, checkout)
     zone = host_zone(checkout, store, read_under)
-    runtime = command[1] if len(command) > 1 else "the project"
     if record.approves(zone.tree):
         console.print(
             f"Host zone unchanged since its approval ({zone.tree}).", markup=False
@@ -315,7 +321,7 @@ def trusted_launch(
     else:
         kept = declared_in(zone, store)
         narrowed = operator_approval(
-            checkout, state, store, zone, read_under, kept, runtime, ask, console
+            checkout, state, store, zone, read_under, kept, named, ask, console
         )
         launched = regenerated_approval(
             checkout, state, store, narrowed, kept, inherited, regenerate, console
@@ -376,8 +382,9 @@ def launch(
     runtime: Annotated[
         str | None,
         typer.Argument(
-            help="The runtime to launch, as the project's `harness` command names it; "
-            "everything after it is passed to that command unchanged"
+            help="The runtime to launch, as the project's `harness` command names it, "
+            "or `run` and any `lup-devtools` command, such as `run setup`; "
+            "everything after it is passed on unchanged"
         ),
     ] = None,
     root: Annotated[
@@ -403,7 +410,13 @@ def launch(
         ),
     ] = False,
 ) -> None:
-    """Review what a launch would run on this machine, then hand it to the project."""
+    """Review what a launch would run on this machine, then hand it to the project.
+
+    ``lup-launch run <command...>`` is the same review over any other
+    project command, run from the approved export with this terminal handed
+    through -- ``lup-launch run setup gemini`` prompts for its key with the
+    typing hidden, from code the operator approved.
+    """
     console = Console()
     # lup: ignore[os-environ] — the launcher hands its own environment on to the
     # launch it starts, and reads git's variables only to drop them
@@ -414,7 +427,21 @@ def launch(
             status(start, console, inherited)
             return
         if runtime is None:
-            raise typer.BadParameter("name the runtime to launch, such as `claude`")
+            raise typer.BadParameter(
+                "name the runtime to launch, such as `claude`, or `run` and a "
+                "devtools command, such as `run setup`"
+            )
+        match [runtime, *context.args]:
+            case ["run"]:
+                raise typer.BadParameter(
+                    "name the devtools command to run, such as `lup-launch run setup`"
+                )
+            case ["run", *devtools]:
+                command = devtools
+                named = shlex.join([CONSOLE_SCRIPT, *devtools])
+            case _:
+                command = ["harness", runtime, *context.args]
+                named = runtime
 
         def ask(
             question: PersistentQuestion,
@@ -426,9 +453,7 @@ def launch(
                 question, checkout, relay, preview, console, port, open_page
             )
 
-        trusted_launch(
-            start, ["harness", runtime, *context.args], ask, console, inherited
-        )
+        trusted_launch(start, command, named, ask, console, inherited)
     except TrustError as error:
         console.print(str(error), markup=False)
         raise typer.Exit(2) from error

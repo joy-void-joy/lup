@@ -110,10 +110,16 @@ class Launches:
         self.regenerated.append(handoff)
         return self.regeneration(handoff)
 
-    def launch(self, start: Path) -> None:
+    def launch(
+        self,
+        start: Path,
+        command: list[str] = ["harness", "claude"],
+        named: str = "claude",
+    ) -> None:
         trusted_launch(
             start,
-            ["harness", "claude"],
+            command,
+            named,
             self.ask,
             Console(file=self.output, width=200),
             # lup: ignore[os-environ] — the launcher is handed the environment it
@@ -384,6 +390,7 @@ def test_an_interrupted_question_is_asked_again_rather_than_twice(
         trusted_launch(
             checkout,
             ["harness", "claude"],
+            "claude",
             interrupted,
             Console(file=io.StringIO()),
             # lup: ignore[os-environ] — the launcher's own inherited environment
@@ -481,24 +488,34 @@ def test_free_zone_paths_never_reach_the_zone(
     assert record.free == [PurePosixPath("studio"), PurePosixPath("tmp")]
 
 
-def test_the_command_hands_everything_after_the_runtime_to_the_launch(
-    checkout: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    starts: list[Path] = []
-    commands: list[list[str]] = []
+class Handed:
+    """What the command line hands ``trusted_launch``, recorded instead of launched."""
 
-    def recorded(
+    def __init__(self) -> None:
+        self.starts: list[Path] = []
+        self.commands: list[list[str]] = []
+        self.named: list[str] = []
+
+    def __call__(
+        self,
         start: Path,
         command: list[str],
+        named: str,
         ask: Asker,
         console: Console,
         # lup: ignore[dict-str-payload] — the environment map
         inherited: dict[str, str],
     ) -> None:
-        starts.append(start)
-        commands.append(command)
+        self.starts.append(start)
+        self.commands.append(command)
+        self.named.append(named)
 
-    monkeypatch.setattr(launcher, "trusted_launch", recorded)
+
+def test_the_command_hands_everything_after_the_runtime_to_the_launch(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    handed = Handed()
+    monkeypatch.setattr(launcher, "trusted_launch", handed)
 
     result = CliRunner().invoke(
         launcher.app,
@@ -515,27 +532,19 @@ def test_the_command_hands_everything_after_the_runtime_to_the_launch(
     )
 
     assert result.exit_code == 0, result.output
-    assert starts == [checkout]
-    assert commands == [["harness", "claude", "--network", "host", "--root", "x"]]
+    assert handed.starts == [checkout]
+    assert handed.commands == [
+        ["harness", "claude", "--network", "host", "--root", "x"]
+    ]
+    assert handed.named == ["claude"]
 
 
 def test_a_host_shim_naming_a_mode_reaches_the_launch_intact(
     checkout: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``exec lup-launch "$runtime" --mode <name> "$@"`` — the mode is the project's word."""
-    commands: list[list[str]] = []
-
-    def recorded(
-        start: Path,
-        command: list[str],
-        ask: Asker,
-        console: Console,
-        # lup: ignore[dict-str-payload] — the environment map
-        inherited: dict[str, str],
-    ) -> None:
-        commands.append(command)
-
-    monkeypatch.setattr(launcher, "trusted_launch", recorded)
+    handed = Handed()
+    monkeypatch.setattr(launcher, "trusted_launch", handed)
     monkeypatch.chdir(checkout)
 
     result = CliRunner().invoke(
@@ -543,9 +552,73 @@ def test_a_host_shim_naming_a_mode_reaches_the_launch_intact(
     )
 
     assert result.exit_code == 0, result.output
-    assert commands == [
+    assert handed.commands == [
         ["harness", "codex", "--mode", "free", "--continue", "--memory", "12g"]
     ]
+
+
+def test_run_hands_a_devtools_command_over_rather_than_a_launch(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``lup-launch run setup gemini``: the command itself, named as the question says it."""
+    handed = Handed()
+    monkeypatch.setattr(launcher, "trusted_launch", handed)
+
+    result = CliRunner().invoke(
+        launcher.app, ["--root", str(checkout), "run", "setup", "gemini", "--help"]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert handed.commands == [["setup", "gemini", "--help"]]
+    assert handed.named == ["lup-devtools setup gemini --help"]
+
+
+def test_run_without_a_command_runs_nothing(
+    checkout: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    handed = Handed()
+    monkeypatch.setattr(launcher, "trusted_launch", handed)
+
+    result = CliRunner().invoke(launcher.app, ["--root", str(checkout), "run"])
+
+    assert result.exit_code == 2
+    assert handed.commands == []
+
+
+def test_a_run_is_reviewed_and_handed_off_from_the_approved_export(
+    checkout: Path, launches: Launches
+) -> None:
+    """The same question, the same recorded approval, the command from the export."""
+    launches.launch(checkout, ["setup", "gemini"], "lup-devtools setup gemini")
+
+    [question] = launches.asked
+    assert question.reason.startswith(
+        f"Launching lup-devtools setup gemini from {checkout.resolve()}"
+    )
+    assert question.operation.payload["runtime"] == "lup-devtools setup gemini"
+    [handed] = launches.handed
+    export = Path(handed.environment[APPROVED_TREE_ENV])
+    assert handed.argv[4:6] == ["--project", str(export)]
+    assert handed.argv[6:] == ["--frozen", "lup-devtools", "setup", "gemini"]
+    assert (export / "src" / "app.py").read_text() == "print('approved')\n"
+
+    launches.launch(checkout)
+
+    assert len(launches.asked) == 1
+
+
+def test_a_rejected_run_runs_nothing(checkout: Path, tmp_path: Path) -> None:
+    rejecting = Launches(tmp_path / "state", approve=False)
+
+    with pytest.raises(typer.Exit) as stopped:
+        rejecting.launch(checkout, ["setup", "gemini"], "lup-devtools setup gemini")
+
+    assert stopped.value.exit_code == 1
+    assert rejecting.handed == []
+    assert rejecting.regenerated == []
+    identity = LiveCheckout.at(checkout, {"PATH": os.defpath}).identity()
+    state = TrustState.of(identity, checkout, rejecting.location)
+    assert state.read().approvals == []
 
 
 def test_status_says_what_this_machine_approved(

@@ -56,6 +56,12 @@ class TrustEvidence(BaseModel, frozen=True):
 
     worktree: str
     runtime: str
+    """What answering runs: the runtime a launch opens, or a command ``lup-launch run`` hands over.
+
+    Named for the first because every question an operator's relay already
+    holds carries it under that name, and the inbox reads them all.
+    """
+
     base: str | None
     current: str
     free: list[str]
@@ -399,7 +405,7 @@ def asked_once(
 
 
 def question_reason(
-    runtime: str,
+    named: str,
     root: Path,
     base: Baseline,
     current: HostZone,
@@ -407,6 +413,6 @@ def question_reason(
 ) -> str:
     """What the operator reads first: what answering lets run, and what changed."""
     opening = (
-        f"Launching {runtime} from {root} runs this checkout's code on this machine."
+        f"Launching {named} from {root} runs this checkout's code on this machine."
     )
     return opening + base.sentence(base.counted(current)) + free_sentence
