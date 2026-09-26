@@ -861,6 +861,7 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="echo x >> notes.log", effect="allow"),
     DecisionCase(input="echo x > $UNSET_DIR/out.txt", effect="ask"),
     DecisionCase(input="echo x > ~/out.txt", effect="ask"),
+    DecisionCase(input="echo x > a$X", effect="ask", sandboxed=True),
     DecisionCase(input="cat <<EOF", effect="deny"),
     # The session scratchpad is a write-allowed root like repo-relative tmp/,
     # and its role is read before the path is spelled — which is what keeps an
@@ -1140,6 +1141,20 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="sort -o out f", effect="allow"),
     DecisionCase(input="sort -o .git/HEAD f", effect="ask"),
     DecisionCase(input="sort -o /tmp/other/file f", effect="allow"),
+    # A target carrying an expansion names a word, and the file it lands on is
+    # decided by the run: it asks however it is spelled and wherever the
+    # session is confined, where the literal spellings beside it create a file
+    # freely. A scratch root reached through the variable naming it is still
+    # scratch, and a flag handed no value names no path and keeps the row's ask.
+    DecisionCase(input="sort -o a$X f", effect="ask"),
+    DecisionCase(input="sort --output=a$X f", effect="ask"),
+    DecisionCase(input="sort --output=a$X f", effect="ask", sandboxed=True),
+    DecisionCase(input="sort -o /etc/$X f", effect="ask"),
+    DecisionCase(input="cp f a$X", effect="ask"),
+    DecisionCase(input="cp f out.txt", effect="allow"),
+    DecisionCase(input="sort --output=out.txt f", effect="allow"),
+    DecisionCase(input="sort --output=$TMPDIR/sorted.txt f", effect="allow"),
+    DecisionCase(input="sort --output= f", effect="ask"),
     # A flag that runs a program is not a flag that writes a file, and keeps
     # its own question however ordinary the file beside it is.
     DecisionCase(input="sort --compress-program=x -o out f", effect="ask"),

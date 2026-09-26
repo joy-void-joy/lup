@@ -53,6 +53,7 @@ from .words import (
     protected_write_target,
     refspec_effects,
     sed_invocation,
+    unlocated_write,
     unread_over_tracked,
     unread_question,
     uv_command_words,
@@ -377,17 +378,24 @@ def targets_write_verdict(
         )
         if protected is not None:
             return protected
-    answered = max(
-        [judged(target) for target in targets],
-        key=lambda answer: STRENGTH.index(answer["effect"]),
+    answers = [judged(target) for target in targets]
+    # A path nobody can locate speaks for the line ahead of any other question,
+    # because it is the one no reading of a path can settle.
+    answered = next(
+        (answer for answer in answers if answer["scope"] == "unbounded"),
+        max(answers, key=lambda answer: STRENGTH.index(answer["effect"])),
     )
     if answered["effect"] == "allow":
         return row_verdict(row, "allow", "this write lands where nothing is reviewed")
-    if answered["unread"]:
+    if answered["unread"] or answered["scope"] == "unbounded":
         # Through the row rather than beside it, so an operator-only row still
         # denies and the sandbox, rule and reviewer the row states still
         # travel; what this verdict knows better is the reason it asks for.
-        asked = unread_question(answered["path"])
+        asked = (
+            unread_question(answered["path"])
+            if answered["unread"]
+            else unlocated_write(f"the write target {answered['path']}")
+        )
         return row_verdict(
             row,
             "ask",
@@ -411,13 +419,15 @@ def verb_loss_scope(
     """What a verb's own targets say the loss is, read one target at a time.
 
     A row carries one value for every path it might touch, and for these verbs
-    that value is `boundary_wide`: a glob or a variable prevents an exact
-    footprint, so the wider capture is what the opacity costs. It is the right
-    reading for a delete inside the checkout and a false one the moment a path
-    leaves it -- ``rm /etc/hosts`` was settled as "the affected paths are
-    captured and restorable", said of a file no snapshot of this checkout has
-    ever held, and the settlement row that discharges a covered loss took it at
-    its word.
+    that value is `boundary_wide`: a glob prevents an exact footprint, so the
+    wider capture is what the opacity costs. It is the right reading for a
+    delete inside the checkout and a false one the moment a path leaves it --
+    ``rm /etc/hosts`` was settled as "the affected paths are captured and
+    restorable", said of a file no snapshot of this checkout has ever held, and
+    the settlement row that discharges a covered loss took it at its word. A
+    variable is the second of those rather than the first: ``rm tmp/$X`` names
+    wherever ``$X`` climbs to, so :func:`write_scope` reads it ``unbounded``
+    and no capture settles it.
 
     So the scope is read off the targets the way :func:`write_checkpoint` reads
     it for a redirection, and for exactly that reason: getting it from the row

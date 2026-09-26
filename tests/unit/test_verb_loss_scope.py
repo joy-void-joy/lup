@@ -1,11 +1,12 @@
 """What a verb destroys is read off its own targets, not off its row.
 
 A row carries one value for every path it might touch, and for `rm`, `cp`,
-`mv`, `ln` and the archive verbs that value is `boundary_wide`: a glob or a
-variable prevents an exact footprint, so the wider capture is what the opacity
-costs. That is the right reading inside the checkout and a false one the
-moment a path leaves it, because the capture it names is a snapshot of the
-checkout.
+`mv`, `ln` and the archive verbs that value is `boundary_wide`: a glob
+prevents an exact footprint, so the wider capture is what the opacity costs.
+That is the right reading inside the checkout and a false one the moment a
+path leaves it, because the capture it names is a snapshot of the checkout --
+and a variable is a path that may leave it, since only the run says where it
+lands.
 
 Measured before this, with a snapshot taken: `rm /etc/hosts` was *allowed*,
 and the reason it gave was "the affected paths are captured and restorable" —
@@ -101,6 +102,38 @@ def test_work_inside_the_checkout_keeps_the_answer_it_had(tmp_path: Path) -> Non
     assert recovered("mv tmp/a tmp/b", tmp_path).effect == "allow"
     assert recovered("gzip tmp/notes.txt", tmp_path).effect == "allow"
     assert recovered("tar -xf a.tgz -C tmp/out", tmp_path).effect == "allow"
+
+
+def test_a_target_only_the_run_resolves_is_not_settled_by_a_capture(
+    tmp_path: Path,
+) -> None:
+    """A write whose path carries an expansion lands wherever the run says.
+
+    Measured before this, with a snapshot taken, every one of these was
+    allowed as "captured and restorable" -- `> ~/.bashrc` and `> $HOME/x`
+    included, and `sort -o a$X` and `cp f a$X` were granted as the create of a
+    file literally named `a$X`. The snapshot holds this checkout, and nothing
+    says `$X` does not climb out of it. A glob is read where it stands, and a
+    scratch root reached through its own variable keeps its grant.
+    """
+    for command in (
+        "echo x > a$X",
+        "echo x > ~/.bashrc",
+        "echo x > $HOME/x",
+        "sort -o a$X f",
+        "cp f a$X",
+        "mv f a$X",
+        "tee a$X",
+        "rm tmp/$X",
+        "dd if=f of=a$X",
+    ):
+        verdict = recovered(command, tmp_path)
+        assert verdict.effect == "ask", command
+        assert "captured and restorable" not in verdict.reason, command
+
+    assert recovered("echo x > $TMPDIR/out.txt", tmp_path).effect == "allow"
+    assert recovered("rm *.pyc", tmp_path).effect == "allow"
+    assert recovered("sort -o out.txt f", tmp_path).effect == "allow"
 
 
 def test_a_patch_sent_outside_the_checkout_is_not_settled_by_its_capture(

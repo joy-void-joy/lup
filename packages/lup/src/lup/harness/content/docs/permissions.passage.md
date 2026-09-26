@@ -134,7 +134,7 @@ rule names the capture that would cover its loss:
 | value | what the capture holds | when a rule declares it |
 |---|---|---|
 | `targeted` | exactly the paths the operation names | every path resolves statically — `rm build/out`, `git restore`, a redirect into a named file |
-| `boundary_wide` | every precious writable root | a variable, a glob, a substitution or a directory walk prevents an exact footprint, so the wider capture is what the opacity costs |
+| `boundary_wide` | every precious writable root | a glob or a directory walk prevents an exact footprint, so the wider capture is what the opacity costs |
 | `unrecoverable` | nothing reaches it | a remote ref, a published artifact, an issue somebody read, a command whose argument is another command |
 
 `unrecoverable` is the default and the whole safety of the axis: a rule
@@ -155,6 +155,16 @@ that sends the write elsewhere says so in its own effects, and its question
 takes the checkpoint they imply: `git apply --unsafe-paths` and
 `--build-fake-ancestor` write outside the checkout, so no capture settles
 them.
+
+A written path carrying an expansion (a variable, a tilde or a substitution)
+fails the same check for a different reason: it names a word, and only the
+run says where that word lands. So it is read as the `unbounded` write a
+compiler's configured output is, whatever spells it: a redirection, a write
+flag's value, or a copy, move, `tee`, delete or link operand. It asks at
+every placement. No capture settles it, and a path nothing stands at yet does
+not make it a create: `sort -o a$X f` is not a new file called `a$X`. A
+declared scratch root reached through the variable that names it, like
+`$TMPDIR/out.txt`, is still scratch.
 
 Where the capture was actually *taken*, `RecoveredLoss` settles the question
 as a **permission**. Not a deferral: deferring would make the outcome depend

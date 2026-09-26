@@ -56,6 +56,7 @@ from .words import (
     refuses_generated_plugin_target,
     sed_invocation,
     sed_rewrite_words,
+    unlocated_write,
     unread_over_tracked,
     unread_question,
     uv_run_words,
@@ -942,17 +943,11 @@ def resolve_redirection(
     scope = write_scope(spelled, path_roles or [], checkout_root)
     # A target still carrying an expansion names no path to scope, so what a
     # reviewer would be shown is `$B` and where that lands is the question.
-    # Asked after the scope is read rather than before it, because a declared
-    # root is one of the things a role recognizes *through* the variable that
-    # names it: `$TMPDIR/out.txt` spells no path and is still scratch.
-    if scope != "scratch" and not spells_its_path(spelled):
-        return KernelDecision(
-            "ask",
-            f"file redirection to {spelled} writes to a path that is only"
-            " known when the command runs",
-            checkpoint="targeted",
-            purpose="unrecovered_local_mutation",
-        )
+    # Read off the scope rather than before it, because a declared root is one
+    # of the things a role recognizes *through* the variable that names it:
+    # `$TMPDIR/out.txt` spells no path and is still scratch.
+    if scope == "unbounded":
+        return unlocated_write(f"the redirection target {spelled}")
     existing = existing_targets is None or spelled in existing_targets
     if unread_over_tracked(
         scope, carried, existing, spelled in (tracked_targets or [])

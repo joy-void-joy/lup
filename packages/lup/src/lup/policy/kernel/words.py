@@ -23,6 +23,7 @@ from .roles import (
     is_generated_plugin_target,
     path_role,
     repository_relative,
+    spells_its_path,
 )
 from .rows import (
     DisplacedTargetRow,
@@ -467,12 +468,23 @@ def write_scope(
     so it arrives from the host per call and is never declared; empty is the
     honest answer where the caller has none, and leaves the reading exactly as
     it was.
+
+    A spelling that still carries an expansion is ``unbounded``: it names a
+    different file at run time than the one written down, so it could be
+    tracked source, the repository, or a path no capture of this checkout
+    holds, and it is read as the strictest of them. Reading it any other way
+    is how `sort --output=a$X` was granted as a create of a file named
+    ``a$X``, and how `> ~/f` was settled as captured by a snapshot that
+    never held a home directory. A declared scratch root reached through the
+    variable naming it is still scratch, which is read first.
     """
     spelled = repository_relative(path_text, checkout)
     if path_role(spelled, path_roles) == "scratch":
         return "scratch"
     if reaches_git_administration(spelled):
         return "protected"
+    if not spells_its_path(spelled):
+        return "unbounded"
     if leaves_the_checkout(spelled):
         return "outside"
     return "production"
@@ -536,6 +548,27 @@ def unread_question(path: str) -> KernelDecision:
             "write into a scratch path and move the result in once it has been"
             " read, or carry the content in the command so the edit gates read"
             " it as they would an Edit"
+        ),
+    )
+
+
+def unlocated_write(named: str) -> KernelDecision:
+    """The question a write to an ``unbounded`` path puts, however it is spelled.
+
+    ``named`` is the path as the reason opens on it: a redirection, a write
+    flag and a verb's destination are one unknown each. No capture discharges
+    it, because the snapshot holds this checkout and nothing says the path
+    lands there; binding the path to a literal first is what lets the write be
+    judged where it lands.
+    """
+    return KernelDecision(
+        "ask",
+        f"{named} is a path that is only known when the command runs",
+        checkpoint=write_checkpoint("unbounded"),
+        purpose="unrecovered_local_mutation",
+        recovery=(
+            "bind the path to a literal value first, so the write is judged"
+            " where it lands"
         ),
     )
 
