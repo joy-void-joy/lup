@@ -277,6 +277,21 @@ class RefusedToolRow(TypedDict):
     recovery: str
 
 
+class RefusedPathRow(TypedDict):
+    """One erased set of paths no shell command may name, and where to go instead.
+
+    ``paths`` are patterns a word is matched against, ``exempt`` the ones
+    beneath them that stay reachable, and :mod:`lup.policy.kernel.withheld`
+    says how either is read. ``reason`` says what naming one would have done
+    and ``recovery`` what reaches the same end, as a tool refusal does.
+    """
+
+    paths: list[str]
+    exempt: list[str]
+    reason: str
+    recovery: str
+
+
 class RunnerTargetRow(TypedDict):
     """One erased ``uv run <target>`` a project judges, and how.
 

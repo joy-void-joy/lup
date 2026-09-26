@@ -505,6 +505,14 @@ are about is the one a session walks, and a module root declared beside the
 executables is on it."""
 """How many restorable files one command may destroy before it asks."""
 
+FIXTURE_REFUSED_PATHS = declared_hook_set().refused_paths
+FIXTURE_SECRET_VARIABLES = declared_hook_set().secret_variables
+"""What this project withholds from every command: its key and login files,
+the runtimes' logins among them, and the variables no builtin may print.
+
+Asked of the hook set, so the cases below pin what a session meets rather
+than a table written for them."""
+
 SHELL_POLICY_CASES = [
     DecisionCase(input="env MODE=test python script.py", effect="deny"),
     DecisionCase(input="uv run --with requests python -c 'x'", effect="deny"),
@@ -1617,6 +1625,70 @@ SHELL_POLICY_CASES = [
     DecisionCase(input='env -S "rm -rf src"', effect="deny"),
     DecisionCase(input="printenv PATH", effect="allow"),
     DecisionCase(input="printenv -0 HOME", effect="allow"),
+    # `set` alone is the same dump by the shell's own spelling.
+    DecisionCase(input="set", effect="deny"),
+    DecisionCase(input="set | grep TOKEN", effect="deny"),
+    DecisionCase(input="set -euo pipefail", effect="allow"),
+    # One secret printed is that dump narrowed to the variable that mattered,
+    # by whichever builtin prints it; asking whether one is set prints nothing.
+    DecisionCase(input="printenv GH_TOKEN", effect="deny"),
+    DecisionCase(input="printenv -0 ANTHROPIC_API_KEY", effect="deny"),
+    DecisionCase(input="echo $GH_TOKEN", effect="deny"),
+    DecisionCase(input='echo "token: ${GH_TOKEN}"', effect="deny"),
+    DecisionCase(input="echo ${GH_TOKEN:-unset}", effect="deny"),
+    DecisionCase(input="printf '%s' \"$AWS_SECRET_ACCESS_KEY\"", effect="deny"),
+    DecisionCase(input="env echo $db_password", effect="deny"),
+    DecisionCase(input='cat <<< "$GH_TOKEN"', effect="deny"),
+    DecisionCase(input="x=$(echo $GH_TOKEN)", effect="deny"),
+    DecisionCase(input="echo ${#GH_TOKEN}", effect="allow"),
+    DecisionCase(input="echo ${GH_TOKEN:+set}", effect="allow"),
+    DecisionCase(input='[ -n "$GH_TOKEN" ] && echo set', effect="allow"),
+    DecisionCase(input="echo '$GH_TOKEN'", effect="allow"),
+    DecisionCase(input="echo $HOME $PATH", effect="allow"),
+    DecisionCase(input="echo $GIT_AUTHOR_NAME $SSH_AUTH_SOCK", effect="allow"),
+    DecisionCase(input="gh auth token", effect="deny"),
+    DecisionCase(input="gh auth status", effect="allow"),
+    DecisionCase(input="gh auth status --show-token", effect="ask"),
+    # A key or a login is reached the moment a command names it, whichever
+    # verb does the reaching, so the word refuses the command -- spelled from
+    # `~`, from `$HOME`, from an absolute home, globbed, attached to an option,
+    # or named to the shell by a redirection.
+    DecisionCase(input="cat ~/.ssh/id_ed25519", effect="deny"),
+    DecisionCase(input="cat ~/.ssh/id_ed25519", effect="deny", sandboxed=True),
+    DecisionCase(input="cat /home/someone/.ssh/id_rsa", effect="deny"),
+    DecisionCase(input="cat $HOME/.aws/credentials", effect="deny"),
+    DecisionCase(input="head -5 ~/.netrc", effect="deny"),
+    DecisionCase(input="tail ~/.git-credentials", effect="deny"),
+    DecisionCase(input="less ~/.config/gh/hosts.yml", effect="deny"),
+    DecisionCase(input="grep -r BEGIN ~/.ssh", effect="deny"),
+    DecisionCase(input="grep --file=~/.pypirc x README.md", effect="deny"),
+    DecisionCase(input="cp ~/.ssh/id_rsa tmp/key", effect="deny"),
+    DecisionCase(input="base64 ~/.gnupg/private-keys-v1.d/x.key", effect="deny"),
+    DecisionCase(input="xxd /proc/self/environ", effect="deny"),
+    DecisionCase(input="tar czf tmp/keys.tgz ~/.ssh", effect="deny"),
+    DecisionCase(input="zip -r tmp/keys.zip ~/.ssh", effect="deny"),
+    DecisionCase(input="cat ~/.ssh/*", effect="deny"),
+    DecisionCase(input="cat .*/credentials", effect="deny"),
+    DecisionCase(input="cat < ~/.ssh/id_rsa", effect="deny"),
+    DecisionCase(input="cd ~/.ssh && cat id_rsa", effect="deny"),
+    DecisionCase(input="cd /home/someone && cat .ssh/id_rsa", effect="deny"),
+    DecisionCase(input="ls README.md | xargs cat ~/.netrc", effect="deny"),
+    DecisionCase(input="uv run python tmp/x.py ~/.aws/credentials", effect="deny"),
+    DecisionCase(input="cat ~/.claude/.credentials.json", effect="deny"),
+    DecisionCase(input="cat ~/.codex/auth.json", effect="deny"),
+    DecisionCase(
+        input="cat .lup/profiles/work/claude-config/.credentials.json",
+        effect="deny",
+    ),
+    DecisionCase(input="cat .lup/codex-home/auth.json", effect="deny"),
+    # What sits beside the keys and is published anyway stays readable, and a
+    # glob reaches a dot-named file only when it is spelled with the dot.
+    DecisionCase(input="cat ~/.ssh/id_ed25519.pub", effect="allow"),
+    DecisionCase(input="cat ~/.ssh/*.pub", effect="allow"),
+    DecisionCase(input="cat ~/.ssh/known_hosts ~/.ssh/config", effect="allow"),
+    DecisionCase(input="cat * | wc -l", effect="allow"),
+    DecisionCase(input="cat src/auth.json", effect="allow"),
+    DecisionCase(input="cat .env", effect="allow"),
     DecisionCase(input="uv run pytest > tmp/out.txt", effect="allow"),
     # find -exec payloads recurse; the sed scanner reads the full stdout-only
     # grammar; curl is screened to read methods against the fetch scopes.
@@ -2200,6 +2272,8 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
             peer_policy=None,
             recoverable_target_limit=FIXTURE_RECOVERABLE_LIMIT,
             runner_targets=FIXTURE_RUNNER_TARGETS,
+            refused_paths=FIXTURE_REFUSED_PATHS,
+            secret_variables=FIXTURE_SECRET_VARIABLES,
             sandbox_excluded_commands=FIXTURE_EXCLUDED_COMMANDS,
             auto_escape_prefixes=[],
             diagnostics_command=[],
@@ -2238,8 +2312,8 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "    ALLOWED_FETCH_SCOPES, ANTI_PATTERN_ROWS, DENIED_FETCH_SCOPES,\n"
         "    EDIT_RULES, MAXIMUM_ADDED_LINES, PATH_ROLES, PATH_RULES,\n"
         "    IMPORT_BOUNDARIES,\n"
-        "    RUNNER_TARGET_TABLES, RUNNER_TARGETS, SANDBOX_EXCLUDED_COMMANDS,\n"
-        "    SHELL_RULES,\n"
+        "    REFUSED_PATHS, RUNNER_TARGET_TABLES, RUNNER_TARGETS,\n"
+        "    SANDBOX_EXCLUDED_COMMANDS, SECRET_VARIABLES, SHELL_RULES,\n"
         ")\n"
         "assert EDIT_RULES, 'the declared edit table did not reach the runtime'\n"
         "assert IMPORT_BOUNDARIES, 'import ownership did not reach the runtime'\n"
@@ -2258,6 +2332,8 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
         "        empty_directories=case['empty'],\n"
         "        runner_targets=RUNNER_TARGETS,\n"
         "        target_tables=RUNNER_TARGET_TABLES,\n"
+        "        refused_paths=REFUSED_PATHS,\n"
+        "        secret_variables=SECRET_VARIABLES,\n"
         "    )\n"
         "    assert result.effect == case['effect'], case\n"
         "for case in fixtures['fetch']:\n"
@@ -3352,6 +3428,8 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
         path_roles=FIXTURE_PATH_ROLES,
         path_rules=FIXTURE_PATH_RULES,
         runner_targets=FIXTURE_RUNNER_TARGETS,
+        refused_paths=FIXTURE_REFUSED_PATHS,
+        secret_variables=FIXTURE_SECRET_VARIABLES,
     )
     hosts: dict[HostShape, ShellPolicy] = {}
 
@@ -3372,6 +3450,8 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
                 path_roles=FIXTURE_PATH_ROLES,
                 path_rules=FIXTURE_PATH_RULES,
                 runner_targets=FIXTURE_RUNNER_TARGETS,
+                refused_paths=FIXTURE_REFUSED_PATHS,
+                secret_variables=FIXTURE_SECRET_VARIABLES,
             )
         return hosts[shape]
 
@@ -3402,6 +3482,8 @@ def test_shell_policy_preserves_golden_compound_and_wrapper_outcomes(
             empty_directories=case.empty,
             runner_targets=policy.runner_targets,
             target_tables=policy.target_tables,
+            refused_paths=policy.refused_paths,
+            secret_variables=policy.secret_variables,
         ).effect
         assert bundled_effect == case.effect, case.input
 

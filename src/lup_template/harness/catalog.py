@@ -34,7 +34,10 @@ from lup.harness.models import (
     SkillInvocation,
 )
 from lup.providers.claude.harness import ClaudeSpellings
+from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.providers.codex.harness import CodexSpellings
+from lup.providers.codex.login import CODEX_LOGIN
+from lup.policy.refused_paths import credential_files
 from lup.harness.codescan.common import ApplicationRoots
 from lup.harness.codescan.boundaries import (
     generated_tree_paths,
@@ -828,6 +831,18 @@ def portable_harness(
             # the coordination directory moves the compiled hook with it.
             peer_policy=peer_policy(),
             refused_tools=REFUSED_TOOLS,
+            # The library's key and login files, and the logins of the two
+            # runtimes this project runs on, each spelled by its own login
+            # declaration: a session reads neither its own token nor the
+            # other runtime's.
+            refused_paths=[
+                credential_files(
+                    also=[
+                        *CLAUDE_LOGIN.withheld_logins(),
+                        *CODEX_LOGIN.withheld_logins(),
+                    ]
+                ),
+            ],
             # Which checker answers for an edit is this project's toolchain,
             # not the library's, and it is named rather than located: the
             # resolution asks the checkout's own environment where the program

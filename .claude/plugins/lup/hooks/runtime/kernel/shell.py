@@ -25,6 +25,7 @@ from .rows import (
     PathRoleRow,
     PathRuleRow,
     DisplacedTargetRow,
+    RefusedPathRow,
     RewrittenDocumentRow,
     RunnerTargetRow,
     UnproducedDocumentRow,
@@ -59,6 +60,13 @@ from .bindings import (
 )
 from .escalation import read_escalation
 from .programs import SCRIPT_INTERPRETERS, program_verdict, read_program
+from .withheld import (
+    printed_secret,
+    secret_name,
+    secret_refusal,
+    withheld_operand,
+    withheld_redirect,
+)
 from .semantics import UnjudgedAmbient
 from .lex import (
     command_segments,
@@ -146,6 +154,12 @@ class ShellContext(TypedDict):
     reaching an undeclared origin answered from the declaration and the other
     from a constant."""
 
+    refused_paths: list[RefusedPathRow]
+    """Paths no word of any command may name, each with what to do instead."""
+
+    secret_variables: list[str]
+    """Name patterns of the variables whose values no command may print."""
+
     antipattern_rows: dict[str, list[AntiPatternRow]]
     edit_rules: list[EditRuleRow]
     import_boundaries: list[ImportBoundaryRow]
@@ -222,6 +236,8 @@ def shell_context(
     contained: bool = False,
     checkout_root: str = "",
     unscoped_fetch: UnjudgedAmbient = "ask",
+    refused_paths: list[RefusedPathRow] | None = None,
+    secret_variables: list[str] | None = None,
     antipattern_rows: dict[str, list[AntiPatternRow]] | None = None,
     edit_rules: list[EditRuleRow] | None = None,
     import_boundaries: list[ImportBoundaryRow] | None = None,
@@ -264,6 +280,8 @@ def shell_context(
         checkout_root=checkout_root,
         displaced_targets=displaced_targets or [],
         unscoped_fetch=unscoped_fetch,
+        refused_paths=refused_paths or [],
+        secret_variables=secret_variables or [],
         antipattern_rows=antipattern_rows or {},
         edit_rules=edit_rules or [],
         import_boundaries=import_boundaries or [],
@@ -376,36 +394,40 @@ def decide_env_words(
             " are the words in the command line.",
         )
     if not payload:
-        return KernelDecision(
-            "deny",
-            "the whole environment is a credential store, and printing it"
-            " writes every secret in it into this transcript",
-            recovery="Name the variables you want: `printenv <NAME>`.",
-        )
+        return environment_dump()
     return decide_shell_segment(payload, context, directory)
 
 
-def decide_printenv_words(words: list[str]) -> KernelDecision:
-    """Judge one `printenv` by whether it says what it wants.
-
-    Named, it is an ordinary read and one of the most useful there is. Bare,
-    it is the same dump `env` refuses, reached by a second spelling — and a
-    refusal that held only one of them would have taught the habit of reaching
-    for the other.
-
-    Options are not read, only whether anything survives them, because
-    `printenv` has exactly two (`-0` and the informational pair) and none
-    changes what it selects.
-    """
-    named = [word for word in words[1:] if not word.startswith("-")]
-    if named:
-        return KernelDecision("allow", "reads the variables it names")
+def environment_dump() -> KernelDecision:
+    """The refusal for printing every variable at once, by whichever spelling."""
     return KernelDecision(
         "deny",
         "the whole environment is a credential store, and printing it writes"
         " every secret in it into this transcript",
         recovery="Name the variables you want: `printenv <NAME>`.",
     )
+
+
+def decide_printenv_words(words: list[str], secrets: list[str]) -> KernelDecision:
+    """Judge one `printenv` by whether it says what it wants.
+
+    Named, it is an ordinary read and one of the most useful there is -- unless
+    a name is one ``secrets`` matches, which is the dump narrowed to the one
+    variable that mattered. Bare, it is the same dump `env` refuses, reached by
+    a second spelling — and a refusal that held only one of them would have
+    taught the habit of reaching for the other.
+
+    Options are not read, only whether anything survives them, because
+    `printenv` has exactly two (`-0` and the informational pair) and none
+    changes what it selects.
+    """
+    named = [word for word in words[1:] if not word.startswith("-")]
+    secret = next((name for name in named if secret_name(name, secrets)), None)
+    if secret is not None:
+        return secret_refusal(secret)
+    if named:
+        return KernelDecision("allow", "reads the variables it names")
+    return environment_dump()
 
 
 def decide_interpreter_words(
@@ -537,7 +559,10 @@ def decide_segment_words(
     if executable == "env":
         return decide_env_words(words, context, directory)
     if executable == "printenv":
-        return decide_printenv_words(words)
+        return decide_printenv_words(words, context["secret_variables"])
+    # `set` alone lists every variable the shell holds, exported or not.
+    if executable == "set" and len(words) == 1:
+        return environment_dump()
     if executable in ("curl", "wget"):
         return decide_download_words(
             words,
@@ -618,6 +643,11 @@ def decide_shell_segment(
         )
     if not words:
         return unjudged("shell segment has no command")
+    withheld = withheld_operand(
+        words, directory, context["checkout_root"], context["refused_paths"]
+    )
+    if withheld is not None:
+        return withheld
     placed = placed_words(words, directory, context["rows"])
     if placed is None:
         return unjudged(
@@ -874,6 +904,13 @@ def decide_simple(
             bindings = bind_name(bindings, pair["name"], pair["value"])
         return Walked(decisions=[], bindings=bindings, stopped=False)
     words = effective_command(texts)["words"]
+    printed = printed_secret(
+        command["words"][len(texts) - len(words) :],
+        command["redirects"],
+        context["secret_variables"],
+    )
+    if printed is not None:
+        return Walked(decisions=[printed], bindings=bindings, stopped=False)
     if words and posixpath.basename(words[0]) == "read":
         extended = read_bindings(words, bindings)
         if isinstance(extended, KernelDecision):
@@ -1059,6 +1096,8 @@ def classify_shell(
     contained: bool = False,
     checkout_root: str = "",
     unscoped_fetch: UnjudgedAmbient = "ask",
+    refused_paths: list[RefusedPathRow] | None = None,
+    secret_variables: list[str] | None = None,
     antipattern_rows: dict[str, list[AntiPatternRow]] | None = None,
     edit_rules: list[EditRuleRow] | None = None,
     import_boundaries: list[ImportBoundaryRow] | None = None,
@@ -1100,6 +1139,8 @@ def classify_shell(
         contained=contained,
         checkout_root=checkout_root,
         unscoped_fetch=unscoped_fetch,
+        refused_paths=refused_paths,
+        secret_variables=secret_variables,
         antipattern_rows=antipattern_rows,
         edit_rules=edit_rules,
         import_boundaries=import_boundaries,
@@ -1129,13 +1170,18 @@ def classify_shell(
             tracked_targets,
             displaced_targets,
         )
+        withheld = withheld_redirect(read, checkout_root, context["refused_paths"])
         return joined_decision(
             [
+                *([] if withheld is None else [withheld]),
                 *([] if redirected is None else [redirected]),
                 *decide_list(read, context)["decisions"],
                 tree,
             ]
         )
+    withheld = withheld_redirect(tree, checkout_root, context["refused_paths"])
+    if withheld is not None:
+        return withheld
     redirected = redirection_verdict(
         tree,
         existing_targets,
@@ -1263,6 +1309,8 @@ def decide_shell(
     relayed: bool = False,
     unjudged_ambient: UnjudgedAmbient = "ask",
     unscoped_fetch: UnjudgedAmbient | None = None,
+    refused_paths: list[RefusedPathRow] | None = None,
+    secret_variables: list[str] | None = None,
     unleased_targets: list[str] | None = None,
     readonly_targets: list[str] | None = None,
     displaced_targets: list[DisplacedTargetRow] | None = None,
@@ -1370,6 +1418,10 @@ def decide_shell(
                 # the fetch declaration where the caller holds one, and the
                 # settlement's own posture below where it does not.
                 unscoped_fetch=unscoped_fetch or unjudged_ambient,
+                # What no word may name and no builtin may print, declared by
+                # the project rather than known here.
+                refused_paths=refused_paths,
+                secret_variables=secret_variables,
                 # The edit gates, for the verbs that rewrite a file in place.
                 # Absent, every such rewrite asks, which is the arrangement
                 # that makes a composition forgetting them safe rather than

@@ -34,6 +34,7 @@ from lup.policy.kernel.rows import (
     PathRoleRow,
     PathRuleRow,
     PeerPolicyRow,
+    RefusedPathRow,
     RefusedToolRow,
     RunnerTargetRow,
     ShellRuleRow,
@@ -46,6 +47,7 @@ from lup.policy.kernel.rows import (
 from lup.policy.edit_rules import EditRule, erase_edit_rules
 from lup.policy.imports import ImportBoundary
 from lup.policy.peer_policy import PeerPolicy, erase_peer_policy
+from lup.policy.refused_paths import RefusedPaths
 from lup.policy.refused_tools import RefusedTool, erase_refused_tools
 from lup.policy.shell_rules import (
     RunnerTargetRule,
@@ -389,6 +391,21 @@ def refused_tool_rows_literal(rows: list[RefusedToolRow]) -> str:
     )
 
 
+def refused_path_rows_literal(rows: list[RefusedPathRow]) -> str:
+    """Render declared path refusals as primitive runtime rows."""
+    return mapping_rows_literal(
+        [
+            [
+                RenderedField(name="paths", value=row["paths"]),
+                RenderedField(name="exempt", value=row["exempt"]),
+                RenderedField(name="reason", value=row["reason"]),
+                RenderedField(name="recovery", value=row["recovery"]),
+            ]
+            for row in rows
+        ]
+    )
+
+
 def runner_target_rows_literal(rows: list[RunnerTargetRow]) -> str:
     """Render the declared runner targets as primitive runtime rows.
 
@@ -601,6 +618,8 @@ def render_policy_data(
     rules: RuleSet | None = None,
     import_boundaries: list[ImportBoundary] | None = None,
     unscoped_fetch: UnjudgedAmbient | None = None,
+    refused_paths: list[RefusedPaths] | None = None,
+    secret_variables: list[str] | None = None,
 ) -> str:
     """Render one plugin's canonical policy rows without executable logic.
 
@@ -642,6 +661,12 @@ def render_policy_data(
             ),
             "REFUSED_TOOLS: list[RefusedToolRow] = "
             + refused_tool_rows_literal(erase_refused_tools(refused_tools)),
+            "REFUSED_PATHS: list[RefusedPathRow] = "
+            + refused_path_rows_literal(
+                [paths.erased() for paths in refused_paths or []]
+            ),
+            "SECRET_VARIABLES: list[str] = "
+            + string_rows_literal(secret_variables or []),
             "PEER_POLICY: PeerPolicyRow | None = "
             + peer_policy_literal(erase_peer_policy(peer_policy)),
             "AUTONOMOUS_AGENT_IDENTITIES: list[str] = "
@@ -677,6 +702,7 @@ def render_policy_data(
         "    PathRoleRow,\n"
         "    PathRuleRow,\n"
         "    PeerPolicyRow,\n"
+        "    RefusedPathRow,\n"
         "    RefusedToolRow,\n"
         "    RunnerTargetRow,\n"
         "    ShellRuleRow,\n"

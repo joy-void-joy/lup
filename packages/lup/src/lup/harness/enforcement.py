@@ -170,6 +170,8 @@ def semantic_policy_for(
             allowed_urls=allowed,
             denied_urls=denied,
             unscoped_fetch=hooks.resolved_unscoped_fetch(),
+            refused_paths=list(hooks.refused_paths),
+            secret_variables=list(hooks.secret_variables),
             sandbox_active=sandbox_active,
             sandbox_excluded_commands=hooks.excluded_commands(),
             escapable=escapable,

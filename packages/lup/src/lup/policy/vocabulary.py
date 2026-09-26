@@ -2140,7 +2140,31 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                     ),
                 ],
             ),
-            group("auth", reads(["status"])),
+            group(
+                "auth",
+                [
+                    # `-t` adds the token itself to the report.
+                    ShellOperationRule(
+                        name="status",
+                        effects=[declare("fetches", scope="declared")],
+                        ask_flags=["-t", "--show-token"],
+                        reason="showing the token gh holds writes it into this"
+                        " transcript",
+                    ),
+                    # The token gh holds, printed and nothing else: the same
+                    # disclosure `printenv GH_TOKEN` is refused for.
+                    ShellOperationRule(
+                        name="token",
+                        effects=[declare("reads_path", scope="secret")],
+                        refuses="printing the token gh holds writes it into this"
+                        " transcript",
+                        reason="printing the token gh holds writes it into this"
+                        " transcript",
+                        recovery="gh reads its own token: run the gh command that"
+                        " needs it.",
+                    ),
+                ],
+            ),
             group("search", reads(["repos", "issues", "prs", "code", "commits"])),
             group(
                 "label",

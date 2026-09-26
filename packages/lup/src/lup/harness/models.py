@@ -47,6 +47,11 @@ from lup.policy.kernel.rows import AcceptanceGuardRow, PathRoleName, SpawnNameRo
 from lup.policy.kernel.semantics import UnjudgedAmbient
 from lup.policy.models import PolicyId, UrlPathPrefix
 from lup.policy.peer_policy import PeerPolicy
+from lup.policy.refused_paths import (
+    RefusedPaths,
+    credential_files,
+    secret_variable_names,
+)
 from lup.policy.refused_tools import RefusedTool
 from lup.policy.edit_rules import EditRule
 from lup.policy.imports import ImportBoundary
@@ -1697,6 +1702,26 @@ class HookSet(BaseModel, frozen=True):
             "carrying the surface to reach for instead. Whether a tool is "
             "against the point of a project is that project's judgement, so "
             "an empty list — the library's own answer — refuses nothing"
+        ),
+    )
+    refused_paths: list[RefusedPaths] = Field(
+        default=[credential_files()],
+        description=(
+            "Paths no word of any shell command may name, each carrying what "
+            "to do instead: whichever verb would have reached one — a read, a "
+            "copy, an archive, a connection — is refused by the name. The "
+            "library's answer is the key and login files a machine keeps; a "
+            "project replacing it states the whole set, and adds its own "
+            "runtimes' logins with `credential_files(also=...)`"
+        ),
+    )
+    secret_variables: list[str] = Field(
+        default=secret_variable_names(),
+        description=(
+            "Name patterns of the variables whose values no command may print "
+            "into the transcript: `printenv NAME`, `echo $NAME`, a printf or a "
+            "here-string carrying one. Matched against the whole name without "
+            "case"
         ),
     )
     carriers: CarrierPins | None = Field(

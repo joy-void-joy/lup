@@ -322,6 +322,41 @@ re-judged; the network boundary answers for where it is sent. An option
 neither grammar lists — a config file, a cookie jar, a recursive crawl, a
 server-chosen name — leaves the invocation unread.
 
+### A path no command may name
+
+`HookSet.refused_paths` declares paths no word of any shell command may
+name, each with the reason and the route to take instead, and
+`lup.policy.kernel.withheld` reads every operand of every command — a value
+attached after `=` included — and every redirection target against them. A
+match denies whichever verb it sits under, because which operands a program
+reads is that program's grammar: `cat`, `head`, `less`, `grep -r`, `base64`,
+`xxd`, a `cp` source, a `tar` or `zip` member, a script's argument, a `cd`
+into the directory, and `cat < key` are one refusal. A pattern spelled from
+the root (`/proc/*/environ`) names that place; one spelled from `~/` or `**/`
+names whatever path its trailing names end, since the kernel knows no home —
+`~/.ssh/id_rsa`, `$HOME/.ssh/id_rsa` and `/home/u/.ssh/id_rsa` are one file.
+A glob reaches what it could expand to, except a dot-named file an unspelled
+dot skips, and `exempt` passes a word only when all it could name is exempt:
+`~/.ssh/*.pub` reads, `~/.ssh/*` does not.
+
+The library's default is `credential_files()`: everything in `~/.ssh` but
+the public keys, `known_hosts`, `config` and `authorized_keys`, `~/.gnupg`,
+and the token files of AWS, netrc, git's credential store, gh, docker and
+PyPI, plus a process's environment file. This project adds each runtime's
+own login through `ProviderLogin.withheld_logins()`: the default home's file
+and the file inside every profile's home. A directory reached only through
+an ancestor — `grep -r x ~` — names no withheld path and is not caught.
+
+`HookSet.secret_variables` names the variables no command may print, matched
+without case: `printenv NAME`, `echo`/`printf`/`print` of an expansion, and a
+here-string carrying one to any command are refused. A length or an
+alternative (`${X:+set}`) prints nothing of the value and stays allowed, as
+does `[ -n "$X" ]`; a value copied into another name before it is printed is
+printed under that name. `set` alone joins `env` and `printenv` as a dump, and
+`gh auth token` is refused by its row while `gh auth status --show-token`
+asks. All of these deny rather than ask, for the reason the dump does: a
+printed secret lands in a transcript that outlives the turn.
+
 ### A write that carries its own content
 
 A redirection is answered by its path, and the reason is that a command
@@ -471,8 +506,11 @@ material and is worth keeping. It is not isolation from `ssh` and `git`
 *using* it: `ssh git@github.com` contains no credential path, and ssh reads
 the key or the agent socket itself. On Claude the denial is additionally
 enforced by the native per-path credential sandbox; Codex has no per-path
-equivalent, so there it is the semantic policy alone, and neither is a
-syscall boundary. An operator granting an ssh rung is granting the contained
+equivalent, so there it is the semantic policy alone — the shell's
+`refused_paths` screen above, which both runtimes' dispatchers run and which
+withholds the private keys rather than the whole directory — and neither is a
+syscall boundary. The file tools Claude reads with directly are not routed
+through the policy hook, so there the `Read` deny rules are the whole of it. An operator granting an ssh rung is granting the contained
 session the use of that identity, and this is the honest description of that
 grant rather than a claim of a stronger boundary.
 

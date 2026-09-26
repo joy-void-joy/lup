@@ -2,7 +2,6 @@
 # See docs/harness.md.
 
 prefix_rule(pattern = ["gh"], decision = "allow", justification = "Allowed by Lup semantic shell policy")
-prefix_rule(pattern = ["gh", "auth", "status"], decision = "allow", justification = "Allowed by Lup semantic shell policy")
 prefix_rule(pattern = ["gh", "browse"], decision = "allow", justification = "Allowed by Lup semantic shell policy")
 prefix_rule(pattern = ["gh", "cache", "list"], decision = "allow", justification = "Allowed by Lup semantic shell policy")
 prefix_rule(pattern = ["gh", "config", "get"], decision = "allow", justification = "Allowed by Lup semantic shell policy")

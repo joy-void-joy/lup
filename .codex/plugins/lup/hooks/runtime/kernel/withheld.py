@@ -1,0 +1,296 @@
+"""What a shell command may not reach: withheld paths, and secret variables.
+
+Two kinds of thing are kept from a session by name rather than by what the
+command does with them. A private key or a login is reached the moment a
+command names it, whichever verb does the reaching -- `cat` prints it, `cp`
+copies it somewhere readable, `tar` packs it, `grep -r` walks into it -- and a
+list of the verbs that read would be a list of the ones somebody remembered.
+So every word is read instead, and a word naming a withheld path refuses the
+command it sits in, whatever that command is. The redirections are read the
+same way, since `cat < key` names the key to the shell rather than to `cat`.
+
+A variable is the other half. The whole environment printed is already refused
+as a dump; one secret printed is the same disclosure narrowed to the variable
+that mattered, so the builtins that write their operands are refused a secret's
+value, and so is a here-string handing one to any command.
+
+Both answer ``deny`` rather than asking, for the reason the dump does: what is
+printed lands in a transcript that outlives the turn, and a question would be
+answered yes on the way to something else. The escalation marker still turns a
+refusal into that question for a caller who means it.
+"""
+
+import posixpath
+from fnmatch import fnmatchcase
+from pathlib import PurePosixPath
+
+from .decision import KernelDecision
+from .lex import placed_path, placed_redirects
+from .rows import RefusedPathRow
+from .syntax import Redirect, Script, Word, WordPart, word_text
+
+# lup: ignore[library-default] — the shell builtins that write their operands to stdout
+PRINTING_BUILTINS = ("echo", "printf", "print")
+# lup: ignore[library-default] — bash's parameter operators whose expansion never carries the value
+UNPRINTED_OPERATORS = ("length", "+", ":+")
+
+
+def could_name(pattern: str, name: str) -> bool:
+    """Whether one word's name could be one a pattern's name matches.
+
+    Either side may be a glob: the pattern's is the declaration, and the
+    word's is expanded by the shell before the command sees it. So a globbed
+    name reaches whatever the pattern's name spells -- except a leading-dot
+    name, which the shell's expansion skips unless the glob starts with a dot
+    itself. Without that exception `cat *` in any directory would read as
+    naming `.netrc`.
+    """
+    if fnmatchcase(name, pattern):
+        return True
+    if not any(character in name for character in "*?["):
+        return False
+    if pattern.startswith(".") and not name.startswith("."):
+        return False
+    return fnmatchcase(pattern, name)
+
+
+def covered_by(pattern: str, name: str) -> bool:
+    """Whether a pattern's name holds everything one word's name could expand to.
+
+    The exemption's test, one-directional where :func:`could_name` is not: a
+    word escapes a refusal only when every file it could name is exempt, so
+    `~/.ssh/*.pub` is exempt and `~/.ssh/*` is not.
+    """
+    return fnmatchcase(name, pattern)
+
+
+def spans(
+    pattern: tuple[str, ...], names: tuple[str, ...], component: bool = True
+) -> bool:
+    """Whether a pattern's names match exactly these, ``**`` spanning any run.
+
+    ``component`` picks the test one name is put to: :func:`could_name` for a
+    refusal, :func:`covered_by` for an exemption.
+    """
+    if not pattern:
+        return not names
+    head, rest = pattern[0], pattern[1:]
+    if head == "**":
+        return any(
+            spans(rest, names[index:], component) for index in range(len(names) + 1)
+        )
+    if not names:
+        return False
+    matched = could_name(head, names[0]) if component else covered_by(head, names[0])
+    return matched and spans(rest, names[1:], component)
+
+
+def reaches(pattern: str, path: str, component: bool = True) -> bool:
+    """Whether a path is one a declared pattern names.
+
+    A pattern spelled from the root names that one place, and is matched
+    against an absolute path from its start. A pattern spelled from ``~`` is
+    matched wherever its names end a path, because the kernel knows no home:
+    `~/.ssh/id_rsa`, `$HOME/.ssh/id_rsa`, `/home/u/.ssh/id_rsa` and
+    `.ssh/id_rsa` read from a `cd` into one are the same file, and a word
+    naming some other directory's `.ssh/id_rsa` is key material all the same.
+    """
+    wanted = PurePosixPath(pattern).parts
+    anchored = wanted[:1] == ("/",)
+    wanted = wanted[1:] if wanted[:1] in (("/",), ("~",)) else wanted
+    absolute = posixpath.isabs(path)
+    names = PurePosixPath(posixpath.normpath(path)).parts[1 if absolute else 0 :]
+    if anchored:
+        return absolute and spans(wanted, names, component)
+    return any(spans(wanted, names[start:], component) for start in range(len(names)))
+
+
+def withheld_row(path: str, rows: list[RefusedPathRow]) -> RefusedPathRow | None:
+    """The first declaration refusing this path, where one does."""
+    return next(
+        (
+            row
+            for row in rows
+            if any(reaches(pattern, path) for pattern in row["paths"])
+            and not any(reaches(pattern, path, False) for pattern in row["exempt"])
+        ),
+        None,
+    )
+
+
+def named_paths(word: str) -> list[str]:
+    """Every string one word could name a file by.
+
+    The word itself, and the value an option or an operand attaches after
+    `=` -- `--file=<path>`, `if=<path>` -- which names a file exactly as the
+    word standing alone would.
+    """
+    # lup: ignore[string-split] — an argv word's attached value, whose only parser is the program's own
+    value = word.partition("=")[2]
+    return [word, value] if value else [word]
+
+
+def withheld_path(
+    word: str, directory: str | None, checkout_root: str, rows: list[RefusedPathRow]
+) -> KernelDecision | None:
+    """The refusal one word earns by naming a withheld path, or nothing.
+
+    Read from where the command stands, and from the checkout above that, so
+    a relative word reaches a pattern anchored at the root the way the shell
+    would resolve it. A directory nothing here can name leaves the word as it
+    was spelled, which still reaches every pattern spelled from ``~``.
+    """
+    for named in named_paths(word):
+        placed = placed_path(named, directory) or named
+        path = (
+            posixpath.join(checkout_root, placed)
+            if checkout_root and not posixpath.isabs(placed)
+            else placed
+        )
+        row = withheld_row(path, rows)
+        if row is not None:
+            return KernelDecision(
+                "deny",
+                f"{word}: {row['reason']}",
+                cause="deliberate",
+                recovery=row["recovery"],
+            )
+    return None
+
+
+def withheld_operand(
+    words: list[str],
+    directory: str | None,
+    checkout_root: str,
+    rows: list[RefusedPathRow],
+) -> KernelDecision | None:
+    """The refusal one command earns for any operand naming a withheld path.
+
+    Every word after the command's own name, because which of them it reads
+    is the command's grammar and there is one grammar per program: a flag's
+    value, a copy's source, an archive's member, a directory to walk.
+    """
+    # lup: defer: a recursive reader over an ancestor -- `grep -r x ~`,
+    # `tar czf out ~` -- names no withheld path and walks into one anyway;
+    # catching it needs which verbs recurse, since `ls ~` and `cd ~` must not
+    # be refused for sitting above a key.
+    return next(
+        (
+            refused
+            for word in words[1:]
+            if (refused := withheld_path(word, directory, checkout_root, rows))
+            is not None
+        ),
+        None,
+    )
+
+
+def redirect_names(redirect: Redirect) -> bool:
+    """Whether a redirection's target is a file, rather than text or a descriptor.
+
+    A heredoc and a here-string carry their text where a file would be, and a
+    duplication (`2>&1`, `<&-`) names a descriptor, which leaves its target
+    empty.
+    """
+    operator = redirect["operator"]
+    return bool(redirect["target"]) and not operator.endswith(("<<", "<<-", "<<<"))
+
+
+def withheld_redirect(
+    script: Script, checkout_root: str, rows: list[RefusedPathRow]
+) -> KernelDecision | None:
+    """The refusal a command line earns for redirecting to or from a withheld path."""
+    return next(
+        (
+            refused
+            for placed in placed_redirects(script)
+            if redirect_names(placed["redirect"])
+            for word in placed["redirect"]["target"]
+            if (
+                refused := withheld_path(
+                    word_text(word), placed["directory"], checkout_root, rows
+                )
+            )
+            is not None
+        ),
+        None,
+    )
+
+
+def secret_name(name: str, patterns: list[str]) -> bool:
+    """Whether a variable's name is one this project treats as holding a secret.
+
+    Compared without case, because a shell variable holding a token is as
+    often spelled `token` as `TOKEN`.
+    """
+    return any(fnmatchcase(name.upper(), pattern.upper()) for pattern in patterns)
+
+
+def printed_parameters(parts: list[WordPart]) -> list[str]:
+    """Every variable these parts would print the value of.
+
+    A command substitution is its own command and is judged as one. A length
+    (`${#X}`) and an alternative (`${X:+set}`) print something about the
+    variable rather than its value, which is how a script asks whether a
+    secret is set without reading it -- so those name only what their own
+    operand prints.
+    """
+    return [
+        name
+        for item in parts
+        if item["kind"] != "command"
+        for name in (
+            [item["name"]]
+            if item["kind"] == "param"
+            and item["name"]
+            and item["operator"] not in UNPRINTED_OPERATORS
+            else []
+        )
+        + printed_parameters(item["parts"])
+    ]
+
+
+def printed_secret(
+    words: list[Word], redirects: list[Redirect], patterns: list[str]
+) -> KernelDecision | None:
+    """The refusal one command earns for printing a secret variable's value.
+
+    ``words`` start at the command the shell finally runs, wrappers already
+    stepped over. A printing builtin prints every operand; any command reads
+    a here-string's text on stdin, and one handed a secret there has it in
+    the stream it is about to write.
+    """
+    printing = (
+        bool(words) and posixpath.basename(word_text(words[0])) in PRINTING_BUILTINS
+    )
+    carried = [
+        *(word for word in words[1:] if printing),
+        *(
+            word
+            for redirect in redirects
+            if redirect["operator"].endswith("<<<")
+            for word in redirect["target"]
+        ),
+    ]
+    named = next(
+        (
+            name
+            for word in carried
+            for name in printed_parameters(word["parts"])
+            if secret_name(name, patterns)
+        ),
+        None,
+    )
+    return None if named is None else secret_refusal(named)
+
+
+def secret_refusal(name: str) -> KernelDecision:
+    """The refusal for writing one secret variable's value into this transcript."""
+    return KernelDecision(
+        "deny",
+        f"${name} holds a secret, and printing it writes the secret into this"
+        " transcript",
+        cause="deliberate",
+        recovery="Let the tool that needs it read the variable itself; to learn"
+        f' whether it is set, test it: `[ -n "${name}" ] && echo set`.',
+    )

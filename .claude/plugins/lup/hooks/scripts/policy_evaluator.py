@@ -77,10 +77,12 @@ from policy_data import (
     PEER_POLICY,
     POLICY_ROOT_ENV,
     RECOVERABLE_TARGET_LIMIT,
+    REFUSED_PATHS,
     REFUSED_TOOLS,
     RUNNER_TARGET_TABLES,
     RUNNER_TARGETS,
     SANDBOX_EXCLUDED_COMMANDS,
+    SECRET_VARIABLES,
     SHELL_RULES,
     SPAWN_NAMES,
     UNSCOPED_FETCH,
@@ -2732,6 +2734,10 @@ def bash_decision(
         # project's fetch declaration, or the posture above where it made
         # none -- the same answer `fetch_decision` gives `WebFetch`.
         unscoped_fetch=UNSCOPED_FETCH,
+        # What no word may name and no builtin may print, as the project
+        # declared them: the same rows the canonical policy is handed.
+        refused_paths=REFUSED_PATHS,
+        secret_variables=SECRET_VARIABLES,
         # Resolved against what this launch mounted writable, so a write into a
         # worktree cut after the container started reaches a reviewer instead of
         # the writable base no overlay covers.

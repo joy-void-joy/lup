@@ -72,6 +72,7 @@ from lup.policy.kernel.rows import (
 from lup.policy.kernel.shell import decide_shell, decide_shell_segment, shell_context
 from lup.policy.edit_rules import EditRule, erase_edit_rules
 from lup.policy.imports import ImportBoundary
+from lup.policy.refused_paths import RefusedPaths
 from lup.policy.assets.host import worktree_path, worktree_root
 from lup.policy.shell_rules import (
     RunnerTargetRule,
@@ -215,8 +216,12 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         relayed: bool = False,
         authored: "EditPolicy | None" = None,
         unscoped_fetch: UnjudgedAmbient | None = None,
+        refused_paths: list[RefusedPaths] | None = None,
+        secret_variables: list[str] | None = None,
     ) -> None:
         self.unscoped_fetch: UnjudgedAmbient | None = unscoped_fetch
+        self.refused_paths = [paths.erased() for paths in refused_paths or []]
+        self.secret_variables = secret_variables or []
         self.authored = authored
         """The edit policy a write carrying its own content is put to.
 
@@ -475,6 +480,8 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 inside_placement=self.inside_placement,
                 relayed=self.relayed,
                 unscoped_fetch=self.unscoped_fetch,
+                refused_paths=self.refused_paths,
+                secret_variables=self.secret_variables,
             )
         )
         # Strongest wins, the rule every other join in this policy uses. The
@@ -499,6 +506,8 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                     self.trusted_script_roots,
                     self.path_roles,
                     self.path_rules,
+                    refused_paths=self.refused_paths,
+                    secret_variables=self.secret_variables,
                 ),
             )
         )
