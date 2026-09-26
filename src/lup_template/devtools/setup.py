@@ -8,11 +8,12 @@ holds only what *this* project configures, and composes the two into the
 This is a **TEMPLATE**. Replace the integrations below with your domain's
 actual services; the framework is reusable as-is.
 
-Usage::
+Usage, through the launcher so the code asking for a secret is code the
+operator approved::
 
-    $ uv run lup-devtools setup          # Full walkthrough
-    $ uv run lup-devtools setup status   # Show what's configured
-    $ uv run lup-devtools setup slack    # Just one integration
+    $ lup-launch run setup          # Full walkthrough
+    $ lup-launch run setup status   # Show what's configured, and where
+    $ lup-launch run setup slack    # Just one integration
 
 Customization:
     1. Append an ``Integration`` to ``INTEGRATIONS``. A token-based one is
@@ -22,7 +23,10 @@ Customization:
        ``setup_func`` returning ``EnvVars`` instead of declarative fields.
     3. Override status display with ``status_func`` when env-key presence
        isn't the whole story.
-    4. Shell helpers live in ``lup.devtools.utils`` (e.g.
+    4. Declare ``host_only=True`` for a secret only a host companion may
+       hold: its keys go to the operator's host store rather than
+       ``.env.local``, which every session can read.
+    5. Shell helpers live in ``lup.devtools.utils`` (e.g.
        ``copy_to_clipboard`` for wizard steps that hand the user a value)
 """
 

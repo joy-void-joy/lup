@@ -690,6 +690,18 @@ session — a preview server, a watcher — started once the launch is cleared t
 open, logged under `~/.cache/lup/companions/`, said in the banner, and
 stopped with everything they started when the session ends.
 
+A companion needing a secret no session may hold — a listener's API key —
+names it in `HostCompanion.secrets`. The launch reads exactly those keys from
+the operator's host store, `$XDG_CONFIG_HOME/lup/secrets/<project>.env`
+outside every checkout, into that companion's environment alone; it takes
+every host-only name out of the session's environment, and refuses a mount
+that would carry the store into the container. A key the store lacks is said
+in the banner, and the companion starts without it. The store is written by
+the setup wizard for an `Integration(host_only=True)`, or by `setup secret
+<KEY>`, run as `lup-launch run setup ...` so the code that asks for the
+secret is code the operator approved. [trust.md](trust.md) has the whole of
+it, under *Host-only secrets*.
+
 ### What a contained session is not held from
 
 A sibling worktree's `.git` pointer and administrative files stay writable,

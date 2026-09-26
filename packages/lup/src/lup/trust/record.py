@@ -13,10 +13,12 @@ per-project environments under ``~/.cache/lup/environments``, cache volumes,
 a named config volume, and the bridge directories a launch creates under the
 system's temporary directory (:meth:`lup.harness.image.Image.session_arguments`
 and :func:`lup.devtools.harness.contained.contained_argv` are where those are
-assembled). None of them is under the state directory, so an answer recorded
-here is one no session could have written -- unlike ``.lup/questions.jsonl``,
-which lives in the checkout and is writable from inside, where no gate
-remains to stop a session answering its own question.
+assembled). None of them is under the state directory, and a launch refuses
+one that would carry it in, such as a registration naming the home directory
+(:func:`lup.devtools.harness.contained.refuse_host_only_mounts`). So an
+answer recorded here is one no session could have written -- unlike
+``.lup/questions.jsonl``, which lives in the checkout and is writable from
+inside, where no gate remains to stop a session answering its own question.
 """
 
 import fcntl
@@ -42,6 +44,10 @@ class StateLocation(BaseSettings, populate_by_name=True):
     def directory(self) -> Path:
         """The state home, falling back to the convention's own default."""
         return self.xdg_state_home or Path.home() / ".local" / "state"
+
+    def trust(self) -> Path:
+        """The directory every repository's trust state lives under."""
+        return self.directory() / "lup" / "trust"
 
 
 type ApprovedBy = Literal["operator", "regeneration", "free zones"]
@@ -153,9 +159,7 @@ class TrustState(BaseModel, frozen=True):
     ) -> "TrustState":
         """The state directory for one repository identity."""
         chosen = location if location is not None else StateLocation()
-        return cls(
-            root=chosen.directory() / "lup" / "trust" / identity, repository=repository
-        )
+        return cls(root=chosen.trust() / identity, repository=repository)
 
     def store(self) -> ObjectStore:
         """The object store every snapshot of this repository is kept in."""

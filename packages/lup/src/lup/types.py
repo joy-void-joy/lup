@@ -44,6 +44,9 @@ The keys are open and data-driven by nature (whatever variables exist), which
 is exactly the shape the dict-str-payload rule otherwise flags: annotate env
 maps with this alias instead of respelling ``dict[str, str]`` per site."""
 
+type EnvName = Annotated[str, StringConstraints(pattern=r"^[A-Z_][A-Z0-9_]*$")]
+"""One environment variable's name as a declaration spells it: capitals, digits, underscores."""
+
 type StringMap = dict[str, str]  # lup: ignore[dict-str-payload] — open string map
 """Any other open map of strings to strings — a reason table, response headers.
 
