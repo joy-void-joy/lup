@@ -20,7 +20,8 @@ a value would come to be read as the script.
 import posixpath
 from typing import Literal, TypedDict
 
-from .decision import SUBSTITUTION_SENTINEL, KernelDecision
+from .decision import KernelDecision
+from .syntax import expands
 
 type ProgramKind = Literal[
     "script", "inline", "bare", "unread", "remote", "module", "subcommand"
@@ -424,7 +425,7 @@ def operand_reading(word: str, rules: InterpreterGrammar) -> ProgramReading:
     can open afterwards, so it is inline. A URL or package specifier is
     fetched from elsewhere. A word this reading cannot see into is unread.
     """
-    if "$" in word or "`" in word or SUBSTITUTION_SENTINEL in word:
+    if expands(word):
         return ProgramReading(kind="unread", subject=word)
     if "://" in word or word.startswith(("data:", "npm:", "jsr:", "node:")):
         return ProgramReading(kind="remote", subject=word)

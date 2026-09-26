@@ -1,0 +1,113 @@
+"""A `$` the shell's quoting holds is read as the character it is.
+
+Every rule reads a command's words as strings, and reads a `$` standing in
+one as an expansion nothing resolved. The grammar knew better and the string
+did not: `'a$'`, `'$HOME'` and `\\$x` reach the program as those characters,
+so a pattern, a sed address, a git setting or a path spelled with a dollar
+sign was read as a word that could become anything -- `rg '$x' src` was
+refused as an argument that "could expand into a guarded flag".
+
+The fact now rides in the string the rules read, without changing a
+character of it, and every reader of an expansion asks it the same way. What
+the shell still rewrites -- a parameter, `$'…'`, a brace expansion, a tilde
+-- keeps the reading it had.
+"""
+
+import pytest
+
+from lup.policy.kernel.decision import KernelDecision
+from lup.policy.kernel.lex import command_segments, parse_shell
+from lup.policy.kernel.review import copied_paths, literal_input
+from lup.policy.kernel.roles import spells_its_path
+from lup.policy.kernel.syntax import VerbatimText, expands, verbatim_piece
+from lup.policy.kernel.words import opaque_argument
+
+
+def read(command: str) -> list[str]:
+    """The first segment's words, as every rule reads them."""
+    tree = parse_shell(command)
+    assert not isinstance(tree, KernelDecision), command
+    return command_segments(tree)[0]
+
+
+@pytest.mark.parametrize(
+    ("command", "position", "text"),
+    [
+        ("rg -e'foo$' src", 1, "-efoo$"),
+        ("grep 'a$' f", 1, "a$"),
+        ("sed -n '/x$/p' f", 2, "/x$/p"),
+        ("echo '$HOME'", 1, "$HOME"),
+        ("echo \\$HOME", 1, "$HOME"),
+        ('echo "a$"', 1, "a$"),
+        ("grep a$ f", 1, "a$"),
+    ],
+)
+def test_a_dollar_the_quotes_hold_is_literal_text(
+    command: str, position: int, text: str
+) -> None:
+    """The text is unchanged and the word says it expands into nothing."""
+    word = read(command)[position]
+
+    assert word == text
+    assert isinstance(word, VerbatimText)
+    assert not expands(word)
+
+
+@pytest.mark.parametrize(
+    ("command", "position", "text"),
+    [
+        ('rg -e"foo$X" src', 1, "-efoo$X"),
+        ("rg -e'foo'$X src", 1, "-efoo$X"),
+        ("rg $'\\x2d\\x2dpre=x' src", 1, "$\\x2d\\x2dpre=x"),
+        ('echo $"x"', 1, "$x"),
+        ("echo a{-rf,}", 1, "a{-rf,}"),
+        ("echo x=~/a", 1, "x=~/a"),
+        ("echo ~/a", 1, "~/a"),
+        ("echo *.py", 1, "*.py"),
+    ],
+)
+def test_what_the_shell_still_rewrites_keeps_its_reading(
+    command: str, position: int, text: str
+) -> None:
+    """A parameter, `$'…'`, a brace, a tilde and a glob are not verbatim."""
+    word = read(command)[position]
+
+    assert word == text
+    assert not isinstance(word, VerbatimText)
+
+
+def test_every_reader_of_an_expansion_asks_the_same_question() -> None:
+    """One spelling, two quotings, and the three readers agree about each."""
+    quoted = read("echo '$x'")[1]
+    expanded = read('echo "$x"')[1]
+
+    assert quoted == expanded == "$x"
+    assert not expands(quoted) and expands(expanded)
+    assert not opaque_argument(quoted) and opaque_argument(expanded)
+    assert spells_its_path(quoted) and not spells_its_path(expanded)
+
+
+def test_a_piece_cut_from_a_word_is_verbatim_only_when_it_says_so() -> None:
+    """A slice is a plain string, which is the reading every string had.
+
+    Losing the fact costs a question that was not owed and never a grant, so
+    a reader that keeps a piece verbatim does it on purpose.
+    """
+    word = read("sort --output='a$b' f")[1]
+
+    assert not isinstance(word[len("--output=") :], VerbatimText)
+    assert isinstance(verbatim_piece(word, word[len("--output=") :]), VerbatimText)
+    assert not isinstance(verbatim_piece("$HOME", "HOME"), VerbatimText)
+
+
+def test_the_review_readers_bind_only_what_reaches_the_program_as_written() -> None:
+    """The reviewer's diff binds literal inputs through the same predicate.
+
+    A brace expansion copies to two targets and `$'…'` rewrites its text, so
+    neither is a literal to show a diff for.
+    """
+    assert copied_paths("cp 'a$b' c") == {"source": "a$b", "target": "c"}
+    assert copied_paths("cp a{b,c} d") is None
+    assert literal_input("apply_patch 'x'", "apply_patch") == "x"
+    with pytest.raises(ValueError):
+        literal_input("apply_patch $'x'", "apply_patch")

@@ -32,6 +32,7 @@ from .rows import (
     PathWord,
     ShellRuleRow,
 )
+from .syntax import VerbatimText, verbatim_piece
 
 
 class EffectiveCommand(TypedDict):
@@ -684,7 +685,11 @@ def flag_write_words(words: list[str], write_flags: list[str]) -> list[PathWord]
         name, sign, value = word.partition("=")
         if sign and name in write_flags:
             if value:
-                named.append(PathWord(at=index, prefix=f"{name}=", path=value))
+                named.append(
+                    PathWord(
+                        at=index, prefix=f"{name}=", path=verbatim_piece(word, value)
+                    )
+                )
             continue
         following = word in write_flags
     return named
@@ -1398,8 +1403,11 @@ def opaque_argument(word: str) -> bool:
 
     A substitution sentinel anywhere in the word marks it: the substitution's
     output word-splits at expansion, so even a mid-word result can become new
-    words.
+    words. A :class:`~lup.policy.kernel.syntax.VerbatimText` expands into
+    nothing, so `'$x'` is the two characters it spells.
     """
+    if isinstance(word, VerbatimText):
+        return False
     if word.startswith("$") or SUBSTITUTION_SENTINEL in word:
         return True
     return "}" in word and ("{-" in word or ",-" in word)

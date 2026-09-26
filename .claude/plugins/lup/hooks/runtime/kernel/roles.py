@@ -21,6 +21,7 @@ from pathlib import PurePosixPath
 
 from .decision import SUBSTITUTION_SENTINEL
 from .rows import PathRoleKind, PathRoleName, PathRoleRow, DisplacedTargetRow
+from .syntax import VerbatimText, expands, verbatim_piece
 
 # lup: ignore[library-default] — the native runtimes' own plugin directory names
 GENERATED_PLUGIN_ROOTS = (".claude/plugins", ".codex/plugins")
@@ -75,7 +76,12 @@ def spells_its_path(word: str) -> bool:
     called the whole path scratch, which allowed ``rm -rf $W/tmp`` unprompted
     on the strength of a component saying nothing about where ``$W``
     resolves.
+
+    A :class:`~lup.policy.kernel.syntax.VerbatimText` spells its path
+    whatever it holds: `'a$b'` is a file named with a dollar sign.
     """
+    if isinstance(word, VerbatimText):
+        return True
     return not any(marker in word for marker in ("$", "~", "`", SUBSTITUTION_SENTINEL))
 
 
@@ -133,7 +139,7 @@ def repository_relative(word: str, checkout: str) -> str:
     path is returned untouched -- the conservative answer this had before any
     root was passed, rather than a rewrite against a root that was guessed.
     """
-    if not checkout or "$" in word:
+    if not checkout or expands(word):
         return word
     normalized = posixpath.normpath(word)
     if not normalized.startswith("/"):
@@ -144,7 +150,7 @@ def repository_relative(word: str, checkout: str) -> str:
     prefix = top if top.endswith("/") else f"{top}/"
     if not normalized.startswith(prefix):
         return word
-    return normalized[len(prefix) :]
+    return verbatim_piece(word, normalized[len(prefix) :])
 
 
 def is_session_scratch_target(word: str) -> bool:
@@ -152,10 +158,12 @@ def is_session_scratch_target(word: str) -> bool:
 
     ``$TMPDIR`` is the harness-provided scratch root and ``/tmp/claude-*`` its
     host-side spelling, so writes there are scratch by definition. A suffix
-    that expands further or climbs out of the root stays unrecognized.
+    that expands further or climbs out of the root stays unrecognized, and
+    so does a quoted `'$TMPDIR/x'`, which names a directory called `$TMPDIR`
+    wherever the command runs.
     """
     for prefix in ("$TMPDIR/", "${TMPDIR}/"):
-        if word.startswith(prefix):
+        if word.startswith(prefix) and not isinstance(word, VerbatimText):
             suffix = word[len(prefix) :]
             normalized = posixpath.normpath(suffix)
             return "$" not in suffix and not normalized.startswith(("..", "/"))
@@ -313,7 +321,7 @@ def path_role(path: str, rows: list[PathRoleRow]) -> PathRoleName:
     disposable merely for being elsewhere, while one under ``/tmp`` is
     disposable by what that root is for.
     """
-    normalized = posixpath.normpath(path)
+    normalized = verbatim_piece(path, posixpath.normpath(path))
     if is_session_scratch_target(path) or is_temporary_root_target(path):
         return "scratch"
     if normalized.startswith(("/", "../")) or normalized == "..":
@@ -339,7 +347,7 @@ def declared_scratch(spelled: str, rows: list[PathRoleRow]) -> bool:
     say no. What is left is a repository-relative path under a root this
     project declared, which is the only scratch a checkout can answer for.
     """
-    normalized = posixpath.normpath(spelled)
+    normalized = verbatim_piece(spelled, posixpath.normpath(spelled))
     if normalized.startswith(("/", "../")) or normalized == "..":
         return False
     return spells_its_path(normalized) and path_role(normalized, rows) == "scratch"

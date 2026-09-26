@@ -66,6 +66,7 @@ from .words import (
 from .downloads import read_download
 from .fetch import decide_fetch
 from .lex import placed_path
+from .syntax import expands
 from .programs import program_verdict, read_program
 from .semantics import UnjudgedAmbient
 
@@ -572,8 +573,7 @@ def apply_command_row(
         # the caller's choosing.
         readable = not any(
             opaque_argument(word)
-            or "$" in word
-            or "`" in word
+            or expands(word)
             or flag_matches(word, row["ask_flags"])
             for word in arguments
         )
@@ -618,9 +618,7 @@ def apply_command_row(
         # missed expansion is the whole verdict, and `dd if=$X` splits into
         # `of=` at runtime if `$X` holds a space — measured allowing until
         # this test replaced it.
-        legible = not any(
-            opaque_argument(word) or "$" in word or "`" in word for word in arguments
-        )
+        legible = not any(opaque_argument(word) or expands(word) for word in arguments)
         if legible and not any(
             word.startswith(marker)
             for word in arguments
@@ -1401,7 +1399,7 @@ def uv_package_source(
     direction is to treat it as though it were.
     """
     for word in arguments:
-        if opaque_argument(word) or "$" in word or "`" in word:
+        if opaque_argument(word) or expands(word):
             return word
         if flag_matches(word, list(guarded)):
             return word

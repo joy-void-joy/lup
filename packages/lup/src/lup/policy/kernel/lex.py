@@ -38,6 +38,7 @@ from .syntax import (
     Script,
     Word,
     WordPart,
+    expands,
     parse_script,
     part,
     word_text,
@@ -709,7 +710,7 @@ def carried_text(
     """
     if not words:
         return None
-    if any(opaque_argument(word) or "$" in word or "`" in word for word in words):
+    if any(opaque_argument(word) or expands(word) for word in words):
         return None
 
     def stdin_text() -> str | None:

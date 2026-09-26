@@ -1155,6 +1155,30 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="sort --output=out.txt f", effect="allow"),
     DecisionCase(input="sort --output=$TMPDIR/sorted.txt f", effect="allow"),
     DecisionCase(input="sort --output= f", effect="ask"),
+    # A `$` the quotes hold is a dollar sign, not an expansion: a pattern, a
+    # sed address, a name or a path spelled with one reads as those characters,
+    # where the double-quoted spelling beside each still expands. `$'…'` is
+    # quoting the shell rewrites, so it stays unread, and a brace expansion
+    # makes a loop word two words rather than one.
+    DecisionCase(input="rg -e'foo$' src", effect="allow"),
+    DecisionCase(input="grep 'a$' f", effect="allow"),
+    DecisionCase(input="sed -n '/x$/p' f", effect="allow"),
+    DecisionCase(input="echo '$HOME'", effect="allow"),
+    DecisionCase(input="rg '$x' src", effect="allow"),
+    DecisionCase(input="rg \\$x src", effect="allow"),
+    DecisionCase(input='rg "$X" src', effect="deny"),
+    DecisionCase(input="rg $'--pre=x' src", effect="deny"),
+    DecisionCase(input="find . -name '$x'", effect="allow"),
+    DecisionCase(input='find . -name "$x"', effect="deny"),
+    DecisionCase(input="git config --local user.name '$me'", effect="allow"),
+    DecisionCase(input='git config --local user.name "$me"', effect="ask"),
+    DecisionCase(input="sort -o 'a$b' f", effect="allow"),
+    DecisionCase(input="sort --output='a$b' f", effect="allow"),
+    DecisionCase(input='sort -o "a$X" f', effect="ask"),
+    DecisionCase(input="cp f 'a$b'", effect="allow"),
+    DecisionCase(input="rm -rf $TMPDIR/build", effect="allow"),
+    DecisionCase(input="rm -rf '$TMPDIR/build'", effect="ask"),
+    DecisionCase(input="for f in a{-rf,}; do rm $f; done", effect="deny"),
     # A flag that runs a program is not a flag that writes a file, and keeps
     # its own question however ordinary the file beside it is.
     DecisionCase(input="sort --compress-program=x -o out f", effect="ask"),

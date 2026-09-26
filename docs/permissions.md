@@ -329,6 +329,13 @@ capture settles — `echo README.md | xargs rm` names its target nowhere a
 rule can read. `sed`/`awk` pass read-only screens, quoted-delimiter heredocs are
 literal data, and `curl` and `wget` are read the way the next section says.
 
+Quoting is kept past the parse. A `$` inside single quotes, or escaped as
+`\$`, is a dollar sign rather than an expansion, so `rg '$x' src`, `git config
+user.name '$me'` and `sort -o 'a$b' f` are read by the characters they spell.
+`"$x"` still expands. `$'…'` and `$"…"` are quoting the shell rewrites, and a
+brace expansion or a `~` after `=` makes more of a word than its text, so each
+of those keeps the reading an unresolved expansion gets.
+
 ### A download
 
 `curl` and `wget` are read through each tool's own option grammar, in
