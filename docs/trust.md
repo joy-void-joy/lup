@@ -149,10 +149,12 @@ shown as approved.
 
 Exports are pruned whenever one is materialized, under the record's lock: what
 stays is the export each existing worktree last launched from, and every
-export a launch still running holds — the launcher leases the export it hands
-off to under its own process id, which the hand-off keeps, so a session's
-export stays for as long as it runs. The bytecode compiled from a pruned export
-goes with it. Environments are kept, one per worktree, since syncing a fresh
+export something still runs from. The launcher leases the export it hands off
+to under its own process id, which the hand-off keeps, so a session's export
+stays for as long as it runs; and on Linux any process whose environment names
+an export in `LUP_APPROVED_TREE` keeps it too, which is how a host companion
+started beside a launch keeps its export after the launch has ended. The
+bytecode compiled from a pruned export goes with it. Environments are kept, one per worktree, since syncing a fresh
 one is the slow part of a launch; remove the one of a worktree that is gone
 to reclaim it.
 
