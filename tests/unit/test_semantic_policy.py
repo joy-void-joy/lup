@@ -631,6 +631,20 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="ls | xargs -n1 head -1", effect="allow"),
     DecisionCase(input="ls | xargs -I{} echo {}", effect="allow"),
     DecisionCase(input="ls | xargs bash -c 'rm $0'", effect="deny"),
+    # The payload is found by xargs's own grammar: a value an option takes
+    # is not the command, an option that only takes one attached does not
+    # take the command, and one the grammar does not list leaves it unread.
+    DecisionCase(input="ls | xargs --max-procs 4 rm", effect="ask"),
+    DecisionCase(input="ls | xargs --max-procs 4 rm", effect="ask", sandboxed=True),
+    DecisionCase(input="ls | xargs -rn 1 rm", effect="ask", sandboxed=True),
+    DecisionCase(input="ls | xargs -i rm {}", effect="ask", sandboxed=True),
+    DecisionCase(input="ls | xargs -l1 python -c 1", effect="deny"),
+    DecisionCase(input="ls | xargs -e python -c 1", effect="deny"),
+    DecisionCase(input="ls | xargs -0rn1 cat", effect="allow"),
+    DecisionCase(input="ls | xargs --max-procs=4 cat", effect="allow"),
+    DecisionCase(input="ls | xargs -l1 head -1", effect="allow"),
+    DecisionCase(input="ls | xargs --frob 4 cat", effect="deny"),
+    DecisionCase(input="ls | xargs -J % cat", effect="deny", sandboxed=True),
     DecisionCase(input="cd /tmp/worktree && uv run pytest", effect="allow"),
     # A frozen restore fetches nothing the lockfile does not pin by integrity
     # hash, which is what `uv run` restores before running, unasked; the

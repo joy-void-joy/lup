@@ -56,6 +56,13 @@ class OptionGrammar(TypedDict):
     reading is about: an attached value cannot move the operand after it, so
     only a name that carries meaning of its own has to be listed."""
 
+    attached: list[str]
+    """Short options whose value, when they take one, is pressed against them.
+
+    Never the next word: `xargs -i` replaces `{}` and `-iX` replaces `X`, so
+    the word after a bare `-i` is the command. Read as consuming it, the
+    command was taken for the option's value."""
+
 
 class ReadOption(TypedDict):
     """One option as a command line spelled it, and the value it consumed."""
@@ -115,6 +122,7 @@ def grammar(
     runner: str = "",
     evaluator: str = "",
     suffixes: tuple[str, ...] = (),
+    attached: tuple[str, ...] = (),
 ) -> InterpreterGrammar:
     """One grammar row, with every list it does not name empty."""
     return InterpreterGrammar(
@@ -123,6 +131,7 @@ def grammar(
         flags=list(flags),
         families=list(families),
         open_attached=open_attached,
+        attached=list(attached),
         module=module,
         runner=runner,
         evaluator=evaluator,
@@ -397,7 +406,11 @@ def read_options(
         return ReadWord(options=[spelled], width=1) if opened else None
     letters = [word[0] + letter for letter in word[1:]]
     ends = next(
-        (at for at, option in enumerate(letters) if option in rules["valued"]),
+        (
+            at
+            for at, option in enumerate(letters)
+            if option in rules["valued"] or option in rules["attached"]
+        ),
         len(letters),
     )
     if any(option not in rules["flags"] for option in letters[:ends]):
@@ -407,6 +420,10 @@ def read_options(
         return ReadWord(options=read, width=1)
     # The letter at `ends` sits at `ends + 1` in the word, after its sign.
     rest = word[ends + 2 :]
+    if letters[ends] in rules["attached"]:
+        return ReadWord(
+            options=[*read, ReadOption(name=letters[ends], value=rest)], width=1
+        )
     if not rest and not following:
         return None
     return ReadWord(
@@ -460,6 +477,7 @@ def read_program(
         flags=[*rules["flags"], *rules["inline"]],
         families=rules["families"],
         open_attached=rules["open_attached"],
+        attached=rules["attached"],
     )
     signed = any(
         option.startswith("+") for option in [*rules["valued"], *rules["flags"]]

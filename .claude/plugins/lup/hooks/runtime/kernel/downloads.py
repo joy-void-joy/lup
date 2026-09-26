@@ -87,6 +87,7 @@ def downloader(
         flags=[*flags, *remote_name, *unsaved],
         families=[],
         open_attached=False,
+        attached=[],
         sends=list(sends),
         method=list(method),
         document=list(document),

@@ -16,7 +16,7 @@ from .decision import (
     unjudged,
 )
 from .edit import path_rule_matches, protected_path_reason
-from .programs import grammar
+from .programs import grammar, read_options
 from .roles import (
     GENERATED_PLUGIN_RECOVERY,
     GENERATED_PLUGIN_REFUSAL,
@@ -1608,15 +1608,75 @@ def is_help_probe(arguments: list[str], unsafe: set[str] = HELP_UNSAFE) -> bool:
     return "--help" in arguments
 
 
-def xargs_payload(words: list[str]) -> list[str]:
-    """Return the command xargs would run, skipping only xargs's own options."""
-    value_options = ("-I", "-i", "-n", "-d", "-P", "-s", "-L", "-a", "-E", "-e")
+XARGS_GRAMMAR = grammar(
+    valued=(
+        "-a",
+        "--arg-file",
+        "-d",
+        "--delimiter",
+        "-E",
+        "-I",
+        "-L",
+        "--max-lines",
+        "-n",
+        "--max-args",
+        "-P",
+        "--max-procs",
+        "--process-slot-var",
+        "-s",
+        "--max-chars",
+    ),
+    flags=(
+        "-0",
+        "--null",
+        "-o",
+        "--open-tty",
+        "-p",
+        "--interactive",
+        "-r",
+        "--no-run-if-empty",
+        "--show-limits",
+        "-t",
+        "--verbose",
+        "-x",
+        "--exit",
+        "--eof",
+        "--replace",
+        "--help",
+        "--version",
+    ),
+    attached=("-e", "-i", "-l"),
+)
+"""How xargs spells the options that stand before the command it runs.
+
+`-e`, `-i` and `-l` take a value only pressed against them, and their long
+forms only after an ``=``, so the word after a bare one is the command; the
+rest of the valued ones take the next word when nothing is attached."""
+
+
+def xargs_payload(words: list[str]) -> list[str] | None:
+    """The command xargs would run, or ``None`` where its options are unread.
+
+    Read by xargs's own grammar, clusters included (`-rn 1`), because a
+    fixed table of which words to skip misplaced the command both ways:
+    `-i` and `-e` were taken to consume the next word, which is the command,
+    and `--max-procs 4` and `-rn 1` were taken to consume nothing, so `4` and
+    `1` were judged as the command. An option the grammar does not list could
+    consume the next word, so it leaves the command unread rather than
+    guessed at, the way an interpreter's does.
+    """
     position = 1
-    while position < len(words) and words[position].startswith("-"):
-        # A value option is two characters and carries no `=`, so it is the
-        # one spelling that skips its operand too.
-        position += 2 if words[position] in value_options else 1
-    return words[position:]
+    while position < len(words):
+        word = words[position]
+        if word == "--":
+            return words[position + 1 :]
+        if word == "-" or not word.startswith("-"):
+            return words[position:]
+        read = read_options(word, words[position + 1 :], XARGS_GRAMMAR)
+        if read is None:
+            return None
+        position += read["width"]
+    return []
 
 
 # lup: ignore[library-default] — each wrapper's own option spellings, which

@@ -389,6 +389,14 @@ def decide_xargs_words(
     the files it would change are the ones nobody has named.
     """
     payload = xargs_payload(words)
+    if payload is None:
+        return KernelDecision(
+            "deny",
+            "an xargs option this policy does not read could take the next word"
+            " as its value, so the command xargs runs is unread",
+            recovery="Spell xargs's options as `xargs --help` lists them, or"
+            " attach an option's value (`-n1`, `--max-procs=4`).",
+        )
     if not payload:
         return unjudged("xargs payload is not classified")
     verdict = decide_shell_segment(payload, context, directory)

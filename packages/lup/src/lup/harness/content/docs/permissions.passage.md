@@ -318,7 +318,9 @@ Loops, conditionals, case
 arms, subshells, and brace groups classify recursively over frozen bindings —
 literal assignments instantiate, opaque ones (`read`, globs) gate
 flag-guarded commands. `find -exec` payloads and `timeout`/`nice` wrappers
-recurse. So does an `xargs` payload, and because xargs appends operands read
+recurse. So does an `xargs` payload, found past xargs's options by the
+grammar `xargs --help` lists (an option it does not list could take the next
+word, so it refuses), and because xargs appends operands read
 from its input, the payload keeps its verdict only where those cannot
 matter: a refusal stands, and an allow stands where the deciding row only
 reads (`xargs grep`, `xargs cat`). Anything else asks at a checkpoint no
