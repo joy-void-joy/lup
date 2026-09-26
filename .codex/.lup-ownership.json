@@ -303,7 +303,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/shell.py",
       "category": "generated",
-      "sha256": "25054ef63536405cf689e19fd2c469a57b238df4edc5c152acab49e5fb3b3fa8",
+      "sha256": "cba556b0883b90d5467c2e2f06a193753ebe7cffafaffcb4bcd393f002e1d36a",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

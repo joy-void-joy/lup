@@ -134,6 +134,9 @@ GUARDED = [
     pytest.param("gh pr merge $X", "deny", id="unread-merge-flag"),
     pytest.param("ls && git push $X origin feat", "deny", id="read-then-unread-push"),
     pytest.param("make x && git push $X origin feat", "ask", id="ask-beside-unread"),
+    # A substitution result stands where the same words do.
+    pytest.param("git push $(cat f) origin feat", "deny", id="substituted-push-word"),
+    pytest.param("gh pr merge $(cat f)", "deny", id="substituted-merge-word"),
     # An unread command word could be each program whose verbs follow it.
     pytest.param("$CMD push --force origin feat", "ask", id="unread-command-force"),
     pytest.param(

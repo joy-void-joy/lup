@@ -12,6 +12,7 @@ from .decision import (
     RELAY_HINT,
     RESHAPE_HINT,
     SUBSTITUTION_SENTINEL,
+    carrying_readings,
     joined_decision,
     unjudged,
 )
@@ -652,11 +653,16 @@ def decide_placed_words(
     ) and not argument_safe_words(words, context):
         # Abstaining is the floor rather than the answer: a result standing
         # where a verb or a guarded flag goes is read as the strictest one it
-        # could be, as any other word nobody can read is.
+        # could be, as any other word nobody can read is. The floor carries
+        # what the command as spelled objects to, since the result could as
+        # well be the operand it is standing in for: `git push $(cat f)`
+        # could name a branch to force or delete.
+        floor = unjudged(
+            "a command substitution result could become a guarded flag"
+        ).advising("Run it in its own call and splice the literal output.")
+        spelled = decide_segment_words(words, context, directory)
         return strictest_reading(
-            unjudged(
-                "a command substitution result could become a guarded flag"
-            ).advising("Run it in its own call and splice the literal output."),
+            carrying_readings(floor, (spelled,)),
             unread_readings(words, context["rows"], write_facts(context)),
         )
     decision = decide_segment_words(words, context, directory)
