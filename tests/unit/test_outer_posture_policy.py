@@ -354,7 +354,7 @@ def test_an_unread_word_under_a_command_guarding_nothing_asks_on_no_posture(
 def test_an_unread_command_word_no_reading_objects_to_is_answered_as_before(
     runtime: Runtime, checkout: Path, monkeypatch: pytest.MonkeyPatch, command: str
 ) -> None:
-    expected = {"none": "deny", "inner": "allow", "outer": "allow"}
+    expected: dict[Posture, str] = {"none": "deny", "inner": "allow", "outer": "allow"}
 
     assert {
         posture: met(runtime, posture, command, checkout) for posture in expected
