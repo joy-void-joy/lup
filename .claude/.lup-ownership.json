@@ -793,7 +793,7 @@
     {
       "path": "docs/permissions.md",
       "category": "generated",
-      "sha256": "b420581d7de9995f4767b9084d5a1eda9c8823d86aa2b1c01da87b887e344387",
+      "sha256": "901e0243d41d826ba6ba13cc0844b9cdc833fe33ea03bf90bcddfc0e268dab1b",
       "semantic_id": "docs.permissions",
       "executable": false
     },
