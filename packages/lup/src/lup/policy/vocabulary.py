@@ -1388,6 +1388,12 @@ def git_rule(
                 )
             ],
             ask_flags=["--unsafe-paths", "--build-fake-ancestor"],
+            # Each lands a write where no snapshot of this checkout reaches --
+            # a patch path outside it, an index file wherever it was named --
+            # so the question stands however much of the checkout was captured.
+            flag_effects=[
+                declare("writes_path", scope="outside", write="overwrite"),
+            ],
             checkpoint="boundary_wide",
             reason="a patch that writes outside the working area requires approval",
         ),

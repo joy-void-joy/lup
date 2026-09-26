@@ -150,7 +150,11 @@ redirection reads its scope off the target, and a path verb reads its
 strongest operand — only the ones it *writes*, since a source `cp` merely
 reads is an ordinary read however far out it sits. Without that, `rm
 /etc/hosts` settles as "the affected paths are captured and restorable",
-which is a sentence about a file no snapshot has ever seen.
+which is a sentence about a file no snapshot has ever seen. A guarded flag
+that sends the write elsewhere says so in its own effects, and its question
+takes the checkpoint they imply: `git apply --unsafe-paths` and
+`--build-fake-ancestor` write outside the checkout, so no capture settles
+them.
 
 Where the capture was actually *taken*, `RecoveredLoss` settles the question
 as a **permission**. Not a deferral: deferring would make the outcome depend

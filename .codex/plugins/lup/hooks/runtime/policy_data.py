@@ -20349,7 +20349,15 @@ SHELL_RULES: list[ShellRuleRow] = [
             "--unsafe-paths",
             "--build-fake-ancestor",
         ],
-        "flag_effects": [],
+        "flag_effects": [
+            {
+                "kind": "writes_path",
+                "scope": "outside",
+                "write": "overwrite",
+                "reviewed": False,
+                "reason": "",
+            },
+        ],
         "write_flags": [],
         "allow_flags": [],
         "read_verbs": [],

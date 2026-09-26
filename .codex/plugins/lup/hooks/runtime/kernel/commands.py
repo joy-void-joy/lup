@@ -166,6 +166,25 @@ def row_verdict(
     )
 
 
+def flagged_checkpoint(row: ShellRuleRow) -> CheckpointRequirement | None:
+    """What capture puts back a guarded flag's loss, where its effects say none.
+
+    A row carries one checkpoint for its ordinary form, and a guarded flag
+    can send the same write somewhere no snapshot of this checkout holds --
+    `git apply --unsafe-paths` patches outside it. Read off the effects the
+    flag adds, the way :func:`~.words.write_checkpoint` reads a redirection's
+    off its target. ``None`` leaves the row's own standing.
+    """
+    implied = [
+        write_checkpoint(effect["scope"])
+        if effect["kind"] == "writes_path"
+        else effect["scope"]
+        for effect in row["flag_effects"]
+        if effect["kind"] in ("writes_path", "destroys_uncaptured")
+    ]
+    return "unrecoverable" if "unrecoverable" in implied else None
+
+
 class WriteFacts(TypedDict):
     """What the host measured about the paths a command's write flags name.
 
@@ -642,6 +661,7 @@ def apply_command_row(
                 row,
                 "ask",
                 row["reason"] or f"{guarded} requires approval",
+                checkpoint=flagged_checkpoint(row),
                 effects=[*row["effects"], *row["flag_effects"]],
                 arguments=arguments,
             )

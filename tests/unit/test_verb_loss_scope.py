@@ -101,3 +101,27 @@ def test_work_inside_the_checkout_keeps_the_answer_it_had(tmp_path: Path) -> Non
     assert recovered("mv tmp/a tmp/b", tmp_path).effect == "allow"
     assert recovered("gzip tmp/notes.txt", tmp_path).effect == "allow"
     assert recovered("tar -xf a.tgz -C tmp/out", tmp_path).effect == "allow"
+
+
+def test_a_patch_sent_outside_the_checkout_is_not_settled_by_its_capture(
+    tmp_path: Path,
+) -> None:
+    """`--unsafe-paths` is the flag that lets a patch leave the working area.
+
+    The row's `boundary_wide` is right for the ordinary apply, which lands in
+    the checkout, and was read for the flagged one too: measured before this,
+    with a snapshot taken, `git apply --unsafe-paths x.patch` was allowed as
+    "captured and restorable". The flag's own effect now says where the write
+    goes, and no capture of this checkout holds it. Reset and switch keep the
+    targeted loss their flags declare.
+    """
+    for command in (
+        "git apply --unsafe-paths x.patch",
+        "git apply --unsafe-paths --directory=/etc x.patch",
+        "git apply --build-fake-ancestor=/tmp/index x.patch",
+    ):
+        verdict = recovered(command, tmp_path)
+        assert verdict.effect == "ask", command
+        assert "captured and restorable" not in verdict.reason
+
+    assert recovered("git reset --hard", tmp_path).effect == "allow"
