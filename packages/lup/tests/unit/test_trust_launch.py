@@ -20,8 +20,13 @@ import typer
 from rich.console import Console
 from typer.testing import CliRunner
 
+from lup.devtools.harness.contained import (
+    host_only_directories,
+    refuse_host_only_mounts,
+)
 from lup.policy.relay import PersistentQuestion, QuestionRelay
 from lup.policy.review import FilePreview
+from lup.sandbox.rail import AccessibleRoot, fleet_lease
 from lup.trust import launcher
 from lup.trust.answer import Preview
 from lup.trust.approved import APPROVED_TREE_ENV
@@ -634,3 +639,17 @@ def test_status_says_what_this_machine_approved(
     approved = launches.asked[0].operation.payload["current"]
     assert isinstance(approved, str)
     assert f"approved     {approved}" in result.output
+
+
+def test_a_registration_carrying_the_launchers_state_is_refused(
+    checkout: Path, launches: Launches, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A session that could write the record could approve its own next launch."""
+    launches.launch(checkout)
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    whole_state = fleet_lease(checkout, [AccessibleRoot(path=tmp_path / "state")])
+    own = fleet_lease(checkout)
+
+    refuse_host_only_mounts(own, host_only_directories())
+    with pytest.raises(typer.BadParameter, match="the launcher's approvals"):
+        refuse_host_only_mounts(whole_state, host_only_directories())

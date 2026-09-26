@@ -86,6 +86,7 @@ from lup.sandbox.rail import (
     same_path,
     worker_lease,
 )
+from lup.trust.record import StateLocation
 
 
 def image_tag(dockerfile: str) -> str:
@@ -851,6 +852,11 @@ def host_only_directories() -> list[HostOnlyDirectory]:
             path=SecretsLocation().directory(),
             holds="host-only secrets",
             moved_by="XDG_CONFIG_HOME",
+        ),
+        HostOnlyDirectory(
+            path=StateLocation().trust(),
+            holds="the launcher's approvals",
+            moved_by="XDG_STATE_HOME",
         ),
     ]
 
