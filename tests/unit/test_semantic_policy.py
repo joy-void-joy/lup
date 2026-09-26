@@ -1316,6 +1316,14 @@ SHELL_POLICY_CASES = [
     # still falls off it.
     DecisionCase(input="git -c color.ui=false reset --hard", effect="ask"),
     DecisionCase(input="git -c color.ui=false something-new", effect="deny"),
+    # A guarded setting's question does not stand in for a refusal: the
+    # subcommand behind it is judged too, and one the vocabulary refuses stays
+    # refused however the global reads. One it would allow keeps the question.
+    DecisionCase(input="git -c core.pager=less checkout main", effect="deny"),
+    DecisionCase(input="git --config-env=core.pager=EVIL checkout main", effect="deny"),
+    DecisionCase(input="git -c $KEY=x checkout main", effect="deny"),
+    DecisionCase(input="git -c core.pager=touch something-new", effect="deny"),
+    DecisionCase(input="git -c core.hooksPath=x worktree list", effect="ask"),
     # The pager is not gated: it moves nothing, these subcommands already run
     # it by default, and the program it names is reachable only through `-c`
     # and `git config`, which ask.

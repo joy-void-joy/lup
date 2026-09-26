@@ -745,6 +745,12 @@ class Subcommand(TypedDict):
 
     word: str
     remainder: list[str]
+    asked: KernelDecision | None
+    """The question a guarded global raised on the way, if one did.
+
+    Carried rather than returned where the walk could step past the global,
+    so the subcommand behind it is still judged: a question about the global
+    is not the answer to a subcommand the vocabulary refuses."""
 
 
 def split_subcommand(
@@ -776,16 +782,26 @@ def split_subcommand(
     commands execute, which is not what the command in front of them did.
     Unreadable keeps its question: a value that expands at run time, or a
     spelling this cannot separate from the flag, is one nobody can weigh.
+
+    The question is carried on past a global whose setting was read, guarded
+    or expanding, because then where the subcommand starts is known: `git -c
+    core.hooksPath=x worktree add` is still the worktree the vocabulary
+    refuses, and answering it with the global's question alone softened a
+    refusal into an approval. A global this cannot read the width of keeps
+    returning its question where it stands.
     """
     ask_flags = default["ask_flags"] if default else []
     value_flags = default["value_flags"] if default else []
     setting_flags = default["setting_flags"] if default else []
     guarded_settings = default["guarded_settings"] if default else []
+    asked: KernelDecision | None = None
     position = 0
     while position < len(arguments):
         word = arguments[position]
         if not word.startswith("-"):
-            return Subcommand(word=word, remainder=arguments[position + 1 :])
+            return Subcommand(
+                word=word, remainder=arguments[position + 1 :], asked=asked
+            )
         if flag_matches(word, ask_flags) and default is not None:
             named = carried_setting(word, setting_flags, arguments[position + 1 :])
             if (
@@ -795,13 +811,18 @@ def split_subcommand(
             ):
                 position += named["words"]
                 continue
-            return row_verdict(
+            question = row_verdict(
                 default,
                 "ask",
                 f"{executable} global flag {word} changes how the command runs",
             )
+            if not named["value"]:
+                return question
+            asked = asked or question
+            position += named["words"]
+            continue
         position += 2 if word in value_flags else 1
-    return Subcommand(word="", remainder=[])
+    return Subcommand(word="", remainder=[], asked=asked)
 
 
 def declares_command(executable: str, rows: list[ShellRuleRow]) -> bool:
@@ -854,6 +875,15 @@ def decide_command_rows(
     split = split_subcommand(executable, arguments, default)
     if isinstance(split, KernelDecision):
         return split
+    asked = split["asked"]
+    if asked is not None:
+        # The global's question, unless the subcommand behind it is refused:
+        # judged as the line reads without the globals, which no guard of the
+        # command's own row stands in front of.
+        plain = decide_command_rows(
+            [words[0], split["word"], *split["remainder"]], rows, measured
+        )
+        return plain if split["word"] and plain.effect == "deny" else asked
     subword = split["word"]
     remainder = split["remainder"]
     # lup: defer: a verb word this walk cannot read -- `$OP`, a `$(...)`
