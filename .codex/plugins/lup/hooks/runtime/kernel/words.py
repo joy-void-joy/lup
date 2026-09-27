@@ -1784,6 +1784,8 @@ reaches a command word beginning with `-`, which
 classifies.
 """
 
+# lup: ignore[library-default] — what each wrapper's own option does, which no
+# project could choose differently and still read the command it wraps
 WRAPPER_JUDGED_OPTIONS: dict[str, tuple[str, ...]] = {
     "time": ("-o", "--output"),
     "env": ("-C", "--chdir"),
