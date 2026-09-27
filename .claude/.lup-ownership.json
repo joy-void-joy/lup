@@ -576,7 +576,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/kernel/settlement.py",
       "category": "generated",
-      "sha256": "2dff6d345bb4ae8b6296e6a1f31e14ab0da7c795ea1ae56e9dfd46c4c81e40e1",
+      "sha256": "98f2c7b249bbdad4067dd2871080303c7ac0f3e3fd3fd6bf9ecff0a27455ae09",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -814,7 +814,7 @@
     {
       "path": "docs/permissions.md",
       "category": "generated",
-      "sha256": "819b4c2cc8cb5a87241cb3d779acbca953eeccefecc91e9a8b342836631c2b79",
+      "sha256": "ab80e4b51b26e119d5ff9be80d40806a7f331afa230ec932f5f15d956ed53dcc",
       "semantic_id": "docs.permissions",
       "executable": false
     },

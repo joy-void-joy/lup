@@ -25,10 +25,14 @@ what differs is the facts it is given, which is why a row never asks which
 pass it is in.
 """
 
+from collections.abc import Iterator
+
 from .decision import (
     SANDBOX_TRAPPED_REASON,
     KernelDecision,
     contributions,
+    joined_decision,
+    joined_placement,
     recovery_dischargeable,
 )
 from .escalation import EscalationRequest
@@ -964,12 +968,60 @@ def settle(
     evidence and reaches its question, a dynamic pass carries what was
     actually measured — so no row has to know which of the two it is in, and
     neither pass can apply a rule the other does not.
+
+    A permission is read for what it did not answer: see :func:`left_standing`.
     """
     for rule in order:
         reached = rule.reached(facts)
         if reached is None:
             continue
         if rule.settles:
-            return reached
+            return left_standing(facts, reached, order)
         facts = facts.rewritten(reached)
     return facts.decision
+
+
+def left_standing(
+    facts: SettlementFacts, settled: KernelDecision, order: list[SettlementRule]
+) -> KernelDecision:
+    """A permission for part of a line, with every deferral it did not answer.
+
+    A row that settles a line as a permission answers for the parts it read.
+    One settling a question -- a harm the container holds, a loss a capture
+    puts back -- reads the questions and refusals, and a part that deferred
+    rode beside them unread: `kill 1234 && curl <an origin no scope names>`
+    is a kill the container holds and a fetch only the runtime answers, and
+    `git rm tmp/x ; frobnicate` a restorable removal and a command nobody
+    judged. One settling a deferral answers for work nobody judged, and a
+    part that handed its decision to the runtime is not that. Allowing either
+    line whole answered the part it never read.
+
+    So what the row left is settled on its own, through the same order, and
+    the line takes the stronger answer: a runtime's handoff, a question, or a
+    refusal where that is what the leftover earns, and the permission where
+    the leftover is allowed too -- placed where every part of it can run.
+    """
+    if settled.effect != "allow":
+        return settled
+
+    def leaves(verdict: KernelDecision) -> Iterator[KernelDecision]:
+        if not verdict.findings:
+            yield verdict
+        for part in verdict.findings:
+            yield from leaves(part)
+
+    handoff = facts.decision.effect == "defer"
+    unanswered = [
+        part
+        for part in leaves(facts.decision)
+        if part.effect == "defer"
+        and (not handoff or part.abstention == "provider_native")
+        and part is not facts.decision
+    ]
+    if not unanswered:
+        return settled
+    again = settle(facts.rewritten(joined_decision(unanswered)), order)
+    placed = joined_placement([settled, again])
+    if again.effect == "allow":
+        return settled.revised(sandbox=placed)
+    return again.revised(sandbox=placed)

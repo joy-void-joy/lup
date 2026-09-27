@@ -733,3 +733,27 @@ def test_a_loopback_port_a_host_process_holds_is_outside_the_declared_scope() ->
     assert loopback_port("https://example.org/x") is None
     assert decide_fetch(url, [LOOPBACK], []).effect == "allow"
     assert decide_fetch(url, [LOOPBACK], [], host_listener=True).effect == "ask"
+
+
+def test_a_handoff_to_the_runtime_outlasts_a_question_the_container_settles() -> None:
+    """A contained kill beside a fetch no scope names leaves the fetch to the runtime.
+
+    Settled whole, the container's answer to the kill allowed the fetch too,
+    which nobody but the runtime was ever to answer.
+    """
+    for line in (
+        "curl https://unlisted.example/x && kill 1234",
+        "kill 1234 && curl https://unlisted.example/x",
+    ):
+        settled = decide_shell(
+            line,
+            ROWS,
+            contained=True,
+            inside_placement=True,
+            existing_targets=[],
+            landings=[],
+            unscoped_fetch="defer",
+        )
+
+        assert (settled.effect, settled.abstention) == ("defer", "provider_native")
+    assert contained_decision("kill 1234", []).effect == "allow"

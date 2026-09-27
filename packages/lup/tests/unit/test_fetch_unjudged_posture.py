@@ -25,6 +25,7 @@ from lup.policy.kernel.decision import KernelDecision
 from lup.policy.kernel.fetch import decide_fetch
 from lup.policy.kernel.rows import ShellRuleRow, UrlScopeRow
 from lup.policy.kernel.semantics import UnjudgedAmbient
+from lup.policy.kernel.settlement import SettlementFacts, settle
 from lup.policy.kernel.shell import decide_shell
 from lup.policy.shell_rules import erase_shell_rules
 from lup.policy.vocabulary import default_vocabulary
@@ -212,3 +213,41 @@ def test_a_handoff_never_carries_an_unread_segment_beside_it() -> None:
             )
             assert settled.effect == "deny", (command, posture)
             assert settled.abstention is None
+
+
+def test_a_permission_for_part_of_a_line_leaves_the_rest_to_settle() -> None:
+    """A capture retires the loss it holds, and nothing that rode beside it.
+
+    `curl <unlisted> ; git rm tmp/x` is a restorable removal and a fetch only
+    the runtime answers; `git rm tmp/x ; frobnicate` the same removal and a
+    command nobody judged. Allowed whole, each answered a part no row read.
+    """
+    loss = KernelDecision(
+        "ask",
+        "a restorable removal",
+        checkpoint="targeted",
+        purpose="unrecovered_local_mutation",
+    )
+    handoff = KernelDecision(
+        "defer", "an origin no scope names", abstention="provider_native"
+    )
+    unjudged = KernelDecision(
+        "defer",
+        "a command nobody classified",
+        unlisted=True,
+        abstention="boundary_settle",
+    )
+
+    def captured(*beside: KernelDecision) -> KernelDecision:
+        return settle(
+            SettlementFacts(
+                loss.revised(findings=(loss, *beside)), checkpoint="complete"
+            )
+        )
+
+    assert captured().effect == "allow"
+    assert (captured(handoff).effect, captured(handoff).abstention) == (
+        "defer",
+        "provider_native",
+    )
+    assert captured(unjudged).effect == "ask"

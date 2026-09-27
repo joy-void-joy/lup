@@ -109,10 +109,12 @@ hands over a credential or retargets a remote do.
 
 A decision escalation keeps the question the agent asked for, and a hard
 prohibition, a missing channel and a read-only hole are settled before the
-row is read. The same measured container makes a loopback fetch ask when a
-process the container cannot see holds the port: sharing the host's network
-means sharing its loopback, and the scope declared for this machine's own
-development servers would otherwise admit the operator's.
+row is read. A part of the line that deferred is answered by neither this row
+nor a capture, but settled on its own: `kill 1234 && curl <unlisted>` still
+hands the fetch to the runtime. The same measured container makes a loopback
+fetch ask when a process the container cannot see holds the port: sharing the
+host's network means sharing its loopback, and the scope declared for this
+machine's own development servers would otherwise admit the operator's.
 
 And the columns that say what a *word* adds or removes, each answering one
 question the row alone cannot:
