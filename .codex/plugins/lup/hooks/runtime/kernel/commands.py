@@ -1283,7 +1283,9 @@ def strictest_reading(
     harm of each would stay inside it: `codex l$OP` asks as an unknown word
     does, which a container holds, and could be `codex login`, which it does
     not. A deferral kept as the spelling's own verdict carries them the same
-    way, marked as standing for what the word could be.
+    way, marked as standing for what the word could be. So is a reading kept
+    in its place, which no capture retires: `$X rm tmp/x` could be the `git
+    rm` a capture restores, and could as well be anything else.
     """
     strictest = max(
         readings,
@@ -1314,6 +1316,7 @@ def strictest_reading(
                 f" `{strictest['spelled']}`: {strictest['decision'].reason}"
             ),
             reach=reach,
+            unread=True,
         )
         .advising(
             "Spell that word out, and the command is judged as the one it is"

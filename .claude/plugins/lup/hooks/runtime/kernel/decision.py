@@ -402,6 +402,10 @@ class KernelDecision:
     harms would land -- a remote a push reaches, a merged pull request. A
     container settles it only where that stays inside, and a reading that
     stated no reach leaves ``None``, which never does.
+
+    On a question it marks the strictest reading kept for such a word, which
+    a capture never retires: what was captured is what that one reading
+    named, and the word could have made any other command.
     """
 
     def __init__(
@@ -789,7 +793,8 @@ def recovery_dischargeable(decision: KernelDecision) -> bool:
     Read over the contributions rather than the join, because the join
     reports the strongest effect and says nothing about how many reasons
     reached it — which is how a recoverable deletion beside a full-file
-    rewrite would have discharged the rewrite.
+    rewrite would have discharged the rewrite. A question kept for a word
+    nobody could read is never retired, whatever loss it names.
     """
     asking = [part for part in contributions(decision) if part.effect == "ask"]
     if not asking:
@@ -797,5 +802,6 @@ def recovery_dischargeable(decision: KernelDecision) -> bool:
     return all(
         part.purpose == "unrecovered_local_mutation"
         and part.checkpoint != "unrecoverable"
+        and not part.unread
         for part in asking
     )

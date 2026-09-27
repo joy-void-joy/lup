@@ -497,7 +497,8 @@ word whose legible part begins a guarded flag is read as that flag:
 The reason names the word and the command it was read as, in one line. The
 verdict carries the reach of every reading that objects, so a measured
 container settles it only where each would stay inside: `codex l$OP` keeps
-its question there, since it could be `codex login`.
+its question there, since it could be `codex login`. No capture retires it:
+`$X rm tmp/x` asks though the `git rm` it could be is restorable.
 
 What the legible part rules out is not read in — `sync st$X` can only be
 `sync status` — and a program guarding nothing answers an unread word as it

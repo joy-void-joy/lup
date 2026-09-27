@@ -757,3 +757,13 @@ def test_a_handoff_to_the_runtime_outlasts_a_question_the_container_settles() ->
 
         assert (settled.effect, settled.abstention) == ("defer", "provider_native")
     assert contained_decision("kill 1234", []).effect == "allow"
+
+
+def test_a_capture_never_retires_a_question_asked_of_a_word_nobody_read() -> None:
+    """`$X rm tmp/x.txt` could be the `git rm` a capture restores, or anything else."""
+
+    def captured(line: str) -> str:
+        return decide_shell(line, ROWS, existing_targets=[], recovered=True).effect
+
+    assert captured("git rm tmp/x.txt") == "allow"
+    assert captured("$X rm tmp/x.txt") == "ask"
