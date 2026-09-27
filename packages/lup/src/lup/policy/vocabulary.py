@@ -48,6 +48,7 @@ from pydantic import BaseModel
 from lup.policy.kernel.decision import CheckpointRequirement, SandboxPlacement
 from lup.policy.kernel.effects import EffectRow, declare
 from lup.policy.kernel.rows import DestinationForm
+from lup.policy.kernel.words import UV_GLOBAL_VALUE_OPTIONS
 from lup.policy.kernel.semantics import EffectClass, ReviewerRequirement
 from lup.policy.shell_rules import (
     RunnerTargetRule,
@@ -346,11 +347,6 @@ def judged_ask_rules(
             name="rsync", reason="remote sync requires approval", reach="host_later"
         ),
         JudgedCommand(
-            name="wget",
-            reason="downloading files requires approval",
-            recovery="Prefer curl or a web fetch, which the fetch scopes judge.",
-        ),
-        JudgedCommand(
             name="make",
             read_verbs=["-n", "--dry-run", "--just-print", "-q", "--question"],
             reason="make runs whatever its recipes say",
@@ -414,6 +410,13 @@ def judged_ask_rules(
                 effects=[declare("installs_dependency", scope="AUR package")],
             )
             for helper in ("yay", "paru", "pikaur", "trizen", "aurman", "pakku")
+        ),
+        # makepkg is that build on its own, from whatever PKGBUILD the checkout
+        # holds, and installs what it built under `-i`.
+        JudgedCommand(
+            name="makepkg",
+            reason="building a package runs its PKGBUILD and can install it",
+            effects=[declare("installs_dependency", scope="PKGBUILD package")],
         ),
     ),
 ) -> list[ShellCommandRule]:
@@ -583,6 +586,92 @@ def reaching_builtin_rules(
             recovery=command.recovery,
         )
         for command in commands
+    ]
+
+
+def downloader_rules(
+    commands: Sequence[str] = ("curl", "wget"),
+) -> list[ShellCommandRule]:
+    """The downloaders, whose rows say what the files they land are judged by.
+
+    What a download reads is the fetch scopes' to answer and what it sends
+    asks, both read by the kernel's downloader screen before any row is
+    walked. The row answers for the rest: every file the response lands at is
+    a write to that path, judged the way `sort -o` and a redirection are, so
+    the reason here is the one a write the destination policy stops is asked
+    with. Only the tools that screen reads belong here.
+    """
+    return [
+        ShellCommandRule(
+            name=command,
+            effects=[declare("fetches", scope="declared")],
+            reason="a download writing that file requires approval",
+        )
+        for command in commands
+    ]
+
+
+def uv_rules(
+    global_values: Sequence[str] = UV_GLOBAL_VALUE_OPTIONS,
+    pip_reads: Sequence[str] = ("list", "show", "freeze", "check", "tree"),
+    tool_reads: Sequence[str] = ("list", "dir"),
+) -> list[ShellCommandRule]:
+    """The uv routes that bring in or send out a package this project never declared.
+
+    `uv add`, `sync`, `lock`, `remove` and `run` are the kernel's, which reads
+    them against the lockfile and the runner targets. What reaches these rows
+    is the rest of the surface, found past uv's global options the way every
+    subcommand-gated command is: `uv pip` and `uv tool` install into an
+    environment the lockfile does not describe, `uvx` fetches and runs a
+    package nobody declared, and `uv publish` uploads one. Each asks wherever
+    it runs, because what it weighs is trust in the package rather than where
+    its files land. Their read-only verbs list what is already installed, and
+    a verb this table does not name falls to the question.
+    """
+    installs = [declare("installs_dependency", scope="python package")]
+    reads = [declare("reads_environment", scope="python environment")]
+    return [
+        ShellCommandRule(
+            name="uv",
+            # Only bare `uv` reaches this level, which prints its usage: every
+            # verb is the kernel's or one of the subcommands below.
+            effects=[declare("changes_nothing")],
+            value_flags=list(global_values),
+            subcommands=[
+                ShellSubcommandRule(
+                    name="pip",
+                    effects=installs,
+                    reason="uv pip changes packages outside this project's lockfile",
+                    recovery="Use uv add / uv remove, which keep the lockfile.",
+                    operations=[
+                        ShellOperationRule(name=verb, effects=reads)
+                        for verb in pip_reads
+                    ],
+                ),
+                ShellSubcommandRule(
+                    name="tool",
+                    effects=[declare("installs_dependency", scope="python tool")],
+                    reason="uv tool fetches and runs a package that is not a"
+                    " declared dependency",
+                    recovery="Declare it with uv add and run it through uv run.",
+                    operations=[
+                        ShellOperationRule(name=verb, effects=reads)
+                        for verb in tool_reads
+                    ],
+                ),
+                ShellSubcommandRule(
+                    name="publish",
+                    effects=[declare("external_mutation", scope="package index")],
+                    reason="uv publish uploads a package where anyone can install it",
+                ),
+            ],
+        ),
+        ShellCommandRule(
+            name="uvx",
+            effects=[declare("installs_dependency", scope="python tool")],
+            reason="uvx fetches and runs a package that is not a declared dependency",
+            recovery="Declare it with uv add and run it through uv run.",
+        ),
     ]
 
 
@@ -1519,6 +1608,12 @@ def git_rule(
                 )
             ],
             ask_flags=["--unsafe-paths", "--build-fake-ancestor"],
+            # Each lands a write where no snapshot of this checkout reaches --
+            # a patch path outside it, an index file wherever it was named --
+            # so the question stands however much of the checkout was captured.
+            flag_effects=[
+                declare("writes_path", scope="outside", write="overwrite"),
+            ],
             checkpoint="boundary_wide",
             reason="a patch that writes outside the working area requires approval",
         ),
@@ -2341,7 +2436,31 @@ def gh_rule(allow_authoring: bool = True) -> ShellCommandRule:
                     ),
                 ],
             ),
-            group("auth", reads(["status"])),
+            group(
+                "auth",
+                [
+                    # `-t` adds the token itself to the report.
+                    ShellOperationRule(
+                        name="status",
+                        effects=[declare("fetches", scope="declared")],
+                        ask_flags=["-t", "--show-token"],
+                        reason="showing the token gh holds writes it into this"
+                        " transcript",
+                    ),
+                    # The token gh holds, printed and nothing else: the same
+                    # disclosure `printenv GH_TOKEN` is refused for.
+                    ShellOperationRule(
+                        name="token",
+                        effects=[declare("reads_path", scope="secret")],
+                        refuses="printing the token gh holds writes it into this"
+                        " transcript",
+                        reason="printing the token gh holds writes it into this"
+                        " transcript",
+                        recovery="gh reads its own token: run the gh command that"
+                        " needs it.",
+                    ),
+                ],
+            ),
             group("search", reads(["repos", "issues", "prs", "code", "commits"])),
             group(
                 "label",
@@ -2476,6 +2595,22 @@ def docker_rule() -> ShellCommandRule:
     return ShellCommandRule(
         name="docker",
         effects=[declare("mutates_environment", scope="docker")],
+        # docker's own globals that consume the word after them, as `docker
+        # --help` lists them. Unlisted, the walk read that word as the
+        # subcommand: `docker --context version rm -f x` was `docker version`
+        # and allowed, while docker removes the container.
+        value_flags=[
+            "-c",
+            "--context",
+            "--config",
+            "-H",
+            "--host",
+            "-l",
+            "--log-level",
+            "--tlscacert",
+            "--tlscert",
+            "--tlskey",
+        ],
         subcommands=[
             *queries,
             noun(
@@ -2494,15 +2629,15 @@ def docker_rule() -> ShellCommandRule:
 def bun_rule() -> ShellCommandRule:
     """Compile the bun surface, which is a package manager wearing a runtime.
 
-    `bun` is in the kernel's interpreter set, so without a rule naming it
-    every invocation is refused as inline code — including `bun install`,
-    which carries none. Declaring the safe forms is what separates the two,
-    and it separates them the safe way round: the default is `deny`, so an
-    eval spelling this table never anticipated is refused by falling through
-    rather than by being listed. That matters more than usual, because the
-    ways of handing an interpreter a program are many and growing — `-e`,
-    `--eval`, `-p`, a bare `-` reading stdin, and on a sibling runtime an
-    `eval` *subcommand* that no flag list could have caught.
+    `bun` is in the kernel's interpreter set, and the kernel reads bun's own
+    grammar before this row: `bun <script file>` runs, and the inline
+    spellings (`-e`, `--eval`, `-p`, `--print`) are refused whatever a row
+    says. What reaches here is a subcommand, and without a rule naming them
+    every one would be refused as a bare interpreter — including `bun
+    install`, which carries no program. Declaring the safe forms separates
+    the two the safe way round: the default is `deny`, so a spelling this
+    table never anticipated is refused by falling through rather than by
+    being listed.
 
     The split between allow and ask is what a verb does to the lockfile
     rather than to the filesystem: restoring what it already pins, as
@@ -2880,6 +3015,8 @@ def default_vocabulary() -> list[ShellCommandRule]:
         *judged_ask_rules(),
         *redirected_rules(),
         *reaching_builtin_rules(),
+        *downloader_rules(),
+        *uv_rules(),
         *guarded_tool_rules(),
         git_rule(),
         gh_rule(),

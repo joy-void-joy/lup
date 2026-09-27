@@ -27,7 +27,7 @@ from lup.policy.kernel.decision import (
 )
 from lup.types import EnvVars, JsonObject
 from lup_template.harness.catalog import declared_hook_set
-from tests.unit.repos import commit_file, initialized_repo
+from tests.unit.repos import commit_file, git_in, initialized_repo
 
 DISPATCHER = Path(".claude/plugins/lup/hooks/scripts/policy.py")
 
@@ -616,8 +616,15 @@ def test_removing_a_directory_asks_where_no_capture_covers_it(
     sentence, which reads as a refusal and was worked around as one — so the
     assertion is that the reason states what is being asked rather than
     announcing an outcome nobody can reach.
+
+    A directory this project protects nothing under, because one that holds a
+    protected path -- `src` holds the catalog here -- is asked about that
+    path's owner first, which no capture settles.
     """
-    effect, reason = effect_from("rm -rf src", delete_repo)
+    git = git_in(delete_repo, delete_repo.parent / "no-hooks")
+    (delete_repo / "lib").mkdir()
+    commit_file(git, delete_repo, "lib/mod.py", "value = 1\n", "chore: lib")
+    effect, reason = effect_from("rm -rf lib", delete_repo)
 
     assert effect == "ask"
     assert "nothing in the command bounds what it holds" in reason

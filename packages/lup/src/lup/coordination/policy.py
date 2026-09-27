@@ -13,9 +13,12 @@ reach for is a judgement about the surfaces a project offers, and a project
 that renamed its own is entitled to say so without editing the library.
 """
 
+from pathlib import PurePosixPath
+
 from lup.coordination.bare.store import COORDINATION_DIR, STORE_DIR, WINDOWS_DIR
 from lup.coordination.identity import MEMBER_ENV
 from lup.policy.peer_policy import PeerPolicy
+from lup.policy.refused_paths import RefusedPaths
 
 SEND_REDIRECT = (
     "a native send to a session on this repository's roster leaves no record"
@@ -88,3 +91,40 @@ def peer_policy(
         claim_reason=claim_reason,
         claim_recovery=claim_recovery,
     )
+
+
+INBOX_REACHED = (
+    "a session's inbox socket is its wake handle, and a frame written to it"
+    " starts that session's turn with text no roster records"
+)
+"""Why a command connecting to a peer's inbox was stopped, in one line."""
+
+INBOX_RECOVERY = (
+    "Reach the peer with `coordination_send` instead: it records the message"
+    " where every session in this clone can read it, and wakes the peer"
+    " through this inbox itself."
+)
+"""What reaches the same peer and leaves the record a raw frame does not."""
+
+
+def inbox_refusal(
+    directory: str, reason: str = INBOX_REACHED, recovery: str = INBOX_RECOVERY
+) -> list[RefusedPaths]:
+    """The directory sessions bind their inboxes in, withheld from every command.
+
+    ``directory`` is the launch's own declaration of where inboxes go, passed
+    rather than spelled here, so a project that moves it moves the refusal
+    with it. Every spelling of a connection the kernel reads names the path --
+    a socat address, `nc -U`, `curl --unix-socket`, a redirection -- so the
+    path is refused rather than each program. Empty declares no inbox
+    directory, and refuses nothing.
+    """
+    if not directory:
+        return []
+    return [
+        RefusedPaths(
+            paths=[str(PurePosixPath(directory) / "**")],
+            reason=reason,
+            recovery=recovery,
+        )
+    ]

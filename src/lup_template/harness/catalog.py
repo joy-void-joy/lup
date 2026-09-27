@@ -34,7 +34,11 @@ from lup.harness.models import (
     SkillInvocation,
 )
 from lup.providers.claude.harness import ClaudeSpellings
+from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.providers.codex.harness import CodexSpellings
+from lup.providers.codex.login import CODEX_LOGIN
+from lup.policy.refused_paths import credential_files
+from lup.policy.rules import dependency_declarations
 from lup.harness.codescan.common import ApplicationRoots
 from lup.harness.codescan.boundaries import (
     generated_tree_paths,
@@ -57,7 +61,7 @@ from lup.devtools.project import DevProject
 from lup.harness.contracts import NativeSpellings
 from lup.harness.enforcement import declared_role_rows
 from lup.policy.boundary import depends_on
-from lup.coordination.policy import peer_policy
+from lup.coordination.policy import inbox_refusal, peer_policy
 from lup.policy.refused_tools import RefusedTool
 from lup.workspace.paths import (
     declared_project_root,
@@ -725,6 +729,10 @@ def portable_harness(
                     for host in ("127.0.0.1", "localhost")
                 ),
             ],
+            # An origin outside those is handed to the runtime's own
+            # permission system rather than asked about here, by every route
+            # that reads one: a web fetch, `curl` and `wget` alike.
+            unscoped_fetch="defer",
             # lup: template: which trees this domain will not let an agent edit
             # without a question. What is here answers for a framework that
             # generates its own plugin trees and carries its own policy; a
@@ -737,7 +745,14 @@ def portable_harness(
                 # decide the same things about the session that reads them.
                 Path(".claude"),
                 Path(".codex"),
-                Path("pyproject.toml"),
+                # Every manifest and lockfile, in whichever package holds it:
+                # what an install fetches and runs is declared there, and the
+                # commands that write them for a reason are judged by the
+                # dependency rows rather than by a path.
+                *dependency_declarations(),
+                # CI runs with the repository's secrets and on every push, so
+                # a workflow or an action is code somebody else executes.
+                Path(".github"),
                 Path("sync.json"),
                 # The gitignored half alongside it, because a registration
                 # there can now carry a `mount` — and that key is what a
@@ -835,6 +850,30 @@ def portable_harness(
             # the coordination directory moves the compiled hook with it.
             peer_policy=peer_policy(),
             refused_tools=REFUSED_TOOLS,
+            # The library's key and login files, and the logins of the two
+            # runtimes this project runs on, each spelled by its own login
+            # declaration: a session reads neither its own token nor the
+            # other runtime's. And the directory this image binds session
+            # inboxes in, read off the image rather than spelled, so a peer
+            # is reached through the roster rather than a raw frame.
+            #
+            # The one declaration every reader is refused by: the shell's
+            # words on both runtimes, and on Claude the `Read` deny rules the
+            # file tools obey, which the runtime merges into its sandbox's
+            # read restrictions too. Defense in depth once a contained session
+            # is lent an ssh identity, and honest about what that is worth: it
+            # stops an agent *reading* key material, not `ssh` and `git`
+            # *using* it -- `ssh git@github.com` names no credential path.
+            # `docs/permissions.md` states the grant in those words.
+            refused_paths=[
+                credential_files(
+                    also=[
+                        *CLAUDE_LOGIN.withheld_logins(),
+                        *CODEX_LOGIN.withheld_logins(),
+                    ]
+                ),
+                *inbox_refusal(agent_image().inboxes.directory),
+            ],
             # Which checker answers for an edit is this project's toolchain,
             # not the library's, and it is named rather than located: the
             # resolution asks the checkout's own environment where the program
@@ -913,20 +952,6 @@ def portable_harness(
             ],
             sandbox=HookSandbox(
                 extra_domains=["api.anthropic.com"],
-                # A read deny inside the boundary, which is where it belongs:
-                # the commands that legitimately need these keys are the ones
-                # excluded below, and they never enter it.
-                #
-                # Kept as defense in depth once a contained session may be
-                # lent an ssh identity, and honest about what that is worth.
-                # It stops an agent *reading* key material. It is not
-                # isolation from `ssh` and `git` *using* it — `ssh
-                # git@github.com` names no credential path, and ssh reads the
-                # key or the agent socket itself. On Claude it is also the
-                # native per-path credential sandbox; on Codex it is the
-                # semantic policy alone, and neither is a syscall boundary.
-                # `docs/permissions.md` states the grant in those words.
-                credential_paths=["~/.ssh", "~/.aws/credentials"],
                 # Every command in this project reaches its toolchain through
                 # `uv`, which locks its cache whenever it resolves dependencies
                 # — which a changed pyproject.toml forces, and an integration

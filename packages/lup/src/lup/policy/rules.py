@@ -9,12 +9,12 @@ stay decision-identical; the shared fixture suite asserts exactly that.
 """
 
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
 from pydantic import AnyHttpUrl, BaseModel, Field
 
-from lup.harness.codescan.antipatterns import patterns_for_suffix
+from lup.harness.codescan.antipatterns import RuleSet, patterns_for_suffix
 from lup.harness.codescan.common import AntiPattern
 from lup.policy.contracts import DecisionPolicy
 from lup.policy.grants import LeaseGrants
@@ -44,19 +44,23 @@ from lup.policy.assets.host import (
     text_at,
     this_checkout_path,
     tracked_write_targets,
+    unleased_write_targets,
+    peer_store,
 )
+from lup.coordination.bare.store import claim_holders
 from lup.policy.kernel.effects import STRENGTH
 from lup.policy.kernel.lex import (
     authored_writes,
     command_segments,
     parse_shell,
-    redirection_verdict,
+    named_write_verdict,
     shell_flag_write_targets,
     shell_path_verb_targets,
     shell_sed_rewrites,
     shell_write_targets,
     shell_written_targets,
 )
+from lup.policy.kernel.peers import decide_foreign_claim, settled_with_claim
 from lup.policy.kernel.roles import displaced_targets
 from lup.policy.kernel.rows import (
     AcceptanceGuardRow,
@@ -65,6 +69,7 @@ from lup.policy.kernel.rows import (
     PathRoleRow,
     PathRuleKind,
     PathRuleRow,
+    PeerPolicyRow,
     RewriteReading,
     RewrittenDocumentRow,
     UnproducedDocumentRow,
@@ -80,6 +85,7 @@ from lup.policy.kernel.shell import (
 )
 from lup.policy.edit_rules import EditRule, erase_edit_rules
 from lup.policy.imports import ImportBoundary
+from lup.policy.refused_paths import RefusedPaths
 from lup.policy.assets.host import worktree_path, worktree_root
 from lup.policy.shell_rules import (
     RunnerTargetRule,
@@ -139,11 +145,11 @@ def url_scope_row(scope: UrlScope) -> UrlScopeRow:
 
 
 class FetchPolicy(DecisionPolicy[FetchUrl]):
-    """Evaluate deny scopes before allow scopes, and let the profile answer the rest.
+    """Evaluate deny scopes before allow scopes, and let the project answer the rest.
 
-    ``unjudged_ambient`` is the same declaration the shell family reads for a
-    command nothing classified, taken here so a profile that declared the
-    seamless posture gets it on both surfaces rather than on one.
+    ``unscoped`` is what an origin no scope names answers, and the shell
+    policy's downloader screen is handed the same value, so one
+    declaration answers on every surface rather than on one.
 
     ``contained`` says the session sits in a container sharing the host's
     network, where a loopback port is the session's own only if one of the
@@ -155,12 +161,12 @@ class FetchPolicy(DecisionPolicy[FetchUrl]):
         self,
         allowed: list[UrlScope],
         denied: list[UrlScope],
-        unjudged_ambient: UnjudgedAmbient = "ask",
+        unscoped: UnjudgedAmbient = "ask",
         contained: bool = False,
     ) -> None:
         self.allowed = list(allowed)
         self.denied = list(denied)
-        self.unjudged_ambient: UnjudgedAmbient = unjudged_ambient
+        self.unscoped: UnjudgedAmbient = unscoped
         self.contained = contained
 
     def decide(self, event: FetchUrl) -> Decision:
@@ -170,7 +176,7 @@ class FetchPolicy(DecisionPolicy[FetchUrl]):
                 str(event.url),
                 [url_scope_row(scope) for scope in self.allowed],
                 [url_scope_row(scope) for scope in self.denied],
-                self.unjudged_ambient,
+                self.unscoped,
                 host_listener=self.contained
                 and port is not None
                 and port in host_held_ports(Path("/proc")),
@@ -198,7 +204,7 @@ def parse_shell_segments(command: str) -> list[ShellSegment] | None:
     would otherwise wave through `echo x > .git/HEAD` as an `echo`.
     """
     tree = parse_shell(command)
-    if isinstance(tree, KernelDecision) or redirection_verdict(tree) is not None:
+    if isinstance(tree, KernelDecision) or named_write_verdict(tree) is not None:
         return None
     segments = command_segments(tree)
     return [ShellSegment(words=words) for words in segments] if segments else None
@@ -209,8 +215,9 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
 
     The vocabulary is the caller's: ``rules`` is the whole table this project
     judges, not an extension of one the library chose. URL scopes feed the
-    kernel's curl screen, so shell reads and WebFetch consult one declared
-    origin table.
+    kernel's downloader screen, so shell reads and WebFetch consult one declared
+    origin table, and ``unscoped_fetch`` is what an origin outside it answers
+    -- the value :class:`FetchPolicy` is handed.
     """
 
     def __init__(
@@ -232,7 +239,13 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         runner_targets: list[RunnerTargetRule] | None = None,
         relayed: bool = False,
         authored: "EditPolicy | None" = None,
+        unscoped_fetch: UnjudgedAmbient | None = None,
+        refused_paths: list[RefusedPaths] | None = None,
+        secret_variables: list[str] | None = None,
     ) -> None:
+        self.unscoped_fetch: UnjudgedAmbient | None = unscoped_fetch
+        self.refused_paths = [paths.erased() for paths in refused_paths or []]
+        self.secret_variables = secret_variables or []
         self.authored = authored
         """The edit policy a write carrying its own content is put to.
 
@@ -321,7 +334,11 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         ]
         if not changes:
             return None
-        return self.authored.decide(EditBatch(changes=changes, cwd=root))
+        # The edit gates alone, as the dispatchers' authored review reads them:
+        # a peer's claim is asked about by an edit tool, while a command's
+        # writes are attributed to it after it runs.
+        authored = self.authored
+        return joined([authored.decide_change(change, root) for change in changes])
 
     def rewritten_documents(self, event: ShellCommand) -> RewriteReading:
         """What every in-place rewrite in this command would leave behind.
@@ -396,17 +413,27 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
 
         Compiled per classification rather than held, because the rules are
         selected by file suffix and a command that rewrites nothing needs none
-        of them compiled at all.
+        of them compiled at all. Drawn from the edit policy's own set, so a
+        rule the project retired is retired for a rewrite as for an edit.
         """
+        rules = None if self.authored is None else self.authored.rules
         return {
             suffix: []
-            if (patterns := patterns_for_suffix(suffix)) is None
+            if (patterns := patterns_for_suffix(suffix, rules)) is None
             else [antipattern_row(rule) for rule in patterns]
             for suffix in {Path(row["path"]).suffix.lower() for row in rows}
         }
 
     def decide(self, event: ShellCommand) -> Decision:
         root = event.cwd or Path.cwd()
+        # One measurement of one launch, read once for every fact drawn from it.
+        # lup: defer: the dispatchers also draw the unjudged posture and the
+        # host-executor channel from this ledger; a composition takes neither,
+        # because the ledger describes the launched session while a nested
+        # agent composed here answers through its own runtime's permission
+        # flow. Decide whether `dev policy` and the sweep read both, with
+        # nested agents left as they are.
+        boundary = measured_boundary(root)
         acted_on = shell_path_verb_targets(event.command, self.rules)
         flagged = shell_flag_write_targets(event.command, self.rules)
         # The edit gates, over the files a rewrite in place would replace. Off
@@ -458,15 +485,19 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 ),
                 directory_targets=directory_write_targets(acted_on, root),
                 empty_directories=empty_directory_targets(acted_on, root),
-                # The launch's read-only holes, read off the ledger the edit
-                # path already routes by, so a `cp` into one is refused here
-                # exactly as the native dispatchers refuse it.
+                # The launch's lease and its read-only holes, read off the
+                # ledger the native dispatchers read, so a write the launch
+                # did not mount is asked about and a `cp` into a hole is
+                # refused here exactly as a session meets either.
+                unleased_targets=unleased_write_targets(
+                    [*shell_write_targets(event.command), *acted_on], boundary, root
+                ),
                 readonly_targets=readonly_write_targets(
                     [
                         *shell_write_targets(event.command),
                         *shell_written_targets(event.command, self.rules),
                     ],
-                    measured_boundary(root),
+                    boundary,
                     root,
                 ),
                 recoverable_target_limit=self.recoverable_target_limit,
@@ -490,6 +521,9 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 checkout_root=str(root),
                 inside_placement=self.inside_placement,
                 relayed=self.relayed,
+                unscoped_fetch=self.unscoped_fetch,
+                refused_paths=self.refused_paths,
+                secret_variables=self.secret_variables,
                 # The same two measurements a dispatcher takes inside a
                 # container, taken wherever this composition was told it is
                 # in one -- so a reading of that posture from a host checkout
@@ -498,7 +532,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                     landing_rows(
                         measured_landings(
                             shell_posture_targets(event.command, self.rules),
-                            measured_boundary(root),
+                            boundary,
                             root,
                         )
                     )
@@ -534,6 +568,8 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                     self.trusted_script_roots,
                     self.path_roles,
                     self.path_rules,
+                    refused_paths=self.refused_paths,
+                    secret_variables=self.secret_variables,
                 ),
             )
         )
@@ -583,6 +619,75 @@ def human_owned_path_rule(path: str) -> PathRule:
     )
 
 
+def protected_root_rule(root: str) -> PathRule:
+    """One declared protected root, as the path rule it compiles to.
+
+    The one compilation both enforcement paths read: a session this program
+    composes and the rows a generated dispatcher carries, so the two cannot
+    come to disagree about which paths a root covers.
+
+    A root is anchored at the repository top, and one spelled from anywhere
+    (`**/uv.lock`) names the path wherever it sits, the way a path role's
+    pattern does: a manifest or a lockfile is what it is in whichever package
+    holds it. Scratch matches by path part for the same reason, because a
+    scratch directory is reachable at more than one root and the rule is about
+    what the directory is, not where it sits.
+
+    No rule here releases an autonomous identity. A protected root is where a
+    session's own boundary is declared -- its settings, its launch registry,
+    its measured preflight, the policy itself -- and an identity trusted to
+    review its own edits is still the confined thing choosing what confines
+    it, so the question reaches a person whoever is asking.
+    """
+    match PurePosixPath(root).parts:
+        case ("tmp",):
+            return PathRule(
+                kind="contains_part",
+                value=root,
+                reason="scratch path requires approval",
+            )
+        case ("**", *named) if named:
+            return PathRule(
+                kind="contains_part",
+                value=PurePosixPath(*named).as_posix(),
+                reason="protected path requires approval",
+            )
+    return PathRule(
+        kind="subtree",
+        value=root,
+        reason="protected path requires approval",
+    )
+
+
+def dependency_declarations(
+    names: tuple[str, ...] = (
+        "pyproject.toml",
+        "package.json",
+        "uv.lock",
+        "poetry.lock",
+        "package-lock.json",
+        "bun.lock",
+        "bun.lockb",
+        "pnpm-lock.yaml",
+        "yarn.lock",
+        "Cargo.lock",
+    ),
+) -> list[Path]:
+    """The manifests and lockfiles that decide what an install fetches and runs.
+
+    Protected wherever they sit, because a package's own manifest declares
+    dependencies and scripts as surely as the root's does, and a lockfile is
+    the exact artefact every later `sync` or `install` trusts without reading.
+    The commands that write them for a reason -- `uv lock`, `uv add`, `bun
+    install` -- are judged by the dependency rows; what this guards is a hand
+    writing one directly.
+
+    A default a composition root takes or replaces, as it does the credential
+    files: which ecosystems a project uses is the project's call.
+    """
+    return [Path("**", name) for name in names]
+
+
 def antipattern_row(rule: AntiPattern) -> AntiPatternRow:
     """Erase one declared rule into the primitive row the kernel matches on.
 
@@ -604,12 +709,23 @@ def antipattern_row(rule: AntiPattern) -> AntiPatternRow:
     )
 
 
-def antipattern_rows(change: EditChange) -> list[AntiPatternRow]:
+def antipattern_rows(
+    change: EditChange, rules: RuleSet | None = None
+) -> list[AntiPatternRow]:
     """Compile rules selected by one edit path into primitive kernel rows."""
-    patterns = patterns_for_suffix(change.path.suffix.lower())
+    patterns = patterns_for_suffix(change.path.suffix.lower(), rules)
     if patterns is None:
         return []
     return [antipattern_row(rule) for rule in patterns]
+
+
+def joined(decisions: list[Decision]) -> Decision:
+    """One batch's verdict: deny beats ask beats defer beats allow."""
+    for effect in ("deny", "ask", "defer"):
+        found = next((item for item in decisions if item.effect == effect), None)
+        if found is not None:
+            return found
+    return Decision(effect="allow", reason="every edit in the batch is safe")
 
 
 class EditPolicy(DecisionPolicy[EditBatch]):
@@ -620,6 +736,15 @@ class EditPolicy(DecisionPolicy[EditBatch]):
     this session runs release the very next edit — and what makes one taken
     back stop releasing it. The generated dispatchers read the same document,
     so a lease has one answer wherever it is asked.
+
+    ``peer_policy`` is where this repository's sessions record what each is
+    holding, and a batch is judged together with every claim over its paths,
+    read live through the store's own fold as the dispatchers read it. Absent,
+    no roster is consulted, which is a project that declared none.
+
+    ``rules`` is the anti-pattern set a project holds itself to, which a
+    composition compiles the way generation compiles each plugin's table;
+    absent, every rule the library ships applies.
     """
 
     def __init__(
@@ -632,6 +757,8 @@ class EditPolicy(DecisionPolicy[EditBatch]):
         acceptance_guard: AcceptanceGuardRow | None = None,
         edit_rules: list[EditRule] | None = None,
         import_boundaries: list[ImportBoundary] | None = None,
+        peer_policy: PeerPolicyRow | None = None,
+        rules: RuleSet | None = None,
     ) -> None:
         self.acceptance_guard = acceptance_guard
         self.path_roles = path_roles or []
@@ -639,6 +766,8 @@ class EditPolicy(DecisionPolicy[EditBatch]):
         self.protected = list(protected)
         self.maximum_added_lines = maximum_added_lines
         self.autonomous = autonomous
+        self.peer_policy = peer_policy
+        self.rules = RuleSet() if rules is None else rules
         # Erased once here rather than per change: the table is a declaration
         # that does not move while this policy answers, and the generated
         # dispatchers read rows that were erased the same way at generation.
@@ -648,20 +777,42 @@ class EditPolicy(DecisionPolicy[EditBatch]):
         ]
 
     def decide(self, event: EditBatch) -> Decision:
-        decisions = [self.decide_change(change, event.cwd) for change in event.changes]
-        denied = next((item for item in decisions if item.effect == "deny"), None)
-        if denied is not None:
-            return denied
-        asked = next((item for item in decisions if item.effect == "ask"), None)
-        if asked is not None:
-            return asked
-        deferred = next((item for item in decisions if item.effect == "defer"), None)
-        if deferred is not None:
-            return deferred
-        return Decision(effect="allow", reason="every edit in the batch is safe")
+        root = event.cwd or Path.cwd()
+        return joined(
+            [
+                pydantic_decision(
+                    settled_with_claim(
+                        self.decide_change(change, event.cwd).as_kernel(),
+                        self.claim(str(root / change.path), root),
+                    )
+                )
+                for change in event.changes
+            ]
+        )
+
+    def claim(self, path: str, root: Path) -> KernelDecision | None:
+        """Whether a live session other than this one is already in *path*.
+
+        Found by the lookups the dispatchers' `foreign_claim_decision` makes --
+        the store beneath the shared git directory, and who holds the path in
+        it -- and judged by the kernel function both paths call. The asker is
+        whoever this process's environment names, which a session hands every
+        process it starts.
+        """
+        peers = self.peer_policy
+        directory = None if peers is None else peer_store(root, peers["store"])
+        if peers is None or directory is None:
+            return None
+        return decide_foreign_claim(
+            path,
+            claim_holders(directory, path, declared_identity(peers["member_env"])),
+            peers,
+        )
 
     def decide_change(self, change: EditChange, cwd: Path | None = None) -> Decision:
         root = cwd or Path.cwd()
+        # Resolved before any gate reads a role, as the dispatchers resolve it,
+        # so an edit through a link meets the gates of the file it lands on.
         path = str((root / change.path).resolve())
         try:
             response = routed_edit_response(
@@ -688,7 +839,7 @@ class EditPolicy(DecisionPolicy[EditBatch]):
                 change.after,
                 path_exists=Path(path).exists(),
                 path_rules=[path_rule_row(rule) for rule in self.protected],
-                antipattern_rows=antipattern_rows(change),
+                antipattern_rows=antipattern_rows(change, self.rules),
                 path_roles=self.path_roles,
                 maximum_added_lines=self.maximum_added_lines,
                 autonomous=self.autonomous,

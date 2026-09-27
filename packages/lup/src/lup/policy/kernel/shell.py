@@ -25,6 +25,7 @@ from .rows import (
     PathRoleRow,
     PathRuleRow,
     DisplacedTargetRow,
+    RefusedPathRow,
     TargetLandingRow,
     RewrittenDocumentRow,
     RunnerTargetRow,
@@ -43,13 +44,19 @@ from .words import (
     dangerous_assignment_reason,
     dangerous_env_name,
     effective_command,
+    global_span,
     is_help_probe,
     is_trusted_script,
     opaque_argument,
     archive_lands_on_nothing,
     confined_to_recoverable_roots,
     refuses_generated_plugin_write,
+    protected_deletion,
+    protected_placement,
     env_payload,
+    read_wrapper,
+    uv_command_words,
+    uv_run_words,
     xargs_payload,
 )
 from .bindings import (
@@ -63,24 +70,35 @@ from .bindings import (
     references,
 )
 from .escalation import read_escalation
+from .programs import SCRIPT_INTERPRETERS, program_verdict, read_program
+from .withheld import (
+    printed_secret,
+    secret_name,
+    secret_refusal,
+    withheld_operand,
+    withheld_redirect,
+)
 from .semantics import UnjudgedAmbient
 from .lex import (
     command_segments,
+    guarded_write_targets,
+    joined_directory,
     list_commands,
     parse_shell,
     parse_shell_words,
     placed_path,
     placed_words,
+    named_write_verdict,
     read_segments,
-    redirection_verdict,
     shell_flag_write_targets,
     shell_path_verb_targets,
     shell_write_targets,
     simple_commands,
     substitutions,
+    tee_operands,
 )
-from .syntax import Command, Script, Word, readable_prefix, word_text
-from .effects import declared_verdict
+from .syntax import Command, Script, Word, expands, readable_prefix, word_text
+from .effects import STRENGTH, declared_verdict, member_for
 from .commands import (
     SedContext,
     WriteFacts,
@@ -88,9 +106,10 @@ from .commands import (
     unresolved_evidence,
     decide_awk_words,
     decide_command_rows,
-    decide_curl_words,
-    decide_gh_api_words,
+    decide_download_words,
+    decide_gh_words,
     decide_sed_words,
+    decide_tool_run,
     decide_uv,
     git_checkout_pathspec,
     git_restore_source,
@@ -102,6 +121,7 @@ from .commands import (
     unread_readings,
     landing_words,
     matched_command_row,
+    row_verdict,
 )
 
 ESCALATE_RE = re.compile(
@@ -154,20 +174,26 @@ class ShellContext(TypedDict):
     host_ports: list[int]
     """Loopback ports a process outside this session's container listens on.
 
-    Carried for `curl` for the reason ``unjudged_ambient`` is: it is the one
-    verb that hands its question to the fetch scopes, and a scope admitting
-    this machine's loopback admits the operator's services on it wherever a
+    Carried for `curl` and `wget` for the reason ``unscoped_fetch`` is: they
+    hand their question to the fetch scopes, and a scope admitting this
+    machine's loopback admits the operator's services on it wherever a
     container shares the host's network."""
 
-    unjudged_ambient: UnjudgedAmbient
-    """The profile's answer for what nothing classified, carried for `curl`.
+    unscoped_fetch: UnjudgedAmbient
+    """What an origin no fetch scope names answers, carried for the downloaders.
 
     A segment classifier does not settle anything, so almost nothing here
-    needs this. `curl` does, because it is the one verb whose row hands the
-    question to the fetch scopes -- and an origin no scope names is the same
-    silence the shell reads this declaration for. Without it, one spelling of
-    reaching an undeclared origin answered from the profile and the other
+    needs this. `curl` and `wget` do, because their screen hands the question
+    to the fetch scopes -- and an origin no scope names is the question
+    `WebFetch` answers from the same declaration. Without it, one spelling of
+    reaching an undeclared origin answered from the declaration and the other
     from a constant."""
+
+    refused_paths: list[RefusedPathRow]
+    """Paths no word of any command may name, each with what to do instead."""
+
+    secret_variables: list[str]
+    """Name patterns of the variables whose values no command may print."""
 
     antipattern_rows: dict[str, list[AntiPatternRow]]
     edit_rules: list[EditRuleRow]
@@ -244,7 +270,9 @@ def shell_context(
     target_tables: list[ShellRuleRow] | None = None,
     contained: bool = False,
     checkout_root: str = "",
-    unjudged_ambient: UnjudgedAmbient = "ask",
+    unscoped_fetch: UnjudgedAmbient = "ask",
+    refused_paths: list[RefusedPathRow] | None = None,
+    secret_variables: list[str] | None = None,
     antipattern_rows: dict[str, list[AntiPatternRow]] | None = None,
     edit_rules: list[EditRuleRow] | None = None,
     import_boundaries: list[ImportBoundaryRow] | None = None,
@@ -288,7 +316,9 @@ def shell_context(
         checkout_root=checkout_root,
         displaced_targets=displaced_targets or [],
         host_ports=host_ports or [],
-        unjudged_ambient=unjudged_ambient,
+        unscoped_fetch=unscoped_fetch,
+        refused_paths=refused_paths or [],
+        secret_variables=secret_variables or [],
         antipattern_rows=antipattern_rows or {},
         edit_rules=edit_rules or [],
         import_boundaries=import_boundaries or [],
@@ -371,6 +401,62 @@ def decide_find_words(
     return decide_command_rows(remaining, context["rows"], write_facts(context))
 
 
+def decide_xargs_words(
+    words: list[str], context: ShellContext, directory: str | None = ""
+) -> KernelDecision:
+    """Judge one `xargs` by its payload, and by what the payload is handed.
+
+    xargs appends the words it reads to the command it runs, so the payload
+    judged as written is the payload with none of its operands: `echo
+    README.md | xargs rm` read as a bare `rm`, which names nothing a
+    human-owned rule could match, and a capture settled it. What those
+    operands are is on stdin, which nothing here reads.
+
+    So a payload keeps its own verdict only where the operands cannot matter
+    to it: a refusal or a deferral stands, and an allow stands where the row
+    that decided it only observes -- `xargs grep`, `xargs wc`, `xargs cat`.
+    Everything else asks, and at a checkpoint no capture settles, because
+    the files it would change are the ones nobody has named.
+    """
+    payload = xargs_payload(words)
+    if payload is None:
+        return KernelDecision(
+            "deny",
+            "an xargs option this policy does not read could take the next word"
+            " as its value, so the command xargs runs is unread",
+            recovery="Spell xargs's options as `xargs --help` lists them, or"
+            " attach an option's value (`-n1`, `--max-procs=4`).",
+        )
+    if not payload:
+        return unjudged("xargs payload is not classified")
+    verdict = decide_shell_segment(payload, context, directory)
+    if verdict.effect in ("deny", "defer"):
+        return verdict
+    deciding = next(
+        (
+            row
+            for row in [*context["rows"], *context["target_tables"]]
+            if verdict.rule and row["rule"] == verdict.rule
+        ),
+        None,
+    )
+    if (
+        verdict.effect == "allow"
+        and deciding is not None
+        and all(member_for(effect["kind"]).observes for effect in deciding["effects"])
+    ):
+        return verdict
+    return KernelDecision(
+        "ask",
+        f"xargs hands `{' '.join(payload)}` operands read from its input, so"
+        " what it changes is named nowhere in the command",
+        checkpoint="unrecoverable",
+        purpose="unrecovered_local_mutation",
+        recovery="Name the files in the command, or loop over a literal list"
+        " of them, so each one can be judged.",
+    )
+
+
 def decide_env_words(
     words: list[str], context: ShellContext, directory: str | None = ""
 ) -> KernelDecision:
@@ -390,6 +476,11 @@ def decide_env_words(
     transcript that outlives the turn — a question would be answered yes on
     the way to something else. A payload this cannot read is unjudged, which
     is the honest answer for `-S` and for a flag no version here knows.
+
+    `-C` moves the payload into another directory, so it is judged there, as
+    `cd <dir> && <command>` is: stepped over, `env -C /etc rm hosts` removed
+    `hosts` from the directory the session stands in. The payload is handed
+    on with its assignments, so a dangerous one is still asked about.
     """
     payload = env_payload(words)
     if payload is None:
@@ -401,30 +492,55 @@ def decide_env_words(
             " are the words in the command line.",
         )
     if not payload:
-        return KernelDecision(
-            "deny",
-            "the whole environment is a credential store, and printing it"
-            " writes every secret in it into this transcript",
-            recovery="Name the variables you want: `printenv <NAME>`.",
-        )
-    return decide_shell_segment(payload, context, directory)
+        return environment_dump()
+    reading = read_wrapper(words, 1, "env")
+    here = directory
+    for option in reading["options"]:
+        if option["name"] not in ("-C", "--chdir"):
+            continue
+        moved = option["value"] or ""
+        if not moved or opaque_argument(moved) or expands(moved):
+            return unjudged(
+                "`env -C` runs its command in a directory only the run resolves"
+            ).advising("Spell the directory literally, or `cd` there first.")
+        here = joined_directory(here, moved)
+    return decide_shell_segment(words[reading["payload"] :], context, here)
 
 
-def decide_printenv_words(words: list[str]) -> KernelDecision:
-    """Judge one `printenv` by whether it says what it wants.
+def decide_time_words(
+    words: list[str], context: ShellContext, directory: str | None = ""
+) -> KernelDecision:
+    """Judge a `time` that writes its report into a file, and what it times.
 
-    Named, it is an ordinary read and one of the most useful there is. Bare,
-    it is the same dump `env` refuses, reached by a second spelling — and a
-    refusal that held only one of them would have taught the habit of reaching
-    for the other.
-
-    Options are not read, only whether anything survives them, because
-    `printenv` has exactly two (`-0` and the informational pair) and none
-    changes what it selects.
+    Stepped over as a wrapper, `time -o <file>` lost the write: `time -o
+    README.md ls` was `ls`, allowed, and the human-owned file was truncated
+    to a timing report. The file is a write no redirection names, so nothing
+    the host resolves stands behind it and it asks; the command it times is
+    judged as ever, and the stronger of the two stands.
     """
-    named = [word for word in words[1:] if not word.startswith("-")]
-    if named:
-        return KernelDecision("allow", "reads the variables it names")
+    reading = read_wrapper(words, 1, "time")
+    written = [
+        option["value"] or ""
+        for option in reading["options"]
+        if option["name"] in ("-o", "--output")
+    ]
+    asked = KernelDecision(
+        "ask",
+        f"time writes its report into {', '.join(written)}, a file no"
+        " redirection names, so nothing judged the write",
+        purpose="unrecovered_local_mutation",
+        recovery="Redirect the report instead -- `{ time <command>; } 2> <file>`"
+        " -- so the file is judged as any redirection's is.",
+    )
+    payload = words[reading["payload"] :]
+    if not payload:
+        return asked
+    timed = decide_shell_segment(payload, context, directory)
+    return timed if STRENGTH.index(timed.effect) >= STRENGTH.index("ask") else asked
+
+
+def environment_dump() -> KernelDecision:
+    """The refusal for printing every variable at once, by whichever spelling."""
     return KernelDecision(
         "deny",
         "the whole environment is a credential store, and printing it writes"
@@ -433,8 +549,75 @@ def decide_printenv_words(words: list[str]) -> KernelDecision:
     )
 
 
+def decide_printenv_words(words: list[str], secrets: list[str]) -> KernelDecision:
+    """Judge one `printenv` by whether it says what it wants.
+
+    Named, it is an ordinary read and one of the most useful there is -- unless
+    a name is one ``secrets`` matches, which is the dump narrowed to the one
+    variable that mattered. Bare, it is the same dump `env` refuses, reached by
+    a second spelling — and a refusal that held only one of them would have
+    taught the habit of reaching for the other.
+
+    Options are not read, only whether anything survives them, because
+    `printenv` has exactly two (`-0` and the informational pair) and none
+    changes what it selects.
+    """
+    named = [word for word in words[1:] if not word.startswith("-")]
+    secret = next((name for name in named if secret_name(name, secrets)), None)
+    if secret is not None:
+        return secret_refusal(secret)
+    if named:
+        return KernelDecision("allow", "reads the variables it names")
+    return environment_dump()
+
+
+def decide_interpreter_words(
+    words: list[str],
+    context: ShellContext,
+    runs_scripts: tuple[str, ...] = SCRIPT_INTERPRETERS,
+) -> KernelDecision | None:
+    """Judge one interpreter invocation by what it hands the interpreter to run.
+
+    The criterion `uv run` already applies: refused where the invocation
+    leaves nothing reviewable behind, which a script file does not do. An
+    interpreter in ``runs_scripts`` runs a named file; inline code, a program
+    fetched from elsewhere, and -- undeclared -- an interpreter handed nothing
+    are refused. The first three hold even where the vocabulary names the
+    interpreter, because a row declaring `bun install` speaks for a
+    subcommand and not for a program nobody can read.
+
+    ``None`` hands a declared interpreter's other forms to its row. Anything
+    else refuses as a bare interpreter, which Python meets over a file too:
+    it runs through `uv run python <script>`, in this project's environment.
+    """
+    executable = posixpath.basename(words[0])
+    declared = declares_command(executable, context["rows"])
+    reading = read_program(words)
+    if executable in runs_scripts:
+        verdict = program_verdict(executable, reading)
+        if verdict is not None and (
+            reading["kind"] in ("script", "inline", "remote") or not declared
+        ):
+            return verdict
+    if declared:
+        return None
+    if len(words) > 1 and is_trusted_script(words[1], context["trusted_script_roots"]):
+        return KernelDecision("allow", "native-managed skill script")
+    return KernelDecision(
+        "deny",
+        f"{executable}: a bare interpreter or inline code leaves nothing"
+        " behind to review",
+        recovery="Write the code to a named script file and run it through"
+        " `uv run python <script>`; a bare interpreter is refused even"
+        " over a file.",
+    )
+
+
 def decide_segment_words(
-    words: list[str], context: ShellContext, directory: str | None = ""
+    words: list[str],
+    context: ShellContext,
+    directory: str | None = "",
+    operands_judged: bool = False,
 ) -> KernelDecision:
     """Classify one command's words against the vocabulary and handlers.
 
@@ -443,6 +626,12 @@ def decide_segment_words(
     the word list a segment settles to, so a construct that recurses into a
     payload — ``xargs``, ``find -exec`` — goes back through the segment and
     meets the same reading of it.
+
+    ``operands_judged`` says the line's write walk
+    (:func:`~lup.policy.kernel.lex.named_write_verdict`) has already judged
+    the files these words write, which it does for the words a command
+    itself carries. A payload is handed operands no word names -- `find
+    -exec tee {}` writes every file it finds -- so it is never set there.
     """
     executable = posixpath.basename(words[0])
     # No program is spelled with a leading dash, so reaching one means a
@@ -458,19 +647,10 @@ def decide_segment_words(
             recovery="Write the command without the wrapper, or name the"
             " wrapper's options so the command after them can be read.",
         )
-    if executable in INTERPRETERS and not declares_command(executable, context["rows"]):
-        if len(words) > 1 and is_trusted_script(
-            words[1], context["trusted_script_roots"]
-        ):
-            return KernelDecision("allow", "native-managed skill script")
-        return KernelDecision(
-            "deny",
-            f"{executable}: a bare interpreter or inline code leaves nothing"
-            " behind to review",
-            recovery="Write the code to a named script file and run it through"
-            " `uv run python <script>`; a bare interpreter is refused even"
-            " over a file.",
-        )
+    if executable in INTERPRETERS:
+        interpreted = decide_interpreter_words(words, context)
+        if interpreted is not None:
+            return interpreted
     if executable == "git" and any("ext::" in word for word in words):
         transport = next(word for word in words if "ext::" in word)
         return KernelDecision(
@@ -478,6 +658,13 @@ def decide_segment_words(
             f"the git ext transport in {transport!r} can run commands",
         )
     if executable == "git":
+        # lup: defer: the segment reading consumes `--work-tree` before these
+        # grants read the words, so `git --work-tree=/tmp restore --source=HEAD
+        # README.md` and `git --work-tree /tmp checkout HEAD -- README.md` are
+        # granted as a restore of this checkout while they overwrite a tree
+        # outside it that no reflog or capture holds. Decide whether a consumed
+        # `--work-tree` withdraws the grants or places their operands in that
+        # tree, where the write scope would then answer for them.
         recognized = (
             git_checkout_pathspec(words)
             or git_restore_source(words)
@@ -488,6 +675,20 @@ def decide_segment_words(
         )
         if recognized is not None:
             return recognized
+        # The readings above grant, so they read the subcommand where it is
+        # written: a global they did not model could change what they cover.
+        # One answer among them is a question rather than a grant -- a restore
+        # reaching a protected file -- and that is owed however the restore
+        # was spelled, so it is asked again past git's globals and only the
+        # question is kept. `git --no-pager restore README.md` is the restore.
+        at = global_span(words, context["rows"])
+        owned = git_restore_unchanged(
+            [words[0], *words[at:]],
+            context["recoverable_targets"],
+            context["path_rules"],
+        )
+        if owned is not None and owned.effect != "allow":
+            return owned
     refused = refuses_generated_plugin_write(
         words,
         context["path_roles"],
@@ -496,6 +697,43 @@ def decide_segment_words(
     )
     if refused is not None:
         return refused
+    deleted = protected_deletion(
+        words, context["path_rules"], context["rows"], context["checkout_root"]
+    ) or protected_placement(
+        words,
+        context["path_rules"],
+        context["rows"],
+        context["existing_targets"],
+        context["checkout_root"],
+    )
+    if deleted is not None:
+        return deleted
+    # `tee f` writes what `> f` writes, and the write walk judged its files
+    # the way it judges a redirection target. The row asking about every tee
+    # has nothing left to add, and keeping it is what gave the two spellings
+    # of one write two answers. It still speaks for the verdict, so a table
+    # that declares no tee leaves it unlisted rather than allowed, and one
+    # that refuses tee keeps the refusal.
+    teed = next(
+        (row for row in context["rows"] if row["command"] == "tee"),
+        None,
+    )
+    if (
+        operands_judged
+        and teed is not None
+        and executable == "tee"
+        and tee_operands(words) is not None
+        and declared_verdict(
+            teed["effects"],
+            teed["refuses"],
+            unresolved_evidence(write_facts(context)),
+            "inside" if context["contained"] else "ambient",
+        )
+        != "deny"
+    ):
+        return row_verdict(
+            teed, "allow", "tee's files are judged as a redirection's are"
+        )
     recoverable = confined_to_recoverable_roots(
         words,
         context["path_roles"],
@@ -522,24 +760,29 @@ def decide_segment_words(
     if removal is not None:
         return removal
     if executable == "xargs":
-        payload = xargs_payload(words)
-        if not payload:
-            return unjudged("xargs payload is not classified")
-        return decide_shell_segment(payload, context, directory)
+        return decide_xargs_words(words, context, directory)
     if executable == "env":
         return decide_env_words(words, context, directory)
+    if executable == "time":
+        return decide_time_words(words, context, directory)
     if executable == "printenv":
-        return decide_printenv_words(words)
-    if executable == "curl":
-        return decide_curl_words(
+        return decide_printenv_words(words, context["secret_variables"])
+    # `set` alone lists every variable the shell holds, exported or not.
+    if executable == "set" and len(words) == 1:
+        return environment_dump()
+    if executable in ("curl", "wget"):
+        return decide_download_words(
             words,
             context["allowed_scopes"],
             context["denied_scopes"],
-            context["unjudged_ambient"],
-            context["host_ports"],
+            context["unscoped_fetch"],
+            context["rows"],
+            write_facts(context),
+            directory,
+            host_ports=context["host_ports"],
         )
-    if executable == "gh" and len(words) > 1 and words[1] == "api":
-        return decide_gh_api_words(words)
+    if executable == "gh":
+        return decide_gh_words(words, context["rows"], write_facts(context))
     if executable == "find":
         return decide_find_words(words, context, directory)
     if executable == "sed":
@@ -547,21 +790,17 @@ def decide_segment_words(
     if executable in ("awk", "gawk", "mawk"):
         return decide_awk_words(words)
     if executable == "uvx":
-        if len(words) > 1 and posixpath.basename(words[1]) in INTERPRETERS:
-            return KernelDecision(
-                "deny",
-                f"uvx {words[1]}: inline code leaves nothing behind to review",
-                recovery="Write the code to a named script file and run it through"
-                " `uv run python <script>`; a bare interpreter is refused even"
-                " over a file.",
-            )
-        return unjudged("uvx command is not classified")
+        refused = decide_tool_run("uvx", words[1:])
+        if refused is not None:
+            return refused
+        return decide_command_rows(words, context["rows"], write_facts(context))
     if executable == "uv" and len(words) > 1:
         return decide_uv(
             words,
             context["runner_targets"],
             context["target_tables"],
             write_facts(context),
+            rows=context["rows"],
         )
     decided = decide_command_rows(words, context["rows"], write_facts(context))
     # A variable a later command sees stays in this process, unless it is one
@@ -573,7 +812,10 @@ def decide_segment_words(
 
 
 def decide_shell_segment(
-    segment: list[str], context: ShellContext, directory: str | None = ""
+    segment: list[str],
+    context: ShellContext,
+    directory: str | None = "",
+    operands_judged: bool = False,
 ) -> KernelDecision:
     """Classify one parsed shell segment, letting a help probe soften the effect.
 
@@ -616,10 +858,15 @@ def decide_shell_segment(
         if not words:
             return assigned
         return joined_decision(
-            [assigned, decide_shell_segment(words, context, directory)]
+            [assigned, decide_shell_segment(words, context, directory, operands_judged)]
         )
     if not words:
         return unjudged("shell segment has no command")
+    withheld = withheld_operand(
+        words, directory, context["checkout_root"], context["refused_paths"]
+    )
+    if withheld is not None:
+        return withheld
     placed = placed_words(words, directory, context["rows"])
     if placed is None:
         return unjudged(
@@ -628,7 +875,7 @@ def decide_shell_segment(
     # A command word nobody can read is read as each program whose verb the
     # words after it name, and the spelling's own verdict is the floor.
     return strictest_reading(
-        decide_placed_words(placed, context, directory),
+        decide_placed_words(placed, context, directory, operands_judged),
         [
             Reading(
                 word=placed[0],
@@ -643,9 +890,17 @@ def decide_shell_segment(
 
 
 def decide_placed_words(
-    words: list[str], context: ShellContext, directory: str | None
+    words: list[str],
+    context: ShellContext,
+    directory: str | None,
+    operands_judged: bool = False,
 ) -> KernelDecision:
-    """One segment's verdict once its words are placed, each read as spelled."""
+    """One segment's verdict once its words are placed, each read as spelled.
+
+    ``operands_judged`` is :func:`decide_segment_words`' own, and holds only for
+    the words as spelled: a reading of an unread command word as another
+    program was never walked for the files that program writes.
+    """
     if SUBSTITUTION_SENTINEL in words[0]:
         return unjudged("a command substitution in command position is not classified")
     if any(
@@ -660,12 +915,12 @@ def decide_placed_words(
         floor = unjudged(
             "a command substitution result could become a guarded flag"
         ).advising("Run it in its own call and splice the literal output.")
-        spelled = decide_segment_words(words, context, directory)
+        spelled = decide_segment_words(words, context, directory, operands_judged)
         return strictest_reading(
             carrying_readings(floor, (spelled,)),
             unread_readings(words, context["rows"], write_facts(context)),
         )
-    decision = decide_segment_words(words, context, directory)
+    decision = decide_segment_words(words, context, directory, operands_judged)
     if is_help_probe(words[1:]):
         return decision.revised(
             effect="allow",
@@ -687,16 +942,26 @@ def uv_post_target_words_safe(
     the trust literal arguments already receive there. An unknown word at or
     before the target could become a uv flag, a flag value, or the target
     itself, so any such word keeps the conservative gate.
+
+    The target is found as `decide_uv` finds it, past uv's globals and the
+    options of `run` with their values: read as the first word not beginning
+    with a dash, `uv run --refresh-package lup-devtools python $(...)` named
+    the blessed target where it names a package, and `uv --quiet run
+    lup-devtools $(...)` named no `run` at all.
     """
-    if len(words) < 3 or words[1] != "run":
+    normalized = uv_command_words(words)
+    if normalized is None or normalized[1:2] != ["run"]:
         return False
-    for word in words[2:]:
-        if opaque_argument(word):
-            return False
-        if word.startswith("-"):
-            continue
-        return "/" not in word and any(row["name"] == word for row in runner_targets)
-    return False
+    run_words = uv_run_words(normalized)
+    options = normalized[2 : len(normalized) - len(run_words)]
+    if not run_words or any(opaque_argument(word) for word in options):
+        return False
+    target = run_words[0]
+    return (
+        not opaque_argument(target)
+        and "/" not in target
+        and any(row["name"] == target for row in runner_targets)
+    )
 
 
 def argument_safe_words(words: list[str], context: ShellContext) -> bool:
@@ -711,7 +976,14 @@ def argument_safe_words(words: list[str], context: ShellContext) -> bool:
     executable = posixpath.basename(words[0])
     if executable == "uv":
         return uv_post_target_words_safe(words, context["runner_targets"])
-    if executable in INTERPRETERS or executable in ("sed", "git", "uvx", "xargs"):
+    if executable in INTERPRETERS or executable in (
+        "sed",
+        "git",
+        "uvx",
+        "xargs",
+        "curl",
+        "wget",
+    ):
         return False
     matches = [row for row in context["rows"] if row["command"] == executable]
     if len(matches) != 1 or matches[0]["subcommand"] or matches[0]["ask_flags"]:
@@ -896,13 +1168,24 @@ def decide_simple(
             bindings = bind_name(bindings, pair["name"], pair["value"])
         return Walked(decisions=[], bindings=bindings, stopped=False)
     words = effective_command(texts)["words"]
+    printed = printed_secret(
+        command["words"][len(texts) - len(words) :],
+        command["redirects"],
+        context["secret_variables"],
+    )
+    if printed is not None:
+        return Walked(decisions=[printed], bindings=bindings, stopped=False)
     if words and posixpath.basename(words[0]) == "read":
         extended = read_bindings(words, bindings)
         if isinstance(extended, KernelDecision):
             return Walked(decisions=[extended], bindings=bindings, stopped=True)
         return Walked(decisions=[], bindings=extended, stopped=False)
     return Walked(
-        decisions=[decide_shell_segment(texts, context, command["directory"])],
+        decisions=[
+            decide_shell_segment(
+                texts, context, command["directory"], operands_judged=True
+            )
+        ],
         bindings=bindings,
         stopped=False,
     )
@@ -1048,7 +1331,9 @@ def classify_shell(
     target_tables: list[ShellRuleRow] | None = None,
     contained: bool = False,
     checkout_root: str = "",
-    unjudged_ambient: UnjudgedAmbient = "ask",
+    unscoped_fetch: UnjudgedAmbient = "ask",
+    refused_paths: list[RefusedPathRow] | None = None,
+    secret_variables: list[str] | None = None,
     antipattern_rows: dict[str, list[AntiPatternRow]] | None = None,
     edit_rules: list[EditRuleRow] | None = None,
     import_boundaries: list[ImportBoundaryRow] | None = None,
@@ -1090,7 +1375,9 @@ def classify_shell(
         target_tables=target_tables,
         contained=contained,
         checkout_root=checkout_root,
-        unjudged_ambient=unjudged_ambient,
+        unscoped_fetch=unscoped_fetch,
+        refused_paths=refused_paths,
+        secret_variables=secret_variables,
         antipattern_rows=antipattern_rows,
         edit_rules=edit_rules,
         import_boundaries=import_boundaries,
@@ -1110,7 +1397,7 @@ def classify_shell(
         read = bind_script(readable_prefix(command))
         if not read["items"]:
             return tree
-        redirected = redirection_verdict(
+        redirected = named_write_verdict(
             read,
             existing_targets,
             path_roles,
@@ -1121,14 +1408,19 @@ def classify_shell(
             tracked_targets,
             displaced_targets,
         )
+        withheld = withheld_redirect(read, checkout_root, context["refused_paths"])
         return joined_decision(
             [
+                *([] if withheld is None else [withheld]),
                 *([] if redirected is None else [redirected]),
                 *decide_list(read, context)["decisions"],
                 tree,
             ]
         )
-    redirected = redirection_verdict(
+    withheld = withheld_redirect(tree, checkout_root, context["refused_paths"])
+    if withheld is not None:
+        return withheld
+    redirected = named_write_verdict(
         tree,
         existing_targets,
         path_roles,
@@ -1222,6 +1514,9 @@ def decide_shell(
     recovered: bool = False,
     relayed: bool = False,
     unjudged_ambient: UnjudgedAmbient = "ask",
+    unscoped_fetch: UnjudgedAmbient | None = None,
+    refused_paths: list[RefusedPathRow] | None = None,
+    secret_variables: list[str] | None = None,
     unleased_targets: list[str] | None = None,
     readonly_targets: list[str] | None = None,
     displaced_targets: list[DisplacedTargetRow] | None = None,
@@ -1285,6 +1580,9 @@ def decide_shell(
     decision nobody needed to make. Three states rather than two, because
     "nobody to ask" and "somebody, but not right now" are different answers
     and were sharing one.
+
+    ``unscoped_fetch`` is what a `curl` or `wget` of an origin no fetch scope
+    names answers, and ``None`` reads ``unjudged_ambient`` for it.
     """
     hint = ESCALATE_HINT if interactive else RELAY_HINT if relayed else RESHAPE_HINT
     # Net of exclusion here, because exclusion is the native sandbox's own
@@ -1324,10 +1622,14 @@ def decide_shell(
                 # path inside the checkout reaches no declaration, and one
                 # file answers twice depending on how it was named.
                 checkout_root=checkout_root,
-                # And `curl` needs the same declaration the settlement below
-                # reads for a command nothing classified, because reaching an
-                # undeclared origin is that silence spelled as a verb.
-                unjudged_ambient=unjudged_ambient,
+                # And the downloaders need what an unlisted origin answers:
+                # the fetch declaration where the caller holds one, and the
+                # settlement's own posture below where it does not.
+                unscoped_fetch=unscoped_fetch or unjudged_ambient,
+                # What no word may name and no builtin may print, declared by
+                # the project rather than known here.
+                refused_paths=refused_paths,
+                secret_variables=secret_variables,
                 # The edit gates, for the verbs that rewrite a file in place.
                 # Absent, every such rewrite asks, which is the arrangement
                 # that makes a composition forgetting them safe rather than
@@ -1361,6 +1663,10 @@ def decide_shell(
             unjudged_ambient=unjudged_ambient,
             unleased=unleased_targets,
             readonly=readonly_targets,
+            # Read here rather than handed in: what a file *is* needs no host,
+            # so every caller -- a composed policy, either dispatcher, `dev
+            # policy` -- refuses the same pointers with no fact to forget.
+            guarded=guarded_write_targets(reading.remainder, rows, displaced_targets),
             displaced=displaced_targets,
             landings=landings,
             hint=hint,

@@ -56,6 +56,21 @@ def test_flags_are_not_patches() -> None:
     ]
 
 
+def test_a_git_global_before_apply_still_hands_over_the_patch() -> None:
+    """A global moves `apply` along, and the patch is read from past it.
+
+    Read where `apply` was written second, `git --no-pager apply fix.patch`
+    named no patch, so nothing it rewrote was put to the gates afterwards.
+    """
+    for command in (
+        "git --no-pager apply fix.patch",
+        "git -P apply fix.patch",
+        "git -c color.ui=false apply fix.patch",
+        "git --literal-pathspecs apply -v fix.patch",
+    ):
+        assert shell_patch_operands(command, VOCABULARY) == ["fix.patch"], command
+
+
 def test_a_patch_arriving_on_standard_input_names_nothing() -> None:
     """A spelling this cannot see, and must not guess at.
 

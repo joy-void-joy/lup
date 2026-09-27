@@ -16,12 +16,14 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from lup.harness.codescan.antipatterns import NO_RUNTIME_READER, rule_set_for
 from lup.harness.models import HookPathRole, HookSet, HookUrlScope
 from lup.policy.assets.host import contained as measured_contained
 from lup.policy.assets.host import delivers, measured_boundary
 from lup.policy.enforcement import SemanticToolPolicy
 from lup.policy.grants import LeaseGrants
 from lup.policy.kernel.rows import PathRoleRow
+from lup.policy.peer_policy import erase_peer_policy
 from lup.policy.rules import (
     EditPolicy,
     FetchPolicy,
@@ -29,6 +31,7 @@ from lup.policy.rules import (
     ShellPolicy,
     UrlScope,
     human_owned_path_rule,
+    protected_root_rule,
 )
 
 
@@ -43,28 +46,6 @@ def declared_scope(scope: HookUrlScope) -> UrlScope:
     )
 
 
-def protected_root_rule(root: Path) -> PathRule:
-    """One declared root, as the protected-path rule it compiles to.
-
-    Scratch is the exception and matches by path part rather than by subtree,
-    because a scratch directory is reachable at more than one root and the
-    rule is about what the directory is, not where it sits.
-    """
-    portable = root.as_posix()
-    if portable == "tmp":
-        return PathRule(
-            kind="contains_part",
-            value=portable,
-            reason="scratch path requires approval",
-        )
-    return PathRule(
-        kind="subtree",
-        value=portable,
-        reason="protected path requires approval",
-        allow_autonomous=True,
-    )
-
-
 def declared_path_rules(hooks: HookSet) -> list[PathRule]:
     """Every protected-path rule this hook set implies.
 
@@ -73,7 +54,7 @@ def declared_path_rules(hooks: HookSet) -> list[PathRule]:
     what any adopter listed.
     """
     return [
-        *[protected_root_rule(root) for root in hooks.protected_edit_roots],
+        *[protected_root_rule(root.as_posix()) for root in hooks.protected_edit_roots],
         *[human_owned_path_rule(path.as_posix()) for path in hooks.human_owned_files],
         PathRule(
             kind="name_prefix",
@@ -162,18 +143,29 @@ def semantic_policy_for(
         acceptance_guard=guard.erased() if (guard := hooks.acceptance_guard) else None,
         edit_rules=hooks.resolved_edit_rules(),
         import_boundaries=hooks.resolved_import_boundaries(),
+        peer_policy=erase_peer_policy(hooks.peer_policy),
+        # The table each plugin is compiled with, by the same call, in no
+        # runtime's words. A launch that relaxed the rules compiled its own
+        # selection into its tree and recorded it nowhere this process reads,
+        # so this answers with the selection the repository declares.
+        # lup: defer: record a launch's relaxed selection in its ledger, so a
+        # composition inside that session judges with what the session meets.
+        rules=rule_set_for(NO_RUNTIME_READER, hooks.rules, hooks.anti_patterns),
     )
     return SemanticToolPolicy(
         fetch=FetchPolicy(
             allowed,
             denied,
-            hooks.unjudged_ambient,
+            hooks.resolved_unscoped_fetch(),
             contained=contained and inside_placement,
         ),
         shell=ShellPolicy(
             hooks.resolved_shell_rules(),
             allowed_urls=allowed,
             denied_urls=denied,
+            unscoped_fetch=hooks.resolved_unscoped_fetch(),
+            refused_paths=list(hooks.refused_paths),
+            secret_variables=list(hooks.secret_variables),
             sandbox_active=sandbox_active,
             sandbox_excluded_commands=hooks.excluded_commands(),
             escapable=escapable,

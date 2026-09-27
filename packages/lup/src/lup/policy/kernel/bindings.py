@@ -33,6 +33,7 @@ from .syntax import (
     Word,
     WordPart,
     part,
+    verbatim,
     word_text,
 )
 from .words import effective_command
@@ -57,26 +58,14 @@ def bind_name(
     return (*kept, ShellBinding(name=name, value=value))
 
 
-def literal_part(item: WordPart) -> bool:
-    """Whether one word part expands to exactly its own characters."""
-    match item["kind"]:
-        case "literal" | "escaped" | "single":
-            return True
-        case "double":
-            return all(literal_part(child) for child in item["parts"])
-        case _:
-            return False
-
-
 def literal_loop_word(word: Word) -> bool:
     """A word whose runtime expansion is exactly the text it reads as.
 
-    Quoting is what decides it: `'*.py'` is those five characters, `*.py`
-    is whatever the glob matches, and `"$f"` is whatever `f` holds.
+    Quoting is what decides it (:func:`~lup.policy.kernel.syntax.verbatim`):
+    `'*.py'` is those five characters, `*.py` is whatever the glob matches,
+    `"$f"` is whatever `f` holds, and `a{b,c}` is two words.
     """
-    return not word_text(word).startswith("/dev/fd/") and all(
-        literal_part(item) for item in word["parts"]
-    )
+    return not word_text(word).startswith("/dev/fd/") and verbatim(word)
 
 
 def literal_value(word: str) -> bool:

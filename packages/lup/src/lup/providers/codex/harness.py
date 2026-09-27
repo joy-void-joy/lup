@@ -681,6 +681,7 @@ CODEX_DYNAMIC_COMMANDS = (
     "sed",
     "uv",
     "uvx",
+    "wget",
     "xargs",
 )
 """Executables whose semantic decision cannot be represented by one prefix."""
@@ -1021,6 +1022,9 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                         refused_tools=list(source.refused_tools),
                         peer_policy=source.peer_policy,
                         recoverable_target_limit=source.recoverable_target_limit,
+                        unscoped_fetch=source.unscoped_fetch,
+                        refused_paths=list(source.refused_paths),
+                        secret_variables=list(source.secret_variables),
                         runner_targets=list(source.runner_targets),
                         sandbox_excluded_commands=source.excluded_commands(),
                         auto_escape_prefixes=codex_allow_prefixes(

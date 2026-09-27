@@ -40,6 +40,7 @@ WordPartKind = Literal[
     "process",
     "glob",
     "tilde",
+    "dollar_quote",
 ]
 
 
@@ -52,6 +53,11 @@ class WordPart(TypedDict):
     expansion. ``parts`` holds a double-quoted piece's children, and a
     parameter operand's -- `${X:-$(cmd)}` runs `cmd`. ``script`` holds the
     parsed command of a substitution, as a one-element list.
+
+    A ``dollar_quote`` is the unquoted `$` that opens `$'…'` or `$"…"`. The
+    quoted piece after it is read as written, but the shell rewrites it --
+    escapes such as `\\x2d` in the one, a translation in the other -- so the
+    text is not what the program receives, and this piece says so.
     """
 
     kind: WordPartKind
@@ -692,6 +698,11 @@ class ShellLexer:
                 raise ShellSyntaxError(
                     KernelDecision("deny", BACKTICK_REASON, recovery=BACKTICK_RECOVERY)
                 )
+            if character == "$" and self.at(1) in ("'", '"'):
+                flush()
+                parts.append(part("dollar_quote", character))
+                self.position += 1
+                continue
             if character == "$":
                 expansion = self.read_dollar()
                 if expansion["kind"] == "literal":
@@ -890,6 +901,70 @@ class ShellLexer:
         return source[start : end - 1]
 
 
+class VerbatimText(str):
+    """A word's text where every character reaches the program as written.
+
+    Every rule reads a word as a string, and reads a `$` in one as an
+    expansion. Quoting says it often is not one: `'a$'`, `'$HOME'` and `\\$x`
+    are those characters and nothing more. The tree knows which is which, and
+    this carries that fact past :func:`word_text` into the string the rules
+    read, without changing a character of it. A reader of the content -- a
+    sed script the host runs, the bytes an `echo` writes -- sees exactly the
+    text it always saw.
+
+    Anything derived from one is a plain ``str`` again: a slice, a join, a
+    normalized path. That is the safe direction, because a plain string is
+    read the way every string was read before this existed. A reader that
+    keeps a derived piece verbatim says so through :func:`verbatim_piece`.
+    """
+
+
+def verbatim_piece(whole: str, piece: str) -> str:
+    """A piece cut from a word, verbatim wherever the word it came from was.
+
+    Every character of a verbatim word is literal, so every run of them is
+    too: `--output='a$b'` names the path `a$b` as surely as `-o 'a$b'` does.
+    """
+    return VerbatimText(piece) if isinstance(whole, VerbatimText) else piece
+
+
+def verbatim_part(item: WordPart) -> bool:
+    """Whether one part reaches the program as exactly the text it reads as.
+
+    Quoting and escaping make a piece literal. Outside them a literal piece is
+    literal only where nothing in it opens an expansion this grammar reads as
+    plain characters: a `{` a brace expansion opens on, and a `~` bash expands
+    after `=` and `:`. A `$` there is literal already, since the lexer reads
+    one as a parameter wherever it can open one.
+    """
+    match item["kind"]:
+        case "escaped" | "single":
+            return True
+        case "double":
+            return all(
+                child["kind"] in ("literal", "escaped") for child in item["parts"]
+            )
+        case "literal":
+            return not any(character in item["text"] for character in "{~")
+        case _:
+            return False
+
+
+def verbatim(word: Word) -> bool:
+    """Whether a whole word reaches the program as exactly the text it reads as."""
+    return all(verbatim_part(item) for item in word["parts"])
+
+
+def expands(word: str) -> bool:
+    """Whether a word as the rules read it could still become something else.
+
+    A `$` or a backtick left standing in the text is an expansion nothing
+    resolved, unless the word is :class:`VerbatimText` and the character was
+    quoted into it.
+    """
+    return not isinstance(word, VerbatimText) and any(marker in word for marker in "$`")
+
+
 def word_text(word: Word) -> str:
     """The string a word reads as, once quoting is removed.
 
@@ -897,9 +972,12 @@ def word_text(word: Word) -> str:
     keeps its spelling, so a `$` still standing is exactly a word that could
     become something else; a command substitution reads as
     :data:`SUBSTITUTION_SENTINEL` and a process substitution as the
-    `/dev/fd` path the command is handed.
+    `/dev/fd` path the command is handed. A word nothing in expands comes
+    back as :class:`VerbatimText`, so the `$` its quotes held reads as the
+    character it is.
     """
-    return "".join(part_text(item) for item in word["parts"])
+    text = "".join(part_text(item) for item in word["parts"])
+    return VerbatimText(text) if verbatim(word) else text
 
 
 def part_text(item: WordPart) -> str:

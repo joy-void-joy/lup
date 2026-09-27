@@ -25,6 +25,7 @@ from lup.policy.identity import AGENT_IDENTITY_ENV, POLICY_ROOT_ENV
 import lup.policy.kernel as kernel
 from lup.policy.kernel.typescript import TYPESCRIPT_SUFFIXES
 from lup.policy.kernel.effects import EffectRow, effect_row_values
+from lup.policy.kernel.semantics import UnjudgedAmbient
 from lup.policy.kernel.rows import (
     AcceptanceGuardRow,
     AntiPatternRow,
@@ -33,6 +34,7 @@ from lup.policy.kernel.rows import (
     PathRoleRow,
     PathRuleRow,
     PeerPolicyRow,
+    RefusedPathRow,
     RefusedToolRow,
     RunnerTargetRow,
     ShellRuleRow,
@@ -45,6 +47,7 @@ from lup.policy.kernel.rows import (
 from lup.policy.edit_rules import EditRule, erase_edit_rules
 from lup.policy.imports import ImportBoundary
 from lup.policy.peer_policy import PeerPolicy, erase_peer_policy
+from lup.policy.refused_paths import RefusedPaths
 from lup.policy.refused_tools import RefusedTool, erase_refused_tools
 from lup.policy.shell_rules import (
     RunnerTargetRule,
@@ -53,7 +56,12 @@ from lup.policy.shell_rules import (
     erase_shell_rules,
     runner_target_tables,
 )
-from lup.policy.rules import antipattern_row, human_owned_path_rule, path_rule_row
+from lup.policy.rules import (
+    antipattern_row,
+    human_owned_path_rule,
+    path_rule_row,
+    protected_root_rule,
+)
 from lup.types import JsonValue
 
 
@@ -123,33 +131,12 @@ def runtime_url_scope(
     )
 
 
-def runtime_path_rule(root: str) -> PathRuleRow:
-    """Compile one application root into its primitive protected-path row."""
-    match root:
-        case "tmp":
-            return PathRuleRow(
-                kind="contains_part",
-                value=root,
-                reason="scratch path requires approval",
-                recovery="",
-                allow_autonomous=False,
-            )
-        case _:
-            return PathRuleRow(
-                kind="subtree",
-                value=root,
-                reason="protected path requires approval",
-                recovery="",
-                allow_autonomous=True,
-            )
-
-
 def runtime_path_rules(
     protected_roots: list[str], human_owned_files: list[str]
 ) -> list[PathRuleRow]:
     """Compile application roots plus invariant edit guardrails."""
     return [
-        *[runtime_path_rule(root) for root in protected_roots],
+        *[path_rule_row(protected_root_rule(root)) for root in protected_roots],
         *[path_rule_row(human_owned_path_rule(path)) for path in human_owned_files],
         PathRuleRow(
             kind="name_prefix",
@@ -388,6 +375,21 @@ def refused_tool_rows_literal(rows: list[RefusedToolRow]) -> str:
     )
 
 
+def refused_path_rows_literal(rows: list[RefusedPathRow]) -> str:
+    """Render declared path refusals as primitive runtime rows."""
+    return mapping_rows_literal(
+        [
+            [
+                RenderedField(name="paths", value=row["paths"]),
+                RenderedField(name="exempt", value=row["exempt"]),
+                RenderedField(name="reason", value=row["reason"]),
+                RenderedField(name="recovery", value=row["recovery"]),
+            ]
+            for row in rows
+        ]
+    )
+
+
 def runner_target_rows_literal(rows: list[RunnerTargetRow]) -> str:
     """Render the declared runner targets as primitive runtime rows.
 
@@ -599,12 +601,19 @@ def render_policy_data(
     repair_command: list[str],
     rules: RuleSet | None = None,
     import_boundaries: list[ImportBoundary] | None = None,
+    unscoped_fetch: UnjudgedAmbient | None = None,
+    refused_paths: list[RefusedPaths] | None = None,
+    secret_variables: list[str] | None = None,
 ) -> str:
     """Render one plugin's canonical policy rows without executable logic.
 
     ``rules`` is the table compiled for the runtime this plugin belongs to, so
     a rule whose message names a native tool ships each tree the words that
     tree can act on. Omitting it renders the runtime-neutral table.
+
+    ``unscoped_fetch`` ships as declared, ``None`` included: an unset
+    declaration is answered at runtime by the posture the launch measured,
+    which no compiled constant could know.
     """
     body = "\n\n".join(
         [
@@ -612,6 +621,8 @@ def render_policy_data(
             + url_scope_rows_literal(allowed_fetch_scopes),
             "DENIED_FETCH_SCOPES: list[UrlScopeRow] = "
             + url_scope_rows_literal(denied_fetch_scopes),
+            "UNSCOPED_FETCH: UnjudgedAmbient | None = "
+            + ("None" if unscoped_fetch is None else json.dumps(unscoped_fetch)),
             "PATH_RULES: list[PathRuleRow] = "
             + path_rule_rows_literal(
                 runtime_path_rules(protected_roots, human_owned_files)
@@ -634,6 +645,12 @@ def render_policy_data(
             ),
             "REFUSED_TOOLS: list[RefusedToolRow] = "
             + refused_tool_rows_literal(erase_refused_tools(refused_tools)),
+            "REFUSED_PATHS: list[RefusedPathRow] = "
+            + refused_path_rows_literal(
+                [paths.erased() for paths in refused_paths or []]
+            ),
+            "SECRET_VARIABLES: list[str] = "
+            + string_rows_literal(secret_variables or []),
             "PEER_POLICY: PeerPolicyRow | None = "
             + peer_policy_literal(erase_peer_policy(peer_policy)),
             "AUTONOMOUS_AGENT_IDENTITIES: list[str] = "
@@ -669,12 +686,14 @@ def render_policy_data(
         "    PathRoleRow,\n"
         "    PathRuleRow,\n"
         "    PeerPolicyRow,\n"
+        "    RefusedPathRow,\n"
         "    RefusedToolRow,\n"
         "    RunnerTargetRow,\n"
         "    ShellRuleRow,\n"
         "    SpawnNameRow,\n"
         "    UrlScopeRow,\n"
         "    VerificationRow,\n"
-        ")"
+        ")\n"
+        "from kernel.semantics import UnjudgedAmbient"
         "\n\n\n" + body + "\n"
     )

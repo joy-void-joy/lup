@@ -5,6 +5,7 @@
 import posixpath
 from collections.abc import Sequence
 from fnmatch import fnmatchcase
+from pathlib import PurePosixPath
 from typing import TypedDict
 
 from .archives import archive_targets, archive_write
@@ -15,6 +16,7 @@ from .decision import (
     unjudged,
 )
 from .edit import path_rule_matches, protected_path_reason
+from .programs import InterpreterGrammar, ReadOption, grammar, read_options
 from .roles import (
     GENERATED_PLUGIN_RECOVERY,
     GENERATED_PLUGIN_REFUSAL,
@@ -22,6 +24,7 @@ from .roles import (
     is_generated_plugin_target,
     path_role,
     repository_relative,
+    spells_its_path,
 )
 from .semantics import Reach
 from .rows import (
@@ -31,6 +34,7 @@ from .rows import (
     PathWord,
     ShellRuleRow,
 )
+from .syntax import VerbatimText, verbatim_piece
 
 
 class EffectiveCommand(TypedDict):
@@ -114,19 +118,27 @@ INTERPRETERS = (
 
 
 def timeout_payload(segment: list[str], position: int) -> int:
-    """Skip timeout's own options and duration to its wrapped command."""
-    value_options = ("-k", "--kill-after", "-s", "--signal")
-    while position < len(segment) and segment[position].startswith("-"):
-        option = segment[position]
-        position += 2 if option in value_options else 1
-    return position + 1
+    """Skip timeout's own options and duration to its wrapped command.
+
+    The options by timeout's grammar, clusters included: `-vk 5 10 cmd` sets
+    `-k 5`, and read a word at a time it made `10` the command. An option the
+    grammar cannot read is left where it stands, so the command word begins
+    with a dash and is refused rather than read one word off.
+    """
+    payload = read_wrapper(segment, position, "timeout")["payload"]
+    unread = payload < len(segment) and segment[payload].startswith("-")
+    return payload if unread else payload + 1
 
 
 def nice_payload(segment: list[str], position: int) -> int:
-    """Skip nice's adjustment options to its wrapped command."""
+    """Skip nice's adjustment options to its wrapped command.
+
+    By hand rather than by a grammar, because nice also takes the obsolete
+    `-N` adjustment no option list can spell.
+    """
     while position < len(segment) and segment[position].startswith("-"):
         option = segment[position]
-        position += 2 if option == "-n" else 1
+        position += 2 if option in ("-n", "--adjustment") else 1
     return position
 
 
@@ -160,7 +172,11 @@ def effective_command(segment: list[str]) -> EffectiveCommand:
         ):
             return EffectiveCommand(words=segment[position:], dangerous=dangerous)
         if executable in PASS_THROUGH_WORDS:
-            position = wrapper_payload(segment, position + 1, executable)
+            reading = read_wrapper(segment, position + 1, executable)
+            judged = WRAPPER_JUDGED_OPTIONS.get(executable, ())
+            if any(option["name"] in judged for option in reading["options"]):
+                return EffectiveCommand(words=segment[position:], dangerous=dangerous)
+            position = reading["payload"]
             continue
         if executable == "timeout":
             position = timeout_payload(segment, position + 1)
@@ -177,7 +193,6 @@ def command_words(words: list[str]) -> list[str]:
     return effective_command(words)["words"]
 
 
-# lup: ignore[library-default] — uv's global options consume one following value
 UV_GLOBAL_VALUE_OPTIONS = (
     "--cache-dir",
     "--color",
@@ -186,6 +201,118 @@ UV_GLOBAL_VALUE_OPTIONS = (
     "--project",
     "--config-file",
 )
+"""uv's global options that consume one following value, as `uv help` lists them.
+
+The vocabulary's uv row takes them as its default ``value_flags``, so the walker
+finds a declared uv verb past them exactly as the kernel's own reading does."""
+
+UV_TOOL_RUN_GRAMMAR = grammar(
+    valued=(
+        *UV_GLOBAL_VALUE_OPTIONS,
+        "--from",
+        "-w",
+        "--with",
+        "--with-editable",
+        "--with-requirements",
+        "-c",
+        "--constraints",
+        "-b",
+        "--build-constraints",
+        "--overrides",
+        "--env-file",
+        "--python-platform",
+        "--torch-backend",
+        "--index",
+        "--default-index",
+        "-i",
+        "--index-url",
+        "--extra-index-url",
+        "-f",
+        "--find-links",
+        "--index-strategy",
+        "--keyring-provider",
+        "-P",
+        "--upgrade-package",
+        "--upgrade-group",
+        "--resolution",
+        "--prerelease",
+        "--prerelease-package",
+        "--fork-strategy",
+        "--exclude-newer",
+        "--exclude-newer-package",
+        "--no-sources-package",
+        "--reinstall-package",
+        "--link-mode",
+        "-C",
+        "--config-setting",
+        "--config-settings-package",
+        "--no-build-isolation-package",
+        "--no-build-package",
+        "--no-binary-package",
+        "--refresh-package",
+        "-p",
+        "--python",
+    ),
+    flags=(
+        "--isolated",
+        "--no-env-file",
+        "--lfs",
+        "-V",
+        "--version",
+        "--no-index",
+        "-U",
+        "--upgrade",
+        "--no-sources",
+        "--reinstall",
+        "--compile-bytecode",
+        "--no-build-isolation",
+        "--no-build",
+        "--no-binary",
+        "-n",
+        "--no-cache",
+        "--refresh",
+        "--managed-python",
+        "--no-managed-python",
+        "--no-python-downloads",
+        "-q",
+        "--quiet",
+        "-v",
+        "--verbose",
+        "--system-certs",
+        "--native-tls",
+        "--offline",
+        "--no-progress",
+        "--no-config",
+        "-h",
+        "--help",
+    ),
+)
+"""How `uvx` and `uv tool run` spell their options ahead of the tool they run.
+
+The tool is the first operand past these, which is where an interpreter handed
+inline code has to be seen: `uvx --from foo python -c 1` runs Python exactly
+as `uvx python -c 1` does. An option not listed here could consume the next
+word, so it leaves the tool unread rather than guessed at."""
+
+
+def operand_positions(words: list[str], value_flags: Sequence[str]) -> list[int]:
+    """Where a command's operands stand, each value flag's value stepped over.
+
+    A verb chosen from among operands is chosen from these. Read as every word
+    not beginning with a dash, a value flag's value was an operand too, so
+    `uv pip --cache-dir list install x` named `list` as the verb it runs.
+    """
+    positions: list[int] = []
+    valued = False
+    for index, word in enumerate(words):
+        if valued:
+            valued = False
+            continue
+        if word.startswith("-"):
+            valued = word in value_flags
+            continue
+        positions.append(index)
+    return positions
 
 
 def uv_command_words(words: list[str]) -> list[str] | None:
@@ -468,12 +595,23 @@ def write_scope(
     so it arrives from the host per call and is never declared; empty is the
     honest answer where the caller has none, and leaves the reading exactly as
     it was.
+
+    A spelling that still carries an expansion is ``unbounded``: it names a
+    different file at run time than the one written down, so it could be
+    tracked source, the repository, or a path no capture of this checkout
+    holds, and it is read as the strictest of them. Reading it any other way
+    is how `sort --output=a$X` was granted as a create of a file named
+    ``a$X``, and how `> ~/f` was settled as captured by a snapshot that
+    never held a home directory. A declared scratch root reached through the
+    variable naming it is still scratch, which is read first.
     """
     spelled = repository_relative(path_text, checkout)
     if path_role(spelled, path_roles) == "scratch":
         return "scratch"
     if reaches_git_administration(spelled):
         return "protected"
+    if not spells_its_path(spelled):
+        return "unbounded"
     if leaves_the_checkout(spelled):
         return "outside"
     return "production"
@@ -537,6 +675,27 @@ def unread_question(path: str) -> KernelDecision:
             "write into a scratch path and move the result in once it has been"
             " read, or carry the content in the command so the edit gates read"
             " it as they would an Edit"
+        ),
+    )
+
+
+def unlocated_write(named: str) -> KernelDecision:
+    """The question a write to an ``unbounded`` path puts, however it is spelled.
+
+    ``named`` is the path as the reason opens on it: a redirection, a write
+    flag and a verb's destination are one unknown each. No capture discharges
+    it, because the snapshot holds this checkout and nothing says the path
+    lands there; binding the path to a literal first is what lets the write be
+    judged where it lands.
+    """
+    return KernelDecision(
+        "ask",
+        f"{named} is a path that is only known when the command runs",
+        checkpoint=write_checkpoint("unbounded"),
+        purpose="unrecovered_local_mutation",
+        recovery=(
+            "bind the path to a literal value first, so the write is judged"
+            " where it lands"
         ),
     )
 
@@ -617,19 +776,33 @@ def global_span(words: list[str], rows: list[ShellRuleRow]) -> int:
     boundary tells them apart.
 
     ``len(words)`` where every word is a flag and no subcommand is named.
+
+    Stepped the way :func:`~lup.policy.kernel.commands.split_subcommand`
+    steps, because a reader finding the subcommand one word away from where
+    the row walk found it answers about a different command: a value flag
+    consumes the word after it, and a setting flag consumes the setting it
+    carries there, so `git -c color.ui=false rm` names `rm` and not the
+    setting. Every reader that refuses or asks about a subcommand's operands
+    finds them from here, so `git --no-pager rm README.md` is read as the
+    `git rm README.md` it runs. A reader that grants keeps reading the
+    subcommand where it is written: a global it did not model could change
+    what the grant covers, and a grant missed only costs a question.
     """
     executable = posixpath.basename(words[0])
-    value_flags = [
-        flag
-        for row in rows
-        if row["command"] == executable and not row["subcommand"]
-        for flag in row["value_flags"]
+    defaults = [
+        row for row in rows if row["command"] == executable and not row["subcommand"]
     ]
+    value_flags = [flag for row in defaults for flag in row["value_flags"]]
+    setting_flags = [flag for row in defaults for flag in row["setting_flags"]]
     position = 1
     while position < len(words):
-        if not words[position].startswith("-"):
+        word = words[position]
+        if not word.startswith("-"):
             return position
-        position += 2 if words[position] in value_flags else 1
+        if word in value_flags:
+            position += 2
+            continue
+        position += carried_setting(word, setting_flags, words[position + 1 :])["words"]
     return len(words)
 
 
@@ -652,7 +825,11 @@ def flag_write_words(words: list[str], write_flags: list[str]) -> list[PathWord]
         name, sign, value = word.partition("=")
         if sign and name in write_flags:
             if value:
-                named.append(PathWord(at=index, prefix=f"{name}=", path=value))
+                named.append(
+                    PathWord(
+                        at=index, prefix=f"{name}=", path=verbatim_piece(word, value)
+                    )
+                )
             continue
         following = word in write_flags
     return named
@@ -712,19 +889,23 @@ class RestoreOperands(TypedDict):
     to put one back after resolving it against the restore's directory."""
 
 
-def git_restore_operands(words: list[str]) -> RestoreOperands | None:
+def git_restore_operands(words: list[str], at: int) -> RestoreOperands | None:
     """Split ``git restore`` into the ref it reads from and the paths it writes.
 
     ``None`` where the line is not a restore, carries a flag beyond the source
     and target selectors, or holds a word that expands at run time — each of
     which leaves the restore row's ask to answer for it, because a flag this
     does not know could move which paths are touched.
+
+    ``at`` is where the caller reads the subcommand: a grant reads it where it
+    is written, and a reader naming paths reads it past git's globals, from
+    :func:`global_span`.
     """
-    if len(words) < 3 or posixpath.basename(words[0]) != "git" or words[1] != "restore":
+    if posixpath.basename(words[0]) != "git" or words[at : at + 1] != ["restore"]:
         return None
     source: str | None = None
     named: list[PathWord] = []
-    position = 2
+    position = at + 1
     while position < len(words):
         word = words[position]
         if word == "--source" and position + 1 < len(words):
@@ -750,18 +931,23 @@ def git_restore_operands(words: list[str]) -> RestoreOperands | None:
     return RestoreOperands(source=source, paths=paths, named=named)
 
 
-def git_apply_words(words: list[str]) -> list[PathWord]:
+def git_apply_words(words: list[str], rows: list[ShellRuleRow]) -> list[PathWord]:
     """Which words a `git apply` reads its patch files out of.
 
     The words rather than the paths, because where each sits in the command is
     what resolves it: a list of paths alone cannot say which of them a `-C`
     moved, and every reader here places a path from the word that named it.
+
+    Found past git's globals, because what the patch touches is judged from
+    these: read only where `apply` was written second, `git --no-pager apply`
+    handed nobody its patch, and a protected file it rewrote went unasked.
     """
-    if len(words) < 3 or posixpath.basename(words[0]) != "git" or words[1] != "apply":
+    at = global_span(words, rows)
+    if posixpath.basename(words[0]) != "git" or words[at : at + 1] != ["apply"]:
         return []
     return [
         PathWord(at=index, prefix="", path=word)
-        for index, word in enumerate(words[2:], start=2)
+        for index, word in enumerate(words[at + 1 :], start=at + 1)
         if not word.startswith("-") and word != "--" and not opaque_argument(word)
     ]
 
@@ -1039,6 +1225,204 @@ def protected_write_target(
     return None
 
 
+def expands_to(word: str, name: str) -> bool:
+    """Whether one name in a word could be this name once the shell expands it.
+
+    A literal name is only itself. A glob reaches what it matches, except a
+    leading-dot name, which the shell's expansion skips unless the glob starts
+    with a dot too -- so `*` does not reach `.claude` and `.*` does.
+    """
+    if word == name:
+        return True
+    if not any(character in word for character in "*?["):
+        return False
+    if name.startswith(".") and not word.startswith("."):
+        return False
+    return fnmatchcase(name, word)
+
+
+def deletes_protected(operand: str, row: PathRuleRow) -> bool:
+    """Whether deleting this operand deletes a path the rule protects.
+
+    The rule's own match, and two readings an edit never needs because an
+    edit names one file: a directory holding the protected path (`rm -r .`)
+    and a glob that could expand to it (`rm *.md`). Both are read only for a
+    rule naming a path, since a prefix or a part names no one file to hold.
+    """
+    if path_rule_matches(operand, True, row):
+        return True
+    if row["kind"] not in ("exact", "subtree"):
+        return False
+    held = PurePosixPath(posixpath.normpath(row["value"])).parts
+    named = PurePosixPath(posixpath.normpath(operand)).parts
+    return len(named) <= len(held) and all(
+        expands_to(word, name) for word, name in zip(named, held)
+    )
+
+
+def git_rm_operands(
+    words: list[str], rows: list[ShellRuleRow]
+) -> list[PathWord] | None:
+    """The pathspecs a `git rm` removes, or ``None`` where it removes nothing.
+
+    A dry run removes nothing. `--cached` is read like any other flag: it
+    leaves the working copy, but the next commit deletes the file from the
+    project, which is the change a protected file's owner is asked about.
+
+    Found past git's globals: `git --no-pager rm README.md` and `git -c
+    color.ui=false rm README.md` remove what `git rm README.md` removes, and
+    read where `rm` was written second they reached the capture instead. The
+    words rather than the paths, so the segment reading places each from the
+    directory a `cd` or `git -C` left -- `cd src && git rm ../README.md` is
+    the same removal.
+    """
+    at = global_span(words, rows)
+    if posixpath.basename(words[0]) != "git" or words[at : at + 1] != ["rm"]:
+        return None
+    operands: list[PathWord] = []
+    literal = False
+    for index, word in enumerate(words[at + 1 :], start=at + 1):
+        if literal or not word.startswith("-"):
+            operands.append(PathWord(at=index, prefix="", path=word))
+            continue
+        if word in ("-n", "--dry-run"):
+            return None
+        literal = word == "--"
+    return operands
+
+
+def deleted_operands(words: list[str], rows: list[ShellRuleRow]) -> list[str]:
+    """What `rm` or `git rm` deletes, and nothing for any other command."""
+    match posixpath.basename(words[0]):
+        case "git":
+            return [named["path"] for named in git_rm_operands(words, rows) or []]
+        case "rm":
+            return path_verb_operands(words)["operands"]
+        case _:
+            return []
+
+
+def protected_deletion(
+    words: list[str],
+    path_rules: list[PathRuleRow],
+    rows: list[ShellRuleRow],
+    checkout: str = "",
+) -> KernelDecision | None:
+    """Ask before `rm` or `git rm` deletes a path the declared rules protect.
+
+    Both rows answer what a delete costs, and a capture of the checkout
+    settles that -- which is the wrong question about a file protected by
+    whose it is. The recoverable-roots grant already defers to ownership, but
+    only on the path it grants, so a protected file beside an operand it did
+    not cover, under a directory, behind a glob, or named through `git rm`
+    reached the capture instead. Read here, before any grant, for every
+    operand, from the spelling the rules are anchored at.
+    """
+    for operand in deleted_operands(words, rows):
+        spelled = repository_relative(operand, checkout)
+        matched = next(
+            (row for row in path_rules if deletes_protected(spelled, row)), None
+        )
+        if matched is None:
+            continue
+        reason = (
+            protected_path_reason(operand, matched)
+            if path_rule_matches(spelled, True, matched)
+            else f"{operand} would delete {matched['value']}: {matched['reason']}"
+        )
+        return KernelDecision("ask", reason, recovery=matched["recovery"])
+    return None
+
+
+def protected_placement(
+    words: list[str],
+    path_rules: list[PathRuleRow],
+    rows: list[ShellRuleRow],
+    existing: list[str] | None = None,
+    checkout: str = "",
+) -> KernelDecision | None:
+    """Ask before a command writes, moves or links onto a path the rules protect.
+
+    :func:`protected_deletion` asks this of `rm`, and the recoverable-roots
+    grant asks it of a path Git could restore. A path nothing stood at yet
+    reached neither: it went to the verb's own row, and a capture of the
+    checkout then settled `cp evil.yml .github/workflows/ci.yml` and `mv x
+    .claude/settings.local.json` as restorable, while the same file written
+    through `Edit` or a redirection asked. Whether a file may be written there
+    is about whose it is, and a file created there is written as surely as one
+    replaced.
+
+    Three readings, each from the spelling the rules are anchored at. Every
+    path the line writes, as :func:`written_targets` names them -- a path
+    verb's destination, an archive's, a declared write flag's -- matched as
+    the edit gate matches a path. Every source `mv` takes away, read as a
+    delete is, so moving a directory that holds a protected file asks. And
+    where each source of `cp`, `mv` or `ln` lands under a destination that is
+    a directory, read the same way: `cp -r /tmp/.claude .` writes `.claude`
+    though no word spells it.
+
+    `rm` is :func:`protected_deletion`'s, which words its question as the
+    delete it is.
+    """
+    executable = posixpath.basename(words[0])
+    if executable == "rm":
+        return None
+    write_flags = next(
+        (
+            row["write_flags"]
+            for row in rows
+            if row["command"] == executable and not row["subcommand"]
+        ),
+        [],
+    )
+    for word in written_targets(words, write_flags) or []:
+        spelled = repository_relative(word, checkout)
+        present = existing is None or word in existing
+        matched = next(
+            (row for row in path_rules if path_rule_matches(spelled, present, row)),
+            None,
+        )
+        if matched is not None:
+            return KernelDecision(
+                "ask",
+                protected_path_reason(posixpath.normpath(word), matched),
+                recovery=matched["recovery"],
+            )
+    operands = (
+        path_verb_operands(words)["operands"]
+        if executable in ("cp", "mv", "ln")
+        else []
+    )
+    sources = operands[:-1]
+    reached = [
+        *[(source, "move") for source in sources if executable == "mv"],
+        *[
+            (
+                posixpath.join(
+                    operands[-1], posixpath.basename(posixpath.normpath(source))
+                ),
+                "replace",
+            )
+            for source in sources
+        ],
+    ]
+    for word, verb in reached:
+        spelled = repository_relative(word, checkout)
+        matched = next(
+            (row for row in path_rules if deletes_protected(spelled, row)), None
+        )
+        if matched is None:
+            continue
+        shown = posixpath.normpath(word)
+        reason = (
+            protected_path_reason(shown, matched)
+            if path_rule_matches(spelled, True, matched)
+            else f"{shown} would {verb} {matched['value']}: {matched['reason']}"
+        )
+        return KernelDecision("ask", reason, recovery=matched["recovery"])
+    return None
+
+
 def confined_to_recoverable_roots(
     words: list[str],
     path_roles: list[PathRoleRow],
@@ -1306,8 +1690,11 @@ def opaque_argument(word: str) -> bool:
 
     A substitution sentinel anywhere in the word marks it: the substitution's
     output word-splits at expansion, so even a mid-word result can become new
-    words.
+    words. A :class:`~lup.policy.kernel.syntax.VerbatimText` expands into
+    nothing, so `'$x'` is the two characters it spells.
     """
+    if isinstance(word, VerbatimText):
+        return False
     if word.startswith("$") or SUBSTITUTION_SENTINEL in word:
         return True
     return "}" in word and ("{-" in word or ",-" in word)
@@ -1320,8 +1707,12 @@ def unread_prefix(word: str) -> str | None:
     ``$`` opens a parameter, and a command substitution is spliced in as a
     sentinel opening with one; a backtick opens the older spelling of the
     same. What follows is unknown rather than one more piece of this word,
-    because an unquoted result splits into further words at run time.
+    because an unquoted result splits into further words at run time. A
+    :class:`~lup.policy.kernel.syntax.VerbatimText` is read whole: the `$` its
+    quotes held is the character it spells, so `rg -e'foo$'` names no flag.
     """
+    if isinstance(word, VerbatimText):
+        return None
     opened = next(
         (index for index, character in enumerate(word) if character in "$`"), None
     )
@@ -1399,36 +1790,185 @@ def is_help_probe(arguments: list[str], unsafe: set[str] = HELP_UNSAFE) -> bool:
     return "--help" in arguments
 
 
-def xargs_payload(words: list[str]) -> list[str]:
-    """Return the command xargs would run, skipping only xargs's own options."""
-    value_options = ("-I", "-i", "-n", "-d", "-P", "-s", "-L", "-a", "-E", "-e")
+XARGS_GRAMMAR = grammar(
+    valued=(
+        "-a",
+        "--arg-file",
+        "-d",
+        "--delimiter",
+        "-E",
+        "-I",
+        "-L",
+        "--max-lines",
+        "-n",
+        "--max-args",
+        "-P",
+        "--max-procs",
+        "--process-slot-var",
+        "-s",
+        "--max-chars",
+    ),
+    flags=(
+        "-0",
+        "--null",
+        "-o",
+        "--open-tty",
+        "-p",
+        "--interactive",
+        "-r",
+        "--no-run-if-empty",
+        "--show-limits",
+        "-t",
+        "--verbose",
+        "-x",
+        "--exit",
+        "--eof",
+        "--replace",
+        "--help",
+        "--version",
+    ),
+    attached=("-e", "-i", "-l"),
+)
+"""How xargs spells the options that stand before the command it runs.
+
+`-e`, `-i` and `-l` take a value only pressed against them, and their long
+forms only after an ``=``, so the word after a bare one is the command; the
+rest of the valued ones take the next word when nothing is attached."""
+
+
+def xargs_payload(words: list[str]) -> list[str] | None:
+    """The command xargs would run, or ``None`` where its options are unread.
+
+    Read by xargs's own grammar, clusters included (`-rn 1`), because a
+    fixed table of which words to skip misplaced the command both ways:
+    `-i` and `-e` were taken to consume the next word, which is the command,
+    and `--max-procs 4` and `-rn 1` were taken to consume nothing, so `4` and
+    `1` were judged as the command. An option the grammar does not list could
+    consume the next word, so it leaves the command unread rather than
+    guessed at, the way an interpreter's does.
+    """
     position = 1
-    while position < len(words) and words[position].startswith("-"):
-        # A value option is two characters and carries no `=`, so it is the
-        # one spelling that skips its operand too.
-        position += 2 if words[position] in value_options else 1
-    return words[position:]
+    while position < len(words):
+        word = words[position]
+        if word == "--":
+            return words[position + 1 :]
+        if word == "-" or not word.startswith("-"):
+            return words[position:]
+        read = read_options(word, words[position + 1 :], XARGS_GRAMMAR)
+        if read is None:
+            return None
+        position += read["width"]
+    return []
 
 
 # lup: ignore[library-default] — each wrapper's own option spellings, which
 # no project could choose differently and still read the command it wraps
-WRAPPER_VALUE_OPTIONS: dict[str, tuple[str, ...]] = {
-    "env": ("-u", "--unset", "-C", "--chdir"),
-    "stdbuf": ("-i", "--input", "-o", "--output", "-e", "--error"),
-    "time": ("-o", "--output", "-f", "--format"),
-    "exec": ("-a",),
-    "setsid": (),
-    "command": (),
-    "nohup": (),
+WRAPPER_GRAMMARS: dict[str, InterpreterGrammar] = {
+    "env": grammar(
+        valued=(
+            "-a",
+            "--argv0",
+            "-u",
+            "--unset",
+            "-C",
+            "--chdir",
+            "-S",
+            "--split-string",
+        ),
+        flags=(
+            "-i",
+            "--ignore-environment",
+            "-0",
+            "--null",
+            "-v",
+            "--debug",
+            "--block-signal",
+            "--default-signal",
+            "--ignore-signal",
+            "--list-signal-handling",
+            "--help",
+            "--version",
+        ),
+    ),
+    "stdbuf": grammar(
+        valued=("-i", "--input", "-o", "--output", "-e", "--error"),
+        flags=("--help", "--version"),
+    ),
+    "time": grammar(
+        valued=("-o", "--output", "-f", "--format"),
+        flags=(
+            "-a",
+            "--append",
+            "-p",
+            "--portability",
+            "-q",
+            "--quiet",
+            "-v",
+            "--verbose",
+            "-V",
+            "--version",
+            "--help",
+        ),
+    ),
+    "exec": grammar(valued=("-a",), flags=("-c", "-l")),
+    "setsid": grammar(
+        flags=(
+            "-c",
+            "--ctty",
+            "-f",
+            "--fork",
+            "-w",
+            "--wait",
+            "-h",
+            "--help",
+            "-V",
+            "--version",
+        )
+    ),
+    "command": grammar(flags=("-p", "-v", "-V")),
+    "nohup": grammar(flags=("--help", "--version")),
+    "timeout": grammar(
+        valued=("-k", "--kill-after", "-s", "--signal"),
+        flags=(
+            "-f",
+            "--foreground",
+            "-p",
+            "--preserve-status",
+            "-v",
+            "--verbose",
+            "--help",
+            "--version",
+        ),
+    ),
 }
-"""Which of each wrapper's options take the following word as their value.
+"""Each wrapper's own options, as its `--help` lists them.
 
 Per wrapper because the grammars differ and a single list would consume a
-word one of them does not take. What is *not* enumerated is the valueless
-options: anything else beginning with `-` is skipped as one word, and where
-that reading is wrong the segment reaches a command word beginning with `-`,
-which :func:`lup.policy.kernel.shell.decide_segment_words` refuses rather than
+word one of them does not take, and read by the interpreters' option reader
+so a cluster is read the way the wrapper reads it: `env -iu NAME cmd` unsets
+`NAME`, `exec -cla name cmd` names the process, and `timeout -vk 5 10 cmd`
+kills after 5, where a word at a time each made the value the command. An
+option the grammar does not list is left where it stands, so the segment
+reaches a command word beginning with `-`, which
+:func:`lup.policy.kernel.shell.decide_segment_words` refuses rather than
 classifies.
+"""
+
+# lup: ignore[library-default] — what each wrapper's own option does, which no
+# project could choose differently and still read the command it wraps
+WRAPPER_JUDGED_OPTIONS: dict[str, tuple[str, ...]] = {
+    "time": ("-o", "--output"),
+    "env": ("-C", "--chdir"),
+}
+"""The wrapper options that act on their own, so the wrapper is not stepped over.
+
+A wrapper is transparent only while its options change nothing a reading of
+the wrapped command would judge. `time -o <file>` writes its report into the
+file, and stepped over it was the command it timed: `time -o README.md ls`
+was `ls`. `env -C <dir>` moves where every operand resolves, and stepped
+over, `env -C /etc rm hosts` removed `hosts` here. A wrapper carrying one of
+these is the segment's command itself, and its own reader judges what the
+option does beside what it wraps.
 """
 
 # lup: ignore[library-default] — `env`'s own spelling of the option that
@@ -1442,27 +1982,37 @@ skip would hand the next word on as though it were the command.
 """
 
 
-def wrapper_payload(segment: list[str], position: int, wrapper: str) -> int:
-    """Skip one wrapper's own options to the command it wraps.
+class WrapperReading(TypedDict):
+    """One wrapper's options as its grammar reads them, and what follows."""
 
-    Shaped like ``timeout_payload`` and ``nice_payload`` beside it, and
-    general where those are specific: a valued option consumes the next word
-    when it stands alone and consumes nothing when its value is attached
-    (``-oL``, ``--unset=NAME``), which is the one distinction a fixed skip of
-    one or two words cannot make.
+    options: list[ReadOption]
+    payload: int
+    """Where the wrapped command starts, or where an unread option stands."""
+
+
+def read_wrapper(segment: list[str], position: int, wrapper: str) -> WrapperReading:
+    """Read one wrapper's own options up to the command it wraps.
+
+    A valued option consumes the next word when it stands alone and nothing
+    when its value is attached (``-oL``, ``--unset=NAME``), and a cluster is
+    read letter by letter. Where an option is unread, ``payload`` is that
+    option's own position, so what the caller takes for the command begins
+    with a dash and is refused rather than read one word off.
     """
-    valued = WRAPPER_VALUE_OPTIONS.get(wrapper, ())
+    rules = WRAPPER_GRAMMARS[wrapper]
+    options: list[ReadOption] = []
     while position < len(segment):
         word = segment[position]
         if word == "--":
-            return position + 1
+            return WrapperReading(options=options, payload=position + 1)
         if word == "-" or not word.startswith("-"):
-            return position
-        # Alone, a valued option's operand is the next word. Attached —
-        # `-oL`, `--unset=NAME` — it is inside this word, as it is for every
-        # other flag, so the two cases differ only in how far to step.
-        position += 2 if word in valued else 1
-    return position
+            return WrapperReading(options=options, payload=position)
+        read = read_options(word, segment[position + 1 :], rules)
+        if read is None:
+            return WrapperReading(options=options, payload=position)
+        options.extend(read["options"])
+        position += read["width"]
+    return WrapperReading(options=options, payload=position)
 
 
 def env_payload(words: list[str]) -> list[str] | None:
@@ -1474,11 +2024,15 @@ def env_payload(words: list[str]) -> list[str] | None:
     run, which a caller has to treat as unjudged rather than as nothing to
     judge. Collapsing the last two is how `env -i <interpreter> <script>` came
     to be read as a command named `-i` and allowed inside the boundary.
+
+    `-S` is found among the options env reads, however it is spelled: matched
+    only as a word of its own, `env -S'python3 -c 1' ls` was stepped over as
+    an inert option and judged as `ls`.
     """
-    if any(option in words[1:] for option in ENV_SPLIT_STRING):
+    reading = read_wrapper(words, 1, "env")
+    if any(option["name"] in ENV_SPLIT_STRING for option in reading["options"]):
         return None
-    position = wrapper_payload(words, 1, "env")
-    rest = words[position:]
+    rest = words[reading["payload"] :]
     assigned = 0
     while assigned < len(rest):
         name = rest[assigned].split("=", 1)

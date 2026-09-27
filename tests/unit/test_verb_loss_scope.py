@@ -1,11 +1,12 @@
 """What a verb destroys is read off its own targets, not off its row.
 
 A row carries one value for every path it might touch, and for `rm`, `cp`,
-`mv`, `ln` and the archive verbs that value is `boundary_wide`: a glob or a
-variable prevents an exact footprint, so the wider capture is what the opacity
-costs. That is the right reading inside the checkout and a false one the
-moment a path leaves it, because the capture it names is a snapshot of the
-checkout.
+`mv`, `ln` and the archive verbs that value is `boundary_wide`: a glob
+prevents an exact footprint, so the wider capture is what the opacity costs.
+That is the right reading inside the checkout and a false one the moment a
+path leaves it, because the capture it names is a snapshot of the checkout --
+and a variable is a path that may leave it, since only the run says where it
+lands.
 
 Measured before this, with a snapshot taken: `rm /etc/hosts` was *allowed*,
 and the reason it gave was "the affected paths are captured and restorable" —
@@ -101,3 +102,81 @@ def test_work_inside_the_checkout_keeps_the_answer_it_had(tmp_path: Path) -> Non
     assert recovered("mv tmp/a tmp/b", tmp_path).effect == "allow"
     assert recovered("gzip tmp/notes.txt", tmp_path).effect == "allow"
     assert recovered("tar -xf a.tgz -C tmp/out", tmp_path).effect == "allow"
+
+
+def test_a_target_only_the_run_resolves_is_not_settled_by_a_capture(
+    tmp_path: Path,
+) -> None:
+    """A write whose path carries an expansion lands wherever the run says.
+
+    Measured before this, with a snapshot taken, every one of these was
+    allowed as "captured and restorable" -- `> ~/.bashrc` and `> $HOME/x`
+    included, and `sort -o a$X` and `cp f a$X` were granted as the create of a
+    file literally named `a$X`. The snapshot holds this checkout, and nothing
+    says `$X` does not climb out of it. A glob is read where it stands, and a
+    scratch root reached through its own variable keeps its grant.
+    """
+    for command in (
+        "echo x > a$X",
+        "echo x > ~/.bashrc",
+        "echo x > $HOME/x",
+        "sort -o a$X f",
+        "cp f a$X",
+        "mv f a$X",
+        "tee a$X",
+        "rm tmp/$X",
+        "dd if=f of=a$X",
+    ):
+        verdict = recovered(command, tmp_path)
+        assert verdict.effect == "ask", command
+        assert "captured and restorable" not in verdict.reason, command
+
+    assert recovered("echo x > $TMPDIR/out.txt", tmp_path).effect == "allow"
+    assert recovered("rm *.pyc", tmp_path).effect == "allow"
+    assert recovered("sort -o out.txt f", tmp_path).effect == "allow"
+
+
+def test_a_patch_sent_outside_the_checkout_is_not_settled_by_its_capture(
+    tmp_path: Path,
+) -> None:
+    """`--unsafe-paths` is the flag that lets a patch leave the working area.
+
+    The row's `boundary_wide` is right for the ordinary apply, which lands in
+    the checkout, and was read for the flagged one too: measured before this,
+    with a snapshot taken, `git apply --unsafe-paths x.patch` was allowed as
+    "captured and restorable". The flag's own effect now says where the write
+    goes, and no capture of this checkout holds it. Reset and switch keep the
+    targeted loss their flags declare.
+    """
+    for command in (
+        "git apply --unsafe-paths x.patch",
+        "git apply --unsafe-paths --directory=/etc x.patch",
+        "git apply --build-fake-ancestor=/tmp/index x.patch",
+    ):
+        verdict = recovered(command, tmp_path)
+        assert verdict.effect == "ask", command
+        assert "captured and restorable" not in verdict.reason
+
+    assert recovered("git reset --hard", tmp_path).effect == "allow"
+
+
+def test_operands_piped_to_xargs_are_not_settled_by_a_capture(
+    tmp_path: Path,
+) -> None:
+    """What xargs appends is on stdin, so no capture was taken of it by name.
+
+    Measured before this, with a snapshot taken: `echo README.md | xargs rm`
+    was allowed as "captured and restorable", judged as a bare `rm` whose
+    missing operands no human-owned rule could match. A reader of the piped
+    names keeps its verdict.
+    """
+    for command in (
+        "echo README.md | xargs rm",
+        "ls | xargs rm -rf",
+        "find . -name '*.pyc' | xargs rm",
+    ):
+        verdict = recovered(command, tmp_path)
+        assert verdict.effect == "ask", command
+        assert "captured and restorable" not in verdict.reason
+
+    assert recovered("git ls-files | xargs grep foo", tmp_path).effect == "allow"

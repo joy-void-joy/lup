@@ -18,9 +18,11 @@ where nothing is reviewed and nothing is meant to last.
 import fnmatch
 import posixpath
 from pathlib import PurePosixPath
+from typing import Literal
 
 from .decision import SUBSTITUTION_SENTINEL
 from .rows import PathRoleKind, PathRoleName, PathRoleRow, DisplacedTargetRow
+from .syntax import VerbatimText, expands, verbatim_piece
 
 # lup: ignore[library-default] — the native runtimes' own plugin directory names
 GENERATED_PLUGIN_ROOTS = (".claude/plugins", ".codex/plugins")
@@ -75,7 +77,12 @@ def spells_its_path(word: str) -> bool:
     called the whole path scratch, which allowed ``rm -rf $W/tmp`` unprompted
     on the strength of a component saying nothing about where ``$W``
     resolves.
+
+    A :class:`~lup.policy.kernel.syntax.VerbatimText` spells its path
+    whatever it holds: `'a$b'` is a file named with a dollar sign.
     """
+    if isinstance(word, VerbatimText):
+        return True
     return not any(marker in word for marker in ("$", "~", "`", SUBSTITUTION_SENTINEL))
 
 
@@ -109,6 +116,84 @@ def is_generated_plugin_target(word: str) -> bool:
     )
 
 
+# lup: ignore[library-default] — git's own file names, fixed by git rather than
+# chosen for an adopter
+GIT_POINTER_NAMES = ("commondir", "gitdir", "config.worktree")
+# lup: ignore[constant-declaration] — refusal wording, declared with its verdict
+GIT_STATE_REFUSAL = (
+    "this rewrites a file git finds its own state through -- a worktree"
+    " pointer or a ref -- which host git follows to the repository, the commit"
+    " and the configuration it acts on"
+)
+# lup: ignore[constant-declaration] — refusal wording, declared with its verdict
+GIT_STATE_RECOVERY = (
+    "Let git write it: `git worktree add`, `move`, `remove` and `prune` keep"
+    " the pointers, and `git branch`, `git switch`, `git update-ref` and"
+    " `git symbolic-ref` keep the refs. A pointer that is already wrong is"
+    " repaired from an operator terminal with `git worktree repair`."
+)
+
+type GitState = Literal["pointer", "ref"]
+"""The two kinds of file git finds its own state through.
+
+A pointer names where git reads its configuration from, so rewriting one is
+choosing that configuration; a ref names a commit, which git's own commands
+move all the time and a person may still approve by hand."""
+
+
+def git_state(word: str) -> GitState | None:
+    """Which of git's own state files a path is, if it is one.
+
+    A linked worktree's `.git` file names its administrative entry, and the
+    entry's `commondir` and `gitdir` name the shared directory and the way
+    back to the checkout; `config.worktree` is read as configuration wherever
+    the shared config turns it on. Host git follows each of those to the
+    configuration it acts on, so a hand that rewrites one chooses what the
+    operator's next git command reads: a `commondir` naming a directory the
+    session built hands host git that directory's `core.hooksPath`. Those are
+    pointers, and so is an entry of `worktrees/` and the directory holding
+    the entries, since renaming or recreating one rewrites every pointer in
+    it at once. A ref -- `HEAD`, every `*_HEAD`, `packed-refs`, everything
+    under `refs/` -- names a commit instead. git's own commands write every
+    one of them consistently, and nothing else needs to.
+
+    Read off the spelling, so it answers for a path no mount could hold: `git
+    worktree remove` unlinks exactly these files, and a read-only bind would
+    refuse it. A segment that is `.git`, or that ends in `.git` as a bare
+    repository's directory does, followed by one of those names. `.git` alone
+    is the pointer -- or, in a plain checkout, the repository itself -- while
+    a bare `<name>.git` alone is a whole repository rather than anything a
+    pointer names, and is left to the verbs that judge a directory.
+    """
+
+    def held(beneath: tuple[str, ...]) -> GitState | None:
+        """What this run of names under a git directory holds, if git's own."""
+        match beneath:
+            case ("worktrees",) | ("worktrees", _):
+                return "pointer"
+            case ("worktrees", _, *inner):
+                return held(tuple(inner))
+            case ("refs", *_):
+                return "ref"
+            case (name,) if name in GIT_POINTER_NAMES:
+                return "pointer"
+            case (name,) if name == "HEAD" or name.endswith("_HEAD"):
+                return "ref"
+            case ("packed-refs",):
+                return "ref"
+        return None
+
+    parts = PurePosixPath(posixpath.normpath(word)).parts
+    found = [
+        "pointer"
+        if segment == ".git" and not parts[index + 1 :]
+        else held(parts[index + 1 :])
+        for index, segment in enumerate(parts)
+        if segment.endswith(".git")
+    ]
+    return "pointer" if "pointer" in found else "ref" if "ref" in found else None
+
+
 def repository_relative(word: str, checkout: str) -> str:
     """This path as the declarations spell it, where it names a file inside.
 
@@ -133,7 +218,7 @@ def repository_relative(word: str, checkout: str) -> str:
     path is returned untouched -- the conservative answer this had before any
     root was passed, rather than a rewrite against a root that was guessed.
     """
-    if not checkout or "$" in word:
+    if not checkout or expands(word):
         return word
     normalized = posixpath.normpath(word)
     if not normalized.startswith("/"):
@@ -144,7 +229,7 @@ def repository_relative(word: str, checkout: str) -> str:
     prefix = top if top.endswith("/") else f"{top}/"
     if not normalized.startswith(prefix):
         return word
-    return normalized[len(prefix) :]
+    return verbatim_piece(word, normalized[len(prefix) :])
 
 
 def is_session_scratch_target(word: str) -> bool:
@@ -152,10 +237,12 @@ def is_session_scratch_target(word: str) -> bool:
 
     ``$TMPDIR`` is the harness-provided scratch root and ``/tmp/claude-*`` its
     host-side spelling, so writes there are scratch by definition. A suffix
-    that expands further or climbs out of the root stays unrecognized.
+    that expands further or climbs out of the root stays unrecognized, and
+    so does a quoted `'$TMPDIR/x'`, which names a directory called `$TMPDIR`
+    wherever the command runs.
     """
     for prefix in ("$TMPDIR/", "${TMPDIR}/"):
-        if word.startswith(prefix):
+        if word.startswith(prefix) and not isinstance(word, VerbatimText):
             suffix = word[len(prefix) :]
             normalized = posixpath.normpath(suffix)
             return "$" not in suffix and not normalized.startswith(("..", "/"))
@@ -313,7 +400,7 @@ def path_role(path: str, rows: list[PathRoleRow]) -> PathRoleName:
     disposable merely for being elsewhere, while one under ``/tmp`` is
     disposable by what that root is for.
     """
-    normalized = posixpath.normpath(path)
+    normalized = verbatim_piece(path, posixpath.normpath(path))
     if is_session_scratch_target(path) or is_temporary_root_target(path):
         return "scratch"
     if normalized.startswith(("/", "../")) or normalized == "..":
@@ -339,7 +426,7 @@ def declared_scratch(spelled: str, rows: list[PathRoleRow]) -> bool:
     say no. What is left is a repository-relative path under a root this
     project declared, which is the only scratch a checkout can answer for.
     """
-    normalized = posixpath.normpath(spelled)
+    normalized = verbatim_piece(spelled, posixpath.normpath(spelled))
     if normalized.startswith(("/", "../")) or normalized == "..":
         return False
     return spells_its_path(normalized) and path_role(normalized, rows) == "scratch"

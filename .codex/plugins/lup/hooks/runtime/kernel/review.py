@@ -2,7 +2,7 @@
 
 from .decision import KernelDecision
 from .lex import parse_shell
-from .syntax import Command, word_text
+from .syntax import Command, verbatim, word_text
 from typing import TypedDict
 
 
@@ -37,10 +37,8 @@ def literal_input(command: str, executable: str) -> str | None:
     if not words or word_text(words[0]) != executable:
         return None
     redirects = invocation["redirects"]
-    if len(words) == 2 and not redirects:
-        parts = words[1]["parts"]
-        if all(part["kind"] in ("single", "literal", "escaped") for part in parts):
-            return word_text(words[1])
+    if len(words) == 2 and not redirects and verbatim(words[1]):
+        return word_text(words[1])
     if len(words) == 1 and len(redirects) == 1:
         redirect = redirects[0]
         if redirect["operator"] == "<<" and len(redirect["heredoc"]) == 1:
@@ -60,11 +58,7 @@ def copied_paths(command: str) -> CopiedPaths | None:
     words = invocation["words"]
     if not words or word_text(words[0]) != "cp":
         return None
-    if not all(
-        part["kind"] in ("single", "literal", "escaped")
-        for word in words
-        for part in word["parts"]
-    ):
+    if not all(verbatim(word) for word in words):
         return None
     values = [word_text(word) for word in words]
     match values:

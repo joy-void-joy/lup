@@ -194,19 +194,25 @@ def test_the_session_scratchpad_is_not_a_target_the_lease_answers_for() -> None:
     the reason named the redirect, so the reader read their own verb as
     having been classified a write.
 
-    Asserted over the filter rather than over the rule, because the rule is
-    right about every target it is given: what was wrong is which targets
-    reached it.
+    The lease is right about the path and the row decides what it means: the
+    host lists every uncovered target, and the row says which roots are the
+    harness's own, at every placement, so no caller's list can differ there.
     """
-    assert is_session_scratch_target("/tmp/claude-1000/session/scratchpad/out.txt")
+    scratchpad = "/tmp/claude-1000/session/scratchpad/out.txt"
+    assert is_session_scratch_target(scratchpad)
     assert is_session_scratch_target("$TMPDIR/out.txt")
     assert not is_session_scratch_target("/repo/tree/other/x")
-    # The path is genuinely outside the lease, which is why the filter has to
-    # be the thing that answers for it: asking the lease gives the wrong
-    # answer, correctly.
-    assert unleased_write_targets(
-        ["/tmp/claude-1000/session/scratchpad/out.txt"], MEASURED, Path("/repo")
-    ) == ["/tmp/claude-1000/session/scratchpad/out.txt"]
+    # The path is genuinely outside the lease: asking the lease gives the
+    # wrong answer, correctly, and the row is what answers for it.
+    assert unleased_write_targets([scratchpad], MEASURED, Path("/repo")) == [scratchpad]
+    settled = settle(
+        SettlementFacts(
+            KernelDecision("allow", "every shell segment is declared safe"),
+            sandbox_confined=True,
+            unleased=[scratchpad, "$TMPDIR/out.txt"],
+        )
+    )
+    assert settled.effect == "allow"
 
 
 def test_the_temporary_root_is_the_launchs_own_where_the_launch_is_a_container() -> (

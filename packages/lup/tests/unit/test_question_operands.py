@@ -44,11 +44,19 @@ def test_a_uv_run_question_names_what_it_installs() -> None:
     )
 
 
-def test_a_requirements_file_and_an_env_file_are_named_the_same_way() -> None:
+def test_a_requirements_file_and_an_env_file_are_each_named() -> None:
+    """Both operands are named, each beside what its flag does.
+
+    A requirements file is code fetched and run; an env file is a secrets
+    file loaded into the environment, so it is not put as external code.
+    """
     asked = verdict("uv run --with-requirements r.txt --env-file .env pytest")
 
     assert asked.effect == "ask"
-    assert asked.reason.endswith("--with-requirements r.txt --env-file .env")
+    assert asked.reason == (
+        "uv run fetches and runs external code: --with-requirements r.txt;"
+        " uv run --env-file .env loads a secrets file into the process environment"
+    )
 
 
 def test_a_uv_add_question_names_the_packages_past_the_valued_flags() -> None:

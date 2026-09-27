@@ -45,6 +45,8 @@ from .effects import (
     verdict_for,
 )
 from .words import (
+    UV_GLOBAL_VALUE_OPTIONS,
+    UV_TOOL_RUN_GRAMMAR,
     INTERPRETERS,
     carried_setting,
     command_words,
@@ -54,11 +56,13 @@ from .words import (
     git_restore_operands,
     key_matches,
     opaque_argument,
+    operand_positions,
     operand_words,
     protected_write_target,
     refspec_destination,
     refspec_effects,
     sed_invocation,
+    unlocated_write,
     unread_flags,
     unread_over_tracked,
     unread_prefix,
@@ -70,7 +74,11 @@ from .words import (
     write_scope,
     written_targets,
 )
+from .downloads import read_download
 from .fetch import decide_fetch, loopback_port
+from .lex import placed_path
+from .syntax import expands, verbatim_piece
+from .programs import program_verdict, read_program
 from .semantics import UnjudgedAmbient
 
 # lup: ignore[constant-declaration] — refusal wording, declared with its verdict
@@ -204,6 +212,25 @@ def settles_unguarded(word: str, following: list[str], row: ShellRuleRow) -> boo
     )
 
 
+def flagged_checkpoint(row: ShellRuleRow) -> CheckpointRequirement | None:
+    """What capture puts back a guarded flag's loss, where its effects say none.
+
+    A row carries one checkpoint for its ordinary form, and a guarded flag
+    can send the same write somewhere no snapshot of this checkout holds --
+    `git apply --unsafe-paths` patches outside it. Read off the effects the
+    flag adds, the way :func:`~.words.write_checkpoint` reads a redirection's
+    off its target. ``None`` leaves the row's own standing.
+    """
+    implied = [
+        write_checkpoint(effect["scope"])
+        if effect["kind"] == "writes_path"
+        else effect["scope"]
+        for effect in row["flag_effects"]
+        if effect["kind"] in ("writes_path", "destroys_uncaptured")
+    ]
+    return "unrecoverable" if "unrecoverable" in implied else None
+
+
 class WriteFacts(TypedDict):
     """What the host measured about the paths a command's write flags name.
 
@@ -332,6 +359,18 @@ def flag_write_verdict(
             row["reason"] or "this flag writes a file",
             arguments=arguments,
         )
+    return targets_write_verdict(row, targets, arguments, facts)
+
+
+def targets_write_verdict(
+    row: ShellRuleRow, targets: list[str], arguments: list[str], facts: WriteFacts
+) -> KernelDecision:
+    """What the files one row's command writes earn, taken together.
+
+    The flag spelling's answer, for a caller that found the paths itself: a
+    download lands its response at a name the URL chooses, which no write flag
+    names, and it is the same write to the same path whichever reader found it.
+    """
 
     def judged(target: str) -> WriteAnswer:
         """What one named path earns, beside the scope that earned it.
@@ -384,17 +423,24 @@ def flag_write_verdict(
         )
         if protected is not None:
             return protected
-    answered = max(
-        [judged(target) for target in targets],
-        key=lambda answer: STRENGTH.index(answer["effect"]),
+    answers = [judged(target) for target in targets]
+    # A path nobody can locate speaks for the line ahead of any other question,
+    # because it is the one no reading of a path can settle.
+    answered = next(
+        (answer for answer in answers if answer["scope"] == "unbounded"),
+        max(answers, key=lambda answer: STRENGTH.index(answer["effect"])),
     )
     if answered["effect"] == "allow":
         return row_verdict(row, "allow", "this write lands where nothing is reviewed")
-    if answered["unread"]:
+    if answered["unread"] or answered["scope"] == "unbounded":
         # Through the row rather than beside it, so an operator-only row still
         # denies and the sandbox, rule and reviewer the row states still
         # travel; what this verdict knows better is the reason it asks for.
-        asked = unread_question(answered["path"])
+        asked = (
+            unread_question(answered["path"])
+            if answered["unread"]
+            else unlocated_write(f"the write target {answered['path']}")
+        )
         return row_verdict(
             row,
             "ask",
@@ -421,13 +467,15 @@ def verb_loss_scope(
     """What a verb's own targets say the loss is, read one target at a time.
 
     A row carries one value for every path it might touch, and for these verbs
-    that value is `boundary_wide`: a glob or a variable prevents an exact
-    footprint, so the wider capture is what the opacity costs. It is the right
-    reading for a delete inside the checkout and a false one the moment a path
-    leaves it -- ``rm /etc/hosts`` was settled as "the affected paths are
-    captured and restorable", said of a file no snapshot of this checkout has
-    ever held, and the settlement row that discharges a covered loss took it at
-    its word.
+    that value is `boundary_wide`: a glob prevents an exact footprint, so the
+    wider capture is what the opacity costs. It is the right reading for a
+    delete inside the checkout and a false one the moment a path leaves it --
+    ``rm /etc/hosts`` was settled as "the affected paths are captured and
+    restorable", said of a file no snapshot of this checkout has ever held, and
+    the settlement row that discharges a covered loss took it at its word. A
+    variable is the second of those rather than the first: ``rm tmp/$X`` names
+    wherever ``$X`` climbs to, so :func:`write_scope` reads it ``unbounded``
+    and no capture settles it.
 
     So the scope is read off the targets the way :func:`write_checkpoint` reads
     it for a redirection, and for exactly that reason: getting it from the row
@@ -653,8 +701,7 @@ def apply_command_row(
         # the caller's choosing.
         readable = not any(
             opaque_argument(word)
-            or "$" in word
-            or "`" in word
+            or expands(word)
             or flag_matches(word, row["ask_flags"])
             for word in arguments
         )
@@ -710,9 +757,7 @@ def apply_command_row(
         # missed expansion is the whole verdict, and `dd if=$X` splits into
         # `of=` at runtime if `$X` holds a space — measured allowing until
         # this test replaced it.
-        legible = not any(
-            opaque_argument(word) or "$" in word or "`" in word for word in arguments
-        )
+        legible = not any(opaque_argument(word) or expands(word) for word in arguments)
         if legible and not any(
             word.startswith(marker)
             for word in arguments
@@ -776,6 +821,7 @@ def apply_command_row(
                 row,
                 "ask",
                 row["reason"] or f"{guarded} requires approval",
+                checkpoint=flagged_checkpoint(row),
                 effects=[*row["effects"], *row["flag_effects"]],
                 arguments=arguments,
                 # What the flag adds is what the flag's effects say, and a flag
@@ -859,8 +905,9 @@ class Subcommand(TypedDict):
 
     ``word`` is empty when the line carried only global flags, which leaves
     the default row to answer for it. ``asked`` are the questions guarded
-    globals before it put that a container could settle, each to be joined
-    with the verdict on the verb rather than standing in for it.
+    globals before it put, each to be joined with the verdict on the verb
+    rather than standing in for it: a question about the global is not the
+    answer to a subcommand the vocabulary refuses.
     """
 
     word: str
@@ -898,11 +945,15 @@ def split_subcommand(
     Unreadable keeps its question: a value that expands at run time, or a
     spelling this cannot separate from the flag, is one nobody can weigh.
 
-    A question placed by nobody settles nowhere, so it answers for the whole
-    command. One a container could settle does not: the walk steps over its
-    setting and goes on to the verb, and the question is joined with that
-    verb's verdict -- `git -c core.pager=less push --force` is a force push,
-    which no container holds, as well as a pager, which one does.
+    A global whose width this cannot read answers for the whole command where
+    it stands, since where the subcommand starts is then unknown. Every other
+    question is carried on to the verb and joined with that verb's verdict:
+    `git -c core.hooksPath=x worktree add` is still the worktree the vocabulary
+    refuses, and answering it with the global's question alone softened a
+    refusal into an approval. The join keeps what each question reaches --
+    `git -c core.pager=less push --force` is a force push, which no container
+    holds, as well as a pager, which one does -- and a question placed by
+    nobody settles the whole command nowhere.
     """
     ask_flags = default["ask_flags"] if default else []
     setting_flags = default["setting_flags"] if default else []
@@ -937,7 +988,7 @@ def split_subcommand(
                 word,
                 reached=default["flag_effects"] if inward else [],
             )
-            if question.reach is None:
+            if not named["value"]:
                 return question
             asked.append(question)
             position += global_width(word, following, default)
@@ -1134,7 +1185,15 @@ def matched_command_row(
             return unlisted(f"{executable} {subword} is not classified")
         return MatchedRow(row=default, arguments=arguments, asked=asked)
     if any(row["operation"] for row in subrows):
-        operands = [word for word in remainder if not word.startswith("-")]
+        # The command's globals may stand between a subcommand and its verb --
+        # uv takes them anywhere -- so a value one consumes is not an operand:
+        # `uv pip --cache-dir list install x` installs, and does not list.
+        operands = [
+            remainder[at]
+            for at in operand_positions(
+                remainder, default["value_flags"] if default else []
+            )
+        ]
         opword = next(iter(operands), "")
         oprows = [
             row
@@ -1276,7 +1335,7 @@ def unread_programs(words: list[str], rows: list[ShellRuleRow]) -> list[str]:
     Where the words name no program's verb -- `$EDITOR file`, `"$PYTHON" x.py`
     -- nothing is read in, and the word keeps the abstention it had.
     """
-    prefix = unread_prefix(posixpath.basename(words[0]))
+    prefix = unread_prefix(verbatim_piece(words[0], posixpath.basename(words[0])))
     if prefix is None:
         return []
 
@@ -1332,8 +1391,8 @@ def unread_readings(
         else Subcommand(word="", remainder=words[1:], asked=[])
     )
     if isinstance(split, KernelDecision):
-        # A guarded global no container settles already asks, whatever the verb
-        # and flags after it.
+        # A guarded global whose width cannot be read already asks, whatever
+        # the verb and flags after it.
         return []
     # Where the verb stands: every word before it is a global, and every word
     # after it the verb's own. Nothing is global to a command without verbs,
@@ -1656,156 +1715,6 @@ def decide_awk_words(words: list[str]) -> KernelDecision:
     return KernelDecision("allow", "read-only awk program")
 
 
-# lup: ignore[library-default] — curl's own flags that change reporting and not the request; the value follows curl's manual, not a project's taste
-CURL_SAFE_FLAGS = (
-    "-s",
-    "--silent",
-    "-S",
-    "--show-error",
-    "-f",
-    "--fail",
-    "--fail-with-body",
-    "-i",
-    "--include",
-    "-I",
-    "--head",
-    "-v",
-    "--verbose",
-    "--compressed",
-    "--no-progress-meter",
-    "-g",
-    "--globoff",
-    "-4",
-    "-6",
-)
-# The single letters above, which curl accepts clustered as readily as apart.
-# `-sS` is one word to every shell and to curl, and reading it as an unknown
-# option refused the request's most ordinary spellings while admitting the
-# same flags written with spaces between them.
-CURL_SAFE_CLUSTER_LETTERS = "".join(
-    flag[1] for flag in CURL_SAFE_FLAGS if len(flag) == 2 and not flag[1].isdigit()
-)
-
-
-def curl_safe_flag(word: str) -> bool:
-    """Whether one curl word is a declared reporting flag, clustered or alone."""
-    if word in CURL_SAFE_FLAGS:
-        return True
-    return (
-        len(word) > 1
-        and word.startswith("-")
-        and not word.startswith("--")
-        and all(letter in CURL_SAFE_CLUSTER_LETTERS for letter in word[1:])
-    )
-
-
-# lup: ignore[library-default] — curl's own value-taking flags; misreading one shifts the argument scan
-CURL_VALUE_FLAGS = (
-    "-H",
-    "--header",
-    "-m",
-    "--max-time",
-    "--connect-timeout",
-    "--retry",
-    "-A",
-    "--user-agent",
-    "-e",
-    "--referer",
-    "-r",
-    "--range",
-)
-
-
-def curl_url(word: str) -> str:
-    """Spell one curl operand the way curl itself resolves it.
-
-    curl accepts a URL with no ``scheme://`` and guesses one, defaulting to
-    HTTP — which is how a liveness probe is actually typed, and how its own
-    manual documents it. Reading the bare form as malformed put an approval
-    question on ``curl localhost:8000/health`` while the identical request
-    spelled in full was already declared safe.
-
-    Guessing HTTP where curl guesses HTTP keeps the verdict conservative on
-    its own terms: a scope declared for ``https`` alone does not match the
-    guess, so an origin reachable only over TLS still asks rather than
-    inheriting a grant its scheme never gave.
-    """
-    return word if "://" in word else f"http://{word}"
-
-
-def decide_curl_words(
-    words: list[str],
-    allowed_scopes: list[UrlScopeRow],
-    denied_scopes: list[UrlScopeRow],
-    unjudged_ambient: UnjudgedAmbient = "ask",
-    host_ports: Sequence[int] = (),
-) -> KernelDecision:
-    """Allow only read-method curl against the declared fetch scopes.
-
-    Every positional word must be a URL the fetch policy allows; denied
-    origins deny, and an origin no scope names is the profile's to answer --
-    the same declaration `WebFetch` reads, so one spelling of reaching an
-    undeclared origin cannot answer differently from the other. Flags that
-    write files, send data, or carry credentials are not classified.
-
-    A `defer` returned from here is settled by `ProviderNative`, which is read
-    before the rule that would otherwise allow unjudged work inside a
-    boundary. That ordering is what makes this safe to thread: the contained
-    reading never sees it, and it must not, because its argument is that every
-    effect is confined there -- true of a command's writes and false of a
-    document entering the agent's context.
-    """
-    urls: list[str] = []
-    expect_value = False
-    expect_method = False
-    method = "GET"
-    for word in words[1:]:
-        if expect_value:
-            expect_value = False
-            continue
-        if expect_method:
-            method = word
-            expect_method = False
-            continue
-        if word in ("-X", "--request"):
-            expect_method = True
-            continue
-        if word.startswith("--request="):
-            method = word.partition("=")[2]
-            continue
-        if curl_safe_flag(word):
-            continue
-        if word in CURL_VALUE_FLAGS:
-            expect_value = True
-            continue
-        if (
-            word.startswith("--")
-            and "=" in word
-            and word.partition("=")[0] in CURL_VALUE_FLAGS
-        ):
-            continue
-        if word.startswith("-"):
-            return unjudged(f"curl option {word!r} is not classified")
-        urls.append(word)
-    if expect_value or expect_method:
-        return unjudged("curl option has no value")
-    if method not in ("GET", "HEAD"):
-        return KernelDecision("ask", f"curl {method} can change remote state")
-    if not urls:
-        return unjudged("curl has no URL")
-    for url in urls:
-        verdict = decide_fetch(
-            curl_url(url),
-            allowed_scopes,
-            denied_scopes,
-            unjudged_ambient,
-            host_listener=loopback_port(curl_url(url)) in host_ports,
-        )
-        if verdict.effect != "allow":
-            return verdict
-    return KernelDecision("allow", "read-only curl within declared scopes")
-
-
 # lup: ignore[library-default] — gh's own value-taking flags; misreading one shifts the argument scan
 GH_API_VALUE_FLAGS = (
     "-H",
@@ -1827,8 +1736,10 @@ GH_API_BODY_FLAGS = (
     "--field",
     "--input",
 )
-# lup: ignore[library-default] — the HTTP methods that do not change state; the same pair the curl screen reads, fixed by the protocol rather than by a project's taste
 GH_API_READ_METHODS = ("GET", "HEAD")
+"""The HTTP methods that do not change state, fixed by the protocol.
+
+The same pair the downloader screen reads, where it arrives as a default."""
 
 
 class GhApiRoute(TypedDict):
@@ -2054,6 +1965,164 @@ def decide_gh_api_words(
     )
 
 
+def decide_gh_words(
+    words: list[str], rows: list[ShellRuleRow], facts: WriteFacts | None = None
+) -> KernelDecision:
+    """Judge a gh command whose subcommand and operation stand where it wrote them.
+
+    gh finds its subcommand the way cobra does, and cobra does not step over a
+    flag the way this walk does: one written before a subcommand, without an
+    ``=`` and not a switch that level knows, takes the next word as its value,
+    and every flag written there is handed on to the subcommand it reaches.
+    So `gh -t status api -X DELETE x` runs `api` with `--template status`,
+    `gh -Xpost api x` sends a POST, and `gh pr -t view merge 1` merges --
+    each read here as the `gh status`, `gh api` or `gh pr view` it spells.
+
+    Refused rather than modelled. Which word cobra takes as the subcommand
+    turns on which flags each level of gh knows, and reading that would be a
+    second copy of gh's own flag tables to keep in step with every release.
+    A flag before gh's subcommand, or before the operation of a subcommand
+    that has operations, is a spelling nobody needs: the same command with
+    its flags after the operation is read by the rows that declare them, and
+    a help probe is answered before this is asked.
+
+    Past that, ``words[1]`` is the subcommand gh runs, which is what lets `gh
+    api` be screened by its method and body here.
+    """
+    subcommand = words[1:2]
+    grouped = bool(subcommand) and any(
+        row["command"] == "gh"
+        and row["subcommand"] == subcommand[0]
+        and row["operation"]
+        for row in rows
+    )
+    leading = next(
+        (word for word in words[1 : 3 if grouped else 2] if word.startswith("-")),
+        None,
+    )
+    if leading is not None:
+        return KernelDecision(
+            "deny",
+            f"gh hands `{leading}`, written before its subcommand, to whichever"
+            " subcommand it reaches, and a flag there without `=` takes the next"
+            " word as its value, so which subcommand runs is not read here",
+            recovery="Write gh's flags after its subcommand and operation:"
+            " `gh pr merge 1 --repo owner/repo`, `gh api -X GET <endpoint>`.",
+        )
+    if subcommand == ["api"]:
+        return decide_gh_api_words(words)
+    return decide_command_rows(words, rows, facts)
+
+
+def curl_url(word: str) -> str:
+    """Spell one downloader operand the way curl and wget resolve it.
+
+    Both accept a URL with no ``scheme://`` and guess one, defaulting to HTTP
+    — which is how a liveness probe is actually typed, and how curl's own
+    manual documents it. Reading the bare form as malformed put an approval
+    question on ``curl localhost:8000/health`` while the identical request
+    spelled in full was already declared safe.
+
+    Guessing HTTP where the tools guess HTTP keeps the verdict conservative on
+    its own terms: a scope declared for ``https`` alone does not match the
+    guess, so an origin reachable only over TLS still asks rather than
+    inheriting a grant its scheme never gave.
+    """
+    return word if "://" in word else f"http://{word}"
+
+
+def decide_download_words(
+    words: list[str],
+    allowed_scopes: list[UrlScopeRow],
+    denied_scopes: list[UrlScopeRow],
+    unscoped: UnjudgedAmbient,
+    rows: list[ShellRuleRow],
+    facts: WriteFacts,
+    directory: str | None = "",
+    host_ports: Sequence[int] = (),
+    read_methods: tuple[str, ...] = GH_API_READ_METHODS,
+) -> KernelDecision:
+    """Judge one `curl` or `wget` by what it reads, sends, and writes.
+
+    Three answers, joined strongest first. Every URL is the fetch policy's:
+    a denied origin denies, a declared one allows, and one no scope names is
+    the fetch declaration's to answer -- the one `WebFetch` reads, so one
+    spelling of reaching an undeclared origin cannot answer differently from
+    another. A request body, or a method beyond the read pair, asks: it can
+    change state on the far end. Every file the response lands at is a write
+    to that path, judged by the tool's row the way any other written path is,
+    so a download into scratch is ordinary and one over a reviewed file asks.
+
+    A redirect `-L` follows is not re-judged: the scope answers for the origin
+    the command names, and the network boundary for where it is sent next.
+    ``host_ports`` are the loopback ports a process outside this session's
+    container listens on, and a URL reaching one asks as `WebFetch` asks.
+
+    A `defer` returned from here is settled by `ProviderNative`, which is read
+    before the rule that would otherwise allow unjudged work inside a
+    boundary. That ordering is what makes this safe to thread: the contained
+    reading never sees it, and it must not, because its argument is that every
+    effect is confined there -- true of a command's writes and false of a
+    document entering the agent's context.
+    """
+    tool = posixpath.basename(words[0])
+    reading = read_download(words)
+    if reading["unread"]:
+        return unjudged(f"{tool} option {reading['unread']!r} is not classified")
+    if not reading["urls"]:
+        return unjudged(f"{tool} has no URL")
+    row = next(
+        (row for row in rows if row["command"] == tool and not row["subcommand"]),
+        None,
+    )
+    found = [
+        decide_fetch(
+            curl_url(url),
+            allowed_scopes,
+            denied_scopes,
+            unscoped,
+            host_listener=loopback_port(curl_url(url)) in host_ports,
+        )
+        for url in reading["urls"]
+    ]
+    method = reading["method"].upper() or "GET"
+    if reading["sends"] or method not in read_methods:
+        asked = (
+            f"{tool} {reading['sends']} sends a request body, which can change"
+            " remote state"
+            if reading["sends"]
+            else f"{tool} {method} can change remote state"
+        )
+        found.append(
+            KernelDecision("ask", asked, purpose="external_consequence")
+            if row is None
+            else row_verdict(
+                row,
+                "ask",
+                asked,
+                effects=[declare("external_mutation", scope="upload")],
+                arguments=words[1:],
+            )
+        )
+    placed = [placed_path(target, directory) for target in reading["targets"]]
+    written = [target for target in placed if target is not None]
+    if placed:
+        found.append(
+            unjudged(f"{tool} writes a file this policy cannot place")
+            if row is None or len(written) < len(placed)
+            else targets_write_verdict(row, written, words[1:], facts)
+        )
+    for effect in ("deny", "ask", "defer"):
+        held = next((verdict for verdict in found if verdict.effect == effect), None)
+        if held is not None:
+            return held
+    return KernelDecision(
+        "allow",
+        f"{tool} reads within the declared fetch scopes"
+        + (", landing where nothing is reviewed" if placed else ""),
+    )
+
+
 UV_FOREIGN_SOURCE_FLAGS = (
     "--index",
     "--index-url",
@@ -2153,7 +2222,7 @@ def uv_package_source(
     direction is to treat it as though it were.
     """
     for word in arguments:
-        if opaque_argument(word) or "$" in word or "`" in word:
+        if opaque_argument(word) or expands(word):
             return word
         if flag_matches(word, list(guarded)):
             return word
@@ -2203,12 +2272,54 @@ def declared_target_decision(
     )
 
 
+def decide_tool_run(spelled: str, arguments: list[str]) -> KernelDecision | None:
+    """Refuse a tool run handed an interpreter, or one whose tool is unread.
+
+    `uvx` and `uv tool run` fetch a tool and run it, and where the tool is an
+    interpreter what it runs is whatever follows -- inline code as often as
+    not, which leaves nothing behind to review. The tool is the first operand
+    past the options, read by their own grammar: read as the word after the
+    command, `uvx --from foo python -c 1` and `uvx -q python -c 1` handed the
+    interpreter over unseen while `uvx python -c 1` was refused. A version
+    pinned onto the name (`python@3.12`) names the interpreter still. An
+    option the grammar does not list could take the next word, so it leaves
+    the tool unread and refuses rather than guessing.
+
+    ``None`` where neither holds, which leaves the row's question standing.
+    """
+    reading = read_program(["uvx", *arguments], {"uvx": UV_TOOL_RUN_GRAMMAR})
+    subject = reading["subject"]
+    if reading["kind"] == "unread":
+        unread = (
+            "an option this policy does not read"
+            if subject.startswith("-")
+            else "a name only the run resolves"
+        )
+        return KernelDecision(
+            "deny",
+            f"{spelled} {subject}: {unread}, so the tool it runs is unread",
+            recovery="Name the tool literally, and spell an option's value with"
+            " `=` or run the tool without it.",
+        )
+    tool = posixpath.basename(subject).partition("@")[0]
+    if reading["kind"] == "script" and tool in INTERPRETERS:
+        return KernelDecision(
+            "deny",
+            f"{spelled} {subject}: inline code leaves nothing behind to review",
+            recovery="Write the code to a named script file and run it through"
+            " `uv run python <script>`; a bare interpreter is refused even"
+            " over a file.",
+        )
+    return None
+
+
 def decide_uv(
     words: list[str],
     runner_targets: list[RunnerTargetRow],
     target_tables: list[ShellRuleRow] | None = None,
     facts: WriteFacts | None = None,
     frozen: tuple[str, ...] = UV_FROZEN_FLAGS,
+    rows: list[ShellRuleRow] | None = None,
 ) -> KernelDecision:
     """Classify a uv invocation, gating dependency and inline-code forms.
 
@@ -2249,7 +2360,15 @@ def decide_uv(
     source cannot authorize an operation the requester may never perform.
     """
     measured = no_write_facts() if facts is None else facts
+    spelled = words
     normalized = uv_command_words(words)
+    # Asking uv what it is names no verb, which is how the reading below fails,
+    # and changes nothing: `uv --version` was refused as though a global had
+    # hidden one. Only the informational globals, and nothing beside them.
+    if len(words) > 1 and all(
+        word in ("--version", "-V", "--help", "-h") for word in words[1:]
+    ):
+        return KernelDecision("allow", "uv reports its own version or usage")
     if normalized is None:
         return KernelDecision(
             "deny", "uv global options do not identify a literal command to judge"
@@ -2264,7 +2383,9 @@ def decide_uv(
     # resolves the whole declaration anew, which is what the pinned spelling
     # the recovery names does not. "Installing a package" said neither.
     if subcommand == "add":
-        named = uv_add_operands(words[2:])
+        named = uv_add_operands(
+            words[2:], (*UV_ADD_VALUE_FLAGS, *UV_GLOBAL_VALUE_OPTIONS)
+        )
         return KernelDecision(
             "ask",
             f"uv add fetches and runs the build code of {', '.join(named)}"
@@ -2306,11 +2427,11 @@ def decide_uv(
         # invocation is refused when it leaves no reviewable artifact behind.
         # `-c` leaves nothing to read and a bare interpreter runs nothing at
         # all; a path and a module in a declared root are both openable,
-        # diffable and runnable again, so neither is inline code.
-        rest = run_words[1:]
-        inline = [word for word in rest if word == "-c"]
-        named = [word for word in rest if not word.startswith("-")]
+        # diffable and runnable again, so neither is inline code. The
+        # interpreter's own grammar says which word is the program, the same
+        # reading a bare `bash <script>` meets.
         interpreted = run_command in INTERPRETERS
+        reading = read_program(run_words) if interpreted else None
         # A module is as readable as the file it lives in, so what decides one
         # is whether this project declares its root — read off the table that
         # already answers `uv run <target>`, because a blessed module root and
@@ -2322,14 +2443,20 @@ def decide_uv(
         declared_root = next(
             (row for row in runner_targets if row["name"] == module_root), None
         )
-        if run_command == "-c" or (interpreted and inline):
-            subject = "uv run -c" if run_command == "-c" else f"uv run {run_command} -c"
+        if run_command == "-c":
             return KernelDecision(
                 "deny",
-                f"{subject}: inline code leaves nothing behind to review",
+                "uv run -c: inline code leaves nothing behind to review",
                 recovery="Write it to a named script file, which can be reviewed"
                 " and run again.",
             )
+        refused = (
+            None
+            if reading is None
+            else program_verdict(f"uv run {run_command}", reading)
+        )
+        if refused is not None and refused.effect == "deny":
+            return refused
         if module_root is not None and declared_root is None:
             return KernelDecision(
                 "deny",
@@ -2338,12 +2465,12 @@ def decide_uv(
                 recovery="Name a script file instead, or declare the root as a"
                 " runner target.",
             )
-        if interpreted and not named:
+        if reading is not None and reading["kind"] == "subcommand":
             return KernelDecision(
                 "deny",
-                f"the bare interpreter uv run {run_command} runs whatever it is"
-                " fed, and leaves nothing behind to review",
-                recovery="Name a script file.",
+                f"uv run {run_command} {reading['subject']}: only a script file"
+                " is read through `uv run`",
+                recovery="Run the command itself, where its own rules judge it.",
             )
         # Transparent wrappers and nested runners cannot hide an operator-only
         # operation. Only its hard prohibition propagates: recognizing a target
@@ -2359,7 +2486,7 @@ def decide_uv(
                 )
                 if nested.hard:
                     return nested
-        risky = ["-w", "--with", "--with-editable", "--with-requirements", "--env-file"]
+        risky = ["-w", "--with", "--with-editable", "--with-requirements"]
         # Named in the question, because what is being installed is the whole
         # of what an approver weighs: "external code" told them a source was
         # involved and nothing about which one.
@@ -2376,9 +2503,32 @@ def decide_uv(
             for word in words[2:]
             if word.startswith("-w") and word != "-w"
         )
-        if fetched:
+        # A secrets file is not code anybody fetched: it is loaded into the
+        # environment the target runs with, and that is the question to put.
+        loaded = [
+            carried["value"]
+            for position, word in enumerate(words[2:], start=2)
+            if (
+                carried := carried_setting(word, ["--env-file"], words[position + 1 :])
+            )["value"]
+        ]
+        asked = [
+            *(
+                [f"uv run fetches and runs external code: {' '.join(fetched)}"]
+                if fetched
+                else []
+            ),
+            *(
+                f"uv run --env-file {secrets} loads a secrets file into the process"
+                " environment"
+                for secrets in loaded
+            ),
+        ]
+        if asked:
             return KernelDecision(
-                "ask", f"uv run fetches and runs external code: {' '.join(fetched)}"
+                "ask",
+                "; ".join(asked),
+                purpose="sensitive_access" if loaded and not fetched else None,
             )
         redirect = uv_package_source(words[2 : len(words) - len(run_words)])
         if redirect is not None:
@@ -2408,7 +2558,27 @@ def decide_uv(
             )
         if bare_target and len(run_words) == 2 and run_words[1] == "--help":
             return KernelDecision("allow", "command help is read-only")
-    return unjudged(f"uv {words[1]} is not classified")
+    # `uv tool run` is `uvx` by its other name, so the tool it runs is read by
+    # the same grammar, past uv's globals on either side of `run`.
+    if subcommand == "tool":
+        verbs = operand_positions(words[2:], UV_GLOBAL_VALUE_OPTIONS)
+        at = 2 + verbs[0] if verbs else len(words)
+        if words[at : at + 1] == ["run"]:
+            refused = decide_tool_run("uv tool run", [*words[2:at], *words[at + 1 :]])
+            if refused is not None:
+                return refused
+    # A verb the vocabulary declares -- `pip`, `tool`, `publish` -- is walked
+    # from the command as spelled, so the row walker finds it past uv's global
+    # options exactly as it finds any subcommand, and what it answers is the
+    # row's rather than a second reading of the same verb here.
+    declared = [
+        row
+        for row in rows or []
+        if row["command"] == "uv" and row["subcommand"] == subcommand
+    ]
+    if declared:
+        return decide_command_rows(spelled, rows or [], measured)
+    return unjudged(f"uv {subcommand} is not classified")
 
 
 def git_checkout_pathspec(words: list[str]) -> KernelDecision | None:
@@ -2438,8 +2608,10 @@ def git_restore_source(words: list[str]) -> KernelDecision | None:
     from a named commit, so committed state stays recoverable through the
     reflog. The index-sourced form and opaque words fall through to the
     restore row's ask.
+
+    A grant, so the subcommand is read where it is written.
     """
-    parsed = git_restore_operands(words)
+    parsed = git_restore_operands(words, 1)
     if parsed is None or parsed["source"] is None:
         return None
     return KernelDecision(
@@ -2466,8 +2638,11 @@ def git_restore_unchanged(
     reason: what a path costs to rebuild is the wrong question about a file
     protected by whose it is, and the two gates read one table so they cannot
     come to differ about one.
+
+    A grant, so the subcommand is read where it is written; the segment
+    reading asks the ownership half again past git's globals.
     """
-    parsed = git_restore_operands(words)
+    parsed = git_restore_operands(words, 1)
     if parsed is None or parsed["source"] is not None:
         return None
     if not all(path in recoverable_targets for path in parsed["paths"]):

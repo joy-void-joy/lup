@@ -8,7 +8,7 @@ A source spelled as a dotted module is a module to open. One spelled as an ident
 
 The repository-wide artifacts written outside every runtime tree — the rule and command references, this page, and the CI workflow — belong to no recipe and are described in [harness.md](harness.md) instead.
 
-## `claude` — 121 artifacts
+## `claude` — 124 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -79,6 +79,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.claude/plugins/lup/hooks/runtime/kernel/commands.py` | lup.policy.kernel.commands |
 | `.claude/plugins/lup/hooks/runtime/kernel/decision.py` | lup.policy.kernel.decision |
 | `.claude/plugins/lup/hooks/runtime/kernel/delegation.py` | lup.policy.kernel.delegation |
+| `.claude/plugins/lup/hooks/runtime/kernel/downloads.py` | lup.policy.kernel.downloads |
 | `.claude/plugins/lup/hooks/runtime/kernel/edit.py` | lup.policy.kernel.edit |
 | `.claude/plugins/lup/hooks/runtime/kernel/effects.py` | lup.policy.kernel.effects |
 | `.claude/plugins/lup/hooks/runtime/kernel/escalation.py` | lup.policy.kernel.escalation |
@@ -87,6 +88,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.claude/plugins/lup/hooks/runtime/kernel/lex.py` | lup.policy.kernel.lex |
 | `.claude/plugins/lup/hooks/runtime/kernel/peers.py` | lup.policy.kernel.peers |
 | `.claude/plugins/lup/hooks/runtime/kernel/policy_protocol.py` | lup.policy.kernel.policy_protocol |
+| `.claude/plugins/lup/hooks/runtime/kernel/programs.py` | lup.policy.kernel.programs |
 | `.claude/plugins/lup/hooks/runtime/kernel/review.py` | lup.policy.kernel.review |
 | `.claude/plugins/lup/hooks/runtime/kernel/roles.py` | lup.policy.kernel.roles |
 | `.claude/plugins/lup/hooks/runtime/kernel/rows.py` | lup.policy.kernel.rows |
@@ -98,6 +100,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.claude/plugins/lup/hooks/runtime/kernel/syntax.py` | lup.policy.kernel.syntax |
 | `.claude/plugins/lup/hooks/runtime/kernel/tools.py` | lup.policy.kernel.tools |
 | `.claude/plugins/lup/hooks/runtime/kernel/typescript.py` | lup.policy.kernel.typescript |
+| `.claude/plugins/lup/hooks/runtime/kernel/withheld.py` | lup.policy.kernel.withheld |
 | `.claude/plugins/lup/hooks/runtime/kernel/words.py` | lup.policy.kernel.words |
 | `.claude/plugins/lup/hooks/runtime/policy_data.py` | lup.policy.bundle |
 | `.claude/plugins/lup/hooks/runtime/subagent_cleanup.py` | lup.providers.claude.assets.subagent_cleanup |
@@ -134,7 +137,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `docs/template.md` | lup_template.harness.content.docs.template |
 | `docs/upstream-reports.md` | lup.harness.content.docs.upstream_reports |
 
-## `codex` — 101 artifacts
+## `codex` — 104 artifacts
 
 | Generated path | Compiled from |
 | --- | --- |
@@ -167,6 +170,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.codex/plugins/lup/hooks/runtime/kernel/commands.py` | lup.policy.kernel.commands |
 | `.codex/plugins/lup/hooks/runtime/kernel/decision.py` | lup.policy.kernel.decision |
 | `.codex/plugins/lup/hooks/runtime/kernel/delegation.py` | lup.policy.kernel.delegation |
+| `.codex/plugins/lup/hooks/runtime/kernel/downloads.py` | lup.policy.kernel.downloads |
 | `.codex/plugins/lup/hooks/runtime/kernel/edit.py` | lup.policy.kernel.edit |
 | `.codex/plugins/lup/hooks/runtime/kernel/effects.py` | lup.policy.kernel.effects |
 | `.codex/plugins/lup/hooks/runtime/kernel/escalation.py` | lup.policy.kernel.escalation |
@@ -175,6 +179,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.codex/plugins/lup/hooks/runtime/kernel/lex.py` | lup.policy.kernel.lex |
 | `.codex/plugins/lup/hooks/runtime/kernel/peers.py` | lup.policy.kernel.peers |
 | `.codex/plugins/lup/hooks/runtime/kernel/policy_protocol.py` | lup.policy.kernel.policy_protocol |
+| `.codex/plugins/lup/hooks/runtime/kernel/programs.py` | lup.policy.kernel.programs |
 | `.codex/plugins/lup/hooks/runtime/kernel/review.py` | lup.policy.kernel.review |
 | `.codex/plugins/lup/hooks/runtime/kernel/roles.py` | lup.policy.kernel.roles |
 | `.codex/plugins/lup/hooks/runtime/kernel/rows.py` | lup.policy.kernel.rows |
@@ -186,6 +191,7 @@ The repository-wide artifacts written outside every runtime tree — the rule an
 | `.codex/plugins/lup/hooks/runtime/kernel/syntax.py` | lup.policy.kernel.syntax |
 | `.codex/plugins/lup/hooks/runtime/kernel/tools.py` | lup.policy.kernel.tools |
 | `.codex/plugins/lup/hooks/runtime/kernel/typescript.py` | lup.policy.kernel.typescript |
+| `.codex/plugins/lup/hooks/runtime/kernel/withheld.py` | lup.policy.kernel.withheld |
 | `.codex/plugins/lup/hooks/runtime/kernel/words.py` | lup.policy.kernel.words |
 | `.codex/plugins/lup/hooks/runtime/policy_data.py` | lup.policy.bundle |
 | `.codex/plugins/lup/hooks/runtime/subagent_cleanup.py` | lup.providers.codex.assets.subagent_cleanup |

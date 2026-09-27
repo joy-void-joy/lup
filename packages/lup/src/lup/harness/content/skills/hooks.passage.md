@@ -63,8 +63,8 @@ generated artifacts. Never edit them as the source of a policy change.
 
 Denial must win over approval across batches and shell segments. Unsupported
 native approval effects fail closed. Resolve-editor autonomy may relax only the
-declared protected/large edit cases; temporary paths, marker changes, and
-anti-pattern violations keep their guardrails.
+large-edit and whole-file cases; protected roots, temporary paths, marker
+changes, and anti-pattern violations keep their guardrails.
 
 With no arguments, summarize the canonical URL scopes, shell classifications,
 protected edit rules, threshold, resolver-editor exceptions, and each native

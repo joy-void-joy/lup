@@ -201,3 +201,20 @@ class ProviderLogin(BaseModel, frozen=True):
     def logged_in(self, home: Path) -> bool:
         """Whether that configuration home already holds a completed login."""
         return self.credentials_path(home).exists()
+
+    def withheld_logins(self) -> list[str]:
+        """Where a completed login sits, spelled as a path policy withholds it.
+
+        The runtime's default home, spelled from a home rather than from this
+        machine's, and the directory a profile gives it wherever a project
+        keeps its profiles.
+        """
+        ambient = (
+            f"~/{self.ambient_home.relative_to(Path.home()).as_posix()}"
+            if self.ambient_home.is_relative_to(Path.home())
+            else self.ambient_home.as_posix()
+        )
+        return [
+            f"{ambient}/{self.credentials_file}",
+            f"**/{self.home_subdir}/{self.credentials_file}",
+        ]

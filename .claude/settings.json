@@ -42,25 +42,26 @@
       "Read(./**/.env.local)",
       "Read(./**/secrets*.local)",
       "Read(./**/*.secret.local)",
-      "Read(~/.ssh)",
       "Read(~/.ssh/**)",
+      "Read(~/.ssh)",
+      "Read(~/.gnupg/**)",
+      "Read(~/.gnupg)",
       "Read(~/.aws/credentials)",
-      "Read(~/.aws/credentials/**)"
+      "Read(~/.netrc)",
+      "Read(~/.git-credentials)",
+      "Read(~/.config/gh/hosts.yml)",
+      "Read(~/.docker/config.json)",
+      "Read(~/.pypirc)",
+      "Read(//proc/*/environ)",
+      "Read(~/.claude/.credentials.json)",
+      "Read(//**/claude-config/.credentials.json)",
+      "Read(~/.codex/auth.json)",
+      "Read(//**/codex-home/auth.json)",
+      "Read(//tmp/lup-inbox/**)",
+      "Read(//tmp/lup-inbox)"
     ]
   },
   "sandbox": {
-    "credentials": {
-      "files": [
-        {
-          "mode": "deny",
-          "path": "~/.ssh"
-        },
-        {
-          "mode": "deny",
-          "path": "~/.aws/credentials"
-        }
-      ]
-    },
     "enabled": true,
     "excludedCommands": [
       "ssh *",

@@ -104,7 +104,7 @@ from kernel.rows import (
 )
 from kernel.spawns import decide_spawn
 from kernel.words import INTERPRETERS
-from kernel.roles import displaced_targets, is_session_scratch_target
+from kernel.roles import displaced_targets
 from kernel.shell import decide_shell, sandbox_excluded, shell_posture_targets
 from kernel.tools import decide_tool
 from policy_data import (
@@ -123,12 +123,15 @@ from policy_data import (
     PEER_POLICY,
     POLICY_ROOT_ENV,
     RECOVERABLE_TARGET_LIMIT,
+    REFUSED_PATHS,
     REFUSED_TOOLS,
     RUNNER_TARGET_TABLES,
     RUNNER_TARGETS,
     SANDBOX_EXCLUDED_COMMANDS,
+    SECRET_VARIABLES,
     SHELL_RULES,
     SPAWN_NAMES,
+    UNSCOPED_FETCH,
 )
 
 
@@ -271,38 +274,22 @@ def bash_decision(
         # uncontained session ever reaches: contained, the row above settles
         # the same operation first.
         unjudged_ambient="defer" if defers_unjudged(boundary) else "ask",
+        # What `curl` and `wget` answer for an origin no scope names: the
+        # project's fetch declaration, or the posture above where it made
+        # none -- the same answer `fetch_decision` gives `WebFetch`.
+        unscoped_fetch=UNSCOPED_FETCH,
+        # What no word may name and no builtin may print, as the project
+        # declared them: the same rows the canonical policy is handed.
+        refused_paths=REFUSED_PATHS,
+        secret_variables=SECRET_VARIABLES,
         # Resolved against what this launch mounted writable, so a write into a
         # worktree cut after the container started reaches a reviewer instead of
-        # the writable base no overlay covers.
-        #
-        # The session scratchpad is taken out first, because the lease is not
-        # the question there. A lease enumerates what the launch mounted from
-        # the host, so anything else reads as uncovered -- and the scratchpad
-        # is uncovered in the direction that makes it safe: the harness's own
-        # root, container-private where a container is running, holding
-        # nothing any capture was meant to protect. The role layer already
-        # had this right, and an edit to the same path allows; only the
-        # measured layer disagreed, so a write there asked while a write
-        # beside it in the checkout did not.
-        #
-        # Filtered here rather than inside `unleased_write_targets`, which is
-        # compiled into a bare script that may not reach the kernel where
-        # `is_session_scratch_target` says what a scratchpad path is.
-        #
-        # The temporary root around it is exempt too, and is not filtered
-        # here, because that one is only safe where the launch is a measured
-        # container -- a fact this site does not hold and the settlement row
-        # does. So the two sit apart by what each needs to know: this
-        # scratchpad is the harness's at every placement, and `/tmp` is
-        # nobody's until something confines it.
+        # the writable base no overlay covers. Every target the lease leaves
+        # uncovered is listed, the scratchpad and `/tmp` included: which of
+        # those roots are the launch's own is the settlement row's to say, so
+        # the canonical policy hands the row the same list from the same call.
         unleased_targets=unleased_write_targets(
-            [
-                target
-                for target in [*shell_write_targets(command), *acted_on]
-                if not is_session_scratch_target(target)
-            ],
-            boundary,
-            cwd,
+            [*shell_write_targets(command), *acted_on], boundary, cwd
         ),
         # The read-only holes of the same lease: a repository's shared config
         # and hooks, which the container binds read-only and a host posture
@@ -500,10 +487,11 @@ def unconfined_by_declaration(command: str) -> bool:
 def fetch_decision(url: str, root: Path | None = None) -> KernelDecision:
     """Judge one outbound fetch against the declared scopes.
 
-    The profile's answer for an origin no scope names is read from the same
-    ledger the shell family reads it from, so one declaration answers on both
-    surfaces. Read here rather than passed, because this entry point is what
-    a dispatcher calls and a dispatcher holds nothing but the call.
+    An origin no scope names answers what the project declared for it, and
+    where it declared nothing, the profile's posture read from the same
+    ledger the shell family reads it from, so one declaration answers on
+    every surface. Read here rather than passed, because this entry point is
+    what a dispatcher calls and a dispatcher holds nothing but the call.
     """
     boundary = measured_boundary(root)
     port = loopback_port(url)
@@ -511,7 +499,7 @@ def fetch_decision(url: str, root: Path | None = None) -> KernelDecision:
         url,
         ALLOWED_FETCH_SCOPES,
         DENIED_FETCH_SCOPES,
-        "defer" if defers_unjudged(boundary) else "ask",
+        UNSCOPED_FETCH or ("defer" if defers_unjudged(boundary) else "ask"),
         host_listener=port is not None and port in held_loopback_ports(boundary),
     )
     if verdict.effect != "ask":
@@ -832,6 +820,12 @@ def local_edit_decision(
         foreign=outside_this_repository,
         outside_project=beyond_this_project,
         checkout_path=this_checkout_path(path_text, cwd),
+        # lup: defer: every caller hands this a path already resolved --
+        # `edit_decision` resolves it, and a routed request carries the resolved
+        # path -- so this reports nothing and `edit:displaced-path` fires on no
+        # runtime; the edit is judged where it lands instead, as the in-process
+        # policy judges it. Either drop the gate and this call, or feed it the
+        # spelled path without letting its ask preempt a deny the landing earns.
         displaced=next(
             iter(
                 displaced_targets(

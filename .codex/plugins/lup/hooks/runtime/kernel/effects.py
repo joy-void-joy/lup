@@ -319,6 +319,8 @@ class WritesPath(Effect):
     ``tsc`` names what it is about to replace and none of the four trees above
     can be the answer -- not because the path is unknown to everybody, but
     because it is unknowable to this gate, which decides before anything ran.
+    A target spelled with an expansion is the same case: ``> a$X`` names a
+    word, and the file it lands on is decided by a run this gate precedes.
 
     There is no ``secret`` here, though :class:`ReadsPath` has one. Reading key
     material is the disclosure and no boundary puts it back; writing over it

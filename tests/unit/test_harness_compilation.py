@@ -1907,14 +1907,19 @@ def test_generated_claude_hook_records_metadata_only_evidence(tmp_path: Path) ->
 def test_generated_hooks_record_a_fetch_by_origin_and_nothing_further(
     tmp_path: Path,
 ) -> None:
-    """Both journals name the origin that asked, and stop there.
+    """Both journals name the origin a fetch reached for, and stop there.
 
-    A refusal that carries no part of the input reads as "a URL was outside
+    A record that carries no part of the input reads as "a URL was outside
     the declared scopes" with no way to tell which URL, so the question the
     journal exists to answer -- what did this session try to reach -- is
     settled by inference. The origin is the half the scope table is written
     against; the path and the query are where a token or a document id ride,
     and they stay out, as does everything else in the call.
+
+    The origin is outside every scope, which this project hands to the
+    runtime's own permission system: Claude's hook says nothing, Codex's
+    exits clean on both judging events -- a deferral is never rendered as an
+    allow -- and no question is parked for a reviewer.
     """
     url = "https://docs.example.test:8443/private/page?token=do-not-record"
     body: JsonObject = {"hook_event_name": "PreToolUse", "cwd": str(tmp_path)}
@@ -1929,22 +1934,17 @@ def test_generated_hooks_record_a_fetch_by_origin_and_nothing_further(
         _return_cmd=True,
     )
     assert isinstance(claude, sh.RunningCommand)
-    rendered = ClaudeHookOutput.model_validate_json(claude.stdout)
-    assert rendered.hook_specific_output.permission_decision == "ask"
-    assert url in rendered.hook_specific_output.permission_decision_reason
-    codex = codex_hook_result(
-        {**body, "tool_name": "web_fetch", "tool_input": {"url": url}},
-        sandboxed=True,
-        plugin_data=codex_data,
-    )
+    assert "hookSpecificOutput" not in json.loads(claude.stdout)
+    fetch = {**body, "tool_name": "web_fetch", "tool_input": {"url": url}}
+    codex = codex_hook_result(fetch, sandboxed=True, plugin_data=codex_data)
     assert codex.exit_code == 0
-    spoken = json.loads(codex.stdout)["hookSpecificOutput"]
-    assert spoken["permissionDecision"] == "deny"
-    assert url in spoken["permissionDecisionReason"]
-    # Only the runtime without an ask effect parks; the other one asked.
-    pending = QuestionRelay(tmp_path / ".lup/questions.jsonl").pending()
-    assert {question.operation.tool for question in pending} == {"web_fetch"}
-    assert all(question.operation.payload == {"url": url} for question in pending)
+    assert not codex.stdout.strip()
+    requested = codex_hook_result(
+        {**fetch, "hook_event_name": "PermissionRequest"}, sandboxed=True
+    )
+    assert requested.exit_code == 0
+    assert not requested.stdout.strip()
+    assert not QuestionRelay(tmp_path / ".lup/questions.jsonl").pending()
 
     for data_root in (claude_data, codex_data):
         written = (data_root / "hook-events.jsonl").read_text(encoding="utf-8")
@@ -1952,6 +1952,7 @@ def test_generated_hooks_record_a_fetch_by_origin_and_nothing_further(
         assert "/private/page" not in written
         records = [json.loads(line) for line in written.splitlines()]
         assert [record["phase"] for record in records] == ["started", "completed"]
+        assert records[-1]["outcome"] == "defer"
         for record in records:
             assert record["fetch_origin"] == "https://docs.example.test:8443"
 
@@ -2243,7 +2244,7 @@ def test_generated_codex_hook_allows_managed_skill_scripts(
     assert isinstance(allowed, sh.RunningCommand)
     assert allowed.exit_code == 0
 
-    body["tool_input"]["command"] = "node /tmp/untrusted-script.mjs"
+    body["tool_input"]["command"] = "python3 /tmp/untrusted-script.py"
     denied = sh.Command(str(script))(
         _in=json.dumps(body),
         _ok_code=[0, 2],
@@ -2270,9 +2271,58 @@ def test_generated_claude_hook_allows_managed_skill_scripts(
     helper = config_dir / "plugins/cache/official/tool/scripts/validate.mjs"
     assert decision(f"node {helper}") == "allow"
     assert decision(f"node {config_dir}/skills/tool/scripts/report.mjs") == "allow"
-    assert decision("node /tmp/untrusted-script.mjs") == "deny"
-    workspace_script = Path(".claude/plugins/lup/scripts/file_suggest.sh").resolve()
-    assert decision(f"sh {workspace_script}") == "deny"
+    assert decision(f"python3 {config_dir}/skills/tool/scripts/report.py") == "allow"
+    assert decision("python3 /tmp/untrusted-script.py") == "deny"
+    assert decision("node -e 'process.exit()'") == "deny"
+
+
+def test_generated_hooks_find_uv_dependency_routes_past_global_flags(
+    tmp_path: Path,
+) -> None:
+    """Both shipped hooks walk to uv's verb past its global options.
+
+    A global before the verb, or between its words, is the spelling that
+    would slip a route past a reader matching by position. The Claude hook
+    asks and the Codex hook, which has no ask to render, parks the question;
+    the listing verbs read on both.
+    """
+    script = Path(".claude/plugins/lup/hooks/scripts/policy.py").resolve()
+
+    def claude(command: str) -> str:
+        body = {
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "cwd": str(tmp_path),
+        }
+        result = sh.Command(str(script))(_in=json.dumps(body), _return_cmd=True)
+        assert isinstance(result, sh.RunningCommand)
+        output = ClaudeHookOutput.model_validate_json(result.stdout)
+        return output.hook_specific_output.permission_decision
+
+    def codex(command: str) -> str:
+        body: JsonObject = {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "Bash",
+            "tool_input": {"command": command},
+            "cwd": str(tmp_path),
+        }
+        result = codex_hook_result(body, sandboxed=True)
+        if not result.stdout.strip():
+            return "allow" if result.exit_code == 0 else "deny"
+        return json.loads(result.stdout)["hookSpecificOutput"]["permissionDecision"]
+
+    for command in (
+        "uv -q pip install y",
+        "uv pip --quiet install x",
+        "uv --cache-dir /tmp/c tool install ruff",
+        "uv --offline publish",
+        "uvx ruff",
+    ):
+        assert claude(command) == "ask", command
+        assert codex(command) == "deny", command
+    for command in ("uv -q pip list", "uv --cache-dir /tmp/c tool list"):
+        assert claude(command) == "allow", command
+        assert codex(command) == "allow", command
 
 
 def test_generated_claude_hook_refuses_the_declared_calls(tmp_path: Path) -> None:
@@ -3146,10 +3196,12 @@ def test_rendered_sandbox_keys_are_the_runtime_documented_ones() -> None:
     """The block is checked against the runtime's shape rather than assumed.
 
     A misspelled sandbox key changes nothing and reports nothing, so every
-    key is drawn from the SDK's published shape. Two are settings-file-only,
-    because the SDK routes filesystem and credential limits through
-    permission rules instead — named here so the split reads as a fact about
-    the two surfaces rather than as a mismatch nobody checked.
+    key is drawn from the SDK's published shape. One is settings-file-only,
+    because the SDK routes filesystem limits through permission rules instead
+    — named here so the split reads as a fact about the two surfaces rather
+    than as a mismatch nobody checked. Credential reads have no key of their
+    own: the `Read` deny rules carry them, and the runtime merges those into
+    the sandbox.
     """
     sandbox = project_settings(portable_harness().plugins[0])["sandbox"]
     assert isinstance(sandbox, dict)
@@ -3160,7 +3212,6 @@ def test_rendered_sandbox_keys_are_the_runtime_documented_ones() -> None:
 
     assert "excludedCommands" in session_keys
     assert sorted(key for key in sandbox if key not in session_keys) == [
-        "credentials",
         "filesystem",
     ]
     assert [key for key in network if key not in network_keys] == []

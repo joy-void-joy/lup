@@ -47,6 +47,11 @@ from lup.policy.kernel.rows import AcceptanceGuardRow, PathRoleName, SpawnNameRo
 from lup.policy.kernel.semantics import UnjudgedAmbient
 from lup.policy.models import PolicyId, UrlPathPrefix
 from lup.policy.peer_policy import PeerPolicy
+from lup.policy.refused_paths import (
+    RefusedPaths,
+    credential_files,
+    secret_variable_names,
+)
 from lup.policy.refused_tools import RefusedTool
 from lup.policy.edit_rules import EditRule
 from lup.policy.imports import ImportBoundary
@@ -1566,7 +1571,6 @@ class HookSandbox(BaseModel, frozen=True):
     """
 
     extra_domains: list[str] = []
-    credential_paths: list[str] = []
     excluded_commands: list[str] = Field(
         default=[],
         description=(
@@ -1699,6 +1703,26 @@ class HookSet(BaseModel, frozen=True):
             "an empty list — the library's own answer — refuses nothing"
         ),
     )
+    refused_paths: list[RefusedPaths] = Field(
+        default=[credential_files()],
+        description=(
+            "Paths no word of any shell command may name, each carrying what "
+            "to do instead: whichever verb would have reached one — a read, a "
+            "copy, an archive, a connection — is refused by the name. The "
+            "library's answer is the key and login files a machine keeps; a "
+            "project replacing it states the whole set, and adds its own "
+            "runtimes' logins with `credential_files(also=...)`"
+        ),
+    )
+    secret_variables: list[str] = Field(
+        default=secret_variable_names(),
+        description=(
+            "Name patterns of the variables whose values no command may print "
+            "into the transcript: `printenv NAME`, `echo $NAME`, a printf or a "
+            "here-string carrying one. Matched against the whole name without "
+            "case"
+        ),
+    )
     carriers: CarrierPins | None = Field(
         default=None,
         description=(
@@ -1817,6 +1841,18 @@ class HookSet(BaseModel, frozen=True):
             "to answer"
         ),
     )
+    unscoped_fetch: UnjudgedAmbient | None = Field(
+        default=None,
+        description=(
+            "What a fetch outside every declared scope answers, whichever "
+            "route reaches it: a web fetch, `curl` or `wget`. `defer` hands "
+            "the origin to the runtime's own permission system; `ask` puts "
+            "it to a reviewer. Unset, it follows `unjudged_ambient`. Its own "
+            "declaration because reading an unlisted origin is not work the "
+            "vocabulary forgot, and a project may hand one to the runtime "
+            "while keeping unjudged shell work visible"
+        ),
+    )
     boundary_capabilities: list[BoundaryCapability] = Field(
         default=[],
         description=(
@@ -1869,6 +1905,15 @@ class HookSet(BaseModel, frozen=True):
         first asking whether a sandbox exists to have an opinion.
         """
         return list(self.sandbox.excluded_commands) if self.sandbox else []
+
+    def resolved_unscoped_fetch(self) -> UnjudgedAmbient:
+        """What an origin no fetch scope names answers in this project.
+
+        The fetch declaration where one was made, the unjudged posture where
+        none was: one answer for `WebFetch`, `curl` and `wget` alike, asked
+        here so the canonical policy composes no second reading of it.
+        """
+        return self.unscoped_fetch or self.unjudged_ambient
 
     def resolved_shell_rules(self) -> list[ShellCommandRule]:
         """The shell vocabulary this project actually judges by.

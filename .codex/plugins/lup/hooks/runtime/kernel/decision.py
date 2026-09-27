@@ -752,12 +752,18 @@ def joined_decision(decisions: list[KernelDecision]) -> KernelDecision:
             findings=parts,
             reach=objecting_reach(parts),
         )
-    deferred = next((item for item in decisions if item.effect == "defer"), None)
-    if deferred is not None:
-        return deferred.revised(
+    deferred = [item for item in decisions if item.effect == "defer"]
+    if deferred:
+        # The abstention leaving the most to settle speaks for the line: a
+        # handoff to the runtime answers for its own segment, never for an
+        # unread one beside it, whichever of the two was written first.
+        return min(
+            deferred,
+            key=lambda item: (item.abstention == "provider_native", item.unlisted),
+        ).revised(
             findings=parts,
             reach=objecting_reach(parts),
-            unread=any(item.unread for item in decisions if item.effect == "defer"),
+            unread=any(item.unread for item in deferred),
         )
     reached = dict.fromkeys(item.rule for item in decisions if item.rule)
     return KernelDecision(

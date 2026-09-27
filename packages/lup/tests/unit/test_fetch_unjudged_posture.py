@@ -20,6 +20,7 @@ bare host is. What keeps that rule away from a deferred fetch is the order:
 `ProviderNative` settles the abstention before `ContainedEffects` is read.
 """
 
+from lup.harness.models import HookSet
 from lup.policy.kernel.decision import KernelDecision
 from lup.policy.kernel.fetch import decide_fetch
 from lup.policy.kernel.rows import ShellRuleRow, UrlScopeRow
@@ -144,3 +145,70 @@ def test_a_deferred_curl_is_not_rewritten_by_the_contained_reading() -> None:
 def test_a_declared_origin_is_still_allowed_however_it_is_spelled() -> None:
     for posture in POSTURES:
         assert curled("curl https://docs.example.test/guide", posture).effect == "allow"
+
+
+def test_a_fetch_declaration_answers_curl_whatever_the_posture() -> None:
+    """The unscoped answer is its own declaration, and the posture its fallback.
+
+    A project may hand an unlisted origin to the runtime while keeping
+    unjudged shell work visible, or the reverse, so each is read where it
+    applies: the downloader reads the fetch declaration, and a command
+    nothing classified still reads the posture.
+    """
+    rows = erase_shell_rules(default_vocabulary())
+
+    def settled(command: str, posture: UnjudgedAmbient, fetch: UnjudgedAmbient):
+        return decide_shell(
+            command,
+            rows,
+            [DOCS],
+            [],
+            unjudged_ambient=posture,
+            unscoped_fetch=fetch,
+        )
+
+    assert settled("curl https://elsewhere.test/page", "ask", "defer").effect == (
+        "defer"
+    )
+    assert settled("curl https://elsewhere.test/page", "defer", "ask").effect == ("ask")
+    assert settled("frobnicate --weird", "ask", "defer").effect == "ask"
+    assert settled("frobnicate --weird", "defer", "ask").effect == "defer"
+
+
+def test_an_unset_fetch_declaration_follows_the_posture() -> None:
+    """Unset, the one declaration a project made answers both surfaces."""
+    for posture in POSTURES:
+        hooks = HookSet(id="hooks", policy_ids=[], unjudged_ambient=posture)
+        assert hooks.resolved_unscoped_fetch() == posture
+        for declared in POSTURES:
+            stated = hooks.model_copy(update={"unscoped_fetch": declared})
+            assert stated.resolved_unscoped_fetch() == declared
+
+
+def test_a_handoff_never_carries_an_unread_segment_beside_it() -> None:
+    """A deferred curl answers for itself, not for the line it sits in.
+
+    Joined by position, whichever abstention was written first spoke for the
+    line: `curl <unlisted> ; $(echo rm) -rf x` went to the runtime whole,
+    while the same two commands the other way round were refused. The
+    abstention leaving the most to settle speaks instead, so the order they
+    were written in stops mattering, and an unread segment is refused
+    uncontained whatever rides beside it.
+    """
+    rows = erase_shell_rules(default_vocabulary())
+    for command in (
+        "curl https://elsewhere.test/ ; $(echo rm) -rf x",
+        "$(echo rm) -rf x ; curl https://elsewhere.test/",
+        "frobnicate ; $(echo rm) -rf x",
+    ):
+        for posture in POSTURES:
+            settled = decide_shell(
+                command,
+                rows,
+                [DOCS],
+                [],
+                unjudged_ambient=posture,
+                unscoped_fetch="defer",
+            )
+            assert settled.effect == "deny", (command, posture)
+            assert settled.abstention is None

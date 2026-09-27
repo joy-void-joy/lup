@@ -1025,6 +1025,45 @@ DECLARED: list[Migration] = [
             ),
         ],
     ),
+    Migration(
+        subjects=["runtime_path_rule"],
+        reason=(
+            "a declared protected root compiles through one function both "
+            "enforcement paths read, lup.policy.rules.protected_root_rule, "
+            "rather than a second copy in the bundle a test held equal to the "
+            "first; no protected root releases an autonomous identity any more"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Call path_rule_row(protected_root_rule(root)) from "
+                    "lup.policy.rules where runtime_path_rule(root) was called; "
+                    "runtime_path_rules keeps its signature."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=["HookSandbox.credential_paths", "ExecutionBoundary.credential_paths"],
+        reason=(
+            "the file tools and the OS sandbox are refused every path "
+            "HookSet.refused_paths withholds from a command, compiled from that "
+            "one declaration, where a second list named two of those paths and "
+            "left the rest readable to Read, Grep and Glob"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Delete credential_paths from the HookSandbox declaration and "
+                    "declare any path it named that the library's "
+                    "credential_files() does not already withhold in "
+                    "HookSet.refused_paths instead, through credential_files(also="
+                    "[...]) or a RefusedPaths of its own; the settings render the "
+                    "Read deny rules from there."
+                )
+            ),
+        ],
+    ),
 ]
 """Every break this library has taken since its last release, and what to do.
 

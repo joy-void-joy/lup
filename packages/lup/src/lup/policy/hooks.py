@@ -63,6 +63,7 @@ Examples:
 """
 
 from collections.abc import Awaitable, Callable, Sequence
+from itertools import accumulate
 from pathlib import Path
 from typing import Literal, TypedDict
 
@@ -353,6 +354,37 @@ def create_git_inspection_hook() -> LupHooksConfig:
     index_commands = dict.fromkeys(["add", "rm"])
     shell_wrappers = dict.fromkeys(["bash", "dash", "fish", "sh", "zsh"])
 
+    def hands_off(subcommand: str, arguments: list[str]) -> str | None:
+        """The option by which an inspection verb runs a program or writes a file.
+
+        Two do, and both ride on verbs this hook lets through: `git grep -O
+        <program>` (`--open-files-in-pager`) runs a program over the files it
+        matched, and `--output=<file>` makes `diff`, `log` and `show` write
+        their report into a file. A long option is caught by any prefix git
+        would take for it, since git accepts an unambiguous abbreviation, and
+        `-O` inside a cluster as well as alone.
+        """
+
+        def spells(word: str, option: str) -> bool:
+            """Whether git reads this word as that long option."""
+            return any(
+                word == prefix or word.startswith(f"{prefix}=")
+                for prefix in accumulate(option)
+                if len(prefix) > 2
+            )
+
+        for word in arguments:
+            if word == "--":
+                return None
+            if spells(word, "--output"):
+                return word
+            if subcommand == "grep" and (
+                spells(word, "--open-files-in-pager")
+                or (not word.startswith("--") and word.startswith("-") and "O" in word)
+            ):
+                return word
+        return None
+
     async def git_inspection_hook(event: LupHookInput) -> LupHookOutput:
         if event.event != "PreToolUse":
             return LupHookOutput()
@@ -393,6 +425,14 @@ def create_git_inspection_hook() -> LupHooksConfig:
                         return deny_hook(
                             "resolver workers may inspect Git and settle its "
                             "index, but cannot mutate history"
+                        )
+                    handed = (
+                        hands_off(words[1], words[2:]) if executable == "git" else None
+                    )
+                    if handed is not None:
+                        return deny_hook(
+                            f"resolver workers may inspect Git, but `{handed}`"
+                            " runs a program or writes a file"
                         )
                 return allow_hook()
             case _:

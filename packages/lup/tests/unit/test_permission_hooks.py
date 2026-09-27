@@ -7,6 +7,8 @@ invisible to the agent.
 
 from pathlib import Path
 
+import pytest
+
 from lup.policy.hooks import (
     LupHookInput,
     LupHooksConfig,
@@ -109,6 +111,36 @@ async def test_resolver_workers_can_inspect_git_but_cannot_mutate_it() -> None:
         "deny"
     )
     assert await decision_for(config, "Edit", {"file_path": ".git"}) == "deny"
+
+
+@pytest.mark.parametrize(
+    ("command", "effect"),
+    [
+        ("git grep --open-files-in-pager=rm x", "deny"),
+        ("git grep --open-files x", "deny"),
+        ("git grep -Orm x", "deny"),
+        ("git grep -iO x", "deny"),
+        ("git diff --output=README.md", "deny"),
+        ("git log -p --out README.md", "deny"),
+        ("git show --output x HEAD", "deny"),
+        ("git grep -n x", "allow"),
+        ("git diff --stat", "allow"),
+        ("git diff --output-indicator-new=+", "allow"),
+        ("git diff -O order.txt", "allow"),
+        ("git diff -- --output=x", "allow"),
+    ],
+)
+async def test_resolver_workers_cannot_hand_an_inspection_a_program_or_a_file(
+    command: str, effect: str
+) -> None:
+    """`grep -O` runs a program over its matches and `--output` writes a file.
+
+    Both ride on verbs the hook lets through, so each is caught however git
+    would read it: abbreviated, attached, or inside a cluster.
+    """
+    config = create_git_inspection_hook()
+
+    assert await decision_for(config, "Bash", {"command": command}) == effect
 
 
 # ---------------------------------------------------------------------------

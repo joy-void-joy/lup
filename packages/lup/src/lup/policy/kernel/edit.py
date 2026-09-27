@@ -20,7 +20,10 @@ from .roles import (
     FOREIGN_REPOSITORY_REFERRAL,
     GENERATED_PLUGIN_RECOVERY,
     GENERATED_PLUGIN_REFUSAL,
+    GIT_STATE_RECOVERY,
+    GIT_STATE_REFUSAL,
     declared_scratch,
+    git_state,
     is_generated_plugin_target,
     normalized_path,
     path_role,
@@ -36,6 +39,7 @@ from .rows import (
     PathRuleRow,
     ResolutionRow,
 )
+from .syntax import VerbatimText
 from .typescript import (
     TYPESCRIPT_SUFFIXES,
     masked_typescript_lines,
@@ -3611,11 +3615,20 @@ def protected_path_reason(path: str, matched: PathRuleRow) -> str:
     from the second mention. Beside :func:`path_rule_matches` so the words a
     question uses and the match that raised it come from one module, for the
     edit gate and the shell path alike.
+
+    A rule spelled from anywhere names the file itself as often as a directory
+    holding it: `packages/app/uv.lock` *is* one of `**/uv.lock` rather than
+    under it, and is named as a match of the pattern it tripped.
     """
     reason = matched["reason"]
-    if path == matched["value"]:
+    value = matched["value"]
+    if path == value:
         return reason if path in reason else f"{path}: {reason}"
-    return f"{path} is under {matched['value']}: {reason}"
+    if matched["kind"] == "contains_part" and not root_matches(
+        posixpath.dirname(normalized_path(path)), value, "contains_part"
+    ):
+        return f"{path} matches **/{value}: {reason}"
+    return f"{path} is under {value}: {reason}"
 
 
 PACKAGE_MARKER_FILES = ("__init__.py",)
@@ -3810,7 +3823,16 @@ def decide_edit(
     ``path`` only where a repository nested inside the checkout holds the
     file, and it answers one question, which two gates below defer to:
     whether the file lies under a root this checkout declares scratch.
+
+    Both spellings name a file that exists or is about to, never a word a
+    shell has yet to expand: a native edit's path is handed over literal, and
+    a command's write reaches this gate only once its target was read as one
+    (:func:`~lup.policy.kernel.lex.carried_writes` drops any that was not).
+    So a `$` in either is the character it is -- `tmp/a$b` is scratch -- and
+    every reader below is told so, as the shell kernel tells its own.
     """
+    path = VerbatimText(path)
+    checkout_path = VerbatimText(checkout_path)
     # Scratch this checkout declares, read off the checkout's own spelling
     # alone. That is empty wherever the checkout does not hold the file -- a
     # sibling worktree, a `refs/` link landing in another project, the
@@ -3872,6 +3894,21 @@ def decide_edit(
             rule="edit:generated-plugin",
             evaluator="edit-gate",
             recovery=GENERATED_PLUGIN_RECOVERY,
+        )
+    # Git's own pointers and refs, on the same footing: every verdict the
+    # lattice can reach is wrong for them. An allow lets a session choose what
+    # host git reads next, and an ask puts a question whose right answer is
+    # "let git write it". No scratch exception, because what a pointer points
+    # host git at does not depend on where the pointer sits.
+    if git_state(path) is not None:
+        return KernelDecision(
+            "deny",
+            GIT_STATE_REFUSAL,
+            cause="deliberate",
+            hard=True,
+            rule="edit:git-state",
+            evaluator="edit-gate",
+            recovery=GIT_STATE_RECOVERY,
         )
 
     # Whether this path is the file it names is prior to every gate below,

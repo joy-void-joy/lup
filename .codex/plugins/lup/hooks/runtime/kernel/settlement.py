@@ -32,7 +32,7 @@ from .decision import (
     recovery_dischargeable,
 )
 from .escalation import EscalationRequest
-from .roles import is_temporary_root_target
+from .roles import is_session_scratch_target, is_temporary_root_target
 from .rows import DisplacedTargetRow, TargetLandingRow
 from .semantics import CheckpointEvidence, Reach, UnjudgedAmbient
 
@@ -81,6 +81,13 @@ class SettlementFacts:
     unjudged_ambient: UnjudgedAmbient
     unleased: list[str]
     readonly: list[str]
+    guarded: list[str]
+    """Git's pointers and refs a write names, held as read-only is but unmounted.
+
+    The same refusal, from a different source: ``readonly`` is what a launch
+    bound read-only and measured, while these are recognized by what they are,
+    because `git worktree remove` has to be able to unlink them and a bind
+    would refuse it."""
     displaced: list[DisplacedTargetRow]
     landings: list[TargetLandingRow]
     hint: str
@@ -102,6 +109,7 @@ class SettlementFacts:
         displaced: list[DisplacedTargetRow] | None = None,
         landings: list[TargetLandingRow] | None = None,
         hint: str = "",
+        guarded: list[str] | None = None,
     ) -> None:
         self.decision = decision
         self.escalation = escalation
@@ -115,6 +123,7 @@ class SettlementFacts:
         self.unjudged_ambient = unjudged_ambient
         self.unleased = unleased or []
         self.readonly = readonly or []
+        self.guarded = guarded or []
         self.displaced = displaced or []
         self.landings = landings or []
         self.hint = hint
@@ -207,6 +216,7 @@ class SettlementFacts:
             displaced=self.displaced,
             landings=self.landings,
             hint=self.hint,
+            guarded=self.guarded,
         )
 
 
@@ -414,21 +424,25 @@ class UnleasedWrite(SettlementRule):
     id = "unleased-write"
 
     def reached(self, facts: SettlementFacts) -> KernelDecision | None:
-        # The machine's temporary root is not the lease's business where the
-        # launch is a container. A lease enumerates what came from the host,
-        # so `/tmp` reads as uncovered — and it is uncovered in the direction
-        # that makes it safe, the same argument the session scratchpad won:
-        # this launch's own directory, gone with it, holding nothing any
-        # capture was meant to protect. The measurement is what carries it,
-        # so the exception is spelled against `container_private` rather than
-        # against the path: uncontained, that same word is the operator's own
-        # `/tmp`, shared with every other process on the machine. Any other
-        # path the host measured as the container's own is the same case: the
-        # lease enumerates what came from the host, and this came from nowhere.
+        # Two roots are not the lease's business. A lease enumerates what came
+        # from the host, so both read as uncovered -- and both are uncovered in
+        # the direction that makes them safe, holding nothing any capture was
+        # meant to protect. The session scratchpad is the harness's own root
+        # at every placement, so its spelling carries the exemption. The
+        # machine's temporary root is the launch's own only where the launch
+        # is a container, gone with it, so that exemption is spelled against
+        # `container_private` rather than against the path: uncontained, the
+        # same word is the operator's own `/tmp`, shared with every other
+        # process on the machine. Any other path the host measured as the
+        # container's own is the same case: the lease enumerates what came
+        # from the host, and this came from nowhere. All are read here, where
+        # every caller's targets meet, because the host half that lists them
+        # reaches no kernel to say what either root is.
         reported = [
             target
             for target in facts.unleased
-            if not (
+            if not is_session_scratch_target(target)
+            and not (
                 facts.container_private()
                 and (is_temporary_root_target(target) or facts.lands_inside(target))
             )
@@ -483,24 +497,45 @@ class ReadOnlyWrite(SettlementRule):
     Read over ``allow``, ``defer`` and ``ask`` alike, and above
     :class:`RecoveredLoss` for that reason; a refusal already standing needs
     nothing from it.
+
+    Git's own pointers are held the same way without a bind, since `git
+    worktree remove` unlinks them and a bind would refuse it: a linked
+    worktree's `.git` file, an entry's `commondir` and `gitdir`, its
+    `config.worktree`, and the entries themselves. Host git follows each to
+    the repository and the config it reads, so rewriting one is choosing that
+    config by another route -- and git's own commands write every one of them.
     """
 
     id = "read-only-write"
 
     def reached(self, facts: SettlementFacts) -> KernelDecision | None:
-        if not facts.readonly or facts.decision.effect == "deny":
+        if not (facts.readonly or facts.guarded) or facts.decision.effect == "deny":
             return None
-        return facts.decision.revised(
-            effect="deny",
-            reason=(
+        held = (
+            [
                 f"writes {', '.join(facts.readonly)}, which this launch holds"
                 " read-only: git runs what its config and hooks name on the host"
-            ),
+            ]
+            if facts.readonly
+            else []
+        )
+        pointed = (
+            [
+                f"rewrites {', '.join(facts.guarded)}, a pointer host git follows"
+                " to the repository and the config it acts on"
+            ]
+            if facts.guarded
+            else []
+        )
+        return facts.decision.revised(
+            effect="deny",
+            reason="; ".join([*held, *pointed]),
             recovery=(
-                "Work in a worktree of that repository; git's own commands"
-                " reach what they need without writing config or hooks, and a"
-                " setting that has to change is changed from an operator"
-                " terminal."
+                "Work in a worktree of that repository; git's own commands --"
+                " `git worktree add`, `move`, `remove` and `prune`, `git"
+                " update-ref` -- reach what they need without writing config,"
+                " hooks, pointers or refs by hand, and a setting that has to"
+                " change is changed from an operator terminal."
             ),
             cause="deliberate",
             purpose=None,

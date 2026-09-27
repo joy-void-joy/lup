@@ -11,6 +11,7 @@ declaration can disagree with it, and the disagreement is invisible until a
 session is denied something the policy allows.
 """
 
+from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field
@@ -79,32 +80,58 @@ def served_tool_grants(plugin: Plugin) -> list[str]:
 
 
 def credential_read_denials(hooks: "HookSet | None") -> list[str]:
-    """The declared credential paths, as deny rules the in-process tools obey.
+    """Every path the policy withholds from a command, as rules the file tools obey.
 
-    The same declaration already renders the sandbox's own credential deny,
-    which governs sandboxed Bash and nothing else. Read, Edit, Grep and Glob
-    run in the session's own process and never reach that boundary, so a path
-    named there was denied to the shell and readable by the file tools —
-    the ssh key included. Both renderings come from the one declaration so
-    they cannot name different paths.
+    Compiled from :attr:`~lup.harness.models.HookSet.refused_paths`, the one
+    declaration the shell policy refuses a word by. Read, Grep and Glob run in
+    the session's own process and never reach the policy hook, so a second
+    list declared for them named `~/.ssh` and `~/.aws/credentials` while the
+    shell withheld `~/.netrc`, `~/.git-credentials` and each runtime's own
+    login -- which the file tools went on reading. Claude Code merges these
+    same rules into its sandbox's read restrictions, so they are the OS
+    layer's credential denial as well, and nothing else renders one.
 
-    Two rules per path because the declaration does not say which are
-    directories, and asking the filesystem here would answer for the machine
-    generating the settings rather than the one reading them. The pattern that
-    does not apply matches nothing.
+    Each anchor keeps its meaning. From a home is `~/`, which the runtime
+    knows and the kernel does not; from the root is `//`; from anywhere is
+    `//**/`. A pattern ending in `**` names the directory too, as the
+    kernel's own match does, so a search rooted at it is refused and not only
+    a read beneath it. An exemption cannot be carried: a rule carves nothing
+    out of a deny spelled from a home or the root, so the file tools are
+    refused the public keys the shell may still read.
 
     ``Read`` covers the reading tools whole: Claude Code consults file
     permissions against ``Read`` and ``Edit`` rules only, and accepts but never
     consults a ``Grep`` or ``Glob`` path rule — writing one would warn at
     startup and deny nothing.
     """
-    if hooks is None or hooks.sandbox is None:
+    if hooks is None:
         return []
-    return [
-        rule
-        for path in hooks.sandbox.credential_paths
-        for rule in (f"Read({path})", f"Read({path}/**)")
-    ]
+
+    def rules(pattern: str) -> list[str]:
+        """One withheld pattern in the rule syntax, with the directory it spans."""
+        match PurePosixPath(pattern).parts:
+            case ("~", *names):
+                anchor = "~/"
+            case ("/", *names):
+                anchor = "//"
+            case ("**", *names):
+                anchor = "//**/"
+            case _:
+                return []
+        spanned = names[:-1] if names[-1:] == ["**"] else []
+        return [
+            f"Read({anchor}{'/'.join(names)})",
+            *([f"Read({anchor}{'/'.join(spanned)})"] if spanned else []),
+        ]
+
+    return list(
+        dict.fromkeys(
+            rule
+            for refused in hooks.refused_paths
+            for pattern in refused.paths
+            for rule in rules(pattern)
+        )
+    )
 
 
 def allowed_network_domains(hooks: HookSet) -> list[str]:
@@ -134,11 +161,13 @@ def project_settings(declared: Settings, plugin: Plugin | None) -> JsonObject:
     """Render the settings artifact, deriving every block it can.
 
     The sandbox stays permissive where the semantic policy already judges
-    (escapes re-enter the deny lattice) and hardens what shell writers could
-    otherwise bypass: human-owned files become OS-level write denials and the
-    declared credential paths become sandbox read denials. Both are array
-    keys the runtime merges across settings scopes, so a repository states
-    its own requirement without displacing the user's or the organization's.
+    (escapes re-enter the deny lattice) and hardens what shell readers could
+    otherwise bypass: every path the policy withholds becomes a `Read` deny
+    rule, which the runtime merges into the sandbox's read restrictions, so
+    the file tools and a sandboxed command are refused the same set. It is an
+    array key the runtime merges across settings scopes, so a repository
+    states its own requirement without displacing the user's or the
+    organization's.
     """
     settings: JsonObject = dict(declared.base)
     if declared.env:
@@ -175,12 +204,10 @@ def project_settings(declared: Settings, plugin: Plugin | None) -> JsonObject:
         # asks and carries the author's answer, where a denial in the runtime's
         # own sandbox refused the write outright and could put nothing to
         # anybody.
+        # No read denials either: the `Read` rules above are merged into this
+        # sandbox's read restrictions by the runtime itself, and a second
+        # rendering here in the sandbox's own path syntax is a second list to
+        # keep in step with the one the file tools obey.
         "filesystem": {"allowWrite": list(hooks.sandbox.writable_paths)},
-        "credentials": {
-            "files": [
-                {"path": path, "mode": "deny"}
-                for path in hooks.sandbox.credential_paths
-            ]
-        },
     }
     return settings
