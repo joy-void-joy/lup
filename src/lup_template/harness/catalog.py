@@ -38,6 +38,7 @@ from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.providers.codex.harness import CodexSpellings
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.policy.refused_paths import credential_files
+from lup.policy.rules import dependency_declarations
 from lup.harness.codescan.common import ApplicationRoots
 from lup.harness.codescan.boundaries import (
     generated_tree_paths,
@@ -733,7 +734,14 @@ def portable_harness(
                 # decide the same things about the session that reads them.
                 Path(".claude"),
                 Path(".codex"),
-                Path("pyproject.toml"),
+                # Every manifest and lockfile, in whichever package holds it:
+                # what an install fetches and runs is declared there, and the
+                # commands that write them for a reason are judged by the
+                # dependency rows rather than by a path.
+                *dependency_declarations(),
+                # CI runs with the repository's secrets and on every push, so
+                # a workflow or an action is code somebody else executes.
+                Path(".github"),
                 Path("sync.json"),
                 # The gitignored half alongside it, because a registration
                 # there can now carry a `mount` — and that key is what a

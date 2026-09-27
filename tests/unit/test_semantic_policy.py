@@ -1008,6 +1008,19 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="echo x > README.md", effect="ask"),
     DecisionCase(input="echo x > sync.json", effect="ask"),
     DecisionCase(input="echo x > .env.local", effect="ask"),
+    # A manifest or lockfile is protected in whichever package holds it, and
+    # CI config wherever under `.github` it sits, by every writing route: the
+    # commands that write them for a reason answer by the dependency rows.
+    DecisionCase(input="echo x > uv.lock", effect="ask"),
+    DecisionCase(input="echo x > packages/app/pyproject.toml", effect="ask"),
+    DecisionCase(input="cp tmp/a web/package.json", effect="ask"),
+    DecisionCase(input="mv tmp/a web/bun.lock", effect="ask"),
+    DecisionCase(input="rm web/pnpm-lock.yaml", effect="ask"),
+    DecisionCase(input="cp tmp/ci.yml .github/workflows/ci.yml", effect="ask"),
+    DecisionCase(input="echo x > .github/actions/setup/action.yml", effect="ask"),
+    DecisionCase(input="cat uv.lock web/package.json", effect="allow"),
+    DecisionCase(input="echo x > docs/pyproject.toml.md", effect="allow"),
+    DecisionCase(input="uv lock", effect="allow"),
     DecisionCase(input="echo x > docs/fresh-note.md", effect="allow"),
     # Housekeeping confined to the disposable roots is as safe as writing
     # them; any long flag, opaque word, or outside target keeps the verb's ask.
@@ -5017,6 +5030,54 @@ def test_a_composed_session_enforces_the_rules_the_generated_tree_does() -> None
     )
 
     assert composed == generated
+
+
+@pytest.mark.parametrize("autonomous", [False, True])
+@pytest.mark.parametrize(
+    ("path", "effect", "named"),
+    [
+        ("pyproject.toml", "ask", "pyproject.toml: protected path"),
+        ("uv.lock", "ask", "uv.lock: protected path"),
+        ("packages/app/pyproject.toml", "ask", "matches **/pyproject.toml"),
+        ("web/package.json", "ask", "matches **/package.json"),
+        ("web/bun.lock", "ask", "matches **/bun.lock"),
+        ("crates/core/Cargo.lock", "ask", "matches **/Cargo.lock"),
+        (".github/workflows/ci.yml", "ask", "is under .github"),
+        ("docs/package.json.md", "allow", ""),
+    ],
+)
+def test_manifests_lockfiles_and_ci_ask_every_identity(
+    tmp_path: Path, path: str, effect: str, named: str, autonomous: bool
+) -> None:
+    """Protected wherever a package holds them, the way the root manifest is.
+
+    A package's own manifest declares dependencies and scripts as the root's
+    does, a lockfile is what every later install trusts unread, and CI runs
+    with the repository's secrets, so none of them is a self-reviewing
+    identity's to rewrite either.
+    """
+    bundled = load_bundled_kernel(tmp_path, "edit")
+    canonical = EditPolicy(
+        FIXTURE_PATH_RULES, autonomous=autonomous, path_roles=FIXTURE_PATH_ROLES
+    ).decide(
+        EditBatch(changes=[EditChange(path=Path(path), before="a\n", after="b\n")])
+    )
+    generated = bundled.decide_edit(
+        path,
+        "a\n",
+        "b\n",
+        path_exists=True,
+        path_rules=runtime_path_rules(
+            [root.as_posix() for root in declared_hook_set().protected_edit_roots],
+            ["README.md"],
+        ),
+        antipattern_rows=[],
+        path_roles=FIXTURE_PATH_ROLES,
+        autonomous=autonomous,
+    )
+
+    assert canonical.effect == generated.effect == effect
+    assert named in generated.reason
 
 
 def test_canonical_edit_policy_preserves_shared_security_outcomes() -> None:

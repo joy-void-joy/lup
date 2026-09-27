@@ -484,6 +484,19 @@ through this same classifier, so `ENV_VAR=constant git status` is approved
 without a prompt. Security-sensitive assignments preserve the prompt, and a
 malformed assignment is refused as an unknown command.
 
+### What an install trusts
+
+Every manifest and lockfile — `pyproject.toml`, `package.json`, `uv.lock`,
+`poetry.lock`, `package-lock.json`, `bun.lock`, `bun.lockb`,
+`pnpm-lock.yaml`, `yarn.lock`, `Cargo.lock` — is a protected root in whichever
+package holds it, declared as `**/<name>` from
+`lup.policy.rules.dependency_declarations()`, and so is `.github`, because CI
+runs with the repository's secrets on every push. An edit of one, or any
+shell write of one, asks whoever makes it, a self-reviewing identity
+included, exactly as the root manifest does. The commands that write them
+for a reason — `uv lock`, `uv add`, `bun install` — are judged by the
+dependency rows instead, which read what they fetch rather than the path.
+
 ### A write that widens a later launch
 
 `sync.json` and `sync.json.local` are protected edit roots because a

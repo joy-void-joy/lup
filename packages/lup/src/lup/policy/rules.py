@@ -9,7 +9,7 @@ stay decision-identical; the shared fixture suite asserts exactly that.
 """
 
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
 from pydantic import AnyHttpUrl, BaseModel, Field
@@ -564,9 +564,12 @@ def protected_root_rule(root: str) -> PathRule:
     composes and the rows a generated dispatcher carries, so the two cannot
     come to disagree about which paths a root covers.
 
-    Scratch is the exception and matches by path part rather than by subtree,
-    because a scratch directory is reachable at more than one root and the
-    rule is about what the directory is, not where it sits.
+    A root is anchored at the repository top, and one spelled from anywhere
+    (`**/uv.lock`) names the path wherever it sits, the way a path role's
+    pattern does: a manifest or a lockfile is what it is in whichever package
+    holds it. Scratch matches by path part for the same reason, because a
+    scratch directory is reachable at more than one root and the rule is about
+    what the directory is, not where it sits.
 
     No rule here releases an autonomous identity. A protected root is where a
     session's own boundary is declared -- its settings, its launch registry,
@@ -574,17 +577,53 @@ def protected_root_rule(root: str) -> PathRule:
     review its own edits is still the confined thing choosing what confines
     it, so the question reaches a person whoever is asking.
     """
-    if root == "tmp":
-        return PathRule(
-            kind="contains_part",
-            value=root,
-            reason="scratch path requires approval",
-        )
+    match PurePosixPath(root).parts:
+        case ("tmp",):
+            return PathRule(
+                kind="contains_part",
+                value=root,
+                reason="scratch path requires approval",
+            )
+        case ("**", *named) if named:
+            return PathRule(
+                kind="contains_part",
+                value=PurePosixPath(*named).as_posix(),
+                reason="protected path requires approval",
+            )
     return PathRule(
         kind="subtree",
         value=root,
         reason="protected path requires approval",
     )
+
+
+def dependency_declarations(
+    names: tuple[str, ...] = (
+        "pyproject.toml",
+        "package.json",
+        "uv.lock",
+        "poetry.lock",
+        "package-lock.json",
+        "bun.lock",
+        "bun.lockb",
+        "pnpm-lock.yaml",
+        "yarn.lock",
+        "Cargo.lock",
+    ),
+) -> list[Path]:
+    """The manifests and lockfiles that decide what an install fetches and runs.
+
+    Protected wherever they sit, because a package's own manifest declares
+    dependencies and scripts as surely as the root's does, and a lockfile is
+    the exact artefact every later `sync` or `install` trusts without reading.
+    The commands that write them for a reason -- `uv lock`, `uv add`, `bun
+    install` -- are judged by the dependency rows; what this guards is a hand
+    writing one directly.
+
+    A default a composition root takes or replaces, as it does the credential
+    files: which ecosystems a project uses is the project's call.
+    """
+    return [Path("**", name) for name in names]
 
 
 def antipattern_row(rule: AntiPattern) -> AntiPatternRow:

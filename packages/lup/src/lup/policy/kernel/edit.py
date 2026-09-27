@@ -3614,11 +3614,20 @@ def protected_path_reason(path: str, matched: PathRuleRow) -> str:
     from the second mention. Beside :func:`path_rule_matches` so the words a
     question uses and the match that raised it come from one module, for the
     edit gate and the shell path alike.
+
+    A rule spelled from anywhere names the file itself as often as a directory
+    holding it: `packages/app/uv.lock` *is* one of `**/uv.lock` rather than
+    under it, and is named as a match of the pattern it tripped.
     """
     reason = matched["reason"]
-    if path == matched["value"]:
+    value = matched["value"]
+    if path == value:
         return reason if path in reason else f"{path}: {reason}"
-    return f"{path} is under {matched['value']}: {reason}"
+    if matched["kind"] == "contains_part" and not root_matches(
+        posixpath.dirname(normalized_path(path)), value, "contains_part"
+    ):
+        return f"{path} matches **/{value}: {reason}"
+    return f"{path} is under {value}: {reason}"
 
 
 PACKAGE_MARKER_FILES = ("__init__.py",)
