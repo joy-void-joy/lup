@@ -19,7 +19,7 @@ import typer
 from pydantic import BaseModel
 
 from lup.formats.banner import REGENERATE_COMMAND
-from lup.devtools.harness.generate import (
+from lup.harness.generate import (
     DeclarationObstruction,
     DriftReport,
     HarnessGenerationConflict,

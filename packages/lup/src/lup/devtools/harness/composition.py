@@ -31,7 +31,7 @@ from lup.providers.codex.harness_runtime import (
     codex_capability_probes,
 )
 from lup.devtools.harness.drift import refuse_generation
-from lup.devtools.harness.generate import (
+from lup.harness.generate import (
     NativeHarnessComposition,
     ProjectContent,
     claude_generation_recipe,

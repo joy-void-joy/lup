@@ -16,7 +16,7 @@ from lup.harness.proposals import ReconciliationMetadata, ReconciliationProposal
 from lup.harness.reconciliation import source_patch_base_digest
 from lup.workspace.paths import project_root
 from lup.devtools.harness.drift import generate_with_report, report_drift
-from lup.devtools.harness.generate import NativeHarnessComposition, inspect_generation
+from lup.harness.generate import NativeHarnessComposition, inspect_generation
 
 
 def classify_targets(compositions: list[NativeHarnessComposition]) -> None:

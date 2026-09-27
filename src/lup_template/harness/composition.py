@@ -20,7 +20,7 @@ from lup.devtools.harness.composition import (
     NativeTargets,
 )
 from lup.devtools.harness.drift import RepositoryWriter
-from lup.devtools.harness.generate import (
+from lup.harness.generate import (
     NativeHarnessComposition,
     ProjectContent,
 )

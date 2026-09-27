@@ -175,7 +175,7 @@ from lup_template.harness.composition import (
     claude_target,
     codex_target,
 )
-from lup.devtools.harness.generate import (
+from lup.harness.generate import (
     GenerationRecipe,
     NativeHarnessComposition,
     current_reader,

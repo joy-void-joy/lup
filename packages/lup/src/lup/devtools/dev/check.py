@@ -68,7 +68,7 @@ from lup.devtools.harness.drift import (
     report_stale,
     roster_gaps,
 )
-from lup.devtools.harness.generate import NativeHarnessComposition
+from lup.harness.generate import NativeHarnessComposition
 from lup.devtools.utils import decode_stderr, uv
 from lup.execution.shell import git
 from lup.web.build import BUN, restore_dependencies

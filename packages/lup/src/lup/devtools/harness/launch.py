@@ -136,7 +136,7 @@ from lup.devtools.harness.drift import (
     generate_targets,
     generate_with_report,
 )
-from lup.devtools.harness.generate import NativeHarnessComposition
+from lup.harness.generate import NativeHarnessComposition
 from lup.devtools.harness.preflight import (
     LaunchSentinels,
     ROOT_VARIABLE,

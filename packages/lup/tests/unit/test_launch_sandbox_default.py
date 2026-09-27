@@ -26,7 +26,7 @@ import lup.devtools.harness.contained as contained
 import lup.devtools.harness.launch as launch
 from lup.devtools.harness.app import create_harness_app
 from lup.devtools.harness.composition import NativeTargets
-from lup.devtools.harness.generate import NativeHarnessComposition
+from lup.harness.generate import NativeHarnessComposition
 from lup.devtools.harness.launch import (
     LaunchSandbox,
     launch_claude,

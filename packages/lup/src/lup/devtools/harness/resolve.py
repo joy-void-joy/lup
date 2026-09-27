@@ -110,7 +110,7 @@ from lup.devtools.harness.contained import (
     worker_cli,
     worker_wrapper_path,
 )
-from lup.devtools.harness.generate import NativeHarnessComposition
+from lup.harness.generate import NativeHarnessComposition
 from lup.devtools.sync import accessible_roots, granted_devices
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.providers.codex.login import CODEX_LOGIN

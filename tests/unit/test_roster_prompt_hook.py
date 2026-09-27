@@ -25,7 +25,7 @@ from lup.coordination.bare.changes import envelope, pointer
 from lup.coordination.bare.store import member_of, session_actor
 from lup.coordination.identity import MEMBER_ENV, mint_member_id
 from lup.coordination.repository import RepositoryPeers
-from lup.devtools.harness.generate import NativeHarnessComposition
+from lup.harness.generate import NativeHarnessComposition
 from lup.harness.models import Artifact
 from lup.policy.dispatcher import STORE_PACKAGE
 from lup.providers.claude.harness import CLAUDE_EXIT_EVENT, CLAUDE_PROMPT_EVENT

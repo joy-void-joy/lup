@@ -40,7 +40,7 @@ from lup.devtools.harness.contained import (
     superseded_images,
 )
 from lup.harness.image import Image, detected_client
-from lup.devtools.harness.generate import NativeHarnessComposition
+from lup.harness.generate import NativeHarnessComposition
 from lup.devtools.harness.profile_app import create_profile_app
 from lup.harness.models import Resumption
 from lup.harness.notice import Banner
