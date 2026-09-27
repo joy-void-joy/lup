@@ -1329,6 +1329,95 @@ def protected_deletion(
     return None
 
 
+def protected_placement(
+    words: list[str],
+    path_rules: list[PathRuleRow],
+    rows: list[ShellRuleRow],
+    existing: list[str] | None = None,
+    checkout: str = "",
+) -> KernelDecision | None:
+    """Ask before a command writes, moves or links onto a path the rules protect.
+
+    :func:`protected_deletion` asks this of `rm`, and the recoverable-roots
+    grant asks it of a path Git could restore. A path nothing stood at yet
+    reached neither: it went to the verb's own row, and a capture of the
+    checkout then settled `cp evil.yml .github/workflows/ci.yml` and `mv x
+    .claude/settings.local.json` as restorable, while the same file written
+    through `Edit` or a redirection asked. Whether a file may be written there
+    is about whose it is, and a file created there is written as surely as one
+    replaced.
+
+    Three readings, each from the spelling the rules are anchored at. Every
+    path the line writes, as :func:`written_targets` names them -- a path
+    verb's destination, an archive's, a declared write flag's -- matched as
+    the edit gate matches a path. Every source `mv` takes away, read as a
+    delete is, so moving a directory that holds a protected file asks. And
+    where each source of `cp`, `mv` or `ln` lands under a destination that is
+    a directory, read the same way: `cp -r /tmp/.claude .` writes `.claude`
+    though no word spells it.
+
+    `rm` is :func:`protected_deletion`'s, which words its question as the
+    delete it is.
+    """
+    executable = posixpath.basename(words[0])
+    if executable == "rm":
+        return None
+    write_flags = next(
+        (
+            row["write_flags"]
+            for row in rows
+            if row["command"] == executable and not row["subcommand"]
+        ),
+        [],
+    )
+    for word in written_targets(words, write_flags) or []:
+        spelled = repository_relative(word, checkout)
+        present = existing is None or word in existing
+        matched = next(
+            (row for row in path_rules if path_rule_matches(spelled, present, row)),
+            None,
+        )
+        if matched is not None:
+            return KernelDecision(
+                "ask",
+                protected_path_reason(posixpath.normpath(word), matched),
+                recovery=matched["recovery"],
+            )
+    operands = (
+        path_verb_operands(words)["operands"]
+        if executable in ("cp", "mv", "ln")
+        else []
+    )
+    sources = operands[:-1]
+    reached = [
+        *[(source, "move") for source in sources if executable == "mv"],
+        *[
+            (
+                posixpath.join(
+                    operands[-1], posixpath.basename(posixpath.normpath(source))
+                ),
+                "replace",
+            )
+            for source in sources
+        ],
+    ]
+    for word, verb in reached:
+        spelled = repository_relative(word, checkout)
+        matched = next(
+            (row for row in path_rules if deletes_protected(spelled, row)), None
+        )
+        if matched is None:
+            continue
+        shown = posixpath.normpath(word)
+        reason = (
+            protected_path_reason(shown, matched)
+            if path_rule_matches(spelled, True, matched)
+            else f"{shown} would {verb} {matched['value']}: {matched['reason']}"
+        )
+        return KernelDecision("ask", reason, recovery=matched["recovery"])
+    return None
+
+
 def confined_to_recoverable_roots(
     words: list[str],
     path_roles: list[PathRoleRow],

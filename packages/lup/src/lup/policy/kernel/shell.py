@@ -47,6 +47,7 @@ from .words import (
     confined_to_recoverable_roots,
     refuses_generated_plugin_write,
     protected_deletion,
+    protected_placement,
     env_payload,
     read_wrapper,
     uv_command_words,
@@ -671,6 +672,12 @@ def decide_segment_words(
         return refused
     deleted = protected_deletion(
         words, context["path_rules"], context["rows"], context["checkout_root"]
+    ) or protected_placement(
+        words,
+        context["path_rules"],
+        context["rows"],
+        context["existing_targets"],
+        context["checkout_root"],
     )
     if deleted is not None:
         return deleted

@@ -221,6 +221,15 @@ protected file asks by the same spellings, and a patch handed to `git
 pending — read the subcommand where it is written, since a global they did
 not model could change what they cover, and missing one costs a question.
 
+Placing a file on a protected path is asked the same way, whether or not
+anything stood there: a path created is written as surely as one replaced,
+and no capture answers whose it is. Every path a command writes — a `cp`,
+`mv` or `ln` destination, a `touch`, a `dd of=`, an archive's target — asks
+when a protected rule matches it; a source `mv` takes away is read as a
+delete is, and a source landing under a directory destination is read at
+the name it lands at, so `cp -r /tmp/.claude .` asks though no word spells
+`.claude`. Reading a protected file, or copying one out, stays ordinary.
+
 **And it is written down**, which is what makes the relaxation honest rather
 than merely quieter. The lattice asks about everything unjudged for an
 *observability* reason, and a deferral is the one verdict that reaches nobody

@@ -1055,6 +1055,26 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="rm tmp/*.md", effect="allow"),
     DecisionCase(input="rm -rf tmp/*", effect="allow"),
     DecisionCase(input="rm .claude/plugins/../settings.json", effect="ask"),
+    # Placing a file there is the other half. A path nothing stood at yet is
+    # written as surely as one replaced, so a copy, move, link or `dd` onto a
+    # protected path asks whether or not it exists, and no capture settles it:
+    # the question is whose the path is. A source `mv` takes away is read as a
+    # delete, and a source landing under a directory destination is read at
+    # the name it lands at. Reading a protected file stays ordinary.
+    DecisionCase(input="cp tmp/a .claude/settings.local.json", effect="ask"),
+    DecisionCase(input="mv tmp/a .claude/settings.local.json", effect="ask"),
+    DecisionCase(input="ln -s tmp/a .lup/preflight/forged.json", effect="ask"),
+    DecisionCase(input="cp tmp/a tmp/b .claude/", effect="ask"),
+    DecisionCase(input="cp -r tmp/kit/.claude .", effect="ask"),
+    DecisionCase(input="dd if=tmp/a of=sync.json.local", effect="ask"),
+    DecisionCase(input="touch .lup/preflight/forged.json", effect="ask"),
+    DecisionCase(
+        input="cp tmp/a pyproject.toml", effect="ask", existing=["pyproject.toml"]
+    ),
+    DecisionCase(input="mv packages /tmp/elsewhere", effect="ask"),
+    DecisionCase(input="mv tmp/kit/a.py tmp/other/", effect="allow"),
+    DecisionCase(input="cp .claude/settings.json tmp/copy.json", effect="allow"),
+    DecisionCase(input="cp -r .claude tmp/backup", effect="allow"),
     # A generated plugin tree is a build product the running runtime already
     # loaded, so writing one by hand changes nothing it will honor and the
     # next generation reverts it. Every writing form refuses it and names the
@@ -2522,11 +2542,10 @@ def test_assembled_kernel_runs_without_site_packages(tmp_path: Path) -> None:
                     "sensitive documentation path",
                 )
             ],
+            # The roots this repository declares, as the shell cases' own
+            # table is, so one fixture list is judged against one table.
             protected_roots=[
-                ".claude",
-                "pyproject.toml",
-                "sync.json",
-                "sync.json.local",
+                root.as_posix() for root in declared_hook_set().protected_edit_roots
             ],
             human_owned_files=["README.md"],
             autonomous_agent_identities=["resolver-worker"],
