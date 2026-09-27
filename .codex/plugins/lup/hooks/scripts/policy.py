@@ -76,7 +76,7 @@ from kernel.rows import (
 )
 from kernel.spawns import decide_spawn
 from kernel.words import INTERPRETERS
-from kernel.roles import displaced_targets, is_session_scratch_target
+from kernel.roles import displaced_targets
 from kernel.shell import decide_shell, sandbox_excluded
 from kernel.tools import decide_tool
 from policy_data import (
@@ -2771,36 +2771,12 @@ def bash_decision(
         secret_variables=SECRET_VARIABLES,
         # Resolved against what this launch mounted writable, so a write into a
         # worktree cut after the container started reaches a reviewer instead of
-        # the writable base no overlay covers.
-        #
-        # The session scratchpad is taken out first, because the lease is not
-        # the question there. A lease enumerates what the launch mounted from
-        # the host, so anything else reads as uncovered -- and the scratchpad
-        # is uncovered in the direction that makes it safe: the harness's own
-        # root, container-private where a container is running, holding
-        # nothing any capture was meant to protect. The role layer already
-        # had this right, and an edit to the same path allows; only the
-        # measured layer disagreed, so a write there asked while a write
-        # beside it in the checkout did not.
-        #
-        # Filtered here rather than inside `unleased_write_targets`, which is
-        # compiled into a bare script that may not reach the kernel where
-        # `is_session_scratch_target` says what a scratchpad path is.
-        #
-        # The temporary root around it is exempt too, and is not filtered
-        # here, because that one is only safe where the launch is a measured
-        # container -- a fact this site does not hold and the settlement row
-        # does. So the two sit apart by what each needs to know: this
-        # scratchpad is the harness's at every placement, and `/tmp` is
-        # nobody's until something confines it.
+        # the writable base no overlay covers. Every target the lease leaves
+        # uncovered is listed, the scratchpad and `/tmp` included: which of
+        # those roots are the launch's own is the settlement row's to say, so
+        # the canonical policy hands the row the same list from the same call.
         unleased_targets=unleased_write_targets(
-            [
-                target
-                for target in [*shell_write_targets(command), *acted_on]
-                if not is_session_scratch_target(target)
-            ],
-            boundary,
-            cwd,
+            [*shell_write_targets(command), *acted_on], boundary, cwd
         ),
         # The read-only holes of the same lease: a repository's shared config
         # and hooks, which the container binds read-only and a host posture

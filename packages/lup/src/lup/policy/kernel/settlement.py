@@ -31,7 +31,7 @@ from .decision import (
     recovery_dischargeable,
 )
 from .escalation import EscalationRequest
-from .roles import is_temporary_root_target
+from .roles import is_session_scratch_target, is_temporary_root_target
 from .rows import DisplacedTargetRow
 from .semantics import CheckpointEvidence, UnjudgedAmbient
 
@@ -385,19 +385,23 @@ class UnleasedWrite(SettlementRule):
     id = "unleased-write"
 
     def reached(self, facts: SettlementFacts) -> KernelDecision | None:
-        # The machine's temporary root is not the lease's business where the
-        # launch is a container. A lease enumerates what came from the host,
-        # so `/tmp` reads as uncovered — and it is uncovered in the direction
-        # that makes it safe, the same argument the session scratchpad won:
-        # this launch's own directory, gone with it, holding nothing any
-        # capture was meant to protect. The measurement is what carries it,
-        # so the exception is spelled against `container_private` rather than
-        # against the path: uncontained, that same word is the operator's own
-        # `/tmp`, shared with every other process on the machine.
+        # Two roots are not the lease's business. A lease enumerates what came
+        # from the host, so both read as uncovered -- and both are uncovered in
+        # the direction that makes them safe, holding nothing any capture was
+        # meant to protect. The session scratchpad is the harness's own root
+        # at every placement, so its spelling carries the exemption. The
+        # machine's temporary root is the launch's own only where the launch
+        # is a container, gone with it, so that exemption is spelled against
+        # `container_private` rather than against the path: uncontained, the
+        # same word is the operator's own `/tmp`, shared with every other
+        # process on the machine. Both are read here, where every caller's
+        # targets meet, because the host half that lists them reaches no
+        # kernel to say what either root is.
         reported = [
             target
             for target in facts.unleased
-            if not (facts.container_private() and is_temporary_root_target(target))
+            if not is_session_scratch_target(target)
+            and not (facts.container_private() and is_temporary_root_target(target))
         ]
         if not reported or facts.decision.effect not in ("allow", "defer"):
             return None

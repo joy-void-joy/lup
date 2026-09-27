@@ -114,10 +114,7 @@ def unresolved_facts(subject: str, kind: str) -> list[str]:
     targets = shell_write_targets(subject)
     if not targets:
         return []
-    return [
-        f"a capture holds {', '.join(targets)}",
-        "every write target is inside what this launch mounted writable",
-    ]
+    return [f"a capture holds {', '.join(targets)}"]
 
 
 def concrete_edit_batch(document: Path, cwd: Path) -> EditBatch:
@@ -211,13 +208,14 @@ def verdict_for(
     session it described -- and the guess is invisible, which is the worst
     property an answer can have.
 
-    **What no placement resolves, it says.** A session measures two facts per
-    command that no reader of a bare string can: which write targets fall
-    outside what the launch mounted writable, and whether the snapshot in front
-    of it succeeded. Both are answered optimistically here, because a reader
-    asking what they will be asked about is better served by the common answer
-    than by a pessimistic one they would learn to discount --
-    :func:`unresolved_facts` names them beside the verdict instead.
+    **What no placement resolves, it says.** A session measures one fact per
+    command that no reader of a bare string can: whether the snapshot in front
+    of it succeeded, which exists only once a session takes it. That is
+    answered optimistically here, because a reader asking what they will be
+    asked about is better served by the common answer than by a pessimistic
+    one they would learn to discount -- :func:`unresolved_facts` names it
+    beside the verdict instead. What the launch mounted writable is not
+    assumed: the policy reads the ledger the session's dispatcher reads.
     """
     return PolicyVerdict(
         input=subject,

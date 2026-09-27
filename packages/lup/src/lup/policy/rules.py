@@ -42,6 +42,7 @@ from lup.policy.assets.host import (
     text_at,
     this_checkout_path,
     tracked_write_targets,
+    unleased_write_targets,
 )
 from lup.policy.kernel.effects import STRENGTH
 from lup.policy.kernel.lex import (
@@ -396,6 +397,8 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
 
     def decide(self, event: ShellCommand) -> Decision:
         root = event.cwd or Path.cwd()
+        # One measurement of one launch, read once for every fact drawn from it.
+        boundary = measured_boundary(root)
         acted_on = shell_path_verb_targets(event.command, self.rules)
         flagged = shell_flag_write_targets(event.command, self.rules)
         # The edit gates, over the files a rewrite in place would replace. Off
@@ -447,15 +450,19 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 ),
                 directory_targets=directory_write_targets(acted_on, root),
                 empty_directories=empty_directory_targets(acted_on, root),
-                # The launch's read-only holes, read off the ledger the edit
-                # path already routes by, so a `cp` into one is refused here
-                # exactly as the native dispatchers refuse it.
+                # The launch's lease and its read-only holes, read off the
+                # ledger the native dispatchers read, so a write the launch
+                # did not mount is asked about and a `cp` into a hole is
+                # refused here exactly as a session meets either.
+                unleased_targets=unleased_write_targets(
+                    [*shell_write_targets(event.command), *acted_on], boundary, root
+                ),
                 readonly_targets=readonly_write_targets(
                     [
                         *shell_write_targets(event.command),
                         *shell_written_targets(event.command, self.rules),
                     ],
-                    measured_boundary(root),
+                    boundary,
                     root,
                 ),
                 recoverable_target_limit=self.recoverable_target_limit,
