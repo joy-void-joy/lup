@@ -20,7 +20,10 @@ from .roles import (
     FOREIGN_REPOSITORY_REFERRAL,
     GENERATED_PLUGIN_RECOVERY,
     GENERATED_PLUGIN_REFUSAL,
+    GIT_STATE_RECOVERY,
+    GIT_STATE_REFUSAL,
     declared_scratch,
+    git_state,
     is_generated_plugin_target,
     normalized_path,
     path_role,
@@ -3872,6 +3875,21 @@ def decide_edit(
             rule="edit:generated-plugin",
             evaluator="edit-gate",
             recovery=GENERATED_PLUGIN_RECOVERY,
+        )
+    # Git's own pointers and refs, on the same footing: every verdict the
+    # lattice can reach is wrong for them. An allow lets a session choose what
+    # host git reads next, and an ask puts a question whose right answer is
+    # "let git write it". No scratch exception, because what a pointer points
+    # host git at does not depend on where the pointer sits.
+    if git_state(path) is not None:
+        return KernelDecision(
+            "deny",
+            GIT_STATE_REFUSAL,
+            cause="deliberate",
+            hard=True,
+            rule="edit:git-state",
+            evaluator="edit-gate",
+            recovery=GIT_STATE_RECOVERY,
         )
 
     # Whether this path is the file it names is prior to every gate below,

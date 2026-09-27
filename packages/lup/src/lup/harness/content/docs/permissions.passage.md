@@ -677,6 +677,23 @@ takes no read-only region inside a root, and Codex protects only a root's
 clone's worktrees rather than its git directory, and a worktree cut after
 the launch is Codex's to write from the next one.
 
+Git's own pointers are held the same way without a bind. A linked worktree's
+`.git` file names its entry under the shared directory, and the entry's
+`commondir` and `gitdir` name the shared directory and the way back; host git
+follows them to the config it reads, so rewriting one hands the operator's
+next git command a config the session built. They cannot be mounted
+read-only, because `git worktree remove` unlinks exactly these files, so they
+are recognized by what they are rather than measured: the file tools on both
+runtimes are refused them, and so is every shell spelling of a write through
+the `read-only-write` settlement — a redirection, `tee`, a write flag, `cp`,
+`mv`, `ln`, `sed -i` — along with `config.worktree` and renaming or
+recreating an entry of `worktrees/` itself, whether the path is spelled or
+reached through a link. The refs — `HEAD`, every `*_HEAD`, `packed-refs`,
+`refs/` — are refused to the file tools and to a command carrying the bytes
+it writes, which meets the edit gates, and keep the question a write to the
+repository earns otherwise. `git worktree add`, `move`, `remove` and `prune`,
+which write all of them, keep their own verdicts.
+
 A file another repository holds, with no destination grant, meets a referral
 in place of the gates below: the edit **asks**, and the reason says that
 repository's conventions are its own, so the way through is never to restyle

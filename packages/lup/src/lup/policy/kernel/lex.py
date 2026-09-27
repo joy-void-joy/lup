@@ -23,7 +23,7 @@ from .bindings import (
 from .decision import KernelDecision, unjudged
 from .downloads import download_targets
 from .effects import EffectEvidence, declare, verdict_for
-from .roles import spells_its_path
+from .roles import git_state, spells_its_path
 from .rows import (
     DisplacedTargetRow,
     PathRoleRow,
@@ -1457,6 +1457,47 @@ def shell_written_targets(command: str, rows: list[ShellRuleRow]) -> list[str]:
         for operand in written_verb_words(segment["words"], rows)
         for placed in [placed_path(operand["path"], segment["directory"])]
         if placed is not None
+    ]
+
+
+def guarded_write_targets(
+    command: str,
+    rows: list[ShellRuleRow],
+    displaced: list[DisplacedTargetRow] | None = None,
+) -> list[str]:
+    """Name every path this command writes that is one of git's pointers.
+
+    The guarded half of the read-only regions a launch measures, and guarded
+    rather than mounted for a reason the files themselves give: `git worktree
+    remove` unlinks exactly these, and a read-only bind would refuse it. So
+    they are recognized by what they are, from the spelling, wherever the
+    command reaches them -- a redirection, `tee`, `cp`, `mv`, `ln`, `truncate`,
+    a write flag, or a `mv` of an entry of `worktrees/` itself -- and by where
+    a link the host resolved lands, so a symlink planted in scratch reaches
+    nothing through its own harmless name.
+
+    Pointers and not refs. A pointer is where host git reads its configuration
+    from, which is the config wall by another route; a ref names a commit, and
+    a write to one keeps the question its path already earns.
+
+    The flag targets are gathered wide -- every row of the executable -- which
+    costs a refusal only where some other row's flag names a pointer, and
+    nothing of this command's names one for any other reason. git's own
+    commands name none of these as operands, which is what leaves `git
+    worktree add`, `move`, `remove` and `prune` their work.
+    """
+    landings = {row["path"]: row["lands"] for row in displaced or []}
+    return [
+        target
+        for target in dict.fromkeys(
+            [
+                *shell_write_targets(command),
+                *shell_written_targets(command, rows),
+                *shell_flag_write_targets(command, rows),
+            ]
+        )
+        if git_state(target) == "pointer"
+        or (target in landings and git_state(landings[target]) == "pointer")
     ]
 
 

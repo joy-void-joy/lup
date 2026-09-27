@@ -76,6 +76,13 @@ class SettlementFacts:
     unjudged_ambient: UnjudgedAmbient
     unleased: list[str]
     readonly: list[str]
+    guarded: list[str]
+    """Git's pointers and refs a write names, held as read-only is but unmounted.
+
+    The same refusal, from a different source: ``readonly`` is what a launch
+    bound read-only and measured, while these are recognized by what they are,
+    because `git worktree remove` has to be able to unlink them and a bind
+    would refuse it."""
     displaced: list[DisplacedTargetRow]
     hint: str
 
@@ -95,6 +102,7 @@ class SettlementFacts:
         readonly: list[str] | None = None,
         displaced: list[DisplacedTargetRow] | None = None,
         hint: str = "",
+        guarded: list[str] | None = None,
     ) -> None:
         self.decision = decision
         self.escalation = escalation
@@ -108,6 +116,7 @@ class SettlementFacts:
         self.unjudged_ambient = unjudged_ambient
         self.unleased = unleased or []
         self.readonly = readonly or []
+        self.guarded = guarded or []
         self.displaced = displaced or []
         self.hint = hint
 
@@ -168,6 +177,7 @@ class SettlementFacts:
             readonly=self.readonly,
             displaced=self.displaced,
             hint=self.hint,
+            guarded=self.guarded,
         )
 
 
@@ -439,24 +449,45 @@ class ReadOnlyWrite(SettlementRule):
     Read over ``allow``, ``defer`` and ``ask`` alike, and above
     :class:`RecoveredLoss` for that reason; a refusal already standing needs
     nothing from it.
+
+    Git's own pointers are held the same way without a bind, since `git
+    worktree remove` unlinks them and a bind would refuse it: a linked
+    worktree's `.git` file, an entry's `commondir` and `gitdir`, its
+    `config.worktree`, and the entries themselves. Host git follows each to
+    the repository and the config it reads, so rewriting one is choosing that
+    config by another route -- and git's own commands write every one of them.
     """
 
     id = "read-only-write"
 
     def reached(self, facts: SettlementFacts) -> KernelDecision | None:
-        if not facts.readonly or facts.decision.effect == "deny":
+        if not (facts.readonly or facts.guarded) or facts.decision.effect == "deny":
             return None
-        return facts.decision.revised(
-            effect="deny",
-            reason=(
+        held = (
+            [
                 f"writes {', '.join(facts.readonly)}, which this launch holds"
                 " read-only: git runs what its config and hooks name on the host"
-            ),
+            ]
+            if facts.readonly
+            else []
+        )
+        pointed = (
+            [
+                f"rewrites {', '.join(facts.guarded)}, a pointer host git follows"
+                " to the repository and the config it acts on"
+            ]
+            if facts.guarded
+            else []
+        )
+        return facts.decision.revised(
+            effect="deny",
+            reason="; ".join([*held, *pointed]),
             recovery=(
-                "Work in a worktree of that repository; git's own commands"
-                " reach what they need without writing config or hooks, and a"
-                " setting that has to change is changed from an operator"
-                " terminal."
+                "Work in a worktree of that repository; git's own commands --"
+                " `git worktree add`, `move`, `remove` and `prune`, `git"
+                " update-ref` -- reach what they need without writing config,"
+                " hooks, pointers or refs by hand, and a setting that has to"
+                " change is changed from an operator terminal."
             ),
             cause="deliberate",
             purpose=None,

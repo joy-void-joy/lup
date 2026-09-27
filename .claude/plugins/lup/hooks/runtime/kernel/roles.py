@@ -18,6 +18,7 @@ where nothing is reviewed and nothing is meant to last.
 import fnmatch
 import posixpath
 from pathlib import PurePosixPath
+from typing import Literal
 
 from .decision import SUBSTITUTION_SENTINEL
 from .rows import PathRoleKind, PathRoleName, PathRoleRow, DisplacedTargetRow
@@ -113,6 +114,84 @@ def is_generated_plugin_target(word: str) -> bool:
         for parts in [root.split("/") for root in GENERATED_PLUGIN_ROOTS]
         for index in range(len(segments))
     )
+
+
+# lup: ignore[library-default] — git's own file names, fixed by git rather than
+# chosen for an adopter
+GIT_POINTER_NAMES = ("commondir", "gitdir", "config.worktree")
+# lup: ignore[constant-declaration] — refusal wording, declared with its verdict
+GIT_STATE_REFUSAL = (
+    "this rewrites a file git finds its own state through -- a worktree"
+    " pointer or a ref -- which host git follows to the repository, the commit"
+    " and the configuration it acts on"
+)
+# lup: ignore[constant-declaration] — refusal wording, declared with its verdict
+GIT_STATE_RECOVERY = (
+    "Let git write it: `git worktree add`, `move`, `remove` and `prune` keep"
+    " the pointers, and `git branch`, `git switch`, `git update-ref` and"
+    " `git symbolic-ref` keep the refs. A pointer that is already wrong is"
+    " repaired from an operator terminal with `git worktree repair`."
+)
+
+type GitState = Literal["pointer", "ref"]
+"""The two kinds of file git finds its own state through.
+
+A pointer names where git reads its configuration from, so rewriting one is
+choosing that configuration; a ref names a commit, which git's own commands
+move all the time and a person may still approve by hand."""
+
+
+def git_state(word: str) -> GitState | None:
+    """Which of git's own state files a path is, if it is one.
+
+    A linked worktree's `.git` file names its administrative entry, and the
+    entry's `commondir` and `gitdir` name the shared directory and the way
+    back to the checkout; `config.worktree` is read as configuration wherever
+    the shared config turns it on. Host git follows each of those to the
+    configuration it acts on, so a hand that rewrites one chooses what the
+    operator's next git command reads: a `commondir` naming a directory the
+    session built hands host git that directory's `core.hooksPath`. Those are
+    pointers, and so is an entry of `worktrees/` and the directory holding
+    the entries, since renaming or recreating one rewrites every pointer in
+    it at once. A ref -- `HEAD`, every `*_HEAD`, `packed-refs`, everything
+    under `refs/` -- names a commit instead. git's own commands write every
+    one of them consistently, and nothing else needs to.
+
+    Read off the spelling, so it answers for a path no mount could hold: `git
+    worktree remove` unlinks exactly these files, and a read-only bind would
+    refuse it. A segment that is `.git`, or that ends in `.git` as a bare
+    repository's directory does, followed by one of those names. `.git` alone
+    is the pointer -- or, in a plain checkout, the repository itself -- while
+    a bare `<name>.git` alone is a whole repository rather than anything a
+    pointer names, and is left to the verbs that judge a directory.
+    """
+
+    def held(beneath: tuple[str, ...]) -> GitState | None:
+        """What this run of names under a git directory holds, if git's own."""
+        match beneath:
+            case ("worktrees",) | ("worktrees", _):
+                return "pointer"
+            case ("worktrees", _, *inner):
+                return held(tuple(inner))
+            case ("refs", *_):
+                return "ref"
+            case (name,) if name in GIT_POINTER_NAMES:
+                return "pointer"
+            case (name,) if name == "HEAD" or name.endswith("_HEAD"):
+                return "ref"
+            case ("packed-refs",):
+                return "ref"
+        return None
+
+    parts = PurePosixPath(posixpath.normpath(word)).parts
+    found = [
+        "pointer"
+        if segment == ".git" and not parts[index + 1 :]
+        else held(parts[index + 1 :])
+        for index, segment in enumerate(parts)
+        if segment.endswith(".git")
+    ]
+    return "pointer" if "pointer" in found else "ref" if "ref" in found else None
 
 
 def repository_relative(word: str, checkout: str) -> str:

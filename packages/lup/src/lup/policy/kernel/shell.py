@@ -76,6 +76,7 @@ from .withheld import (
 from .semantics import UnjudgedAmbient
 from .lex import (
     command_segments,
+    guarded_write_targets,
     joined_directory,
     list_commands,
     parse_shell,
@@ -1643,6 +1644,10 @@ def decide_shell(
             unjudged_ambient=unjudged_ambient,
             unleased=unleased_targets,
             readonly=readonly_targets,
+            # Read here rather than handed in: what a file *is* needs no host,
+            # so every caller -- a composed policy, either dispatcher, `dev
+            # policy` -- refuses the same pointers with no fact to forget.
+            guarded=guarded_write_targets(reading.remainder, rows, displaced_targets),
             displaced=displaced_targets,
             hint=hint,
         )

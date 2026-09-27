@@ -1075,6 +1075,21 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="mv tmp/kit/a.py tmp/other/", effect="allow"),
     DecisionCase(input="cp .claude/settings.json tmp/copy.json", effect="allow"),
     DecisionCase(input="cp -r .claude tmp/backup", effect="allow"),
+    # Git's own pointers are git's to write: a worktree's `.git`, an entry's
+    # `commondir` and `gitdir`, and an entry itself, by every verb and write
+    # flag, since host git follows them to the config it reads. A ref names a
+    # commit instead and keeps its question. git's own worktree commands, and
+    # reading any of them, stay open; `refs/` outside a git directory is
+    # somebody's source.
+    DecisionCase(input="echo 'gitdir: /tmp/evil' > .git", effect="deny"),
+    DecisionCase(input="cp tmp/a ../repo.git/worktrees/wt/commondir", effect="deny"),
+    DecisionCase(input="mv ../repo.git/worktrees/wt tmp/wt", effect="deny"),
+    DecisionCase(input="ln -sf tmp/x .git", effect="deny"),
+    DecisionCase(input="sort -o ../wt/.git tmp/a", effect="deny"),
+    DecisionCase(input="truncate -s0 .git/refs/heads/main", effect="ask"),
+    DecisionCase(input="git worktree move ../wt ../moved", effect="allow"),
+    DecisionCase(input="cat .git ../repo.git/worktrees/wt/gitdir", effect="allow"),
+    DecisionCase(input="echo x > tmp/refs/heads/main", effect="allow"),
     # A generated plugin tree is a build product the running runtime already
     # loaded, so writing one by hand changes nothing it will honor and the
     # next generation reverts it. Every writing form refuses it and names the
@@ -2187,6 +2202,25 @@ EDIT_POLICY_CASES = [
         before="value = 1",
         after="value = 1  # lup: revisit",
         effect="ask",
+    ),
+    # Git's pointers and refs are refused to every identity: host git follows
+    # them to the config it reads. Git's ignore list names nothing it follows,
+    # and a `refs/` outside a git directory is ordinary source.
+    EditDecisionCase(
+        path=".git", before="gitdir: /a\n", after="gitdir: /b\n", effect="deny"
+    ),
+    EditDecisionCase(
+        path=".git/worktrees/wt/commondir",
+        before="../..\n",
+        after="/tmp/evil\n",
+        effect="deny",
+        autonomous=True,
+    ),
+    EditDecisionCase(
+        path=".git/info/exclude", before="a\n", after="a\nb\n", effect="allow"
+    ),
+    EditDecisionCase(
+        path="docs/refs/heads/main.md", before="a\n", after="b\n", effect="allow"
     ),
     # A protected root asks a self-reviewing identity too: the settings, the
     # launch registry and the policy are what confine that identity, and it
