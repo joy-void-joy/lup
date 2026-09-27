@@ -15,8 +15,13 @@ the shell still rewrites -- a parameter, `$'…'`, a brace expansion, a tilde
 
 import pytest
 
+from lup.harness.enforcement import semantic_policy_for
 from lup.policy.kernel.decision import KernelDecision
+from lup.policy.kernel.edit import decide_edit
 from lup.policy.kernel.lex import command_segments, parse_shell
+from lup.policy.kernel.rows import PathRoleRow
+from lup.policy.models import ShellCommand
+from lup_template.harness.catalog import declared_hook_set
 from lup.policy.kernel.review import copied_paths, literal_input
 from lup.policy.kernel.roles import spells_its_path
 from lup.policy.kernel.syntax import VerbatimText, expands, verbatim_piece
@@ -111,3 +116,46 @@ def test_the_review_readers_bind_only_what_reaches_the_program_as_written() -> N
     assert literal_input("apply_patch 'x'", "apply_patch") == "x"
     with pytest.raises(ValueError):
         literal_input("apply_patch $'x'", "apply_patch")
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo x > 'tmp/a$b'",
+        "cat > 'tmp/a$b' <<'EOF'\nbody\nEOF",
+        "printf 'x' | tee 'tmp/a$b'",
+        "echo x > tmp/a\\$b",
+    ],
+)
+def test_the_edit_gates_read_a_quoted_dollar_as_text_too(command: str) -> None:
+    """A write carrying its content meets the edit gates, which agree with the shell.
+
+    The shell kernel read `'tmp/a$b'` as the scratch file it names, and the
+    edit gates, handed the same path, read the `$` as an expansion and judged
+    a production file written whole -- so the command asked through them.
+    """
+    policy = semantic_policy_for(declared_hook_set())
+
+    assert policy.decide(ShellCommand(command=command)).effect == "allow"
+
+
+def test_an_expansion_the_shell_still_performs_keeps_its_question() -> None:
+    """Unquoted, the `$` is a parameter, and the path is only known at run time."""
+    policy = semantic_policy_for(declared_hook_set())
+
+    assert policy.decide(ShellCommand(command="echo x > tmp/$B")).effect == "ask"
+
+
+def test_an_edited_path_is_literal_wherever_the_gate_is_reached_from() -> None:
+    """No shell expands a native edit's path, so its `$` never names another file."""
+    decided = decide_edit(
+        "tmp/a$b.py",
+        None,
+        "value = 1\n",
+        path_exists=False,
+        path_rules=[],
+        antipattern_rows=[],
+        path_roles=[PathRoleRow(root="**/tmp", role="scratch")],
+    )
+
+    assert decided.effect == "allow"

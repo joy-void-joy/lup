@@ -39,6 +39,7 @@ from .rows import (
     PathRuleRow,
     ResolutionRow,
 )
+from .syntax import VerbatimText
 from .typescript import (
     TYPESCRIPT_SUFFIXES,
     masked_typescript_lines,
@@ -3822,7 +3823,16 @@ def decide_edit(
     ``path`` only where a repository nested inside the checkout holds the
     file, and it answers one question, which two gates below defer to:
     whether the file lies under a root this checkout declares scratch.
+
+    Both spellings name a file that exists or is about to, never a word a
+    shell has yet to expand: a native edit's path is handed over literal, and
+    a command's write reaches this gate only once its target was read as one
+    (:func:`~lup.policy.kernel.lex.carried_writes` drops any that was not).
+    So a `$` in either is the character it is -- `tmp/a$b` is scratch -- and
+    every reader below is told so, as the shell kernel tells its own.
     """
+    path = VerbatimText(path)
+    checkout_path = VerbatimText(checkout_path)
     # Scratch this checkout declares, read off the checkout's own spelling
     # alone. That is empty wherever the checkout does not hold the file -- a
     # sibling worktree, a `refs/` link landing in another project, the

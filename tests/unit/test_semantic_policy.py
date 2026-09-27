@@ -2292,6 +2292,30 @@ EDIT_POLICY_CASES = [
         effect="allow",
         path_exists=False,
     ),
+    # An edited path is literal: no shell ever expands it, so a `$` in one is
+    # the character it is and the role reads through it -- scratch stays
+    # scratch, a test stays a test, and production is still written whole.
+    EditDecisionCase(
+        path="tmp/a$b.md",
+        before=None,
+        after="# what is left",
+        effect="allow",
+        path_exists=False,
+    ),
+    EditDecisionCase(
+        path="tests/unit/test_a$b.py",
+        before=None,
+        after="def test_thing() -> None:\n    assert True\n",
+        effect="allow",
+        path_exists=False,
+    ),
+    EditDecisionCase(
+        path="src/a$b.py",
+        before=None,
+        after="def thing() -> None:\n    pass\n",
+        effect="ask",
+        path_exists=False,
+    ),
     # It matches the segment and not the characters, so a sibling that merely
     # opens with the name is production and judged as production.
     EditDecisionCase(

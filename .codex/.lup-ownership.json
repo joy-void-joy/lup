@@ -219,7 +219,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/edit.py",
       "category": "generated",
-      "sha256": "d7a54a878aa0d9d0afb47acfccb8e29c4eababcc6a7dc444ec0a15977915e71d",
+      "sha256": "d7055f82f5a67f4398eae0b0a49fe61fbd7eac23dad8de459ef22220e638c469",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

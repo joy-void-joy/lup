@@ -374,7 +374,10 @@ Quoting is kept past the parse. A `$` inside single quotes, or escaped as
 user.name '$me'` and `sort -o 'a$b' f` are read by the characters they spell.
 `"$x"` still expands. `$'…'` and `$"…"` are quoting the shell rewrites, and a
 brace expansion or a `~` after `=` makes more of a word than its text, so each
-of those keeps the reading an unresolved expansion gets.
+of those keeps the reading an unresolved expansion gets. The edit gates read
+a path the same way: a native edit's path is never expanded by any shell, and
+a command's write reaches them only once its target was read as a literal, so
+`echo x > 'tmp/a$b'` and an `Edit` of `tmp/a$b` are both a scratch file.
 
 ### A download
 
