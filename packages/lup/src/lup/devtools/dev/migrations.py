@@ -247,6 +247,24 @@ DECLARED: list[Migration] = [
         ],
     ),
     Migration(
+        subjects=["runtime_path_rule"],
+        reason=(
+            "a declared protected root compiles through one function both "
+            "enforcement paths read, lup.policy.rules.protected_root_rule, "
+            "rather than a second copy in the bundle a test held equal to the "
+            "first; no protected root releases an autonomous identity any more"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Call path_rule_row(protected_root_rule(root)) from "
+                    "lup.policy.rules where runtime_path_rule(root) was called; "
+                    "runtime_path_rules keeps its signature."
+                )
+            ),
+        ],
+    ),
+    Migration(
         subjects=["HookSandbox.credential_paths", "ExecutionBoundary.credential_paths"],
         reason=(
             "the file tools and the OS sandbox are refused every path "
