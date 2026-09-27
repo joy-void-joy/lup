@@ -1786,14 +1786,17 @@ classifies.
 
 WRAPPER_JUDGED_OPTIONS: dict[str, tuple[str, ...]] = {
     "time": ("-o", "--output"),
+    "env": ("-C", "--chdir"),
 }
 """The wrapper options that act on their own, so the wrapper is not stepped over.
 
 A wrapper is transparent only while its options change nothing a reading of
 the wrapped command would judge. `time -o <file>` writes its report into the
 file, and stepped over it was the command it timed: `time -o README.md ls`
-was `ls`. A wrapper carrying one of these is the segment's command itself,
-and its own reader judges what the option does beside what it wraps.
+was `ls`. `env -C <dir>` moves where every operand resolves, and stepped
+over, `env -C /etc rm hosts` removed `hosts` here. A wrapper carrying one of
+these is the segment's command itself, and its own reader judges what the
+option does beside what it wraps.
 """
 
 # lup: ignore[library-default] — `env`'s own spelling of the option that

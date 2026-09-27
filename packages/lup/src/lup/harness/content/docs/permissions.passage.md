@@ -323,7 +323,8 @@ each wrapper's options are read by the grammar its `--help` lists, clusters
 included, and one the grammar does not list leaves the command unread and
 refuses. A wrapper option that acts on its own keeps the wrapper as the
 command: `time -o <file>` writes a file no redirection names, so it asks
-beside whatever it times. So does an `xargs` payload, found past xargs's options by the
+beside whatever it times, and `env -C <dir>` judges its command in that
+directory, as `cd <dir> && <command>` is judged. So does an `xargs` payload, found past xargs's options by the
 grammar `xargs --help` lists (an option it does not list could take the next
 word, so it refuses), and because xargs appends operands read
 from its input, the payload keeps its verdict only where those cannot

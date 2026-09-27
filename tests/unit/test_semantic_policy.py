@@ -1823,6 +1823,14 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="time --output=t.txt ls", effect="ask"),
     DecisionCase(input="time -ao t.txt node -e evil", effect="deny"),
     DecisionCase(input="time -p ls", effect="allow"),
+    # `env -C` moves where its command runs, so the command is judged there
+    # with its assignments, as `cd <dir> && <command>` is.
+    DecisionCase(input="env -C /etc rm hosts", effect="ask"),
+    DecisionCase(input="env -C /etc rm hosts", effect="ask", sandboxed=True),
+    DecisionCase(input="env -C docs rm ../README.md", effect="ask"),
+    DecisionCase(input="env -iC src rm -rf lup_template", effect="ask"),
+    DecisionCase(input="env -C tmp PATH=/x ls", effect="ask"),
+    DecisionCase(input="env --chdir=tmp ls", effect="allow"),
     # `env` wrapping nothing readable prints the whole environment, which is
     # every variable the launcher set and the credentials among them, into a
     # transcript that outlives the turn. Refused rather than asked: a question

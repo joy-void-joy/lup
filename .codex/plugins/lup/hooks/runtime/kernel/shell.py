@@ -75,6 +75,7 @@ from .withheld import (
 from .semantics import UnjudgedAmbient
 from .lex import (
     command_segments,
+    joined_directory,
     list_commands,
     parse_shell,
     parse_shell_words,
@@ -84,7 +85,7 @@ from .lex import (
     substitutions,
     tee_operands,
 )
-from .syntax import Command, Script, Word, readable_prefix, word_text
+from .syntax import Command, Script, Word, expands, readable_prefix, word_text
 from .effects import STRENGTH, declared_verdict, member_for
 from .commands import (
     SedContext,
@@ -447,6 +448,11 @@ def decide_env_words(
     transcript that outlives the turn — a question would be answered yes on
     the way to something else. A payload this cannot read is unjudged, which
     is the honest answer for `-S` and for a flag no version here knows.
+
+    `-C` moves the payload into another directory, so it is judged there, as
+    `cd <dir> && <command>` is: stepped over, `env -C /etc rm hosts` removed
+    `hosts` from the directory the session stands in. The payload is handed
+    on with its assignments, so a dangerous one is still asked about.
     """
     payload = env_payload(words)
     if payload is None:
@@ -459,7 +465,18 @@ def decide_env_words(
         )
     if not payload:
         return environment_dump()
-    return decide_shell_segment(payload, context, directory)
+    reading = read_wrapper(words, 1, "env")
+    here = directory
+    for option in reading["options"]:
+        if option["name"] not in ("-C", "--chdir"):
+            continue
+        moved = option["value"] or ""
+        if not moved or opaque_argument(moved) or expands(moved):
+            return unjudged(
+                "`env -C` runs its command in a directory only the run resolves"
+            ).advising("Spell the directory literally, or `cd` there first.")
+        here = joined_directory(here, moved)
+    return decide_shell_segment(words[reading["payload"] :], context, here)
 
 
 def decide_time_words(
