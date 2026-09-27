@@ -16,7 +16,7 @@ from .decision import (
     unjudged,
 )
 from .edit import path_rule_matches, protected_path_reason
-from .programs import grammar, read_options
+from .programs import InterpreterGrammar, ReadOption, grammar, read_options
 from .roles import (
     GENERATED_PLUGIN_RECOVERY,
     GENERATED_PLUGIN_REFUSAL,
@@ -113,19 +113,27 @@ INTERPRETERS = (
 
 
 def timeout_payload(segment: list[str], position: int) -> int:
-    """Skip timeout's own options and duration to its wrapped command."""
-    value_options = ("-k", "--kill-after", "-s", "--signal")
-    while position < len(segment) and segment[position].startswith("-"):
-        option = segment[position]
-        position += 2 if option in value_options else 1
-    return position + 1
+    """Skip timeout's own options and duration to its wrapped command.
+
+    The options by timeout's grammar, clusters included: `-vk 5 10 cmd` sets
+    `-k 5`, and read a word at a time it made `10` the command. An option the
+    grammar cannot read is left where it stands, so the command word begins
+    with a dash and is refused rather than read one word off.
+    """
+    payload = read_wrapper(segment, position, "timeout")["payload"]
+    unread = payload < len(segment) and segment[payload].startswith("-")
+    return payload if unread else payload + 1
 
 
 def nice_payload(segment: list[str], position: int) -> int:
-    """Skip nice's adjustment options to its wrapped command."""
+    """Skip nice's adjustment options to its wrapped command.
+
+    By hand rather than by a grammar, because nice also takes the obsolete
+    `-N` adjustment no option list can spell.
+    """
     while position < len(segment) and segment[position].startswith("-"):
         option = segment[position]
-        position += 2 if option == "-n" else 1
+        position += 2 if option in ("-n", "--adjustment") else 1
     return position
 
 
@@ -159,7 +167,7 @@ def effective_command(segment: list[str]) -> EffectiveCommand:
         ):
             return EffectiveCommand(words=segment[position:], dangerous=dangerous)
         if executable in PASS_THROUGH_WORDS:
-            position = wrapper_payload(segment, position + 1, executable)
+            position = read_wrapper(segment, position + 1, executable)["payload"]
             continue
         if executable == "timeout":
             position = timeout_payload(segment, position + 1)
@@ -1681,22 +1689,94 @@ def xargs_payload(words: list[str]) -> list[str] | None:
 
 # lup: ignore[library-default] — each wrapper's own option spellings, which
 # no project could choose differently and still read the command it wraps
-WRAPPER_VALUE_OPTIONS: dict[str, tuple[str, ...]] = {
-    "env": ("-u", "--unset", "-C", "--chdir"),
-    "stdbuf": ("-i", "--input", "-o", "--output", "-e", "--error"),
-    "time": ("-o", "--output", "-f", "--format"),
-    "exec": ("-a",),
-    "setsid": (),
-    "command": (),
-    "nohup": (),
+WRAPPER_GRAMMARS: dict[str, InterpreterGrammar] = {
+    "env": grammar(
+        valued=(
+            "-a",
+            "--argv0",
+            "-u",
+            "--unset",
+            "-C",
+            "--chdir",
+            "-S",
+            "--split-string",
+        ),
+        flags=(
+            "-i",
+            "--ignore-environment",
+            "-0",
+            "--null",
+            "-v",
+            "--debug",
+            "--block-signal",
+            "--default-signal",
+            "--ignore-signal",
+            "--list-signal-handling",
+            "--help",
+            "--version",
+        ),
+    ),
+    "stdbuf": grammar(
+        valued=("-i", "--input", "-o", "--output", "-e", "--error"),
+        flags=("--help", "--version"),
+    ),
+    "time": grammar(
+        valued=("-o", "--output", "-f", "--format"),
+        flags=(
+            "-a",
+            "--append",
+            "-p",
+            "--portability",
+            "-q",
+            "--quiet",
+            "-v",
+            "--verbose",
+            "-V",
+            "--version",
+            "--help",
+        ),
+    ),
+    "exec": grammar(valued=("-a",), flags=("-c", "-l")),
+    "setsid": grammar(
+        flags=(
+            "-c",
+            "--ctty",
+            "-f",
+            "--fork",
+            "-w",
+            "--wait",
+            "-h",
+            "--help",
+            "-V",
+            "--version",
+        )
+    ),
+    "command": grammar(flags=("-p", "-v", "-V")),
+    "nohup": grammar(flags=("--help", "--version")),
+    "timeout": grammar(
+        valued=("-k", "--kill-after", "-s", "--signal"),
+        flags=(
+            "-f",
+            "--foreground",
+            "-p",
+            "--preserve-status",
+            "-v",
+            "--verbose",
+            "--help",
+            "--version",
+        ),
+    ),
 }
-"""Which of each wrapper's options take the following word as their value.
+"""Each wrapper's own options, as its `--help` lists them.
 
 Per wrapper because the grammars differ and a single list would consume a
-word one of them does not take. What is *not* enumerated is the valueless
-options: anything else beginning with `-` is skipped as one word, and where
-that reading is wrong the segment reaches a command word beginning with `-`,
-which :func:`lup.policy.kernel.shell.decide_segment_words` refuses rather than
+word one of them does not take, and read by the interpreters' option reader
+so a cluster is read the way the wrapper reads it: `env -iu NAME cmd` unsets
+`NAME`, `exec -cla name cmd` names the process, and `timeout -vk 5 10 cmd`
+kills after 5, where a word at a time each made the value the command. An
+option the grammar does not list is left where it stands, so the segment
+reaches a command word beginning with `-`, which
+:func:`lup.policy.kernel.shell.decide_segment_words` refuses rather than
 classifies.
 """
 
@@ -1711,27 +1791,37 @@ skip would hand the next word on as though it were the command.
 """
 
 
-def wrapper_payload(segment: list[str], position: int, wrapper: str) -> int:
-    """Skip one wrapper's own options to the command it wraps.
+class WrapperReading(TypedDict):
+    """One wrapper's options as its grammar reads them, and what follows."""
 
-    Shaped like ``timeout_payload`` and ``nice_payload`` beside it, and
-    general where those are specific: a valued option consumes the next word
-    when it stands alone and consumes nothing when its value is attached
-    (``-oL``, ``--unset=NAME``), which is the one distinction a fixed skip of
-    one or two words cannot make.
+    options: list[ReadOption]
+    payload: int
+    """Where the wrapped command starts, or where an unread option stands."""
+
+
+def read_wrapper(segment: list[str], position: int, wrapper: str) -> WrapperReading:
+    """Read one wrapper's own options up to the command it wraps.
+
+    A valued option consumes the next word when it stands alone and nothing
+    when its value is attached (``-oL``, ``--unset=NAME``), and a cluster is
+    read letter by letter. Where an option is unread, ``payload`` is that
+    option's own position, so what the caller takes for the command begins
+    with a dash and is refused rather than read one word off.
     """
-    valued = WRAPPER_VALUE_OPTIONS.get(wrapper, ())
+    rules = WRAPPER_GRAMMARS[wrapper]
+    options: list[ReadOption] = []
     while position < len(segment):
         word = segment[position]
         if word == "--":
-            return position + 1
+            return WrapperReading(options=options, payload=position + 1)
         if word == "-" or not word.startswith("-"):
-            return position
-        # Alone, a valued option's operand is the next word. Attached —
-        # `-oL`, `--unset=NAME` — it is inside this word, as it is for every
-        # other flag, so the two cases differ only in how far to step.
-        position += 2 if word in valued else 1
-    return position
+            return WrapperReading(options=options, payload=position)
+        read = read_options(word, segment[position + 1 :], rules)
+        if read is None:
+            return WrapperReading(options=options, payload=position)
+        options.extend(read["options"])
+        position += read["width"]
+    return WrapperReading(options=options, payload=position)
 
 
 def env_payload(words: list[str]) -> list[str] | None:
@@ -1743,11 +1833,15 @@ def env_payload(words: list[str]) -> list[str] | None:
     run, which a caller has to treat as unjudged rather than as nothing to
     judge. Collapsing the last two is how `env -i <interpreter> <script>` came
     to be read as a command named `-i` and allowed inside the boundary.
+
+    `-S` is found among the options env reads, however it is spelled: matched
+    only as a word of its own, `env -S'python3 -c 1' ls` was stepped over as
+    an inert option and judged as `ls`.
     """
-    if any(option in words[1:] for option in ENV_SPLIT_STRING):
+    reading = read_wrapper(words, 1, "env")
+    if any(option["name"] in ENV_SPLIT_STRING for option in reading["options"]):
         return None
-    position = wrapper_payload(words, 1, "env")
-    rest = words[position:]
+    rest = words[reading["payload"] :]
     assigned = 0
     while assigned < len(rest):
         name = rest[assigned].split("=", 1)

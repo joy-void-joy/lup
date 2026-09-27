@@ -317,8 +317,11 @@ fd dups strip.
 Loops, conditionals, case
 arms, subshells, and brace groups classify recursively over frozen bindings —
 literal assignments instantiate, opaque ones (`read`, globs) gate
-flag-guarded commands. `find -exec` payloads and `timeout`/`nice` wrappers
-recurse. So does an `xargs` payload, found past xargs's options by the
+flag-guarded commands. `find -exec` payloads and wrappers (`env`, `time`,
+`timeout`, `nice`, `stdbuf`, `setsid`, `nohup`, `exec`, `command`) recurse;
+each wrapper's options are read by the grammar its `--help` lists, clusters
+included, and one the grammar does not list leaves the command unread and
+refuses. So does an `xargs` payload, found past xargs's options by the
 grammar `xargs --help` lists (an option it does not list could take the next
 word, so it refuses), and because xargs appends operands read
 from its input, the payload keeps its verdict only where those cannot

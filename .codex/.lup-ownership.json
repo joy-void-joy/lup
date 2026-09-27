@@ -366,7 +366,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/words.py",
       "category": "generated",
-      "sha256": "552d52523a5b2011b6f5203444bd8eb6d9aeb0e88c2bbeafd665bb42d78bcbed",
+      "sha256": "342cea5db1d79e3e011b42b461c520d3f198b4cb70aaad9193f4e12f294f3403",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

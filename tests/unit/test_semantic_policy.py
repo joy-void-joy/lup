@@ -1799,6 +1799,23 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="env --unset=GH_TOKEN ls", effect="allow"),
     DecisionCase(input="env -- ls -la", effect="allow"),
     DecisionCase(input="env FOO=1 ls", effect="allow"),
+    # Every wrapper's options are read by its own grammar, clusters and long
+    # forms included, so a value is never taken for the command and a cluster
+    # never hides one; an option the grammar does not list leaves the command
+    # unread and refuses. `-S` is found however it is spelled.
+    DecisionCase(input="env -a foo node -e evil", effect="deny"),
+    DecisionCase(input="env --argv0 foo rm -rf src", effect="ask", sandboxed=True),
+    DecisionCase(input="nice --adjustment 5 rm -rf src", effect="ask", sandboxed=True),
+    DecisionCase(input="timeout -vk 5 10 rm -rf src", effect="ask", sandboxed=True),
+    DecisionCase(input="timeout -fs KILL 5 node -e evil", effect="deny"),
+    DecisionCase(input="env -iu FOO rm -rf src", effect="ask", sandboxed=True),
+    DecisionCase(input="exec -cla foo rm -rf src", effect="ask", sandboxed=True),
+    DecisionCase(input="time -ap node -e evil", effect="deny"),
+    DecisionCase(input="env -S'python3 -c 1' ls", effect="deny"),
+    DecisionCase(input="env -iS'python3 -c 1' ls", effect="deny"),
+    DecisionCase(input="env --frob ls", effect="deny"),
+    DecisionCase(input="setsid -fw ls", effect="allow"),
+    DecisionCase(input="env --unset GH_TOKEN ls", effect="allow"),
     # `env` wrapping nothing readable prints the whole environment, which is
     # every variable the launcher set and the credentials among them, into a
     # transcript that outlives the turn. Refused rather than asked: a question
