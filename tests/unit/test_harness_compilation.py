@@ -3198,10 +3198,12 @@ def test_rendered_sandbox_keys_are_the_runtime_documented_ones() -> None:
     """The block is checked against the runtime's shape rather than assumed.
 
     A misspelled sandbox key changes nothing and reports nothing, so every
-    key is drawn from the SDK's published shape. Two are settings-file-only,
-    because the SDK routes filesystem and credential limits through
-    permission rules instead — named here so the split reads as a fact about
-    the two surfaces rather than as a mismatch nobody checked.
+    key is drawn from the SDK's published shape. One is settings-file-only,
+    because the SDK routes filesystem limits through permission rules instead
+    — named here so the split reads as a fact about the two surfaces rather
+    than as a mismatch nobody checked. Credential reads have no key of their
+    own: the `Read` deny rules carry them, and the runtime merges those into
+    the sandbox.
     """
     sandbox = project_settings(portable_harness().plugins[0])["sandbox"]
     assert isinstance(sandbox, dict)
@@ -3212,7 +3214,6 @@ def test_rendered_sandbox_keys_are_the_runtime_documented_ones() -> None:
 
     assert "excludedCommands" in session_keys
     assert sorted(key for key in sandbox if key not in session_keys) == [
-        "credentials",
         "filesystem",
     ]
     assert [key for key in network if key not in network_keys] == []

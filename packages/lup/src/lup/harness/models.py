@@ -1571,7 +1571,6 @@ class HookSandbox(BaseModel, frozen=True):
     """
 
     extra_domains: list[str] = []
-    credential_paths: list[str] = []
     excluded_commands: list[str] = Field(
         default=[],
         description=(

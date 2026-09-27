@@ -246,6 +246,27 @@ DECLARED: list[Migration] = [
             ),
         ],
     ),
+    Migration(
+        subjects=["HookSandbox.credential_paths", "ExecutionBoundary.credential_paths"],
+        reason=(
+            "the file tools and the OS sandbox are refused every path "
+            "HookSet.refused_paths withholds from a command, compiled from that "
+            "one declaration, where a second list named two of those paths and "
+            "left the rest readable to Read, Grep and Glob"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Delete credential_paths from the HookSandbox declaration and "
+                    "declare any path it named that the library's "
+                    "credential_files() does not already withhold in "
+                    "HookSet.refused_paths instead, through credential_files(also="
+                    "[...]) or a RefusedPaths of its own; the settings render the "
+                    "Read deny rules from there."
+                )
+            ),
+        ],
+    ),
 ]
 """Every break this library has taken since its last release, and what to do.
 

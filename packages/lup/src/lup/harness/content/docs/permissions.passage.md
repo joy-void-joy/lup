@@ -591,21 +591,27 @@ not. The selected rung also decides which way remotes are rewritten: toward
 `https://host/` for a token, toward `git@host:` for a key or an agent, so one
 session speaks one transport rather than half its remotes working.
 
-**What the credential-path denials do and do not buy.** `~/.ssh` and
-`~/.aws/credentials` are declared in `HookSandbox.credential_paths`, which
-compiles into an OS-level read denial for sandboxed shell and into `Read`
-deny rules for the in-process file tools. That stops an agent *reading* key
-material and is worth keeping. It is not isolation from `ssh` and `git`
-*using* it: `ssh git@github.com` contains no credential path, and ssh reads
-the key or the agent socket itself. On Claude the denial is additionally
-enforced by the native per-path credential sandbox; Codex has no per-path
-equivalent, so there it is the semantic policy alone — the shell's
-`refused_paths` screen above, which both runtimes' dispatchers run and which
-withholds the private keys rather than the whole directory — and neither is a
-syscall boundary. The file tools Claude reads with directly are not routed
-through the policy hook, so there the `Read` deny rules are the whole of it. An operator granting an ssh rung is granting the contained
-session the use of that identity, and this is the honest description of that
-grant rather than a claim of a stronger boundary.
+**What the credential-path denials do and do not buy.** The key and login
+files are declared once, in `HookSet.refused_paths`, and every reader is
+refused them from that declaration: the shell's `refused_paths` screen above,
+which both runtimes' dispatchers run, and on Claude the `Read` deny rules the
+in-process file tools obey — Read, Grep and Glob are not routed through the
+policy hook — which Claude Code merges into its sandbox's read restrictions
+for sandboxed commands too. A pattern from a home is spelled `~/`, one from
+the root `//`, and one from anywhere `//**/`. Two differences are the
+runtimes' own. A `Read` deny carves no exemption out of a home or a root, so
+the file tools are refused the public keys and `known_hosts` the shell may
+read. And Claude's sandbox on Linux expands a pattern against what exists
+when a command is wrapped, skipping one whose first name is a wildcard, so
+`//**/…` holds for the file tools and not for a sandboxed command there.
+Codex has no file-reading tool — every read it makes is a command — and no
+read restriction in its sandbox, so the screen is the whole of it. That
+stops an agent *reading* key material and is worth keeping. It is not
+isolation from `ssh` and `git` *using* it: `ssh git@github.com` contains no
+credential path, and ssh reads the key or the agent socket itself, and
+neither layer is a syscall boundary. An operator granting an ssh rung is
+granting the contained session the use of that identity, and this is the
+honest description of that grant rather than a claim of a stronger boundary.
 
 Nothing lent is written where it could outlive the session: the ephemeral
 home is made under the system temporary directory at mode `0700`, holds

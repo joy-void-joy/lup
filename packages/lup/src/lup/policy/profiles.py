@@ -94,9 +94,6 @@ def compile_boundary(
             *(str(scope.origin) for scope in hooks.allowed_fetch),
             *(sandbox.extra_domains if sandbox else []),
         ],
-        credential_paths=[
-            Path(item) for item in (sandbox.credential_paths if sandbox else [])
-        ],
         unjudged_ambient=hooks.unjudged_ambient,
         capabilities=[entry.requirement for entry in depended_on(hooks, contained)],
     )

@@ -32,7 +32,6 @@ def declaration(capabilities: list[BoundaryCapability] = []) -> HookSet:
         ],
         sandbox=HookSandbox(
             extra_domains=["api.example.com"],
-            credential_paths=["~/.ssh"],
             writable_paths=["~/.cache/uv"],
             excluded_commands=["git *"],
         ),
@@ -64,7 +63,6 @@ def test_the_boundary_is_read_off_the_declaration_rather_than_restated() -> None
 
     assert boundary.disposable_roots == [Path("build")]
     assert Path("~/.cache/uv") in boundary.writable_roots
-    assert boundary.credential_paths == [Path("~/.ssh")]
     assert "api.example.com" in boundary.network_destinations
 
 

@@ -12,6 +12,7 @@ from lup.devtools.harness.settings import (
     project_settings,
 )
 from lup.harness.models import HookSandbox, HookSet
+from lup.policy.refused_paths import RefusedPaths, credential_files
 
 
 def test_a_refused_plugin_is_rendered_rather_than_dropped() -> None:
@@ -30,33 +31,54 @@ def test_a_refused_plugin_is_rendered_rather_than_dropped() -> None:
     assert rendered["enabledPlugins"] == {"kept@vendor": True, "refused@vendor": False}
 
 
-def test_a_declared_credential_is_denied_to_the_file_tools_too() -> None:
-    """The sandbox deny governs Bash alone, and Read never reaches it.
+def test_every_withheld_path_is_denied_to_the_file_tools_too() -> None:
+    """The shell's refusal and the file tools' denial are one declaration.
 
-    Read, Edit, Grep and Glob run in the session's own process, so a path
-    declared as a credential was denied to the shell and readable by the file
-    tools. Both renderings come from the one declaration, so the pair cannot
-    name different paths.
-
-    Two patterns per path because the declaration does not say which entries
-    are directories, and `Read` rather than `Grep` because Claude Code
-    consults file permissions against `Read` and `Edit` rules only.
+    Read, Grep and Glob run in the session's own process and never reach the
+    policy hook, so a path the shell withholds was readable by the file tools
+    unless something else denied it -- and the list that did named two paths
+    out of the set. Each anchor keeps its meaning: a home is `~/`, the root
+    `//`, and anywhere `//**/`; a pattern spanning a directory names the
+    directory too, as the kernel's own match does. `Read` rather than `Grep`
+    because Claude Code consults file permissions against `Read` and `Edit`
+    rules only.
     """
     hooks = HookSet(
         id="probe",
         policy_ids=[],
-        sandbox=HookSandbox(credential_paths=["~/.ssh", "~/.aws/credentials"]),
+        refused_paths=[
+            credential_files(
+                paths=["~/.ssh/**", "~/.netrc", "/proc/*/environ"],
+                also=["**/profile-home/auth.json"],
+            ),
+            RefusedPaths(paths=["/tmp/inbox/**"], reason="a", recovery="b"),
+        ],
     )
 
     assert credential_read_denials(hooks) == [
-        "Read(~/.ssh)",
         "Read(~/.ssh/**)",
-        "Read(~/.aws/credentials)",
-        "Read(~/.aws/credentials/**)",
+        "Read(~/.ssh)",
+        "Read(~/.netrc)",
+        "Read(//proc/*/environ)",
+        "Read(//**/profile-home/auth.json)",
+        "Read(//tmp/inbox/**)",
+        "Read(//tmp/inbox)",
     ]
 
 
-def test_a_declaration_without_a_sandbox_denies_nothing_extra() -> None:
-    """A project that declares no boundary gets no rules invented for it."""
+def test_a_declaration_withholding_nothing_denies_nothing_extra() -> None:
+    """A project that withholds no path gets no rules invented for it.
+
+    One that says nothing inherits the library's key and login files, which
+    is what the shell withholds from it too; neither needs a sandbox declared.
+    """
     assert credential_read_denials(None) == []
-    assert credential_read_denials(HookSet(id="probe", policy_ids=[])) == []
+    assert (
+        credential_read_denials(
+            HookSet(id="probe", policy_ids=[], refused_paths=[], sandbox=HookSandbox())
+        )
+        == []
+    )
+    assert "Read(~/.netrc)" in credential_read_denials(
+        HookSet(id="probe", policy_ids=[])
+    )

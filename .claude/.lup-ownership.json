@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "b562a0f01dd53ad45f8e9240bb1f107792b569a8e94f31c56352d0fb4a9a7b6b",
+  "source_digest": "233e509e4b480889d4048fb676edfd34fe534721238a1821e499c3d731760d6a",
   "target_requirements": [
     "claude-code"
   ],
@@ -716,7 +716,7 @@
     {
       "path": ".claude/settings.json",
       "category": "generated",
-      "sha256": "d80afdfbc479a6cc5273d14feb54b4114cf71485ab3e7cb946866ab5f6b4378e",
+      "sha256": "d61aea5414fc141aa3d1b78aac99bcaa3152a53c0772f15e14ec4f9fb959750a",
       "semantic_id": "harness.project-settings",
       "executable": false
     },
@@ -814,14 +814,14 @@
     {
       "path": "docs/permissions.md",
       "category": "generated",
-      "sha256": "99fed26e54a08dda3d62f80c501209561bf813be4f0b7bc0e8d1ec46afb035a2",
+      "sha256": "2763c42d1a698611952b6bc22a3e6d35069645563d17ca366951bfe516b3b035",
       "semantic_id": "docs.permissions",
       "executable": false
     },
     {
       "path": "docs/platform-differentiation.md",
       "category": "generated",
-      "sha256": "4bdb7babb8c37eb42e3f8e6d86c28dd956b5985bdb1ad804a0b2b097ae513e75",
+      "sha256": "6fd159ebeecd58a23c80a80fbf21818345d3082305a241b3dde015b6d3fe84b2",
       "semantic_id": "docs.platform-differentiation",
       "executable": false
     },

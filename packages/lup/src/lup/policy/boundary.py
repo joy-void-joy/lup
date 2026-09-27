@@ -118,14 +118,6 @@ class ExecutionBoundary(BaseModel, frozen=True):
     proxy, chases no redirects, and polices no DNS. An operation whose only
     unusual fact is an unfamiliar destination settles like any other.
     """
-    credential_paths: list[Path] = []
-    """Credential material the boundary exposes, so policy can tell two uses apart.
-
-    Normal git and gh use of a credential is part of a classified operation
-    and is not a policy event. An explicit operation to print, copy, upload,
-    or inspect the same material is, and the distinction needs the paths to
-    be named somewhere. Placement cannot protect a secret already inside.
-    """
     unjudged_ambient: UnjudgedAmbient = "ask"
     capabilities: list[CapabilityRequirement] = Field(default=[])
 

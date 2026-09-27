@@ -845,6 +845,15 @@ def portable_harness(
             # other runtime's. And the directory this image binds session
             # inboxes in, read off the image rather than spelled, so a peer
             # is reached through the roster rather than a raw frame.
+            #
+            # The one declaration every reader is refused by: the shell's
+            # words on both runtimes, and on Claude the `Read` deny rules the
+            # file tools obey, which the runtime merges into its sandbox's
+            # read restrictions too. Defense in depth once a contained session
+            # is lent an ssh identity, and honest about what that is worth: it
+            # stops an agent *reading* key material, not `ssh` and `git`
+            # *using* it -- `ssh git@github.com` names no credential path.
+            # `docs/permissions.md` states the grant in those words.
             refused_paths=[
                 credential_files(
                     also=[
@@ -932,20 +941,6 @@ def portable_harness(
             ],
             sandbox=HookSandbox(
                 extra_domains=["api.anthropic.com"],
-                # A read deny inside the boundary, which is where it belongs:
-                # the commands that legitimately need these keys are the ones
-                # excluded below, and they never enter it.
-                #
-                # Kept as defense in depth once a contained session may be
-                # lent an ssh identity, and honest about what that is worth.
-                # It stops an agent *reading* key material. It is not
-                # isolation from `ssh` and `git` *using* it — `ssh
-                # git@github.com` names no credential path, and ssh reads the
-                # key or the agent socket itself. On Claude it is also the
-                # native per-path credential sandbox; on Codex it is the
-                # semantic policy alone, and neither is a syscall boundary.
-                # `docs/permissions.md` states the grant in those words.
-                credential_paths=["~/.ssh", "~/.aws/credentials"],
                 # Every command in this project reaches its toolchain through
                 # `uv`, which locks its cache whenever it resolves dependencies
                 # — which a changed pyproject.toml forces, and an integration
