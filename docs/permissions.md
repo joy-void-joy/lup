@@ -776,9 +776,15 @@ ordinary lattice, which is right for a project that does not implement
 against fixed acceptance tests.
 
 The
-resolver's worker receives only its declared autonomous edit exceptions;
+resolver's worker receives only its declared autonomous edit exceptions,
+which are the size and whole-file gates: it writes a large edit or a new
+file without a question because it reviews its own. Protected roots,
 temporary paths, human-owned files like `README.md`, marker changes, and
-anti-pattern violations retain their guardrails in every mode.
+anti-pattern violations retain their guardrails in every mode. A protected
+root is where a session's own boundary is declared — its settings, its
+launch registry, its measured preflight, the policy — so an edit there asks
+a person whoever is making it, including an identity trusted to review its
+own work.
 
 A few of those guardrails open only for a gate a human granted — creating a
 devtools module, adding an anti-pattern suppression. What a lease holds is

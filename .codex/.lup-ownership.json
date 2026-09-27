@@ -373,7 +373,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "4df0ed0070e56e26232d39ebf1b8ccc1be9cc6f0ab922ee593dec85cca92501f",
+      "sha256": "849eaf8847d657d31bfa30db68344084a76d892dd0b2b9746c700d8956c7b4fc",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -569,7 +569,7 @@
     {
       "path": ".codex/plugins/lup/skills/hooks/SKILL.md",
       "category": "generated",
-      "sha256": "d36abc6ecb4f7a4c4839e8ead4b75b5d421bd47e52b83313735737c74664fe87",
+      "sha256": "2c53f1405c6f2f74c0cdfa25dd6cb90c70ece79ffb267e65dfa018b8289e30b3",
       "semantic_id": "skill.hooks",
       "executable": false
     },

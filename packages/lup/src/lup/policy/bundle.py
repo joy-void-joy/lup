@@ -56,7 +56,12 @@ from lup.policy.shell_rules import (
     erase_shell_rules,
     runner_target_tables,
 )
-from lup.policy.rules import antipattern_row, human_owned_path_rule, path_rule_row
+from lup.policy.rules import (
+    antipattern_row,
+    human_owned_path_rule,
+    path_rule_row,
+    protected_root_rule,
+)
 from lup.types import JsonValue
 
 
@@ -126,33 +131,12 @@ def runtime_url_scope(
     )
 
 
-def runtime_path_rule(root: str) -> PathRuleRow:
-    """Compile one application root into its primitive protected-path row."""
-    match root:
-        case "tmp":
-            return PathRuleRow(
-                kind="contains_part",
-                value=root,
-                reason="scratch path requires approval",
-                recovery="",
-                allow_autonomous=False,
-            )
-        case _:
-            return PathRuleRow(
-                kind="subtree",
-                value=root,
-                reason="protected path requires approval",
-                recovery="",
-                allow_autonomous=True,
-            )
-
-
 def runtime_path_rules(
     protected_roots: list[str], human_owned_files: list[str]
 ) -> list[PathRuleRow]:
     """Compile application roots plus invariant edit guardrails."""
     return [
-        *[runtime_path_rule(root) for root in protected_roots],
+        *[path_rule_row(protected_root_rule(root)) for root in protected_roots],
         *[path_rule_row(human_owned_path_rule(path)) for path in human_owned_files],
         PathRuleRow(
             kind="name_prefix",

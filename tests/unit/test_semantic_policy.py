@@ -106,6 +106,7 @@ from lup.policy.rules import (
     UrlScope,
     human_owned_path_rule,
     path_rule_row,
+    protected_root_rule,
     url_scope_row,
 )
 
@@ -2167,12 +2168,23 @@ EDIT_POLICY_CASES = [
         after="value = 1  # lup: revisit",
         effect="ask",
     ),
+    # A protected root asks a self-reviewing identity too: the settings, the
+    # launch registry and the policy are what confine that identity, and it
+    # is not the one to widen them.
     EditDecisionCase(
         path=".claude/settings.json",
         before="{}",
         after='{"ok": true}',
-        effect="allow",
+        effect="ask",
         autonomous=True,
+    ),
+    EditDecisionCase(
+        path="sync.json.local",
+        before=None,
+        after='{"projects": [{"name": "fleet-app", "mount": "rw"}]}',
+        effect="ask",
+        autonomous=True,
+        path_exists=False,
     ),
     EditDecisionCase(
         path="src/module.py",
@@ -2357,7 +2369,7 @@ EDIT_POLICY_CASES = [
         path="sync.json",
         before='{"projects": []}',
         after='{"projects": [{"name": "fleet-app"}]}',
-        effect="allow",
+        effect="ask",
         autonomous=True,
     ),
     EditDecisionCase(
@@ -4956,25 +4968,10 @@ def test_a_composed_session_enforces_the_rules_the_generated_tree_does() -> None
 
 def test_canonical_edit_policy_preserves_shared_security_outcomes() -> None:
     protected = [
-        PathRule(
-            kind="subtree",
-            value=".claude",
-            reason="protected path requires approval",
-            allow_autonomous=True,
-        ),
+        protected_root_rule(".claude"),
         human_owned_path_rule("README.md"),
-        PathRule(
-            kind="subtree",
-            value="sync.json",
-            reason="protected path requires approval",
-            allow_autonomous=True,
-        ),
-        PathRule(
-            kind="subtree",
-            value="sync.json.local",
-            reason="protected path requires approval",
-            allow_autonomous=True,
-        ),
+        protected_root_rule("sync.json"),
+        protected_root_rule("sync.json.local"),
     ]
 
     for case in EDIT_POLICY_CASES:
@@ -5001,25 +4998,10 @@ def test_bundled_edit_policy_matches_canonical_security_outcomes(
     bundled = load_bundled_kernel(tmp_path, "edit")
     policy = EditPolicy(
         protected=[
-            PathRule(
-                kind="subtree",
-                value=".claude",
-                reason="protected path requires approval",
-                allow_autonomous=True,
-            ),
+            protected_root_rule(".claude"),
             human_owned_path_rule("README.md"),
-            PathRule(
-                kind="subtree",
-                value="sync.json",
-                reason="protected path requires approval",
-                allow_autonomous=True,
-            ),
-            PathRule(
-                kind="subtree",
-                value="sync.json.local",
-                reason="protected path requires approval",
-                allow_autonomous=True,
-            ),
+            protected_root_rule("sync.json"),
+            protected_root_rule("sync.json.local"),
         ],
         path_roles=FIXTURE_PATH_ROLES,
     )
@@ -5059,11 +5041,11 @@ def test_bundled_autonomous_worker_keeps_guardrails(tmp_path: Path) -> None:
             case.path,
             case.before,
             case.after,
-            [".claude"],
+            [".claude", "pyproject.toml", "sync.json", "sync.json.local"],
             ["README.md"],
             autonomous=True,
         )
-        assert decision.effect == case.effect
+        assert decision.effect == case.effect, case.path
 
 
 def test_edit_policy_uses_full_python_context_for_added_docstrings(

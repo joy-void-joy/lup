@@ -191,7 +191,7 @@
     {
       "path": ".claude/plugins/lup/commands/hooks.md",
       "category": "generated",
-      "sha256": "39e3b35f306df9ce471bfbbbb4f64dc841bf946807f2c3dd135257a1a895e3a2",
+      "sha256": "ac067738961f0b0dcf24372dfbc50b9dd9a04cbd31d8efc454810b7b972d0e22",
       "semantic_id": "skill.hooks",
       "executable": false
     },
@@ -639,7 +639,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "52f4c453c9e0eb0c708a99732c63e545285852d64d4aa40d24b4b99a250a4065",
+      "sha256": "f167623338e813222ec78e9c2ed6d1d90def778d9f6c58190d668c71883e113f",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -814,7 +814,7 @@
     {
       "path": "docs/permissions.md",
       "category": "generated",
-      "sha256": "a75a81187fbb3d7ff38f10bdb10b1de1f43f5679af97f16a977f62ceb8397f48",
+      "sha256": "a90bb244c3020b66804b10186777d4904c89f955feb7f970a027b475790bfc68",
       "semantic_id": "docs.permissions",
       "executable": false
     },

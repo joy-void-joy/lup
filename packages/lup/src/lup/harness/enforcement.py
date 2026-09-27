@@ -29,6 +29,7 @@ from lup.policy.rules import (
     ShellPolicy,
     UrlScope,
     human_owned_path_rule,
+    protected_root_rule,
 )
 
 
@@ -43,28 +44,6 @@ def declared_scope(scope: HookUrlScope) -> UrlScope:
     )
 
 
-def protected_root_rule(root: Path) -> PathRule:
-    """One declared root, as the protected-path rule it compiles to.
-
-    Scratch is the exception and matches by path part rather than by subtree,
-    because a scratch directory is reachable at more than one root and the
-    rule is about what the directory is, not where it sits.
-    """
-    portable = root.as_posix()
-    if portable == "tmp":
-        return PathRule(
-            kind="contains_part",
-            value=portable,
-            reason="scratch path requires approval",
-        )
-    return PathRule(
-        kind="subtree",
-        value=portable,
-        reason="protected path requires approval",
-        allow_autonomous=True,
-    )
-
-
 def declared_path_rules(hooks: HookSet) -> list[PathRule]:
     """Every protected-path rule this hook set implies.
 
@@ -73,7 +52,7 @@ def declared_path_rules(hooks: HookSet) -> list[PathRule]:
     what any adopter listed.
     """
     return [
-        *[protected_root_rule(root) for root in hooks.protected_edit_roots],
+        *[protected_root_rule(root.as_posix()) for root in hooks.protected_edit_roots],
         *[human_owned_path_rule(path.as_posix()) for path in hooks.human_owned_files],
         PathRule(
             kind="name_prefix",

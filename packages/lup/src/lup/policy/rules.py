@@ -557,6 +557,36 @@ def human_owned_path_rule(path: str) -> PathRule:
     )
 
 
+def protected_root_rule(root: str) -> PathRule:
+    """One declared protected root, as the path rule it compiles to.
+
+    The one compilation both enforcement paths read: a session this program
+    composes and the rows a generated dispatcher carries, so the two cannot
+    come to disagree about which paths a root covers.
+
+    Scratch is the exception and matches by path part rather than by subtree,
+    because a scratch directory is reachable at more than one root and the
+    rule is about what the directory is, not where it sits.
+
+    No rule here releases an autonomous identity. A protected root is where a
+    session's own boundary is declared -- its settings, its launch registry,
+    its measured preflight, the policy itself -- and an identity trusted to
+    review its own edits is still the confined thing choosing what confines
+    it, so the question reaches a person whoever is asking.
+    """
+    if root == "tmp":
+        return PathRule(
+            kind="contains_part",
+            value=root,
+            reason="scratch path requires approval",
+        )
+    return PathRule(
+        kind="subtree",
+        value=root,
+        reason="protected path requires approval",
+    )
+
+
 def antipattern_row(rule: AntiPattern) -> AntiPatternRow:
     """Erase one declared rule into the primitive row the kernel matches on.
 
