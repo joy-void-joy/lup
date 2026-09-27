@@ -43,7 +43,9 @@ from lup.policy.assets.host import (
     this_checkout_path,
     tracked_write_targets,
     unleased_write_targets,
+    peer_store,
 )
+from lup.coordination.bare.store import claim_holders
 from lup.policy.kernel.effects import STRENGTH
 from lup.policy.kernel.lex import (
     authored_writes,
@@ -56,6 +58,7 @@ from lup.policy.kernel.lex import (
     shell_write_targets,
     shell_written_targets,
 )
+from lup.policy.kernel.peers import decide_foreign_claim, settled_with_claim
 from lup.policy.kernel.roles import displaced_targets
 from lup.policy.kernel.rows import (
     AcceptanceGuardRow,
@@ -64,6 +67,7 @@ from lup.policy.kernel.rows import (
     PathRoleRow,
     PathRuleKind,
     PathRuleRow,
+    PeerPolicyRow,
     RewriteReading,
     RewrittenDocumentRow,
     UnproducedDocumentRow,
@@ -311,7 +315,11 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         ]
         if not changes:
             return None
-        return self.authored.decide(EditBatch(changes=changes, cwd=root))
+        # The edit gates alone, as the dispatchers' authored review reads them:
+        # a peer's claim is asked about by an edit tool, while a command's
+        # writes are attributed to it after it runs.
+        authored = self.authored
+        return joined([authored.decide_change(change, root) for change in changes])
 
     def rewritten_documents(self, event: ShellCommand) -> RewriteReading:
         """What every in-place rewrite in this command would leave behind.
@@ -662,6 +670,15 @@ def antipattern_rows(change: EditChange) -> list[AntiPatternRow]:
     return [antipattern_row(rule) for rule in patterns]
 
 
+def joined(decisions: list[Decision]) -> Decision:
+    """One batch's verdict: deny beats ask beats defer beats allow."""
+    for effect in ("deny", "ask", "defer"):
+        found = next((item for item in decisions if item.effect == effect), None)
+        if found is not None:
+            return found
+    return Decision(effect="allow", reason="every edit in the batch is safe")
+
+
 class EditPolicy(DecisionPolicy[EditBatch]):
     """Apply the shared marker, anti-pattern, path, deletion, and size gates.
 
@@ -670,6 +687,11 @@ class EditPolicy(DecisionPolicy[EditBatch]):
     this session runs release the very next edit — and what makes one taken
     back stop releasing it. The generated dispatchers read the same document,
     so a lease has one answer wherever it is asked.
+
+    ``peer_policy`` is where this repository's sessions record what each is
+    holding, and a batch is judged together with every claim over its paths,
+    read live through the store's own fold as the dispatchers read it. Absent,
+    no roster is consulted, which is a project that declared none.
     """
 
     def __init__(
@@ -682,6 +704,7 @@ class EditPolicy(DecisionPolicy[EditBatch]):
         acceptance_guard: AcceptanceGuardRow | None = None,
         edit_rules: list[EditRule] | None = None,
         import_boundaries: list[ImportBoundary] | None = None,
+        peer_policy: PeerPolicyRow | None = None,
     ) -> None:
         self.acceptance_guard = acceptance_guard
         self.path_roles = path_roles or []
@@ -689,6 +712,7 @@ class EditPolicy(DecisionPolicy[EditBatch]):
         self.protected = list(protected)
         self.maximum_added_lines = maximum_added_lines
         self.autonomous = autonomous
+        self.peer_policy = peer_policy
         # Erased once here rather than per change: the table is a declaration
         # that does not move while this policy answers, and the generated
         # dispatchers read rows that were erased the same way at generation.
@@ -698,17 +722,37 @@ class EditPolicy(DecisionPolicy[EditBatch]):
         ]
 
     def decide(self, event: EditBatch) -> Decision:
-        decisions = [self.decide_change(change, event.cwd) for change in event.changes]
-        denied = next((item for item in decisions if item.effect == "deny"), None)
-        if denied is not None:
-            return denied
-        asked = next((item for item in decisions if item.effect == "ask"), None)
-        if asked is not None:
-            return asked
-        deferred = next((item for item in decisions if item.effect == "defer"), None)
-        if deferred is not None:
-            return deferred
-        return Decision(effect="allow", reason="every edit in the batch is safe")
+        root = event.cwd or Path.cwd()
+        return joined(
+            [
+                pydantic_decision(
+                    settled_with_claim(
+                        self.decide_change(change, event.cwd).as_kernel(),
+                        self.claim(str(root / change.path), root),
+                    )
+                )
+                for change in event.changes
+            ]
+        )
+
+    def claim(self, path: str, root: Path) -> KernelDecision | None:
+        """Whether a live session other than this one is already in *path*.
+
+        Found by the lookups the dispatchers' `foreign_claim_decision` makes --
+        the store beneath the shared git directory, and who holds the path in
+        it -- and judged by the kernel function both paths call. The asker is
+        whoever this process's environment names, which a session hands every
+        process it starts.
+        """
+        peers = self.peer_policy
+        directory = None if peers is None else peer_store(root, peers["store"])
+        if peers is None or directory is None:
+            return None
+        return decide_foreign_claim(
+            path,
+            claim_holders(directory, path, declared_identity(peers["member_env"])),
+            peers,
+        )
 
     def decide_change(self, change: EditChange, cwd: Path | None = None) -> Decision:
         root = cwd or Path.cwd()

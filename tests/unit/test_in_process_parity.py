@@ -22,8 +22,16 @@ from typing import Literal
 import pytest
 import sh
 
+from lup.coordination.identity import MEMBER_ENV, mint_member_id
+from lup.coordination.repository import RepositoryPeers
 from lup.harness.enforcement import measured_containment, semantic_policy_for
-from lup.policy.models import EditBatch, EditChange, SemanticTool, ShellCommand
+from lup.policy.models import (
+    Decision,
+    EditBatch,
+    EditChange,
+    SemanticTool,
+    ShellCommand,
+)
 from lup.types import JsonObject
 from lup_template.harness.catalog import declared_hook_set
 from tests.unit.native import codex_denial
@@ -117,7 +125,11 @@ class Session:
         return str(specific["permissionDecision"])
 
     def composed(self, monkeypatch: pytest.MonkeyPatch, event: SemanticTool) -> str:
-        """The in-process answer, composed the way `dev policy` composes it."""
+        """The in-process effect, composed the way `dev policy` composes it."""
+        return self.judged(monkeypatch, event).effect
+
+    def judged(self, monkeypatch: pytest.MonkeyPatch, event: SemanticTool) -> Decision:
+        """The in-process verdict, in this session's environment."""
         for name, value in self.environment.items():
             if name.startswith("LUP_"):
                 monkeypatch.setenv(name, value)
@@ -128,7 +140,7 @@ class Session:
             contained=held.contained,
             inside_placement=held.inside_placement,
         )
-        return policy.decide(event).effect
+        return policy.decide(event)
 
     def command(self, command: str) -> ShellCommand:
         """One shell command, run from this checkout."""
@@ -269,3 +281,61 @@ def test_an_edit_through_a_link_is_judged_where_it_lands_everywhere(
     for runtime in DISPATCHERS:
         call = edited(runtime, through, before, after)
         assert linked.dispatched(runtime, call) == effect
+
+
+@pytest.mark.parametrize(
+    ("asker", "effect"),
+    [
+        pytest.param("stranger", "ask", id="another-session-holds-it"),
+        pytest.param("holder", "allow", id="its-own-claim"),
+    ],
+)
+def test_an_edit_under_a_peers_claim_is_asked_about_everywhere(
+    session: Session, monkeypatch: pytest.MonkeyPatch, asker: str, effect: str
+) -> None:
+    """A live session holding the path is a question on every path.
+
+    Read from the roster the store keeps under the shared git directory, as
+    the asker the environment names, so a session is never asked about its
+    own work and `dev policy` shows the question a session would be shown.
+    """
+    commit_file(session.git, session.checkout, "a.py", "value = 1\n", "seed")
+    peers = RepositoryPeers(session.checkout)
+    members = {"holder": mint_member_id(), "stranger": mint_member_id()}
+    peers.join(members["holder"], session.checkout, cli_name="feat-holding")
+    peers.join(members["stranger"], session.checkout, cli_name="feat-asking")
+    peers.lock(members["holder"], session.checkout)
+    session.environment[MEMBER_ENV] = members[asker]
+    target = session.checkout / "a.py"
+    before, after = "value = 1\n", "value = 2\n"
+
+    verdict = session.judged(monkeypatch, session.edit(target, before, after))
+    assert verdict.effect == effect
+    assert ("feat-holding" in verdict.reason) == (effect == "ask")
+    for runtime in DISPATCHERS:
+        call = edited(runtime, target, before, after)
+        assert session.dispatched(runtime, call) == effect
+
+
+def test_a_command_is_not_asked_about_a_peers_claim_anywhere(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A command's writes are attributed after it runs, on every path.
+
+    So a heredoc carrying its content meets the edit gates and not the claim:
+    the question is an edit tool's, and the dispatchers never ask it of a
+    command.
+    """
+    commit_file(session.git, session.checkout, "notes.md", "one\n", "seed")
+    peers = RepositoryPeers(session.checkout)
+    holder, stranger = mint_member_id(), mint_member_id()
+    peers.join(holder, session.checkout, cli_name="feat-holding")
+    peers.join(stranger, session.checkout, cli_name="feat-asking")
+    peers.lock(holder, session.checkout)
+    session.environment[MEMBER_ENV] = stranger
+    command = "echo two >> notes.md"
+
+    effect = session.composed(monkeypatch, session.command(command))
+    assert effect == "allow"
+    for runtime in DISPATCHERS:
+        assert session.dispatched(runtime, shell(command)) == effect

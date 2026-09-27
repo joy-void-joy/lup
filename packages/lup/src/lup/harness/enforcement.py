@@ -22,6 +22,7 @@ from lup.policy.assets.host import delivers, measured_boundary
 from lup.policy.enforcement import SemanticToolPolicy
 from lup.policy.grants import LeaseGrants
 from lup.policy.kernel.rows import PathRoleRow
+from lup.policy.peer_policy import erase_peer_policy
 from lup.policy.rules import (
     EditPolicy,
     FetchPolicy,
@@ -141,6 +142,7 @@ def semantic_policy_for(
         acceptance_guard=guard.erased() if (guard := hooks.acceptance_guard) else None,
         edit_rules=hooks.resolved_edit_rules(),
         import_boundaries=hooks.resolved_import_boundaries(),
+        peer_policy=erase_peer_policy(hooks.peer_policy),
     )
     return SemanticToolPolicy(
         fetch=FetchPolicy(allowed, denied, hooks.resolved_unscoped_fetch()),
