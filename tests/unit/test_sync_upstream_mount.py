@@ -26,6 +26,9 @@ import sh
 from lup.devtools import sync
 from lup.devtools.dev.policy_explain import verdict_for
 from lup.devtools.harness import launch
+from lup.launch.declaration import LaunchSandbox
+from lup.providers.claude.launch import claude_sandbox_arguments
+from lup.providers.codex.launch import writable_root_arguments
 from lup.devtools.harness.policy_refresh import refresh_destination_policy
 from lup.devtools.harness.preflight import (
     NONCE_VARIABLE,
@@ -147,7 +150,7 @@ def settled_launch(
     monkeypatch: pytest.MonkeyPatch,
     checkout: Path,
     roots: list[AccessibleRoot],
-    sandbox: launch.LaunchSandbox = launch.LaunchSandbox.OUTER,
+    sandbox: LaunchSandbox = LaunchSandbox.OUTER,
     runtime: str = "codex",
 ) -> str:
     """Settle a launch's boundary from ``checkout`` over ``roots``; its nonce.
@@ -569,8 +572,8 @@ def test_a_checkout_this_machine_keeps_is_mounted_at_its_working_tree_alone(
 
 
 POSTURES = {
-    "inner": (launch.LaunchSandbox.INNER, True),
-    "none": (launch.LaunchSandbox.NONE, False),
+    "inner": (LaunchSandbox.INNER, True),
+    "none": (LaunchSandbox.NONE, False),
 }
 """The host postures, and whether each has the runtime's own sandbox vouched for."""
 
@@ -763,9 +766,7 @@ def test_dev_policy_answers_those_writes_as_the_dispatchers_do(
 ) -> None:
     """The preview a session is sent to before spending a turn agrees with them."""
     checkout, clone, roots = mounted_clone(tmp_path, monkeypatch, upstream, cache)
-    nonce = settled_launch(
-        monkeypatch, checkout, roots, launch.LaunchSandbox.INNER, "claude"
-    )
+    nonce = settled_launch(monkeypatch, checkout, roots, LaunchSandbox.INNER, "claude")
     monkeypatch.setenv(NONCE_VARIABLE, nonce)
     monkeypatch.setenv(ROOT_VARIABLE, str(checkout))
 
@@ -794,20 +795,11 @@ def test_neither_runtime_s_host_sandbox_can_write_the_clone_s_config_or_hooks(
     repository, so it admits the clone's worktrees and not its git directory.
     """
     checkout, clone, roots = mounted_clone(tmp_path, monkeypatch, upstream, cache)
-    monkeypatch.setattr(launch, "get_tree_dir", lambda: checkout / "tree")
-    plugin = Plugin(
-        id="test.upstream",
-        name="test",
-        marketplace="test",
-        version="1.0.0",
-        description="The launch whose host sandbox is read",
-        skills=[],
-        agents=[],
-        hooks=declared_hook_set(),
+    tree = checkout / "tree"
+    claude = claude_sandbox_arguments(
+        declared_hook_set(), LaunchSandbox.INNER, roots, tree=tree
     )
-
-    claude = launch.claude_sandbox_arguments(plugin, launch.LaunchSandbox.INNER, roots)
-    codex = launch.writable_root_arguments(roots)
+    codex = writable_root_arguments(roots, tree)
 
     filesystem = json.loads(claude[claude.index("--settings") + 1])["sandbox"][
         "filesystem"

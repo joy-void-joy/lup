@@ -8,6 +8,7 @@ import sh
 import typer
 
 import lup.devtools.harness.launch as launch
+from lup.launch.declaration import LaunchSandbox
 from lup.harness.clipboard import ClipboardBridge, ClipboardTransport
 from lup.harness.egress import SessionEgress
 from lup.sandbox.models import NetworkMode
@@ -150,14 +151,14 @@ def test_named_profile_is_not_verified_against_an_unselected_base_configuration(
     assert "not verified" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("sandbox", list(launch.LaunchSandbox))
+@pytest.mark.parametrize("sandbox", list(LaunchSandbox))
 @pytest.mark.parametrize("transport", ["commands", "x11"])
 @pytest.mark.parametrize(
     ("network", "headless"),
     [("host", False), ("filtered", True), ("bridge", True), ("none", True)],
 )
 def test_session_authentication_uses_the_same_execution_boundary(
-    sandbox: launch.LaunchSandbox,
+    sandbox: LaunchSandbox,
     transport: ClipboardTransport,
     network: NetworkMode,
     headless: bool,

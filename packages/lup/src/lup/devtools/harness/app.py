@@ -21,6 +21,7 @@ import lup.devtools.harness.clean as clean
 import lup.devtools.harness.doctor as doctor
 import lup.devtools.harness.drift as drift
 import lup.devtools.harness.launch as launch
+from lup.launch.declaration import LaunchSandbox
 import lup.devtools.harness.policy_refresh as policy_refresh
 import lup.devtools.harness.reconcile as reconcile
 import lup.devtools.harness.resolve as resolve
@@ -581,7 +582,7 @@ def create_harness_app(
                 ),
             ] = False,
             sandbox: Annotated[
-                launch.LaunchSandbox | None,
+                LaunchSandbox | None,
                 typer.Option(
                     "--sandbox",
                     help="Which sandbox holds the session: the verified "
@@ -772,7 +773,7 @@ def create_harness_app(
                 ),
             ] = False,
             sandbox: Annotated[
-                launch.LaunchSandbox | None,
+                LaunchSandbox | None,
                 typer.Option(
                     "--sandbox",
                     help="Which sandbox holds the session: the verified "

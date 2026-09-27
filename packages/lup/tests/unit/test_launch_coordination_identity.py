@@ -21,6 +21,7 @@ import pytest
 import typer
 
 import lup.devtools.harness.launch as launch
+from lup.launch.declaration import LaunchSandbox
 from lup.coordination.identity import (
     MEMBER_ENV,
     NAME_ENV,
@@ -63,7 +64,7 @@ def opened(environment: dict[str, str], tmp_path: Path) -> list[str]:
         Mock(),
         tmp_path,
         Mock(),
-        launch.LaunchSandbox.INNER,
+        LaunchSandbox.INNER,
         environment,
     )
 
@@ -209,7 +210,7 @@ def launched(
     monkeypatch.setattr(
         launch,
         "claude_sandbox_arguments",
-        lambda _plugin, sandbox=launch.LaunchSandbox.INNER, accessible=[], settings=None: [],
+        lambda _plugin, sandbox=LaunchSandbox.INNER, accessible=[], settings=None, tree=None: [],
     )
     monkeypatch.setattr(launch, "non_interactive_environment", lambda _env: {})
     monkeypatch.setattr(

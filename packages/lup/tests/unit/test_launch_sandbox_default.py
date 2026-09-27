@@ -24,11 +24,12 @@ from typer.testing import CliRunner
 
 import lup.devtools.harness.contained as contained
 import lup.devtools.harness.launch as launch
+import lup.launch.declaration as declaration
+from lup.launch.declaration import LaunchSandbox
 from lup.devtools.harness.app import create_harness_app
 from lup.devtools.harness.composition import NativeTargets
 from lup.harness.generate import NativeHarnessComposition
 from lup.devtools.harness.launch import (
-    LaunchSandbox,
     launch_claude,
     launch_codex,
     session_argv,
@@ -52,7 +53,7 @@ def composition() -> Mock:
 
 def host(monkeypatch: pytest.MonkeyPatch, client: ContainerClient | None) -> None:
     """Answer the launcher's own probe as a host with this client, or with none."""
-    monkeypatch.setattr(launch, "detected_client", lambda: client)
+    monkeypatch.setattr(declaration, "detected_client", lambda: client)
 
 
 def unprobed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -61,7 +62,7 @@ def unprobed(monkeypatch: pytest.MonkeyPatch) -> None:
     def probed() -> ContainerClient | None:
         raise AssertionError("the launcher asked the host for a container client")
 
-    monkeypatch.setattr(launch, "detected_client", probed)
+    monkeypatch.setattr(declaration, "detected_client", probed)
 
 
 @pytest.fixture

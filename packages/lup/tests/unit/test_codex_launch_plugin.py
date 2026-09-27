@@ -8,6 +8,7 @@ import pytest
 import sh
 
 import lup.devtools.harness.launch as launch
+from lup.launch.declaration import LaunchSandbox
 import lup.providers.codex.install as installation
 import lup.providers.codex.runtime as runtime
 from lup.providers.codex import CODEX_PROGRAM, Codex
@@ -46,11 +47,11 @@ def boundary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Mock:
     return composition
 
 
-@pytest.mark.parametrize("sandbox", list(launch.LaunchSandbox))
+@pytest.mark.parametrize("sandbox", list(LaunchSandbox))
 def test_plugin_preparation_uses_the_actual_home_before_authentication(
     tmp_path: Path,
     boundary: Mock,
-    sandbox: launch.LaunchSandbox,
+    sandbox: LaunchSandbox,
 ) -> None:
     calls = Mock()
     launch.session_argv(
@@ -85,7 +86,7 @@ def test_failed_plugin_preparation_stops_the_launch_before_authentication(
             Mock(hooks=None),
             tmp_path,
             CODEX_LOGIN,
-            launch.LaunchSandbox.OUTER,
+            LaunchSandbox.OUTER,
             {},
             authenticate=authenticate,
             prepare=Mock(side_effect=RuntimeError("plugin unavailable")),

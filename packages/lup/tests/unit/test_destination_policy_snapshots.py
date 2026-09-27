@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from lup.devtools.harness import launch
+from lup.launch.declaration import LaunchSandbox
 from lup.devtools.harness.policy_refresh import refresh_destination_policy
 from lup.devtools.harness.preflight import (
     LaunchSentinels,
@@ -41,11 +42,9 @@ def evaluator(checkout: Path, runtime: str = "codex") -> Path:
     return hooks
 
 
-@pytest.mark.parametrize(
-    "sandbox", [launch.LaunchSandbox.NONE, launch.LaunchSandbox.OUTER]
-)
+@pytest.mark.parametrize("sandbox", [LaunchSandbox.NONE, LaunchSandbox.OUTER])
 def test_every_launch_replaces_inherited_ledger_ownership(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sandbox: launch.LaunchSandbox
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sandbox: LaunchSandbox
 ) -> None:
     checkout = repository(tmp_path / "checkout")
     monkeypatch.setattr(launch, "project_root", lambda: checkout)

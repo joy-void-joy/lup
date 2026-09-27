@@ -6,14 +6,12 @@ native CLI with the non-interactive environment applied.
 """
 
 import asyncio
-import json
 import logging
 import os
 import shutil
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from datetime import datetime
-from enum import StrEnum
 from pathlib import Path
 from tempfile import mkdtemp
 from typing import Protocol, runtime_checkable
@@ -30,7 +28,6 @@ from lup.providers.profiles import DefaultHomeProfile, ProfileDirectory
 from lup.providers.user_config import UserConfig, UserConfigFile
 from lup.devtools.harness.config_volume import HomeSeedPlaces, named_file
 from lup.devtools.harness.contained import contained_argv, read_config_home
-from lup.providers.claude.confinement import CLAUDE_SANDBOX_OFF
 from lup.providers.claude.model_choice import (
     claude_default_effort,
     claude_model_id,
@@ -63,7 +60,6 @@ from lup.providers.claude.home_seed import (
 from lup.providers.claude.theme import settle_claude_theme
 from lup.providers.claude.harness import ClaudeSpellings
 from lup.providers.claude.transcripts import ClaudeTranscripts
-from lup.providers.codex.confinement import CODEX_CONFINEMENT
 from lup.providers.codex.harness import CodexSpellings
 from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.account import read_account
@@ -74,7 +70,7 @@ from lup.providers.codex.transcripts import CodexTranscripts
 from lup.coordination.identity import MEMBER_ENV, NAME_ENV, LaunchedMember
 from lup.coordination.repository import RepositoryPeers, launched_member
 from lup.harness.environment import non_interactive_environment
-from lup.harness.image import Image, detected_client
+from lup.harness.image import Image
 from lup.harness.messaging import SessionInboxes, cleared
 from lup.workspace.edition import shared_git_directory
 from lup.harness.models import HookSet, NativeName, Plugin, Resumption
@@ -85,24 +81,27 @@ from lup.policy.snapshots import accept_destination_policies, destination_author
 from lup.devtools.pointer_trust import judged_roots, store_exposure
 from lup.sandbox.rail import (
     AccessibleRoot,
-    host_run,
-    in_repository,
     fleet_lease,
-    working_trees,
 )
 from lup.devtools.sync import accessible_roots, granted_devices
+from lup.launch.boundary import apply_sandbox_environment
+from lup.launch.declaration import LaunchSandbox, settled_sandbox
+from lup.providers.claude.launch import (
+    claude_resume_arguments,
+    claude_sandbox_arguments,
+    companion_plugin_directories,
+)
+from lup.providers.codex.launch import codex_resume_arguments, codex_sandbox_arguments
 from lup.harness.notice import Banner, Notice
 from lup.harness.requirements import (
     Finding,
     HostFacts,
     Manifest,
-    Requirement,
     refused,
 )
 from lup.harness.process import LocalProcessLauncher
 from lup.harness.toolchain import (
     bubblewrap_requirement,
-    codex_envelope_requirement,
     container_client,
     for_host,
     granted_device_requirement,
@@ -147,82 +146,7 @@ from lup.devtools.harness.preflight import (
     sweep_ledgers,
 )
 from lup.devtools.dev.worktree import RelocationHint, refuse_redirected_pointers
-from lup.devtools.layout import get_tree_dir
-
-
-class LaunchSandbox(StrEnum):
-    """Which sandbox a launch opens the session under.
-
-    One axis with three points rather than two booleans, because the two
-    walls were never independent: the container stands the runtime's own
-    sandbox down, and skipping the container is what makes that sandbox
-    worth establishing. Named from the session's point of view -- which
-    wall is load-bearing -- so the flag that selects one reads as the
-    posture it buys rather than as the machinery it toggles.
-
-    Distinct from :class:`~lup.policy.enforcement.SandboxPosture`, which is
-    what a session's *configuration* means to the policy kernel once it is
-    open; this is the launcher's choice of what to configure.
-    """
-
-    OUTER = "outer"
-    """The verified container is the boundary; the native sandbox stands down
-    inside it, because a wall that has to be weakened to start nested is worth
-    less than saying plainly which wall is load-bearing."""
-
-    INNER = "inner"
-    """The session opens on the host and the launcher establishes the
-    runtime's own workspace-write sandbox, vouching for it only after
-    exercising the tools it stands on."""
-
-    NONE = "none"
-    """The session opens on the host under the semantic policy alone. Nothing
-    is established and nothing is vouched for, so the deny lattice stays
-    standing -- the posture a broken inner sandbox would degrade into
-    silently, stated as a choice."""
-
-    def contained(self) -> bool:
-        """Whether this launch opens inside the verified container."""
-        return self is LaunchSandbox.OUTER
-
-
-def settled_sandbox(asked: LaunchSandbox | None) -> LaunchSandbox:
-    """The sandbox a launch opens under: the one asked for, or the default the host holds.
-
-    ``None`` is a command line that named no sandbox, the one answer with
-    anything left to settle. The default is the verified container, which a
-    host with no container client cannot start, and refusing there would
-    leave the plain launch unopenable on every machine without Docker or
-    Podman. So the default opens under the runtime's own sandbox instead, and
-    says so at warning level: what would restore the container, and the flag
-    that states the choice without the warning.
-
-    Only the default degrades. ``--sandbox outer`` asks for the container by
-    name, and a launch that asked for a boundary and opened without one is
-    the failure the boundary exists to rule out, so that request reaches
-    :func:`~lup.devtools.harness.contained.contained_argv` and is refused
-    there. A client that answers and cannot drive the engine behind it is not
-    an absence either: the operator has an engine to repair rather than one
-    to install, and the refusal there says which.
-
-    Asked of :func:`~lup.harness.image.detected_client`, the probe the
-    container's argv is built from, so the two cannot disagree about whether
-    this host has an engine.
-    """
-    if asked is not None:
-        return asked
-    if detected_client() is not None:
-        return LaunchSandbox.OUTER
-    Notice(
-        text=(
-            "No working Docker or Podman client was found, so this session "
-            "runs under the inner sandbox on the host. Install Docker or "
-            "Podman to launch in the container (outer), or pass "
-            "`--sandbox inner` to choose this without the warning."
-        ),
-        urgency="warning",
-    ).say()
-    return LaunchSandbox.INNER
+from lup.devtools.layout import find_tree_dir
 
 
 def declared_mounts(
@@ -410,7 +334,7 @@ def ready_to_open(
             f"status: {', '.join(excluded)}"
         )
     typer.echo("checking the host")
-    opening = LaunchOpening(sandbox=settled_sandbox(sandbox))
+    opening = LaunchOpening(sandbox=settled_sandbox(sandbox, "pass `--sandbox inner`"))
     opening.findings = runtime_preflight(
         composition, sentinels, opening, opening.sandbox.contained()
     )
@@ -1084,249 +1008,6 @@ def codex_login_preflight(
         )
 
 
-def apply_sandbox_environment(
-    plugin: Plugin,
-    environment: EnvVars,
-    label: str,
-    required_tools: list[Requirement],
-    sandbox: LaunchSandbox = LaunchSandbox.INNER,
-    announce: bool = True,
-) -> bool:
-    """Export LUP_SANDBOX_ACTIVE when the declared sandbox can actually run.
-
-    The dispatchers defer unjudged shell only under this flag, so it is set
-    exactly when the launch verified the OS boundary; without it the deny
-    lattice keeps carrying the escalation recipe.
-
-    Verified by exercising each tool rather than by finding it on PATH. The
-    two answers differ exactly where it matters: a confinement binary that is
-    installed and cannot start a namespace on this kernel is present and
-    useless, and a flag set on its presence tells every dispatcher downstream
-    to relax into a boundary that will not be there. Absence and breakage
-    both leave the lattice standing, which is the safe direction, and the
-    message says which of the two was found rather than only that one was.
-
-    Asked only of a launch establishing the inner sandbox. A contained one
-    has a boundary already, and the kernel reads it from what the launch
-    measured rather than from anything a launcher asserts -- ``boundary =
-    sandboxed or contained``, so the flag would change no verdict. Probing
-    anyway printed a sandbox verdict about a session that was not going to
-    rely on it, and on a failed probe printed ``deny lattice stays active``
-    for a session whose lattice was about to stand down behind the container.
-    Saying nothing is the honest report, and the container's own line says
-    what the boundary is. A launch that chose no sandbox at all is not asked
-    either: it wants the lattice standing, so there is nothing to vouch for.
-
-    Each tool carries its own exercise rather than being named here and
-    probed with a flag chosen by this function. That is not tidiness: the
-    one flag this spelled for every tool was ``--version``, socat has no
-    such option and exits 1 on it, and the OS boundary was therefore
-    reported unavailable on every host in the world.
-
-    Both runtimes vouch through here, which is the point of it taking the
-    tools rather than naming them: Claude's confinement is a pair of programs
-    and Codex's is its own envelope, and the asymmetry that mattered was not
-    which tools but that one path exercised something and the other asserted
-    the flag outright. *announce* is off where the caller has a better
-    sentence for the success case -- a posture whose name is worth printing --
-    and the failures are said either way, because that is the half a reader
-    has to act on.
-
-    Answers whether it vouched, so a caller can say so without re-deriving it
-    from the environment it just passed in.
-    """
-    hooks = plugin.hooks
-    if sandbox is not LaunchSandbox.INNER or hooks is None or hooks.sandbox is None:
-        return False
-    findings = [tool.check(environment) for tool in required_tools]
-    unusable = [finding for finding in findings if not finding.working]
-    if unusable:
-        for finding in unusable:
-            for notice in finding.alarms():
-                notice.say()
-        Notice(
-            text=f"{label} sandbox could not be verified. Command permission checks remain active.",
-            urgency="warning",
-        ).say()
-        return False
-    environment["LUP_SANDBOX_ACTIVE"] = "1"
-    if announce:
-        Notice(
-            text=f"{label} sandbox: verified; it also restricts commands not covered by the policy.",
-            urgency="boundary",
-        ).say()
-    return True
-
-
-# lup: ignore[library-default] — each entry is literally a Codex CLI flag
-CODEX_SANDBOX_OVERRIDES = (
-    "-s",
-    "--sandbox",
-    "--approve-for-me",
-    "--not-so-yolo",
-    "--yolo",
-    "--dangerously-bypass-approvals-and-sandbox",
-)
-"""Every Codex flag by which a caller picks the sandbox itself, aliases included.
-
-``--yolo`` and ``--not-so-yolo`` are the CLI's hidden aliases of the two long
-flags after them. ``--approve-for-me`` names workspace-write on its own, and
-Codex refuses it beside ``--sandbox``, so the launcher cannot add one."""
-
-
-def codex_sandbox_arguments(
-    plugin: Plugin,
-    environment: EnvVars,
-    extra_args: list[str],
-    sandbox: LaunchSandbox = LaunchSandbox.INNER,
-    accessible: list[AccessibleRoot] = [],
-) -> list[str]:
-    """Compose the interactive Codex envelope that LUP_SANDBOX_ACTIVE vouches for.
-
-    Establishing the inner sandbox, the launcher builds the boundary it announces: an
-    explicit workspace-write sandbox on the Codex command line, mirroring how
-    the Claude settings artifact compiles the same declaration into an OS
-    wall. Path-level write and credential denials have no Codex equivalent,
-    and neither does taking one command out of the envelope, so the envelope
-    is the declaration's strict subset (network stays off). The dispatcher
-    still reads the exclusions, judging those commands as though nothing
-    confined them — which is the strict direction here too, since an envelope
-    with no network is not a boundary they would have survived either. When
-    the caller supplies its own sandbox flag the launcher vouches for
-    nothing: the flag stays unset and the deny lattice keeps the escalation
-    recipe.
-
-    Contained, that same envelope is wrong in a way that has nothing to do
-    with strictness, and what stands in its place is spelled by
-    :data:`~lup.providers.codex.confinement.CODEX_CONFINEMENT` rather than
-    here -- which carries why, and is where the image-side probe reads the
-    same words rather than inventing its own. This is the counterpart of
-    Claude's off switch, and it is what "every runtime, in the same change"
-    means for a posture: one concept, each runtime's own word for it.
-
-    Choosing no sandbox at all spells the same off switch on the host, and
-    the notice says which wall holds instead: none, so the deny lattice
-    stays standing and every unjudged command keeps its escalation recipe.
-
-    LUP_SANDBOX_ACTIVE stays unset in both of those, because neither session
-    relies on it -- the kernel reads the containment out of what the launch
-    measured, and a boundary that was observed is a boundary whether this
-    flag vouched for it or not, while a session with no boundary wants the
-    lattice the flag would relax.
-    """
-    hooks = plugin.hooks
-    if hooks is None or hooks.sandbox is None:
-        return []
-    overrides = [
-        word
-        for word in extra_args
-        if word in CODEX_SANDBOX_OVERRIDES or word.startswith("--sandbox=")
-    ]
-    if overrides:
-        Notice(
-            text=(
-                f"codex sandbox: caller envelope ({' '.join(overrides)}) — "
-                "deny lattice stays active"
-            ),
-            urgency="warning",
-        ).say()
-        return []
-    match sandbox:
-        case LaunchSandbox.OUTER:
-            Notice(
-                text=(
-                    "codex sandbox: off inside the container — "
-                    "the container is the boundary, and its proxy is the way out"
-                ),
-                urgency="boundary",
-            ).say()
-            return list(CODEX_CONFINEMENT.off)
-        case LaunchSandbox.NONE:
-            Notice(
-                text=(
-                    "codex sandbox: off on the host — "
-                    "the semantic policy alone judges, and its deny lattice stands"
-                ),
-                urgency="boundary",
-            ).say()
-            return list(CODEX_CONFINEMENT.off)
-        case LaunchSandbox.INNER:
-            pass
-    # Exercised before it is vouched for, the way the Claude path exercises
-    # its confinement tools. Asserting the flag outright was the asymmetry:
-    # `codex sandbox` runs a command under this exact envelope and no model
-    # turn, so there was never a reason not to ask.
-    vouched = apply_sandbox_environment(
-        plugin,
-        environment,
-        "codex",
-        [codex_envelope_requirement()],
-        sandbox=sandbox,
-        announce=False,
-    )
-    if vouched:
-        Notice(
-            text=(
-                "codex sandbox: workspace-write envelope — "
-                "unjudged shell defers to the OS boundary"
-            ),
-            urgency="boundary",
-        ).say()
-    # The envelope goes on either way. What a failed probe withdraws is the
-    # claim, not the confinement: leaving the sandbox off because it could not
-    # be verified would answer a boundary nobody could measure by removing it.
-    return ["--sandbox", "workspace-write", *writable_root_arguments(accessible)]
-
-
-def writable_root_arguments(accessible: list[AccessibleRoot] = []) -> list[str]:
-    """Widen the workspace-write root to the tree/ holding sibling worktrees.
-
-    Codex roots writes at the launch directory, so a feature worktree this
-    project's own workflow prescribes creating lands outside the boundary
-    and cannot be edited from the session that created it.
-
-    The declared roots widen it alongside, which is what makes this the same
-    change as the Claude settings merge rather than a second policy: one
-    registration, and both runtimes' uncontained sandboxes admit it. The
-    spelling is each runtime's own -- a settings document there, a dotted
-    TOML override here, whose value the CLI parses as TOML and falls back to
-    treating as a literal string.
-
-    A root nothing declared writable is left out rather than admitted
-    read-only: this key grants writes, and there is no Codex spelling for
-    "reachable and not writable" to be faithful to. Reads are not what it
-    governs.
-
-    A bare repository is widened to its worktrees rather than to itself. Its
-    `config` and `hooks/` name what the host runs, which the container binds
-    read-only and Claude's widening denies; this key cannot hold a read-only
-    region inside a root, and Codex keeps only a root's `.git` read-only,
-    which a bare repository does not have. So the session writes the
-    worktrees the clone holds at launch and not its git directory -- which
-    also leaves a worktree cut later, and a commit that writes the object
-    store, to a later launch or to Claude.
-    """
-    try:
-        tree = get_tree_dir()
-    except (typer.Exit, SystemExit):
-        return []
-    roots = [
-        str(tree),
-        *[
-            str(checkout)
-            for item in accessible
-            if item.writable
-            for checkout in working_trees(item.path)
-        ],
-    ]
-    # lup: defer: a Codex permission profile can hold `config` and `hooks/`
-    # read-only inside a writable root (`[permissions.<name>.filesystem]`,
-    # deepest entry wins), which would give a mounted bare clone the whole-
-    # clone reach Claude has; it replaces `--sandbox workspace-write`, which
-    # overrides a profile, so it is the envelope's redesign and not this key's
-    return ["-c", f"sandbox_workspace_write.writable_roots={json.dumps(roots)}"]
-
-
 def personal_config(config: UserConfigFile) -> UserConfig:
     """The person's lup config, or a refusal naming the file to fix.
 
@@ -1367,157 +1048,6 @@ def announce_relaxed_rules(relaxed: bool, plugin: Plugin) -> None:
         "compiled tree carries a policy nothing declares. To retire them for "
         "good instead, `dev seams --retire-all` writes it where a review sees "
         "it."
-    )
-
-
-def claude_resume_arguments(resume: Resumption) -> list[str]:
-    """Claude Code's spelling: continuing and resuming are two flags.
-
-    ``--continue`` takes the most recent conversation in the working
-    directory and ``--resume`` opens the picker or takes a session id, so a
-    request reaches the runtime as words rather than as a mode.
-    """
-    if resume.session is not None:
-        return ["--resume", resume.session]
-    if resume.pick:
-        return ["--resume"]
-    return ["--continue"] if resume.latest else []
-
-
-def codex_resume_arguments(resume: Resumption) -> list[str]:
-    """Codex's spelling: reopening is a subcommand, and it leads the vector.
-
-    The same three requests, in the shape this runtime has for them —
-    ``resume`` alone is the picker, ``--last`` is the most recent, and a
-    session id is positional. It comes first because a subcommand does, which
-    is the whole of why the two cannot share one word list.
-    """
-    if resume.session is not None:
-        return ["resume", resume.session]
-    if resume.pick:
-        return ["resume"]
-    return ["resume", "--last"] if resume.latest else []
-
-
-def claude_sandbox_arguments(
-    plugin: Plugin,
-    sandbox: LaunchSandbox = LaunchSandbox.INNER,
-    accessible: list[AccessibleRoot] = [],
-    settings: JsonObject | None = None,
-) -> list[str]:
-    """Say what this launch means the Claude sandbox to be, in one settings merge.
-
-    ``settings`` is whatever else this launch compiles into that document —
-    an effort's ultracode switch — merged in here because the CLI reads one
-    ``--settings`` flag, and a second would be read in place of the first.
-
-    Establishing the inner sandbox, that is a widening: Claude roots writes at the working
-    directory just as Codex does, so a second checkout is read-only to every
-    command a session runs — and running the toolchain over one is ordinary
-    work here, which is why the symptom arrives as pytest failing to write a
-    cache and `ruff format` refusing to save. Neither error names a sandbox.
-
-    The declared roots widen it the same way and for the same reason they
-    reach the container's mount table: a project registered as reachable is
-    one this session is meant to write, and a boundary that admitted it in
-    one posture and refused it in the other would make where the session runs
-    the thing that decides what it can do.
-
-    For the same reason the container's read-only binds reach it too, as
-    ``denyWrite``: each declared repository's shared `config` and `hooks/`,
-    read off the lease that makes those binds. A mounted bare clone admits
-    its git directory whole, and those two name what the host runs at the
-    next git command there -- the documented rule is that a deny holds inside
-    a wider allow, and Claude's own protection of `.git/hooks` and
-    `.git/config` covers only the working directory.
-
-    The path is this machine's, so it is resolved at launch and passed as
-    settings rather than declared: an artifact carrying an absolute path
-    would be drift in every other checkout. The declared writable paths ride
-    along rather than being left to the generated file, because the two
-    surfaces document this key differently — arrays that merge across
-    scopes, values that override per session — and a list carrying both is
-    the same list under either reading.
-
-    Contained -- or with no sandbox chosen at all -- it is an *off* switch,
-    and the artifact still says ``enabled: true`` because that is the right
-    answer for the inner-sandbox launch the same file serves. The switch itself is spelled by
-    :data:`~lup.providers.claude.confinement.CLAUDE_CONFINEMENT` rather than
-    here, so the image-side probe that asks whether a session can open at all
-    opens the same one this does -- spelled twice, the probe verifies a
-    session nobody launches, and refuses for the absence of a confinement no
-    launch has ever asked for.
-
-    What the vendor documents in place of the nested sandbox travels with
-    that spelling. The measured half belongs here, beside the launcher
-    making the choice: in an unprivileged container bubblewrap cannot mount a
-    fresh ``/proc`` -- ``Can't mount proc on /newroot/proc: Operation not
-    permitted`` -- so the inner sandbox does not start, and the packages
-    installed to keep it quiet bought silence rather than a boundary.
-
-    What is lost is narrower than it looks. The credential read denials name
-    paths this container never mounts; the human-owned write denials are
-    still surfaced as approvals by the semantic policy; ``excludedCommands``
-    was already inert here, because the container never agreed to leave any
-    command alone. The domain allowlist is not a wall either -- it
-    pre-approves rather than refuses, and ``strictAllowlist`` has no effect
-    from a repository's own settings — and what does refuse is the egress
-    proxy, which is untouched by this.
-    """
-    carried = settings or {}
-
-    def document(sandboxed: JsonObject) -> list[str]:
-        merged = {**sandboxed, **carried}
-        return ["--settings", json.dumps(merged)] if merged else []
-
-    hooks = plugin.hooks
-    if hooks is None or hooks.sandbox is None:
-        return document({})
-    if sandbox is not LaunchSandbox.INNER:
-        return document(CLAUDE_SANDBOX_OFF)
-    try:
-        tree = get_tree_dir()
-    except (typer.Exit, SystemExit):
-        return document({})
-    allowed: list[JsonValue] = [
-        *hooks.sandbox.writable_paths,
-        str(tree),
-        *[str(item.path) for item in accessible if item.writable],
-    ]
-    held: list[JsonValue] = [
-        str(path)
-        for item in accessible
-        if item.writable and in_repository(item.path)
-        for path in host_run(item.path)
-    ]
-    filesystem: JsonObject = {
-        "allowWrite": allowed,
-        **({"denyWrite": held} if held else {}),
-    }
-    return document({"sandbox": {"filesystem": filesystem}})
-
-
-def companion_plugin_directories(root: Path, generated: str) -> list[Path]:
-    """The plugin directories this checkout carries beside the generated one.
-
-    A project may keep a hand-written plugin next to the one the harness
-    compiles. Its only other way into a session is a marketplace, and a
-    marketplace name is one global namespace shared by every checkout
-    declaring it — so the plugin a session loaded is whichever tree
-    registered that name last, the same hazard `lease_plugin_dir` documents.
-    A directory carrying `.claude-plugin/plugin.json` is a plugin by its own
-    declaration, which is why nothing here needs to be written down twice.
-
-    Sorted, so what a launch names does not depend on directory order.
-    """
-    plugins = root / ".claude" / "plugins"
-    if not plugins.is_dir():
-        return []
-    return sorted(
-        directory
-        for directory in plugins.iterdir()
-        if directory.name != generated
-        and (directory / ".claude-plugin" / "plugin.json").is_file()
     )
 
 
@@ -2020,7 +1550,7 @@ def launch_claude(
         [
             *[flag for directory in named for flag in ("--plugin-dir", str(directory))],
             *claude_sandbox_arguments(
-                plugin,
+                plugin.hooks,
                 sandbox=sandbox,
                 accessible=(
                     [*mounts, *accessible_roots()]
@@ -2030,6 +1560,7 @@ def launch_claude(
                 settings=(
                     compiled_effort.settings if compiled_effort is not None else None
                 ),
+                tree=find_tree_dir(),
             ),
             # What this runtime shows in its own chrome, made to agree with
             # the name the roster answers to: the same minted name is
@@ -2055,7 +1586,7 @@ def launch_claude(
     environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]
     environment[MAX_RECURSIVE_AGENT_ENV] = str(max_recursive_agent)
     apply_sandbox_environment(
-        plugin,
+        plugin.hooks,
         environment,
         "claude",
         [bubblewrap_requirement(), socat_requirement()],
@@ -2439,13 +1970,14 @@ def launch_codex(
     environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]
     environment[MAX_RECURSIVE_AGENT_ENV] = str(max_recursive_agent)
     envelope = codex_sandbox_arguments(
-        plugin,
+        plugin.hooks,
         environment,
         extra_args,
         sandbox=sandbox,
         accessible=(
             [*mounts, *accessible_roots()] if sandbox is LaunchSandbox.INNER else []
         ),
+        tree=find_tree_dir(),
     )
     # The account a worktree home is derived from, and returns its login and
     # settings to: the selected profile, this checkout's then the global one,

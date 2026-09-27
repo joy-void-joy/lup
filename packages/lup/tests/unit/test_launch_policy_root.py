@@ -6,6 +6,7 @@ from unittest.mock import Mock
 import pytest
 
 import lup.devtools.harness.launch as launch
+from lup.launch.declaration import LaunchSandbox
 from lup.harness.clipboard import ClipboardBridge
 from lup.policy.identity import POLICY_ROOT_ENV
 from lup.providers.claude.login import CLAUDE_LOGIN
@@ -14,14 +15,14 @@ from lup.providers.login import ProviderLogin
 from lup.types import EnvVars
 
 
-@pytest.mark.parametrize("sandbox", list(launch.LaunchSandbox))
+@pytest.mark.parametrize("sandbox", list(LaunchSandbox))
 @pytest.mark.parametrize(
     "cli,login", [("claude", CLAUDE_LOGIN), ("codex", CODEX_LOGIN)]
 )
 def test_interactive_launch_replaces_inherited_policy_root_and_forwards_it(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    sandbox: launch.LaunchSandbox,
+    sandbox: LaunchSandbox,
     cli: str,
     login: ProviderLogin,
 ) -> None:

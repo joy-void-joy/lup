@@ -12,7 +12,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from lup.devtools.harness.launch import LaunchSandbox, claude_sandbox_arguments
+from lup.launch.declaration import LaunchSandbox
+from lup.providers.claude.launch import claude_sandbox_arguments
 from lup.harness.models import HookSandbox, HookSet, Plugin
 from lup.providers.claude.confinement import CLAUDE_CONFINEMENT
 from lup.providers.claude.model_choice import (
@@ -152,7 +153,7 @@ def test_ultra_on_the_command_line_is_one_settings_document() -> None:
 
     assert compiled.arguments() == ["--effort", "xhigh"]
     arguments = claude_sandbox_arguments(
-        plugin, sandbox=LaunchSandbox.OUTER, settings=compiled.settings
+        plugin.hooks, sandbox=LaunchSandbox.OUTER, settings=compiled.settings
     )
     assert arguments[0] == "--settings"
     assert arguments.count("--settings") == 1
@@ -161,7 +162,7 @@ def test_ultra_on_the_command_line_is_one_settings_document() -> None:
         "ultracode": True,
     }
     assert (
-        claude_sandbox_arguments(plugin, sandbox=LaunchSandbox.OUTER)
+        claude_sandbox_arguments(plugin.hooks, sandbox=LaunchSandbox.OUTER)
         == CLAUDE_CONFINEMENT.off
     )
 

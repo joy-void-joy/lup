@@ -18,15 +18,13 @@ from pathlib import Path
 
 import pytest
 
-from lup.devtools.harness import launch
-from lup.devtools.harness.launch import (
-    LaunchSandbox,
-    apply_sandbox_environment,
-    claude_sandbox_arguments,
-    codex_sandbox_arguments,
-)
+import lup.providers.codex.launch as codex_launch
+from lup.launch.boundary import apply_sandbox_environment
+from lup.launch.declaration import LaunchSandbox
+from lup.providers.claude.launch import claude_sandbox_arguments
+from lup.providers.codex.launch import codex_sandbox_arguments
 from lup.harness.image import ContainerClient, Image, detected_client
-from lup.harness.models import HookSandbox, HookSet, Plugin
+from lup.harness.models import HookSandbox, HookSet
 from lup.harness.requirements import LostCapability, Requirement, Run
 from lup.harness.toolchain import (
     agent_session_requirement,
@@ -39,18 +37,9 @@ from lup.providers.codex.confinement import CODEX_CONFINEMENT
 from lup.types import EnvVars
 
 
-def confining_plugin() -> Plugin:
-    """A plugin declaring an OS sandbox, which is what all of this keys off."""
-    return Plugin(
-        id="plugin.probe",
-        name="probe",
-        description="a plugin declaring a boundary",
-        version="0.0.0",
-        marketplace="probe",
-        skills=[],
-        agents=[],
-        hooks=HookSet(id="hooks.probe", policy_ids=[], sandbox=HookSandbox()),
-    )
+def confining_hooks() -> HookSet:
+    """A policy declaring an OS sandbox, which is what all of this keys off."""
+    return HookSet(id="hooks.probe", policy_ids=[], sandbox=HookSandbox())
 
 
 def test_each_sandbox_dependency_carries_its_own_version_flag() -> None:
@@ -84,7 +73,7 @@ def test_a_contained_launch_probes_nothing_and_claims_nothing() -> None:
     )
 
     apply_sandbox_environment(
-        confining_plugin(),
+        confining_hooks(),
         environment,
         "claude",
         [refuses],
@@ -112,7 +101,7 @@ def test_an_uncontained_launch_vouches_for_a_boundary_that_answers() -> None:
     )
 
     apply_sandbox_environment(
-        confining_plugin(),
+        confining_hooks(),
         environment,
         "claude",
         [answers],
@@ -133,7 +122,7 @@ def test_an_uncontained_launch_still_refuses_to_vouch_for_a_broken_tool() -> Non
     )
 
     apply_sandbox_environment(
-        confining_plugin(),
+        confining_hooks(),
         environment,
         "claude",
         [refuses],
@@ -150,9 +139,7 @@ def test_a_contained_claude_session_turns_its_own_sandbox_off() -> None:
     right answer for the uncontained launch the same file serves. Which one
     this launch is, is the launch's to say.
     """
-    arguments = claude_sandbox_arguments(
-        confining_plugin(), sandbox=LaunchSandbox.OUTER
-    )
+    arguments = claude_sandbox_arguments(confining_hooks(), sandbox=LaunchSandbox.OUTER)
 
     assert arguments[0] == "--settings"
     assert '"enabled": false' in arguments[1]
@@ -170,7 +157,7 @@ def test_a_contained_codex_session_keeps_the_route_to_its_proxy() -> None:
     environment: EnvVars = {}
 
     arguments = codex_sandbox_arguments(
-        confining_plugin(), environment, [], sandbox=LaunchSandbox.OUTER
+        confining_hooks(), environment, [], sandbox=LaunchSandbox.OUTER
     )
 
     assert arguments == ["--sandbox", "danger-full-access"]
@@ -190,9 +177,9 @@ def test_a_launch_choosing_no_sandbox_stands_both_walls_down_and_vouches_nothing
     """
     environment: EnvVars = {}
 
-    claude = claude_sandbox_arguments(confining_plugin(), sandbox=LaunchSandbox.NONE)
+    claude = claude_sandbox_arguments(confining_hooks(), sandbox=LaunchSandbox.NONE)
     codex = codex_sandbox_arguments(
-        confining_plugin(), environment, [], sandbox=LaunchSandbox.NONE
+        confining_hooks(), environment, [], sandbox=LaunchSandbox.NONE
     )
 
     assert claude == CLAUDE_CONFINEMENT.off
@@ -212,7 +199,7 @@ def test_neither_runtime_vouches_for_a_boundary_it_did_not_exercise(
     """
     environment: EnvVars = {}
     monkeypatch.setattr(
-        launch,
+        codex_launch,
         "codex_envelope_requirement",
         lambda: Requirement(
             capability="codex sandbox envelope",
@@ -223,7 +210,7 @@ def test_neither_runtime_vouches_for_a_boundary_it_did_not_exercise(
     )
 
     arguments = codex_sandbox_arguments(
-        confining_plugin(), environment, [], sandbox=LaunchSandbox.INNER
+        confining_hooks(), environment, [], sandbox=LaunchSandbox.INNER
     )
 
     assert "LUP_SANDBOX_ACTIVE" not in environment
@@ -238,7 +225,7 @@ def test_an_envelope_that_answers_is_vouched_for(
     """The positive case, which is the one a broken probe silently loses."""
     environment: EnvVars = {}
     monkeypatch.setattr(
-        launch,
+        codex_launch,
         "codex_envelope_requirement",
         lambda: Requirement(
             capability="codex sandbox envelope",
@@ -249,7 +236,7 @@ def test_an_envelope_that_answers_is_vouched_for(
     )
 
     codex_sandbox_arguments(
-        confining_plugin(), environment, [], sandbox=LaunchSandbox.INNER
+        confining_hooks(), environment, [], sandbox=LaunchSandbox.INNER
     )
 
     assert environment["LUP_SANDBOX_ACTIVE"] == "1"
@@ -379,12 +366,12 @@ def test_each_runtime_stands_down_by_one_declaration_rather_than_two() -> None:
     environment: EnvVars = {}
 
     assert (
-        claude_sandbox_arguments(confining_plugin(), sandbox=LaunchSandbox.OUTER)
+        claude_sandbox_arguments(confining_hooks(), sandbox=LaunchSandbox.OUTER)
         == CLAUDE_CONFINEMENT.off
     )
     assert (
         codex_sandbox_arguments(
-            confining_plugin(), environment, [], sandbox=LaunchSandbox.OUTER
+            confining_hooks(), environment, [], sandbox=LaunchSandbox.OUTER
         )
         == CODEX_CONFINEMENT.off
     )
