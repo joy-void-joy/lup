@@ -24,7 +24,9 @@ import sh
 
 from lup.coordination.identity import MEMBER_ENV, mint_member_id
 from lup.coordination.repository import RepositoryPeers
+from lup.harness.codescan.common import RuleSelection
 from lup.harness.enforcement import measured_containment, semantic_policy_for
+from lup.harness.models import HookSet
 from lup.policy.models import (
     Decision,
     EditBatch,
@@ -34,6 +36,7 @@ from lup.policy.models import (
 )
 from lup.types import JsonObject
 from lup_template.harness.catalog import declared_hook_set
+from lup_template.harness.composition import TARGETS
 from tests.unit.native import codex_denial
 from tests.unit.repos import commit_file, initialized_repo
 
@@ -84,8 +87,13 @@ class Session:
             encoding="utf-8",
         )
 
-    def dispatched(self, runtime: Runtime, call: JsonObject) -> str:
+    def dispatched(
+        self, runtime: Runtime, call: JsonObject, script: Path | None = None
+    ) -> str:
         """One runtime's effect for a call, run as its harness runs the hook.
+
+        *script* is a dispatcher compiled elsewhere, where the case needs one
+        this checkout's committed tree is not.
 
         Codex has no ask at this boundary: it parks the question as a review
         and answers with a structured refusal naming who can release it, which
@@ -94,7 +102,7 @@ class Session:
         result = sh.Command(sys.executable)(
             "-I",
             "-S",
-            str(DISPATCHERS[runtime].resolve()),
+            str(script or DISPATCHERS[runtime].resolve()),
             _in=json.dumps(
                 {
                     "session_id": "parity",
@@ -128,14 +136,19 @@ class Session:
         """The in-process effect, composed the way `dev policy` composes it."""
         return self.judged(monkeypatch, event).effect
 
-    def judged(self, monkeypatch: pytest.MonkeyPatch, event: SemanticTool) -> Decision:
+    def judged(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        event: SemanticTool,
+        hooks: HookSet | None = None,
+    ) -> Decision:
         """The in-process verdict, in this session's environment."""
         for name, value in self.environment.items():
             if name.startswith("LUP_"):
                 monkeypatch.setenv(name, value)
         held = measured_containment(self.checkout)
         policy = semantic_policy_for(
-            declared_hook_set(),
+            hooks or declared_hook_set(),
             recovered=True,
             contained=held.contained,
             inside_placement=held.inside_placement,
@@ -339,3 +352,57 @@ def test_a_command_is_not_asked_about_a_peers_claim_anywhere(
     assert effect == "allow"
     for runtime in DISPATCHERS:
         assert session.dispatched(runtime, shell(command)) == effect
+
+
+def compiled(runtime: Runtime, selection: RuleSelection, into: Path) -> Path:
+    """One runtime's hook tree compiled against *selection*, laid out under *into*.
+
+    Every file the recipe places under the plugin's hooks directory, so the
+    dispatcher runs beside the runtime, kernel and data generation gave it.
+    """
+    hooks = DISPATCHERS[runtime].parent.parent
+    build = TARGETS.builders[runtime]
+    for artifact in build(Path.cwd(), selection).recipe.desired.artifacts:
+        if artifact.path.is_relative_to(hooks):
+            landed = into / artifact.path
+            landed.parent.mkdir(parents=True, exist_ok=True)
+            landed.write_text(artifact.content, encoding="utf-8")
+    return into / DISPATCHERS[runtime]
+
+
+@pytest.mark.parametrize(
+    ("retired", "effect"),
+    [
+        pytest.param([], "deny", id="held"),
+        pytest.param(["any-type"], "allow", id="retired"),
+    ],
+)
+def test_a_retired_rule_is_retired_on_every_path(
+    session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    retired: list[str],
+    effect: str,
+) -> None:
+    """The selection a plugin is compiled with is the one a composition judges by.
+
+    Each tree is compiled here against the selection, the way a launch that
+    retires rules compiles it, and the composition is handed the same hook
+    set: a rule the project dropped neither fires in one and not the other.
+    """
+    selection = RuleSelection(retired=retired)
+    hooks = declared_hook_set().model_copy(update={"rules": selection})
+    commit_file(session.git, session.checkout, "a.py", "value = 1\n", "seed")
+    target = session.checkout / "a.py"
+    before, after = "value = 1\n", "from typing import Any\n"
+
+    rewrite = "sed -i 's/value = 1/from typing import Any/' a.py"
+
+    edit = session.edit(target, before, after)
+    assert session.judged(monkeypatch, edit, hooks).effect == effect
+    command = session.command(rewrite)
+    assert session.judged(monkeypatch, command, hooks).effect == effect
+    for runtime in DISPATCHERS:
+        script = compiled(runtime, selection, session.base / "plugins")
+        call = edited(runtime, target, before, after)
+        assert session.dispatched(runtime, call, script) == effect
+        assert session.dispatched(runtime, shell(rewrite), script) == effect

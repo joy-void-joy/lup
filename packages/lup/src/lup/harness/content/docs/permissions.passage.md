@@ -1007,8 +1007,11 @@ lattice through the same segments, so a pipeline or a `$(...)` answers as it
 actually would. It reads what the hook reads about the host: the launch's
 lease from the ledger, so a write the launch did not mount writable asks here
 as it asks there, and the roster, so an edit of a file another live session
-holds asks too. The one fact it assumes is that a capture holds what a write
-would replace, since only a running session takes one. With `--kind fetch` it reads a URL against the declared
+holds asks too. Its edit gates hold the rules the plugin was compiled with,
+the project's retirements and additions included. It assumes a capture holds
+what a write would replace, since only a running session takes one, and it
+answers with the selection the repository declares where a launch relaxed the
+rules for one session. With `--kind fetch` it reads a URL against the declared
 scopes and lists every one of them beneath the verdict, which is where the
 question a fetch outside them raises sends its reader. `dev vocabulary` prints every shell form the vocabulary
 judges and where each rule came from, which is the one to reach for when the

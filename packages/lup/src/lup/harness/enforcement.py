@@ -16,6 +16,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from lup.harness.codescan.antipatterns import NO_RUNTIME_READER, rule_set_for
 from lup.harness.models import HookPathRole, HookSet, HookUrlScope
 from lup.policy.assets.host import contained as measured_contained
 from lup.policy.assets.host import delivers, measured_boundary
@@ -143,6 +144,13 @@ def semantic_policy_for(
         edit_rules=hooks.resolved_edit_rules(),
         import_boundaries=hooks.resolved_import_boundaries(),
         peer_policy=erase_peer_policy(hooks.peer_policy),
+        # The table each plugin is compiled with, by the same call, in no
+        # runtime's words. A launch that relaxed the rules compiled its own
+        # selection into its tree and recorded it nowhere this process reads,
+        # so this answers with the selection the repository declares.
+        # lup: defer: record a launch's relaxed selection in its ledger, so a
+        # composition inside that session judges with what the session meets.
+        rules=rule_set_for(NO_RUNTIME_READER, hooks.rules, hooks.anti_patterns),
     )
     return SemanticToolPolicy(
         fetch=FetchPolicy(allowed, denied, hooks.resolved_unscoped_fetch()),

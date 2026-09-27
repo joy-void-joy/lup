@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 
 from pydantic import AnyHttpUrl, BaseModel, Field
 
-from lup.harness.codescan.antipatterns import patterns_for_suffix
+from lup.harness.codescan.antipatterns import RuleSet, patterns_for_suffix
 from lup.harness.codescan.common import AntiPattern
 from lup.policy.contracts import DecisionPolicy
 from lup.policy.grants import LeaseGrants
@@ -394,11 +394,13 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
 
         Compiled per classification rather than held, because the rules are
         selected by file suffix and a command that rewrites nothing needs none
-        of them compiled at all.
+        of them compiled at all. Drawn from the edit policy's own set, so a
+        rule the project retired is retired for a rewrite as for an edit.
         """
+        rules = None if self.authored is None else self.authored.rules
         return {
             suffix: []
-            if (patterns := patterns_for_suffix(suffix)) is None
+            if (patterns := patterns_for_suffix(suffix, rules)) is None
             else [antipattern_row(rule) for rule in patterns]
             for suffix in {Path(row["path"]).suffix.lower() for row in rows}
         }
@@ -662,9 +664,11 @@ def antipattern_row(rule: AntiPattern) -> AntiPatternRow:
     )
 
 
-def antipattern_rows(change: EditChange) -> list[AntiPatternRow]:
+def antipattern_rows(
+    change: EditChange, rules: RuleSet | None = None
+) -> list[AntiPatternRow]:
     """Compile rules selected by one edit path into primitive kernel rows."""
-    patterns = patterns_for_suffix(change.path.suffix.lower())
+    patterns = patterns_for_suffix(change.path.suffix.lower(), rules)
     if patterns is None:
         return []
     return [antipattern_row(rule) for rule in patterns]
@@ -692,6 +696,10 @@ class EditPolicy(DecisionPolicy[EditBatch]):
     holding, and a batch is judged together with every claim over its paths,
     read live through the store's own fold as the dispatchers read it. Absent,
     no roster is consulted, which is a project that declared none.
+
+    ``rules`` is the anti-pattern set a project holds itself to, which a
+    composition compiles the way generation compiles each plugin's table;
+    absent, every rule the library ships applies.
     """
 
     def __init__(
@@ -705,6 +713,7 @@ class EditPolicy(DecisionPolicy[EditBatch]):
         edit_rules: list[EditRule] | None = None,
         import_boundaries: list[ImportBoundary] | None = None,
         peer_policy: PeerPolicyRow | None = None,
+        rules: RuleSet | None = None,
     ) -> None:
         self.acceptance_guard = acceptance_guard
         self.path_roles = path_roles or []
@@ -713,6 +722,7 @@ class EditPolicy(DecisionPolicy[EditBatch]):
         self.maximum_added_lines = maximum_added_lines
         self.autonomous = autonomous
         self.peer_policy = peer_policy
+        self.rules = RuleSet() if rules is None else rules
         # Erased once here rather than per change: the table is a declaration
         # that does not move while this policy answers, and the generated
         # dispatchers read rows that were erased the same way at generation.
@@ -784,7 +794,7 @@ class EditPolicy(DecisionPolicy[EditBatch]):
                 change.after,
                 path_exists=Path(path).exists(),
                 path_rules=[path_rule_row(rule) for rule in self.protected],
-                antipattern_rows=antipattern_rows(change),
+                antipattern_rows=antipattern_rows(change, self.rules),
                 path_roles=self.path_roles,
                 maximum_added_lines=self.maximum_added_lines,
                 autonomous=self.autonomous,
