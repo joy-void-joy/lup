@@ -408,6 +408,12 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
     def decide(self, event: ShellCommand) -> Decision:
         root = event.cwd or Path.cwd()
         # One measurement of one launch, read once for every fact drawn from it.
+        # lup: defer: the dispatchers also draw the unjudged posture and the
+        # host-executor channel from this ledger; a composition takes neither,
+        # because the ledger describes the launched session while a nested
+        # agent composed here answers through its own runtime's permission
+        # flow. Decide whether `dev policy` and the sweep read both, with
+        # nested agents left as they are.
         boundary = measured_boundary(root)
         acted_on = shell_path_verb_targets(event.command, self.rules)
         flagged = shell_flag_write_targets(event.command, self.rules)
