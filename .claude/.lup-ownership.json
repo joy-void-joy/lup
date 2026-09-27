@@ -681,7 +681,7 @@
     {
       "path": ".claude/plugins/lup/hooks/scripts/policy.py",
       "category": "generated",
-      "sha256": "6e897319aa34415e4de93333610ba0f8525c5b8493ff9c40e88cb5c14202d962",
+      "sha256": "10926edf730c547d541b8d656ee396a3da11d8bb8ae8299626f88213efe1ede3",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
@@ -695,7 +695,7 @@
     {
       "path": ".claude/plugins/lup/hooks/scripts/policy_evaluator.py",
       "category": "generated",
-      "sha256": "cfc041cd11bcfe19ff53e653711e3ffe4b7eb4e928f7421c48965b47bfb09edd",
+      "sha256": "3e5b330eca4313bb64f784c36aac5ac6985c7d848fe450f235df654585bd2bd4",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

@@ -712,6 +712,8 @@ class EditPolicy(DecisionPolicy[EditBatch]):
 
     def decide_change(self, change: EditChange, cwd: Path | None = None) -> Decision:
         root = cwd or Path.cwd()
+        # Resolved before any gate reads a role, as the dispatchers resolve it,
+        # so an edit through a link meets the gates of the file it lands on.
         path = str((root / change.path).resolve())
         try:
             response = routed_edit_response(

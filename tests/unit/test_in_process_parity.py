@@ -23,7 +23,7 @@ import pytest
 import sh
 
 from lup.harness.enforcement import measured_containment, semantic_policy_for
-from lup.policy.models import ShellCommand
+from lup.policy.models import EditBatch, EditChange, SemanticTool, ShellCommand
 from lup.types import JsonObject
 from lup_template.harness.catalog import declared_hook_set
 from tests.unit.native import codex_denial
@@ -116,7 +116,7 @@ class Session:
             return "defer"
         return str(specific["permissionDecision"])
 
-    def composed(self, monkeypatch: pytest.MonkeyPatch, command: str) -> str:
+    def composed(self, monkeypatch: pytest.MonkeyPatch, event: SemanticTool) -> str:
         """The in-process answer, composed the way `dev policy` composes it."""
         for name, value in self.environment.items():
             if name.startswith("LUP_"):
@@ -128,7 +128,40 @@ class Session:
             contained=held.contained,
             inside_placement=held.inside_placement,
         )
-        return policy.decide(ShellCommand(command=command, cwd=self.checkout)).effect
+        return policy.decide(event).effect
+
+    def command(self, command: str) -> ShellCommand:
+        """One shell command, run from this checkout."""
+        return ShellCommand(command=command, cwd=self.checkout)
+
+    def edit(self, target: Path, before: str, after: str) -> EditBatch:
+        """One edit of *target*, as the in-process policy is handed it."""
+        return EditBatch(
+            changes=[EditChange(path=target, before=before, after=after)],
+            cwd=self.checkout,
+        )
+
+
+def edited(runtime: Runtime, target: Path, before: str, after: str) -> JsonObject:
+    """The same edit, as each runtime's harness carries it."""
+    if runtime == "claude":
+        return {
+            "tool_name": "Edit",
+            "tool_input": {
+                "file_path": str(target),
+                "old_string": before.rstrip("\n"),
+                "new_string": after.rstrip("\n"),
+            },
+        }
+    return {
+        "tool_name": "apply_patch",
+        "tool_input": {
+            "command": (
+                f"*** Begin Patch\n*** Update File: {target}\n"
+                f"@@\n-{before.rstrip()}\n+{after.rstrip()}\n*** End Patch"
+            )
+        },
+    }
 
 
 @pytest.fixture
@@ -181,6 +214,58 @@ def test_a_write_the_launch_did_not_mount_is_judged_alike_everywhere(
         contained,
     )
 
-    assert session.composed(monkeypatch, command) == effect
+    assert session.composed(monkeypatch, session.command(command)) == effect
     assert session.dispatched("claude", shell(command)) == effect
     assert session.dispatched("codex", shell(command)) == effect
+
+
+@pytest.fixture
+def linked(session: Session) -> Session:
+    """A checkout whose scratch holds a link into its production source."""
+    (session.checkout / "src").mkdir()
+    (session.checkout / "src" / "a.py").write_text("value = 1\n", encoding="utf-8")
+    (session.checkout / "tmp").mkdir()
+    (session.checkout / "tmp" / "link").symlink_to(session.checkout / "src")
+    return session
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param("touch tmp/link/b.py", id="path-verb"),
+        pytest.param("echo x > tmp/link/b.py", id="redirect"),
+    ],
+)
+def test_a_shell_write_through_a_link_asks_everywhere(
+    linked: Session, monkeypatch: pytest.MonkeyPatch, command: str
+) -> None:
+    """The spelling reads as scratch and the write lands in production.
+
+    The host resolves each target and the kernel says whether the landing
+    changes the role, on every path; a composition that resolved nothing
+    would grant the scratch spelling what the landing never earned.
+    """
+    assert linked.composed(monkeypatch, linked.command(command)) == "ask"
+    assert linked.dispatched("claude", shell(command)) == "ask"
+    assert linked.dispatched("codex", shell(command)) == "ask"
+
+
+def test_an_edit_through_a_link_is_judged_where_it_lands_everywhere(
+    linked: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every path resolves an edited file before any gate reads its role.
+
+    So the scratch spelling earns nothing: the edit meets the gates of the
+    file it lands on, the same answer as spelling that file directly, and an
+    edit production refuses is not allowed for arriving through scratch.
+    """
+    before, after = "value = 1\n", "from typing import Any\n"
+    through = linked.checkout / "tmp" / "link" / "a.py"
+    landing = linked.checkout / "src" / "a.py"
+
+    effect = linked.composed(monkeypatch, linked.edit(landing, before, after))
+    assert effect != "allow"
+    assert linked.composed(monkeypatch, linked.edit(through, before, after)) == effect
+    for runtime in DISPATCHERS:
+        call = edited(runtime, through, before, after)
+        assert linked.dispatched(runtime, call) == effect

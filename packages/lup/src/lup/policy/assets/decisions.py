@@ -778,6 +778,12 @@ def local_edit_decision(
         foreign=outside_this_repository,
         outside_project=beyond_this_project,
         checkout_path=this_checkout_path(path_text, cwd),
+        # lup: defer: every caller hands this a path already resolved --
+        # `edit_decision` resolves it, and a routed request carries the resolved
+        # path -- so this reports nothing and `edit:displaced-path` fires on no
+        # runtime; the edit is judged where it lands instead, as the in-process
+        # policy judges it. Either drop the gate and this call, or feed it the
+        # spelled path without letting its ask preempt a deny the landing earns.
         displaced=next(
             iter(
                 displaced_targets(
