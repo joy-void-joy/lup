@@ -116,7 +116,9 @@ nor a capture, but settled on its own: `kill 1234 && curl <unlisted>` still
 hands the fetch to the runtime. The same measured container makes a loopback
 fetch ask when a process the container cannot see holds the port: sharing the
 host's network means sharing its loopback, and the scope declared for this
-machine's own development servers would otherwise admit the operator's.
+machine's own development servers would otherwise admit the operator's. It
+asks even where `unscoped_fetch` defers, since the runtime sees a loopback
+address and not whose service answers on it.
 
 And the columns that say what a *word* adds or removes, each answering one
 question the row alone cannot:

@@ -733,6 +733,7 @@ def test_a_loopback_port_a_host_process_holds_is_outside_the_declared_scope() ->
     assert loopback_port("https://example.org/x") is None
     assert decide_fetch(url, [LOOPBACK], []).effect == "allow"
     assert decide_fetch(url, [LOOPBACK], [], host_listener=True).effect == "ask"
+    assert decide_fetch(url, [], [], "defer", host_listener=True).effect == "ask"
 
 
 def test_a_handoff_to_the_runtime_outlasts_a_question_the_container_settles() -> None:

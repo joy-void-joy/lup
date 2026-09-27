@@ -814,7 +814,7 @@
     {
       "path": "docs/permissions.md",
       "category": "generated",
-      "sha256": "f9e0688d826fe540a06214a86a42adc6485e97b795e98c1224b4d3fa6cecbf3c",
+      "sha256": "c4b6fcc52ed74cd3b87c4f424641c3074eb21ea57ee27a284b6971271c25598a",
       "semantic_id": "docs.permissions",
       "executable": false
     },
