@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "7865da221260f969fa8a3decdbdcb6a5b5b407ee2d8285563b19cc2910d3b9f5",
+  "source_digest": "b86bf395089a19f0a995d514a2b3060ef6e2de7008b62a74ac1469facc6371f4",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -359,7 +359,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/withheld.py",
       "category": "generated",
-      "sha256": "8c1ed6ee9cd744edfddfba9bdd537f659dd798c47ca85c6d447e404117f2c494",
+      "sha256": "fc08c5972ab133ce74e9b5f5f39edbc0a47087e468fae9afa979fe4e50969ce8",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -373,7 +373,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/policy_data.py",
       "category": "generated",
-      "sha256": "ed087d7bdf9ad125d5bb62b0f2f89a623b2ffaf862ecc8e042cdf472e884ed1b",
+      "sha256": "c0a81a0820bc29b22a55faaa3ee54047256e396878329d1a6835effba9518110",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

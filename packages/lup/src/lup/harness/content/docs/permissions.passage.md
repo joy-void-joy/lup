@@ -450,7 +450,10 @@ is not. `exempt` passes a word only when all it could name is exempt:
 The library's default is `credential_files()`: everything in `~/.ssh` but
 the public keys, `known_hosts`, `config` and `authorized_keys`, `~/.gnupg`,
 and the token files of AWS, netrc, git's credential store, gh, docker and
-PyPI, plus a process's environment file. This project adds each runtime's
+PyPI, plus a process's environment file and, in any directory, the
+gitignored `.env.local` and `.env.<mode>.local` a project's settings keep
+its API keys in — `cat .env.local` is refused where `cat .env` and
+`cat .env.example` read. This project adds each runtime's
 own login through `ProviderLogin.withheld_logins()`: the default home's file
 and the file inside every profile's home. A directory reached only through
 an ancestor — `grep -r x ~` — names no withheld path and is not caught.

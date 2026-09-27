@@ -27030,6 +27030,8 @@ REFUSED_PATHS: list[RefusedPathRow] = [
             "~/.docker/config.json",
             "~/.pypirc",
             "/proc/*/environ",
+            "**/.env.local",
+            "**/.env.*.local",
             "~/.claude/.credentials.json",
             "**/claude-config/.credentials.json",
             "~/.codex/auth.json",

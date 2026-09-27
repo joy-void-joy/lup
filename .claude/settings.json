@@ -38,8 +38,6 @@
       "mcp__plugin_lup_ledger"
     ],
     "deny": [
-      "Read(./**/.env*.local)",
-      "Read(./**/.env.local)",
       "Read(./**/secrets*.local)",
       "Read(./**/*.secret.local)",
       "Read(~/.ssh/**)",
@@ -53,6 +51,8 @@
       "Read(~/.docker/config.json)",
       "Read(~/.pypirc)",
       "Read(//proc/*/environ)",
+      "Read(//**/.env.local)",
+      "Read(//**/.env.*.local)",
       "Read(~/.claude/.credentials.json)",
       "Read(//**/claude-config/.credentials.json)",
       "Read(~/.codex/auth.json)",

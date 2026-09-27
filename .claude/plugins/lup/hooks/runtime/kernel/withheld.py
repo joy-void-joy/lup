@@ -94,17 +94,24 @@ def reaches(pattern: str, path: str, component: bool = True) -> bool:
     `.*` in any directory reaches `~/.netrc`. So a run of names that is all
     glob reaches a pattern spelled from ``~`` only where the word spells the
     home it stands in -- `~/.*` does, `ls -d .*` in a checkout does not.
+
+    A pattern spelled from anywhere has no home to spell: the file it names
+    may stand in whichever directory the glob is read in, so a glob reaches it
+    wherever it stands -- `cat .env*` in a checkout names its `.env.local`.
+    Read the same whether or not the word was placed under the checkout,
+    where the checkout's own names are literal ones.
     """
     wanted = PurePosixPath(pattern).parts
     anchored = wanted[:1] == ("/",)
-    wanted = wanted[1:] if wanted[:1] in (("/",), ("~",)) else wanted
+    home = wanted[:1] == ("~",)
+    wanted = wanted[1:] if anchored or home else wanted
     absolute = posixpath.isabs(path)
     names = PurePosixPath(posixpath.normpath(path)).parts[1 if absolute else 0 :]
     if anchored:
         return absolute and spans(wanted, names, component)
     return any(
         spans(wanted, names[start:], component)
-        and (literal_among(names[start:]) or spelled_home(names[:start]))
+        and (not home or literal_among(names[start:]) or spelled_home(names[:start]))
         for start in range(len(names))
     )
 

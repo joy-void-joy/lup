@@ -1148,7 +1148,9 @@ SHELL_POLICY_CASES = [
     # the shell cannot reach what the edit gate stops.
     DecisionCase(input="echo x > README.md", effect="ask"),
     DecisionCase(input="echo x > sync.json", effect="ask"),
-    DecisionCase(input="echo x > .env.local", effect="ask"),
+    # A withheld credential path is refused by name, so its write is refused
+    # as its read is rather than asked about as a protected file.
+    DecisionCase(input="echo x > .env.local", effect="deny"),
     # A manifest or lockfile is protected in whichever package holds it, and
     # CI config wherever under `.github` it sits, by every writing route: the
     # commands that write them for a reason answer by the dependency rows.
@@ -2121,8 +2123,12 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="cat ~/.ssh/known_hosts ~/.ssh/config", effect="allow"),
     DecisionCase(input="cat * | wc -l", effect="allow"),
     # A run of names that is all glob reaches a home's file only where the
-    # word spells the home: `.*` in the checkout names no login.
-    DecisionCase(input="ls -d .*", effect="allow"),
+    # word spells the home: `.n*` in the checkout names no `~/.netrc`. A file
+    # withheld from anywhere is reached wherever the glob stands, so `.*` in
+    # the checkout names its `.env.local`.
+    DecisionCase(input="ls -d .n*", effect="allow"),
+    DecisionCase(input="ls -d .*", effect="deny"),
+    DecisionCase(input="cat .env*", effect="deny"),
     DecisionCase(input="cat ~/.*", effect="deny"),
     DecisionCase(input="du -sh $HOME/.*", effect="deny"),
     DecisionCase(input="cat src/auth.json", effect="allow"),

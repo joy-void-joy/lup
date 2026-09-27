@@ -81,6 +81,8 @@ def credential_files(
         "~/.docker/config.json",
         "~/.pypirc",
         "/proc/*/environ",
+        "**/.env.local",
+        "**/.env.*.local",
     ),
     exempt: Sequence[str] = (
         "~/.ssh/*.pub",
@@ -97,6 +99,11 @@ def credential_files(
     ones, the signing keyring, and the token files the common command-line
     clients write: AWS, netrc, git's credential store, gh, docker, PyPI. A
     process's environment file is the environment dump by another route.
+
+    A checkout's own login file too: the gitignored `.env.local`, and the
+    `.env.<mode>.local` beside it, are where a project's settings keep the API
+    keys its `.env` leaves out, in whichever checkout or worktree holds one.
+    The committed `.env` and `.env.example` name no secret and stay readable.
 
     ``also`` is the composition root's, for a login only it can name -- the
     runtimes' own, which a neutral module does not spell.

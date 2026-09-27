@@ -109,6 +109,8 @@ GUARDED = [
     pytest.param("yay -S foo", "ask", id="aur"),
     pytest.param("npm install left-pad", "ask", id="npm"),
     pytest.param("pip install httpx", "deny", id="pip"),
+    pytest.param("cat .env.local", "deny", id="env-local-read"),
+    pytest.param("grep KEY .env.production.local", "deny", id="env-mode-local-read"),
     pytest.param("sudo ls", "ask", id="sudo"),
     pytest.param("ssh host.example ls", "ask", id="ssh"),
     pytest.param("export GH_TOKEN=x", "deny", id="export-token"),
@@ -362,6 +364,18 @@ def test_an_unread_word_under_a_command_guarding_nothing_asks_on_no_posture(
         for posture in ("none", "inner", "outer")
     } == {"allow"}
     assert set(previewed(UNGUARDED_UNREAD, checkout, monkeypatch).values()) == {"allow"}
+
+
+@pytest.mark.parametrize("command", ["cat .env", "cat .env.example"])
+def test_a_committed_environment_file_reads_on_every_posture(
+    runtime: Runtime, checkout: Path, monkeypatch: pytest.MonkeyPatch, command: str
+) -> None:
+    """Only the gitignored locals hold a key; the committed defaults name none."""
+    assert {
+        met(runtime, posture, command, checkout)
+        for posture in ("none", "inner", "outer")
+    } == {"allow"}
+    assert set(previewed(command, checkout, monkeypatch).values()) == {"allow"}
 
 
 @pytest.mark.parametrize("command", UNREAD_COMMAND_AS_BEFORE)
