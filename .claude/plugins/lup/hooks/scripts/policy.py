@@ -145,6 +145,19 @@ def policy_snapshot_digest(directory: Path) -> str:
     return sha256(json.dumps(rows, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
+def granted_root(scope: str) -> Path:
+    """One root a launch recorded, as the absolute directory it names here.
+
+    A lease's own roots are recorded resolved, and a declared sandbox grant is
+    recorded as it was written -- `~/.cache/uv` -- because it answers for
+    whichever home reads it. Resolving that spelling without expanding it
+    named `<cwd>/~/.cache/uv`, so the one grant every toolchain needs was
+    refused as outside the boundary it was declared into, while `touch` on the
+    same path, which no reader resolved, went through.
+    """
+    return Path(scope).expanduser().resolve()
+
+
 def execution_write_refusal(path_text: str, root: Path | None) -> str:
     """Keep the caller's measured mounts in force independently of policy ownership."""
     boundary = measured_boundary(root)
@@ -154,10 +167,11 @@ def execution_write_refusal(path_text: str, root: Path | None) -> str:
         return ""
     path = ((root or Path.cwd()) / path_text).resolve()
     matches = [
-        (len(Path(scope).parts), allowed)
+        (len(granted.parts), allowed)
         for scopes, allowed in ((writable, True), (readonly, False))
         for scope in scopes
-        if path.is_relative_to(Path(scope).resolve())
+        for granted in [granted_root(scope)]
+        if path.is_relative_to(granted)
     ]
     if not matches or not min(
         allowed for depth, allowed in matches if depth == max(row[0] for row in matches)
@@ -2331,14 +2345,12 @@ def unleased_write_targets(
     if not leased:
         return []
     where = Path.cwd() if root is None else root
+    granted = [granted_root(root_path) for root_path in leased]
     return [
         target
         for target in targets
-        for resolved in [str((where / target).resolve())]
-        if not any(
-            resolved == root_path or resolved.startswith(root_path + "/")
-            for root_path in leased
-        )
+        for resolved in [(where / target).resolve()]
+        if not any(resolved.is_relative_to(root_path) for root_path in granted)
     ]
 
 
@@ -2370,12 +2382,13 @@ def readonly_write_targets(
     where = Path.cwd() if root is None else root
     found: list[str] = []  # lup: ignore[empty-collection] — filtered append below
     for target in targets:
-        resolved = str((where / target).resolve())
+        resolved = (where / target).resolve()
         matches = [
-            (len(Path(scope).parts), allowed)
+            (len(granted.parts), allowed)
             for scopes, allowed in ((writable, True), (readonly, False))
             for scope in scopes
-            if resolved == scope or resolved.startswith(scope + "/")
+            for granted in [granted_root(scope)]
+            if resolved.is_relative_to(granted)
         ]
         deepest = max((depth for depth, _ in matches), default=0)
         if matches and not any(

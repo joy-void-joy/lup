@@ -23,6 +23,8 @@ from lup.policy.assets.host import (
     delivers,
     execution_write_refusal,
     measured_boundary,
+    readonly_write_targets,
+    unleased_write_targets,
 )
 
 MEASURED = {
@@ -196,3 +198,39 @@ def test_a_failed_pinned_ledger_never_uses_the_current_directory_ledger(
     )
 
     assert measured_boundary(tmp_path) == {}
+
+
+def test_a_grant_declared_from_a_home_is_read_in_the_home_reading_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`~/.cache/uv` is recorded as written, and every reader expands it here.
+
+    The declared sandbox grants join the lease spelled as they were declared,
+    because they answer for whichever home reads them. Read without expanding,
+    `~` named a directory called `~` under the working directory, and the
+    toolchain cache every `uv` command writes was refused as outside the
+    boundary it was granted into.
+    """
+    home = tmp_path / "home"
+    launch = tmp_path / "launch"
+    held = home / ".cache" / "uv" / "held"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("LUP_BOUNDARY_NONCE", "launch")
+    monkeypatch.delenv("LUP_BOUNDARY_ROOT", raising=False)
+    measured = {
+        **MEASURED,
+        "writable_roots": [str(launch), "~/.cache/uv"],
+        "read_only_roots": ["~/.cache/uv/held"],
+    }
+    written(launch, "launch", measured)
+
+    cached = str(home / ".cache" / "uv" / "probe.txt")
+    assert not execution_write_refusal(cached, launch)
+    assert execution_write_refusal(str(home / ".bashrc"), launch)
+    assert execution_write_refusal(str(held / "x"), launch)
+    assert unleased_write_targets([cached, str(home / ".bashrc")], measured) == [
+        str(home / ".bashrc")
+    ]
+    assert readonly_write_targets([cached, str(held / "x")], measured) == [
+        str(held / "x")
+    ]
