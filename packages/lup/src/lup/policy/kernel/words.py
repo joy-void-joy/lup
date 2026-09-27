@@ -167,7 +167,11 @@ def effective_command(segment: list[str]) -> EffectiveCommand:
         ):
             return EffectiveCommand(words=segment[position:], dangerous=dangerous)
         if executable in PASS_THROUGH_WORDS:
-            position = read_wrapper(segment, position + 1, executable)["payload"]
+            reading = read_wrapper(segment, position + 1, executable)
+            judged = WRAPPER_JUDGED_OPTIONS.get(executable, ())
+            if any(option["name"] in judged for option in reading["options"]):
+                return EffectiveCommand(words=segment[position:], dangerous=dangerous)
+            position = reading["payload"]
             continue
         if executable == "timeout":
             position = timeout_payload(segment, position + 1)
@@ -1778,6 +1782,18 @@ option the grammar does not list is left where it stands, so the segment
 reaches a command word beginning with `-`, which
 :func:`lup.policy.kernel.shell.decide_segment_words` refuses rather than
 classifies.
+"""
+
+WRAPPER_JUDGED_OPTIONS: dict[str, tuple[str, ...]] = {
+    "time": ("-o", "--output"),
+}
+"""The wrapper options that act on their own, so the wrapper is not stepped over.
+
+A wrapper is transparent only while its options change nothing a reading of
+the wrapped command would judge. `time -o <file>` writes its report into the
+file, and stepped over it was the command it timed: `time -o README.md ls`
+was `ls`. A wrapper carrying one of these is the segment's command itself,
+and its own reader judges what the option does beside what it wraps.
 """
 
 # lup: ignore[library-default] — `env`'s own spelling of the option that

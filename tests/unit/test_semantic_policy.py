@@ -1816,6 +1816,13 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="env --frob ls", effect="deny"),
     DecisionCase(input="setsid -fw ls", effect="allow"),
     DecisionCase(input="env --unset GH_TOKEN ls", effect="allow"),
+    # `time -o` writes its report into a file no redirection names, so the
+    # write asks beside what is timed, and the stronger answer stands.
+    DecisionCase(input="time -o README.md ls", effect="ask"),
+    DecisionCase(input="time -o README.md ls", effect="ask", sandboxed=True),
+    DecisionCase(input="time --output=t.txt ls", effect="ask"),
+    DecisionCase(input="time -ao t.txt node -e evil", effect="deny"),
+    DecisionCase(input="time -p ls", effect="allow"),
     # `env` wrapping nothing readable prints the whole environment, which is
     # every variable the launcher set and the credentials among them, into a
     # transcript that outlives the turn. Refused rather than asked: a question

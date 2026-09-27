@@ -48,6 +48,7 @@ from .words import (
     refuses_generated_plugin_write,
     protected_deletion,
     env_payload,
+    read_wrapper,
     uv_command_words,
     uv_run_words,
     xargs_payload,
@@ -84,7 +85,7 @@ from .lex import (
     tee_operands,
 )
 from .syntax import Command, Script, Word, readable_prefix, word_text
-from .effects import declared_verdict, member_for
+from .effects import STRENGTH, declared_verdict, member_for
 from .commands import (
     SedContext,
     WriteFacts,
@@ -461,6 +462,38 @@ def decide_env_words(
     return decide_shell_segment(payload, context, directory)
 
 
+def decide_time_words(
+    words: list[str], context: ShellContext, directory: str | None = ""
+) -> KernelDecision:
+    """Judge a `time` that writes its report into a file, and what it times.
+
+    Stepped over as a wrapper, `time -o <file>` lost the write: `time -o
+    README.md ls` was `ls`, allowed, and the human-owned file was truncated
+    to a timing report. The file is a write no redirection names, so nothing
+    the host resolves stands behind it and it asks; the command it times is
+    judged as ever, and the stronger of the two stands.
+    """
+    reading = read_wrapper(words, 1, "time")
+    written = [
+        option["value"] or ""
+        for option in reading["options"]
+        if option["name"] in ("-o", "--output")
+    ]
+    asked = KernelDecision(
+        "ask",
+        f"time writes its report into {', '.join(written)}, a file no"
+        " redirection names, so nothing judged the write",
+        purpose="unrecovered_local_mutation",
+        recovery="Redirect the report instead -- `{ time <command>; } 2> <file>`"
+        " -- so the file is judged as any redirection's is.",
+    )
+    payload = words[reading["payload"] :]
+    if not payload:
+        return asked
+    timed = decide_shell_segment(payload, context, directory)
+    return timed if STRENGTH.index(timed.effect) >= STRENGTH.index("ask") else asked
+
+
 def environment_dump() -> KernelDecision:
     """The refusal for printing every variable at once, by whichever spelling."""
     return KernelDecision(
@@ -679,6 +712,8 @@ def decide_segment_words(
         return decide_xargs_words(words, context, directory)
     if executable == "env":
         return decide_env_words(words, context, directory)
+    if executable == "time":
+        return decide_time_words(words, context, directory)
     if executable == "printenv":
         return decide_printenv_words(words, context["secret_variables"])
     # `set` alone lists every variable the shell holds, exported or not.
