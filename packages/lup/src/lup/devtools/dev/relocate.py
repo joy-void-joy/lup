@@ -160,7 +160,9 @@ def module_runs(tokens: list[tokenize.TokenInfo]) -> list[ModuleRun]:
     ``import`` where no ``from`` preceded it on that logical line — including
     after each comma in that form, because ``import a.b, c.d`` names two.
     Names after an ``import`` that follows a ``from`` are the imported
-    symbols, which are not module paths and must not be rewritten.
+    symbols, which are not module paths and must not be rewritten. A
+    semicolon ends a statement as a line break does, so what follows one is
+    read afresh.
     """
 
     def run_at(index: int) -> Iterator[ModuleRun]:
@@ -173,7 +175,7 @@ def module_runs(tokens: list[tokenize.TokenInfo]) -> list[ModuleRun]:
         listing = False
         for index, token in enumerate(tokens):
             match (token.type, token.string):
-                case (tokenize.NEWLINE | tokenize.NL, _):
+                case (tokenize.NEWLINE | tokenize.NL, _) | (tokenize.OP, ";"):
                     from_seen = listing = False
                 case (tokenize.OP, ",") if listing:
                     yield from run_at(index)

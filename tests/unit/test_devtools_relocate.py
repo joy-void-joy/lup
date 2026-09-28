@@ -92,6 +92,20 @@ def test_relocate_rewrites_two_imports_sharing_one_line(tmp_path: Path) -> None:
     )
 
 
+def test_relocate_reads_a_statement_after_a_semicolon_as_its_own(
+    tmp_path: Path,
+) -> None:
+    """A `from` earlier on the line does not make a later `import` its names."""
+    source = tmp_path / "site.py"
+    source.write_text("from lup.trace import x; import lup.paths\n", encoding="utf-8")
+
+    relocate([tmp_path], DEEPER)
+
+    assert source.read_text(encoding="utf-8") == (
+        "from lup.trace import x; import lup.workspace.paths\n"
+    )
+
+
 def test_relocate_carries_submodules_of_a_moved_package(tmp_path: Path) -> None:
     """Relocating a package moves what sits beneath it without declaring each."""
     source = tmp_path / "site.py"
