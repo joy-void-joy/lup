@@ -32,7 +32,7 @@ from typing import NotRequired, TypedDict
 import pytest
 import sh
 
-from lup.devtools.harness.generate import NativeHarnessComposition
+from lup.harness.generate import NativeHarnessComposition
 from lup.harness.models import Artifact
 from lup.policy.bundle import policy_kernel_modules
 from lup.providers.codex.harness import CODEX_SUBAGENT_START_EVENT

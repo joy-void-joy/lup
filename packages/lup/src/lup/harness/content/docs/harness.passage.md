@@ -192,7 +192,8 @@ Python to a launched native plugin.
    preimage and applies a conflict-free proposal atomically, then saves the
    manifest. Stale proposals are rejected.
 6. **Launch** — `lup.providers.*.harness_runtime` probes native CLI
-   capabilities, and `lup.devtools.harness.launch` runs the native CLI in the
+   capabilities, `lup.launch.session` composes the session a launch opens,
+   and `lup.devtools.harness.launch` runs the native CLI in the
    foreground of the launching terminal, over the non-interactive defaults
    from `lup.harness.environment`. `lup.harness.process` is the
    captured-output launcher seam the resolver and the base-freshness probe run
@@ -212,19 +213,15 @@ than lup's, because its whole job is to be this project's own harness. The CLI
 half lives in `packages/lup/src/lup/devtools/harness/`:
 
 - `app.py` — Typer wiring only; every command body lives elsewhere
-- `composition.py` — builders wiring concrete adapter capabilities, and the
-  target roster a CLI selector names
-- `generate.py` — recipes, drift inspection, and atomic materialization
+- `composition.py` — the target roster a CLI selector names, and the
+  accounts each runtime keeps
 - `drift.py` — console drift reporting for `generate` and `check`
 - `reconcile.py` — drift classification and the source-patch flow
 - `doctor.py` — runtime evidence against the `lup.harness.evidence` ledger
 - `resolve.py` — persisted-resolver glue: broker, snapshots, factories
-- `launch.py` — the shared preflight a launcher opens a session past
-  (generation, runtime probes, base freshness) and the native launchers
-- `preflight.py` — minting a launch's boundary, measuring it, and writing it
-  down for the session
-- `contained.py` — opening a native session inside the container the project
-  declares
+- `launch.py` — this repository's gates before a session (generation, base
+  freshness, worktree pointers), its registrations handed to the library as
+  standing grants, and the native launchers mapping flags onto the session
 - `settings.py` — rendering a runtime's project settings from what the
   harness declares
 - `accretion.py` — what the boundary has been widened for, and which of it
@@ -236,6 +233,30 @@ half lives in `packages/lup/src/lup/devtools/harness/`:
 - `sandbox.py` — exercising the Python sandbox through its container and
   persistent REPL
 - `generated_paths.py` — which file each typed declaration compiles to
+
+What generation and a launch do for any project declaring an agent is the
+library's rather than the CLI's. `lup.harness.generate` holds the recipes,
+drift inspection, and atomic materialization, with the `NativeComposer` seam
+each runtime compiles a project's content through in its own adapter
+(`lup.providers.<runtime>.composition`), and
+`packages/lup/src/lup/launch/` the launch:
+
+- `session.py` — composing a session: the runtime and host rosters, the
+  boundary compiled, measured and refused where it fell short, the argv that
+  opens the session inside the container or on the host, and its transcript;
+  what each runtime adds around one (its login, its plugin, its home carried
+  back) is `lup.providers.<runtime>.session`
+- `preflight.py` — minting a launch's boundary, measuring it, and writing it
+  down for the session
+- `container.py` — opening a native session inside the container the project
+  declares
+- `config_volume.py`, `environments.py`, `superseded.py` — what a contained
+  session keeps between launches: its configuration volume, its project
+  environments, and what a split volume left to sweep
+- `pointer_trust.py` — which roots host git may enter, and which
+  repositories lup comes to trust
+- `refusal.py` — `LaunchRefused`, the refusal a launch that cannot open
+  raises, which a command line turns into its own usage error
 
 ## What the plugin ships
 
@@ -542,6 +563,19 @@ immutable and retained so concurrent sessions keep valid hook paths; the source
 plugin is never mistaken for the cache. Personal trust state, credentials,
 active run state, and cache contents are never generated or committed. Review
 hook trust with the native hooks surface after generation.
+
+`lup-devtools harness claude|codex` composes its session from the library:
+the gates a launch clears, the boundary it measures and records, the
+container it opens in and the argv on either side of it live in
+`lup.launch.session` and `lup.launch.container`, and each runtime's own
+spelling of the same launch in `lup.providers.claude.launch` and
+`lup.providers.codex.launch`. What stays with the command is this
+repository's workflow around a session — regenerating every tree, syncing
+the base, checkpoints, the launch modes — and the mapping from its flags to
+the launch. A program launches a declared agent through the same
+composition with `Claude(...).launch()` or `Codex(...).launch()`, and
+`command()` prints the process either would start; `docs/library.md`
+describes the declaration.
 
 ### Opening a session the anti-pattern gate leaves alone
 

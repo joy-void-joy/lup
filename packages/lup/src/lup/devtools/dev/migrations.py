@@ -284,8 +284,9 @@ DECLARED: list[Migration] = [
             ),
             MigrationStep(
                 instruction=(
-                    "Read lup.AGENTS where lup.CONSTRUCTORS was read: it maps "
-                    "Claude and Codex to the modules defining them."
+                    "Read lup.DEFERRED where lup.CONSTRUCTORS was read: it maps "
+                    "Claude and Codex, among every name the package root "
+                    "resolves on first access, to the modules defining them."
                 )
             ),
         ],
@@ -1060,6 +1061,108 @@ DECLARED: list[Migration] = [
                     "HookSet.refused_paths instead, through credential_files(also="
                     "[...]) or a RefusedPaths of its own; the settings render the "
                     "Read deny rules from there."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=["NativeCapabilityEvidence"],
+        reason=(
+            "each runtime's composer moved into its adapter "
+            "(lup.providers.claude.composition, lup.providers.codex.composition) "
+            "and types its own readiness evidence, so the union naming both "
+            "runtimes' evidence had nothing left to name"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Type a readiness probe's evidence as the runtime's own "
+                    "CapabilityEvidence[ClaudeCliEvidence] or "
+                    "CapabilityEvidence[CodexCliEvidence], or as the neutral "
+                    "CapabilityReport where either will do."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "ClaudeSandboxConfig",
+            "ClaudeSandboxConfig.enabled",
+            "ClaudeSandboxConfig.auto_allow_bash_if_sandboxed",
+            "ClaudeSandboxConfig.allow_unsandboxed_commands",
+            "ClaudeSandboxConfig.excluded_commands",
+            "ClaudeSandboxConfig.posture",
+            "SessionContainment",
+            "CLAUDE_CONTAINMENT",
+            "CODEX_CONTAINMENT",
+            "codex_sandbox",
+            "Codex.containment",
+            "SessionRequest.containment",
+        ],
+        reason=(
+            "one declaration now says which wall a session opens behind for "
+            "both of its compilations — a session opened in process and one "
+            "launched at a terminal — so the wall is one typed field on Claude, "
+            "Codex and SessionRequest alike, OuterContainer, InnerSandbox or "
+            "NoSandbox, rather than a Claude-only settings object, a Codex "
+            "containment word and a request's third spelling of the same thing"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Declare sandbox=InnerSandbox() where ClaudeSandboxConfig() "
+                    "was, from lup.launch.declaration: allow_unsandboxed_commands "
+                    "is InnerSandbox(escapable=...), excluded_commands keeps its "
+                    "name, and enabled=False inside a container is "
+                    "sandbox=OuterContainer(). ClaudeSandboxConfig(...).posture() "
+                    "is the wall's own .enforcement()."
+                )
+            ),
+            MigrationStep(
+                instruction=(
+                    "Replace containment='outer'|'inner'|'none' on Codex and "
+                    "SessionRequest with sandbox=OuterContainer()|InnerSandbox()|"
+                    "NoSandbox(); a session opened in process inside the container "
+                    "still names the program entering it, as executable= or "
+                    "contained_program=. Codex's own mode word moves to "
+                    "sandbox_mode=, which the wall narrows; codex_sandbox(request) "
+                    "is codex_sandbox_mode(config.sandbox, config.sandbox_mode) in "
+                    "lup.providers.codex.launch, beside CODEX_SANDBOX_WIDTH."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=["Codex.sandbox"],
+        reason=(
+            "Codex's sandbox field is the declaration's wall now, the same "
+            "type Claude's is, so Codex's own mode word moved to the name its "
+            "config.toml gives it"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Rename Codex(sandbox='read-only'|'workspace-write'|"
+                    "'danger-full-access') to Codex(sandbox_mode=...)."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=["AGENTS"],
+        reason=(
+            "the package root resolves the launch vocabulary on first access "
+            "the way it resolves the agents, through one table naming the "
+            "module each deferred name is defined in, so the table is named "
+            "for what it holds"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Read lup.DEFERRED where lup.AGENTS was read. It maps every "
+                    "name the root resolves on first access to its module; a "
+                    "caller that wanted the agents alone keeps the rows for "
+                    "Claude and Codex."
                 )
             ),
         ],

@@ -20,7 +20,7 @@ import lup.devtools.dev.update as update
 from lup.formats.banner import REGENERATE_COMMAND
 from lup.devtools.harness.composition import NativeTargets
 from lup.devtools.harness.drift import generate_targets
-from lup.devtools.harness.generate import NativeHarnessComposition, obstruction_at
+from lup.harness.generate import NativeHarnessComposition, obstruction_at
 from lup.harness.codescan.common import RuleSelection
 
 MISSING_PASSAGE = "src/demo/harness/content/skills/update.passage.md"

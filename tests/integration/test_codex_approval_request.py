@@ -171,7 +171,7 @@ def answering_session(cwd: Path, watch: ApprovalWatch) -> Codex:
         model=PROBE_MODEL,
         system_prompt=INSTRUCTIONS,
         cwd=cwd,
-        sandbox="workspace-write",
+        sandbox_mode="workspace-write",
         tools=CodexTools(builtin=["Bash"]),
         approval_policy="on-request",
         hooks=watch.hooks(),
@@ -190,7 +190,7 @@ def quiet_session(cwd: Path) -> Codex:
         model=PROBE_MODEL,
         system_prompt=INSTRUCTIONS,
         cwd=cwd,
-        sandbox="danger-full-access",
+        sandbox_mode="danger-full-access",
         tools=CodexTools(builtin=["Bash"]),
         approval_policy="never",
     )

@@ -106,7 +106,7 @@ async def test_served_roles_execute_on_the_selected_engine(
     else:
         assert isinstance(config, Codex)
         assert config.model_id() == "gpt-5.6-sol"
-        assert config.sandbox == "read-only"
+        assert config.sandbox_mode == "read-only"
         assert config.approval_policy == "never"
         assert config.delegated_tools is not None
         assert config.delegated_tools.workspace_read
@@ -192,7 +192,7 @@ def test_codex_does_not_widen_role_to_session_sandbox(
     monkeypatch.setattr(settings, "codex_sandbox", "danger_full_access")
     agent = core.build_subagent_factory(get_subagent_specs()[0])
     assert isinstance(agent, Codex)
-    assert agent.sandbox == "read-only"
+    assert agent.sandbox_mode == "read-only"
 
 
 def test_model_override_routes_when_no_engine_is_explicit(

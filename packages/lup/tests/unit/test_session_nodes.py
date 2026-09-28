@@ -22,7 +22,7 @@ import lup.devtools.ledger.app as ledger_app
 import lup.sessions.capabilities as capabilities
 from lup.channels.models import utc_now
 from lup.coordination.refs import ActorRef
-from lup.devtools.harness import launch
+import lup.launch.session as launch_session
 from lup.ledger.files import digest_of
 from lup.ledger.journal import LedgerStore
 from lup.ledger.models import Surroundings
@@ -257,18 +257,20 @@ def test_a_recorder_exists_only_where_both_kinds_are_declared(
 @pytest.fixture
 def launched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A project root a harness launch would record its transcript under."""
-    monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
     monkeypatch.setattr(
-        launch, "harness_runs_path", lambda: tmp_path / "notes" / "harness"
+        launch_session, "harness_runs_path", lambda: tmp_path / "notes" / "harness"
     )
-    monkeypatch.setattr(launch, "agent_version", lambda: "1.2.3")
+    monkeypatch.setattr(launch_session, "agent_version", lambda: "1.2.3")
     return tmp_path
 
 
-def transcript_at(root: Path, recorder: SessionRecorder) -> launch.HarnessTranscript:
-    return launch.start_harness_transcript(
+def transcript_at(
+    root: Path, recorder: SessionRecorder
+) -> launch_session.HarnessTranscript:
+    return launch_session.start_harness_transcript(
         "claude",
         ClaudeTranscripts(root / "config"),
+        root,
         model=None,
         profile=None,
         arguments=[],
@@ -341,9 +343,10 @@ def wrote_session(
 
 def launched_run(root: Path, succeeded: bool = True, ended: bool = True) -> Path:
     """One launch directory under notes/harness/, written with no recorder wired."""
-    transcript = launch.start_harness_transcript(
+    transcript = launch_session.start_harness_transcript(
         "claude",
         ClaudeTranscripts(root / "config"),
+        root,
         model=None,
         profile=None,
         arguments=[],

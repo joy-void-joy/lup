@@ -38,7 +38,6 @@ narrowed to one it has. A model only Claude's catalog lists is refused too.
 """
 
 from pathlib import Path
-from typing import Literal
 
 from lup.providers.codex.hooks import codex_hook_approval_policy
 from lup.providers.codex.home import select_codex_home
@@ -46,9 +45,8 @@ from lup.providers.codex.login import CODEX_LOGIN
 from lup.providers.codex.model_choice import codex_model_choice
 from lup.providers.codex.models import CodexEffort
 from lup.providers.codex.builtins import CodexBuiltins
-from lup.providers.codex import CODEX_PROGRAM, Codex, CodexTools
+from lup.providers.codex import CODEX_PROGRAM, Codex, CodexSandbox, CodexTools
 from lup.sessions.errors import UnsupportedCapability
-from lup.providers.confinement import SessionContainment
 from lup.providers.selection import (
     Runtime,
     SessionAutonomy,
@@ -57,9 +55,6 @@ from lup.providers.selection import (
 )
 from lup.types import EnvVars
 from lup.workspace.paths import project_root
-
-type CodexSandbox = Literal["read-only", "workspace-write", "danger-full-access"]
-
 
 # lup: ignore[constant-declaration] — each value is Codex's own sandbox name for
 # the autonomy beside it, over a vocabulary this library closes
@@ -87,65 +82,6 @@ Every rung under its own name, each one Codex's catalog lists; a model whose
 own row lacks one refuses it where the session is declared."""
 
 
-# lup: ignore[constant-declaration] — each value is Codex's own sandbox name for
-# the wall beside it, over a vocabulary this library closes
-CODEX_CONTAINMENT: dict[SessionContainment, CodexSandbox | None] = {
-    "outer": "danger-full-access",
-    "inner": "workspace-write",
-    "none": None,
-}
-"""What Codex's one sandbox field is asked for behind each wall.
-
-``outer`` is the word
-:data:`~lup.providers.codex.confinement.CODEX_CONFINEMENT` already sends a
-launched CLI, for the same reason: Codex confines with the kernel's own
-facilities, which an unprivileged container does not hand a nested caller,
-so inside one the honest posture is the container alone.
-
-``none`` names no mode at all. The wall was not asked for, so the field is
-left to whatever the autonomy implies — which is what every request meant
-before this axis existed.
-"""
-
-# lup: ignore[constant-declaration] — Codex's own sandbox names, narrowest first
-CODEX_SANDBOX_WIDTH: list[CodexSandbox] = [
-    "read-only",
-    "workspace-write",
-    "danger-full-access",
-]
-"""Codex's sandbox modes, ordered by how much they let a session reach."""
-
-
-def codex_sandbox(request: SessionRequest) -> CodexSandbox | None:
-    """The one field Codex says both how much and how far with.
-
-    Claude holds a permission mode and a sandbox and decides them apart.
-    Codex has neither word: it states what a session may do by stating what
-    it may reach, so a request naming an autonomy and a wall has named one
-    field twice.
-
-    The narrower of the two wins. That is not a precedence rule to remember
-    but the refusal of one: neither axis may widen what the other narrowed,
-    so an unattended session behind the inner wall reaches
-    ``workspace-write``, and a planning one stays ``read-only``.
-
-    ``outer`` takes the field outright instead. The container is the wall by
-    then, and narrowing this field would arm a second boundary inside it —
-    the one that cannot start there, which is what standing it down was for.
-    """
-    if request.containment == "outer":
-        return CODEX_CONTAINMENT["outer"]
-    asked: list[CodexSandbox] = [
-        mode
-        for mode in (
-            CODEX_CONTAINMENT[request.containment],
-            None if request.autonomy is None else CODEX_AUTONOMY[request.autonomy],
-        )
-        if mode is not None
-    ]
-    return min(asked, key=CODEX_SANDBOX_WIDTH.index, default=None)
-
-
 def codex_config(request: SessionRequest) -> Codex:
     """Render a portable request into Codex's own session configuration.
 
@@ -157,8 +93,9 @@ def codex_config(request: SessionRequest) -> Codex:
     against its working directory, so inferring one would decide what the
     session may write from wherever the process happened to start.
 
-    ``containment`` and ``autonomy`` both land on the sandbox, which is the
-    only field Codex has for either; :func:`codex_sandbox` states how the
+    ``sandbox`` and ``autonomy`` both land on Codex's sandbox mode, which is
+    the only field Codex has for either;
+    :func:`~lup.providers.codex.launch.codex_sandbox_mode` states how the
     two are reconciled. An ``outer`` request is also started as the program
     that enters its container, the same seam Claude spells ``cli_path``.
     """
@@ -196,9 +133,13 @@ def codex_config(request: SessionRequest) -> Codex:
         system_prompt=request.instructions,
         cwd=request.cwd,
         policy_root=project_root(),
-        sandbox=codex_sandbox(request),
+        sandbox=request.sandbox,
+        sandbox_mode=(
+            None
+            if request.autonomy is None or request.sandbox.posture().contained()
+            else CODEX_AUTONOMY[request.autonomy]
+        ),
         executable=request.contained_program or CODEX_PROGRAM,
-        containment=request.containment,
         approval_policy=codex_hook_approval_policy(request.hooks),
         hooks=request.hooks,
         effort=(None if request.effort is None else CODEX_EFFORT[request.effort]),

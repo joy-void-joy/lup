@@ -658,17 +658,19 @@ class RepositoryPeers:
         return self.revise(member_id, lambda member: store.unclaimed(member, prefix))
 
 
-def launched_member(root: Path) -> LaunchedMember:
+def launched_member(root: Path, name: str | None = None) -> LaunchedMember:
     """The identity a launcher mints for the session it is about to open in *root*.
 
-    The id is minted; the name is the worktree's, numbered where a live session
-    of this repository is already called that, so the runtime's own chrome and
-    the roster agree on a name that reaches this session and no other. Read
-    without joining, because a launch that only generates has to leave the
-    store as it found it — the session joins for itself once it is open.
+    The id is minted; the name is ``name``, or the worktree's where none was
+    given, numbered where a live session of this repository is already called
+    that, so the runtime's own chrome and the roster agree on a name that
+    reaches this session and no other. Read without joining, because a launch
+    that only generates has to leave the store as it found it — the session
+    joins for itself once it is open.
     """
     peers = RepositoryPeers(root)
+    wanted = derived_cli_name(root) if name is None else name
     return LaunchedMember(
         member_id=mint_member_id(),
-        cli_name=unique_cli_name(derived_cli_name(root), peers.names_taken()),
+        cli_name=unique_cli_name(wanted, peers.names_taken()),
     )

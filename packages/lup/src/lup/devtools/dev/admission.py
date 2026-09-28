@@ -36,16 +36,7 @@ from pydantic import BaseModel
 
 from lup.harness.notice import Notice
 from lup.workspace.edition import shared_git_directory
-
-# lup: ignore[constant-declaration] — an identity this repository defines: the
-# directory a run takes its slot in, which every session must spell alike for
-# any of them to see that another is holding one
-SLOT_DIRECTORY = "lup-gate-slots"
-"""Where this clone's slots live, beneath the shared git directory.
-
-The one place every worktree of a clone agrees on, and one no worktree's own
-branch can move out from under another.
-"""
+from lup.workspace.shared_directory import SLOT_DIRECTORY
 
 SLOTS = 4
 """How many gates may run at once before one has to wait.

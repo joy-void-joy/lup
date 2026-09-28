@@ -10,11 +10,9 @@ loop, which is why the request is one declaration and only the words differ.
 import pytest
 import typer
 
-from lup.devtools.harness.launch import (
-    claude_resume_arguments,
-    codex_resume_arguments,
-)
 from lup.harness.models import Resumption
+from lup.providers.claude.launch import claude_resume_arguments
+from lup.providers.codex.launch import codex_resume_arguments
 
 
 def test_a_launch_that_reopens_nothing_adds_no_words() -> None:

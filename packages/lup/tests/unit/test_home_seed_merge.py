@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from lup.devtools.harness.config_volume import (
+from lup.launch.config_volume import (
     HomeFile,
     HomeHelper,
     HomeSeedPlaces,

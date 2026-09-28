@@ -5,9 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from lup.devtools.harness import launch
+import lup.launch.session as launch_session
+from lup.launch.declaration import LaunchSandbox
 from lup.devtools.harness.policy_refresh import refresh_destination_policy
-from lup.devtools.harness.preflight import (
+from lup.launch.preflight import (
     LaunchSentinels,
     ROOT_VARIABLE,
     NONCE_VARIABLE,
@@ -41,14 +42,11 @@ def evaluator(checkout: Path, runtime: str = "codex") -> Path:
     return hooks
 
 
-@pytest.mark.parametrize(
-    "sandbox", [launch.LaunchSandbox.NONE, launch.LaunchSandbox.OUTER]
-)
+@pytest.mark.parametrize("sandbox", [LaunchSandbox.NONE, LaunchSandbox.OUTER])
 def test_every_launch_replaces_inherited_ledger_ownership(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sandbox: launch.LaunchSandbox
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sandbox: LaunchSandbox
 ) -> None:
     checkout = repository(tmp_path / "checkout")
-    monkeypatch.setattr(launch, "project_root", lambda: checkout)
     environment = {ROOT_VARIABLE: "/inherited", NONCE_VARIABLE: "inherited"}
     sentinels = LaunchSentinels()
     plugin = Plugin(
@@ -61,7 +59,9 @@ def test_every_launch_replaces_inherited_ledger_ownership(
         agents=[],
     )
 
-    launch.settle_boundary(plugin, sandbox, [], sentinels, environment, Banner())
+    launch_session.settle_boundary(
+        checkout, plugin.hooks, sandbox, [], sentinels, environment, Banner()
+    )
 
     assert environment[ROOT_VARIABLE] == str(checkout)
     assert environment[NONCE_VARIABLE] == sentinels.nonce

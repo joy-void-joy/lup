@@ -131,7 +131,7 @@ async def test_codex_disables_inherited_mcp_before_start(
     monkeypatch.setattr(server, "request", request)
     config = Codex(
         cwd=tmp_path,
-        sandbox="read-only",
+        sandbox_mode="read-only",
         approval_policy="never",
         tools=CodexTools(builtin="none"),
         delegated_tools=codex_tools(role(capabilities=["workspace-read"])),
@@ -159,7 +159,7 @@ async def test_codex_disables_inherited_mcp_before_start(
 async def test_codex_restricted_role_cannot_resume_wider_thread(tmp_path: Path) -> None:
     config = Codex(
         cwd=tmp_path,
-        sandbox="read-only",
+        sandbox_mode="read-only",
         approval_policy="never",
         tools=CodexTools(builtin="none"),
         delegated_tools=codex_tools(role()),
@@ -181,7 +181,7 @@ def test_codex_restricted_tools_require_enforced_bounds(tmp_path: Path) -> None:
     with pytest.raises(ValidationError, match="alternative authority"):
         Codex(
             cwd=tmp_path,
-            sandbox="read-only",
+            sandbox_mode="read-only",
             approval_policy="never",
             delegated_tools=codex_tools(role()),
         )

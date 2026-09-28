@@ -22,7 +22,7 @@ ask.
 
 from pathlib import Path
 
-from lup.devtools.harness.generate import ProjectContent, claude_generation_recipe
+from lup.harness.generate import ProjectContent, claude_generation_recipe
 from lup_template.harness.catalog import portable_harness
 
 ASSET = Path("src/lup_template/harness/content/assets/file_suggest.sh")

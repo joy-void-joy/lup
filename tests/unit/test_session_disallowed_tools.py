@@ -89,7 +89,7 @@ def test_codex_refuses_a_refusal_it_cannot_apply_per_session() -> None:
 
 def test_codex_stays_silent_when_no_refusal_was_asked_for() -> None:
     """A refusal nobody requested must not become a runtime that cannot open."""
-    assert codex_config(SessionRequest(cwd=Path("."))).sandbox is None
+    assert codex_config(SessionRequest(cwd=Path("."))).sandbox_mode is None
 
 
 def test_codex_names_every_field_it_refuses_at_once() -> None:

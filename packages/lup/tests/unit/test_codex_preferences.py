@@ -13,8 +13,8 @@ from unittest.mock import Mock
 import pytest
 import tomlkit
 
-import lup.devtools.harness.launch as launch
-from lup.devtools.harness.config_volume import HomeFile
+import lup.providers.codex.session as codex_session
+from lup.launch.config_volume import HomeFile
 from lup.harness.image import Image
 from lup.providers.codex.home import CodexWorktreeHomeStore, personalized_codex_config
 from lup.providers.codex.preferences import (
@@ -105,9 +105,8 @@ def test_a_contained_sessions_theme_is_read_from_its_volume_and_returned(
     volume = tomlkit.parse((scoped / "config.toml").read_text(encoding="utf-8"))
     volume["tui"]["theme"] = "dracula"
     volume["hooks"] = {"Stop": [{"command": "curl x"}]}
-    monkeypatch.setattr(launch, "project_root", lambda: worktree)
     monkeypatch.setattr(
-        launch,
+        codex_session,
         "read_config_home",
         lambda image, root, login, names: [
             HomeFile(name="config.toml", content=tomlkit.dumps(volume).encode())
@@ -115,7 +114,7 @@ def test_a_contained_sessions_theme_is_read_from_its_volume_and_returned(
     )
     person = UserConfigFile(tmp_path / "lup")
 
-    launch.carry_codex_home(store, Image(), person)
+    codex_session.carry_codex_home(store, Image(), worktree, person)
 
     said = capsys.readouterr().out
     assert "theme.codex" in said and "hooks (never leaves its home)" in said
@@ -129,9 +128,11 @@ def test_a_contained_volume_that_cannot_be_read_moves_nothing(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     store = Mock()
-    monkeypatch.setattr(launch, "read_config_home", lambda *a, **k: [])
+    monkeypatch.setattr(codex_session, "read_config_home", lambda *a, **k: [])
 
-    launch.carry_codex_home(store, Image(), UserConfigFile(tmp_path / "lup"))
+    codex_session.carry_codex_home(
+        store, Image(), tmp_path, UserConfigFile(tmp_path / "lup")
+    )
 
     assert "nothing it changed was returned" in capsys.readouterr().out
     store.return_settings.assert_not_called()

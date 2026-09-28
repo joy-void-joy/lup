@@ -9,7 +9,7 @@ import typer
 import sh
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
-from lup.devtools.harness.preflight import NONCE_VARIABLE, ledger_path
+from lup.launch.preflight import NONCE_VARIABLE, ledger_path
 from lup.execution.shell import git
 from lup.policy.snapshots import DestinationPolicy, RepositoryPolicyAuthority
 from lup.sandbox.rail import repository_layout

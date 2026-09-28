@@ -11,7 +11,7 @@ differently lives in exactly two places — the adapter renderers
 `packages/lup/src/lup/providers/codex/harness.py`, composed by
 `packages/lup/src/lup/providers/harness.py`) and the per-platform generation
 recipes (`claude_generation_recipe` / `codex_generation_recipe` in
-`packages/lup/src/lup/devtools/harness/generate.py`). A per-platform declaration
+`packages/lup/src/lup/harness/generate.py`). A per-platform declaration
 layer was considered and rejected: it would let semantic content fork silently,
 whereas the adapter seam forces every difference to be a rendering decision
 over the same declarations. Two checks enforce that. Every prose field a tree
@@ -80,7 +80,7 @@ Generated files are one surface, not the boundary of the audit. Every policy, fl
 | Exact request limits | Native `max_turns` and `max_thinking_tokens` | Both raise `UnsupportedCapability` before starting a session | Codex 0.155.1 exposes no equivalent native limit. Use `effort` or whole-turn client timeout/budget middleware only where their different semantics fit. |
 | Completed native activity | SDK content blocks | All app-server item kinds retain replay evidence; native tools carry call/result blocks, and plans, compaction and future kinds carry `TurnNativeActivityBlock` | Provider activity survives typed serialization and telemetry without being mislabeled as assistant speech. |
 | Portable session hooks | Native SDK hook callbacks | `PostToolUse`, bounded `Stop` continuation, inbox context, and callbacks scoped exactly to native command/file-change approval requests | Codex app-server exposes approval requests, not interception of every tool. Both direct and portable openers refuse broad pre-execution callbacks before session startup; explicitly scoped approval callbacks also require a native requesting policy. Callback feedback reaches the matching active turn through steering, or a bounded continuation after completion; delivery receipts are acknowledged only after transport acceptance. Stop evaluation precedes typed submission and retains its continuation flag through validation retries. Generated CLI hooks remain a separate native plugin surface. |
-| A session's containment | `CLAUDE_CONTAINMENT` in `providers/claude/selection.py`, rendering the SDK's `sandbox` settings, and `cli_path` for the program that enters the container | `CODEX_CONTAINMENT` in `providers/codex/selection.py`, rendering the one `sandbox` mode, and `executable` for that same program | `SessionRequest.containment` asks in the launcher's own three words — `outer`, `inner`, `none` — so one request means one wall on both runtimes, and the default is the `none` every request meant before the axis existed. What differs is what each runtime has to spell it with. Claude holds a permission mode and a sandbox, so autonomy and containment render into two fields that decide nothing about each other. Codex has one field for both — it says how much a session may do by saying how far it may reach — so `codex_sandbox` takes the narrower of what the wall asks and what the autonomy implies, over `read-only < workspace-write < danger-full-access`: neither axis may widen what the other narrowed, which is a refusal rather than a precedence rule. `outer` is the exception under both, and takes the field outright. The runtime's own sandbox is stated off rather than left unsaid, because a spawned session reads none of the settings files a launched one does and the policy would otherwise judge a posture nobody set; on Codex the boundary is a kernel facility an unprivileged container will not nest, so narrowing it there would arm the wall that cannot start. The program both fields point at is written by `contained_cli` in `devtools/harness/contained.py` — one builder, whose only provider-specific argument is the CLI's own name. |
+| A session's containment | `CLAUDE_CONTAINMENT` in `providers/claude/selection.py`, rendering the SDK's `sandbox` settings, and `cli_path` for the program that enters the container | `CODEX_CONTAINMENT` in `providers/codex/selection.py`, rendering the one `sandbox` mode, and `executable` for that same program | `SessionRequest.containment` asks in the launcher's own three words — `outer`, `inner`, `none` — so one request means one wall on both runtimes, and the default is the `none` every request meant before the axis existed. What differs is what each runtime has to spell it with. Claude holds a permission mode and a sandbox, so autonomy and containment render into two fields that decide nothing about each other. Codex has one field for both — it says how much a session may do by saying how far it may reach — so `codex_sandbox` takes the narrower of what the wall asks and what the autonomy implies, over `read-only < workspace-write < danger-full-access`: neither axis may widen what the other narrowed, which is a refusal rather than a precedence rule. `outer` is the exception under both, and takes the field outright. The runtime's own sandbox is stated off rather than left unsaid, because a spawned session reads none of the settings files a launched one does and the policy would otherwise judge a posture nobody set; on Codex the boundary is a kernel facility an unprivileged container will not nest, so narrowing it there would arm the wall that cannot start. The program both fields point at is written by `contained_cli` in `launch/container.py` — one builder, whose only provider-specific argument is the CLI's own name. |
 | Usage display | the OAuth usage endpoint for live windows, plus the local stats cache for per-day and per-model detail | the app-server's own account calls for both the metered windows and the daily token buckets | One display over two readers (`lup.observability.usage`, `usage/reader.py` in each adapter). Each side reports a plan's windows and its days into the same report, so the pacing bars, the daily budget, and the `--json` snapshot are decided once. What differs is what each account publishes: fixed named windows and a per-model split on one side, two self-describing windows and no model breakdown on the other — which is why one draws a model legend and the other has none to draw. |
 | Sensitive local-only files | `.claude/settings.local.json` | `.codex/config.local.toml` | Native personal-config locations, excluded from generation. |
 | Where a verdict's question is put | The native permission request, carrying `permissionDecisionReason`; a verdict enumerating sites repeats them in `systemMessage`, coloured for this terminal (`announced` in `providers/claude/assets/policy_dispatcher.py`) | The review queue, because the pre-tool boundary has no ask effect: a successful structured `deny` carries the reason in `systemMessage`, and app-server hook notifications deliver it as a warning. Refusals from anywhere else write their reason to stderr | Measured against Claude Code 2.1.237 and Codex 0.155.1. Claude's `permissionDecisionReason` reaches the person for `Bash` and not for `Write`/`Edit`; `systemMessage` reaches them from every hook, arriving with the tool call rather than with the prompt. Codex drops `systemMessage` on exit 2, so a blocked review exits 0 to preserve the warning while the structured denial still stops the call. `codex exec --json` omits hook notifications, so its agent receives the denial but its event stream carries no separate review notice. An autonomy mode answers a rendered request on the session's behalf, and the payload carries no field separating that from a person; a recorded answer is the one a mode cannot give. |
@@ -107,6 +107,41 @@ hooks, unresolved load errors and untrusted hooks refuse session startup;
 skill-only plugins do not require hook evidence.
 
 Neither runtime remembers an approval. An observed execution records that it ran and nothing more, so every ask re-enters review on both. A queue answer releases one exact retry: the receipt binds the captured documents, resolved paths, origin policy and accepted destination policies. `test_codex_review_delivery.py` verifies native notification, blocking, independent settlement and one-use replay using an inert local Responses server.
+
+## The launch declaration's intended differences
+
+Every launch field on `Claude` and `Codex` compiles into both a session
+opened in process and a launched CLI, with the same meaning. Where a
+runtime or an output has no word for a field, the declaration refuses it
+rather than dropping it, and the difference is this list:
+
+- **Inbox socket.** Claude Code binds the inbox a peer nudges it through
+  (`--messaging-socket-path`) and shows the roster name in its chrome
+  (`--name`); Codex takes neither flag, and a Codex session reads its mail
+  at its next tool call. A session opened in process binds no inbox on
+  either runtime: the program driving its turns is what wakes it.
+- **A way out of the sandbox.** `InnerSandbox(escapable=True)` and
+  `excluded_commands` are Claude Code's `allowUnsandboxedCommands` and
+  `excludedCommands`; Codex's workspace-write envelope has no per-command
+  exit, so a Codex declaration asking for one is refused.
+- **Sandbox mode.** Codex states how much a session may do by how far it
+  may reach, so its own `sandbox_mode` is reconciled with the wall
+  (`codex_sandbox_mode`: the narrower wins inside the inner sandbox, the
+  container takes `danger-full-access` unless a mode is declared); Claude
+  keeps the permission mode and the sandbox apart.
+- **The picker.** `Pick()` is the runtime's own terminal picker, so only a
+  launch takes it; a session opened in process refuses it and resumes
+  `Latest()` or a named session instead.
+- **Codex's home.** A launched Codex session runs in a home derived from
+  the account's for its worktree; a session opened in process runs in the
+  account's home itself. Claude runs in the account's home either way.
+- **A built plugin.** Claude loads a plugin directory; Codex installs from
+  a marketplace, so a built Codex plugin is named by the project whose
+  marketplace offers it.
+- **What only a program honours.** In-process `hooks`, a submission gate,
+  `layers` and `max_turns` (and Codex's delegated tools and corrections)
+  shape a session a program drives; a launch refuses them, since the
+  policy it enforces reaches it through the plugin's dispatcher.
 
 ## Parity audit of generated artifact families
 

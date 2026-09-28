@@ -7,7 +7,9 @@ import pytest
 import sh
 
 import lup.devtools.harness.launch as launch
-from lup.devtools.harness.preflight import LaunchSentinels
+from lup.launch.session import LaunchOpening
+from lup.launch.declaration import LaunchSandbox
+from lup.launch.preflight import LaunchSentinels
 from lup.harness.messaging import SessionInboxes
 
 
@@ -44,16 +46,16 @@ def checkpoint(events: list[str]) -> launch.LaunchCheckpoint:
     return record
 
 
-@pytest.mark.parametrize("sandbox", list(launch.LaunchSandbox))
+@pytest.mark.parametrize("sandbox", list(LaunchSandbox))
 def test_claude_checkpoints_before_preflight_and_after_close(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sandbox: launch.LaunchSandbox
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sandbox: LaunchSandbox
 ) -> None:
     events: list[str] = []
     profiles = Mock()
     profiles.launch_home.return_value = None
     preflight = Mock(
         side_effect=lambda *a, **k: (
-            events.append("ready") or launch.LaunchOpening(sandbox=k["sandbox"])
+            events.append("ready") or LaunchOpening(sandbox=k["sandbox"])
         )
     )
     monkeypatch.setattr(
@@ -68,7 +70,7 @@ def test_claude_checkpoints_before_preflight_and_after_close(
     monkeypatch.setattr(
         launch,
         "claude_sandbox_arguments",
-        lambda _plugin, sandbox=launch.LaunchSandbox.INNER, accessible=[], settings=None: [],
+        lambda _plugin, sandbox=LaunchSandbox.INNER, accessible=[], settings=None, tree=None: [],
     )
     monkeypatch.setattr(launch, "non_interactive_environment", lambda _env: {})
     monkeypatch.setattr(
@@ -108,16 +110,16 @@ def test_claude_checkpoints_before_preflight_and_after_close(
     ]
 
 
-@pytest.mark.parametrize("sandbox", list(launch.LaunchSandbox))
+@pytest.mark.parametrize("sandbox", list(LaunchSandbox))
 def test_codex_checkpoints_before_preflight_and_after_close(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sandbox: launch.LaunchSandbox
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sandbox: LaunchSandbox
 ) -> None:
     events: list[str] = []
     home = Mock(path=tmp_path / "home", isolated=False)
     store = Mock()
     preflight = Mock(
         side_effect=lambda *a, **k: (
-            events.append("ready") or launch.LaunchOpening(sandbox=k["sandbox"])
+            events.append("ready") or LaunchOpening(sandbox=k["sandbox"])
         )
     )
     monkeypatch.setattr(
@@ -133,7 +135,7 @@ def test_codex_checkpoints_before_preflight_and_after_close(
     monkeypatch.setattr(
         launch,
         "codex_sandbox_arguments",
-        lambda _plugin, _environment, _args, sandbox=launch.LaunchSandbox.INNER, accessible=[]: [],
+        lambda _plugin, _environment, _args, sandbox=LaunchSandbox.INNER, accessible=[], tree=None: [],
     )
     monkeypatch.setattr(launch, "CodexWorktreeHomeStore", lambda **_: store)
     monkeypatch.setattr(launch, "select_codex_home", lambda *args: home)
@@ -261,7 +263,7 @@ def test_a_launch_names_the_waits_it_spends_silent(
     # Named, so the host is not asked which posture the default settles to.
     assert (
         launch.ready_to_open(
-            composition(), False, LaunchSentinels(), sandbox=launch.LaunchSandbox.OUTER
+            composition(), False, LaunchSentinels(), sandbox=LaunchSandbox.OUTER
         )
         is not None
     )

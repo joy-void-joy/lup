@@ -105,12 +105,12 @@ from lup.devtools.dev.worktree import (
     copy_gitignored_extras,
     sync_dependencies,
 )
-from lup.devtools.harness.contained import (
+from lup.launch.container import (
     engine_absence,
     worker_cli,
     worker_wrapper_path,
 )
-from lup.devtools.harness.generate import NativeHarnessComposition
+from lup.harness.generate import NativeHarnessComposition
 from lup.devtools.sync import accessible_roots, granted_devices
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.providers.codex.login import CODEX_LOGIN
@@ -1576,7 +1576,12 @@ def run_resolve(
         report_a_blocked_registration(root)
 
     async def execute() -> None:
-        from lup.providers.claude import Claude, ClaudeSandboxConfig, ClaudeTools
+        from lup.launch.declaration import (
+            InnerSandbox,
+            NoSandbox,
+            OuterContainer,
+        )
+        from lup.providers.claude import Claude, ClaudeTools
         from lup.providers.claude.runtime import (
             environmental_fault,
             may_be_a_rotation,
@@ -1830,8 +1835,8 @@ def run_resolve(
         # here as well: without them a worker is confined by a boundary its own
         # toolchain does not fit through, and every failure it meets names
         # something other than the boundary.
-        claude_worker_sandbox = ClaudeSandboxConfig(
-            allow_unsandboxed_commands=True,
+        claude_worker_sandbox = InnerSandbox(
+            escapable=True,
             excluded_commands=plugin.hooks.excluded_commands() if plugin.hooks else [],
         )
         # Codex has no such channel: its sandbox is a mode on the whole
@@ -1958,7 +1963,7 @@ def run_resolve(
                                     harness.declared_hooks,
                                     context.grants,
                                     CLAUDE_SEMANTICS,
-                                    claude_worker_sandbox.posture(),
+                                    claude_worker_sandbox.enforcement(),
                                     relay,
                                 ),
                             ),
@@ -1972,8 +1977,8 @@ def run_resolve(
                 tools=CodexTools(builtin="stock", mcp=[questions]),
                 system_prompt=("Execute the persisted Lup resolver assignment."),
                 cwd=cwd,
-                sandbox="workspace-write",
-                containment="outer" if contained_actors else "none",
+                sandbox_mode="workspace-write",
+                sandbox=OuterContainer() if contained_actors else NoSandbox(),
                 # Falls back to the program's own name, which is what this
                 # field already defaults to. Claude's seam takes ``None``
                 # for the same case instead, because its SDK searches for a
@@ -2063,8 +2068,8 @@ def run_resolve(
                 hooks=merge_hooks(create_permission_hooks([], [cwd]), context.hooks),
                 system_prompt=("Independently review the persisted resolver change."),
                 cwd=cwd,
-                sandbox="read-only",
-                containment="outer" if contained_actors else "none",
+                sandbox_mode="read-only",
+                sandbox=OuterContainer() if contained_actors else NoSandbox(),
                 executable=actor_cli(
                     cwd,
                     reviewing,

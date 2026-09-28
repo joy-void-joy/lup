@@ -25,7 +25,7 @@ from lup.harness.evidence import (
     evidence_drift,
     sdk_evidence_drift,
 )
-from lup.devtools.harness.generate import NativeHarnessComposition
+from lup.harness.generate import NativeHarnessComposition
 
 
 class SchemaReading(BaseModel, frozen=True):

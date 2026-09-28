@@ -10,31 +10,20 @@ from pathlib import Path
 
 import typer
 
+from lup.workspace.paths import worktrees_directory
+
 
 def find_tree_dir() -> Path | None:
     """Locate the ``tree/`` directory that holds sibling worktrees, or ``None``.
 
-    Two checkout layouts are supported. In the bare-repo layout the current
-    checkout is itself a worktree living inside ``tree/``, so ``tree/`` is the
-    parent. Otherwise ``tree/`` sits at the current directory or an ancestor,
-    so walking upward lets the command run from anywhere inside the checkout.
-
-    ``None`` where neither holds, so a caller that only wants the layout when
-    there is one -- a guard over sibling worktrees that have none to guard --
-    reads the absence rather than a raised exit meant for a command the layout
-    is a precondition of.
+    Asked from wherever the command runs, the way
+    :func:`~lup.workspace.paths.worktrees_directory` answers it for any
+    start. ``None`` where the layout does not hold, so a caller that only
+    wants the layout when there is one -- a guard over sibling worktrees that
+    have none to guard -- reads the absence rather than a raised exit meant
+    for a command the layout is a precondition of.
     """
-    cwd = Path.cwd().resolve()
-
-    if cwd.parent.name == "tree":
-        return cwd.parent
-
-    for directory in (cwd, *cwd.parents):
-        tree = directory / "tree"
-        if tree.is_dir():
-            return tree
-
-    return None
+    return worktrees_directory(Path.cwd())
 
 
 def get_tree_dir() -> Path:

@@ -21,7 +21,7 @@ import sh
 
 import lup.devtools.dev.drift_fold as fold
 import lup.devtools.dev.scaffold as scaffold
-from lup.devtools.harness.generate import NativeHarnessComposition
+from lup.harness.generate import NativeHarnessComposition
 from lup.harness.models import CarrierPins, HookSet
 from lup.providers.claude.harness import CLAUDE_PROMPT_EVENT
 from lup.providers.codex.harness import CODEX_PROMPT_EVENT

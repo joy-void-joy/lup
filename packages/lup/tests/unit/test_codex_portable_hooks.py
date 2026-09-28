@@ -21,11 +21,11 @@ async def test_direct_opener_rejects_unenforceable_hooks_before_native_setup(
     matcher: str | None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def native_setup(_environment: EnvVars) -> Never:
+    def native_setup(_declared: int | None, _environment: EnvVars) -> Never:
         pytest.fail("native setup must not run for unsupported hook coverage")
 
     monkeypatch.setattr(
-        "lup.providers.codex.runtime.child_recursive_agent_allowance", native_setup
+        "lup.providers.codex.runtime.allowance_environment", native_setup
     )
     hooks = LupHooksConfig(pre_tool_use=[LupHookMatcher(matcher=matcher, hook=observe)])
     config = Codex(cwd=tmp_path, hooks=hooks, approval_policy="never")
@@ -40,11 +40,11 @@ async def test_direct_pre_hooks_require_an_explicit_asking_policy(
     approval_policy: str | None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def native_setup(_environment: EnvVars) -> Never:
+    def native_setup(_declared: int | None, _environment: EnvVars) -> Never:
         pytest.fail("native setup must not run when callbacks cannot be reached")
 
     monkeypatch.setattr(
-        "lup.providers.codex.runtime.child_recursive_agent_allowance", native_setup
+        "lup.providers.codex.runtime.allowance_environment", native_setup
     )
     hooks = LupHooksConfig(
         pre_tool_use=[LupHookMatcher(matcher=APPROVAL_METHODS[0], hook=observe)]
@@ -63,11 +63,11 @@ async def test_supported_direct_hooks_reach_setup_without_changing_approvals(
     approval: bool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def native_setup(_environment: EnvVars) -> Never:
+    def native_setup(_declared: int | None, _environment: EnvVars) -> Never:
         raise RuntimeError("reached native setup after hook validation")
 
     monkeypatch.setattr(
-        "lup.providers.codex.runtime.child_recursive_agent_allowance", native_setup
+        "lup.providers.codex.runtime.allowance_environment", native_setup
     )
     observer = LupHookMatcher(hook=observe)
     hooks = LupHooksConfig(post_tool_use=[observer], stop=[observer])

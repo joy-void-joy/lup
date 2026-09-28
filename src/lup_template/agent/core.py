@@ -9,12 +9,12 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import AnyHttpUrl, BaseModel, SecretStr
 
 from lup.providers.claude import ClaudeCompatibleEndpoint
+from lup.launch.declaration import InnerSandbox, NoSandbox
 from lup.providers.claude.config import ClaudeCompatibilityTransform
 from lup.providers.claude.model_choice import ClaudeModelChoice, claude_model_choice
 from lup.providers.claude import (
     Claude,
     ClaudeBuiltinTool,
-    ClaudeSandboxConfig,
     ClaudeTools,
     SESSION_THINKING_TOKENS,
 )
@@ -231,7 +231,7 @@ def provider_factory(
                 if settings.tool_search is not None
                 else {}
             ),
-            sandbox=ClaudeSandboxConfig() if session_defaults else None,
+            sandbox=InnerSandbox() if session_defaults else NoSandbox(),
             hooks=hooks,
             submission_gate_resolver=submission_gate,
             subagents=subagents or [],
@@ -300,7 +300,7 @@ def provider_factory(
             model=codex_model,
             system_prompt=system_prompt,
             cwd=cwd,
-            sandbox=(
+            sandbox_mode=(
                 "read-only"
                 if delegated_tools is not None
                 else normalize_codex_sandbox(settings.codex_sandbox)

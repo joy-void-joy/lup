@@ -15,7 +15,7 @@ from pydantic import AnyHttpUrl, ValidationError
 from lup.providers.claude.harness import CLAUDE_DISPATCHER
 from lup.providers.claude.hooks import CLAUDE_SEMANTICS
 from lup.providers.claude.native import ClaudeDecisionRenderer
-from lup.providers.claude import ClaudeSandboxConfig
+from lup.launch.declaration import InnerSandbox
 from lup.providers.codex.native import CodexDecisionRenderer
 from lup.devtools.harness.resolve import worker_policy_hooks
 from lup.policy.hooks import LupHookInput, LupHookOutput
@@ -203,7 +203,7 @@ async def test_a_placement_widens_only_the_operations_that_declare_one() -> None
     that may place one operation on the host must not thereby place the ones
     it never judged.
     """
-    posture = ClaudeSandboxConfig(allow_unsandboxed_commands=True).posture()
+    posture = InnerSandbox(escapable=True).enforcement()
     assert posture == SandboxPosture(active=True, escapable=True)
 
     hooks = create_policy_hooks(
@@ -249,7 +249,7 @@ async def test_a_toolchain_needs_a_boundary_that_grants_paths_not_the_host() -> 
     does not both read as ``outside``, and the second only found out at its
     first shell call, on a bare ``EROFS`` that reads like a broken repository.
     """
-    posture = ClaudeSandboxConfig().posture()
+    posture = InnerSandbox().enforcement()
     assert posture == SandboxPosture(active=True, escapable=False)
 
     hooks = create_policy_hooks(
@@ -286,7 +286,7 @@ async def test_an_operation_needing_a_channel_this_session_lacks_is_blocked() ->
     the missing channel rather than reading as a rule's judgement: no approval
     builds a channel, so no reviewer is shown the question.
     """
-    posture = ClaudeSandboxConfig().posture()
+    posture = InnerSandbox().enforcement()
     assert CLAUDE_SEMANTICS.escapable
     assert not CLAUDE_SEMANTICS.escapes_from(posture)
 
@@ -333,7 +333,7 @@ async def test_a_worker_is_judged_by_the_composition_a_run_actually_builds() -> 
         declared_hook_set(),
         LeaseGrants(),
         CLAUDE_SEMANTICS,
-        ClaudeSandboxConfig(allow_unsandboxed_commands=True).posture(),
+        InnerSandbox(escapable=True).enforcement(),
     )
 
     async def judged(command: str) -> LupHookOutput:

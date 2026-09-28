@@ -14,13 +14,11 @@ from lup.devtools.dev.model_catalog import catalog_writers, library_catalogs
 from lup.devtools.dev.settings_schema import SettingsSchemaSource, settings_writers
 from lup.devtools.dev.rules import write_rule_reference
 from lup.devtools.dev.workflow import write_publish, write_workflow
-from lup.devtools.harness.composition import (
-    ClaudeComposer,
-    CodexComposer,
-    NativeTargets,
-)
+from lup.devtools.harness.composition import NativeTargets
+from lup.providers.claude.composition import ClaudeComposer
+from lup.providers.codex.composition import CodexComposer
 from lup.devtools.harness.drift import RepositoryWriter
-from lup.devtools.harness.generate import (
+from lup.harness.generate import (
     NativeHarnessComposition,
     ProjectContent,
 )

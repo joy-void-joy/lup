@@ -1,36 +1,31 @@
-"""Native launch flows: runtime preflight, then the Claude and Codex launchers.
+"""This repository's launch workflow, and the Claude and Codex launchers over it.
 
-Each launcher regenerates its target's artifacts, verifies every claimed
-native requirement against a live probe, and hands the terminal to the
-native CLI with the non-interactive environment applied.
+Each launcher regenerates its target's artifacts, clears the gates this
+repository keeps before a session -- its companion trees, its base, its
+worktree pointers -- and maps its command line onto the session the
+library composes (:mod:`lup.launch.session`), handing the terminal to the
+native CLI with the non-interactive environment applied. What it reads
+only here, the registrations in `sync.json.local`, it hands the library
+as the grants a session stands on.
 """
 
-import asyncio
-import json
-import logging
 import os
 import shutil
-from collections.abc import Callable, Sequence
-from contextlib import AbstractContextManager, nullcontext
-from datetime import datetime
-from enum import StrEnum
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from pathlib import Path
 from tempfile import mkdtemp
 from typing import Protocol, runtime_checkable
-from uuid import uuid4
 
 import sh
 import typer
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from lup.harness.devices import Device
-from lup.providers.login import ProviderLogin
 from lup.providers.profile_tree import profile_directory
 from lup.providers.profiles import DefaultHomeProfile, ProfileDirectory
-from lup.providers.user_config import UserConfig, UserConfigFile
-from lup.devtools.harness.config_volume import HomeSeedPlaces, named_file
-from lup.devtools.harness.contained import contained_argv, read_config_home
-from lup.providers.claude.confinement import CLAUDE_SANDBOX_OFF
+from lup.providers.user_config import UserConfigFile
+from lup.launch.config_volume import HomeSeedPlaces
 from lup.providers.claude.model_choice import (
     claude_default_effort,
     claude_model_id,
@@ -49,84 +44,68 @@ from lup.providers.codex.model_choice import (
 )
 from lup.providers.codex.subagents import CodexModelTiers
 from lup.providers.claude.config_home import (
-    CLAUDE_HOME_DOCUMENT,
-    WORKSPACE_SETTINGS,
-    ClaudeConfigHome,
     ClaudeConfigUnreadable,
     selected_config_home,
 )
 from lup.providers.claude.home_seed import (
-    KEYBINDINGS,
-    ClaudeHomeReturn,
     ClaudeHomeSeed,
 )
 from lup.providers.claude.theme import settle_claude_theme
 from lup.providers.claude.harness import ClaudeSpellings
 from lup.providers.claude.transcripts import ClaudeTranscripts
-from lup.providers.codex.confinement import CODEX_CONFINEMENT
 from lup.providers.codex.harness import CodexSpellings
 from lup.providers.codex.login import CODEX_LOGIN
-from lup.providers.codex.account import read_account
-from lup.providers.codex.install import install_codex_plugin
 from lup.providers.codex.marketplace import CodexMarketplace
 from lup.providers.codex.profile import CodexProfileSettings
 from lup.providers.codex.transcripts import CodexTranscripts
-from lup.coordination.identity import MEMBER_ENV, NAME_ENV, LaunchedMember
-from lup.coordination.repository import RepositoryPeers, launched_member
+from lup.coordination.repository import launched_member
 from lup.harness.environment import non_interactive_environment
-from lup.harness.image import Image, detected_client
-from lup.harness.messaging import SessionInboxes, cleared
-from lup.workspace.edition import shared_git_directory
-from lup.harness.models import HookSet, NativeName, Plugin, Resumption
-from lup.policy.boundary import BoundaryPreflight
-from lup.policy.identity import POLICY_ROOT_ENV
-from lup.policy.profiles import compile_boundary, depended_on, measured
-from lup.policy.snapshots import accept_destination_policies, destination_authorities
-from lup.devtools.pointer_trust import judged_roots, store_exposure
+from lup.harness.models import NativeName, Plugin, Resumption
+from lup.launch.refusal import LaunchRefused
 from lup.sandbox.rail import (
     AccessibleRoot,
-    host_run,
-    in_repository,
-    fleet_lease,
-    working_trees,
 )
 from lup.devtools.sync import accessible_roots, granted_devices
-from lup.harness.notice import Banner, Notice
-from lup.harness.requirements import (
-    Finding,
-    HostFacts,
-    Manifest,
-    Requirement,
-    refused,
+from lup.launch.session import (
+    LaunchOpening,
+    StandingGrants,
+    ambient_config_home,
+    personal_config,
+    placed_inbox,
+    runtime_preflight,
+    session_argv,
+    start_harness_transcript,
 )
+from lup.providers.claude.session import carry_claude_home
+from lup.providers.codex.session import (
+    carry_codex_home,
+    codex_login_preflight,
+    prepare_codex_plugin,
+    settled_codex_seed,
+)
+from lup.launch.boundary import apply_sandbox_environment
+from lup.launch.declaration import LaunchSandbox, settled_sandbox
+from lup.providers.claude.launch import (
+    claude_resume_arguments,
+    claude_sandbox_arguments,
+    companion_plugin_directories,
+)
+from lup.providers.codex.launch import codex_resume_arguments, codex_sandbox_arguments
+from lup.harness.notice import Notice
 from lup.harness.process import LocalProcessLauncher
 from lup.harness.toolchain import (
     bubblewrap_requirement,
-    codex_envelope_requirement,
-    container_client,
-    for_host,
-    granted_device_requirement,
     socat_requirement,
 )
 from lup.observability.audit import (
-    ArgvRedaction,
-    KeyRedaction,
-    PathRedaction,
-    PortableRoot,
-    Redactions,
-    TraceActor,
-    TraceContext,
     TraceJournal,
 )
-from lup.observability.native import NativeTranscripts, NativeTranscriptWatcher
-from lup.observability.sessions import Session, SessionRecorder
+from lup.observability.sessions import SessionRecorder
 from lup.sessions.recursion import MAX_RECURSIVE_AGENT_ENV
-from lup.types import EnvVars, JsonObject, JsonValue
-from lup.workspace.paths import agent_version, harness_runs_path, project_root
+from lup.types import EnvVars, JsonObject
+from lup.workspace.paths import project_root
 from lup.providers.codex.home import (
-    SEED_RECORD,
     CodexWorktreeHomeStore,
-    seeded_codex_settings,
     select_codex_home,
 )
 from lup.devtools.harness.composition import NativeTargets
@@ -136,93 +115,42 @@ from lup.devtools.harness.drift import (
     generate_targets,
     generate_with_report,
 )
-from lup.devtools.harness.generate import NativeHarnessComposition
-from lup.devtools.harness.preflight import (
+from lup.harness.generate import NativeHarnessComposition
+from lup.launch.preflight import (
     LaunchSentinels,
-    ROOT_VARIABLE,
     exclude_sandbox_placeholders,
-    record_preflight,
     release_ledger,
-    retire_mount_table,
     sweep_ledgers,
 )
 from lup.devtools.dev.worktree import RelocationHint, refuse_redirected_pointers
-from lup.devtools.layout import get_tree_dir
+from lup.devtools.layout import find_tree_dir
 
 
-class LaunchSandbox(StrEnum):
-    """Which sandbox a launch opens the session under.
+@contextmanager
+def usage_refusals() -> Iterator[None]:
+    """Say a launch the library refused as this command line's own usage error.
 
-    One axis with three points rather than two booleans, because the two
-    walls were never independent: the container stands the runtime's own
-    sandbox down, and skipping the container is what makes that sandbox
-    worth establishing. Named from the session's point of view -- which
-    wall is load-bearing -- so the flag that selects one reads as the
-    posture it buys rather than as the machinery it toggles.
-
-    Distinct from :class:`~lup.policy.enforcement.SandboxPosture`, which is
-    what a session's *configuration* means to the policy kernel once it is
-    open; this is the launcher's choice of what to configure.
+    The library refuses in its own exception, which names what to fix and
+    nothing about a command line; here the refusal reaches the operator the
+    way every other bad invocation does, as a usage error and its exit code.
+    Held once at each entry point -- the launchers and the commands that ask
+    the library for a boundary -- rather than at every call into it.
     """
-
-    OUTER = "outer"
-    """The verified container is the boundary; the native sandbox stands down
-    inside it, because a wall that has to be weakened to start nested is worth
-    less than saying plainly which wall is load-bearing."""
-
-    INNER = "inner"
-    """The session opens on the host and the launcher establishes the
-    runtime's own workspace-write sandbox, vouching for it only after
-    exercising the tools it stands on."""
-
-    NONE = "none"
-    """The session opens on the host under the semantic policy alone. Nothing
-    is established and nothing is vouched for, so the deny lattice stays
-    standing -- the posture a broken inner sandbox would degrade into
-    silently, stated as a choice."""
-
-    def contained(self) -> bool:
-        """Whether this launch opens inside the verified container."""
-        return self is LaunchSandbox.OUTER
+    try:
+        yield
+    except LaunchRefused as refusal:
+        raise typer.BadParameter(str(refusal)) from refusal
 
 
-def settled_sandbox(asked: LaunchSandbox | None) -> LaunchSandbox:
-    """The sandbox a launch opens under: the one asked for, or the default the host holds.
+def standing_grants() -> StandingGrants:
+    """This repository's registrations, as the library asks a launch for them.
 
-    ``None`` is a command line that named no sandbox, the one answer with
-    anything left to settle. The default is the verified container, which a
-    host with no container client cannot start, and refusing there would
-    leave the plain launch unopenable on every machine without Docker or
-    Podman. So the default opens under the runtime's own sandbox instead, and
-    says so at warning level: what would restore the container, and the flag
-    that states the choice without the warning.
-
-    Only the default degrades. ``--sandbox outer`` asks for the container by
-    name, and a launch that asked for a boundary and opened without one is
-    the failure the boundary exists to rule out, so that request reaches
-    :func:`~lup.devtools.harness.contained.contained_argv` and is refused
-    there. A client that answers and cannot drive the engine behind it is not
-    an absence either: the operator has an engine to repair rather than one
-    to install, and the refusal there says which.
-
-    Asked of :func:`~lup.harness.image.detected_client`, the probe the
-    container's argv is built from, so the two cannot disagree about whether
-    this host has an engine.
+    Read by :mod:`lup.devtools.sync` from the registry and `sync.json.local`,
+    which are this repository's bookkeeping rather than the launch's. Named
+    at the call rather than captured at import, so the registry asked is the
+    one in force when the launch asks.
     """
-    if asked is not None:
-        return asked
-    if detected_client() is not None:
-        return LaunchSandbox.OUTER
-    Notice(
-        text=(
-            "No working Docker or Podman client was found, so this session "
-            "runs under the inner sandbox on the host. Install Docker or "
-            "Podman to launch in the container (outer), or pass "
-            "`--sandbox inner` to choose this without the warning."
-        ),
-        urgency="warning",
-    ).say()
-    return LaunchSandbox.INNER
+    return StandingGrants(roots=accessible_roots, devices=granted_devices)
 
 
 def declared_mounts(
@@ -298,35 +226,6 @@ def relocation_hint(worktree_path: Path) -> RelocationHint:
             shell=f"{move}; codex",
         )
     return RelocationHint(agent="", shell=move)
-
-
-class LaunchOpening(BaseModel):
-    """What clearing the gates before a session left for the opening to say.
-
-    The banner travels with the findings because the two are halves of one
-    answer and are produced at opposite ends of the launch: the runtime is
-    established here, the boundary is measured after the container starts,
-    and the reader wants them in one block ordered by what they might have to
-    do about it. A component that printed as it went would put the version
-    above the roster above the boundary, which is the order the launcher
-    happens to work in and no order at all to anybody reading it.
-    """
-
-    findings: list[Finding] = []
-    """The host roster, carried to the boundary preflight that needs it."""
-
-    banner: Banner = Banner()
-    """Every line held so far, said once the last measurement is in."""
-
-    runtime: str = ""
-    """The runtime this opens, and the version of it that answered."""
-
-    sandbox: LaunchSandbox = LaunchSandbox.OUTER
-    """The sandbox this session opens under, settled once for everything after.
-
-    Carried rather than recomputed, because the default is settled by asking
-    the host and says so when it falls back: a launcher reading the flag
-    again would see the question and not its answer."""
 
 
 def ready_to_open(
@@ -410,79 +309,19 @@ def ready_to_open(
             f"status: {', '.join(excluded)}"
         )
     typer.echo("checking the host")
-    opening = LaunchOpening(sandbox=settled_sandbox(sandbox))
+    opening = LaunchOpening(sandbox=settled_sandbox(sandbox, "pass `--sandbox inner`"))
     opening.findings = runtime_preflight(
-        composition, sentinels, opening, opening.sandbox.contained()
+        composition.recipe.label,
+        composition.readiness,
+        composition.recipe.source.requirements,
+        project_root(),
+        sentinels,
+        opening,
+        opening.sandbox.contained(),
+        standing=standing_grants(),
     )
     settle_base_freshness(LocalProcessLauncher(), project_root())
     return opening
-
-
-class HarnessTranscript(BaseModel, arbitrary_types_allowed=True):
-    """Canonical journal and native watcher owned by one CLI launch.
-
-    An interactive CLI owns its terminal, so a launch cannot be wrapped the way
-    an SDK session is. Mirroring what the CLI persists into a journal of our own
-    is what makes a hand-driven session produce the same observable trace a
-    programmatic run does -- and what a launch path that starts nothing quietly
-    takes away, since a trace nobody wrote is indistinguishable from a session
-    nobody ran.
-    """
-
-    journal: TraceJournal
-    watcher: NativeTranscriptWatcher | None = None
-    diagnostics: logging.Handler | None = None
-    record: Session | None = None
-    """The ledger node pointing at this launch's directory, where one was recorded."""
-
-    recorder: SessionRecorder | None = None
-
-    def close(self, *, succeeded: bool, interrupted: bool = False) -> None:
-        """Stop ingestion, record the outcome, and release the diagnostics log.
-
-        The ledger's record of the launch is amended last, after the journal
-        holds its final record, so the digest pinned is the closed journal's.
-        """
-        if self.watcher is not None:
-            self.watcher.stop()
-        self.journal.emit("run_end", {"succeeded": succeeded})
-        if self.diagnostics is not None:
-            watcher_logger().removeHandler(self.diagnostics)
-            self.diagnostics.close()
-        if self.recorder is not None and self.record is not None:
-            self.recorder.closed(
-                self.record,
-                "interrupted"
-                if interrupted
-                else "completed"
-                if succeeded
-                else "failed",
-            )
-
-
-def watcher_logger() -> logging.Logger:
-    """The logger the native transcript watcher reports its own failures on."""
-    return logging.getLogger(NativeTranscriptWatcher.__module__)
-
-
-def capture_watcher_diagnostics(run_directory: Path) -> logging.Handler:
-    """Send watcher diagnostics to a file for the life of one launch.
-
-    The launcher hands its terminal to an interactive CLI that draws over the
-    whole screen. Nothing configures logging on this path, so a watcher failure
-    would reach Python's last-resort handler and print a traceback into that UI
-    -- so a recovered polling error would read as a crash. The durable
-    record is the journal's own error event; this file is for the detail
-    that does not belong in it.
-    """
-    run_directory.mkdir(parents=True, exist_ok=True)
-    handler = logging.FileHandler(run_directory / "watcher.log", encoding="utf-8")
-    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-    logger = watcher_logger()
-    logger.addHandler(handler)
-    logger.setLevel(logging.DEBUG)
-    logger.propagate = False
-    return handler
 
 
 @runtime_checkable
@@ -648,697 +487,6 @@ def extract_launch_mode(
     )
 
 
-def portable_roots() -> list[PortableRoot]:
-    """The roots a durable transcript should name by role, not by location.
-
-    The project root, the tree of sibling checkouts around it, and the
-    operator's home — between them, everywhere a session's paths come from.
-    Ordered widest-last is irrelevant here because the rule sorts by length;
-    what matters is that all three are offered, since a payload quoting a
-    sibling worktree names none of the other two.
-    """
-    return [
-        PortableRoot(label="<project>", path=project_root()),
-        PortableRoot(label="<tree>", path=project_root().parent),
-        PortableRoot(label="<home>", path=Path.home()),
-    ]
-
-
-def start_harness_transcript(
-    provider: str,
-    transcripts: NativeTranscripts,
-    *,
-    model: str | None,
-    profile: str | None,
-    arguments: list[str],
-    record_root: Path | None = None,
-    mode: str | None = None,
-    transcribe: bool = True,
-    recorder: SessionRecorder | None = None,
-) -> HarnessTranscript:
-    """Start one canonical transcript around a native interactive CLI.
-
-    The runtime arrives as its own transcript reader rather than as a directory
-    to scan, because where a runtime keeps its sessions and how one of its
-    records names itself are the runtime's business, not this launcher's.
-
-    ``record_root`` is where the transcript tree is rooted, so a launch mode
-    whose records are kept to a different standard keeps them somewhere a
-    reader can tell apart without opening one. ``mode`` puts the same fact
-    inside the record, because a directory is renameable and a run that has
-    been copied out of one should still say what it was.
-
-    This is the writer that opens a launch's directory, so it is where the
-    launch is recorded in the ledger: handed a ``recorder``, it records one
-    :class:`~lup.observability.sessions.Session` pointing at the directory
-    and its observable journal, which :meth:`HarnessTranscript.close` amends
-    with the outcome. The harness command tree wires the recorder from the
-    project's declared kinds; handed none, nothing is recorded.
-    """
-    run_id = (
-        f"{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{provider}_{uuid4().hex[:8]}"
-    )
-    root = record_root or harness_runs_path()
-    trace_path = root / provider / run_id / "observable.jsonl"
-    journal = TraceJournal(
-        trace_path,
-        TraceContext.root(
-            run_id,
-            TraceActor(
-                kind="harness",
-                name=f"lup-devtools harness {provider}",
-                provider=provider,
-                model=model,
-            ),
-        ),
-        # A harness transcript is the one journal written to be kept and read
-        # later, so it carries the path rule the in-process default does not:
-        # what it mirrors is a native CLI's own record, full of this machine's
-        # directories in prose no key-name rule can see.
-        redaction=Redactions(KeyRedaction(), PathRedaction(portable_roots())),
-    )
-    # An argv vector reaches the journal only redacted: these are the words a
-    # caller typed, and a credential passed as an option value is a value the
-    # key-name redaction cannot see.
-    safe_arguments: list[JsonValue] = list(ArgvRedaction().arguments(arguments))
-    payload: JsonObject = {
-        "provider": provider,
-        "model": model,
-        "profile": profile,
-        "mode": mode,
-        "arguments": safe_arguments,
-    }
-    journal.emit("run_start", payload)
-    record = (
-        recorder.opened(provider, agent_version(), trace_path.parent, trace_path)
-        if recorder is not None
-        else None
-    )
-    if not transcribe:
-        return HarnessTranscript(journal=journal, record=record, recorder=recorder)
-    watcher = NativeTranscriptWatcher(
-        transcripts,
-        journal.child(
-            TraceActor(
-                kind="native_agent",
-                name=provider,
-                provider=provider,
-                model=model,
-            )
-        ),
-        scope=project_root(),
-    )
-    diagnostics = capture_watcher_diagnostics(trace_path.parent)
-    watcher.start()
-    # Said by the banner rather than here, where it was printed a second time
-    # under `Artifacts` a few lines later: one path, twice, in two different
-    # spellings of the same sentence.
-    return HarnessTranscript(
-        journal=journal,
-        watcher=watcher,
-        diagnostics=diagnostics,
-        record=record,
-        recorder=recorder,
-    )
-
-
-def runtime_preflight(
-    composition: NativeHarnessComposition,
-    sentinels: LaunchSentinels,
-    opening: LaunchOpening,
-    contained: bool = True,
-) -> list[Finding]:
-    """Verify each claimed native requirement immediately before launch.
-
-    Two rosters, asked in the order their failures matter. The native probes
-    answer whether this runtime can host a session at all, and a gap there
-    stops the launch. The declared requirements answer what the session will
-    be able to *do*, and almost every gap there costs a capability rather
-    than the session -- so those are named and the launch continues, which is
-    the only posture that works on a machine without a display, a container,
-    or an editor attached.
-
-    A supported probe is not a line. Three of them answering with one version
-    between them is one fact stated three times, and the fact is which
-    runtime this opens -- so that is what the opening carries, and each
-    capability is heard from only where it is missing, which is the answer
-    the launch stops on.
-    """
-    target = composition.recipe.label
-    evidence = composition.readiness()
-    for item in evidence:
-        if item.supported:
-            continue
-        Notice(
-            text=f"{target} {item.version}: required capability unavailable: {item.capability}",
-            urgency="refusal",
-        ).say()
-    if any(not item.supported for item in evidence):
-        raise typer.BadParameter(
-            f"Cannot launch {target}: required runtime checks failed. "
-            "Run `uv run lup-devtools harness doctor` for details."
-        )
-    versions = ", ".join(sorted({item.version for item in evidence}))
-    opening.runtime = f"{target} {versions}" if versions else target
-    return report_requirements(
-        composition.recipe.source.requirements,
-        sentinels=sentinels,
-        in_passing=True,
-        contained=contained,
-    )
-
-
-def report_requirements(
-    manifest: Manifest,
-    setting_up: bool = False,
-    sentinels: LaunchSentinels = LaunchSentinels(),
-    in_passing: bool = False,
-    contained: bool = False,
-) -> list[Finding]:
-    """Exercise the host-side requirements, printing what each one found.
-
-    An absence is exactly the fact a session needs at the top of its
-    scrollback, because it is the one the agent inside cannot discover except
-    by failing at it.
-
-    *in_passing* is a roster exercised on the way to something else, and
-    there a capability that works is counted rather than named: the roster
-    grows, the block of `working` grows with it, and the launch reports the
-    same block every session. A caller that asked -- `harness requirements`,
-    whose whole job is this answer -- hears every entry, because a command
-    that prints nothing on a healthy machine has not answered the question.
-
-    *setting_up* widens this to everything checked only at setup, and is off
-    for a launch. Two different things live there and both would be wrong to
-    repeat: a nicety reported before every session becomes a line people learn
-    to skip, along with the line above it that mattered; and an exercise that
-    starts a container is a cost no session should pay to be told something
-    that was equally true yesterday.
-    """
-    # The host sentinel reaches a probe through this process's own environment
-    # rather than through an argument, because an exercise runs as a
-    # subprocess of this one and inherits it. Set here, at the one place the
-    # host roster runs, so a probe asking which side it is on has an answer
-    # before it is asked -- and so nothing else has to carry the value.
-    os.environ.update(sentinels.outside())  # lup: ignore[os-environ]
-    environ: EnvVars = dict(os.environ)  # lup: ignore[os-environ]
-    # Pointed at this host's client here rather than declared as one, because
-    # the declaration is hashed into the ownership digest and a container
-    # client is a fact about the machine. This is the only place the
-    # exercises actually run, so it is the only place that has to know.
-    #
-    # The machine's device grants join the roster here for the same reason
-    # and from the same side: a grant is read off this machine's own file at
-    # the moment the roster runs, so a committed manifest never names a
-    # vendor's device, and a setup check still re-proves every grant.
-    findings = for_host(
-        Manifest(
-            requirements=[
-                *manifest.requirements,
-                *(granted_device_requirement(device) for device in granted_devices()),
-            ]
-        ),
-        container_client(),
-        project_root(),
-        inside_sentinel=sentinels.inside,
-        host_sentinel=sentinels.host,
-    ).check(environ, setting_up=setting_up, contained=contained)
-    return reported(findings, in_passing)
-
-
-def reported(findings: list[Finding], in_passing: bool = False) -> list[Finding]:
-    """Say what each finding found, and stop where absence refuses.
-
-    One place for both halves so the two rosters cannot come to differ about
-    what a refusal means. Two rosters printed separately have somewhere to
-    differ: either is free to treat a refused finding as a line rather than
-    a stop.
-
-    The refusal names the capabilities and stops there. Joining their whole
-    consequences into the exception is unreadable at the size this roster
-    reaches: four refusals make one nine-line paragraph inside an error box,
-    restating word for word what has just been printed above it with the
-    causes, the recoveries and the blank lines all flattened out. The
-    lines above are the report; this is the exit code and what it was about.
-
-    *in_passing* decides which half of a finding is read: everything it
-    found, for a caller that asked, and only what a reader has to act on for
-    a launch on its way to opening a session.
-    """
-    for finding in findings:
-        for notice in finding.alarms() if in_passing else finding.notices():
-            notice.say()
-    stopping = refused(findings)
-    if stopping:
-        raise typer.BadParameter(
-            f"Cannot launch: {len(stopping)} required checks failed: "
-            + ", ".join(item.requirement.capability for item in stopping)
-            + ". See the errors above."
-        )
-    return findings
-
-
-def verify_inside(
-    manifest: Manifest,
-    opening: list[str],
-    setting_up: bool = True,
-    sentinels: LaunchSentinels = LaunchSentinels(),
-    environment: EnvVars | None = None,
-    in_passing: bool = False,
-    skipped: Sequence[str] = (),
-    accessible: Sequence[AccessibleRoot] = (),
-) -> list[Finding]:
-    """Exercise the image half behind an argv somebody already assembled.
-
-    Split from :func:`report_inside_requirements` so the launch can use it
-    without building the argv a second time. Assembling it starts the egress
-    proxy and may build the image, so a second call would not merely be slow
-    -- it would print the whole boundary notice again, which reads as the
-    launch having done it twice.
-
-    ``skipped`` is what another composition over the same image already
-    exercised, by :meth:`Manifest.inside_signatures`.
-
-    ``accessible`` is the roots the argv was assembled with, so the read-only
-    binds a probe checks are the lease that argv carries -- taken after the
-    argv, whose assembly readies each shared git directory the lease reads.
-    """
-    if environment is None:
-        environ: EnvVars = dict(os.environ)  # lup: ignore[os-environ]
-    else:
-        environ = dict(environment)
-    leased = fleet_lease(project_root(), list(accessible))
-    return reported(
-        manifest.check_inside(
-            environ,
-            opening,
-            setting_up,
-            HostFacts(
-                checkout=project_root(),
-                inside_sentinel=sentinels.inside,
-                host_sentinel=sentinels.host,
-                read_only_binds=list(leased.read_only),
-            ),
-            skipped,
-        ),
-        in_passing,
-    )
-
-
-def report_inside_requirements(
-    composition: NativeHarnessComposition,
-    plugin: Plugin,
-    config_home: Path,
-    login: ProviderLogin,
-    sentinels: LaunchSentinels = LaunchSentinels(),
-    setting_up: bool = True,
-    skipped: Sequence[str] = (),
-    banner: Banner | None = None,
-) -> list[Finding]:
-    """Exercise the image-side requirements inside the container a session opens.
-
-    ``skipped`` and ``banner`` are for a caller asking two runtimes about one
-    image: the checks the first already exercised are not paid for again, and
-    the boundary notice the argv assembly says is collected into the banner
-    rather than printed a second time.
-
-    The half of the manifest that had nowhere to run. An image requirement is
-    excluded from the host roster for a good reason -- a laptop without
-    ``bun`` is not a laptop with a problem -- and excluded was as far as it
-    went: declared, rendered into a package list, never exercised. What that
-    bought was a preflight that reported a healthy machine and a session that
-    could not resolve its own proxy, because everything the boundary is made
-    of sat on the unexercised side.
-
-    Behind the *same* argv a launch opens with, assembled by the same call.
-    That is the whole design, and the alternative has already been measured
-    wrong twice: an exercise spelled as its own ``run`` verified a container
-    with no network, no mounts and no config home, and an exercise spelled
-    with its own client verified an engine no session opens through. A probe
-    that assembles its own container answers about that container.
-
-    Non-interactive, which is the one deliberate difference. A probe's output
-    is captured rather than shown, and ``-it`` against a pipe fails on the
-    terminal it was promised.
-    """
-    harness = composition.recipe.source
-    credential = login.credentials_path(config_home)
-    opening = contained_argv(
-        harness.image,
-        harness.requirements,
-        project_root(),
-        editor_rendezvous(login),
-        credential if credential.exists() else None,
-        login,
-        streams="captured",
-        banner=banner,
-        sentinels=sentinels,
-        # The same mounts and devices a session gets, for the reason this
-        # probe assembles nothing of its own: a container built without the
-        # declared roots is a container no session opens, and a placement
-        # verified in one says nothing about the other.
-        accessible=accessible_roots(),
-        devices=granted_devices(),
-    )
-    # The same values on both sides of one call, which is the whole of what a
-    # placement probe asks. Injected into the argv above and handed to the
-    # roster below: aimed with one and opened with the other, the probe would
-    # look for a value nothing had set and report the boundary broken on a
-    # machine whose boundary was fine.
-    return verify_inside(
-        harness.requirements,
-        opening,
-        setting_up=setting_up,
-        sentinels=sentinels,
-        skipped=skipped,
-        accessible=accessible_roots(),
-    )
-
-
-def codex_login_preflight(
-    home: Path,
-    environment: EnvVars,
-    command: list[str] | None = None,
-    *,
-    headless: bool = False,
-    profile: str | None = None,
-) -> None:
-    """Refresh managed authentication through its native owner before launch.
-
-    A local token deadline proves neither renewal nor acceptance by another
-    service. Native account/read owns renewal; its absence or failure is an
-    unverified login, never a successful local-file check. Declining sign-in
-    remains explicit so a deliberately offline session is still possible.
-    """
-    if profile is not None:
-        typer.echo(
-            f"Codex authentication for profile {profile}: not verified before launch. "
-            "The native account API cannot select named profiles; "
-            "the session will validate its selected configuration."
-        )
-        return
-    selected = {**environment, **CODEX_LOGIN.environment(home)}
-    executable, *arguments = command or ["codex"]
-
-    def verified() -> bool:
-        try:
-            state = asyncio.run(
-                read_account(
-                    Path(executable), selected, refresh_token=True, arguments=arguments
-                )
-            )
-        except (OSError, RuntimeError, ValueError, sh.CommandNotFound) as error:
-            # Native error bodies can contain credentials or account identity.
-            typer.echo(
-                f"Codex authentication in {home}: not verified; "
-                f"native account check failed ({type(error).__name__})."
-            )
-            return False
-        if state.ready:
-            return True
-        typer.echo(f"Codex authentication in {home}: not signed in.")
-        return False
-
-    if verified():
-        return
-    if not typer.confirm("Sign in to Codex now?", default=True):
-        typer.echo(
-            "Continuing with authentication not verified — "
-            "Codex will report its own authentication errors."
-        )
-        return
-    try:
-        sh.Command(executable)(
-            *arguments,
-            "login",
-            *(["--device-auth"] if headless else []),
-            _fg=True,
-            _env=selected,
-        )
-    except sh.ErrorReturnCode as error:
-        raise typer.BadParameter("Codex sign-in did not complete") from error
-    if not verified():
-        raise typer.BadParameter(
-            f"Codex authentication in {home} remains unverified after sign-in; "
-            "the session was not opened."
-        )
-
-
-def apply_sandbox_environment(
-    plugin: Plugin,
-    environment: EnvVars,
-    label: str,
-    required_tools: list[Requirement],
-    sandbox: LaunchSandbox = LaunchSandbox.INNER,
-    announce: bool = True,
-) -> bool:
-    """Export LUP_SANDBOX_ACTIVE when the declared sandbox can actually run.
-
-    The dispatchers defer unjudged shell only under this flag, so it is set
-    exactly when the launch verified the OS boundary; without it the deny
-    lattice keeps carrying the escalation recipe.
-
-    Verified by exercising each tool rather than by finding it on PATH. The
-    two answers differ exactly where it matters: a confinement binary that is
-    installed and cannot start a namespace on this kernel is present and
-    useless, and a flag set on its presence tells every dispatcher downstream
-    to relax into a boundary that will not be there. Absence and breakage
-    both leave the lattice standing, which is the safe direction, and the
-    message says which of the two was found rather than only that one was.
-
-    Asked only of a launch establishing the inner sandbox. A contained one
-    has a boundary already, and the kernel reads it from what the launch
-    measured rather than from anything a launcher asserts -- ``boundary =
-    sandboxed or contained``, so the flag would change no verdict. Probing
-    anyway printed a sandbox verdict about a session that was not going to
-    rely on it, and on a failed probe printed ``deny lattice stays active``
-    for a session whose lattice was about to stand down behind the container.
-    Saying nothing is the honest report, and the container's own line says
-    what the boundary is. A launch that chose no sandbox at all is not asked
-    either: it wants the lattice standing, so there is nothing to vouch for.
-
-    Each tool carries its own exercise rather than being named here and
-    probed with a flag chosen by this function. That is not tidiness: the
-    one flag this spelled for every tool was ``--version``, socat has no
-    such option and exits 1 on it, and the OS boundary was therefore
-    reported unavailable on every host in the world.
-
-    Both runtimes vouch through here, which is the point of it taking the
-    tools rather than naming them: Claude's confinement is a pair of programs
-    and Codex's is its own envelope, and the asymmetry that mattered was not
-    which tools but that one path exercised something and the other asserted
-    the flag outright. *announce* is off where the caller has a better
-    sentence for the success case -- a posture whose name is worth printing --
-    and the failures are said either way, because that is the half a reader
-    has to act on.
-
-    Answers whether it vouched, so a caller can say so without re-deriving it
-    from the environment it just passed in.
-    """
-    hooks = plugin.hooks
-    if sandbox is not LaunchSandbox.INNER or hooks is None or hooks.sandbox is None:
-        return False
-    findings = [tool.check(environment) for tool in required_tools]
-    unusable = [finding for finding in findings if not finding.working]
-    if unusable:
-        for finding in unusable:
-            for notice in finding.alarms():
-                notice.say()
-        Notice(
-            text=f"{label} sandbox could not be verified. Command permission checks remain active.",
-            urgency="warning",
-        ).say()
-        return False
-    environment["LUP_SANDBOX_ACTIVE"] = "1"
-    if announce:
-        Notice(
-            text=f"{label} sandbox: verified; it also restricts commands not covered by the policy.",
-            urgency="boundary",
-        ).say()
-    return True
-
-
-# lup: ignore[library-default] — each entry is literally a Codex CLI flag
-CODEX_SANDBOX_OVERRIDES = (
-    "-s",
-    "--sandbox",
-    "--approve-for-me",
-    "--not-so-yolo",
-    "--yolo",
-    "--dangerously-bypass-approvals-and-sandbox",
-)
-"""Every Codex flag by which a caller picks the sandbox itself, aliases included.
-
-``--yolo`` and ``--not-so-yolo`` are the CLI's hidden aliases of the two long
-flags after them. ``--approve-for-me`` names workspace-write on its own, and
-Codex refuses it beside ``--sandbox``, so the launcher cannot add one."""
-
-
-def codex_sandbox_arguments(
-    plugin: Plugin,
-    environment: EnvVars,
-    extra_args: list[str],
-    sandbox: LaunchSandbox = LaunchSandbox.INNER,
-    accessible: list[AccessibleRoot] = [],
-) -> list[str]:
-    """Compose the interactive Codex envelope that LUP_SANDBOX_ACTIVE vouches for.
-
-    Establishing the inner sandbox, the launcher builds the boundary it announces: an
-    explicit workspace-write sandbox on the Codex command line, mirroring how
-    the Claude settings artifact compiles the same declaration into an OS
-    wall. Path-level write and credential denials have no Codex equivalent,
-    and neither does taking one command out of the envelope, so the envelope
-    is the declaration's strict subset (network stays off). The dispatcher
-    still reads the exclusions, judging those commands as though nothing
-    confined them — which is the strict direction here too, since an envelope
-    with no network is not a boundary they would have survived either. When
-    the caller supplies its own sandbox flag the launcher vouches for
-    nothing: the flag stays unset and the deny lattice keeps the escalation
-    recipe.
-
-    Contained, that same envelope is wrong in a way that has nothing to do
-    with strictness, and what stands in its place is spelled by
-    :data:`~lup.providers.codex.confinement.CODEX_CONFINEMENT` rather than
-    here -- which carries why, and is where the image-side probe reads the
-    same words rather than inventing its own. This is the counterpart of
-    Claude's off switch, and it is what "every runtime, in the same change"
-    means for a posture: one concept, each runtime's own word for it.
-
-    Choosing no sandbox at all spells the same off switch on the host, and
-    the notice says which wall holds instead: none, so the deny lattice
-    stays standing and every unjudged command keeps its escalation recipe.
-
-    LUP_SANDBOX_ACTIVE stays unset in both of those, because neither session
-    relies on it -- the kernel reads the containment out of what the launch
-    measured, and a boundary that was observed is a boundary whether this
-    flag vouched for it or not, while a session with no boundary wants the
-    lattice the flag would relax.
-    """
-    hooks = plugin.hooks
-    if hooks is None or hooks.sandbox is None:
-        return []
-    overrides = [
-        word
-        for word in extra_args
-        if word in CODEX_SANDBOX_OVERRIDES or word.startswith("--sandbox=")
-    ]
-    if overrides:
-        Notice(
-            text=(
-                f"codex sandbox: caller envelope ({' '.join(overrides)}) — "
-                "deny lattice stays active"
-            ),
-            urgency="warning",
-        ).say()
-        return []
-    match sandbox:
-        case LaunchSandbox.OUTER:
-            Notice(
-                text=(
-                    "codex sandbox: off inside the container — "
-                    "the container is the boundary, and its proxy is the way out"
-                ),
-                urgency="boundary",
-            ).say()
-            return list(CODEX_CONFINEMENT.off)
-        case LaunchSandbox.NONE:
-            Notice(
-                text=(
-                    "codex sandbox: off on the host — "
-                    "the semantic policy alone judges, and its deny lattice stands"
-                ),
-                urgency="boundary",
-            ).say()
-            return list(CODEX_CONFINEMENT.off)
-        case LaunchSandbox.INNER:
-            pass
-    # Exercised before it is vouched for, the way the Claude path exercises
-    # its confinement tools. Asserting the flag outright was the asymmetry:
-    # `codex sandbox` runs a command under this exact envelope and no model
-    # turn, so there was never a reason not to ask.
-    vouched = apply_sandbox_environment(
-        plugin,
-        environment,
-        "codex",
-        [codex_envelope_requirement()],
-        sandbox=sandbox,
-        announce=False,
-    )
-    if vouched:
-        Notice(
-            text=(
-                "codex sandbox: workspace-write envelope — "
-                "unjudged shell defers to the OS boundary"
-            ),
-            urgency="boundary",
-        ).say()
-    # The envelope goes on either way. What a failed probe withdraws is the
-    # claim, not the confinement: leaving the sandbox off because it could not
-    # be verified would answer a boundary nobody could measure by removing it.
-    return ["--sandbox", "workspace-write", *writable_root_arguments(accessible)]
-
-
-def writable_root_arguments(accessible: list[AccessibleRoot] = []) -> list[str]:
-    """Widen the workspace-write root to the tree/ holding sibling worktrees.
-
-    Codex roots writes at the launch directory, so a feature worktree this
-    project's own workflow prescribes creating lands outside the boundary
-    and cannot be edited from the session that created it.
-
-    The declared roots widen it alongside, which is what makes this the same
-    change as the Claude settings merge rather than a second policy: one
-    registration, and both runtimes' uncontained sandboxes admit it. The
-    spelling is each runtime's own -- a settings document there, a dotted
-    TOML override here, whose value the CLI parses as TOML and falls back to
-    treating as a literal string.
-
-    A root nothing declared writable is left out rather than admitted
-    read-only: this key grants writes, and there is no Codex spelling for
-    "reachable and not writable" to be faithful to. Reads are not what it
-    governs.
-
-    A bare repository is widened to its worktrees rather than to itself. Its
-    `config` and `hooks/` name what the host runs, which the container binds
-    read-only and Claude's widening denies; this key cannot hold a read-only
-    region inside a root, and Codex keeps only a root's `.git` read-only,
-    which a bare repository does not have. So the session writes the
-    worktrees the clone holds at launch and not its git directory -- which
-    also leaves a worktree cut later, and a commit that writes the object
-    store, to a later launch or to Claude.
-    """
-    try:
-        tree = get_tree_dir()
-    except (typer.Exit, SystemExit):
-        return []
-    roots = [
-        str(tree),
-        *[
-            str(checkout)
-            for item in accessible
-            if item.writable
-            for checkout in working_trees(item.path)
-        ],
-    ]
-    # lup: defer: a Codex permission profile can hold `config` and `hooks/`
-    # read-only inside a writable root (`[permissions.<name>.filesystem]`,
-    # deepest entry wins), which would give a mounted bare clone the whole-
-    # clone reach Claude has; it replaces `--sandbox workspace-write`, which
-    # overrides a profile, so it is the envelope's redesign and not this key's
-    return ["-c", f"sandbox_workspace_write.writable_roots={json.dumps(roots)}"]
-
-
-def personal_config(config: UserConfigFile) -> UserConfig:
-    """The person's lup config, or a refusal naming the file to fix.
-
-    Refused rather than passed over, because a launch that dropped a setting
-    it could not read would open looking exactly like one that never had it.
-    """
-    try:
-        return config.load()
-    except ValueError as refusal:
-        raise typer.BadParameter(str(refusal)) from refusal
-
-
 def announce_relaxed_rules(relaxed: bool, plugin: Plugin) -> None:
     """Say what a relaxed launch retired, and what it did not.
 
@@ -1370,565 +518,20 @@ def announce_relaxed_rules(relaxed: bool, plugin: Plugin) -> None:
     )
 
 
-def claude_resume_arguments(resume: Resumption) -> list[str]:
-    """Claude Code's spelling: continuing and resuming are two flags.
+def install_codex_plugin_home(codex_home: Path, force: bool, trusted: bool) -> None:
+    """Install the declared plugin into a home the operator names, as a host launch would.
 
-    ``--continue`` takes the most recent conversation in the working
-    directory and ``--resume`` opens the picker or takes a session id, so a
-    request reaches the runtime as words rather than as a mode.
+    The whole of `harness codex-plugin install`, held here because installing
+    it is the Codex adapter's and the command tree names no adapter.
     """
-    if resume.session is not None:
-        return ["--resume", resume.session]
-    if resume.pick:
-        return ["--resume"]
-    return ["--continue"] if resume.latest else []
-
-
-def codex_resume_arguments(resume: Resumption) -> list[str]:
-    """Codex's spelling: reopening is a subcommand, and it leads the vector.
-
-    The same three requests, in the shape this runtime has for them —
-    ``resume`` alone is the picker, ``--last`` is the most recent, and a
-    session id is positional. It comes first because a subcommand does, which
-    is the whole of why the two cannot share one word list.
-    """
-    if resume.session is not None:
-        return ["resume", resume.session]
-    if resume.pick:
-        return ["resume"]
-    return ["resume", "--last"] if resume.latest else []
-
-
-def claude_sandbox_arguments(
-    plugin: Plugin,
-    sandbox: LaunchSandbox = LaunchSandbox.INNER,
-    accessible: list[AccessibleRoot] = [],
-    settings: JsonObject | None = None,
-) -> list[str]:
-    """Say what this launch means the Claude sandbox to be, in one settings merge.
-
-    ``settings`` is whatever else this launch compiles into that document —
-    an effort's ultracode switch — merged in here because the CLI reads one
-    ``--settings`` flag, and a second would be read in place of the first.
-
-    Establishing the inner sandbox, that is a widening: Claude roots writes at the working
-    directory just as Codex does, so a second checkout is read-only to every
-    command a session runs — and running the toolchain over one is ordinary
-    work here, which is why the symptom arrives as pytest failing to write a
-    cache and `ruff format` refusing to save. Neither error names a sandbox.
-
-    The declared roots widen it the same way and for the same reason they
-    reach the container's mount table: a project registered as reachable is
-    one this session is meant to write, and a boundary that admitted it in
-    one posture and refused it in the other would make where the session runs
-    the thing that decides what it can do.
-
-    For the same reason the container's read-only binds reach it too, as
-    ``denyWrite``: each declared repository's shared `config` and `hooks/`,
-    read off the lease that makes those binds. A mounted bare clone admits
-    its git directory whole, and those two name what the host runs at the
-    next git command there -- the documented rule is that a deny holds inside
-    a wider allow, and Claude's own protection of `.git/hooks` and
-    `.git/config` covers only the working directory.
-
-    The path is this machine's, so it is resolved at launch and passed as
-    settings rather than declared: an artifact carrying an absolute path
-    would be drift in every other checkout. The declared writable paths ride
-    along rather than being left to the generated file, because the two
-    surfaces document this key differently — arrays that merge across
-    scopes, values that override per session — and a list carrying both is
-    the same list under either reading.
-
-    Contained -- or with no sandbox chosen at all -- it is an *off* switch,
-    and the artifact still says ``enabled: true`` because that is the right
-    answer for the inner-sandbox launch the same file serves. The switch itself is spelled by
-    :data:`~lup.providers.claude.confinement.CLAUDE_CONFINEMENT` rather than
-    here, so the image-side probe that asks whether a session can open at all
-    opens the same one this does -- spelled twice, the probe verifies a
-    session nobody launches, and refuses for the absence of a confinement no
-    launch has ever asked for.
-
-    What the vendor documents in place of the nested sandbox travels with
-    that spelling. The measured half belongs here, beside the launcher
-    making the choice: in an unprivileged container bubblewrap cannot mount a
-    fresh ``/proc`` -- ``Can't mount proc on /newroot/proc: Operation not
-    permitted`` -- so the inner sandbox does not start, and the packages
-    installed to keep it quiet bought silence rather than a boundary.
-
-    What is lost is narrower than it looks. The credential read denials name
-    paths this container never mounts; the human-owned write denials are
-    still surfaced as approvals by the semantic policy; ``excludedCommands``
-    was already inert here, because the container never agreed to leave any
-    command alone. The domain allowlist is not a wall either -- it
-    pre-approves rather than refuses, and ``strictAllowlist`` has no effect
-    from a repository's own settings — and what does refuse is the egress
-    proxy, which is untouched by this.
-    """
-    carried = settings or {}
-
-    def document(sandboxed: JsonObject) -> list[str]:
-        merged = {**sandboxed, **carried}
-        return ["--settings", json.dumps(merged)] if merged else []
-
-    hooks = plugin.hooks
-    if hooks is None or hooks.sandbox is None:
-        return document({})
-    if sandbox is not LaunchSandbox.INNER:
-        return document(CLAUDE_SANDBOX_OFF)
-    try:
-        tree = get_tree_dir()
-    except (typer.Exit, SystemExit):
-        return document({})
-    allowed: list[JsonValue] = [
-        *hooks.sandbox.writable_paths,
-        str(tree),
-        *[str(item.path) for item in accessible if item.writable],
-    ]
-    held: list[JsonValue] = [
-        str(path)
-        for item in accessible
-        if item.writable and in_repository(item.path)
-        for path in host_run(item.path)
-    ]
-    filesystem: JsonObject = {
-        "allowWrite": allowed,
-        **({"denyWrite": held} if held else {}),
-    }
-    return document({"sandbox": {"filesystem": filesystem}})
-
-
-def companion_plugin_directories(root: Path, generated: str) -> list[Path]:
-    """The plugin directories this checkout carries beside the generated one.
-
-    A project may keep a hand-written plugin next to the one the harness
-    compiles. Its only other way into a session is a marketplace, and a
-    marketplace name is one global namespace shared by every checkout
-    declaring it — so the plugin a session loaded is whichever tree
-    registered that name last, the same hazard `lease_plugin_dir` documents.
-    A directory carrying `.claude-plugin/plugin.json` is a plugin by its own
-    declaration, which is why nothing here needs to be written down twice.
-
-    Sorted, so what a launch names does not depend on directory order.
-    """
-    plugins = root / ".claude" / "plugins"
-    if not plugins.is_dir():
-        return []
-    return sorted(
-        directory
-        for directory in plugins.iterdir()
-        if directory.name != generated
-        and (directory / ".claude-plugin" / "plugin.json").is_file()
-    )
+    prepare_codex_plugin([], codex_home, project_root(), {}, force, trusted)
 
 
 # It takes a composition, an account, a profile, a model and a passthrough
 # vector, and a mode is one optional argument among them; moving it onto
 # LaunchMode would make the model answerable for starting a runtime it knows
 # nothing about, and leave a project declaring no mode with no launcher at all.
-def ambient_config_home(login: ProviderLogin, fallback: Path | None = None) -> Path:
-    """The configuration home a launch would inherit, made concrete for a mount.
-
-    ``launch_home`` answers ``None`` for "inherit whatever the environment
-    selected", which is the right answer everywhere it is read -- except at a
-    mount, which names a file rather than a policy. Resolving it here lets
-    that ``None`` keep meaning what it means everywhere else instead of every
-    caller inventing a default.
-
-    ``fallback`` is what answers where the environment selected nothing, and
-    it is a caller's because it is not always the provider's own default: a
-    Codex composition falls back to the *worktree-scoped* home its store
-    derives, which is a home per checkout rather than the account's. Omitting
-    it takes the runtime's declared default, which is the right answer for a
-    caller that has no home of its own in mind.
-    """
-    # lup: ignore[os-environ] — the process environment is the open
-    # mapping this reads by definition, and absence is the answer it wants
-    selected = login.selected_home(dict(os.environ))
-    return selected if fallback is None or selected != login.ambient_home else fallback
-
-
-def editor_rendezvous(login: ProviderLogin) -> Path | None:
-    """Where an editor on this machine would leave a lockfile for this runtime.
-
-    Read off the environment this launcher runs in rather than the home the
-    launch selected, because the editor is a *sibling* process: it reads the
-    same variable and knows nothing about ``--profile``. ``None`` where the
-    runtime declares no rendezvous, which is every runtime but Claude Code.
-    """
-    # lup: ignore[os-environ] — the same open mapping the editor itself reads
-    return login.editor_rendezvous(dict(os.environ))
-
-
-def settle_boundary(
-    plugin: Plugin,
-    sandbox: LaunchSandbox,
-    findings: list[Finding],
-    sentinels: LaunchSentinels,
-    environment: EnvVars,
-    banner: Banner,
-    accessible: list[AccessibleRoot] = [],
-    runtime: str = "",
-) -> BoundaryPreflight:
-    """Compile what this launch promised, measure it, and refuse if it fell short.
-
-    The gate, and the reason every other part of this exists. A profile
-    requiring a capability nothing delivered does not open, and the diagnostic
-    names the capability and what was tried -- because "the sandbox is broken"
-    sends somebody to read configuration, where the exercise's own words send
-    them to the thing that failed.
-
-    An optional capability that came back absent is not a refusal and not a
-    question. The operations that need it are capability-blocked, which is
-    what sends an agent to the missing channel rather than to argue with a
-    rule, and the ledger is how the dispatcher learns which those are.
-
-    The lease is read here rather than carried from the argv builder because
-    an uncontained launch never builds one and still has a boundary to
-    describe: the same worktree, the same siblings, and no container under
-    them. One call answers for both postures, which is what stops the two
-    from coming to disagree about what this session may write.
-
-    ``accessible`` arrives as an argument rather than being read here, which
-    is the one part of the lease that cannot be recomputed freely: resolving
-    a registration can clone it, so a launch settles the list once and hands
-    the same one to the boundary and to the argv. Passed empty, this answers
-    for the checkout alone -- which is what a caller with no registry to read
-    should get, rather than a boundary that quietly went looking for one.
-
-    A refusal is said here and everything else is held. The banner is printed
-    after the last measurement, and a launch that raises never reaches it --
-    so the one report a reader cannot afford to lose is the one that cannot
-    wait for it.
-    """
-    root = project_root()
-    declared = plugin.hooks or HookSet(id="hooks.absent", policy_ids=[])
-    # Before the lease asks git anything about these roots, on either posture:
-    # a root whose pointer its repository does not list back is refused here
-    # rather than mounted and read through, and each repository vouching for
-    # a root is remembered before any container runs in it.
-    trust = judged_roots([root, *(item.path for item in accessible)], operator=root)
-    for notice in trust.notices:
-        typer.echo(notice, err=True)
-    if trust.refusal:
-        raise typer.BadParameter(trust.refusal)
-    lease = fleet_lease(root, accessible=accessible)
-    if exposed := store_exposure(lease):
-        raise typer.BadParameter(exposed)
-    boundary = compile_boundary(
-        declared,
-        contained=sandbox.contained(),
-        writable=list(lease.writable),
-    )
-    preflight = measured(boundary, depended_on(declared, sandbox.contained()), findings)
-    said = preflight.opening()
-    if not preflight.launchable():
-        Notice(text=said, urgency="boundary").say()
-        raise typer.BadParameter(
-            f"{boundary.name}: "
-            + ", ".join(entry.capability for entry in preflight.missing_required())
-            + " could not be verified. Launch stopped. See the failed checks above."
-        )
-    if said:
-        banner.add([Notice(text=said, urgency="boundary")])
-    record_preflight(
-        preflight,
-        sentinels,
-        root,
-        destination_policies=accept_destination_policies(
-            root, accessible, lease, runtime
-        ),
-        read_only_roots=list(lease.read_only),
-        destination_authorities=destination_authorities(accessible, runtime),
-    )
-    if not sandbox.contained():
-        # No mounts, so no mount table -- and the one a contained launch left
-        # behind describes a boundary this session is not behind. Attributing
-        # a refusal to it teaches an agent to reach for the host when the bug
-        # was its own, which outlives the command it was wrong about.
-        retire_mount_table(root)
-    environment.update(
-        sentinels.within() if sandbox.contained() else sentinels.outside()
-    )
-    environment[ROOT_VARIABLE] = str(root.resolve())
-    return preflight
-
-
-def session_argv(
-    cli: str,
-    arguments: list[str],
-    composition: NativeHarnessComposition,
-    plugin: Plugin,
-    config_home: Path,
-    login: ProviderLogin,
-    sandbox: LaunchSandbox,
-    environment: EnvVars,
-    transcript: Path | None = None,
-    sentinels: LaunchSentinels = LaunchSentinels(),
-    cleared: LaunchOpening = LaunchOpening(),
-    mounts: list[AccessibleRoot] = [],
-    devices: list[Device] = [],
-    authenticate: Callable[[list[str], Path, bool], None] | None = None,
-    member: LaunchedMember | None = None,
-    prepare: Callable[[list[str], Path], None] | None = None,
-    home_seed: HomeSeedPlaces | None = None,
-) -> list[str]:
-    """The argv that opens a session, inside the declared container or on the host.
-
-    One place decides this for both runtimes, because "contained unless the
-    operator said otherwise, or the host has no engine to contain it" is a
-    property of the launch rather than of the CLI being launched -- and a
-    second runtime that decided it separately is how one of them ends up
-    quietly uncontained. ``sandbox`` arrives settled, by
-    :func:`settled_sandbox`, so the fallback is said before this runs.
-
-    It is also the one place that knows the whole opening: what the container
-    had to say about itself, and whether the checks behind it passed. So the
-    banner is said here, after the verification rather than before it -- a
-    launch cannot report itself ready while the thing that would refute it
-    has not run yet, and thirty lines printed ahead of the answer is how the
-    refutation ends up below the fold. Both postures say it. A posture that
-    says nothing leaves a transcript path in its place, printed on the way
-    past by whatever opened the file.
-
-    And it is where the boundary is settled, for the same reason: this is the
-    one place that knows which posture the launch took, so it is the only
-    place a boundary can be compiled that answers for the session actually
-    about to open. Both postures write a ledger. A launch that wrote nothing
-    would leave whatever a contained launch wrote last standing as this
-    session's answer -- a boundary belonging to a session that has already
-    ended.
-    """
-    banner = cleared.banner
-    # Minted where both runtimes pass through, so a session's coordination
-    # identity is a fact about having been launched rather than about which
-    # CLI was launched. Exported rather than derived because the session's
-    # tool server and its hooks are separate processes with no channel
-    # between them, and an id each worked out for itself would put one
-    # session on the roster twice. A launcher that already minted one, to
-    # show its name in the runtime's own chrome, hands it in so the chrome
-    # and the roster agree.
-    #
-    # Overwritten rather than respected. The variables are a launcher's claim
-    # to have minted what is behind them, and an operator who happened to
-    # have them exported would otherwise hand their own roster address to
-    # every session they start — two peers answering to one id, which is the
-    # one thing the durable id exists to rule out.
-    environment.update((member or launched_member(project_root())).environment())
-    environment[POLICY_ROOT_ENV] = str(project_root())
-
-    # Settled once and handed to everything that needs it. Resolving a
-    # registration can clone it, so a second resolution would be a second
-    # trip to the forge -- and, where the two disagreed, a boundary compiled
-    # against one set of roots and mounts built from another. The ad-hoc
-    # mounts the caller named lead the list: they were asked for on this
-    # command line, so they belong to this launch even where no registry does.
-    def told(said: str) -> None:
-        """Route the registry's own progress into the banner rather than past it."""
-        banner.add([Notice(text=said, urgency="boundary")])
-
-    accessible = [*mounts, *accessible_roots(told)]
-    if not sandbox.contained():
-        # A host posture holds the host's devices already, so a flag asking
-        # for one describes a container this launch does not open. Said
-        # rather than ignored: the operator typed it expecting a grant, and
-        # silence would leave them reading a GPU that answers on the host as
-        # one the flag delivered.
-        if devices:
-            banner.add(
-                [
-                    Notice(
-                        text=(
-                            "Devices: "
-                            + ", ".join(device.name for device in devices)
-                            + " asked for; the session runs on the host, which "
-                            "holds its own devices, and --device grants one "
-                            "inside the container."
-                        ),
-                        urgency="detail",
-                    )
-                ]
-            )
-        if prepare is not None:
-            prepare([], config_home)
-        if authenticate is not None:
-            authenticate([cli], config_home, False)
-        settle_boundary(
-            plugin,
-            sandbox,
-            cleared.findings,
-            sentinels,
-            environment,
-            banner,
-            accessible,
-            runtime=cli,
-        )
-        say_opening(cleared, cleared.findings, transcript)
-        return [cli, *arguments]
-    harness = composition.recipe.source
-    # A token crosses by name, so its value has to be in the environment of the
-    # process that starts the container rather than anywhere in the argv. That
-    # makes this the one place it has to be resolved: the argv builder reads
-    # the same declaration for whether to pass the name, and a name passed
-    # against an environment nobody populated forwards nothing.
-    carried = harness.image.forge.sourced(environment)
-    if carried:
-        environment[harness.image.forge.token_variable] = carried
-    credential = login.credentials_path(config_home)
-    opening = contained_argv(
-        harness.image,
-        harness.requirements,
-        project_root(),
-        editor_rendezvous(login),
-        credential if credential.exists() else None,
-        login,
-        inherited_environment=[
-            # By name, so the value crosses out of this process's environment
-            # rather than through an argv every process on the host can read.
-            # The member id is not a secret, but a session whose id reached it
-            # by a second route would be a session two mechanisms could
-            # disagree about.
-            *(
-                [MAX_RECURSIVE_AGENT_ENV]
-                if MAX_RECURSIVE_AGENT_ENV in environment
-                else []
-            ),
-            MEMBER_ENV,
-            NAME_ENV,
-            POLICY_ROOT_ENV,
-        ],
-        banner=banner,
-        sentinels=sentinels,
-        accessible=accessible,
-        # This launch's flags lead and the machine's standing grants follow,
-        # settled here beside the roots for the same reason they are.
-        devices=[*devices, *granted_devices(told)],
-        home_seed=home_seed,
-    )
-    # Verified on the way in, rather than asserted. This is §6's whole point
-    # and the launch is where it has to happen: the boundary was built two
-    # lines ago and nothing had ever asked whether it carries traffic. What
-    # that cost, measured on the first contained session anybody opened, was
-    # a session that started cleanly, looked entirely healthy, and reported
-    # every request as the operator's own internet or DNS being down.
-    #
-    # Not the whole image roster -- only the entries marked `always`, which
-    # is the handful whose absence means the session can do nothing. A model
-    # call and a toolchain version belong to `harness requirements --inside`.
-    inside = verify_inside(
-        harness.requirements,
-        probing(opening),
-        setting_up=False,
-        sentinels=sentinels,
-        environment=environment,
-        in_passing=True,
-        accessible=accessible,
-    )
-    if prepare is not None:
-        prepare(probing(opening, stdin=True), Path(harness.image.config_home))
-    # A contained session sharing host loopback can receive a browser callback.
-    # Device login is needed where that callback stays outside its namespace.
-    if authenticate is not None:
-        authenticate(
-            [*probing(opening, stdin=True), cli],
-            Path(harness.image.config_home),
-            not harness.image.egress.shares_host_loopback(),
-        )
-    # Both halves of one measurement, joined here because this is where the
-    # second is taken. The host roster answered for the relay and the store
-    # before the container existed; the inside roster answered for the
-    # placement behind the argv this session opens with. A preflight built
-    # from either alone would report a capability nothing asked about.
-    measured_here = [*cleared.findings, *inside]
-    settle_boundary(
-        plugin,
-        sandbox,
-        measured_here,
-        sentinels,
-        environment,
-        banner,
-        accessible,
-        runtime=cli,
-    )
-    say_opening(cleared, measured_here, transcript)
-    native = harness.image.clipboard.wrap(
-        [cli, *arguments], composition.clipboard_transport
-    )
-    return [*opening, *native]
-
-
-def say_opening(
-    cleared: LaunchOpening, findings: list[Finding], transcript: Path | None
-) -> None:
-    """Say everything this launch held, once, in the order a reader wants it.
-
-    The count is what replaces the roster. A reader who wants to know *which*
-    checks passed is asking a question `harness requirements` answers on
-    demand and a launch cannot answer usefully anyway -- the list is the same
-    list as yesterday, every session, and the one time it differs is the one
-    time a line is printed for it.
-    """
-    passed = sum(1 for finding in findings if finding.working)
-    named = f"{cleared.runtime}: " if cleared.runtime else ""
-    cleared.banner.add(
-        [
-            Notice(
-                text=f"{named}artifacts current, {passed} checks passed",
-                urgency="ready",
-            ),
-            *(
-                [Notice(text=f"Transcript: {transcript}", urgency="artifact")]
-                if transcript is not None
-                else []
-            ),
-        ]
-    )
-    cleared.banner.say()
-
-
-def probing(opening: list[str], *, stdin: bool = False) -> list[str]:
-    """The session's own argv, with the interactive terminal taken back off.
-
-    The same argv rather than a fresh one, because a probe assembled
-    separately verifies a container no session opens -- an exercise that
-    passes on a host whose sessions cannot start. The one difference is
-    deliberate: a probe's output is captured, and ``-it`` against a pipe
-    fails on the terminal it was promised.
-    """
-    return [
-        "-i" if word == "-it" else word for word in opening if stdin or word != "-it"
-    ]
-
-
-def placed_inbox(
-    inboxes: SessionInboxes, root: Path, member: LaunchedMember
-) -> str | None:
-    """Where this session binds the inbox a peer nudges it through, if anywhere.
-
-    Named by the launcher rather than left to the runtime, whose own default
-    is a directory a container does not share and a file named after a pid its
-    namespace assigns -- so two sessions in sibling containers name one path
-    and neither can reach the other. A directory that could not be made
-    answers nothing, which is a peer that waits for its mail rather than a
-    launch that fails.
-
-    Refused where something already listens there, before the runtime can say
-    so itself: its own refusal tells the reader to remove a socket that
-    belongs to a live session. This one names the session, off the roster.
-    """
-    if inboxes.serve() is None:
-        return None
-    inbox = inboxes.socket(shared_git_directory(root), member.cli_name)
-    if cleared(Path(inbox)):
-        return inbox
-    holders = RepositoryPeers(root).woken_through(inbox)
-    raise typer.BadParameter(
-        f"{', '.join(holders) or 'a process on no roster of this repository'} "
-        f"is listening at {inbox}, the inbox this session would bind. lup "
-        "leaves a live inbox alone rather than cut that session off from its "
-        "nudges: end it, or let it finish, and launch again"
-    )
-
-
+@usage_refusals()
 def launch_claude(
     composition: NativeHarnessComposition,
     extra_args: list[str],
@@ -2020,7 +623,7 @@ def launch_claude(
         [
             *[flag for directory in named for flag in ("--plugin-dir", str(directory))],
             *claude_sandbox_arguments(
-                plugin,
+                plugin.hooks,
                 sandbox=sandbox,
                 accessible=(
                     [*mounts, *accessible_roots()]
@@ -2030,6 +633,7 @@ def launch_claude(
                 settings=(
                     compiled_effort.settings if compiled_effort is not None else None
                 ),
+                tree=find_tree_dir(),
             ),
             # What this runtime shows in its own chrome, made to agree with
             # the name the roster answers to: the same minted name is
@@ -2055,7 +659,7 @@ def launch_claude(
     environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]
     environment[MAX_RECURSIVE_AGENT_ENV] = str(max_recursive_agent)
     apply_sandbox_environment(
-        plugin,
+        plugin.hooks,
         environment,
         "claude",
         [bubblewrap_requirement(), socat_requirement()],
@@ -2119,6 +723,7 @@ def launch_claude(
     transcript = start_harness_transcript(
         "claude",
         ClaudeTranscripts(home),
+        root,
         model=selected_model,
         profile=profile,
         arguments=arguments,
@@ -2140,8 +745,10 @@ def launch_claude(
             argv = session_argv(
                 "claude",
                 arguments,
-                composition,
-                plugin,
+                root,
+                composition.recipe.source.image,
+                composition.recipe.source.requirements,
+                plugin.hooks,
                 home if home is not None else ambient_config_home(profiles.login),
                 profiles.login,
                 sandbox,
@@ -2153,6 +760,8 @@ def launch_claude(
                 devices,
                 member=member,
                 home_seed=places,
+                standing=standing_grants(),
+                clipboard=composition.clipboard_transport,
             )
             seed_applied = places is not None
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
@@ -2191,176 +800,9 @@ def launch_claude(
             checkpoint(provider="claude")
 
 
-def carry_claude_home(
-    image: Image,
-    root: Path,
-    login: ProviderLogin,
-    seed: ClaudeHomeSeed,
-    account: ClaudeConfigHome,
-    config: UserConfigFile,
-    personal: UserConfig,
-) -> None:
-    """Bring back what a contained session changed of the person's, and say what stayed.
-
-    Read out of the volume the session ran in and compared with what this
-    launch seeded, so only the session's own changes move. Where the
-    volume cannot be read, nothing moves and the launch says so rather
-    than leaving a changed theme to look as though it never happened.
-    """
-    files = read_config_home(
-        image, root, login, [WORKSPACE_SETTINGS, CLAUDE_HOME_DOCUMENT, KEYBINDINGS]
-    )
-    settings = named_file(files, WORKSPACE_SETTINGS)
-    document = named_file(files, CLAUDE_HOME_DOCUMENT)
-    keybindings = named_file(files, KEYBINDINGS)
-    try:
-        read = [
-            TypeAdapter(JsonObject).validate_json(held.content)
-            for held in (settings, document)
-            if held is not None
-        ]
-    except ValidationError:
-        read = []
-    if settings is None or len(read) != (2 if document is not None else 1):
-        Notice(
-            text=(
-                "Could not read this session's Claude settings back out of "
-                "its volume, so nothing it changed was returned."
-            ),
-            urgency="warning",
-        ).say()
-        return
-    returned = ClaudeHomeReturn.between(
-        seed,
-        read[0],
-        read[1] if document is not None else {},
-        keybindings.text() if keybindings is not None else None,
-        personal,
-    )
-    returned.apply(account, config)
-    if returned.carried():
-        typer.echo(
-            "Returned the Claude settings this session changed: "
-            + ", ".join(returned.carried())
-        )
-    stayed = [
-        *(f"{key} (never leaves a container)" for key in returned.withheld),
-        *(f"{key} (the session's own)" for key in returned.session),
-    ]
-    if stayed:
-        typer.echo("Kept in the container: " + ", ".join(stayed))
-
-
-def settled_codex_seed(image: Image, theirs: JsonObject) -> JsonObject:
-    """What a contained Codex home will be given, and where the person's settings won.
-
-    The three-way merge the home's own installation runs
-    (:func:`~lup.providers.codex.home.seeded_codex_settings`), run first on
-    the volume as it stands, so the launch knows what its session starts
-    from and can say which settings a running session had changed too.
-    """
-    files = read_config_home(
-        image, project_root(), CODEX_LOGIN, ["config.toml", SEED_RECORD]
-    )
-    current = named_file(files, "config.toml")
-    recorded = named_file(files, SEED_RECORD)
-    seeded = seeded_codex_settings(
-        current.text() if current is not None else None,
-        recorded.text() if recorded is not None else None,
-        theirs,
-    )
-    for conflict in seeded.conflicts:
-        Notice(
-            text=(
-                f"Settings: {conflict} was changed both by a session still "
-                "running in this repository and in your own settings; yours win."
-            ),
-            urgency="warning",
-        ).say()
-    return seeded.settings
-
-
-def carry_codex_home(
-    store: CodexWorktreeHomeStore,
-    image: Image | None,
-    config: UserConfigFile,
-    applied: JsonObject | None = None,
-) -> None:
-    """Bring back what a Codex session changed of the person's, and say what stayed.
-
-    ``image`` is the container a contained session ran in, whose volume
-    holds the configuration it left; ``None`` reads the worktree home a
-    session on the host ran in. A volume that cannot be read moves
-    nothing, said aloud.
-    """
-    left = None
-    if image is not None:
-        read = named_file(
-            read_config_home(image, project_root(), CODEX_LOGIN, ["config.toml"]),
-            "config.toml",
-        )
-        if read is None:
-            Notice(
-                text=(
-                    "Could not read this session's Codex settings back out of "
-                    "its volume, so nothing it changed was returned."
-                ),
-                urgency="warning",
-            ).say()
-            return
-        left = read.text()
-    returned = store.return_settings(
-        project_root(), config, current=left, applied=applied
-    )
-    if returned.carried():
-        typer.echo(
-            "Returned the Codex settings this session changed: "
-            + ", ".join(returned.carried())
-        )
-    stayed = [
-        *(f"{key} (never leaves its home)" for key in returned.withheld),
-        *(f"{key} (the session's own)" for key in returned.session),
-    ]
-    if stayed:
-        typer.echo("Kept in the session's home: " + ", ".join(stayed))
-
-
-def prepare_codex_plugin(
-    prefix: list[str],
-    home: Path,
-    root: Path,
-    environment: EnvVars,
-    force: bool = False,
-    trusted: bool = False,
-    settings: CodexProfileSettings | None = None,
-) -> None:
-    """Prepare the home where the launch runs, through its own execution boundary."""
-    if not prefix:
-        if settings is not None:
-            settings.install(
-                home, enforce_policy=CodexMarketplace.declared(root) is not None
-            )
-        install_codex_plugin(root, home, force, trusted)
-        return
-    assert CODEX_LOGIN.home_preparation is not None
-    command = [
-        *prefix,
-        *CODEX_LOGIN.home_preparation.command(root, home, force, settings is not None),
-    ]
-    typer.echo(
-        str(
-            sh.Command(command[0])(
-                *command[1:],
-                _env=environment,
-                _in=settings.model_dump_json() if settings is not None else None,
-            )
-        ),
-        nl=False,
-    )
-
-
 # For the reason spelled at `launch_claude`: the mode is one optional argument
 # among the ones that actually decide how a runtime starts.
+@usage_refusals()
 def launch_codex(
     composition: NativeHarnessComposition,
     extra_args: list[str],
@@ -2439,13 +881,14 @@ def launch_codex(
     environment = non_interactive_environment(os.environ)  # lup: ignore[os-environ]
     environment[MAX_RECURSIVE_AGENT_ENV] = str(max_recursive_agent)
     envelope = codex_sandbox_arguments(
-        plugin,
+        plugin.hooks,
         environment,
         extra_args,
         sandbox=sandbox,
         accessible=(
             [*mounts, *accessible_roots()] if sandbox is LaunchSandbox.INNER else []
         ),
+        tree=find_tree_dir(),
     )
     # The account a worktree home is derived from, and returns its login and
     # settings to: the selected profile, this checkout's then the global one,
@@ -2502,6 +945,7 @@ def launch_codex(
     transcript = start_harness_transcript(
         "codex",
         CodexTranscripts(selected_home),
+        project_root(),
         model=selected_model,
         profile=profile,
         arguments=arguments,
@@ -2525,6 +969,7 @@ def launch_codex(
             command,
             headless=headless,
             profile=None if sandbox.contained() else profile,
+            consent=lambda question: typer.confirm(question, default=True),
         )
         if home.isolated and not sandbox.contained():
             store.publish(project_root())
@@ -2534,6 +979,7 @@ def launch_codex(
             applied.append(
                 settled_codex_seed(
                     composition.recipe.source.image,
+                    project_root(),
                     selected_profile.personal_settings(
                         CodexMarketplace.declared(project_root()) is not None
                     ),
@@ -2555,8 +1001,10 @@ def launch_codex(
             argv = session_argv(
                 "codex",
                 arguments,
-                composition,
-                plugin,
+                project_root(),
+                composition.recipe.source.image,
+                composition.recipe.source.requirements,
+                plugin.hooks,
                 selected_home,
                 CODEX_LOGIN,
                 sandbox,
@@ -2568,6 +1016,8 @@ def launch_codex(
                 devices,
                 authenticate=authenticate,
                 prepare=prepare,
+                standing=standing_grants(),
+                clipboard=composition.clipboard_transport,
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True
@@ -2593,6 +1043,7 @@ def launch_codex(
             carry_codex_home(
                 store,
                 composition.recipe.source.image if sandbox.contained() else None,
+                project_root(),
                 config,
                 applied[0] if applied else None,
             )

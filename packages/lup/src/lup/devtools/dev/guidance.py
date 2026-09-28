@@ -22,7 +22,7 @@ from lup.harness.models import (
     GuidanceBudget,
     document_byte_size,
 )
-from lup.devtools.harness.generate import NativeHarnessComposition
+from lup.harness.generate import NativeHarnessComposition
 
 parser = MarkdownIt()
 

@@ -29,24 +29,28 @@ from lup.mcp import External, hosted_servers, opened_needs
 from lup.providers.claude import Claude, ClaudeTools
 from lup.providers.claude.selection import (
     CLAUDE_AUTONOMY,
-    CLAUDE_CONTAINMENT,
     CLAUDE_RUNTIME,
     claude_config,
 )
 from lup.providers.codex.home import CodexWorktreeHomeStore
 from lup.providers.codex.login import CODEX_HOME, CODEX_LOGIN
-from lup.providers.codex import CODEX_PROGRAM, Codex
+from lup.providers.codex import CODEX_PROGRAM, Codex, CodexSandbox
 from lup.providers.codex.selection import (
     CODEX_AUTONOMY,
-    CODEX_CONTAINMENT,
-    CODEX_SANDBOX_WIDTH,
     CODEX_RUNTIME,
     codex_config,
 )
 from lup.providers.codex.runtime import codex_mcp_server, codex_serving
 from lup.policy.hooks import LupHooksConfig
 from lup.tools.mcp import create_mcp_server, lup_tool
-from lup.providers.confinement import SessionContainment
+from lup.launch.declaration import (
+    InnerSandbox,
+    OuterContainer,
+    SessionSandbox,
+    NoSandbox,
+)
+from lup.providers.claude.launch import claude_settings
+from lup.providers.codex.launch import CODEX_SANDBOX_WIDTH, codex_sandbox_mode
 from lup.providers.selection import (
     Runtime,
     SessionAutonomy,
@@ -58,7 +62,12 @@ from lup.sessions.events import SubmissionDecision
 from lup.types import CustomModel
 
 AUTONOMY_DEGREES = get_args(SessionAutonomy.__value__)
-CONTAINMENT_WALLS = get_args(SessionContainment.__value__)
+WALLS: list[SessionSandbox] = [OuterContainer(), InnerSandbox(), NoSandbox()]
+
+
+def codex_mode(config: Codex) -> CodexSandbox | None:
+    """The sandbox mode a Codex thread is started with, wall and mode reconciled."""
+    return codex_sandbox_mode(config.sandbox, config.sandbox_mode)
 
 
 @pytest.fixture(autouse=True)
@@ -147,7 +156,7 @@ def test_codex_renders_what_it_can_spell(tmp_path: Path) -> None:
     assert isinstance(config, Codex)
     assert config.model_id() == "a-model"
     assert config.system_prompt == "be brief"
-    assert config.sandbox == "workspace-write"
+    assert codex_mode(config) == "workspace-write"
     assert config.writable_roots == [tmp_path]
     assert config.tools.mcp == [group]
     needs = opened_needs(tmp_path, tmp_path, {})
@@ -486,34 +495,38 @@ def test_a_request_is_uncontained_until_it_says_otherwise() -> None:
     """The default is what every request meant before the field existed."""
     request = SessionRequest()
 
-    assert request.containment == "none"
+    assert request.sandbox == NoSandbox()
     assert request.contained_program is None
 
 
 def test_an_outer_request_names_the_program_that_enters_its_container() -> None:
     """Asking for the container without one would open on the host."""
     with pytest.raises(ValidationError, match="contained_program"):
-        SessionRequest(containment="outer")
+        SessionRequest(sandbox=OuterContainer())
 
 
-@pytest.mark.parametrize("wall", ["inner", "none"])
-def test_a_program_nothing_would_start_is_refused(wall: SessionContainment) -> None:
+@pytest.mark.parametrize("wall", [InnerSandbox(), NoSandbox()])
+def test_a_program_nothing_would_start_is_refused(wall: SessionSandbox) -> None:
     """A wrapper named by a request that opens no container never runs.
 
     Refused rather than ignored: the request reads as contained, and the
     session it opens is not, which is the one failure a boundary cannot
     afford to state wrongly.
     """
-    with pytest.raises(ValidationError, match="containment='outer'"):
-        SessionRequest(containment=wall, contained_program=Path("enter.sh"))
+    with pytest.raises(ValidationError, match="sandbox=OuterContainer"):
+        SessionRequest(sandbox=wall, contained_program=Path("enter.sh"))
 
 
 def test_claude_opens_an_inner_session_in_its_own_sandbox(tmp_path: Path) -> None:
-    config = claude_config(SessionRequest(cwd=tmp_path, containment="inner"))
+    config = claude_config(SessionRequest(cwd=tmp_path, sandbox=InnerSandbox()))
 
-    assert config.sandbox is not None
-    assert config.sandbox.enabled
-    assert config.sandbox.posture().active
+    assert config.sandbox == InnerSandbox()
+    assert claude_settings(config)["sandbox"] == {
+        "enabled": True,
+        "allowUnsandboxedCommands": False,
+        "filesystem": {"allowWrite": []},
+    }
+    assert config.sandbox.enforcement().active
     assert config.cli_path is None
 
 
@@ -527,19 +540,21 @@ def test_claude_stands_its_sandbox_down_inside_the_container(tmp_path: Path) -> 
     """
     program = tmp_path / "enter.sh"
     config = claude_config(
-        SessionRequest(cwd=tmp_path, containment="outer", contained_program=program)
+        SessionRequest(
+            cwd=tmp_path, sandbox=OuterContainer(), contained_program=program
+        )
     )
 
     assert config.cli_path == program
-    assert config.sandbox is not None
-    assert not config.sandbox.enabled
-    assert not config.sandbox.posture().active
+    assert config.sandbox == OuterContainer()
+    assert claude_settings(config)["sandbox"] == {"enabled": False}
+    assert not config.sandbox.enforcement().active
 
 
 def test_claude_says_nothing_about_a_wall_nobody_asked_for(tmp_path: Path) -> None:
     config = claude_config(SessionRequest(cwd=tmp_path))
 
-    assert config.sandbox is None
+    assert config.sandbox == NoSandbox()
     assert config.cli_path is None
 
 
@@ -550,23 +565,23 @@ def test_claude_decides_autonomy_and_containment_apart(degree: SessionAutonomy) 
     The property Codex cannot state this simply, and the reason the two
     adapters are tested differently rather than through one parametrization.
     """
-    config = claude_config(SessionRequest(autonomy=degree, containment="inner"))
+    config = claude_config(SessionRequest(autonomy=degree, sandbox=InnerSandbox()))
 
     assert config.permission_mode == CLAUDE_AUTONOMY[degree]
-    assert config.sandbox == CLAUDE_CONTAINMENT["inner"]
+    assert config.sandbox == InnerSandbox()
 
 
-@pytest.mark.parametrize("wall", CONTAINMENT_WALLS)
-def test_every_runtime_spells_every_wall(wall: SessionContainment) -> None:
+@pytest.mark.parametrize("wall", WALLS)
+def test_every_runtime_spells_every_wall(wall: SessionSandbox, tmp_path: Path) -> None:
     """A wall added to the axis fails here until both runtimes answer it."""
-    assert wall in CLAUDE_CONTAINMENT
-    assert wall in CODEX_CONTAINMENT
+    assert "sandbox" in claude_settings(Claude(sandbox=wall))
+    assert codex_sandbox_mode(wall, None) != "read-only"
 
 
 def test_codex_opens_an_inner_session_in_its_own_sandbox(tmp_path: Path) -> None:
-    config = codex_config(SessionRequest(cwd=tmp_path, containment="inner"))
+    config = codex_config(SessionRequest(cwd=tmp_path, sandbox=InnerSandbox()))
 
-    assert config.sandbox == "workspace-write"
+    assert codex_mode(config) == "workspace-write"
     assert config.executable == CODEX_PROGRAM
 
 
@@ -578,10 +593,12 @@ def test_codex_stands_its_sandbox_down_inside_the_container(tmp_path: Path) -> N
     """
     program = tmp_path / "enter.sh"
     config = codex_config(
-        SessionRequest(cwd=tmp_path, containment="outer", contained_program=program)
+        SessionRequest(
+            cwd=tmp_path, sandbox=OuterContainer(), contained_program=program
+        )
     )
 
-    assert config.sandbox == "danger-full-access"
+    assert codex_mode(config) == "danger-full-access"
     assert config.executable == program
 
 
@@ -592,7 +609,7 @@ def test_codex_leaves_an_unwalled_session_to_its_autonomy(
     """Asking for no wall renders what the request rendered before the axis."""
     config = codex_config(SessionRequest(cwd=tmp_path, autonomy=degree))
 
-    assert config.sandbox == CODEX_AUTONOMY[degree]
+    assert codex_mode(config) == CODEX_AUTONOMY[degree]
 
 
 @pytest.mark.parametrize("degree", AUTONOMY_DEGREES)
@@ -607,12 +624,13 @@ def test_neither_axis_widens_what_the_other_narrowed(
     widened to it.
     """
     config = codex_config(
-        SessionRequest(cwd=tmp_path, autonomy=degree, containment="inner")
+        SessionRequest(cwd=tmp_path, autonomy=degree, sandbox=InnerSandbox())
     )
 
-    assert config.sandbox is not None
+    mode = codex_mode(config)
+    assert mode is not None
     ordering = CODEX_SANDBOX_WIDTH.index
-    assert ordering(config.sandbox) == min(
+    assert ordering(mode) == min(
         ordering("workspace-write"), ordering(CODEX_AUTONOMY[degree])
     )
 
@@ -626,9 +644,9 @@ def test_an_outer_codex_session_keeps_its_wall_whatever_it_may_do(
         SessionRequest(
             cwd=tmp_path,
             autonomy="plan",
-            containment="outer",
+            sandbox=OuterContainer(),
             contained_program=program,
         )
     )
 
-    assert config.sandbox == "danger-full-access"
+    assert codex_mode(config) == "danger-full-access"

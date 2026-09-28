@@ -24,9 +24,9 @@ from lup.policy.assets.host import project_environment
 from lup.web.build import dependencies_behind, restore_dependencies
 from lup.devtools.layout import find_tree_dir, get_tree_dir
 from lup.devtools.clipboard import copy_to_clipboard
-from lup.devtools.harness.environments import remove_worktree_environment
+from lup.launch.environments import remove_worktree_environment
 from lup.execution.shell import git
-from lup.devtools.pointer_trust import judged_roots
+from lup.launch.pointer_trust import judged_roots
 from lup.sandbox.pointers import tree_checkouts
 from lup.devtools.utils import (
     attributed_stderr,
@@ -732,7 +732,7 @@ def refuse_redirected_pointers() -> None:
     Judges the checkout this command runs in, and every directory standing
     where a worktree stands in ``tree/`` where there is one, each discovered
     from the repository that vouches for it rather than trusted for its place
-    -- see :func:`lup.devtools.pointer_trust.judged_roots`. Run from the host this
+    -- see :func:`lup.launch.pointer_trust.judged_roots`. Run from the host this
     is also where lup remembers the repository a worktree is cut from, before
     any container ran in it. Outside a repository nothing is judged, so this
     is safe to call before any host git command rather than only the worktree

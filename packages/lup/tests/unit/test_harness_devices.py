@@ -14,7 +14,7 @@ import typer
 from pydantic import ValidationError
 
 import lup.devtools.sync as sync
-from lup.devtools.harness.contained import record_boundary
+from lup.launch.container import record_boundary
 from lup.devtools.harness.launch import declared_devices
 from lup.harness.devices import (
     Device,

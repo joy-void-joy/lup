@@ -27,7 +27,7 @@ from lup.devtools.dev.branches import (
 )
 from lup.devtools.dev.comments import FoundComment, scan_tracked
 from lup.devtools.harness.drift import RepositoryWriter, inspect_drift
-from lup.devtools.harness.generate import NativeHarnessComposition
+from lup.harness.generate import NativeHarnessComposition
 from lup.harness.ownership import GeneratedArtifacts, generated_artifacts
 from lup.devtools.report.models import (
     CLAIMS,

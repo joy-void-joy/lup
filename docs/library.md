@@ -34,6 +34,15 @@ from lup import (
     SessionSummary,   # one conversation the provider has on record
     TurnId,           # the provider's identity for one turn; a fork is cut at it
     CustomModel,      # a model id outside the runtime's catalog, on purpose
+    OuterContainer,   # the wall a launch opens behind: the verified container,
+    InnerSandbox,     # the runtime's own sandbox on the host,
+    NoSandbox,        # or the semantic policy alone
+    Mount,            # a folder outside the working tree the session reaches
+    Member,           # the session's name on the coordination roster
+    Recording,        # what is kept of the session beside the runtime's record
+    Latest,           # reopen the newest session in the workspace,
+    Pick,             # the one the runtime's picker offers, at a terminal,
+    Reopen,           # or the one named by its id
 )
 ```
 
@@ -64,9 +73,17 @@ asyncio.run(main())
 Pydantic model declaring one agent whole — model, prompt, tools, permissions,
 workspace, and the layers its sessions are wrapped in — and each is also what
 opens those sessions: there is no client to build from a declaration.
-Everything else here is vocabulary, a name to annotate against, and vocabulary
-alone builds nothing: the typed result is a Pydantic model the program
-declares itself.
+The launch vocabulary is the fields a launch adds to that declaration, each a
+typed value from `lup.launch.declaration` (**Launching** below). Everything
+else here is vocabulary, a name to annotate against, and vocabulary alone
+builds nothing: the typed result is a Pydantic model the program declares
+itself.
+
+The agents and the launch vocabulary resolve on first access, because each
+stands on several hundred modules — an agent on its provider's tools, a
+launch field on the harness, policy and sandbox machinery a launch composes.
+So `import lup` loads neither an adapter nor that machinery, and naming either
+still loads no provider SDK: opening a session does.
 
 ### Asking
 
@@ -230,8 +247,8 @@ tools: an import path is what crosses the process boundary.
 
 Typed output remains available with no built-in. On `Claude`, `allowed_tools`
 controls automatic approval within the declared tools and `disallowed_tools`
-narrows it; neither adds an undeclared tool. Plugin directories require
-`"stock"`, since a plugin can introduce delegated authority.
+narrows it; neither adds an undeclared tool. A session opened here with a
+plugin requires `"stock"`, since a plugin can introduce delegated authority.
 
 Explicit session hooks remain attached when built-in tools are granted. Codex
 enables the verified declared project policy plugin for an explicit built-in grant while keeping
@@ -249,6 +266,78 @@ session when application tools require another dynamic binding. The adapter
 rejects an incompatible resume before sending user input. Typed output does
 not ride that channel — each turn carries its own `outputSchema` — so the
 model a turn is asked for may change from one turn to the next.
+
+## Launching
+
+A declaration is compiled twice. `open()` and `ask()` compile it into SDK
+options for a session this process drives; `command()` compiles the same
+fields into the `(argv, env, cwd)` an interactive CLI starts with, and
+`launch()` runs that command in the foreground, the terminal handed over until
+the session ends. The fields a launch adds are typed values the package root
+exports, defined in `lup.launch.declaration`, and each means one thing to
+both compilations:
+
+```python
+from pathlib import Path
+
+from lup import Claude, Latest, Member, Mount, OuterContainer, Recording
+from lup.mcp import CodeIntel, Coordination
+from lup.providers.claude import ClaudeTools
+
+agent = Claude(
+    model="opus",
+    tools=ClaudeTools(mcp=[Coordination(), CodeIntel()]),
+    plugin=Path(".claude/plugins/lup"),  # or a Harness, which prepare() compiles
+    sandbox=OuterContainer(mounts=[Mount(path=Path("../notes"), writable=True)]),
+    identity=Member(name="reviewer"),
+    record=Recording(transcript=True),
+    resume=Latest(),
+    max_recursive_agent=2,
+    profile="work",
+)
+
+
+class Checkpoint:  # a LaunchStep: the repository's workflow, not the session's
+    def before(self) -> None: ...
+
+    def after(self, succeeded: bool) -> None: ...
+
+
+command = agent.command("--verbose")  # printable: str(command) is its argv
+agent.prepare()  # compile the plugin and settle the home; nothing launched
+agent.check()  # the CLI's probes, the declared requirements, the login
+status = agent.launch("--verbose", steps=[Checkpoint()])
+```
+
+| Field | A session opened here | A launched CLI |
+|---|---|---|
+| `sandbox` | One settings document: `InnerSandbox` enables Claude Code's sandbox with the policy's exclusions and the mounts' write widening, anything else stands it down; Codex's mode narrowed by the wall. `OuterContainer` needs the program entering the container in `cli_path` / `executable` | The same document as `--settings` (Codex: the `--sandbox` envelope and its writable roots); `OuterContainer` builds and verifies the container and starts the CLI inside it |
+| `plugin` | Claude's first plugin directory, which takes `builtin="stock"`; Codex installs the plugin its project's marketplace offers | `--plugin-dir` (Claude); installed into the launch's home (Codex). A `Harness` is compiled into the project's tree by `prepare()` |
+| `policy` | Hooks judging every call in process; unset, the plugin harness's own | The plugin's dispatcher, and the boundary the launch measures and records |
+| `tools.mcp` | Hosted in process | `--mcp-config` with `--strict-mcp-config` (Claude), `--config mcp_servers.*` (Codex): the declared roster, never the plugin's |
+| `identity` | Joins the coordination roster through the session's environment | The same, plus `--name` and the inbox socket on Claude |
+| `record` | The run's journal, transcript and ledger entry, kept while the session is open | The same, around the foreground CLI |
+| `resume` | `Latest()` resumes the newest session on record; `Pick()` is refused | `--continue` / `--resume` (Claude), `resume --last` / `resume` (Codex); `Reopen(session=...)` names one |
+| `max_recursive_agent` | `LUP_MAX_RECURSIVE_AGENT`, never more than this process has left | The same variable |
+| `profile`, `home` | The account's configuration home | Claude: the same home; Codex: a home derived from the account's for the worktree |
+
+What a launch does not say it assumes, and a session opened here does not:
+an unset `sandbox` is the verified container wherever Docker or Podman answers
+and the inner sandbox, with a warning, where neither does; built-in tools left
+unnamed are the runtime's stock; the permission mode is the CLI's own rather
+than a program's `bypassPermissions`; an unset identity is the worktree's name
+on the roster; an unset record is the run's transcript. `launched()` answers
+the declaration with those filled in. What only a program driving turns can
+honour — in-process `hooks`, a submission gate, `layers`, `max_turns` — a
+launch refuses in the field's own words rather than dropping.
+
+`steps` are the repository's own workflow around a launch — a checkpoint, a
+base-freshness sync, a companion tree regenerated — each a `LaunchStep` with
+`before()` and `after(succeeded)`. They nest as `with` blocks do: every
+`before` in the order given, the session, then every `after` in reverse, run
+however the session ended. `Codex.prepare(force=True)` reinstalls a plugin
+whose version has not moved; Claude loads its plugin from the directory at each
+start, so its `prepare()` takes no such flag.
 
 ## Layering
 
@@ -445,6 +534,7 @@ the way six of them once were.
 | `devtools` | The development CLI a project built on lup inherits rather than forks. Worktrees and branches, trace and Python introspection, the resolver supervisor, the sync registry, version bookkeeping. Ships the whole roster — `roster.py` wires every sub-app over one `DevtoolsDeclarations`, and an application declares only what it retires and what only it has, so a sub-app added here reaches it on the next lock refresh instead of waiting to be noticed. Requires the `web` extra for the supervisor. |
 | `execution` | What carrying work out runs into, and what to do about each of it. The retry and the throttle a flaky or rate-limited service is met with, the executor a blocking call is handed to so work in flight outlives any one loop&#x27;s teardown, and whether a path can be written at all — or whether a boundary owns it and something merely died holding a lock. |
 | `formats` | What a generated artifact is written as, at the leaf where data enters it. Not what a document says, but what it has to be spelled like to survive being one. A file compiled from a declaration has to say so, in whatever comment syntax its own format admits; a value spliced into a compiled table has to survive the characters that would end a cell or a row early. Both are one question — the target format&#x27;s rules, applied where data crosses into it — and it is nobody else&#x27;s: prose a human wrote is Markdown all the way down and needs nothing here, which is why this sits below every package that compiles something rather than inside the one that compiles most. |
+| `launch` | Launching a declared agent: the vocabulary both compilations of one declaration read. An agent declared as :class:`~lup.providers.claude.Claude` or :class:`~lup.providers.codex.Codex` is compiled twice from the same fields: into SDK options when a program opens a session in process, and into the ``(argv, env, cwd)`` an interactive CLI runs when a person launches one. What the two compilations share without being either provider&#x27;s lives here, one module per concern. |
 | `ledger` | One DAG of typed nodes per repository, and nothing about what they mean. Work that outlives the session which did it has to live somewhere a later session finds. Prose rots because nothing checks it; a per-branch file forks because every worktree holds one; a stored status keeps its label after the support for it goes away. This is the mechanism that avoids all three, and it is deliberately only the mechanism. |
 | `mcp` | The MCP servers a session carries, each declared as a value. A server is named in an agent&#x27;s tools and read twice. A session this process opens hosts it, built against what that session has — its checkout, its roster identity, its container. A session a runtime&#x27;s own CLI launches starts it instead, as the transport that launch declares: a stdio subprocess serving it, for anything lup hosts. Both answers come from one value, so the session a library opens and the one a terminal launches carry the same servers, and neither is a list kept beside the other. |
 | `observability` | What happened, recorded so that a later reader can answer for it. One subject rather than four top-level entries answering the same reader question. The ordered record file every durable log appends to; the lossless hash-chained audit stream a session writes as it runs; the compact markdown trace and its sidecar a later reader skims to find a session worth opening; the console display; the per-tool metrics; the replay divergence check; the per-turn cost arithmetic; and the account-level metered usage. What separates them is what each is kept *for* — evidence, navigation, or a bill — and never the mechanism, which they share. |

@@ -14,25 +14,25 @@ from pathlib import Path
 import pytest
 
 from lup.providers.claude.transcripts import ClaudeTranscripts
-from lup.devtools.harness import launch
+import lup.launch.session as launch_session
 from lup.observability.audit import read_observable_events
 
 
 @pytest.fixture
 def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A project root the launcher would write its harness transcript under."""
-    monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
     monkeypatch.setattr(
-        launch, "harness_runs_path", lambda: tmp_path / "notes" / "harness"
+        launch_session, "harness_runs_path", lambda: tmp_path / "notes" / "harness"
     )
     return tmp_path
 
 
-def started(project: Path) -> launch.HarnessTranscript:
+def started(project: Path) -> launch_session.HarnessTranscript:
     """One transcript, as a launcher starts it."""
-    return launch.start_harness_transcript(
+    return launch_session.start_harness_transcript(
         "claude",
         ClaudeTranscripts(project / "config"),
+        project,
         model="claude-fable-5",
         profile=None,
         arguments=["--model", "claude-fable-5"],
@@ -80,9 +80,10 @@ def test_the_launch_starts_a_watcher_that_stops_on_close(project: Path) -> None:
 def test_transcription_can_be_disabled_without_losing_run_boundaries(
     project: Path,
 ) -> None:
-    transcript = launch.start_harness_transcript(
+    transcript = launch_session.start_harness_transcript(
         "claude",
         ClaudeTranscripts(project / "config"),
+        project,
         model="claude-fable-5",
         profile=None,
         arguments=[],
@@ -112,9 +113,10 @@ def test_the_watcher_is_scoped_to_this_project(project: Path) -> None:
 def test_a_credential_passed_on_the_command_line_is_not_recorded(
     project: Path,
 ) -> None:
-    transcript = launch.start_harness_transcript(
+    transcript = launch_session.start_harness_transcript(
         "claude",
         ClaudeTranscripts(project / "config"),
+        project,
         model=None,
         profile=None,
         arguments=["--api-key", "hunter2", "--model=claude-fable-5"],
@@ -134,7 +136,7 @@ def test_watcher_diagnostics_land_in_a_file_rather_than_the_terminal(
     traceback into that UI and reads as a crash.
     """
     transcript = started(project)
-    launch.watcher_logger().error("a recovered polling failure")
+    launch_session.watcher_logger().error("a recovered polling failure")
     transcript.close(succeeded=True)
 
     written = next((project / "notes" / "harness").rglob("watcher.log"))
@@ -146,13 +148,13 @@ def test_closing_releases_the_diagnostics_handler(project: Path) -> None:
     transcript = started(project)
     transcript.close(succeeded=True)
 
-    assert transcript.diagnostics not in launch.watcher_logger().handlers
+    assert transcript.diagnostics not in launch_session.watcher_logger().handlers
 
 
 def test_the_diagnostics_logger_does_not_propagate(project: Path) -> None:
     transcript = started(project)
     try:
-        assert launch.watcher_logger().propagate is False
+        assert launch_session.watcher_logger().propagate is False
     finally:
         transcript.close(succeeded=True)
 
@@ -160,17 +162,19 @@ def test_the_diagnostics_logger_does_not_propagate(project: Path) -> None:
 def test_a_second_launch_reuses_no_stale_handler(project: Path) -> None:
     first = started(project)
     first.close(succeeded=True)
-    before = len(launch.watcher_logger().handlers)
+    before = len(launch_session.watcher_logger().handlers)
 
     second = started(project)
     second.close(succeeded=True)
 
-    assert len(launch.watcher_logger().handlers) == before
+    assert len(launch_session.watcher_logger().handlers) == before
 
 
 def test_the_watcher_reports_its_failures_on_the_captured_logger() -> None:
     """The handler is attached by module name, so the two must agree."""
     from lup.observability.native import NativeTranscriptWatcher
 
-    assert launch.watcher_logger().name == NativeTranscriptWatcher.__module__
-    assert logging.getLogger("lup.observability.native") is launch.watcher_logger()
+    assert launch_session.watcher_logger().name == NativeTranscriptWatcher.__module__
+    assert (
+        logging.getLogger("lup.observability.native") is launch_session.watcher_logger()
+    )

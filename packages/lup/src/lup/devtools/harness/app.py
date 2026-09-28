@@ -21,6 +21,7 @@ import lup.devtools.harness.clean as clean
 import lup.devtools.harness.doctor as doctor
 import lup.devtools.harness.drift as drift
 import lup.devtools.harness.launch as launch
+from lup.launch.declaration import LaunchSandbox
 import lup.devtools.harness.policy_refresh as policy_refresh
 import lup.devtools.harness.reconcile as reconcile
 import lup.devtools.harness.resolve as resolve
@@ -30,9 +31,14 @@ from lup.devtools.harness.composition import NativeTargets, claude_profile_direc
 from lup.ledger.models import LedgerNode
 from lup.ledger.store import LedgerLayout
 from lup.observability.sessions import SessionRecorder, session_recorder
-from lup.devtools.harness.config_volume import HomeHelper, kept_for_superseded
-from lup.devtools.harness.superseded import SupersededFile
-from lup.devtools.harness.contained import (
+from lup.launch.config_volume import HomeHelper, kept_for_superseded
+from lup.launch.superseded import SupersededFile
+from lup.launch.session import (
+    ambient_config_home,
+    report_inside_requirements,
+    report_requirements,
+)
+from lup.launch.container import (
     checkout_tag,
     image_tag,
     report_egress,
@@ -40,7 +46,7 @@ from lup.devtools.harness.contained import (
     superseded_images,
 )
 from lup.harness.image import Image, detected_client
-from lup.devtools.harness.generate import NativeHarnessComposition
+from lup.harness.generate import NativeHarnessComposition
 from lup.devtools.harness.profile_app import create_profile_app
 from lup.harness.models import Resumption
 from lup.harness.notice import Banner
@@ -233,33 +239,38 @@ def create_harness_app(
             }
             for index in range(len(manifests))
         ]
-        findings = (
-            [
-                finding
-                for index, composition in enumerate(compositions)
-                for finding in launch.report_inside_requirements(
-                    composition,
-                    composition.recipe.source.plugins[0],
-                    launch.ambient_config_home(
-                        composition.login, composition.default_config_home
+        with launch.usage_refusals():
+            findings = (
+                [
+                    finding
+                    for index, composition in enumerate(compositions)
+                    for finding in report_inside_requirements(
+                        composition.recipe.source.image,
+                        composition.recipe.source.requirements,
+                        project_root(),
+                        ambient_config_home(
+                            composition.login, composition.default_config_home
+                        ),
+                        composition.login,
+                        setting_up=not launch_only,
+                        skipped=sorted(exercised_before[index]),
+                        banner=None if index == 0 else Banner(),
+                        standing=launch.standing_grants(),
+                    )
+                ]
+                if inside
+                else report_requirements(
+                    Manifest.across(
+                        [
+                            composition.recipe.source.requirements
+                            for composition in compositions
+                        ]
                     ),
-                    composition.login,
+                    project_root(),
                     setting_up=not launch_only,
-                    skipped=sorted(exercised_before[index]),
-                    banner=None if index == 0 else Banner(),
+                    standing=launch.standing_grants(),
                 )
-            ]
-            if inside
-            else launch.report_requirements(
-                Manifest.across(
-                    [
-                        composition.recipe.source.requirements
-                        for composition in compositions
-                    ]
-                ),
-                setting_up=not launch_only,
             )
-        )
         if not findings:
             typer.echo(
                 "No container requirements selected."
@@ -581,7 +592,7 @@ def create_harness_app(
                 ),
             ] = False,
             sandbox: Annotated[
-                launch.LaunchSandbox | None,
+                LaunchSandbox | None,
                 typer.Option(
                     "--sandbox",
                     help="Which sandbox holds the session: the verified "
@@ -695,9 +706,7 @@ def create_harness_app(
             ] = False,
         ) -> None:
             """Install the declared plugin and verify native discovery in the selected home."""
-            launch.prepare_codex_plugin(
-                [], codex_home, project_root(), {}, force, trust_project
-            )
+            launch.install_codex_plugin_home(codex_home, force, trust_project)
 
         @app.command(
             "codex",
@@ -772,7 +781,7 @@ def create_harness_app(
                 ),
             ] = False,
             sandbox: Annotated[
-                launch.LaunchSandbox | None,
+                LaunchSandbox | None,
                 typer.Option(
                     "--sandbox",
                     help="Which sandbox holds the session: the verified "

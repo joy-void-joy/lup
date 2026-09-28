@@ -15,8 +15,8 @@ from unittest.mock import Mock
 import pytest
 import sh
 
-import lup.devtools.harness.config_volume as config_volume
-from lup.devtools.harness.config_volume import (
+import lup.launch.config_volume as config_volume
+from lup.launch.config_volume import (
     kept_for_superseded,
     sweep_superseded,
     swept_superseded_notice,
@@ -29,7 +29,7 @@ from lup.devtools.harness.config_volume import (
 from lup.harness.image import Podman
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.providers.codex.login import CODEX_LOGIN
-from lup.devtools.harness.superseded import SupersededFile
+from lup.launch.superseded import SupersededFile
 from lup.providers.user_config import UserConfigFile
 
 LOGINS = [CLAUDE_LOGIN, CODEX_LOGIN]

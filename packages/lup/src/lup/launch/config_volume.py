@@ -39,7 +39,7 @@ from lup.harness.assets.home_seed import (
     text_of,
     write,
 )
-from lup.devtools.harness.superseded import SupersededFile
+from lup.launch.superseded import SupersededFile
 from lup.harness.image import ContainerEngine
 from lup.harness.notice import Notice
 from lup.providers.login import ProviderLogin
@@ -367,7 +367,7 @@ def split_config_volumes(
     Per-worktree volumes were superseded before the split and are not read.
 
     The old volumes are kept, not removed: each is recorded as superseded
-    (:mod:`lup.devtools.harness.superseded`) and a launch removes it once
+    (:mod:`lup.launch.superseded`) and a launch removes it once
     ``kept_for`` has passed, so a history nobody has checked the copy of is
     still there to check.
     """

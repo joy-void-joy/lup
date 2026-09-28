@@ -13,6 +13,8 @@ import pytest
 import sh
 
 import lup.devtools.harness.launch as launch
+from lup.launch.session import LaunchOpening
+from lup.launch.declaration import LaunchSandbox
 from lup.harness.messaging import SessionInboxes
 
 
@@ -52,7 +54,7 @@ def launched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[list[str]]
     monkeypatch.setattr(
         launch,
         "ready_to_open",
-        lambda *a, **k: launch.LaunchOpening(sandbox=launch.LaunchSandbox.INNER),
+        lambda *a, **k: LaunchOpening(sandbox=LaunchSandbox.INNER),
     )
     monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
     monkeypatch.setattr(launch, "ambient_config_home", lambda *a, **k: tmp_path)
@@ -60,12 +62,12 @@ def launched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[list[str]]
     monkeypatch.setattr(
         launch,
         "claude_sandbox_arguments",
-        lambda _plugin, sandbox=launch.LaunchSandbox.INNER, accessible=[], settings=None: [],
+        lambda _plugin, sandbox=LaunchSandbox.INNER, accessible=[], settings=None, tree=None: [],
     )
     monkeypatch.setattr(
         launch,
         "codex_sandbox_arguments",
-        lambda _plugin, _environment, _args, sandbox=launch.LaunchSandbox.INNER, accessible=[]: [],
+        lambda _plugin, _environment, _args, sandbox=LaunchSandbox.INNER, accessible=[], tree=None: [],
     )
     monkeypatch.setattr(launch, "non_interactive_environment", lambda _env: {})
     monkeypatch.setattr(

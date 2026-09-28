@@ -13,7 +13,6 @@ from typing import Literal, get_args
 
 import pytest
 import sh
-import typer
 from claude_agent_sdk.types import SandboxNetworkConfig, SandboxSettings
 from pydantic import BaseModel, Field, ValidationError
 
@@ -159,11 +158,12 @@ from lup_template.harness.content.docs.catalog import documents
 from lup_template.harness.content.catalog import GUIDANCE as COMPOSED_GUIDANCE
 from lup_template.harness.content.settings import project_settings
 from lup.devtools.harness import launch
-from lup.devtools.harness.launch import (
+import lup.providers.codex.launch as codex_launch
+from lup.providers.claude.launch import (
     claude_sandbox_arguments,
-    codex_sandbox_arguments,
     companion_plugin_directories,
 )
+from lup.providers.codex.launch import codex_sandbox_arguments
 from lup.policy.kernel.shell import sandbox_excluded
 from lup_template.harness.content.template_claude import (
     DOCUMENT as TEMPLATE_CLAUDE,
@@ -175,7 +175,7 @@ from lup_template.harness.composition import (
     claude_target,
     codex_target,
 )
-from lup.devtools.harness.generate import (
+from lup.harness.generate import (
     GenerationRecipe,
     NativeHarnessComposition,
     current_reader,
@@ -3261,10 +3261,9 @@ def test_claude_sandbox_widens_the_writable_set_to_sibling_worktrees(
     documented as merging across scopes and as overriding per session, and a
     list carrying both is the same list under either reading.
     """
-    monkeypatch.setattr(launch, "get_tree_dir", lambda: tmp_path)
     plugin = portable_harness().plugins[0]
     assert plugin.hooks is not None and plugin.hooks.sandbox is not None
-    arguments = claude_sandbox_arguments(plugin)
+    arguments = claude_sandbox_arguments(plugin.hooks, tree=tmp_path)
     widened = json.loads(arguments[arguments.index("--settings") + 1])
 
     assert widened["sandbox"]["filesystem"]["allowWrite"] == [
@@ -3284,13 +3283,14 @@ def test_a_launch_mount_widens_the_inner_sandbox_where_it_asked_to_write(
     read-only mount stays out of `allowWrite` because writing is exactly what
     it withheld -- reads are not what this key governs.
     """
-    monkeypatch.setattr(launch, "get_tree_dir", lambda: tmp_path)
     plugin = portable_harness().plugins[0]
     writable = tmp_path / "notes"
     read_only = tmp_path / "reference"
 
     arguments = claude_sandbox_arguments(
-        plugin, accessible=launch.declared_mounts([writable], [read_only])
+        plugin.hooks,
+        accessible=launch.declared_mounts([writable], [read_only]),
+        tree=tmp_path,
     )
 
     widened = json.loads(arguments[arguments.index("--settings") + 1])
@@ -3368,11 +3368,11 @@ def test_codex_sandbox_arguments_establish_the_envelope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        launch, "codex_envelope_requirement", lambda: envelope_that(True)
+        codex_launch, "codex_envelope_requirement", lambda: envelope_that(True)
     )
     environment: EnvVars = {}
     arguments = codex_sandbox_arguments(
-        portable_harness().plugins[0], environment, ["--model", "gpt-5.2"]
+        portable_harness().plugins[0].hooks, environment, ["--model", "gpt-5.2"]
     )
     assert arguments[:2] == ["--sandbox", "workspace-write"]
     assert environment["LUP_SANDBOX_ACTIVE"] == "1"
@@ -3390,10 +3390,12 @@ def test_a_failed_probe_leaves_the_deny_lattice_standing(
     recipe.
     """
     monkeypatch.setattr(
-        launch, "codex_envelope_requirement", lambda: envelope_that(False)
+        codex_launch, "codex_envelope_requirement", lambda: envelope_that(False)
     )
     environment: EnvVars = {}
-    arguments = codex_sandbox_arguments(portable_harness().plugins[0], environment, [])
+    arguments = codex_sandbox_arguments(
+        portable_harness().plugins[0].hooks, environment, []
+    )
 
     assert arguments[:2] == ["--sandbox", "workspace-write"]
     assert "LUP_SANDBOX_ACTIVE" not in environment
@@ -3403,27 +3405,23 @@ def test_codex_sandbox_widens_the_root_to_sibling_worktrees(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Codex roots writes at the launch cwd; the prescribed worktree is outside."""
-    monkeypatch.setattr(launch, "get_tree_dir", lambda: tmp_path)
     environment: EnvVars = {}
-    arguments = codex_sandbox_arguments(portable_harness().plugins[0], environment, [])
+    arguments = codex_sandbox_arguments(
+        portable_harness().plugins[0].hooks, environment, [], tree=tmp_path
+    )
     roots = arguments[arguments.index("-c") + 1]
 
     assert roots.startswith("sandbox_workspace_write.writable_roots=")
     assert str(tmp_path) in roots
 
 
-def test_codex_sandbox_omits_the_root_outside_a_tree_layout(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_codex_sandbox_omits_the_root_outside_a_tree_layout() -> None:
     """A plain clone has no tree/ to widen to, so the envelope stands alone."""
-
-    def no_tree() -> Path:
-        raise typer.Exit(1)
-
-    monkeypatch.setattr(launch, "get_tree_dir", no_tree)
     environment: EnvVars = {}
 
-    assert codex_sandbox_arguments(portable_harness().plugins[0], environment, []) == [
+    assert codex_sandbox_arguments(
+        portable_harness().plugins[0].hooks, environment, []
+    ) == [
         "--sandbox",
         "workspace-write",
     ]
@@ -3443,7 +3441,7 @@ def test_codex_sandbox_arguments_defer_to_a_caller_envelope() -> None:
     for extra_args in caller_forms:
         assert (
             codex_sandbox_arguments(
-                portable_harness().plugins[0], environment, extra_args
+                portable_harness().plugins[0].hooks, environment, extra_args
             )
             == []
         )

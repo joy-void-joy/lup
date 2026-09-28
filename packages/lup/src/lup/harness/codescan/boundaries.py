@@ -464,7 +464,7 @@ def front_door_exports(text: str) -> FrontDoorExports:
     """Each name the package root re-exports, and the module that defines it.
 
     Read off the root's own imports — the ``TYPE_CHECKING`` block's among
-    them, which is where the agents it resolves lazily are named — so a name
+    them, which is where the names it resolves lazily are named — so a name
     the root starts exporting is known here the day it does, and the module a
     diagnostic sends a reader to is the one the root itself imports from.
     """
@@ -1302,9 +1302,9 @@ FRONT_DOOR_RULE = ProjectRule(
     ],
     message=(
         "The package root is the library's front door: it re-exports the public "
-        "names for the library's users and resolves Claude and Codex on first "
-        "access, so importing lup reaches no provider until an agent is named. "
-        "Inside the library an import from it runs the dependency backwards — a "
+        "names for the library's users and resolves the agents and the launch "
+        "vocabulary on first access, so importing lup reaches no provider and no "
+        "launch machinery until one of them is named. Inside the library an import from it runs the dependency backwards — a "
         "module the root is still loading meets a half-built package, and an "
         "agent taken through it reaches its adapter under a name the seam rule "
         "never sees. Import each name from the module that defines it; the "

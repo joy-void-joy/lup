@@ -102,6 +102,15 @@ class CodexBuiltins(BaseModel, frozen=True):
 
     def arguments(self) -> list[str]:
         """Apply the same controls before app-server starts, not just per thread."""
+        return self.configuration_arguments() + [
+            "--config",
+            'sandbox_mode="read-only"',
+            "--config",
+            'approval_policy="never"',
+        ]
+
+    def configuration_arguments(self) -> list[str]:
+        """These facilities as the dotted ``--config`` overrides any Codex CLI reads."""
 
         def leaves(prefix: str, value: JsonValue) -> list[str]:
             if isinstance(value, dict):
@@ -114,12 +123,7 @@ class CodexBuiltins(BaseModel, frozen=True):
                 ]
             return ["--config", f"{prefix}={json.dumps(value)}"]
 
-        return leaves("", self.configuration()) + [
-            "--config",
-            'sandbox_mode="read-only"',
-            "--config",
-            'approval_policy="never"',
-        ]
+        return leaves("", self.configuration())
 
     def model_catalog(
         self, executable: Path, environment: EnvVars, model: str | None

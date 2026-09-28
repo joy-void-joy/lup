@@ -10,7 +10,7 @@ import os
 import stat
 from pathlib import Path
 
-from lup.devtools.harness.contained import (
+from lup.launch.container import (
     engine_absence,
     worker_wrapper_path,
     wrapper_script,

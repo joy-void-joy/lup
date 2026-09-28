@@ -23,17 +23,34 @@ from lup.providers.codex.app_server import (
 )
 from lup.providers.codex.hooks import (
     APPROVAL_METHODS,
+    CODEX_SEMANTICS,
     CodexApprovalResponder,
     codex_hook_approval_policy,
 )
 from lup.providers.codex.home import CodexWorktreeHomeStore, install_declared_policy
-from lup.providers.codex.login import CODEX_HOME, CODEX_LOGIN, native_home
-from lup.providers.codex.model_choice import codex_default_effort
-from lup.providers.profile_tree import profile_environment
-from lup.providers.user_config import UserConfigFile
+from lup.providers.codex.login import CODEX_HOME, native_home
+from lup.coordination.repository import launched_member
+from lup.launch.compilation import (
+    allowance_environment,
+    kept_record,
+    semantic_hooks,
+)
+from lup.launch.declaration import Reopening
+from lup.providers.codex.launch import (
+    codex_account_environment,
+    codex_plugin_root,
+    codex_sandbox_mode,
+    compiled_codex,
+)
 from lup.providers.codex.output import CodexOutputContract, codex_output_contract
-from lup.providers.codex import Codex, CodexMcpServerConfig, CodexSession
-from lup.policy.hooks import LupHookInput, LupHookOutput, LupHooksConfig
+from lup.providers.codex.transcripts import CodexTranscripts
+from lup.providers.codex import (
+    CODEX_PROGRAM,
+    Codex,
+    CodexMcpServerConfig,
+    CodexSession,
+)
+from lup.policy.hooks import LupHookInput, LupHookOutput, LupHooksConfig, merge_hooks
 from lup.policy.identity import POLICY_ROOT_ENV
 from lup.tools.mcp import (
     LupMcpServerConfig,
@@ -84,7 +101,7 @@ from lup.sessions.events import (
 )
 from lup.sessions.output import TurnSubmission, bound_submission
 from lup.sessions.recursion import (
-    child_recursive_agent_allowance,
+    recursive_agent_allowance,
     recursive_agent_scope,
 )
 from lup.sessions.transcript import fold_transcript
@@ -654,18 +671,23 @@ class CodexConversationState:
         # channel; typed output rides `outputSchema` on each turn instead.
         if dynamic:
             params["dynamicTools"] = dynamic
-        if self.config.writable_roots:
+        writable = [
+            *self.config.writable_roots,
+            *[root.path for root in self.config.sandbox.roots() if root.writable],
+        ]
+        if writable:
             configuration["sandbox_workspace_write"] = {
-                "writable_roots": [str(path) for path in self.config.writable_roots]
+                "writable_roots": [str(path) for path in writable]
             }
         if configuration:
             params["config"] = configuration
-        if self.config.sandbox is not None:
-            params["sandbox"] = self.config.sandbox
+        mode = codex_sandbox_mode(self.config.sandbox, self.config.sandbox_mode)
+        if mode is not None:
+            params["sandbox"] = mode
         if self.config.approval_policy is not None:
             params["approvalPolicy"] = self.config.approval_policy
         native = self.config.builtins()
-        if native.write and self.config.sandbox is None:
+        if native.write and mode is None:
             params["sandbox"] = "workspace-write"
         if (
             not native.shell
@@ -1096,6 +1118,17 @@ class CodexFork(ForkSession[CodexSession]):
         )
 
 
+async def resumed_thread(config: Codex, resume: Reopening | None) -> SessionId | None:
+    """The thread a declared reopening names, as a session opened here resumes one.
+
+    ``Latest`` is the newest thread on record for this workspace, the one
+    ``codex resume --last`` takes; a picker is a terminal's, and refused.
+    """
+    if resume is None:
+        return None
+    return await resume.reopened(lambda: codex_sessions(config))
+
+
 class CodexSessionOpener:
     """Validate hook coverage before opening one app-server per Lup session.
 
@@ -1113,31 +1146,46 @@ class CodexSessionOpener:
     @asynccontextmanager
     async def open_session(
         self,
-        resume: SessionId | None = None,
+        resume: Reopening | None = None,
         *,
         fork_from: SessionId | None = None,
         fork_at: TurnId | None = None,
     ) -> AsyncGenerator[CodexSession]:
-        approval = codex_hook_approval_policy(self.config.hooks)
-        if approval == "on-request" and self.config.approval_policy in {None, "never"}:
+        if (
+            self.config.sandbox.posture().contained()
+            and self.config.executable == CODEX_PROGRAM
+        ):
+            raise ValueError(
+                "a session opened here inside the container is started as the "
+                "program that enters it; name it in executable, or launch() it"
+            )
+        compiled = self.compiled()
+        approval = codex_hook_approval_policy(compiled.hooks)
+        if approval == "on-request" and compiled.approval_policy in {None, "never"}:
             raise UnsupportedCapability(
                 "Native approval-scoped PreToolUse hooks require an explicit asking "
                 "approval_policy; use 'on-request' so the app-server can call them."
             )
-        compiled = self.compiled()
         # Installed here rather than where the home is named: installing runs
         # a package manager, and a home is named wherever a request is merely
         # described. A session that opened without the policy it was meant to
         # run under is indistinguishable from one running under it, so a
         # failure is raised rather than warned past.
-        allowance = child_recursive_agent_allowance(compiled.environment)
-        environment = allowance.environment(compiled.environment)
+        relayed = allowance_environment(
+            compiled.max_recursive_agent, compiled.environment
+        )
+        allowance = recursive_agent_allowance(relayed)
+        environment = {**compiled.environment, **relayed}
+        reopened = await resumed_thread(compiled, resume)
         config = compiled.model_copy(
             update={
                 "cwd": compiled.workspace(),
                 "environment": {
                     **environment,
-                    POLICY_ROOT_ENV: str(compiled.policy_root or compiled.workspace()),
+                    POLICY_ROOT_ENV: str(
+                        compiled.policy_root
+                        or codex_plugin_root(compiled, compiled.workspace())
+                    ),
                 },
             }
         )
@@ -1164,7 +1212,7 @@ class CodexSessionOpener:
             }
         )
         policy_plugin = None
-        if config.containment != "outer":
+        if not config.sandbox.posture().contained():
             effective = native_environment(config.environment)
             home = native_home(effective)
             if not effective.get(CODEX_HOME):
@@ -1173,7 +1221,7 @@ class CodexSessionOpener:
                 partial(
                     install_declared_policy,
                     home,
-                    config.policy_root or config.workspace(),
+                    config.policy_root or codex_plugin_root(config, config.workspace()),
                     seed=CodexWorktreeHomeStore().derived(home),
                     workspace=config.workspace(),
                     executable=config.executable,
@@ -1192,7 +1240,7 @@ class CodexSessionOpener:
         state = CodexConversationState(
             config,
             server,
-            resume,
+            reopened,
             policy_plugin.selector if policy_plugin else None,
             fork_from=fork_from,
             fork_at=fork_at,
@@ -1251,7 +1299,15 @@ class CodexSessionOpener:
                 server.arguments.extend(
                     ["--config", f"model_catalog_json={json.dumps(str(catalog_path))}"]
                 )
-                with recursive_agent_scope(allowance):
+                kept = kept_record(
+                    "codex",
+                    CodexTranscripts(native_home(config.environment)),
+                    config.workspace(),
+                    config.record,
+                    config.model_id(),
+                    config.profile,
+                )
+                with recursive_agent_scope(allowance), kept:
                     await server.start()
                     async with running_companions(serving.companions):
                         try:
@@ -1266,7 +1322,7 @@ class CodexSessionOpener:
                     directory.cleanup()
                     scratch.cleanup()
 
-        async with config.layers.around(process(), resume or fork_from) as engine:
+        async with config.layers.around(process(), reopened or fork_from) as engine:
             yield CodexSession(engine, CodexRecord(state), CodexFork(state))
 
     def compiled(self) -> Codex:
@@ -1276,38 +1332,43 @@ class CodexSessionOpener:
         the thread is configured with, here rather than at declaration, so an
         agent can be copied and changed before it is built.
 
-        What the declaration leaves unset is the person's to answer, read
-        from their lup config as each session opens: a model left unnamed
-        runs on their tier, unless a provider of its own serves the session,
-        and an effort left unnamed starts from theirs. A named profile becomes
-        the account home the session runs under.
+        :func:`~lup.providers.codex.launch.compiled_codex` is the half a
+        launch shares; what only an in-process session has is added here.
+        The declared policy becomes hooks the app-server asks through,
+        ahead of the declared ones, and the identity joins the roster
+        through the environment the session's tool servers read.
         """
         declared = self.config
-        personal = UserConfigFile().load()
-        served = (
-            declared.endpoint is not None
-            or declared.model_provider is not None
-            or declared.provider_config is not None
-        )
-        model = (
-            declared.model if declared.model is not None or served else personal.tier
-        )
-        account = profile_environment(CODEX_LOGIN, declared.profile)
-        config = declared.model_copy(
+        compiled = compiled_codex(declared)
+        config = compiled.model_copy(
             update={
-                "model": model,
-                "effort": declared.effort
-                or codex_default_effort(
-                    model, declared.model_tiers, personal.effort or "xhigh"
-                ),
-                "environment": {**declared.environment, **account},
+                "environment": {
+                    **compiled.environment,
+                    **codex_account_environment(declared),
+                }
             }
         )
-        if config.endpoint is None:
+        policy = declared.enforced_policy()
+        if policy is not None:
+            judged = semantic_hooks(policy, declared.sandbox, CODEX_SEMANTICS)
+            hooks = (
+                judged if config.hooks is None else merge_hooks(judged, config.hooks)
+            )
+            config = config.model_copy(
+                update={
+                    "hooks": hooks,
+                    "approval_policy": config.approval_policy
+                    or codex_hook_approval_policy(hooks),
+                }
+            )
+        if declared.identity is None:
             return config
-        from lup.providers.codex.config import CodexCompatibilityTransform
-
-        return CodexCompatibilityTransform(config.endpoint).apply(config)
+        member = launched_member(
+            declared.workspace(), declared.identity.name
+        ).environment()
+        return config.model_copy(
+            update={"environment": {**config.environment, **member}}
+        )
 
 
 class CodexServing(BaseModel, frozen=True, arbitrary_types_allowed=True):
@@ -1394,9 +1455,9 @@ async def codex_sessions(config: Codex) -> list[SessionSummary]:
     is the one they write to. It starts no thread and installs nothing:
     listing is a read.
     """
-    account = profile_environment(CODEX_LOGIN, config.profile)
+    account = codex_account_environment(config)
     environment = native_environment({**config.environment, **account})
-    if config.containment != "outer":
+    if not config.sandbox.posture().contained():
         environment = {**environment, CODEX_HOME: str(native_home(environment))}
     server = CodexAppServer(config.executable, environment=environment)
     await server.start()

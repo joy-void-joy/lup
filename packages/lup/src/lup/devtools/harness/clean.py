@@ -11,7 +11,7 @@ What points at each kind:
 
 images
     A checkout's readable tag. A digest tag with none beside it is finished
-    (:func:`~lup.devtools.harness.contained.superseded_images`).
+    (:func:`~lup.launch.container.superseded_images`).
 volumes
     A container holding it; a repository's config home
     (``lup-<runtime>-<repo>``), which only that repository can say it no
@@ -21,7 +21,7 @@ volumes
     sandbox workspace no container holds is finished.
 environments
     The checkout each was made for, while it exists
-    (:mod:`lup.devtools.harness.environments`).
+    (:mod:`lup.launch.environments`).
 containers
     Egress proxies, which are left standing when they stop so their log can
     be read; a stopped one is finished. Sandbox and job containers keep
@@ -35,7 +35,7 @@ from typing import Literal
 import sh
 from pydantic import BaseModel, ValidationError
 
-from lup.devtools.harness.config_volume import (
+from lup.launch.config_volume import (
     HomeHelper,
     LegacyVolumes,
     RuntimeVolume,
@@ -45,7 +45,7 @@ from lup.devtools.harness.config_volume import (
     split_config_volumes,
     sweep_superseded,
 )
-from lup.devtools.harness.contained import (
+from lup.launch.container import (
     IMAGE_PREFIX,
     checkout_tag,
     finished_containers,
@@ -53,8 +53,8 @@ from lup.devtools.harness.contained import (
     state_volume_name,
     superseded_images,
 )
-from lup.devtools.harness.environments import HeldEnvironment, recorded_environments
-from lup.devtools.harness.superseded import SupersededFile
+from lup.launch.environments import HeldEnvironment, recorded_environments
+from lup.launch.superseded import SupersededFile
 from lup.harness.egress import PROXY_LABEL
 from lup.harness.image import ContainerEngine, Image
 from lup.harness.notice import Notice

@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 import sh
 
-from lup.devtools.harness.preflight import exclude_sandbox_placeholders
+from lup.launch.preflight import exclude_sandbox_placeholders
 from tests.unit.repos import commit_file, initialized_repo
 
 

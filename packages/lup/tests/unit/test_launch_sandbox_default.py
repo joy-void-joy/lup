@@ -22,17 +22,15 @@ import sh
 import typer
 from typer.testing import CliRunner
 
-import lup.devtools.harness.contained as contained
+import lup.launch.container as contained
 import lup.devtools.harness.launch as launch
+import lup.launch.declaration as declaration
+from lup.launch.declaration import LaunchSandbox
 from lup.devtools.harness.app import create_harness_app
 from lup.devtools.harness.composition import NativeTargets
-from lup.devtools.harness.generate import NativeHarnessComposition
-from lup.devtools.harness.launch import (
-    LaunchSandbox,
-    launch_claude,
-    launch_codex,
-    session_argv,
-)
+from lup.harness.generate import NativeHarnessComposition
+from lup.devtools.harness.launch import launch_claude, launch_codex
+from lup.launch.session import runtime_preflight, session_argv
 from lup.harness.codescan.common import RuleSelection
 from lup.harness.image import ContainerClient
 from lup.harness.messaging import SessionInboxes
@@ -52,7 +50,7 @@ def composition() -> Mock:
 
 def host(monkeypatch: pytest.MonkeyPatch, client: ContainerClient | None) -> None:
     """Answer the launcher's own probe as a host with this client, or with none."""
-    monkeypatch.setattr(launch, "detected_client", lambda: client)
+    monkeypatch.setattr(declaration, "detected_client", lambda: client)
 
 
 def unprobed(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -61,7 +59,7 @@ def unprobed(monkeypatch: pytest.MonkeyPatch) -> None:
     def probed() -> ContainerClient | None:
         raise AssertionError("the launcher asked the host for a container client")
 
-    monkeypatch.setattr(launch, "detected_client", probed)
+    monkeypatch.setattr(declaration, "detected_client", probed)
 
 
 @pytest.fixture
@@ -148,7 +146,11 @@ def opened_under(seen: Mock, runtime: str) -> LaunchSandbox:
     argv = inspect.signature(session_argv).bind(*call.args, **call.kwargs)
     posture = argv.arguments["sandbox"]
     words = seen.claude_sandbox if runtime == "claude" else seen.codex_sandbox
-    assert seen.preflight.call_args.args[3] is posture.contained()
+    preflight = seen.preflight.call_args
+    roster = inspect.signature(runtime_preflight).bind(
+        *preflight.args, **preflight.kwargs
+    )
+    assert roster.arguments["contained"] is posture.contained()
     assert words.call_args.kwargs["sandbox"] is posture
     return posture
 
