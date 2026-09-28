@@ -504,6 +504,11 @@ class RepositoryPeers:
         parameter the surfaces pass and this has no record to attribute to
         them.
         """
+        # lup: defer: nothing deletes what the member-file store replaced in
+        # this directory -- `touches.jsonl`, `roster.jsonl`, `messages.jsonl`,
+        # `names.jsonl`, `delivery/`, `heartbeats/` and `resets/` stay on every
+        # clone that ran 0.2.x; the user settled that the first sweep of this
+        # store deletes them, and no sweep or migration does
         return [
             folded_member(member)
             for member in store.swept(self.root, now, self.pulse.stale_after_seconds)

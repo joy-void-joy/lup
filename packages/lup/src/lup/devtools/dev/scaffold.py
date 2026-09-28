@@ -699,6 +699,11 @@ def merged(root: Path, source: ScaffoldSource) -> MergeOutcome:
     conflict in this repository is, and concluded by the update that started
     it rather than by hand.
     """
+    # lup: defer: unmeasured -- whether git's rename detection carries an
+    # adopter's moved copies of scaffold files through this merge, rather than
+    # reading each as a delete plus an add; the divergence probe that sized
+    # this merge paired files by path only. An adopter that moved its copied
+    # half around (nori did) is the case to try it on
     plan = planned(root, source.branch)
     git(
         "-C",
