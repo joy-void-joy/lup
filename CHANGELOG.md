@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+### A native subagent is a roster row of its own
+
+A session's native subagents inherited its coordination identity, so a
+subagent's `coordination_describe` replaced its orchestrator's row, a lock
+held a file for the whole session, and a subagent could not reach the
+session that dispatched it (#505). Each subagent is now a row of its own
+beneath its session's, keyed by the runtime's subagent id under the
+session's, named from its spawn where the runtime records one, and live
+while its session is.
+
+A new `PreToolUse` hook on each runtime, matched to the coordination
+server's tools, writes the calling conversation into the call's hidden
+`lup_caller` argument, so `describe`, `rename`, `lock`, `release` and
+`inbox` act on the calling subagent's row and `coordination_peers` lists
+subagents beneath their session. A subagent's edits are held on its row: a
+sibling writing there is asked, its own session's claims are not. A native
+send between conversations of one session is no longer redirected, and an
+address resolves as an id before a name. `PeerPolicy` gains a required
+`server`, the tool server the coordination verbs are served from, which
+`lup.coordination.policy.peer_policy` fills with `COORDINATION_SERVER`.
+
 ### Claude asks natively; only Codex parks a review
 
 0.4.0's note on native approval authority says a call parks in
