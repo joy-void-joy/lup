@@ -721,6 +721,15 @@ def disposition_for(
     it goes stale with nothing to recover it from. Dirt elsewhere prices an
     action without changing it, a dirty ``DELETE`` being a delete that refuses
     until forced; on a reserved workspace it decides what the action is.
+
+    A merged PR stays below the reserved guard, though it reads as the
+    stronger evidence. :func:`get_pr_info` finds a PR by head branch name in
+    every state, so a reused name matches one merged long before this
+    workspace was cut: hoisted, the check offers to ``DELETE`` a workspace
+    cut a moment ago, and a delete takes the worktree with the branch. A
+    reserved branch has no commit of its own, so it cannot own a merged PR,
+    and the guard shadows nothing real. A second net, where one is wanted,
+    honours a PR only when it merged before the reservation was recorded.
     """
     if name == current:
         return Disposition(status="CURRENT", reason="current branch")
