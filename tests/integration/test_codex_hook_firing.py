@@ -73,7 +73,7 @@ def personal_home_session(cwd: Path) -> Codex:
         model=PROBE_MODEL,
         system_prompt=INSTRUCTIONS,
         cwd=cwd,
-        sandbox="danger-full-access",
+        sandbox_mode="danger-full-access",
         tools=CodexTools(builtin=["Bash"]),
         approval_policy="never",
     )

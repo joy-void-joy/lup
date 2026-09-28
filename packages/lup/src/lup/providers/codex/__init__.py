@@ -37,13 +37,26 @@ Deliberately Codex-only, with no neutral contract:
   would have exactly one possible implementation.
 """
 
-from collections.abc import AsyncIterator, Generator
+from collections.abc import AsyncIterator, Generator, Sequence
 from contextlib import AbstractAsyncContextManager
 from pathlib import Path
 from typing import Literal, Self, overload
 
-from pydantic import AnyHttpUrl, BaseModel, SecretStr, model_validator
+from pydantic import AnyHttpUrl, BaseModel, Field, SecretStr, model_validator
 
+from lup.harness.models import Harness, HookSet
+from lup.harness.requirements import Finding
+from lup.launch.declaration import (
+    LaunchCommand,
+    LaunchStep,
+    Member,
+    Recording,
+    Resume,
+    NoSandbox,
+    Reopen,
+    SessionSandbox,
+    declared_policy,
+)
 from lup.policy.hooks import LupHooksConfig
 from lup.providers.codex.model_choice import (
     CodexModelChoice,
@@ -53,10 +66,9 @@ from lup.providers.codex.model_choice import (
 )
 from lup.providers.codex.models import CodexEffort
 from lup.providers.codex.builtins import CodexBuiltins
-from lup.mcp import ToolServer, uniquely_named
+from lup.mcp import ServeLaunch, ToolServer, uniquely_named
 from lup.tools.builtin import BuiltinPreset
 from lup.providers.codex.subagents import CodexModelTiers, CodexSubagentTools
-from lup.providers.confinement import SessionContainment
 from lup.sessions.capabilities import ConversationRecord, ForkSession, SessionEngine
 from lup.sessions.events import (
     AnyTurnBlock,
@@ -100,6 +112,9 @@ class CodexTools(BaseModel, frozen=True, extra="forbid", arbitrary_types_allowed
 
     mcp: list[ToolServer] = []
     """The MCP servers every session carries, each hosted or started as declared."""
+
+    serve: ServeLaunch = ServeLaunch()
+    """How a launched CLI starts the servers lup hosts, each in a process of its own."""
 
     @model_validator(mode="after")
     def servers_are_named_apart(self) -> Self:
@@ -230,6 +245,10 @@ class CodexSession:
         return self.forks.fork(at)
 
 
+type CodexSandbox = Literal["read-only", "workspace-write", "danger-full-access"]
+"""Codex's own sandbox modes, which say both how much a session may do and how far."""
+
+
 class Codex(
     BaseModel,
     frozen=True,
@@ -264,8 +283,7 @@ class Codex(
     policy_root: Path | None = None
     """Application project declaring policy; direct callers default to cwd."""
     executable: Path = CODEX_PROGRAM
-    containment: SessionContainment = "none"
-    """The boundary owning this executable's home; outer wrappers prepare theirs."""
+    """The program a session's app-server, or a launched CLI, is started as."""
     profile: str | None = None
     """The account every session opens as: a name among the person's lup
     profiles, resolved to that account's Codex home the way the same name
@@ -279,7 +297,56 @@ class Codex(
     endpoint: CodexCompatibleEndpoint | None = None
     """An OpenAI-compatible provider the sessions talk to instead of OpenAI."""
 
-    sandbox: Literal["read-only", "workspace-write", "danger-full-access"] | None = None
+    home: Path | None = None
+    """The Codex home every session runs in, named outright.
+
+    Wins over the home ``profile`` resolves to, the way an explicit directory
+    outranks a name looked up; unset, the profile's home, the one this
+    process already runs under, or a launch's home for its worktree."""
+
+    sandbox: SessionSandbox = NoSandbox()
+    """Which wall every session opens behind; ``NoSandbox()`` is none, the policy alone.
+
+    Unset, ``launch()`` and ``command()`` open inside the verified container
+    wherever a container engine answers, and under the inner sandbox with a
+    warning where none does. A session opened here inside the container is
+    started as the ``executable`` that enters it. The inner sandbox is
+    Codex's workspace-write envelope, which has no way out for one command:
+    an escapable one, or one excluding commands, is refused."""
+
+    sandbox_mode: CodexSandbox | None = None
+    """Codex's own sandbox mode, narrowed further by ``sandbox`` where it is
+    narrower, and taken over outright by the container."""
+
+    plugin: Harness | Path | None = None
+    """The plugin every session runs with: a harness declaration :meth:`prepare`
+    compiles into this project's tree and installs into the session's home,
+    or a directory already built. Its MCP entries are overridden by
+    ``tools.mcp``, the session's roster of servers in both compilations."""
+
+    policy: HookSet | None = None
+    """The semantic policy judging every call; unset, the plugin harness's.
+
+    A different policy named beside a harness is refused, since the plugin
+    already enforces its own. Compiled into hooks the app-server asks for a
+    session opened here, and into the plugin's dispatcher for a launched one."""
+
+    identity: Member | None = None
+    """Who each session is on the coordination roster; unset, a session opened
+    here joins none, and a launched one is named after its worktree."""
+
+    record: Recording | None = None
+    """What is kept of each session; unset, a launched session's transcript
+    and nothing for a session opened here."""
+
+    resume: Resume | None = None
+    """The earlier thread the next session reopens, or a fresh one."""
+
+    max_recursive_agent: int | None = Field(default=None, ge=-1)
+    """How many more levels of lup-created agents a session may open, ``-1``
+    for no limit; never more than this process has left to give. Unset, the
+    allowance this process holds, one level spent."""
+
     # The app-server's own wire spellings, passed through by thread_parameters.
     approval_policy: Literal["untrusted", "on-request", "granular", "never"] | None = (
         None
@@ -324,10 +391,14 @@ class Codex(
         the turn on its first command — so the combination is rejected at
         construction instead of at the first act.
         """
-        if self.containment == "outer" and self.executable == CODEX_PROGRAM:
+        inner = self.sandbox.confinement()
+        if inner is not None and (inner.escapable or inner.excluded_commands):
             raise ValueError(
-                "outer containment requires the prepared container executable"
+                "Codex's workspace-write envelope has no way out for one "
+                "command; declare InnerSandbox() without escapable or "
+                "excluded_commands, or judge those commands by the policy"
             )
+        declared_policy(self.plugin, self.policy)
         for key in self.provider_config or {}:
             if key not in {"model_provider", "model_providers"}:
                 raise ValueError(
@@ -339,7 +410,7 @@ class Codex(
                 "declarations; declare tools=CodexTools(builtin='none') beside it"
             )
         if self.delegated_tools is not None and (
-            self.sandbox != "read-only" or self.approval_policy != "never"
+            self.sandbox_mode != "read-only" or self.approval_policy != "never"
         ):
             raise ValueError(
                 "delegated tools require read-only sandbox and never approvals"
@@ -433,7 +504,9 @@ class Codex(
         """
         from lup.providers.codex.runtime import CodexSessionOpener
 
-        return CodexSessionOpener(self).open_session(resume)
+        return CodexSessionOpener(self).open_session(
+            Reopen(session=resume) if resume is not None else self.resume
+        )
 
     @overload
     async def ask(self, prompt: str | TurnInput) -> TurnResult[None]: ...
@@ -461,6 +534,65 @@ class Codex(
         from lup.providers.codex.runtime import codex_sessions
 
         return await codex_sessions(self)
+
+    def enforced_policy(self) -> HookSet | None:
+        """The policy judging every session: the one named, or the plugin harness's."""
+        return declared_policy(self.plugin, self.policy)
+
+    def launched(self) -> "Codex":
+        """This agent as a launch opens it: every field left unset takes the launch's default.
+
+        Built-in tools left unnamed are Codex's own stock, an unset sandbox is
+        the verified container wherever an engine answers (the inner sandbox,
+        with a warning, where none does), an unset identity is the worktree's
+        name on the roster, and an unset record is the run's transcript.
+        """
+        from lup.providers.codex.launch import codex_launched
+
+        return codex_launched(self)
+
+    def command(self, *words: str) -> LaunchCommand:
+        """The exact ``(argv, env, cwd)`` a launch of this agent runs, ``words`` passed through.
+
+        Compiled from the same fields ``open()`` reads. What the argv depends
+        on is settled first, as a launch settles it: the boundary is measured
+        and recorded, and an outer container's image and egress are made
+        ready, since the argv names them. Nothing is run in it.
+        """
+        from lup.providers.codex.launch import codex_command
+
+        return codex_command(self, list(words))
+
+    def prepare(self, force: bool = False) -> None:
+        """Compile the plugin, install it into the home, and trust it, launching nothing.
+
+        ``force`` reinstalls a plugin whose version has not moved.
+        """
+        from lup.providers.codex.launch import prepare_codex
+
+        prepare_codex(self, force)
+
+    def check(self) -> list[Finding]:
+        """Probe the installed CLI, the declared requirements and the login.
+
+        Answers every finding, and raises :class:`~lup.launch.refusal.LaunchRefused`
+        where one a launch needs is missing.
+        """
+        from lup.providers.codex.launch import check_codex
+
+        return check_codex(self)
+
+    def launch(self, *words: str, steps: Sequence[LaunchStep] = ()) -> int:
+        """Prepare, check, and run Codex in the foreground, then clean up.
+
+        The terminal is the session's until it ends; ``words`` reach the CLI
+        after everything the declaration compiles to, and ``steps`` run around
+        the whole of it — each ``before`` first, each ``after`` last, however
+        the session ended. Answers the CLI's exit status.
+        """
+        from lup.providers.codex.launch import launch_codex_session
+
+        return launch_codex_session(self, list(words), steps)
 
     def layered(self, layers: SessionLayers) -> Self:
         """This agent with ``layers`` laid over its own, the fields set there winning."""

@@ -34,16 +34,28 @@ in-process SDK hook callbacks, a mechanism only the Claude SDK exposes; Codex
 hooks exist solely as generated plugin command artifacts.
 """
 
-from collections.abc import AsyncIterator, Generator
+from collections.abc import AsyncIterator, Generator, Sequence
 from contextlib import AbstractAsyncContextManager
 from pathlib import Path
 from typing import Literal, Self, overload
 
 from pydantic import AnyHttpUrl, BaseModel, Field, SecretStr, model_validator
 
-from lup.policy.enforcement import SandboxPosture
+from lup.harness.models import Harness, HookSet
+from lup.harness.requirements import Finding
+from lup.launch.declaration import (
+    LaunchCommand,
+    LaunchStep,
+    Member,
+    Recording,
+    Resume,
+    NoSandbox,
+    Reopen,
+    SessionSandbox,
+    declared_policy,
+)
 from lup.policy.hooks import LupHooksConfig
-from lup.mcp import ToolServer, server_grants, uniquely_named
+from lup.mcp import ServeLaunch, ToolServer, server_grants, uniquely_named
 from lup.providers.claude.model_choice import (
     ClaudeModelChoice,
     claude_default_effort,
@@ -122,6 +134,9 @@ class ClaudeTools(BaseModel, frozen=True, extra="forbid", arbitrary_types_allowe
     mcp: list[ToolServer] = []
     """The MCP servers every session carries, each hosted or started as declared."""
 
+    serve: ServeLaunch = ServeLaunch()
+    """How a launched CLI starts the servers lup hosts, each in a process of its own."""
+
     @model_validator(mode="after")
     def servers_are_named_apart(self) -> Self:
         """Refuse two servers under one name, which would address one tool twice."""
@@ -146,46 +161,6 @@ class ClaudeTools(BaseModel, frozen=True, extra="forbid", arbitrary_types_allowe
         if not name.startswith("mcp__"):
             return roster is None or name in roster
         return server_grants(name, self.mcp)
-
-
-class ClaudeSandboxConfig(BaseModel, frozen=True):
-    """Claude SDK sandbox settings consumed by this factory."""
-
-    enabled: bool = True
-    auto_allow_bash_if_sandboxed: bool = True
-    allow_unsandboxed_commands: bool = False
-    excluded_commands: list[str] = Field(
-        default=[],
-        description=(
-            "Command prefixes this session runs outside the boundary. A "
-            "spawned session inherits none of the launching shell's settings "
-            "files, so a requirement stated there reaches it only by being "
-            "passed here too"
-        ),
-    )
-
-    def posture(self) -> SandboxPosture:
-        """These settings as the policy judging this session reads them.
-
-        The same two values reach the CLI and the policy from this one
-        object, so a session cannot be permitted more or less than whatever
-        judges it believes. Read off a runtime constant instead, the two
-        drifted the only way they can: the policy granted an escape the
-        settings forbade, and the runtime dropped it without a word.
-
-        The two halves are not equally firm, and only one of them settles
-        its own question. ``allow_unsandboxed_commands`` decides the escape
-        outright — off, the per-call argument is ignored. ``enabled`` only
-        asks for a sandbox: where one cannot start, the CLI warns and runs
-        the session unconfined, and this reports a boundary that is not
-        there. The CLI settles that with a fail-if-unavailable setting, which
-        this configuration cannot reach because the SDK's sandbox settings do
-        not carry it; until they do, the placement is settled here and the
-        confinement is asserted.
-        """
-        return SandboxPosture(
-            active=self.enabled, escapable=self.allow_unsandboxed_commands
-        )
 
 
 type ClaudePermissionMode = Literal[
@@ -358,10 +333,57 @@ class Claude(
     under. An unknown name is refused when a session opens, listing the known
     ones."""
 
+    home: Path | None = None
+    """The Claude configuration home every session runs in, named outright.
+
+    Wins over the home ``profile`` resolves to, the way an explicit directory
+    outranks a name looked up; unset, the profile's home or the one this
+    process already runs under."""
+
     endpoint: ClaudeCompatibleEndpoint | None = None
     """An Anthropic-compatible endpoint the sessions talk to instead of Anthropic's."""
 
-    sandbox: ClaudeSandboxConfig | None = None
+    sandbox: SessionSandbox = NoSandbox()
+    """Which wall every session opens behind; ``NoSandbox()`` is none, the policy alone.
+
+    Unset, ``launch()`` and ``command()`` open inside the verified container
+    wherever a container engine answers, and under the inner sandbox with a
+    warning where none does; a session opened here stays unconfined, which is
+    why the built-in tools default to the web alone."""
+
+    plugin: Harness | Path | None = None
+    """The plugin every session loads: a harness declaration :meth:`prepare`
+    compiles into this project's tree, or a directory already built.
+
+    A plugin brings skills, agents and commands, which is delegated authority,
+    so a session opened here with one takes ``ClaudeTools(builtin="stock")``.
+    Its MCP entries are not loaded: ``tools.mcp`` is the session's whole
+    roster of servers, in both compilations."""
+
+    policy: HookSet | None = None
+    """The semantic policy judging every call, and the boundary it declares.
+
+    Unset, the policy the ``plugin`` harness declares, where it is one; a
+    different policy named beside a harness is refused, since the plugin
+    already enforces its own. Compiled into in-process hooks for a session
+    opened here and into the plugin's dispatcher for a launched one."""
+
+    identity: Member | None = None
+    """Who each session is on the coordination roster; unset, a session opened
+    here joins none, and a launched one is named after its worktree."""
+
+    record: Recording | None = None
+    """What is kept of each session; unset, a launched session's transcript
+    and nothing for a session opened here."""
+
+    resume: Resume | None = None
+    """The earlier session the next one reopens, or a fresh one."""
+
+    max_recursive_agent: int | None = Field(default=None, ge=-1)
+    """How many more levels of lup-created agents a session may open, ``-1``
+    for no limit; never more than this process has left to give. Unset, the
+    allowance this process holds, one level spent."""
+
     hooks: LupHooksConfig | None = None
     submission_gate_resolver: SubmissionGateResolver | None = None
     subagents: list[SubagentSpec] = []
@@ -403,6 +425,16 @@ class Claude(
         """
         refuse_unsupported_effort(self.model, self.effort)
         return self
+
+    @model_validator(mode="after")
+    def one_policy_judges(self) -> Self:
+        """Refuse a policy that is not the one the plugin harness already enforces."""
+        declared_policy(self.plugin, self.policy)
+        return self
+
+    def enforced_policy(self) -> HookSet | None:
+        """The policy judging every session: the one named, or the plugin harness's."""
+        return declared_policy(self.plugin, self.policy)
 
     def model_id(self) -> str | None:
         """The model name the CLI is started with, or None to leave it the CLI's."""
@@ -463,14 +495,16 @@ class Claude(
     def open(
         self, resume: SessionId | None = None
     ) -> AbstractAsyncContextManager[ClaudeSession]:
-        """Open a conversation, or resume the one ``resume`` names.
+        """Open a conversation, or resume the one ``resume`` names over the declared one.
 
         The SDK loads here, not when the agent is declared; the CLI connects
         when the first turn starts, once that turn's submission tool is bound.
         """
         from lup.providers.claude.runtime import ClaudeSessionOpener
 
-        return ClaudeSessionOpener(self).open_session(resume)
+        return ClaudeSessionOpener(self).open_session(
+            Reopen(session=resume) if resume is not None else self.resume
+        )
 
     @overload
     async def ask(self, prompt: str | TurnInput) -> TurnResult[None]: ...
@@ -498,15 +532,74 @@ class Claude(
         """
         from lup.execution.threads import run_sync
         from lup.providers.claude.config_home import session_config_home
-        from lup.providers.claude.login import CLAUDE_LOGIN
+        from lup.providers.claude.launch import claude_account_environment
         from lup.providers.claude.transcripts import ClaudeTranscripts
-        from lup.providers.profile_tree import profile_environment
 
-        account = profile_environment(CLAUDE_LOGIN, self.profile)
+        account = claude_account_environment(self)
         home = session_config_home({**self.environment, **account})
         transcripts = ClaudeTranscripts(home)
         workspace = self.cwd if self.cwd is not None else Path.cwd()
         return await run_sync(lambda: transcripts.sessions(workspace))
+
+    def launched(self) -> "Claude":
+        """This agent as a launch opens it: every field left unset takes the launch's default.
+
+        A person at a terminal wants the coding agent they launched, so
+        ``launch()`` differs from ``open()`` in what it assumes, never in what
+        a declaration says: built-in tools left unnamed are Claude Code's own
+        stock, an unset sandbox is the verified container wherever an engine
+        answers (the inner sandbox, with a warning, where none does), an unset
+        identity is the worktree's name on the roster, and an unset record is
+        the run's transcript. Asking for the container's engine is the one
+        side effect, and says so where it falls back.
+        """
+        from lup.providers.claude.launch import claude_launched
+
+        return claude_launched(self)
+
+    def command(self, *words: str) -> LaunchCommand:
+        """The exact ``(argv, env, cwd)`` a launch of this agent runs, ``words`` passed through.
+
+        Compiled from the same fields ``open()`` reads. What the argv depends
+        on is settled first, as a launch settles it: the boundary is measured
+        and recorded, and an outer container's image and egress are made
+        ready, since the argv names them. Nothing is run in it.
+        """
+        from lup.providers.claude.launch import claude_command
+
+        return claude_command(self, list(words))
+
+    def prepare(self) -> None:
+        """Compile the plugin and ready the configuration home, launching nothing.
+
+        Claude Code loads a plugin from its directory at every start, so
+        nothing is installed that a forced preparation would reinstall.
+        """
+        from lup.providers.claude.launch import prepare_claude
+
+        prepare_claude(self)
+
+    def check(self) -> list[Finding]:
+        """Probe the installed CLI, the declared requirements and the login.
+
+        Answers every finding, and raises :class:`~lup.launch.refusal.LaunchRefused`
+        where one a launch needs is missing.
+        """
+        from lup.providers.claude.launch import check_claude
+
+        return check_claude(self)
+
+    def launch(self, *words: str, steps: Sequence[LaunchStep] = ()) -> int:
+        """Prepare, check, and run Claude Code in the foreground, then clean up.
+
+        The terminal is the session's until it ends; ``words`` reach the CLI
+        after everything the declaration compiles to, and ``steps`` run around
+        the whole of it — each ``before`` first, each ``after`` last, however
+        the session ended. Answers the CLI's exit status.
+        """
+        from lup.providers.claude.launch import launch_claude_session
+
+        return launch_claude_session(self, list(words), steps)
 
     def layered(self, layers: SessionLayers) -> Self:
         """This agent with ``layers`` laid over its own, the fields set there winning."""

@@ -8,6 +8,8 @@ declaration is compiled, in the words of the field, rather than dropped.
 """
 
 import shlex
+from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from enum import StrEnum
 from pathlib import Path
 from typing import Protocol, runtime_checkable
@@ -17,11 +19,12 @@ from pydantic import BaseModel, Field
 from lup.harness.devices import Device
 from lup.harness.image import detected_client
 from lup.harness.messaging import SessionInboxes
-from lup.harness.models import Resumption
+from lup.harness.models import Harness, HookSet, Resumption
 from lup.harness.notice import Notice
 from lup.observability.sessions import SessionRecorder
+from lup.policy.enforcement import SandboxPosture
 from lup.sandbox.rail import AccessibleRoot
-from lup.sessions.events import SessionId
+from lup.sessions.events import SessionId, SessionSummary
 from lup.types import EnvVars
 
 
@@ -42,44 +45,6 @@ class Mount(BaseModel, frozen=True, extra="forbid"):
     def root(self) -> AccessibleRoot:
         """This mount as the roots a lease and a boundary are compiled from."""
         return AccessibleRoot(path=self.path, writable=self.writable)
-
-
-class OuterContainer(BaseModel, frozen=True, extra="forbid"):
-    """The verified container is the boundary, and the runtime's own sandbox stands down.
-
-    A wall that has to be weakened to start nested is worth less than saying
-    plainly which wall is load-bearing: in an unprivileged container the
-    runtime's own confinement cannot start, so inside one the container and
-    its egress proxy are the whole boundary.
-    """
-
-    mounts: list[Mount] = []
-    """Folders mounted beside the working tree, ahead of the machine's standing ones."""
-
-    devices: list[Device] = []
-    """Devices the container is granted, ahead of the machine's standing grants."""
-
-
-class InnerSandbox(BaseModel, frozen=True, extra="forbid"):
-    """The session opens on the host, inside the runtime's own workspace-write sandbox."""
-
-    mounts: list[Mount] = []
-    """Folders the sandbox's write root widens to, beside the working tree."""
-
-    escapable: bool = Field(
-        default=False,
-        description=(
-            "Whether a command may ask to run outside the sandbox, for the "
-            "policy to judge. Claude Code spells it allowUnsandboxedCommands, "
-            "which a launched CLI already answers yes to on its own, so a "
-            "launch says it only to refuse; Codex has no per-command way out "
-            "of its envelope, and refuses a declaration asking for one"
-        ),
-    )
-
-
-type SessionSandbox = OuterContainer | InnerSandbox | None
-"""Which wall a session opens behind; ``None`` is none, the semantic policy alone."""
 
 
 class LaunchSandbox(StrEnum):
@@ -118,24 +83,161 @@ class LaunchSandbox(StrEnum):
         return self is LaunchSandbox.OUTER
 
 
-def sandbox_posture(sandbox: SessionSandbox) -> LaunchSandbox:
-    """Which wall a declared sandbox makes load-bearing."""
-    match sandbox:
-        case OuterContainer():
-            return LaunchSandbox.OUTER
-        case InnerSandbox():
-            return LaunchSandbox.INNER
-        case None:
-            return LaunchSandbox.NONE
+class Sandbox(BaseModel, ABC, frozen=True, extra="forbid"):
+    """Which wall a session opens behind, answered the same way by every compilation.
+
+    Each wall answers what a compilation asks of it — which posture it is,
+    what the policy judging it should believe, what it mounts and grants, and
+    what of the runtime's own sandbox it establishes — so a runtime compiles
+    a wall by asking, never by recognising one.
+    """
+
+    @abstractmethod
+    def posture(self) -> LaunchSandbox:
+        """Which wall this makes load-bearing."""
+
+    @abstractmethod
+    def enforcement(self) -> SandboxPosture:
+        """What this wall means to the policy judging the session it confines.
+
+        The same declaration reaches the runtime and the policy, so a session
+        cannot be permitted more or less than whatever judges it believes.
+        Read off a runtime constant instead, the two drifted the only way
+        they can: the policy granted an escape the settings forbade, and the
+        runtime dropped it without a word.
+        """
+
+    def roots(self) -> list[AccessibleRoot]:
+        """The folders this wall lets the session reach beside its working tree."""
+        return []
+
+    def granted(self) -> list[Device]:
+        """The devices this wall grants the session."""
+        return []
+
+    def confinement(self) -> "InnerSandbox | None":
+        """The runtime's own sandbox this wall establishes, or ``None`` where it stands down."""
+        return None
 
 
-def mount_roots(sandbox: SessionSandbox) -> list[AccessibleRoot]:
-    """The folders a declared sandbox mounts, as the roots a lease is built from."""
-    match sandbox:
-        case OuterContainer(mounts=mounts) | InnerSandbox(mounts=mounts):
-            return [mount.root() for mount in mounts]
-        case None:
-            return []
+class OuterContainer(Sandbox, frozen=True):
+    """The verified container is the boundary, and the runtime's own sandbox stands down.
+
+    A wall that has to be weakened to start nested is worth less than saying
+    plainly which wall is load-bearing: in an unprivileged container the
+    runtime's own confinement cannot start, so inside one the container and
+    its egress proxy are the whole boundary.
+    """
+
+    mounts: list[Mount] = []
+    """Folders mounted beside the working tree, ahead of the machine's standing ones."""
+
+    devices: list[Device] = []
+    """Devices the container is granted, ahead of the machine's standing grants."""
+
+    def posture(self) -> LaunchSandbox:
+        return LaunchSandbox.OUTER
+
+    def enforcement(self) -> SandboxPosture:
+        return SandboxPosture(contained=True)
+
+    def roots(self) -> list[AccessibleRoot]:
+        return [mount.root() for mount in self.mounts]
+
+    def granted(self) -> list[Device]:
+        return list(self.devices)
+
+
+class InnerSandbox(Sandbox, frozen=True):
+    """The session opens on the host, inside the runtime's own workspace-write sandbox."""
+
+    mounts: list[Mount] = []
+    """Folders the sandbox's write root widens to, beside the working tree."""
+
+    escapable: bool = Field(
+        default=False,
+        description=(
+            "Whether a command may ask to run outside the sandbox, for the "
+            "policy to judge. Claude Code spells it allowUnsandboxedCommands, "
+            "which a launched CLI already answers yes to on its own, so a "
+            "launch says it only to refuse; Codex has no per-command way out "
+            "of its envelope, and refuses a declaration asking for one"
+        ),
+    )
+
+    excluded_commands: list[str] = Field(
+        default=[],
+        description=(
+            "Command prefixes run outside the sandbox, beside the ones the "
+            "declared policy excludes. For a session whose policy is composed "
+            "by its caller rather than declared: a spawned session inherits "
+            "none of the launching shell's settings files, so an exclusion "
+            "stated there reaches it only by being named here. Codex has no "
+            "way to take a command out of its envelope, and refuses one"
+        ),
+    )
+
+    def posture(self) -> LaunchSandbox:
+        return LaunchSandbox.INNER
+
+    def enforcement(self) -> SandboxPosture:
+        """Confined, and escapable exactly where the sandbox lets a command out.
+
+        The two halves are not equally firm, and only one of them settles its
+        own question. ``escapable`` decides the escape outright — off, the
+        per-call argument is ignored. The sandbox only asks for confinement:
+        where one cannot start, Claude Code warns and runs the session
+        unconfined, and this reports a boundary that is not there. The CLI
+        settles that with a fail-if-unavailable setting the SDK's sandbox
+        settings do not carry; until they do, the placement is settled here
+        and the confinement is asserted.
+        """
+        return SandboxPosture(active=True, escapable=self.escapable)
+
+    def roots(self) -> list[AccessibleRoot]:
+        return [mount.root() for mount in self.mounts]
+
+    def confinement(self) -> "InnerSandbox | None":
+        return self
+
+
+class NoSandbox(Sandbox, frozen=True):
+    """No wall: the session opens on the host under the semantic policy alone."""
+
+    def posture(self) -> LaunchSandbox:
+        return LaunchSandbox.NONE
+
+    def enforcement(self) -> SandboxPosture:
+        return SandboxPosture()
+
+
+type SessionSandbox = OuterContainer | InnerSandbox | NoSandbox
+"""Which wall a session opens behind."""
+
+
+def declared_policy(
+    plugin: Harness | Path | None, policy: HookSet | None
+) -> HookSet | None:
+    """The policy a declaration enforces: the one it names, or its plugin harness's.
+
+    Derived rather than restated, because a harness compiles its policy into
+    the plugin it builds: a second one named beside it would judge a session
+    opened in process by one policy and a launched session by another, under
+    one declaration. So a different one is refused, and the same one is
+    merely redundant.
+    """
+    carried = (
+        next((each.hooks for each in plugin.plugins if each.hooks is not None), None)
+        if isinstance(plugin, Harness)
+        else None
+    )
+    if policy is not None and carried is not None and policy != carried:
+        raise ValueError(
+            f"policy {policy.id!r} is not the policy {carried.id!r} the plugin "
+            "harness declares, which its plugin already enforces; drop policy, "
+            "or declare it in the harness"
+        )
+    return policy if policy is not None else carried
 
 
 def settled_sandbox(asked: LaunchSandbox | None, stated: str) -> LaunchSandbox:
@@ -176,6 +278,15 @@ def settled_sandbox(asked: LaunchSandbox | None, stated: str) -> LaunchSandbox:
     return LaunchSandbox.INNER
 
 
+def launched_sandbox() -> SessionSandbox:
+    """The wall a launch declaring none opens behind: the container where an engine answers."""
+    return (
+        OuterContainer()
+        if settled_sandbox(None, "declare sandbox=InnerSandbox()").contained()
+        else InnerSandbox()
+    )
+
+
 class Member(BaseModel, frozen=True, extra="forbid"):
     """Who this session is on the repository's coordination roster, and where it is woken.
 
@@ -207,33 +318,75 @@ class Recording(BaseModel, frozen=True, extra="forbid", arbitrary_types_allowed=
     """Where the run's journal and transcript are written; unset, the project's runs."""
 
 
-class Latest(BaseModel, frozen=True, extra="forbid"):
+type RecordedSessions = Callable[[], Awaitable[list[SessionSummary]]]
+"""The sessions a runtime has on record for a workspace, newest first."""
+
+
+class Reopening(BaseModel, ABC, frozen=True, extra="forbid"):
+    """Which earlier session the next one reopens, in words every runtime spells."""
+
+    @abstractmethod
+    def resumption(self) -> Resumption:
+        """This reopening as each runtime's own launch spelling reads it."""
+
+    @abstractmethod
+    async def reopened(self, recorded: RecordedSessions) -> SessionId:
+        """The session a session opened in process resumes, from what is on record."""
+
+
+class Latest(Reopening, frozen=True):
     """Reopen the most recent session in this workspace, without choosing one."""
 
+    def resumption(self) -> Resumption:
+        return Resumption(latest=True)
 
-class Pick(BaseModel, frozen=True, extra="forbid"):
+    async def reopened(self, recorded: RecordedSessions) -> SessionId:
+        newest = next(iter(await recorded()), None)
+        if newest is None:
+            raise ValueError(
+                "there is no earlier session in this workspace to continue"
+            )
+        return newest.id
+
+
+class Pick(Reopening, frozen=True):
     """Offer the runtime's own picker over this workspace's sessions.
 
     A picker is a terminal's, so only a launch can take it; a session opened
     in process refuses one and asks for :class:`Latest` or a session id.
     """
 
+    def resumption(self) -> Resumption:
+        return Resumption(pick=True)
 
-type Resume = Latest | Pick | SessionId
-"""Which earlier session a launch reopens."""
+    async def reopened(self, recorded: RecordedSessions) -> SessionId:
+        del recorded
+        raise ValueError(
+            "Pick() offers the runtime's own picker, which only a launched "
+            "terminal has; name the session, or declare Latest()"
+        )
 
 
-def resumption(resume: Resume | None) -> Resumption:
+class Reopen(Reopening, frozen=True):
+    """Reopen one session by the id its runtime knows it as."""
+
+    session: SessionId
+
+    def resumption(self) -> Resumption:
+        return Resumption(session=self.session.value)
+
+    async def reopened(self, recorded: RecordedSessions) -> SessionId:
+        del recorded
+        return self.session
+
+
+type Resume = Latest | Pick | Reopen
+"""Which earlier session a launch reopens: ``Latest()``, ``Pick()``, or ``Reopen(session=...)``."""
+
+
+def resumption(resume: Reopening | None) -> Resumption:
     """A declared reopening in the shape each runtime's own spelling reads."""
-    match resume:
-        case Latest():
-            return Resumption(latest=True)
-        case Pick():
-            return Resumption(pick=True)
-        case SessionId(value=session):
-            return Resumption(session=session)
-        case None:
-            return Resumption()
+    return Resumption() if resume is None else resume.resumption()
 
 
 class LaunchCommand(BaseModel, frozen=True):
@@ -269,8 +422,9 @@ class LaunchStep(Protocol):
     repository wants done at a launch's edges that is no capability of the
     session. ``before`` runs ahead of everything the launch does, in the order
     the steps were given; ``after`` runs once the session has ended, in the
-    same order, for every step whose ``before`` ran — a session that failed or
-    was interrupted included, which ``succeeded`` says.
+    reverse order, the way nested ``with`` blocks unwind, for every step whose
+    ``before`` ran — a session that failed or was interrupted included, which
+    ``succeeded`` says.
     """
 
     def before(self) -> None: ...

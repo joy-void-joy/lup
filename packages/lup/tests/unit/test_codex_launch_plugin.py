@@ -9,7 +9,13 @@ import sh
 
 import lup.launch.session as launch_session
 import lup.providers.codex.session as codex_session
-from lup.launch.declaration import LaunchSandbox
+from lup.launch.declaration import (
+    InnerSandbox,
+    LaunchSandbox,
+    NoSandbox,
+    OuterContainer,
+    SessionSandbox,
+)
 import lup.providers.codex.install as installation
 import lup.providers.codex.runtime as runtime
 from lup.providers.codex import CODEX_PROGRAM, Codex
@@ -184,17 +190,17 @@ def test_portable_requests_keep_the_executables_execution_boundary(
 ) -> None:
     config = codex_config(
         SessionRequest(
-            cwd=tmp_path, containment="outer", contained_program=tmp_path / "enter"
+            cwd=tmp_path, sandbox=OuterContainer(), contained_program=tmp_path / "enter"
         )
     )
-    assert config.containment == "outer"
+    assert config.sandbox == OuterContainer()
 
 
-@pytest.mark.parametrize("containment", ["outer", "none", "inner"])
+@pytest.mark.parametrize("wall", [OuterContainer(), NoSandbox(), InnerSandbox()])
 async def test_custom_host_executables_still_need_host_policy_checks(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    containment: str,
+    wall: SessionSandbox,
 ) -> None:
     policy = Mock()
     monkeypatch.setattr(runtime, "install_declared_policy", policy)
@@ -206,15 +212,16 @@ async def test_custom_host_executables_still_need_host_policy_checks(
         {
             "cwd": tmp_path,
             "executable": tmp_path / "custom-codex",
-            "containment": containment,
+            "sandbox": wall,
             "environment": {"CODEX_HOME": str(tmp_path / "host-home")},
         }
     )
     with pytest.raises(RuntimeError, match="stop before any session"):
         async with runtime.CodexSessionOpener(config).open_session():
             pytest.fail("no native session should open")
-    assert policy.call_count == (0 if containment == "outer" else 1)
-    if containment != "outer":
+    outer = isinstance(wall, OuterContainer)
+    assert policy.call_count == (0 if outer else 1)
+    if not outer:
         assert policy.call_args.args == (tmp_path / "host-home", tmp_path)
         assert policy.call_args.kwargs["executable"] == config.executable
         assert (
@@ -223,9 +230,13 @@ async def test_custom_host_executables_still_need_host_policy_checks(
         )
 
 
-def test_outer_boundary_requires_a_container_executable(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="prepared container executable"):
-        Codex(cwd=tmp_path, containment="outer")
+async def test_outer_boundary_requires_a_container_executable(tmp_path: Path) -> None:
+    """A session opened here in the container is started as what enters it."""
+    with pytest.raises(ValueError, match="program that enters it"):
+        async with runtime.CodexSessionOpener(
+            Codex(cwd=tmp_path, sandbox=OuterContainer())
+        ).open_session():
+            pytest.fail("no session opens outside the container it asked for")
 
 
 def thread_opening_server() -> Mock:
@@ -250,7 +261,7 @@ def thread_opening_server() -> Mock:
     )
 
 
-@pytest.mark.parametrize("containment", ["none", "inner"])
+@pytest.mark.parametrize("wall", [NoSandbox(), InnerSandbox()])
 @pytest.mark.parametrize(
     ("explicit", "ambient", "expected"),
     [
@@ -263,7 +274,7 @@ def thread_opening_server() -> Mock:
 async def test_host_policy_and_process_use_the_same_resolved_native_home(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    containment: str,
+    wall: SessionSandbox,
     explicit: str | None,
     ambient: str | None,
     expected: str,
@@ -284,7 +295,7 @@ async def test_host_policy_and_process_use_the_same_resolved_native_home(
     calls.server.return_value = server
     monkeypatch.setattr(runtime, "CodexAppServer", calls.server)
     config = Codex.model_validate(
-        {"cwd": tmp_path, "containment": containment, "environment": environment}
+        {"cwd": tmp_path, "sandbox": wall, "environment": environment}
     )
 
     async with runtime.CodexSessionOpener(config).open_session():

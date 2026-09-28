@@ -1064,6 +1064,65 @@ DECLARED: list[Migration] = [
             ),
         ],
     ),
+    Migration(
+        subjects=[
+            "ClaudeSandboxConfig",
+            "SessionContainment",
+            "CLAUDE_CONTAINMENT",
+            "CODEX_CONTAINMENT",
+            "codex_sandbox",
+            "Codex.containment",
+            "SessionRequest.containment",
+        ],
+        reason=(
+            "one declaration now says which wall a session opens behind for "
+            "both of its compilations — a session opened in process and one "
+            "launched at a terminal — so the wall is one typed field on Claude, "
+            "Codex and SessionRequest alike, OuterContainer, InnerSandbox or "
+            "NoSandbox, rather than a Claude-only settings object, a Codex "
+            "containment word and a request's third spelling of the same thing"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Declare sandbox=InnerSandbox() where ClaudeSandboxConfig() "
+                    "was, from lup.launch.declaration: allow_unsandboxed_commands "
+                    "is InnerSandbox(escapable=...), excluded_commands keeps its "
+                    "name, and enabled=False inside a container is "
+                    "sandbox=OuterContainer(). ClaudeSandboxConfig(...).posture() "
+                    "is the wall's own .enforcement()."
+                )
+            ),
+            MigrationStep(
+                instruction=(
+                    "Replace containment='outer'|'inner'|'none' on Codex and "
+                    "SessionRequest with sandbox=OuterContainer()|InnerSandbox()|"
+                    "NoSandbox(); a session opened in process inside the container "
+                    "still names the program entering it, as executable= or "
+                    "contained_program=. Codex's own mode word moves to "
+                    "sandbox_mode=, which the wall narrows; codex_sandbox(request) "
+                    "is codex_sandbox_mode(config.sandbox, config.sandbox_mode) in "
+                    "lup.providers.codex.launch, beside CODEX_SANDBOX_WIDTH."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=["Codex.sandbox"],
+        reason=(
+            "Codex's sandbox field is the declaration's wall now, the same "
+            "type Claude's is, so Codex's own mode word moved to the name its "
+            "config.toml gives it"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Rename Codex(sandbox='read-only'|'workspace-write'|"
+                    "'danger-full-access') to Codex(sandbox_mode=...)."
+                )
+            ),
+        ],
+    ),
 ]
 """Every break this library has taken since its last release, and what to do.
 

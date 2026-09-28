@@ -1,18 +1,78 @@
 """Codex's spelling of a launch: the words and overrides an interactive CLI starts with."""
 
 import json
+from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from lup.harness.models import HookSet, Resumption
+from pydantic import BaseModel
+
+from lup.coordination.repository import launched_member
+from lup.harness.generate import ProjectContent, codex_generation_recipe, generate
+from lup.harness.image import Image
+from lup.harness.models import CapabilityEvidence, Harness, HookSet, Resumption
 from lup.harness.notice import Notice
+from lup.harness.requirements import Finding, Manifest
 from lup.harness.toolchain import codex_envelope_requirement
 from lup.launch.boundary import apply_sandbox_environment
-from lup.launch.declaration import LaunchSandbox
+from lup.launch.compilation import allowance_environment, inherited_environment
+from lup.launch.declaration import (
+    InnerSandbox,
+    LaunchCommand,
+    LaunchSandbox,
+    LaunchStep,
+    Member,
+    Recording,
+    Sandbox,
+    launched_sandbox,
+    resumption,
+)
+from lup.launch.foreground import between_steps, run_in_foreground
+from lup.launch.preflight import LaunchSentinels, release_ledger, sweep_ledgers
+from lup.launch.refusal import LaunchRefused
+from lup.launch.session import (
+    LaunchOpening,
+    personal_config,
+    runtime_preflight,
+    session_argv,
+    start_harness_transcript,
+)
 from lup.providers.codex.confinement import CODEX_CONFINEMENT
+from lup.providers.codex.harness_runtime import (
+    CodexCliEvidence,
+    codex_capability_probes,
+)
+from lup.providers.codex.home import (
+    CodexHomeSelection,
+    CodexWorktreeHomeStore,
+    select_codex_home,
+)
+from lup.providers.codex.login import CODEX_HOME, CODEX_LOGIN
+from lup.providers.codex.marketplace import CodexMarketplace
+from lup.providers.codex.model_choice import (
+    codex_default_effort,
+    codex_effort_arguments,
+)
+from lup.providers.codex.profile import CodexProfileSettings
+from lup.providers.codex.session import (
+    carry_codex_home,
+    codex_login_preflight,
+    prepare_codex_plugin,
+    settled_codex_seed,
+)
+from lup.providers.codex.transcripts import CodexTranscripts
+from lup.providers.profile_tree import profile_directory, profile_environment
+from lup.providers.profiles import DefaultHomeProfile
+from lup.providers.user_config import UserConfigFile
 from lup.sandbox.rail import AccessibleRoot, working_trees
-from lup.types import EnvVars
+from lup.sessions.layers import SessionLayers
+from lup.types import EnvVars, JsonObject
+from lup.workspace.paths import worktrees_directory
 
-# lup: ignore[library-default] — each entry is literally a Codex CLI flag
+if TYPE_CHECKING:
+    from lup.providers.codex import Codex, CodexSandbox, CodexTools
+
+# lup: ignore[library-default, constant-declaration] — each entry is literally a Codex CLI flag, its wire spelling
 CODEX_SANDBOX_OVERRIDES = (
     "-s",
     "--sandbox",
@@ -86,6 +146,26 @@ def codex_sandbox_arguments(
     """
     if hooks is None or hooks.sandbox is None:
         return []
+    return codex_envelope(hooks, environment, extra_args, sandbox, accessible, tree)
+
+
+def codex_envelope(
+    hooks: HookSet | None,
+    environment: EnvVars,
+    extra_args: list[str],
+    sandbox: LaunchSandbox = LaunchSandbox.INNER,
+    accessible: list[AccessibleRoot] = [],
+    tree: Path | None = None,
+    mode: "CodexSandbox | None" = None,
+) -> list[str]:
+    """The Codex envelope for one posture, whether or not a policy declares a sandbox.
+
+    What :func:`codex_sandbox_arguments` composes once a policy declares a
+    sandbox, and what a declaration naming its sandbox outright compiles to
+    either way. ``mode`` is a mode the declaration names beside its wall:
+    it narrows the inner envelope and replaces the container's and the
+    host's off switch, as :func:`codex_sandbox_mode` reconciles the two.
+    """
     overrides = [
         word
         for word in extra_args
@@ -109,7 +189,7 @@ def codex_sandbox_arguments(
                 ),
                 urgency="boundary",
             ).say()
-            return list(CODEX_CONFINEMENT.off)
+            return list(CODEX_CONFINEMENT.off) if mode is None else ["--sandbox", mode]
         case LaunchSandbox.NONE:
             Notice(
                 text=(
@@ -118,7 +198,7 @@ def codex_sandbox_arguments(
                 ),
                 urgency="boundary",
             ).say()
-            return list(CODEX_CONFINEMENT.off)
+            return list(CODEX_CONFINEMENT.off) if mode is None else ["--sandbox", mode]
         case LaunchSandbox.INNER:
             pass
     # Exercised before it is vouched for, the way the Claude path exercises
@@ -144,9 +224,10 @@ def codex_sandbox_arguments(
     # The envelope goes on either way. What a failed probe withdraws is the
     # claim, not the confinement: leaving the sandbox off because it could not
     # be verified would answer a boundary nobody could measure by removing it.
+    inner = codex_sandbox_mode(InnerSandbox(), mode)
     return [
         "--sandbox",
-        "workspace-write",
+        inner or "workspace-write",
         *writable_root_arguments(accessible, tree),
     ]
 
@@ -160,7 +241,7 @@ def writable_root_arguments(
     project's own workflow prescribes creating lands outside the boundary
     and cannot be edited from the session that created it. ``tree`` is that
     directory, and ``None`` where the checkout keeps no sibling worktrees,
-    which widens nothing.
+    which leaves the declared roots to widen it alone.
 
     The declared roots widen it alongside, which is what makes this the same
     change as the Claude settings merge rather than a second policy: one
@@ -183,10 +264,8 @@ def writable_root_arguments(
     also leaves a worktree cut later, and a commit that writes the object
     store, to a later launch or to Claude.
     """
-    if tree is None:
-        return []
     roots = [
-        str(tree),
+        *([str(tree)] if tree is not None else []),
         *[
             str(checkout)
             for item in accessible
@@ -194,9 +273,551 @@ def writable_root_arguments(
             for checkout in working_trees(item.path)
         ],
     ]
+    if not roots:
+        return []
     # lup: defer: a Codex permission profile can hold `config` and `hooks/`
     # read-only inside a writable root (`[permissions.<name>.filesystem]`,
     # deepest entry wins), which would give a mounted bare clone the whole-
     # clone reach Claude has; it replaces `--sandbox workspace-write`, which
     # overrides a profile, so it is the envelope's redesign and not this key's
     return ["-c", f"sandbox_workspace_write.writable_roots={json.dumps(roots)}"]
+
+
+# lup: ignore[constant-declaration] — Codex's own sandbox names, narrowest first
+CODEX_SANDBOX_WIDTH: list["CodexSandbox"] = [
+    "read-only",
+    "workspace-write",
+    "danger-full-access",
+]
+"""Codex's sandbox modes, ordered by how much they let a session reach."""
+
+
+def codex_sandbox_mode(
+    sandbox: Sandbox, declared: "CodexSandbox | None"
+) -> "CodexSandbox | None":
+    """The one field Codex says both how much and how far with.
+
+    Claude holds a permission mode and a sandbox and decides them apart.
+    Codex has neither word: it states what a session may do by stating what
+    it may reach, so a declaration naming a mode and a wall has named one
+    field twice.
+
+    The narrower of the two wins. That is not a precedence rule to remember
+    but the refusal of one: neither may widen what the other narrowed, so an
+    unattended session behind the inner sandbox reaches ``workspace-write``,
+    and a planning one stays ``read-only``. No wall leaves the mode to
+    whatever was declared, which is what every session meant before the wall
+    was a field.
+
+    The container takes the field instead, as ``danger-full-access`` — the
+    word :data:`~lup.providers.codex.confinement.CODEX_CONFINEMENT` sends a
+    launched CLI, for the same reason: Codex confines with the kernel's own
+    facilities, which an unprivileged container does not hand a nested
+    caller, so narrowing this field would arm a second boundary inside it —
+    the one that cannot start there, which is what standing it down was for.
+    A mode the declaration names itself is still sent: that is its author's
+    to answer for, and a mode inferred from an autonomy is not declared.
+    """
+    match sandbox.posture():
+        case LaunchSandbox.OUTER:
+            return "danger-full-access" if declared is None else declared
+        case LaunchSandbox.INNER:
+            asked: list[CodexSandbox] = [
+                "workspace-write",
+                *([declared] if declared is not None else []),
+            ]
+            return min(asked, key=CODEX_SANDBOX_WIDTH.index)
+        case LaunchSandbox.NONE:
+            return declared
+
+
+def codex_account_environment(agent: "Codex") -> EnvVars:
+    """The account a session runs as: its profile's home, or the home named outright."""
+    account = profile_environment(CODEX_LOGIN, agent.profile)
+    if agent.home is None:
+        return account
+    return {**account, **CODEX_LOGIN.environment(agent.home)}
+
+
+def compiled_codex(agent: "Codex") -> "Codex":
+    """The declaration as its sessions open with it, the one compilation both outputs start from.
+
+    A compatible endpoint becomes the provider definition and credential the
+    thread is configured with, here rather than at declaration, so an agent
+    can be copied and changed before it is built.
+
+    What the declaration leaves unset is the person's to answer, read from
+    their lup config as each session opens: a model left unnamed runs on
+    their tier, unless a provider of its own serves the session, and an
+    effort left unnamed starts from theirs. Which home the account runs in
+    is each output's own: its home itself for a session opened here, and a
+    home derived from it for the worktree a launch opens in.
+    """
+    personal = UserConfigFile().load()
+    served = (
+        agent.endpoint is not None
+        or agent.model_provider is not None
+        or agent.provider_config is not None
+    )
+    model = agent.model if agent.model is not None or served else personal.tier
+    config = agent.model_copy(
+        update={
+            "model": model,
+            "effort": agent.effort
+            or codex_default_effort(
+                model, agent.model_tiers, personal.effort or "xhigh"
+            ),
+        }
+    )
+    if config.endpoint is None:
+        return config
+    from lup.providers.codex.config import CodexCompatibilityTransform
+
+    return CodexCompatibilityTransform(config.endpoint).apply(config)
+
+
+def codex_launched(agent: "Codex") -> "Codex":
+    """The declaration with every field it left unset taking a launch's default.
+
+    Read off what was set, so a field declared with the same value as its
+    default still counts as said: built-in tools left unnamed are Codex's own
+    stock, an unset sandbox is the verified container where an engine answers
+    and the inner sandbox with a warning where none does, an unset identity is
+    the worktree's name, and an unset record is the run's transcript.
+    """
+    launched = agent
+    if "builtin" not in agent.tools.model_fields_set:
+        tools = agent.tools.model_copy(update={"builtin": "stock"})
+        launched = launched.model_copy(update={"tools": tools})
+    if "sandbox" not in agent.model_fields_set:
+        launched = launched.model_copy(update={"sandbox": launched_sandbox()})
+    if agent.identity is None:
+        launched = launched.model_copy(update={"identity": Member()})
+    if agent.record is None:
+        launched = launched.model_copy(update={"record": Recording(transcript=True)})
+    return launched
+
+
+def codex_mcp_arguments(tools: "CodexTools") -> list[str]:
+    """The declared servers as a launched CLI starts them, one ``--config`` table each.
+
+    Declared per session over whatever the home or the plugin carries under
+    the same names, so the declaration's roster is what the session serves.
+    """
+    serve = (
+        tools.serve
+        if tools.serve.runtime is not None
+        else tools.serve.model_copy(update={"runtime": "codex"})
+    )
+    return [
+        argument
+        for server in tools.mcp
+        for key, value in dict(server.launched(serve)).items()
+        if key != "type"
+        for argument in (
+            "--config",
+            f"mcp_servers.{server.name}.{key}={json.dumps(value)}",
+        )
+    ]
+
+
+def refuse_codex_in_process_fields(agent: "Codex") -> None:
+    """Refuse what only a session opened in process can honour, naming what a launch takes instead."""
+    refused = [
+        reason
+        for asked, reason in (
+            (
+                agent.hooks is not None,
+                "hooks are callbacks in this process, which a launched CLI "
+                "cannot call; declare the policy, which its plugin enforces",
+            ),
+            (
+                agent.submission_gate_resolver is not None,
+                "a submission gate answers turns a program drives; a launched "
+                "session's turns are the person's",
+            ),
+            (
+                agent.delegated_tools is not None,
+                "delegated tools describe a role a program delegates to",
+            ),
+            (
+                agent.layers != SessionLayers(),
+                "layers wrap sessions opened in this process",
+            ),
+            (
+                bool({"correction", "continuation"} & agent.model_fields_set),
+                "corrections answer a Stop hook for a program driving the turn",
+            ),
+        )
+        if asked
+    ]
+    if refused:
+        raise LaunchRefused("cannot launch this declaration: " + "; ".join(refused))
+
+
+def codex_arguments(
+    config: "Codex", envelope: list[str], words: list[str]
+) -> list[str]:
+    """The words Codex starts with, from a declaration already launched and compiled.
+
+    The reopening subcommand leads, because a word placed after a positional
+    session id would be read as another one; the envelope follows it, then
+    the model and its effort, then every override the declaration compiles
+    to, and the caller's ``words`` last.
+    """
+    refuse_codex_in_process_fields(config)
+    model = config.model_id()
+    effort = config.resolved_effort()
+    builtins = config.builtins()
+    return [
+        *codex_resume_arguments(resumption(config.resume)),
+        *envelope,
+        *(["--model", model] if model is not None else []),
+        *(codex_effort_arguments(effort) if effort is not None else []),
+        *codex_mcp_arguments(config.tools),
+        *(
+            []
+            if config.tools.builtin == "stock"
+            else builtins.configuration_arguments()
+        ),
+        *(
+            ["--config", f"developer_instructions={json.dumps(config.system_prompt)}"]
+            if config.system_prompt
+            else []
+        ),
+        *(
+            ["--config", f"approval_policy={json.dumps(config.approval_policy)}"]
+            if config.approval_policy is not None
+            else []
+        ),
+        *(
+            ["--config", f"model_provider={json.dumps(config.model_provider)}"]
+            if config.model_provider is not None
+            else []
+        ),
+        *[
+            argument
+            for key, value in (config.provider_config or {}).items()
+            for argument in ("--config", f"{key}={json.dumps(value)}")
+        ],
+        *words,
+    ]
+
+
+def codex_root(agent: "Codex") -> Path:
+    """The directory a launch opens in: the declared one, or where this process stands."""
+    return agent.workspace().resolve()
+
+
+def codex_checked(agent: "Codex", sentinels: LaunchSentinels) -> LaunchOpening:
+    """Clear the gates before a session: the CLI's probes, then the declared requirements."""
+    launched = codex_launched(agent)
+    harness = launched.plugin if isinstance(launched.plugin, Harness) else None
+    posture = launched.sandbox.posture()
+    opening = LaunchOpening(sandbox=posture)
+
+    def readiness() -> list[CapabilityEvidence[CodexCliEvidence]]:
+        return [probe.probe() for probe in codex_capability_probes(launched.executable)]
+
+    opening.findings = runtime_preflight(
+        "codex",
+        readiness,
+        harness.requirements if harness is not None else Manifest(),
+        codex_root(launched),
+        sentinels,
+        opening,
+        posture.contained(),
+    )
+    return opening
+
+
+class CodexLaunchHome(BaseModel, frozen=True, arbitrary_types_allowed=True):
+    """The home a launched Codex session runs in, and what it was derived from."""
+
+    store: CodexWorktreeHomeStore
+    selection: CodexHomeSelection
+    settings: CodexProfileSettings | None = None
+    """The person's settings, carried into a container's home at its start."""
+
+
+def codex_launch_home(
+    agent: "Codex", environment: EnvVars, root: Path
+) -> CodexLaunchHome:
+    """The home a launch runs in: the one named outright, or one derived for this worktree.
+
+    Derived from the account's home, the profile's where one is declared,
+    and seeded with the person's theme, editor and settings; a contained
+    session's settings are captured to be carried into the container's own.
+    """
+    config = UserConfigFile()
+    personal = personal_config(config)
+    try:
+        account_home = profile_directory(CODEX_LOGIN, config).launch_home(agent.profile)
+    except (KeyError, DefaultHomeProfile) as error:
+        raise LaunchRefused(str(error)) from error
+    store = CodexWorktreeHomeStore(
+        account_home=account_home or CODEX_LOGIN.ambient_home,
+        theme=personal.theme.codex,
+        editor=personal.editor,
+        settings=personal.codex.settings,
+    )
+    selection = select_codex_home(agent.home, environment, root, None, store)
+    contained = agent.sandbox.posture().contained()
+    settings = (
+        CodexProfileSettings.capture(selection.path, None, as_base=True)
+        if contained
+        else None
+    )
+    return CodexLaunchHome(store=store, selection=selection, settings=settings)
+
+
+def check_codex(agent: "Codex") -> list[Finding]:
+    """Every finding a launch of this declaration would clear, the login included.
+
+    The login is asked of the home the session would run in on the host; a
+    contained session is authenticated inside its container as it opens.
+    """
+    findings = codex_checked(agent, LaunchSentinels()).findings
+    launched = codex_launched(agent)
+    if launched.sandbox.posture().contained():
+        return findings
+    root = codex_root(launched)
+    environment = {**inherited_environment(), **compiled_codex(launched).environment}
+    home = codex_launch_home(launched, environment, root)
+    codex_login_preflight(
+        home.selection.path,
+        {**environment, CODEX_HOME: str(home.selection.path)},
+        [str(launched.executable)],
+    )
+    return findings
+
+
+def prepare_codex(agent: "Codex", force: bool = False) -> None:
+    """Compile a harness plugin into this project's tree, then install it into the home.
+
+    Installed, with its hooks and the project trusted, into the home a host
+    session would run in; a contained session's home is prepared inside its
+    container as it opens, which the launch does. ``force`` reinstalls a
+    plugin whose version has not moved.
+    """
+    launched = codex_launched(agent)
+    root = codex_root(launched)
+    if isinstance(launched.plugin, Harness):
+        generate(codex_generation_recipe(root, ProjectContent(harness=launched.plugin)))
+    if launched.sandbox.posture().contained():
+        return
+    environment = {**inherited_environment(), **compiled_codex(launched).environment}
+    home = codex_launch_home(launched, environment, root)
+    prepare_codex_plugin(
+        [], home.selection.path, root, environment, force, settings=home.settings
+    )
+
+
+class CodexLaunchState(BaseModel, arbitrary_types_allowed=True):
+    """What preparing a launched Codex home settled, read again once it ends."""
+
+    installed: list[Path] = []
+    applied: list[JsonObject] = []
+
+
+def codex_opening(
+    agent: "Codex",
+    words: list[str],
+    sentinels: LaunchSentinels,
+    opening: LaunchOpening,
+    home: CodexLaunchHome,
+    state: CodexLaunchState,
+    force: bool = False,
+    transcript: Path | None = None,
+) -> LaunchCommand:
+    """Compile a launched declaration into the process that opens its session.
+
+    Settles what the argv depends on the way a launch does: the envelope
+    exercised before it is vouched for, the home prepared and the login
+    refreshed through the boundary the session runs behind, the boundary
+    measured and recorded, and an outer container's image and egress made
+    ready, since the argv names them.
+    """
+    launched = codex_launched(agent)
+    config = compiled_codex(launched)
+    root = codex_root(launched)
+    posture = config.sandbox.posture()
+    policy = config.enforced_policy()
+    member = launched_member(root, config.identity.name if config.identity else None)
+    environment = inherited_environment()
+    environment.update(config.environment)
+    environment.update(allowance_environment(config.max_recursive_agent, environment))
+    accessible = [
+        *config.sandbox.roots(),
+        *[AccessibleRoot(path=path) for path in config.writable_roots],
+    ]
+    envelope = codex_envelope(
+        policy,
+        environment,
+        words,
+        sandbox=posture,
+        accessible=accessible if posture is LaunchSandbox.INNER else [],
+        tree=worktrees_directory(root),
+        mode=config.sandbox_mode,
+    )
+    arguments = codex_arguments(config, envelope, words)
+    environment[CODEX_HOME] = str(home.selection.path)
+    harness = config.plugin if isinstance(config.plugin, Harness) else None
+    image = harness.image if harness is not None else Image()
+
+    def authenticate(command: list[str], native_home: Path, headless: bool) -> None:
+        codex_login_preflight(native_home, environment, command, headless=headless)
+        if home.selection.isolated and not posture.contained():
+            home.store.publish(root)
+
+    def prepare(prefix: list[str], native_home: Path) -> None:
+        if prefix and home.settings is not None:
+            state.applied.append(
+                settled_codex_seed(
+                    image,
+                    root,
+                    home.settings.personal_settings(
+                        CodexMarketplace.declared(root) is not None
+                    ),
+                )
+            )
+        prepare_codex_plugin(
+            prefix, native_home, root, environment, force, settings=home.settings
+        )
+        state.installed.append(native_home)
+
+    argv = session_argv(
+        str(config.executable),
+        arguments,
+        root,
+        image,
+        harness.requirements if harness is not None else Manifest(),
+        policy,
+        home.selection.path,
+        CODEX_LOGIN,
+        posture,
+        environment,
+        transcript,
+        sentinels,
+        opening,
+        config.sandbox.roots(),
+        config.sandbox.granted(),
+        authenticate=authenticate,
+        member=member,
+        prepare=prepare,
+        # Codex reads the clipboard through the X11 selection a container can
+        # bridge, as its composition declares.
+        clipboard="x11",
+    )
+    return LaunchCommand(argv=argv, env=environment, cwd=root)
+
+
+def codex_command(agent: "Codex", words: list[str]) -> LaunchCommand:
+    """The process a launch of ``agent`` runs, compiled and settled but not run.
+
+    Preparing the home and refreshing the login are part of what the argv
+    depends on, so they happen here as they would for a launch; the boundary
+    a launch records is released again once the command is known.
+    """
+    launched = codex_launched(agent)
+    root = codex_root(launched)
+    sentinels = LaunchSentinels()
+    opening = codex_checked(launched, sentinels)
+    environment = {**inherited_environment(), **compiled_codex(launched).environment}
+    home = codex_launch_home(launched, environment, root)
+    try:
+        return codex_opening(
+            launched, words, sentinels, opening, home, CodexLaunchState()
+        )
+    finally:
+        release_ledger(root, sentinels.nonce)
+
+
+def launch_codex_session(
+    agent: "Codex", words: list[str], steps: Sequence[LaunchStep], force: bool = False
+) -> int:
+    """Prepare, check, and run a launched Codex session in the foreground.
+
+    The run's transcript is started before the session and closed after it;
+    a worktree home returns its refreshed login and what the session changed
+    of the person's settings to the account when it ends; the boundary it was
+    measured behind is released however it ended.
+    """
+    launched = codex_launched(agent)
+
+    def session() -> int:
+        root = codex_root(launched)
+        if isinstance(launched.plugin, Harness):
+            generate(
+                codex_generation_recipe(root, ProjectContent(harness=launched.plugin))
+            )
+        sweep_ledgers(root)
+        sentinels = LaunchSentinels()
+        opening = codex_checked(launched, sentinels)
+        config = compiled_codex(launched)
+        environment = {**inherited_environment(), **config.environment}
+        home = codex_launch_home(launched, environment, root)
+        if home.selection.isolated:
+            Notice(
+                text=(
+                    f"Using worktree-scoped Codex home: {home.selection.path}, "
+                    f"derived from {home.store.account_home}"
+                ),
+                urgency="detail",
+            ).say()
+        record = launched.record or Recording()
+        state = CodexLaunchState()
+        transcript = start_harness_transcript(
+            "codex",
+            CodexTranscripts(home.selection.path),
+            root,
+            model=config.model_id(),
+            profile=config.profile,
+            arguments=list(words),
+            record_root=record.root,
+            transcribe=record.transcript,
+            recorder=record.ledger,
+        )
+        succeeded = False
+        interrupted = False
+        contained = launched.sandbox.posture().contained()
+        try:
+            command = codex_opening(
+                launched,
+                words,
+                sentinels,
+                opening,
+                home,
+                state,
+                force,
+                transcript.journal.path,
+            )
+            status = run_in_foreground(command)
+            succeeded = status == 0
+            return status
+        except KeyboardInterrupt:
+            interrupted = True
+            raise
+        finally:
+            release_ledger(root, sentinels.nonce)
+            transcript.close(succeeded=succeeded, interrupted=interrupted)
+            if home.selection.isolated and home.store.publish(root):
+                Notice(
+                    text="Returned the refreshed Codex login to the account home",
+                    urgency="detail",
+                ).say()
+            if home.selection.isolated and (state.installed or not contained):
+                harness = (
+                    launched.plugin if isinstance(launched.plugin, Harness) else None
+                )
+                carry_codex_home(
+                    home.store,
+                    (harness.image if harness is not None else Image())
+                    if contained
+                    else None,
+                    root,
+                    UserConfigFile(),
+                    state.applied[0] if state.applied else None,
+                )
+
+    return between_steps(steps, session)

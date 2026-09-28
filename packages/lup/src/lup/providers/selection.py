@@ -28,7 +28,7 @@ from lup.providers.codex.models import CodexModel
 from lup.providers.login import ProviderLogin
 from lup.sessions.events import SubmissionGateResolver
 from lup.types import CustomModel, EnvVars, ModelTier
-from lup.providers.confinement import SessionContainment
+from lup.launch.declaration import NoSandbox, SessionSandbox
 
 type SessionAutonomy = Literal["ask", "accept_edits", "plan", "unattended"]
 """How much a session may do before it stops to ask.
@@ -100,15 +100,15 @@ class SessionRequest(
     default: ``xhigh`` where that runtime's catalog row takes it, and the row's
     highest rung below ``xhigh`` otherwise."""
 
-    containment: SessionContainment = "none"
-    """Which wall this session is opened behind, defaulting to the one it had."""
+    sandbox: SessionSandbox = NoSandbox()
+    """Which wall this session is opened behind; none unless it says, as it always was."""
 
     contained_program: Path | None = Field(
         default=None,
         description=(
             "The program an outer session's runtime is started as: the "
             "wrapper that execs the real CLI inside a container, which "
-            "`lup.devtools.harness.contained.contained_cli` writes. Named "
+            "`lup.launch.container.contained_cli` writes. Named "
             "here rather than derived, because the image, the mount table "
             "and the login it is built from are the application's, and a "
             "request is a declaration that builds nothing"
@@ -157,17 +157,17 @@ class SessionRequest(
         built a wrapper nothing starts, which reads as containment until
         somebody checks what the session actually ran in.
         """
-        match self.containment, self.contained_program:
-            case "outer", None:
-                raise ValueError(
-                    "an outer session is started as the program that enters "
-                    "its container; name it in contained_program"
-                )
-            case (("inner" | "none"), Path()):
-                raise ValueError(
-                    f"contained_program names a container no {self.containment} "
-                    "session opens; ask for containment='outer' or drop it"
-                )
+        contained = self.sandbox.posture().contained()
+        if contained and self.contained_program is None:
+            raise ValueError(
+                "an outer session is started as the program that enters "
+                "its container; name it in contained_program"
+            )
+        if not contained and self.contained_program is not None:
+            raise ValueError(
+                "contained_program names a container this session does "
+                "not open in; declare sandbox=OuterContainer() or drop it"
+            )
         return self
 
 

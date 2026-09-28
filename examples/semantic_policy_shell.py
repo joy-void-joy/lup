@@ -17,7 +17,8 @@ from pydantic import AnyHttpUrl, BaseModel, Field
 from lup import Claude
 from lup.harness.models import HookSet
 from lup.providers.claude.hooks import CLAUDE_SEMANTICS
-from lup.providers.claude import ClaudeSandboxConfig, ClaudeTools
+from lup.launch.declaration import InnerSandbox
+from lup.providers.claude import ClaudeTools
 from lup.policy.hooks import LupHooksConfig
 from lup.policy.enforcement import SemanticToolPolicy, create_policy_hooks
 from lup.policy.rules import ShellPolicy, UrlScope
@@ -29,7 +30,7 @@ DOCS_ORIGIN = AnyHttpUrl("https://docs.example.com")
 # denial on, which is the example's subject rather than a value to pass in
 DENIED_COMMAND = "curl https://docs.example.com/private/token"
 
-SANDBOX = ClaudeSandboxConfig(allow_unsandboxed_commands=True)
+SANDBOX = InnerSandbox(escapable=True)
 """The escape this session permits, said once to the policy and the runtime.
 
 A rule may place a call outside the sandbox, but only a session that opened
@@ -70,7 +71,7 @@ def policy_hooks() -> LupHooksConfig:
     return create_policy_hooks(
         SemanticToolPolicy(shell=policy),
         CLAUDE_SEMANTICS,
-        sandbox=SANDBOX.posture(),
+        sandbox=SANDBOX.enforcement(),
     )
 
 

@@ -41,12 +41,19 @@ from lup.providers.claude import (
 from lup.providers.claude.config_home import session_config_home
 from lup.providers.claude.transcripts import ClaudeTranscripts, result_text
 from lup.mcp import hosted_servers, opened_needs
-from lup.providers.claude.login import CLAUDE_LOGIN
-from lup.providers.claude.model_choice import claude_default_effort, claude_effort
-from lup.providers.profile_tree import profile_environment
-from lup.providers.user_config import UserConfigFile
+from lup.coordination.repository import launched_member
+from lup.launch.compilation import (
+    allowance_environment,
+    kept_record,
+    semantic_hooks,
+)
+from lup.launch.declaration import Reopening
+from lup.policy.hooks import merge_hooks
+from lup.providers.claude.hooks import CLAUDE_SEMANTICS
+from lup.providers.claude.launch import claude_settings, compiled_claude
+from lup.providers.claude.model_choice import claude_effort
 from lup.sessions.recursion import (
-    child_recursive_agent_allowance,
+    recursive_agent_allowance,
     recursive_agent_scope,
 )
 from lup.sessions.composition import AcceptedTurn, CompletedTurn, ComposedSession
@@ -798,6 +805,15 @@ class ClaudeFork(ForkSession[ClaudeSession]):
         return self.state.opener.open_session(fork=self.state.fork_point(at))
 
 
+async def resumed_session(config: Claude, resume: Reopening | None) -> SessionId | None:
+    """The conversation a declared reopening names, as a session opened here resumes one.
+
+    ``Latest`` is the newest conversation on record for this workspace, the
+    one ``claude --continue`` takes; a picker is a terminal's, and refused.
+    """
+    return None if resume is None else await resume.reopened(config.sessions)
+
+
 class ClaudeSessionOpener:
     """Open independently configured reconnecting Claude sessions."""
 
@@ -805,49 +821,53 @@ class ClaudeSessionOpener:
         self.config = Claude.model_validate(config)
 
     def compiled(self) -> Claude:
-        """The declaration as its sessions open with it.
+        """The declaration as a session opened in this process runs it.
 
-        A compatible endpoint becomes the environment that routes the CLI to
-        it here rather than at declaration, so an agent can be copied and
-        changed before it is built.
-
-        What the declaration leaves unset is the person's to answer, read
-        from their lup config as each session opens: a model left unnamed
-        runs on their tier, unless an endpoint serves models of its own, and
-        an effort left unnamed starts from theirs. A named profile becomes
-        the account home the session runs under.
+        :func:`~lup.providers.claude.launch.compiled_claude` is the half a
+        launch shares; what only an in-process session has is added here. The
+        declared policy becomes hooks judging each call ahead of the declared
+        ones, the identity joins the roster through the environment the
+        session's tool servers read, and a plugin — delegated authority —
+        needs Claude Code's stock tools to open at all.
         """
         declared = self.config
-        personal = UserConfigFile().load()
-        model = (
-            declared.model
-            if declared.model is not None or declared.endpoint is not None
-            else personal.tier
-        )
-        account = profile_environment(CLAUDE_LOGIN, declared.profile)
-        config = declared.model_copy(
-            update={
-                "model": model,
-                "effort": declared.effort
-                or claude_default_effort(model, personal.effort or "xhigh"),
-                "environment": {**declared.environment, **account},
-            }
-        )
-        if config.endpoint is None:
+        if (declared.plugin is not None or declared.plugin_dirs) and (
+            declared.tools.builtin != "stock"
+        ):
+            raise ValueError(
+                "a plugin can introduce delegated authority, so a session "
+                "opened here with one requires tools=ClaudeTools(builtin='stock')"
+            )
+        config = compiled_claude(declared)
+        policy = declared.enforced_policy()
+        if policy is not None:
+            judged = semantic_hooks(policy, declared.sandbox, CLAUDE_SEMANTICS)
+            hooks = (
+                judged if config.hooks is None else merge_hooks(judged, config.hooks)
+            )
+            config = config.model_copy(update={"hooks": hooks})
+        if declared.identity is None:
             return config
-        from lup.providers.claude.config import ClaudeCompatibilityTransform
-
-        return ClaudeCompatibilityTransform(config.endpoint).apply(config)
+        member = launched_member(
+            declared.cwd or Path.cwd(), declared.identity.name
+        ).environment()
+        return config.model_copy(
+            update={"environment": {**config.environment, **member}}
+        )
 
     @asynccontextmanager
     async def open_session(
-        self, resume: SessionId | None = None, *, fork: ClaudeForkPoint | None = None
+        self, resume: Reopening | None = None, *, fork: ClaudeForkPoint | None = None
     ) -> AsyncGenerator[ClaudeSession]:
         compiled = self.compiled()
-        allowance = child_recursive_agent_allowance(compiled.environment)
-        config = compiled.model_copy(
-            update={"environment": allowance.environment(compiled.environment)}
+        relayed = allowance_environment(
+            compiled.max_recursive_agent, compiled.environment
         )
+        allowance = recursive_agent_allowance(relayed)
+        config = compiled.model_copy(
+            update={"environment": {**compiled.environment, **relayed}}
+        )
+        reopened = await resumed_session(config, resume)
         # Built here rather than at declaration: a hosted server closes over
         # the session it serves — its identity, a container started for it,
         # a directory of its own that lives exactly as long as it does.
@@ -858,7 +878,7 @@ class ClaudeSessionOpener:
                 config.cwd or Path.cwd(), Path(scratch.name), config.environment
             ),
         )
-        state = ClaudeConversationState(self, config, servers, resume, fork)
+        state = ClaudeConversationState(self, config, servers, reopened, fork)
         composed = ComposedSession(
             starter=state.start_turn,
             binder=ClaudeTurnToolBinder(state),
@@ -889,7 +909,15 @@ class ClaudeSessionOpener:
 
         @asynccontextmanager
         async def native() -> AsyncGenerator[SessionEngine]:
-            with scratch, recursive_agent_scope(allowance):
+            kept = kept_record(
+                "claude",
+                ClaudeTranscripts(session_config_home(config.environment)),
+                config.cwd or Path.cwd(),
+                config.record,
+                config.model_id(),
+                config.profile,
+            )
+            with scratch, recursive_agent_scope(allowance), kept:
                 async with running_companions(companions):
                     try:
                         yield composed
@@ -899,7 +927,7 @@ class ClaudeSessionOpener:
                         finally:
                             await state.disconnect()
 
-        resumed = SessionId(value=fork.parent) if fork is not None else resume
+        resumed = SessionId(value=fork.parent) if fork is not None else reopened
         async with config.layers.around(native(), resumed) as engine:
             yield ClaudeSession(
                 engine,
@@ -1073,16 +1101,6 @@ def build_claude_options(
             case _:
                 return server
 
-    sandbox = (
-        claude_types.SandboxSettings(
-            enabled=config.sandbox.enabled,
-            autoAllowBashIfSandboxed=config.sandbox.auto_allow_bash_if_sandboxed,
-            allowUnsandboxedCommands=config.sandbox.allow_unsandboxed_commands,
-            excludedCommands=list(config.sandbox.excluded_commands),
-        )
-        if config.sandbox is not None
-        else None
-    )
     # The stock tools are Claude Code's coding agent, and that agent is its
     # tools and the system prompt that teaches them; a narrower grant keeps
     # only the caller's instructions, since the preset's describe tools the
@@ -1132,13 +1150,9 @@ def build_claude_options(
         max_turns=config.max_turns,
         max_thinking_tokens=config.max_thinking_tokens,
         effort=effort.level if effort is not None else None,
-        # The SDK merges its sandbox into this same document, so an effort's
-        # settings and the sandbox's reach the CLI as one `--settings`.
-        settings=(
-            json.dumps(effort.settings)
-            if effort is not None and effort.settings
-            else None
-        ),
+        # The one document a launched CLI reads as `--settings`: the declared
+        # wall and an effort's switches, so neither output inherits them.
+        settings=json.dumps(claude_settings(config)),
         cwd=config.cwd,
         add_dirs=[str(path) for path in config.add_dirs],
         plugins=[
@@ -1146,7 +1160,6 @@ def build_claude_options(
             for path in config.plugin_dirs
         ],
         env=config.environment,
-        sandbox=sandbox,
         hooks=hooks,
         include_partial_messages=config.delta_streaming,
         resume=resume,

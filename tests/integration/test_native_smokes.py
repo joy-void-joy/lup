@@ -77,7 +77,7 @@ async def test_codex_turn_start_carries_a_native_output_schema(tmp_path: Path) -
         model=CODEX_SMOKE_MODEL,
         system_prompt="Follow the submission instruction exactly.",
         cwd=tmp_path,
-        sandbox="read-only",
+        sandbox_mode="read-only",
         approval_policy="never",
     )
     async with agent.open() as session:

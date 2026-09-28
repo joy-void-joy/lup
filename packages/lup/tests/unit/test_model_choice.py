@@ -24,7 +24,8 @@ from lup.providers.claude.model_choice import (
     claude_model_name,
     listed_claude_model,
 )
-from lup.providers.claude import Claude, ClaudeSandboxConfig
+from lup.launch.declaration import InnerSandbox
+from lup.providers.claude import Claude
 from lup.providers.claude.models import ClaudeModel
 from lup.providers.claude.runtime import build_claude_options
 from lup.providers.claude.selection import CLAUDE_RUNTIME, claude_config
@@ -89,7 +90,10 @@ def test_ultra_compiles_to_xhigh_with_ultracode_for_the_sdk() -> None:
 
     assert options.effort == "xhigh"
     assert options.settings is not None
-    assert json.loads(options.settings) == {"ultracode": True}
+    assert json.loads(options.settings) == {
+        "sandbox": {"enabled": False},
+        "ultracode": True,
+    }
 
 
 def test_every_other_effort_reaches_the_sdk_unchanged_and_alone() -> None:
@@ -102,7 +106,8 @@ def test_every_other_effort_reaches_the_sdk_unchanged_and_alone() -> None:
             session_id=SESSION,
         )
         assert options.effort == effort
-        assert options.settings is None
+        assert options.settings is not None
+        assert json.loads(options.settings) == {"sandbox": {"enabled": False}}
 
 
 @pytest.mark.parametrize(
@@ -123,9 +128,9 @@ def test_an_unnamed_effort_reaches_the_sdk_as_the_models_default(
 
 
 def test_an_ultra_session_keeps_its_sandbox_in_the_same_settings() -> None:
-    """The SDK merges its sandbox into the settings document it is given."""
+    """The sandbox and the effort's switch travel in one settings document."""
     options = build_claude_options(
-        Claude(model="opus", effort="ultra", sandbox=ClaudeSandboxConfig()),
+        Claude(model="opus", effort="ultra", sandbox=InnerSandbox()),
         servers={},
         binding=lambda: None,
         resume=None,
@@ -133,8 +138,9 @@ def test_an_ultra_session_keeps_its_sandbox_in_the_same_settings() -> None:
     )
 
     assert options.settings is not None
-    assert json.loads(options.settings) == {"ultracode": True}
-    assert options.sandbox is not None
+    settings = json.loads(options.settings)
+    assert settings["ultracode"] is True
+    assert settings["sandbox"]["enabled"] is True
 
 
 def test_ultra_on_the_command_line_is_one_settings_document() -> None:

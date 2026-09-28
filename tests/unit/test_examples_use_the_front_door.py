@@ -9,7 +9,7 @@ else in the library, and the front door would be the defect.
 This fails on the import line rather than on the day somebody tries the
 example, and it is deliberately about the *agent* rather than about adapter
 imports in general: an example whose whole subject is provider-specific policy
-legitimately names `ClaudeSandboxConfig`. What none of them may do is reach past
+legitimately names `InnerSandbox`. What none of them may do is reach past
 the root for `Claude` or `Codex`, because a reader who has to know
 `lup.providers.claude` exists to get an agent has already been failed.
 """

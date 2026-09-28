@@ -501,3 +501,26 @@ def path_is_under(file_path: str | Path, allowed_dirs: list[Path]) -> bool:
         except ValueError:
             continue
     return False
+
+
+def worktrees_directory(start: Path) -> Path | None:
+    """The ``tree/`` directory holding this checkout's sibling worktrees, or ``None``.
+
+    Two checkout layouts are supported. In the bare-repo layout the checkout
+    at ``start`` is itself a worktree living inside ``tree/``, so ``tree/`` is
+    the parent. Otherwise ``tree/`` sits at ``start`` or an ancestor, so
+    walking upward finds it from anywhere inside the checkout. ``None`` where
+    neither holds, which a caller widening a sandbox over sibling worktrees
+    reads as there being none to widen over.
+    """
+    resolved = start.resolve()
+    if resolved.parent.name == "tree":
+        return resolved.parent
+    return next(
+        (
+            directory / "tree"
+            for directory in (resolved, *resolved.parents)
+            if (directory / "tree").is_dir()
+        ),
+        None,
+    )
