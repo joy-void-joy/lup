@@ -138,6 +138,56 @@ class RenderedMigrations(BaseModel, frozen=True):
 
 DECLARED: list[Migration] = [
     Migration(
+        subjects=["SpawnNames.misspelled"],
+        reason=(
+            "a spawn whose name falls outside the shape is normalized and sent "
+            "out rather than refused, so no refusal wording remains to declare"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Drop the field from a SpawnNames override. The first "
+                    "character of `punctuation` is what joins the words of a "
+                    "normalized name; `reason` and `recovery` still word the one "
+                    "refusal left, a spawn with nothing to read a name from."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=["SubagentCleanup.gate", "SubagentCleanup.record"],
+        reason=(
+            "a delegated agent is told the scoped check and the test runner it "
+            "owes, and leaves the full gate to whoever lands its work"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Spell your project's scoped check in `SubagentCleanup.scoped` "
+                    "and its test runner in `SubagentCleanup.tests` where `gate` "
+                    "and `record` were set."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=["ToolInput.description", "ToolInput.subagent_type"],
+        reason=(
+            "the stop hook names only shell work a subagent's own run started, "
+            "so it reads no spawn arguments"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Nothing reads these fields of the cleanup hook's tool input. "
+                    "A hook that needs a spawn's description or type reads them "
+                    "from its own PreToolUse payload, as lup.policy.kernel.spawns "
+                    "is handed them."
+                )
+            ),
+        ],
+    ),
+    Migration(
         subjects=[
             "ModuleRun.renamed",
             "ModuleEdit",
