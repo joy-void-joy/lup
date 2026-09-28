@@ -333,7 +333,7 @@ def create_peer_tools(
         return PeerSayOutput(
             address=found.label(),
             delivery=peers.cohort.delivery(found),
-            outstanding=len(peers.waiting(member_id).messages),
+            outstanding=peers.cohort.outstanding(found),
         )
 
     @lup_tool(
