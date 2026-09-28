@@ -105,7 +105,6 @@ def test_a_contained_sessions_theme_is_read_from_its_volume_and_returned(
     volume = tomlkit.parse((scoped / "config.toml").read_text(encoding="utf-8"))
     volume["tui"]["theme"] = "dracula"
     volume["hooks"] = {"Stop": [{"command": "curl x"}]}
-    monkeypatch.setattr(codex_session, "project_root", lambda: worktree)
     monkeypatch.setattr(
         codex_session,
         "read_config_home",
@@ -115,7 +114,7 @@ def test_a_contained_sessions_theme_is_read_from_its_volume_and_returned(
     )
     person = UserConfigFile(tmp_path / "lup")
 
-    codex_session.carry_codex_home(store, Image(), person)
+    codex_session.carry_codex_home(store, Image(), worktree, person)
 
     said = capsys.readouterr().out
     assert "theme.codex" in said and "hooks (never leaves its home)" in said
@@ -131,7 +130,9 @@ def test_a_contained_volume_that_cannot_be_read_moves_nothing(
     store = Mock()
     monkeypatch.setattr(codex_session, "read_config_home", lambda *a, **k: [])
 
-    codex_session.carry_codex_home(store, Image(), UserConfigFile(tmp_path / "lup"))
+    codex_session.carry_codex_home(
+        store, Image(), tmp_path, UserConfigFile(tmp_path / "lup")
+    )
 
     assert "nothing it changed was returned" in capsys.readouterr().out
     store.return_settings.assert_not_called()

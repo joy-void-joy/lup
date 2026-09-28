@@ -161,7 +161,6 @@ def settled_launch(
     policy accepted for every checkout granted, and the repositories a later
     worktree may be accepted beneath.
     """
-    monkeypatch.setattr(launch_session, "project_root", lambda: checkout)
     sentinels = LaunchSentinels()
     plugin = Plugin(
         id="test.upstream",
@@ -173,6 +172,7 @@ def settled_launch(
         agents=[],
     )
     launch_session.settle_boundary(
+        checkout,
         plugin.hooks,
         sandbox,
         [],

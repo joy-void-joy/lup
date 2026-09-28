@@ -51,7 +51,6 @@ def uncontained(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Everything an uncontained `session_argv` reaches that is not its subject."""
     monkeypatch.setattr(launch_session, "settle_boundary", lambda *a, **k: None)
     monkeypatch.setattr(launch_session, "say_opening", lambda *a, **k: None)
-    monkeypatch.setattr(launch_session, "project_root", lambda: tmp_path)
     monkeypatch.setattr(launch, "carry_claude_home", lambda *a, **k: None)
 
 
@@ -61,6 +60,7 @@ def opened(environment: dict[str, str], tmp_path: Path) -> list[str]:
     return launch_session.session_argv(
         "claude",
         ["--model", "opus"],
+        tmp_path,
         built.recipe.source.image,
         built.recipe.source.requirements,
         Mock(),

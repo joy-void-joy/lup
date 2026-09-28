@@ -70,7 +70,7 @@ from lup.observability.native import NativeTranscripts, NativeTranscriptWatcher
 from lup.observability.sessions import Session, SessionRecorder
 from lup.sessions.recursion import MAX_RECURSIVE_AGENT_ENV
 from lup.types import EnvVars, JsonObject, JsonValue
-from lup.workspace.paths import agent_version, harness_runs_path, project_root
+from lup.workspace.paths import agent_version, harness_runs_path
 from lup.harness.clipboard import ClipboardTransport
 from lup.harness.generate import RuntimeReadiness
 from lup.harness.image import Image
@@ -202,18 +202,18 @@ def capture_watcher_diagnostics(run_directory: Path) -> logging.Handler:
     return handler
 
 
-def portable_roots() -> list[PortableRoot]:
+def portable_roots(root: Path) -> list[PortableRoot]:
     """The roots a durable transcript should name by role, not by location.
 
-    The project root, the tree of sibling checkouts around it, and the
+    The checkout ``root``, the tree of sibling checkouts around it, and the
     operator's home — between them, everywhere a session's paths come from.
     Ordered widest-last is irrelevant here because the rule sorts by length;
     what matters is that all three are offered, since a payload quoting a
     sibling worktree names none of the other two.
     """
     return [
-        PortableRoot(label="<project>", path=project_root()),
-        PortableRoot(label="<tree>", path=project_root().parent),
+        PortableRoot(label="<project>", path=root),
+        PortableRoot(label="<tree>", path=root.parent),
         PortableRoot(label="<home>", path=Path.home()),
     ]
 
@@ -221,6 +221,7 @@ def portable_roots() -> list[PortableRoot]:
 def start_harness_transcript(
     provider: str,
     transcripts: NativeTranscripts,
+    root: Path,
     *,
     model: str | None,
     profile: str | None,
@@ -248,12 +249,15 @@ def start_harness_transcript(
     and its observable journal, which :meth:`HarnessTranscript.close` amends
     with the outcome. The harness command tree wires the recorder from the
     project's declared kinds; handed none, nothing is recorded.
+
+    ``root`` is the checkout the session works in: the paths its record
+    names by role, and the scope its native transcripts are read from.
     """
     run_id = (
         f"{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}_{provider}_{uuid4().hex[:8]}"
     )
-    root = record_root or harness_runs_path()
-    trace_path = root / provider / run_id / "observable.jsonl"
+    runs = record_root or harness_runs_path()
+    trace_path = runs / provider / run_id / "observable.jsonl"
     journal = TraceJournal(
         trace_path,
         TraceContext.root(
@@ -269,7 +273,7 @@ def start_harness_transcript(
         # later, so it carries the path rule the in-process default does not:
         # what it mirrors is a native CLI's own record, full of this machine's
         # directories in prose no key-name rule can see.
-        redaction=Redactions(KeyRedaction(), PathRedaction(portable_roots())),
+        redaction=Redactions(KeyRedaction(), PathRedaction(portable_roots(root))),
     )
     # An argv vector reaches the journal only redacted: these are the words a
     # caller typed, and a credential passed as an option value is a value the
@@ -300,7 +304,7 @@ def start_harness_transcript(
                 model=model,
             )
         ),
-        scope=project_root(),
+        scope=root,
     )
     diagnostics = capture_watcher_diagnostics(trace_path.parent)
     watcher.start()
@@ -320,6 +324,7 @@ def runtime_preflight(
     label: str,
     readiness: RuntimeReadiness,
     requirements: Manifest,
+    root: Path,
     sentinels: LaunchSentinels,
     opening: LaunchOpening,
     contained: bool = True,
@@ -364,6 +369,7 @@ def runtime_preflight(
     opening.runtime = f"{target} {versions}" if versions else target
     return report_requirements(
         requirements,
+        root,
         sentinels=sentinels,
         in_passing=True,
         contained=contained,
@@ -373,6 +379,7 @@ def runtime_preflight(
 
 def report_requirements(
     manifest: Manifest,
+    root: Path,
     setting_up: bool = False,
     sentinels: LaunchSentinels = LaunchSentinels(),
     in_passing: bool = False,
@@ -426,7 +433,7 @@ def report_requirements(
             ]
         ),
         container_client(),
-        project_root(),
+        root,
         inside_sentinel=sentinels.inside,
         host_sentinel=sentinels.host,
     ).check(environ, setting_up=setting_up, contained=contained)
@@ -468,6 +475,7 @@ def reported(findings: list[Finding], in_passing: bool = False) -> list[Finding]
 def verify_inside(
     manifest: Manifest,
     opening: list[str],
+    root: Path,
     setting_up: bool = True,
     sentinels: LaunchSentinels = LaunchSentinels(),
     environment: EnvVars | None = None,
@@ -494,14 +502,14 @@ def verify_inside(
         environ: EnvVars = dict(os.environ)  # lup: ignore[os-environ]
     else:
         environ = dict(environment)
-    leased = fleet_lease(project_root(), list(accessible))
+    leased = fleet_lease(root, list(accessible))
     return reported(
         manifest.check_inside(
             environ,
             opening,
             setting_up,
             HostFacts(
-                checkout=project_root(),
+                checkout=root,
                 inside_sentinel=sentinels.inside,
                 host_sentinel=sentinels.host,
                 read_only_binds=list(leased.read_only),
@@ -515,6 +523,7 @@ def verify_inside(
 def report_inside_requirements(
     image: Image,
     requirements: Manifest,
+    root: Path,
     config_home: Path,
     login: ProviderLogin,
     sentinels: LaunchSentinels = LaunchSentinels(),
@@ -555,7 +564,7 @@ def report_inside_requirements(
     opening = contained_argv(
         image,
         requirements,
-        project_root(),
+        root,
         editor_rendezvous(login),
         credential if credential.exists() else None,
         login,
@@ -577,6 +586,7 @@ def report_inside_requirements(
     return verify_inside(
         requirements,
         opening,
+        root,
         setting_up=setting_up,
         sentinels=sentinels,
         skipped=skipped,
@@ -631,6 +641,7 @@ def editor_rendezvous(login: ProviderLogin) -> Path | None:
 
 
 def settle_boundary(
+    root: Path,
     hooks: HookSet | None,
     sandbox: LaunchSandbox,
     findings: list[Finding],
@@ -670,8 +681,11 @@ def settle_boundary(
     after the last measurement, and a launch that raises never reaches it --
     so the one report a reader cannot afford to lose is the one that cannot
     wait for it.
+
+    ``root`` is the checkout the boundary is measured for, handed in rather
+    than read from wherever this process happens to stand: a declaration
+    opened on another checkout measures that one.
     """
-    root = project_root()
     declared = hooks or HookSet(id="hooks.absent", policy_ids=[])
     # Before the lease asks git anything about these roots, on either posture:
     # a root whose pointer its repository does not list back is refused here
@@ -727,6 +741,7 @@ def settle_boundary(
 def session_argv(
     cli: str,
     arguments: list[str],
+    root: Path,
     image: Image,
     requirements: Manifest,
     hooks: HookSet | None,
@@ -777,10 +792,11 @@ def session_argv(
     posture known, and what the registry says as it resolves belongs in
     this opening's banner.
 
-    What it reads of the declaration arrives piece by piece -- the image and
-    its manifest, the policy, the clipboard's way in -- rather than as a
-    generated harness, so a declaration whose plugin is a built directory
-    opens a session the same way as one this library compiled.
+    What it reads of the declaration arrives piece by piece -- the checkout
+    it opens in, the image and its manifest, the policy, the clipboard's way
+    in -- rather than as a generated harness, so a declaration whose plugin
+    is a built directory, opened on any checkout, opens a session the same
+    way as one this library compiled for this one.
     """
     banner = cleared.banner
     # Minted where both runtimes pass through, so a session's coordination
@@ -797,8 +813,8 @@ def session_argv(
     # have them exported would otherwise hand their own roster address to
     # every session they start — two peers answering to one id, which is the
     # one thing the durable id exists to rule out.
-    environment.update((member or launched_member(project_root())).environment())
-    environment[POLICY_ROOT_ENV] = str(project_root())
+    environment.update((member or launched_member(root)).environment())
+    environment[POLICY_ROOT_ENV] = str(root)
 
     # Settled once and handed to everything that needs it. Resolving a
     # registration can clone it, so a second resolution would be a second
@@ -837,6 +853,7 @@ def session_argv(
         if authenticate is not None:
             authenticate([cli], config_home, False)
         settle_boundary(
+            root,
             hooks,
             sandbox,
             cleared.findings,
@@ -860,7 +877,7 @@ def session_argv(
     opening = contained_argv(
         image,
         requirements,
-        project_root(),
+        root,
         editor_rendezvous(login),
         credential if credential.exists() else None,
         login,
@@ -900,6 +917,7 @@ def session_argv(
     inside = verify_inside(
         requirements,
         probing(opening),
+        root,
         setting_up=False,
         sentinels=sentinels,
         environment=environment,
@@ -923,6 +941,7 @@ def session_argv(
     # from either alone would report a capability nothing asked about.
     measured_here = [*cleared.findings, *inside]
     settle_boundary(
+        root,
         hooks,
         sandbox,
         measured_here,

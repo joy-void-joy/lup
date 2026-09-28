@@ -37,7 +37,6 @@ def boundary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Mock:
     composition.recipe.source.image.forge.sourced.return_value = ""
     composition.recipe.source.image.clipboard = ClipboardBridge()
     composition.clipboard_transport = "commands"
-    monkeypatch.setattr(launch_session, "project_root", lambda: tmp_path)
     monkeypatch.setattr(launch_session, "settle_boundary", Mock())
     monkeypatch.setattr(launch_session, "say_opening", Mock())
     monkeypatch.setattr(launch_session, "verify_inside", Mock(return_value=[]))
@@ -59,6 +58,7 @@ def test_plugin_preparation_uses_the_actual_home_before_authentication(
     launch_session.session_argv(
         "codex",
         [],
+        tmp_path,
         boundary.recipe.source.image,
         boundary.recipe.source.requirements,
         None,
@@ -86,6 +86,7 @@ def test_failed_plugin_preparation_stops_the_launch_before_authentication(
         launch_session.session_argv(
             "codex",
             [],
+            tmp_path,
             boundary.recipe.source.image,
             boundary.recipe.source.requirements,
             None,

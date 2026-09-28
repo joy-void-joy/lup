@@ -31,7 +31,6 @@ def test_interactive_launch_replaces_inherited_policy_root_and_forwards_it(
     workspace = tmp_path / "scratch"
     workspace.mkdir()
     monkeypatch.chdir(workspace)
-    monkeypatch.setattr(launch_session, "project_root", lambda: project)
     monkeypatch.setattr(launch_session, "settle_boundary", Mock())
     monkeypatch.setattr(launch_session, "say_opening", Mock())
     monkeypatch.setattr(launch_session, "verify_inside", Mock(return_value=[]))
@@ -47,6 +46,7 @@ def test_interactive_launch_replaces_inherited_policy_root_and_forwards_it(
     launch_session.session_argv(
         cli,
         [],
+        project,
         composition.recipe.source.image,
         composition.recipe.source.requirements,
         None,

@@ -257,7 +257,6 @@ def test_a_recorder_exists_only_where_both_kinds_are_declared(
 @pytest.fixture
 def launched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A project root a harness launch would record its transcript under."""
-    monkeypatch.setattr(launch_session, "project_root", lambda: tmp_path)
     monkeypatch.setattr(
         launch_session, "harness_runs_path", lambda: tmp_path / "notes" / "harness"
     )
@@ -271,6 +270,7 @@ def transcript_at(
     return launch_session.start_harness_transcript(
         "claude",
         ClaudeTranscripts(root / "config"),
+        root,
         model=None,
         profile=None,
         arguments=[],
@@ -346,6 +346,7 @@ def launched_run(root: Path, succeeded: bool = True, ended: bool = True) -> Path
     transcript = launch_session.start_harness_transcript(
         "claude",
         ClaudeTranscripts(root / "config"),
+        root,
         model=None,
         profile=None,
         arguments=[],

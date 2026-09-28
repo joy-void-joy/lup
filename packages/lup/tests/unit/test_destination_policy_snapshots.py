@@ -47,7 +47,6 @@ def test_every_launch_replaces_inherited_ledger_ownership(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, sandbox: LaunchSandbox
 ) -> None:
     checkout = repository(tmp_path / "checkout")
-    monkeypatch.setattr(launch_session, "project_root", lambda: checkout)
     environment = {ROOT_VARIABLE: "/inherited", NONCE_VARIABLE: "inherited"}
     sentinels = LaunchSentinels()
     plugin = Plugin(
@@ -61,7 +60,7 @@ def test_every_launch_replaces_inherited_ledger_ownership(
     )
 
     launch_session.settle_boundary(
-        plugin.hooks, sandbox, [], sentinels, environment, Banner()
+        checkout, plugin.hooks, sandbox, [], sentinels, environment, Banner()
     )
 
     assert environment[ROOT_VARIABLE] == str(checkout)

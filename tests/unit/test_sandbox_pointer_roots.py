@@ -388,13 +388,12 @@ def test_the_boundary_refuses_a_mismatch_and_an_exposed_store(
     import lup.launch.session as launch_session
 
     side = clone / "tree" / "side"
-    monkeypatch.setattr(launch_session, "project_root", lambda: side)
     monkeypatch.setattr(launch_session, "compile_boundary", unreachable)
     sandbox = SimpleNamespace(contained=lambda: False)
     arguments = {"sandbox": sandbox, "findings": [], "sentinels": None}
     extra = {"environment": None, "banner": None}
     with pytest.raises(Reached):
-        launch_session.settle_boundary(None, **arguments, **extra)  # type: ignore[arg-type]
+        launch_session.settle_boundary(side, None, **arguments, **extra)  # type: ignore[arg-type]
     assert (clone).resolve() in known_repositories()
 
     monkeypatch.setattr(
@@ -403,11 +402,11 @@ def test_the_boundary_refuses_a_mismatch_and_an_exposed_store(
         lambda *_a, **_k: Lease(writable={own_store: "x"}),
     )
     with pytest.raises(LaunchRefused, match="store of trusted"):
-        launch_session.settle_boundary(None, **arguments, **extra)  # type: ignore[arg-type]
+        launch_session.settle_boundary(side, None, **arguments, **extra)  # type: ignore[arg-type]
 
     redirect(side, evil_gitdir(tmp_path / "built"))
     with pytest.raises(LaunchRefused, match="redirected"):
-        launch_session.settle_boundary(None, **arguments, **extra)  # type: ignore[arg-type]
+        launch_session.settle_boundary(side, None, **arguments, **extra)  # type: ignore[arg-type]
 
 
 def test_a_container_start_refuses_before_any_broker(

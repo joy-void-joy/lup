@@ -247,6 +247,7 @@ def create_harness_app(
                     for finding in report_inside_requirements(
                         composition.recipe.source.image,
                         composition.recipe.source.requirements,
+                        project_root(),
                         ambient_config_home(
                             composition.login, composition.default_config_home
                         ),
@@ -265,6 +266,7 @@ def create_harness_app(
                             for composition in compositions
                         ]
                     ),
+                    project_root(),
                     setting_up=not launch_only,
                     standing=launch.standing_grants(),
                 )

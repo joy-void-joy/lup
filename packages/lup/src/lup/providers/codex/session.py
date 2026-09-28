@@ -25,7 +25,6 @@ from lup.harness.image import Image
 from lup.harness.notice import Notice
 from lup.launch.refusal import LaunchRefused
 from lup.types import EnvVars, JsonObject
-from lup.workspace.paths import project_root
 from lup.providers.codex.home import (
     SEED_RECORD,
     CodexWorktreeHomeStore,
@@ -123,7 +122,7 @@ def codex_login_preflight(
         )
 
 
-def settled_codex_seed(image: Image, theirs: JsonObject) -> JsonObject:
+def settled_codex_seed(image: Image, root: Path, theirs: JsonObject) -> JsonObject:
     """What a contained Codex home will be given, and where the person's settings won.
 
     The three-way merge the home's own installation runs
@@ -131,9 +130,7 @@ def settled_codex_seed(image: Image, theirs: JsonObject) -> JsonObject:
     the volume as it stands, so the launch knows what its session starts
     from and can say which settings a running session had changed too.
     """
-    files = read_config_home(
-        image, project_root(), CODEX_LOGIN, ["config.toml", SEED_RECORD]
-    )
+    files = read_config_home(image, root, CODEX_LOGIN, ["config.toml", SEED_RECORD])
     current = named_file(files, "config.toml")
     recorded = named_file(files, SEED_RECORD)
     seeded = seeded_codex_settings(
@@ -155,6 +152,7 @@ def settled_codex_seed(image: Image, theirs: JsonObject) -> JsonObject:
 def carry_codex_home(
     store: CodexWorktreeHomeStore,
     image: Image | None,
+    root: Path,
     config: UserConfigFile,
     applied: JsonObject | None = None,
 ) -> None:
@@ -168,7 +166,7 @@ def carry_codex_home(
     left = None
     if image is not None:
         read = named_file(
-            read_config_home(image, project_root(), CODEX_LOGIN, ["config.toml"]),
+            read_config_home(image, root, CODEX_LOGIN, ["config.toml"]),
             "config.toml",
         )
         if read is None:
@@ -181,9 +179,7 @@ def carry_codex_home(
             ).say()
             return
         left = read.text()
-    returned = store.return_settings(
-        project_root(), config, current=left, applied=applied
-    )
+    returned = store.return_settings(root, config, current=left, applied=applied)
     if returned.carried():
         Notice(
             text=(

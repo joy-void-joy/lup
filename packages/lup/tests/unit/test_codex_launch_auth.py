@@ -175,7 +175,6 @@ def test_session_authentication_uses_the_same_execution_boundary(
     composition.clipboard_transport = transport
     plugin = Mock(hooks=None)
     authenticate = Mock()
-    monkeypatch.setattr(launch_session, "project_root", lambda: tmp_path)
     monkeypatch.setattr(launch_session, "settle_boundary", Mock())
     monkeypatch.setattr(launch_session, "say_opening", Mock())
     monkeypatch.setattr(launch_session, "verify_inside", Mock(return_value=[]))
@@ -188,6 +187,7 @@ def test_session_authentication_uses_the_same_execution_boundary(
     argv = launch_session.session_argv(
         "codex",
         ["resume", "session"],
+        tmp_path,
         composition.recipe.source.image,
         composition.recipe.source.requirements,
         plugin.hooks,

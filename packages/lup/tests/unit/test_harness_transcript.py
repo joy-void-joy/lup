@@ -21,7 +21,6 @@ from lup.observability.audit import read_observable_events
 @pytest.fixture
 def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A project root the launcher would write its harness transcript under."""
-    monkeypatch.setattr(launch_session, "project_root", lambda: tmp_path)
     monkeypatch.setattr(
         launch_session, "harness_runs_path", lambda: tmp_path / "notes" / "harness"
     )
@@ -33,6 +32,7 @@ def started(project: Path) -> launch_session.HarnessTranscript:
     return launch_session.start_harness_transcript(
         "claude",
         ClaudeTranscripts(project / "config"),
+        project,
         model="claude-fable-5",
         profile=None,
         arguments=["--model", "claude-fable-5"],
@@ -83,6 +83,7 @@ def test_transcription_can_be_disabled_without_losing_run_boundaries(
     transcript = launch_session.start_harness_transcript(
         "claude",
         ClaudeTranscripts(project / "config"),
+        project,
         model="claude-fable-5",
         profile=None,
         arguments=[],
@@ -115,6 +116,7 @@ def test_a_credential_passed_on_the_command_line_is_not_recorded(
     transcript = launch_session.start_harness_transcript(
         "claude",
         ClaudeTranscripts(project / "config"),
+        project,
         model=None,
         profile=None,
         arguments=["--api-key", "hunter2", "--model=claude-fable-5"],

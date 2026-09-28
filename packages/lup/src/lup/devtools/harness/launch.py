@@ -314,6 +314,7 @@ def ready_to_open(
         composition.recipe.label,
         composition.readiness,
         composition.recipe.source.requirements,
+        project_root(),
         sentinels,
         opening,
         opening.sandbox.contained(),
@@ -722,6 +723,7 @@ def launch_claude(
     transcript = start_harness_transcript(
         "claude",
         ClaudeTranscripts(home),
+        root,
         model=selected_model,
         profile=profile,
         arguments=arguments,
@@ -743,6 +745,7 @@ def launch_claude(
             argv = session_argv(
                 "claude",
                 arguments,
+                root,
                 composition.recipe.source.image,
                 composition.recipe.source.requirements,
                 plugin.hooks,
@@ -942,6 +945,7 @@ def launch_codex(
     transcript = start_harness_transcript(
         "codex",
         CodexTranscripts(selected_home),
+        project_root(),
         model=selected_model,
         profile=profile,
         arguments=arguments,
@@ -975,6 +979,7 @@ def launch_codex(
             applied.append(
                 settled_codex_seed(
                     composition.recipe.source.image,
+                    project_root(),
                     selected_profile.personal_settings(
                         CodexMarketplace.declared(project_root()) is not None
                     ),
@@ -996,6 +1001,7 @@ def launch_codex(
             argv = session_argv(
                 "codex",
                 arguments,
+                project_root(),
                 composition.recipe.source.image,
                 composition.recipe.source.requirements,
                 plugin.hooks,
@@ -1037,6 +1043,7 @@ def launch_codex(
             carry_codex_home(
                 store,
                 composition.recipe.source.image if sandbox.contained() else None,
+                project_root(),
                 config,
                 applied[0] if applied else None,
             )

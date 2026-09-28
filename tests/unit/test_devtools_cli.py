@@ -94,8 +94,8 @@ def test_container_requirements_respect_launch_only(
     assert result.exit_code == 0, result.output
     checks.assert_called_once()
     assert checks.call_args.kwargs["setting_up"] == (not launch_only)
-    assert checks.call_args.args[2] == tmp_path
-    assert checks.call_args.args[3] == login
+    assert checks.call_args.args[3] == tmp_path
+    assert checks.call_args.args[4] == login
 
     assert "No container requirements selected." in result.output
 
@@ -113,7 +113,7 @@ def test_all_container_requirements_select_each_runtimes_default_home(
     )
 
     assert result.exit_code == 0, result.output
-    assert [(call.args[2], call.args[3]) for call in checks.call_args_list] == [
+    assert [(call.args[3], call.args[4]) for call in checks.call_args_list] == [
         (Path.home() / ".claude", CLAUDE_LOGIN),
         (CodexWorktreeHomeStore().home_for(project_root()), CODEX_LOGIN),
     ]
