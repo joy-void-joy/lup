@@ -1065,8 +1065,32 @@ DECLARED: list[Migration] = [
         ],
     ),
     Migration(
+        subjects=["NativeCapabilityEvidence"],
+        reason=(
+            "each runtime's composer moved into its adapter "
+            "(lup.providers.claude.composition, lup.providers.codex.composition) "
+            "and types its own readiness evidence, so the union naming both "
+            "runtimes' evidence had nothing left to name"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Type a readiness probe's evidence as the runtime's own "
+                    "CapabilityEvidence[ClaudeCliEvidence] or "
+                    "CapabilityEvidence[CodexCliEvidence], or as the neutral "
+                    "CapabilityReport where either will do."
+                )
+            ),
+        ],
+    ),
+    Migration(
         subjects=[
             "ClaudeSandboxConfig",
+            "ClaudeSandboxConfig.enabled",
+            "ClaudeSandboxConfig.auto_allow_bash_if_sandboxed",
+            "ClaudeSandboxConfig.allow_unsandboxed_commands",
+            "ClaudeSandboxConfig.excluded_commands",
+            "ClaudeSandboxConfig.posture",
             "SessionContainment",
             "CLAUDE_CONTAINMENT",
             "CODEX_CONTAINMENT",
