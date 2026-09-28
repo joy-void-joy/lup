@@ -55,9 +55,9 @@ DECLARED = Settings(
         "Read(./.claude/settings.json.local*)",
         "Read(./sync.json.local)",
     ],
+    # `.env.local` and `.env.<mode>.local` are absent because they are withheld
+    # credential paths, whose `Read` rules are compiled from that declaration.
     denied=[
-        "Read(./**/.env*.local)",
-        "Read(./**/.env.local)",
         "Read(./**/secrets*.local)",
         "Read(./**/*.secret.local)",
     ],

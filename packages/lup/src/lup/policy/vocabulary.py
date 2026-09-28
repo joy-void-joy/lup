@@ -637,6 +637,9 @@ def uv_rules(
             # verb is the kernel's or one of the subcommands below.
             effects=[declare("changes_nothing")],
             value_flags=list(global_values),
+            # Runs uv from another directory, as `git -C` runs git, so the
+            # program a `uv run` hands its words to stands there.
+            directory_flags=["--directory"],
             subcommands=[
                 ShellSubcommandRule(
                     name="pip",
@@ -1988,10 +1991,11 @@ def git_rule(
     # which ask. Gating it would spend a question on the flag rather than on
     # what the flag could reach.
     # Three globals consume the word after them, and one of the three moves
-    # where an operand resolves: `-C` runs git as though it had been started
-    # in that directory, while `--git-dir` names a repository and
-    # `--work-tree` a tree, neither of which changes what a relative pathspec
-    # is read against. Two lists, because they answer two questions.
+    # where every operand resolves: `-C` runs git as though it had been
+    # started in that directory. `--git-dir` names a repository and moves
+    # nothing, and `--work-tree` moves only a pathspec, and only where git
+    # stands outside the tree -- a reading of git's own the kernel makes.
+    # Two lists, because they answer two questions.
     valued_flags = ["-C", "--git-dir", "--work-tree"]
     return ShellCommandRule(
         name="git",

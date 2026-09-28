@@ -651,10 +651,12 @@ def test_an_ignored_file_holding_the_only_copy_still_asks(delete_repo: Path) -> 
     holds — secrets, the trace corpus, resolver state. A grant keyed on
     `.gitignore` rather than on a declared role would take all three.
     """
-    for path in (".env.local", "notes/traces/session.jsonl", ".lup/run/state.json"):
+    for path in ("notes/traces/session.jsonl", ".lup/run/state.json"):
         effect, _reason = effect_from(f"rm {path}", delete_repo)
 
         assert effect == "ask", path
+    # The secrets are withheld outright, which answers before any grant could.
+    assert effect_from("rm .env.local", delete_repo)[0] == "deny"
 
 
 def test_a_delete_at_the_cap_is_granted(delete_repo: Path) -> None:

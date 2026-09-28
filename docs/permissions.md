@@ -269,6 +269,21 @@ protected file asks by the same spellings, and a patch handed to `git
 pending — read the subcommand where it is written, since a global they did
 not model could change what they cover, and missing one costs a question.
 
+`--work-tree` moves the pathspecs where git stands outside the tree: `git
+--work-tree=/home/x restore .bashrc` is read as a restore of
+`/home/x/.bashrc`, a `checkout <ref> -- <path>` likewise, while a flag's own
+file stays where git stands, and a tree that holds where git stands — `.`,
+`..` — moves nothing. `--git-dir` names a repository and moves nothing. A
+grant resting on this checkout's history — a checkout or restore from a
+named ref — holds only for paths this checkout answers for, so a placed path
+elsewhere meets the row's question and the write scope's reading of where
+it lands. And where git works in a tree outside the checkout, by
+`--work-tree` or `-C`, a loss a capture would have settled keeps its
+question, because the capture is of this checkout: `git -C ../other reset
+--hard` and `git --work-tree=/srv/wt reset --hard` ask where `git reset
+--hard` is settled. The tree is named to the container question too, so a
+tree the host lent keeps the question there.
+
 Placing a file on a protected path is asked the same way, whether or not
 anything stood there: a path created is written as surely as one replaced,
 and no capture answers whose it is. Every path a command writes — a `cp`,
@@ -330,9 +345,14 @@ each declares its `effects`, its `refuses`, its placement, and its reason.
 Blessing a toolchain is the common case and it is one word,
 `runs_declared_target`. A project that means to stop a target — one that
 spends money, runs for an hour, or publishes something — refuses it there.
-Leaving it off is not the same answer: an undeclared target reaches no
-judgment, which denies unsandboxed and defers under the boundary, where the
-policy has stated nothing and the runtime's own permissions decide.
+A program the shell vocabulary judges is judged as itself: `uv run` puts this
+project's environment on the path and nothing more, so `uv run pip install x`
+and `uv -q run pip install x` are refused as `pip install x` is, whatever uv
+options surround them, and `uv run git status` reads as `git status` —
+standing in the directory `--directory` names, where one does. Leaving a
+program off both tables is not the same answer: it reaches no judgment,
+which denies unsandboxed and defers under the boundary, where the policy has
+stated nothing and the runtime's own permissions decide.
 
 That table also answers `uv run -m <root>.<module>`, on the root segment, and
 one criterion settles every `uv run` form: an invocation is refused when it
@@ -469,7 +489,10 @@ is not. `exempt` passes a word only when all it could name is exempt:
 The library's default is `credential_files()`: everything in `~/.ssh` but
 the public keys, `known_hosts`, `config` and `authorized_keys`, `~/.gnupg`,
 and the token files of AWS, netrc, git's credential store, gh, docker and
-PyPI, plus a process's environment file. This project adds each runtime's
+PyPI, plus a process's environment file and, in any directory, the
+gitignored `.env.local` and `.env.<mode>.local` a project's settings keep
+its API keys in — `cat .env.local` is refused where `cat .env` and
+`cat .env.example` read. This project adds each runtime's
 own login through `ProviderLogin.withheld_logins()`: the default home's file
 and the file inside every profile's home. A directory reached only through
 an ancestor — `grep -r x ~` — names no withheld path and is not caught.
@@ -1162,13 +1185,19 @@ a question this project has not settled — a candidate corpus, or the commands
 a recorded session was actually stopped for — asked from the posture those
 same flags name.
 
-`dev policy` answers under all three placements the launcher spells —
-`none`, `inner` and `outer` — and `--placement` narrows it to one. Each
-placement decides both walls itself rather than inheriting the ledger of the
-session asking, so a reading taken inside a container still says what a host
-session is told. An `outer` reading measures what only a container can: which
-paths this machine's mount table lends from elsewhere, and which loopback
-ports a process out of sight holds.
+`dev policy` answers as the session running it: the runtime's sandbox from
+the launcher's variable, and from the ledger its dispatcher reads, whether a
+container stands around it and places work inside, which posture answers
+legible work nothing judged, and whether a host executor carries what has to
+run outside. A runtime's own per-call escape is an argument of one call and
+is not read. `--placement` names one of the placements the launcher spells —
+`none`, `inner` or `outer` — and answers for it instead: a named placement
+decides both walls itself rather than inheriting the ledger of the session
+asking, so a reading taken inside a container still says what a host session
+is told. An `outer` reading measures what only a container can: which paths
+this machine's mount table lends from elsewhere, and which loopback ports a
+process out of sight holds. The everyday sweep names its postures the same
+way, so a corpus reads alike from any session.
 
 Only what must keep allowing belongs in that corpus. A command that asks
 today is either a defect to fix or a question somebody meant, and neither is

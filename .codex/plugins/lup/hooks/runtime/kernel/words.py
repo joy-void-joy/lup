@@ -931,6 +931,32 @@ def git_restore_operands(words: list[str], at: int) -> RestoreOperands | None:
     return RestoreOperands(source=source, paths=paths, named=named)
 
 
+def git_checkout_operands(words: list[str], at: int) -> list[PathWord] | None:
+    """The paths ``git checkout [<ref>] -- <path>...`` writes, past its `--`.
+
+    The spelling that names files rather than a branch: whatever stands
+    before the `--` is a ref or nothing, and every word after it is a path the
+    working tree takes from there. ``None`` for any other checkout -- a branch
+    switch, a flag, a word that expands at run time -- which leaves the row to
+    answer for it.
+    """
+    if posixpath.basename(words[0]) != "git" or words[at : at + 1] != ["checkout"]:
+        return None
+    rest = words[at + 1 :]
+    if "--" not in rest:
+        return None
+    split = rest.index("--")
+    before, paths = rest[:split], rest[split + 1 :]
+    if len(before) > 1 or any(word.startswith("-") for word in before) or not paths:
+        return None
+    if any(opaque_argument(word) for word in [*before, *paths]):
+        return None
+    return [
+        PathWord(at=at + 2 + split + index, prefix="", path=path)
+        for index, path in enumerate(paths)
+    ]
+
+
 def git_apply_words(words: list[str], rows: list[ShellRuleRow]) -> list[PathWord]:
     """Which words a `git apply` reads its patch files out of.
 

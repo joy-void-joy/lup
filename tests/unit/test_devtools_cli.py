@@ -335,27 +335,34 @@ def effect_of(arguments: list[str], environment: dict[str, str | None]) -> str:
     return str(readings[0]["effect"])
 
 
-def test_dev_policy_answers_for_every_placement_rather_than_one() -> None:
-    """Every answer, so no reader has to know which session they were given.
+UNLAUNCHED: dict[str, str | None] = {
+    "LUP_BOUNDARY_NONCE": None,
+    "LUP_BOUNDARY_ROOT": None,
+    "LUP_SANDBOX_ACTIVE": None,
+}
+"""A process no launch measured: no ledger named, and no sandbox armed."""
 
-    The guidance sends a reader here *before* they spend a turn, and placement
-    is the fact that moves the most verdicts — an unclassified command is
-    settled by either boundary and refused without one. One answer leaves the
-    reader holding a guess about which session it described, and the guess is
-    invisible, which is the worst property an answer can have.
 
-    So the environment stops deciding what they are told. The pinning flag
-    below narrows this rather than switching it, which is why no setting
-    reports an answer the default would have withheld.
+@pytest.mark.parametrize(
+    ("sandbox", "effect"), [(None, "ask"), ("1", "allow")], ids=["host", "inner"]
+)
+def test_dev_policy_answers_for_this_session_by_default(
+    sandbox: str | None, effect: str
+) -> None:
+    """The reader is about to spend a turn in this session, so its answer leads.
+
+    Read as its dispatcher reads it: the runtime's sandbox from the launcher's
+    variable, and the rest from the ledger the launch named -- none here.
     """
     result = runner.invoke(
         app,
         ["dev", "policy", "--json", "frobnicate"],
-        env={"LUP_SANDBOX_ACTIVE": None},
+        env={**UNLAUNCHED, "LUP_SANDBOX_ACTIVE": sandbox},
     )
     readings = json.loads(result.stdout)[0]["readings"]
-    assert [reading["placement"] for reading in readings] == ["none", "inner", "outer"]
-    assert [reading["effect"] for reading in readings] == ["ask", "allow", "allow"]
+    assert [(reading["placement"], reading["effect"]) for reading in readings] == [
+        ("session", effect)
+    ]
 
 
 def test_the_unbounded_reading_ignores_the_container_around_this_process(
@@ -388,6 +395,64 @@ def test_the_unbounded_reading_ignores_the_container_around_this_process(
     )
 
     assert [reading.effect for reading in verdict.readings] == ["ask", "allow", "allow"]
+
+
+@pytest.mark.parametrize(
+    ("measured", "effect"),
+    [
+        ({"contained": ["yes"], "delivered": ["inside_placement"]}, "allow"),
+        ({"contained": ["yes"]}, "ask"),
+        ({"unjudged_ambient": ["defer"]}, "defer"),
+        ({}, "ask"),
+    ],
+    ids=["contained", "container-placing-nothing", "deferring", "measured-nothing"],
+)
+def test_the_session_reading_takes_its_posture_from_the_ledger(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    measured: dict[str, list[str]],
+    effect: str,
+) -> None:
+    """What the launch measured is what the dispatcher answers by, and so this.
+
+    A container settles unjudged work only where it measured work placed
+    inside, and an uncontained profile that hands such work to the runtime
+    says so in the ledger rather than in any declaration read here.
+    """
+    ledger = tmp_path / ".lup" / "preflight" / "launch.json"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text(json.dumps(measured), encoding="utf-8")
+    monkeypatch.setenv("LUP_BOUNDARY_NONCE", "launch")
+    monkeypatch.delenv("LUP_BOUNDARY_ROOT", raising=False)
+    monkeypatch.delenv("LUP_SANDBOX_ACTIVE", raising=False)
+
+    verdict = policy_explain.verdict_for(
+        "frobnicate",
+        "shell",
+        autonomous=False,
+        cwd=tmp_path,
+        hooks=declared_hook_set(),
+        placements=[policy_explain.session_placement(tmp_path)],
+    )
+
+    assert [(reading.placement, reading.effect) for reading in verdict.readings] == [
+        ("session", effect)
+    ]
+
+
+def test_the_session_reading_takes_the_host_executor_from_the_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The channel carrying outside work is measured, not assumed either way."""
+    ledger = tmp_path / ".lup" / "preflight" / "launch.json"
+    ledger.parent.mkdir(parents=True)
+    monkeypatch.setenv("LUP_BOUNDARY_NONCE", "launch")
+    monkeypatch.delenv("LUP_BOUNDARY_ROOT", raising=False)
+
+    ledger.write_text(json.dumps({"delivered": ["host_executor"]}), encoding="utf-8")
+    assert policy_explain.session_placement(tmp_path).host_executor
+    ledger.write_text(json.dumps({"blocked": ["host_executor"]}), encoding="utf-8")
+    assert not policy_explain.session_placement(tmp_path).host_executor
 
 
 @pytest.mark.parametrize(

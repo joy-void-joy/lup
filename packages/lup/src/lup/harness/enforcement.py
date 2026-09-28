@@ -23,6 +23,7 @@ from lup.policy.assets.host import delivers, measured_boundary
 from lup.policy.enforcement import SemanticToolPolicy
 from lup.policy.grants import LeaseGrants
 from lup.policy.kernel.rows import PathRoleRow
+from lup.policy.kernel.semantics import UnjudgedAmbient
 from lup.policy.peer_policy import erase_peer_policy
 from lup.policy.rules import (
     EditPolicy,
@@ -116,6 +117,7 @@ def semantic_policy_for(
     autonomous: bool = False,
     trusted_script_roots: list[str] | None = None,
     grants: LeaseGrants | None = None,
+    unjudged_ambient: UnjudgedAmbient | None = None,
 ) -> SemanticToolPolicy:
     """Compose the fetch, shell, and edit policies one hook set declares.
 
@@ -126,7 +128,17 @@ def semantic_policy_for(
     The declared refusals travel with them, so a call this project decided
     against is refused by a session composed in process exactly as the
     generated plugin refuses it.
+
+    ``unjudged_ambient`` is a launched session's measured posture, for a
+    caller reading that session -- what legible work nothing judged answers,
+    and an origin no fetch scope names where the project declared nothing.
+    Left out, the shell asks and a fetch takes the declaration's own posture.
     """
+    unscoped = (
+        hooks.resolved_unscoped_fetch()
+        if unjudged_ambient is None
+        else hooks.unscoped_fetch or unjudged_ambient
+    )
     allowed = [declared_scope(scope) for scope in hooks.allowed_fetch]
     denied = [declared_scope(scope) for scope in hooks.denied_fetch]
     roles = declared_role_rows(list(hooks.path_roles))
@@ -156,19 +168,20 @@ def semantic_policy_for(
         fetch=FetchPolicy(
             allowed,
             denied,
-            hooks.resolved_unscoped_fetch(),
+            unscoped,
             contained=contained and inside_placement,
         ),
         shell=ShellPolicy(
             hooks.resolved_shell_rules(),
             allowed_urls=allowed,
             denied_urls=denied,
-            unscoped_fetch=hooks.resolved_unscoped_fetch(),
+            unscoped_fetch=unscoped,
             refused_paths=list(hooks.refused_paths),
             secret_variables=list(hooks.secret_variables),
             sandbox_active=sandbox_active,
             sandbox_excluded_commands=hooks.excluded_commands(),
             escapable=escapable,
+            unjudged_ambient="ask" if unjudged_ambient is None else unjudged_ambient,
             recovered=recovered,
             contained=contained,
             inside_placement=inside_placement,

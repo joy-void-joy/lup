@@ -27,7 +27,7 @@ from typing import Literal
 import pytest
 import sh
 
-from lup.devtools.dev.policy_explain import verdict_for
+from lup.devtools.dev.policy_explain import session_placement, verdict_for
 from lup.policy.assets.host import (
     container_owned,
     host_held_ports,
@@ -109,6 +109,8 @@ GUARDED = [
     pytest.param("yay -S foo", "ask", id="aur"),
     pytest.param("npm install left-pad", "ask", id="npm"),
     pytest.param("pip install httpx", "deny", id="pip"),
+    pytest.param("cat .env.local", "deny", id="env-local-read"),
+    pytest.param("grep KEY .env.production.local", "deny", id="env-mode-local-read"),
     pytest.param("sudo ls", "ask", id="sudo"),
     pytest.param("ssh host.example ls", "ask", id="ssh"),
     pytest.param("export GH_TOKEN=x", "deny", id="export-token"),
@@ -284,6 +286,29 @@ def previewed(
     return {reading.placement: reading.effect for reading in verdict.readings}
 
 
+def session_previewed(
+    command: str, posture: Posture, checkout: Path, monkeypatch: pytest.MonkeyPatch
+) -> str:
+    """What `dev policy` answers with no placement named, inside one posture."""
+    launched = posture_environment(posture)
+    for name in ("LUP_SANDBOX_ACTIVE", "LUP_BOUNDARY_NONCE"):
+        if name in launched:
+            monkeypatch.setenv(name, launched[name])
+    monkeypatch.chdir(checkout)
+    verdict = verdict_for(
+        command,
+        "shell",
+        False,
+        checkout,
+        declared_hook_set(),
+        [session_placement(checkout)],
+    )
+    monkeypatch.delenv("LUP_BOUNDARY_NONCE", raising=False)
+    monkeypatch.delenv("LUP_SANDBOX_ACTIVE", raising=False)
+    (reading,) = verdict.readings
+    return reading.effect
+
+
 @pytest.mark.parametrize(("command", "host"), SETTLED_INSIDE)
 def test_a_question_whose_harm_stays_inside_is_settled_only_by_the_container(
     runtime: Runtime,
@@ -333,6 +358,71 @@ def test_a_target_the_host_lent_from_outside_the_checkout_keeps_the_question(
     assert previewed(command, checkout, monkeypatch)["outer"] == "ask"
 
 
+@pytest.mark.parametrize(
+    "spelled",
+    [
+        pytest.param("git --work-tree={tree} reset --hard", id="reset-work-tree"),
+        pytest.param("git -C {tree} reset --hard", id="reset-C"),
+        pytest.param("git --work-tree={tree} restore README.md", id="restore"),
+        pytest.param(
+            "git --work-tree {tree} restore --source=HEAD README.md",
+            id="restore-source",
+        ),
+        pytest.param("git --work-tree={tree} clean -fd", id="clean"),
+    ],
+)
+def test_git_moved_into_a_lent_tree_keeps_the_question_there(
+    runtime: Runtime, checkout: Path, monkeypatch: pytest.MonkeyPatch, spelled: str
+) -> None:
+    """A work tree git is pointed at is where its loss lands, not this checkout.
+
+    A capture of the checkout holds none of the tree, and the container holds
+    none of what the host lent it, so no wall settles the question. The tree
+    stands outside the temporary root, which is disposable wherever it is.
+    """
+    lent = "/srv/lent-tree"
+    ledger = checkout / ".lup" / "preflight" / "launch.json"
+    measured = json.loads(ledger.read_text(encoding="utf-8"))
+    ledger.write_text(
+        json.dumps({**measured, "writable_roots": [*measured["writable_roots"], lent]}),
+        encoding="utf-8",
+    )
+    command = spelled.format(tree=lent)
+    postures: tuple[Posture, ...] = ("none", "inner", "outer")
+
+    assert {met(runtime, posture, command, checkout) for posture in postures} == {"ask"}
+    assert set(previewed(command, checkout, monkeypatch).values()) == {"ask"}
+
+
+@pytest.mark.parametrize(
+    ("command", "standing"),
+    [
+        pytest.param("git --work-tree=. reset --hard", "git reset --hard", id="reset"),
+        pytest.param(
+            "git --work-tree=. restore --source=HEAD README.md",
+            "git restore --source=HEAD README.md",
+            id="restore-source",
+        ),
+    ],
+)
+def test_a_work_tree_git_stands_in_moves_nothing(
+    runtime: Runtime,
+    checkout: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    command: str,
+    standing: str,
+) -> None:
+    postures: tuple[Posture, ...] = ("none", "inner", "outer")
+    meets = {posture: met(runtime, posture, standing, checkout) for posture in postures}
+
+    assert {
+        posture: met(runtime, posture, command, checkout) for posture in postures
+    } == meets
+    assert previewed(command, checkout, monkeypatch) == previewed(
+        standing, checkout, monkeypatch
+    )
+
+
 def test_a_setting_a_container_holds_leaves_the_verb_its_landing(
     runtime: Runtime, checkout: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -362,6 +452,78 @@ def test_an_unread_word_under_a_command_guarding_nothing_asks_on_no_posture(
         for posture in ("none", "inner", "outer")
     } == {"allow"}
     assert set(previewed(UNGUARDED_UNREAD, checkout, monkeypatch).values()) == {"allow"}
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param("kill 1234", id="settled-inside"),
+        pytest.param("pip install httpx", id="refused"),
+        pytest.param("frobnicate", id="unjudged"),
+        pytest.param("git status", id="read"),
+        pytest.param("uv run pip install httpx", id="uv-run-pip"),
+        pytest.param("cat .env.local", id="withheld"),
+    ],
+)
+def test_dev_policy_answers_as_the_session_it_runs_in(
+    runtime: Runtime, checkout: Path, monkeypatch: pytest.MonkeyPatch, command: str
+) -> None:
+    """Named no placement, `dev policy` reads the ledger its dispatcher reads."""
+    postures: tuple[Posture, ...] = ("none", "inner", "outer")
+    # The dispatchers first: a preview stands in the checkout, and the
+    # dispatcher scripts are found from the repository.
+    meets = {posture: met(runtime, posture, command, checkout) for posture in postures}
+    assert {
+        posture: session_previewed(command, posture, checkout, monkeypatch)
+        for posture in postures
+    } == meets
+
+
+@pytest.mark.parametrize("command", ["cat .env", "cat .env.example"])
+def test_a_committed_environment_file_reads_on_every_posture(
+    runtime: Runtime, checkout: Path, monkeypatch: pytest.MonkeyPatch, command: str
+) -> None:
+    """Only the gitignored locals hold a key; the committed defaults name none."""
+    assert {
+        met(runtime, posture, command, checkout)
+        for posture in ("none", "inner", "outer")
+    } == {"allow"}
+    assert set(previewed(command, checkout, monkeypatch).values()) == {"allow"}
+
+
+@pytest.mark.parametrize(
+    ("command", "program"),
+    [
+        pytest.param("uv run pip install httpx", "pip install httpx", id="pip"),
+        pytest.param("uv -q run pip install httpx", "pip install httpx", id="uv-q"),
+        pytest.param("uv run python -c 'x'", "python -c 'x'", id="python-inline"),
+        pytest.param("uv run git status", "git status", id="git-status"),
+        pytest.param("uv run rm -rf /opt/probe", "rm -rf /opt/probe", id="rm"),
+        pytest.param(
+            "uv --directory /opt run rm -rf probe", "rm -rf /opt/probe", id="moved-rm"
+        ),
+        pytest.param(
+            "uv run git push --force origin feat",
+            "git push --force origin feat",
+            id="force-push",
+        ),
+    ],
+)
+def test_a_program_uv_runs_answers_as_itself(
+    runtime: Runtime,
+    checkout: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    command: str,
+    program: str,
+) -> None:
+    """`uv run` puts this project's environment on the path and judges nothing."""
+    postures: tuple[Posture, ...] = ("none", "inner", "outer")
+    assert {
+        posture: met(runtime, posture, command, checkout) for posture in postures
+    } == {posture: met(runtime, posture, program, checkout) for posture in postures}
+    assert previewed(command, checkout, monkeypatch) == previewed(
+        program, checkout, monkeypatch
+    )
 
 
 @pytest.mark.parametrize("command", UNREAD_COMMAND_AS_BEFORE)

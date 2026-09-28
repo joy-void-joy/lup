@@ -633,9 +633,10 @@ class ShellCommandRule(SelectableRule, frozen=True):
 
     Not every flag that consumes a word: `git -C <dir>` runs git as though it
     had been started there, so every path operand beside it resolves from
-    there, while `--git-dir` names a repository and `--work-tree` a tree
-    neither of which moves where an operand is read. Both consume a word, and
-    only one of them answers this, so the two are declared apart.
+    there, while `--git-dir` names a repository and moves nothing, and
+    `--work-tree` moves a pathspec alone, where git stands outside the tree.
+    Each consumes a word, and only the first answers this, so they are
+    declared apart.
 
     Read where a `cd` is read, and joined onto it: a command carrying one
     inside a segment that already moved runs in the directory the two name

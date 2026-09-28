@@ -54,6 +54,8 @@ def test_claude_s_file_tools_are_denied_every_withheld_path() -> None:
         "Read(//**/claude-config/.credentials.json)",
         "Read(~/.codex/auth.json)",
         "Read(//proc/*/environ)",
+        "Read(//**/.env.local)",
+        "Read(//**/.env.*.local)",
     ]:
         assert rule in denied
     assert "credentials" not in settings["sandbox"]
