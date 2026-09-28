@@ -757,7 +757,8 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
             CLAUDE_EXIT_EVENT,
         )
         # A subagent is told at its start what it arms is its own to stop,
-        # and refused once at its stop while any of it is still listed.
+        # and refused once at the stop handing back its report while any of
+        # it is still listed.
         cleanup = cleanup_hooks(
             Path(f".claude/plugins/{self.plugin_name}"),
             "CLAUDE_PLUGIN_ROOT",

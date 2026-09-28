@@ -57,7 +57,7 @@ from kernel.rows import (
     landing_rows,
     unproduced_cause,
 )
-from kernel.spawns import decide_spawn
+from kernel.spawns import decide_spawn, spawn_name
 from kernel.words import INTERPRETERS
 from kernel.roles import displaced_targets
 from kernel.shell import decide_shell, sandbox_excluded, shell_posture_targets
@@ -3306,15 +3306,28 @@ def peer_listing_decision() -> KernelDecision:
     return decide_peer_listing(PEER_POLICY)
 
 
-def spawn_decision(name: str, values: list[str], field: str) -> KernelDecision:
-    """Judge one native spawn by the name it carries, against what this project declared.
+def spawn_decision(
+    name: str, description: str, values: list[str], field: str
+) -> KernelDecision:
+    """Judge one native spawn by the name it goes out under, against what this project declared.
 
-    ``name`` is the runtime's own field for it, read by the host half that
-    knows which key that is, and ``field`` is that key, so the refusal can
-    name the argument; every string the call carries rides beside them so an
+    ``name`` is the runtime's own field for it and ``description`` the text a
+    name is read from where none was given, each read by the host half that
+    knows which key that is — a runtime whose spawn carries no description
+    passes ``""``. ``field`` is the name's key, so the refusal can name the
+    argument; every string the call carries rides beside them so an
     escalation marker in any of them is found.
     """
-    return decide_spawn(name, values, SPAWN_NAMES, field)
+    return decide_spawn(name, description, values, SPAWN_NAMES, field)
+
+
+def spawn_named(name: str, description: str) -> str:
+    """The name this project sends a spawn out under, the one the verdict judged.
+
+    What a host half writes back into the call where it differs from what
+    was given, so the rewrite and the verdict cannot come to disagree.
+    """
+    return spawn_name(name, description, SPAWN_NAMES)
 
 
 def peer_listing_attachment(cwd: Path | None) -> str:

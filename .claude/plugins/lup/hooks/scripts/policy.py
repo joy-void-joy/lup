@@ -73,7 +73,7 @@ from kernel.rows import (
     landing_rows,
     unproduced_cause,
 )
-from kernel.spawns import decide_spawn
+from kernel.spawns import decide_spawn, spawn_name
 from kernel.words import INTERPRETERS
 from kernel.roles import displaced_targets
 from kernel.shell import decide_shell, sandbox_excluded, shell_posture_targets
@@ -3322,15 +3322,28 @@ def peer_listing_decision() -> KernelDecision:
     return decide_peer_listing(PEER_POLICY)
 
 
-def spawn_decision(name: str, values: list[str], field: str) -> KernelDecision:
-    """Judge one native spawn by the name it carries, against what this project declared.
+def spawn_decision(
+    name: str, description: str, values: list[str], field: str
+) -> KernelDecision:
+    """Judge one native spawn by the name it goes out under, against what this project declared.
 
-    ``name`` is the runtime's own field for it, read by the host half that
-    knows which key that is, and ``field`` is that key, so the refusal can
-    name the argument; every string the call carries rides beside them so an
+    ``name`` is the runtime's own field for it and ``description`` the text a
+    name is read from where none was given, each read by the host half that
+    knows which key that is — a runtime whose spawn carries no description
+    passes ``""``. ``field`` is the name's key, so the refusal can name the
+    argument; every string the call carries rides beside them so an
     escalation marker in any of them is found.
     """
-    return decide_spawn(name, values, SPAWN_NAMES, field)
+    return decide_spawn(name, description, values, SPAWN_NAMES, field)
+
+
+def spawn_named(name: str, description: str) -> str:
+    """The name this project sends a spawn out under, the one the verdict judged.
+
+    What a host half writes back into the call where it differs from what
+    was given, so the rewrite and the verdict cannot come to disagree.
+    """
+    return spawn_name(name, description, SPAWN_NAMES)
 
 
 def peer_listing_attachment(cwd: Path | None) -> str:
@@ -3880,21 +3893,30 @@ def spent_escape(tool_input):
 
 
 def placed_input(payload):
-    """The tool arguments that land the same edit with its directives placed.
+    """The tool arguments that send the same call out in the shape the policy keeps.
 
     The correcting route rather than the refusing one: where a directive was
-    written somewhere the placement policy does not keep it, the call goes out
+    written somewhere the placement policy does not keep it, or a spawn went
+    out with no name or one no runtime here would take, the call goes out
     rewritten instead of coming back as a complaint, so nobody weighs a reason
-    against a column count while writing one. This is what `ruff --add-noqa`
-    does for its own directives, moved to the gate that already reads the
-    edit.
+    against a column count, or guesses at an argument the schema they read
+    does not list. For a directive this is what `ruff --add-noqa` does for its
+    own, moved to the gate that already reads the edit.
 
     ``None`` says place nothing. An edit can only rewrite the text it supplies,
     so a move reaching outside that text declines rather than guesses — and a
-    `replace_all` edit has no single span to read a move back out of.
+    `replace_all` edit has no single span to read a move back out of. A spawn
+    whose name goes out as given, or that no name can be read for, is left
+    to its verdict.
     """
     name = payload["tool_name"]
     tool_input = payload["tool_input"]
+    if name == "Agent":
+        given = tool_input["name"] if "name" in tool_input else ""
+        named = spawn_named(
+            given, tool_input["description"] if "description" in tool_input else ""
+        )
+        return None if named in ("", given) else {**tool_input, "name": named}
     if name not in ("Edit", "Write"):
         return None
     path = tool_input["file_path"]
@@ -4025,10 +4047,11 @@ def dispatch(payload):
         return peer_listing_decision()
     if name == "Agent":
         # A spawn is judged by the one thing that makes its subagent legible
-        # and addressable: the name it carries. The runtime validates the
-        # spelling; this only insists there is one.
+        # and addressable: the name it goes out under, read out of the
+        # description every spawn here carries where none was given.
         return spawn_decision(
             tool_input["name"] if "name" in tool_input else "",
+            tool_input["description"] if "description" in tool_input else "",
             [value for value in tool_input.values() if isinstance(value, str)],
             "name",
         )
@@ -4083,18 +4106,25 @@ def rendered(decision, payload, placed, attached):
     and never by this runtime.
 
     The rewrite replaces the arguments rather than merging into them, so the
-    whole input is carried through. A deferral is placed nowhere, which is
+    whole input is carried through. A deferral places no sandbox, which is
     also why nothing here reads a payload a deferral may not have parsed.
 
     ``placed`` carries the other rewrite this channel can hand back: the same
-    edit with its suppression directives at their canonical placement. It
-    rides along with the verdict rather than replacing it — placing a
-    directive settles where it is written and says nothing about whether the
-    edit may happen, so an ask still asks, over the placed text, which is what
-    the approver should be reading. A denied call runs nothing, so there is
-    nothing to place. The two rewrites never contend for the one
-    ``updatedInput`` field: a directive is placed only in an ``Edit`` or
-    ``Write``, and the sandbox argument belongs only to ``Bash``.
+    edit with its suppression directives at their canonical placement, or the
+    same spawn under the name it goes out with. It rides along with the
+    verdict rather than replacing it — placing a directive or a name settles
+    how the call is spelled and says nothing about whether it may happen, so
+    an ask still asks, over the placed text, which is what the approver should
+    be reading. A deferral carries it too, as ``updatedInput`` with no
+    ``permissionDecision``, which Claude Code takes as the arguments alone and
+    leaves the permission where it was: read out of 2.1.283, whose hook result
+    yields a bare rewrite exactly when no behaviour was given, validates it
+    against the tool's full input schema, and was measured recording an
+    unnamed spawn rewritten this way under the name the hook gave it. A denied
+    call runs nothing, so there is nothing to place. The rewrites never
+    contend for the one ``updatedInput`` field: a directive is placed only in
+    an ``Edit`` or ``Write``, a name only in an ``Agent``, and the sandbox
+    argument belongs only to ``Bash``.
 
     The rewrite is how a verdict places a call, and it is the whole of what
     this field does: whether a placement leaves the boundary is the kernel's
@@ -4135,7 +4165,16 @@ def rendered(decision, payload, placed, attached):
         }
 
     if settled.effect == "defer":
-        return carried({})
+        return carried(
+            {}
+            if placed is None
+            else {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "updatedInput": placed,
+                }
+            }
+        )
     answer = {
         "hookEventName": "PreToolUse",
         "permissionDecision": settled.effect,
