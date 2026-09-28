@@ -1097,6 +1097,19 @@ def create_dev_app(
 
         declared = [parsed(move) for move in moves]
         roots = [path for path in root or relocate_roots if path.exists()]
+        # Refused whole, before any file moves or any import is rewritten: a
+        # module that cannot land must not have its importers aimed at the
+        # one already standing where it would.
+        taken = relocate_mod.occupied(roots, declared)
+        for plan in taken:
+            typer.echo(
+                f"{plan.new} already exists, so {plan.old} cannot move there; "
+                "nothing was moved or repointed. Merge the two modules by hand, "
+                "or relocate to a name no module holds.",
+                err=True,
+            )
+        if taken:
+            raise typer.Exit(2)
         # The module's own file first, so every import repointed below is
         # pointed at something already there. Leaving this to the caller is
         # what made the command's name a lie: it reported success over a tree
