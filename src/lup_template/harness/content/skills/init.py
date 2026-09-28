@@ -84,6 +84,7 @@ SKILL = models.Skill(
                 },
             ),
             *provenance.sync_baseline(SPELLING),
+            # lup: defer: "Phase 1.6: Settle the Seams" (the `phases` passage) and "Phase 2.5: Settle the Seams" (this one) both walk file ownership and rule retirement, so an interview asks them twice; decide which phase owns the seams and fold the other's (approval trees, tree roles, acceptance guard) into it.
             models.Passage(
                 module=__name__,
                 name="verify",
