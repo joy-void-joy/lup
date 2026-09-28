@@ -46,6 +46,7 @@ from decisions import (
     reviewed_decision,
     session_contained,
     spawn_decision,
+    spawn_named,
     written_review,
 )
 from host import (
@@ -220,11 +221,12 @@ def dispatch(payload, permission_request=False):
         return patch_decision(tool_input["command"], session_directory, autonomous)
     if name == "collaborationspawn_agent":
         # Measured on 0.155.1: the spawn carries `task_name` and `message`,
-        # and the hook names the tool this way. The runtime requires the task
-        # name on the call, so this insists on the same thing Claude's half
-        # does, and defers where it is there.
+        # and the hook names the tool this way. It carries no description to
+        # read a name out of, so a spawn with no task name is refused where
+        # Claude's half would name it, and one misspelled goes out normalized.
         return spawn_decision(
             tool_input["task_name"] if "task_name" in tool_input else "",
+            "",
             [value for value in tool_input.values() if isinstance(value, str)],
             "task_name",
         )
@@ -239,6 +241,25 @@ def dispatch(payload, permission_request=False):
     if refused is not None:
         return refused
     return KernelDecision("ask", f"unknown tool {name!r} is not covered by policy")
+
+
+def named_input(payload):
+    """The spawn's arguments under the name it goes out with, or ``None`` to send it as written.
+
+    The one call this half rewrites. Codex takes `updatedInput` only beside
+    `permissionDecision: "allow"` — its hook documentation says so, and the
+    0.158.0 binary reports "PreToolUse hook returned updatedInput without
+    permissionDecision:allow" for any other shape — while a function tool's
+    rewrite replaces its whole arguments object. A spawn raises no approval
+    of its own there, so the allow that carries the name settles nothing the
+    deferral it spells would have left to anybody.
+    """
+    if payload["tool_name"] != "collaborationspawn_agent":
+        return None
+    tool_input = payload["tool_input"]
+    given = tool_input["task_name"] if "task_name" in tool_input else ""
+    named = spawn_named(given, "")
+    return None if named in ("", given) else {**tool_input, "task_name": named}
 
 
 def queued_review(payload, decision):
@@ -522,6 +543,18 @@ def main():
         )
         return
     if decision.effect in ("allow", "defer"):
+        renamed = None if permission_request else named_input(payload)
+        if renamed is not None:
+            json.dump(
+                {
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "allow",
+                        "updatedInput": renamed,
+                    }
+                },
+                sys.stdout,
+            )
         record_hook_evidence(plugin_data_root(), payload, "completed", decision.effect)
         return
     # A successful structured denial preserves the operator warning; exit 2

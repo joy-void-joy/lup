@@ -1450,17 +1450,27 @@ class AcceptanceGuard(BaseModel, frozen=True):
 
 
 class SpawnNames(BaseModel, frozen=True):
-    """A project's decision that every subagent it spawns is named.
+    """A project's decision that every subagent it spawns goes out named.
 
     A runtime lists, addresses and stops a subagent by the name it was
     spawned with, and shows its type where none was given — a generic word
     such as the default agent's, which says nothing about what the subagent
-    is doing. Declaring this refuses a spawn that carries no name, with a
-    recovery giving the shape, so the caller passes one and the listing says
-    what each subagent is for.
+    is doing. Declaring this sends every spawn out under a name of the shape
+    below: one given in that shape goes as given, one outside it is
+    normalized, and a spawn given none takes one read out of its description.
 
-    It refuses a name outside the shape too, because leaving the spelling to
-    the runtime was measured to fail quietly. Claude Code 2.1.278 validates it
+    The caller is not asked for it, because the schema it reads may not list
+    the argument. Claude Code 2.1.280 and 2.1.283 show the model an `Agent`
+    schema with no `name`, `additionalProperties` false, and take a `name`
+    all the same; a session refused with "pass a name beside the agent type"
+    put it in `description` twice before trying the key the schema did not
+    list, and sessions refused that way were the commonest spawn friction.
+    The description is the argument every spawn there carries, so the name
+    is read out of it and handed back as a rewrite of the call — measured on
+    2.1.283, where the runtime recorded the rewritten spawn under that name.
+
+    The spelling is settled here rather than left to the runtime, because
+    leaving it was measured to fail quietly. Claude Code 2.1.278 validates it
     and says so — "name must start with a letter or digit and contain only
     letters, digits, underscores, or hyphens (max 64 chars)", read out of the
     shipped binary. Codex 0.155.1 rejects a hyphen with no hook record at all:
@@ -1470,16 +1480,12 @@ class SpawnNames(BaseModel, frozen=True):
     written into portable guidance needs: a project running on one runtime
     alone may widen `punctuation` to what that runtime takes.
 
-    The refusal is the only thing that tells a caller which argument the name
-    is. Claude Code 2.1.280 shows the model an `Agent` schema with no `name`
-    in it, `additionalProperties` false, and accepts a `name` all the same;
-    a session refused with "pass a name beside the agent type" put it in
-    `description` twice before trying the key the schema did not list. So
-    ``recovery`` states the shape alone and the kernel opens it with the key
-    the dispatcher read, `name` on Claude Code and `task_name` on Codex.
+    Only a spawn with nothing to read a name from is refused, and then
+    ``recovery`` states the shape alone while the kernel opens it with the
+    key the dispatcher read, `name` on Claude Code and `task_name` on Codex.
 
-    On by default, since the cost is one argument per spawn and the gain is
-    every listing, message and stop naming the work rather than the type.
+    On by default, since it costs the caller nothing and every listing,
+    message and stop then names the work rather than the type.
     """
 
     reason: str = (
@@ -1495,14 +1501,11 @@ class SpawnNames(BaseModel, frozen=True):
     reads it from is that runtime's, and the kernel opens the recovery with the
     one the dispatcher read, so the sentence a caller meets names the argument
     whether or not the tool schema they were shown did."""
-    misspelled: str = (
-        "a name outside that shape is rejected by one runtime or another, one"
-        " of them silently, so the spawn dies where nothing records it"
-    )
     punctuation: str = "_"
     """What a name may carry beside letters and digits: the intersection of
     what every runtime this project runs on accepts, a hyphen being one
-    runtime's alone."""
+    runtime's alone. The first mark is what a normalized name joins its
+    words with."""
     limit: int = 64
     """The longest name accepted, which is the shorter of the two limits."""
 
@@ -1511,7 +1514,6 @@ class SpawnNames(BaseModel, frozen=True):
         return SpawnNameRow(
             reason=self.reason,
             recovery=self.recovery,
-            misspelled=self.misspelled,
             punctuation=self.punctuation,
             limit=self.limit,
         )
