@@ -108,7 +108,7 @@ root="$shared/{STORE_DIR}/{COORDINATION_DIR}"
 set -- "$root/{INBOX_DIR}/{session}"/*.json "$root/{INBOX_DIR}/{subagents}"*/*.json
 for waiting do
     [ -e "$waiting" ] || continue
-    exec python3 "${{0%/*}}/../runtime/{RUNTIME_MODULE}" "$root" "{member}"
+    exec python3 -s "${{0%/*}}/../runtime/{RUNTIME_MODULE}" "$root" "{member}"
 done
 exit 0
 """

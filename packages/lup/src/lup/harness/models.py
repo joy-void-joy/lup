@@ -1357,6 +1357,18 @@ class McpServer(BaseModel, frozen=True):
     as a group that is simply absent rather than as an error naming a limit.
     """
 
+    always_load: bool = False
+    """Whether this server's tools are offered from the first turn, never deferred.
+
+    A runtime that withholds tool definitions until a search asks for them
+    spends a search call each time a deferred tool is wanted. That is a fair
+    price for a server reached now and then, and the wrong one for tools a
+    session calls dozens of times. Claude Code spells this per server, as
+    `alwaysLoad`, and waits at startup for such a server's tools up to its
+    connect deadline; Codex documents no per-server loading control and no
+    deferral, so its config renders nothing for it.
+    """
+
     def command_line(self, runtime: "NativeSpellings") -> list[str]:
         """Spell every argument for the runtime that will spawn this server."""
         return [argument.spell_in(runtime) for argument in self.arguments]
@@ -1450,17 +1462,27 @@ class AcceptanceGuard(BaseModel, frozen=True):
 
 
 class SpawnNames(BaseModel, frozen=True):
-    """A project's decision that every subagent it spawns is named.
+    """A project's decision that every subagent it spawns goes out named.
 
     A runtime lists, addresses and stops a subagent by the name it was
     spawned with, and shows its type where none was given — a generic word
     such as the default agent's, which says nothing about what the subagent
-    is doing. Declaring this refuses a spawn that carries no name, with a
-    recovery giving the shape, so the caller passes one and the listing says
-    what each subagent is for.
+    is doing. Declaring this sends every spawn out under a name of the shape
+    below: one given in that shape goes as given, one outside it is
+    normalized, and a spawn given none takes one read out of its description.
 
-    It refuses a name outside the shape too, because leaving the spelling to
-    the runtime was measured to fail quietly. Claude Code 2.1.278 validates it
+    The caller is not asked for it, because the schema it reads may not list
+    the argument. Claude Code 2.1.280 and 2.1.283 show the model an `Agent`
+    schema with no `name`, `additionalProperties` false, and take a `name`
+    all the same; a session refused with "pass a name beside the agent type"
+    put it in `description` twice before trying the key the schema did not
+    list, and sessions refused that way were the commonest spawn friction.
+    The description is the argument every spawn there carries, so the name
+    is read out of it and handed back as a rewrite of the call — measured on
+    2.1.283, where the runtime recorded the rewritten spawn under that name.
+
+    The spelling is settled here rather than left to the runtime, because
+    leaving it was measured to fail quietly. Claude Code 2.1.278 validates it
     and says so — "name must start with a letter or digit and contain only
     letters, digits, underscores, or hyphens (max 64 chars)", read out of the
     shipped binary. Codex 0.155.1 rejects a hyphen with no hook record at all:
@@ -1470,16 +1492,12 @@ class SpawnNames(BaseModel, frozen=True):
     written into portable guidance needs: a project running on one runtime
     alone may widen `punctuation` to what that runtime takes.
 
-    The refusal is the only thing that tells a caller which argument the name
-    is. Claude Code 2.1.280 shows the model an `Agent` schema with no `name`
-    in it, `additionalProperties` false, and accepts a `name` all the same;
-    a session refused with "pass a name beside the agent type" put it in
-    `description` twice before trying the key the schema did not list. So
-    ``recovery`` states the shape alone and the kernel opens it with the key
-    the dispatcher read, `name` on Claude Code and `task_name` on Codex.
+    Only a spawn with nothing to read a name from is refused, and then
+    ``recovery`` states the shape alone while the kernel opens it with the
+    key the dispatcher read, `name` on Claude Code and `task_name` on Codex.
 
-    On by default, since the cost is one argument per spawn and the gain is
-    every listing, message and stop naming the work rather than the type.
+    On by default, since it costs the caller nothing and every listing,
+    message and stop then names the work rather than the type.
     """
 
     reason: str = (
@@ -1495,14 +1513,11 @@ class SpawnNames(BaseModel, frozen=True):
     reads it from is that runtime's, and the kernel opens the recovery with the
     one the dispatcher read, so the sentence a caller meets names the argument
     whether or not the tool schema they were shown did."""
-    misspelled: str = (
-        "a name outside that shape is rejected by one runtime or another, one"
-        " of them silently, so the spawn dies where nothing records it"
-    )
     punctuation: str = "_"
     """What a name may carry beside letters and digits: the intersection of
     what every runtime this project runs on accepts, a hyphen being one
-    runtime's alone."""
+    runtime's alone. The first mark is what a normalized name joins its
+    words with."""
     limit: int = 64
     """The longest name accepted, which is the shorter of the two limits."""
 
@@ -1511,22 +1526,22 @@ class SpawnNames(BaseModel, frozen=True):
         return SpawnNameRow(
             reason=self.reason,
             recovery=self.recovery,
-            misspelled=self.misspelled,
             punctuation=self.punctuation,
             limit=self.limit,
         )
 
 
 class SubagentCleanup(BaseModel, frozen=True):
-    """A project's decision that a subagent reports only after its background work stops.
+    """A project's decision that a subagent hands back its report only after its background work stops.
 
     Declaring one registers the fold under the runtime's subagent events: as a
     subagent starts it is told that what it arms in the background is its own
-    to stop, and as it is about to report, while any task it started is still
-    listed, the report is refused once with a reason naming each task and the
-    call that ends it. Undeclared, a subagent's report goes through with its
-    watches running, and each line they emit resumes it — the leak this
-    exists to close.
+    to stop, and at the stop that hands its report back, while any shell work
+    its own run started is still listed, that stop is refused once with a
+    reason naming each task and the call that ends it. A stop that only waits
+    on that work goes through, and a subagent it started is never named.
+    Undeclared, a subagent's report goes through with its watches running,
+    and each line they emit resumes it — the leak this exists to close.
 
     On by default, because every project delegating to subagents that wait on
     pushed output meets the same leak; the main agent is never gated, since
@@ -1538,11 +1553,10 @@ class SubagentCleanup(BaseModel, frozen=True):
     """Whether the subagent is told at its start; the stop-time refusal is the
     declaration itself."""
 
-    gate: str = "`uv run lup-devtools dev check`"
     scoped: str = "`uv run lup-devtools dev check --changed`"
-    record: str = "your report"
-    """How this project spells the gate, its scoped form, and where a delegated
-    agent names what it could not check.
+    tests: str = "`uv run lup-devtools dev test`"
+    """How this project spells the scoped check and the runner a delegated
+    agent points at the tests its change reaches.
 
     Declared rather than written into the notice, because the notice ships
     into a project that named its own devtools CLI and would otherwise read
@@ -1747,9 +1761,9 @@ class HookSet(BaseModel, frozen=True):
         description=(
             "Whether a subagent's report waits for the background work it "
             "started: told at its start that what it arms is its own to stop, "
-            "and refused once at its stop while any of it is still listed. "
-            "None declines, and leaves a subagent's leftovers to whoever "
-            "notices them"
+            "and refused once at the stop that hands its report back while "
+            "any of it is still listed. None declines, and leaves a "
+            "subagent's leftovers to whoever notices them"
         ),
     )
     peer_policy: PeerPolicy | None = Field(

@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pytest
 
-from lup import DEFERRED
+from lup import LAZY_EXPORTS
 
 EXAMPLES = Path(__file__).resolve().parents[2] / "examples"
 
@@ -48,12 +48,12 @@ def imported_names(tree: ast.Module) -> list[tuple[str, str]]:
 
 
 @pytest.mark.parametrize("path", example_sources(), ids=lambda p: p.name)
-def test_a_deferred_name_is_taken_from_the_package_root(path: Path) -> None:
+def test_a_lazy_export_is_taken_from_the_package_root(path: Path) -> None:
     imported = imported_names(ast.parse(path.read_text(encoding="utf-8")))
     reached = [
         (module, name)
         for module, name in imported
-        if name in DEFERRED and module != "lup"
+        if name in LAZY_EXPORTS and module != "lup"
     ]
 
     assert not reached, (

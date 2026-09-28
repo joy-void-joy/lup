@@ -50,7 +50,7 @@ from lup.resolver.contracts import (
     WorktreePreparer,
 )
 from lup.resolver.core import ASSEMBLY_QUESTION_ID, ResolverCore
-from lup.resolver.journal import Journal
+from lup.resolver.record import Journal
 from lup.resolver.lifecycle import HostWait, drive_with_host_retries
 from lup.resolver.orchestrator import WorktreeOrchestrator
 from lup.resolver.rebase import BaseRefresher

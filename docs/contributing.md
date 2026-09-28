@@ -34,8 +34,11 @@ it is not is owed on every commit, and treating it as owed is how several
 agents sharing one working tree each start the whole suite at once. Over a tree
 still being edited that answer is about a state that never existed, and a
 failure in it cannot be attributed to whoever caused it — so a delegated agent
-runs the scoped pair, names what it could not check, and leaves the gate and
-the commit to whoever dispatched it.
+runs the scoped pair over what its change reaches and leaves the full gate to
+whoever lands it. Whether it commits follows the tree it works in: in a
+worktree of its own it commits its work, and in a checkout it shares it leaves
+the commit to whoever dispatched it, since a commit there would carry what the
+others left half-edited beside its change.
 
 The other two are the loop while a change is still moving. `dev check
 --changed` runs ruff and pyright over the Python files changed since the
@@ -50,9 +53,19 @@ static reading of it — so a suite narrowed automatically could report green
 while skipping the one test the change breaks. A gate that is trusted and
 wrong costs more than one that is slow.
 
-Run one at a time. Two gates at once are slower than the same two in
-sequence, because each already spreads itself across every core the machine
-has — and a suite reading a repository whose branches another command is
+Running several at once is held to the machine by the commands themselves,
+because each suite alone would spread itself across every core there is.
+`dev check` and `dev test` each hold one of four slots the clone keeps under
+its shared git directory, across every worktree, and spread their suites over
+the share of the cores that the runs already under way leave — four runs of
+four workers rather than four of sixteen. A fifth waits for a slot and says so
+as its wait begins, so a run that seems to hang with that line above it is
+queued rather than stuck; after half an hour it goes ahead at full width, in
+case a holder died without releasing its slot. `dev check --changed` and
+`dev check --no-test` hold none: neither runs a suite, and Pyright checks on one
+core, so a slot either held would divide nothing of its own and narrow every
+run opening beside it for the whole of that run. What the slots do not divide
+is the repository — a suite reading one whose branches another command is
 moving fails on that rather than on the code.
 
 `uv` is the package manager: use `uv add <package>`, never edit

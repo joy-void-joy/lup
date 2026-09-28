@@ -906,11 +906,9 @@ def test_a_stale_environment_cannot_grant_what_the_document_does_not(
 def bundled_dispatcher() -> ModuleType:
     """Import the emitted dispatcher so its own `rendered` can be called.
 
-    A placement reaches that function on a decision, and no rule declares
-    `escalable` yet — the placement exists so `toolchain-sandbox-escalation`
-    can declare one. Driving it from a command would therefore pin nothing
-    until the first rule lands, which is exactly when a silent revocation
-    would stop being catchable.
+    A placement reaches that function on a decision, so building the decision
+    here pins every placement the vocabulary has, where driving one from a
+    command would pin only the placements some rule happens to declare.
     """
     spec = importlib.util.spec_from_file_location(
         "bundled_claude_policy", DISPATCHER.resolve()

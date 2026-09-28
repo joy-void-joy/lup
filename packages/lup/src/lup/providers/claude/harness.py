@@ -550,6 +550,7 @@ class ClaudeMcpRenderer(ArtifactRenderer[Plugin]):
             server.name: {
                 "command": server.command,
                 "args": server.command_line(self.spellings),
+                **({"alwaysLoad": True} if server.always_load else {}),
             }
             for server in source.mcp_servers
         }
@@ -782,7 +783,8 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
             CLAUDE_SUBAGENT_STOP_EVENT,
         )
         # A subagent is told at its start what it arms is its own to stop,
-        # and refused once at its stop while any of it is still listed.
+        # and refused once at the stop handing back its report while any of
+        # it is still listed.
         cleanup = cleanup_hooks(
             Path(f".claude/plugins/{self.plugin_name}"),
             "CLAUDE_PLUGIN_ROOT",

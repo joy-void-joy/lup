@@ -2201,15 +2201,13 @@ ACCEPTANCE_GUARD: AcceptanceGuardRow | None = None
 SPAWN_NAMES: SpawnNameRow | None = {
     "reason": "a subagent spawned without a name is listed, addressed and stopped by its type alone, which says nothing about what it is doing",
     "recovery": "the task in two or three words, starting with a letter or digit and carrying only letters, digits and underscores, at most 64 characters \u2014 it is what the listing shows and what a message or a stop addresses",
-    "misspelled": "a name outside that shape is rejected by one runtime or another, one of them silently, so the spawn dies where nothing records it",
     "punctuation": "_",
     "limit": 64,
 }
 
 VERIFICATION: VerificationRow = {
-    "gate": "`uv run lup-devtools dev check`",
     "scoped": "`uv run lup-devtools dev check --changed`",
-    "record": "your report",
+    "tests": "`uv run lup-devtools dev test`",
 }
 
 SHELL_RULES: list[ShellRuleRow] = [

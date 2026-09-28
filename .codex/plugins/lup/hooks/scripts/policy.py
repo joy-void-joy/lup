@@ -76,7 +76,7 @@ from kernel.rows import (
     landing_rows,
     unproduced_cause,
 )
-from kernel.spawns import decide_spawn
+from kernel.spawns import decide_spawn, spawn_name
 from kernel.words import INTERPRETERS
 from kernel.roles import displaced_targets
 from kernel.shell import decide_shell, sandbox_excluded, shell_posture_targets
@@ -3334,15 +3334,28 @@ def peer_listing_decision() -> KernelDecision:
     return decide_peer_listing(PEER_POLICY)
 
 
-def spawn_decision(name: str, values: list[str], field: str) -> KernelDecision:
-    """Judge one native spawn by the name it carries, against what this project declared.
+def spawn_decision(
+    name: str, description: str, values: list[str], field: str
+) -> KernelDecision:
+    """Judge one native spawn by the name it goes out under, against what this project declared.
 
-    ``name`` is the runtime's own field for it, read by the host half that
-    knows which key that is, and ``field`` is that key, so the refusal can
-    name the argument; every string the call carries rides beside them so an
+    ``name`` is the runtime's own field for it and ``description`` the text a
+    name is read from where none was given, each read by the host half that
+    knows which key that is — a runtime whose spawn carries no description
+    passes ``""``. ``field`` is the name's key, so the refusal can name the
+    argument; every string the call carries rides beside them so an
     escalation marker in any of them is found.
     """
-    return decide_spawn(name, values, SPAWN_NAMES, field)
+    return decide_spawn(name, description, values, SPAWN_NAMES, field)
+
+
+def spawn_named(name: str, description: str) -> str:
+    """The name this project sends a spawn out under, the one the verdict judged.
+
+    What a host half writes back into the call where it differs from what
+    was given, so the rewrite and the verdict cannot come to disagree.
+    """
+    return spawn_name(name, description, SPAWN_NAMES)
 
 
 def peer_listing_attachment(cwd: Path | None) -> str:
@@ -3972,11 +3985,12 @@ def dispatch(payload, permission_request=False):
         )
     if name == "collaborationspawn_agent":
         # Measured on 0.155.1: the spawn carries `task_name` and `message`,
-        # and the hook names the tool this way. The runtime requires the task
-        # name on the call, so this insists on the same thing Claude's half
-        # does, and defers where it is there.
+        # and the hook names the tool this way. It carries no description to
+        # read a name out of, so a spawn with no task name is refused where
+        # Claude's half would name it, and one misspelled goes out normalized.
         return spawn_decision(
             tool_input["task_name"] if "task_name" in tool_input else "",
+            "",
             [value for value in tool_input.values() if isinstance(value, str)],
             "task_name",
         )
@@ -3991,6 +4005,25 @@ def dispatch(payload, permission_request=False):
     if refused is not None:
         return refused
     return KernelDecision("ask", f"unknown tool {name!r} is not covered by policy")
+
+
+def named_input(payload):
+    """The spawn's arguments under the name it goes out with, or ``None`` to send it as written.
+
+    The one call this half rewrites. Codex takes `updatedInput` only beside
+    `permissionDecision: "allow"` — its hook documentation says so, and the
+    0.158.0 binary reports "PreToolUse hook returned updatedInput without
+    permissionDecision:allow" for any other shape — while a function tool's
+    rewrite replaces its whole arguments object. A spawn raises no approval
+    of its own there, so the allow that carries the name settles nothing the
+    deferral it spells would have left to anybody.
+    """
+    if payload["tool_name"] != "collaborationspawn_agent":
+        return None
+    tool_input = payload["tool_input"]
+    given = tool_input["task_name"] if "task_name" in tool_input else ""
+    named = spawn_named(given, "")
+    return None if named in ("", given) else {**tool_input, "task_name": named}
 
 
 def queued_review(payload, decision):
@@ -4274,6 +4307,18 @@ def main():
         )
         return
     if decision.effect in ("allow", "defer"):
+        renamed = None if permission_request else named_input(payload)
+        if renamed is not None:
+            json.dump(
+                {
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "allow",
+                        "updatedInput": renamed,
+                    }
+                },
+                sys.stdout,
+            )
         record_hook_evidence(plugin_data_root(), payload, "completed", decision.effect)
         return
     # A successful structured denial preserves the operator warning; exit 2

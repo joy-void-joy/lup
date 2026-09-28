@@ -9,7 +9,7 @@ from lup.coordination.mail import ActorMail
 from lup.coordination.mailbox import AnswerDoor
 from lup.coordination.refs import ActorRef
 from lup.coordination.sessions import ActorInbox, ActorRecord, ActorSession
-from lup.resolver.journal import Journal
+from lup.resolver.record import Journal
 from lup.sessions.capabilities import SessionEngine
 from lup.sessions.errors import ProviderTurnError, TurnFailure
 from lup.sessions.events import (

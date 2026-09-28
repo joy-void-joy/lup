@@ -243,7 +243,10 @@ through its dynamic tools. A runtime's own CLI starts it instead, as a stdio
 command running `python -m lup.mcp.serve` (or a composed CLI's `tools serve`)
 that carries the server's class and fields, which the subprocess validates back
 into the same declaration. That is why a served `Toolset` names module-level
-tools: an import path is what crosses the process boundary.
+tools: an import path is what crosses the process boundary. Any of them takes
+`always_load=True` for tools a session calls on most turns: Claude then offers
+them from the first turn rather than behind its tool search, and Codex, which
+names no such control, is unchanged.
 
 Typed output remains available with no built-in. On `Claude`, `allowed_tools`
 controls automatic approval within the declared tools and `disallowed_tools`

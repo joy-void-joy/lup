@@ -138,6 +138,83 @@ class RenderedMigrations(BaseModel, frozen=True):
 
 DECLARED: list[Migration] = [
     Migration(
+        subjects=["SpawnNames.misspelled"],
+        reason=(
+            "a spawn whose name falls outside the shape is normalized and sent "
+            "out rather than refused, so no refusal wording remains to declare"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Drop the field from a SpawnNames override. The first "
+                    "character of `punctuation` is what joins the words of a "
+                    "normalized name; `reason` and `recovery` still word the one "
+                    "refusal left, a spawn with nothing to read a name from."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=["SubagentCleanup.gate", "SubagentCleanup.record"],
+        reason=(
+            "a delegated agent is told the scoped check and the test runner it "
+            "owes, and leaves the full gate to whoever lands its work"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Spell your project's scoped check in `SubagentCleanup.scoped` "
+                    "and its test runner in `SubagentCleanup.tests` where `gate` "
+                    "and `record` were set."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=["ToolInput.description", "ToolInput.subagent_type"],
+        reason=(
+            "the stop hook names only shell work a subagent's own run started, "
+            "so it reads no spawn arguments"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Nothing reads these fields of the cleanup hook's tool input. "
+                    "A hook that needs a spawn's description or type reads them "
+                    "from the payload its runtime hands it before the call, as "
+                    "lup.policy.kernel.spawns is handed them."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=[
+            "ModuleRun.renamed",
+            "ModuleEdit",
+            "ModuleEdit.row",
+            "ModuleEdit.start",
+            "ModuleEdit.end",
+            "ModuleEdit.text",
+            "module_edits",
+            "apply_edits",
+        ],
+        reason=(
+            "`dev relocate` plans a file's rewrite as splices that may span rows "
+            "and split an import statement, which a one-row edit of a dotted run "
+            "could not express"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Call respellings(tokens, moves) from lup.devtools.dev.relocate "
+                    "for the splices a file's tokens need, and apply_splices(text, "
+                    "splices) to write them; destination(named, moves) answers where "
+                    "a dotted path lands, which ModuleRun.renamed used to."
+                )
+            ),
+        ],
+    ),
+    Migration(
         subjects=["last_release_tag"],
         reason=(
             "the migrations gate measures from the release commit rather than "
@@ -284,7 +361,7 @@ DECLARED: list[Migration] = [
             ),
             MigrationStep(
                 instruction=(
-                    "Read lup.DEFERRED where lup.CONSTRUCTORS was read: it maps "
+                    "Read lup.LAZY_EXPORTS where lup.CONSTRUCTORS was read: it maps "
                     "Claude and Codex, among every name the package root "
                     "resolves on first access, to the modules defining them."
                 )
@@ -1166,20 +1243,38 @@ DECLARED: list[Migration] = [
         ],
     ),
     Migration(
-        subjects=["AGENTS"],
+        subjects=["AGENTS", "DEFERRED"],
         reason=(
             "the package root resolves the launch vocabulary on first access "
             "the way it resolves the agents, through one table naming the "
-            "module each deferred name is defined in, so the table is named "
+            "module each lazy export is defined in, so the table is named "
             "for what it holds"
         ),
         steps=[
             MigrationStep(
                 instruction=(
-                    "Read lup.DEFERRED where lup.AGENTS was read. It maps every "
+                    "Read lup.LAZY_EXPORTS where lup.AGENTS was read. It maps every "
                     "name the root resolves on first access to its module; a "
                     "caller that wanted the agents alone keeps the rows for "
                     "Claude and Codex."
+                )
+            ),
+        ],
+    ),
+    Migration(
+        subjects=["ModuleRow.guidance_used"],
+        reason=(
+            "`dev modules` weighs each module as this project's selection "
+            "resolves it, so its one prose column split in two: what the "
+            "project ships of the module, and what the module itself declares"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Read ModuleRow.guidance_resolved where guidance_used was "
+                    "read, for the bytes this project's version of the module "
+                    "holds; ModuleRow.guidance_declared is the module's own "
+                    "sections, before any were retired or rewritten."
                 )
             ),
         ],

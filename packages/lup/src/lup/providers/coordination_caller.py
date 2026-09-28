@@ -50,7 +50,7 @@ def guard_body() -> str:
     """
     return f"""#!/bin/sh
 command -v python3 >/dev/null 2>&1 || exit 0
-exec python3 "${{0%/*}}/../runtime/{RUNTIME_ENTRY}"
+exec python3 -s "${{0%/*}}/../runtime/{RUNTIME_ENTRY}"
 """
 
 

@@ -17,6 +17,7 @@ import pytest
 import lup.launch.declaration as declaration
 import lup.providers.claude.runtime as claude_runtime
 from lup.coordination.identity import MEMBER_ENV, NAME_ENV, LaunchedMember
+from lup.harness.environment import tool_server_env
 from lup.harness.image import ContainerClient
 from lup.harness.models import HookSandbox, HookSet
 from lup.launch.compilation import allowance_environment
@@ -62,6 +63,7 @@ from lup.providers.codex.launch import (
 from lup.providers.codex.login import CODEX_HOME
 from lup.sessions.events import SessionId, SessionSummary
 from lup.sessions.recursion import MAX_RECURSIVE_AGENT_ENV
+from lup.tools.mcp import RawStdioServerConfig
 
 MEMBER = LaunchedMember(member_id="member-1", cli_name="reviewer")
 
@@ -373,6 +375,92 @@ def test_declared_servers_are_the_launched_sessions_whole_roster() -> None:
     assert any(
         word.startswith("mcp_servers.coordination.command=") for word in codex_words
     )
+
+
+def test_a_launched_codex_hands_the_servers_lup_hosts_what_its_launcher_exported() -> (
+    None
+):
+    """Codex starts a stdio server under a fixed base environment, forwarding nothing else.
+
+    So a server lup hosts names the roster identity and recursion allowance in
+    ``env_vars``, or its coordination server joins the roster under no id and
+    a nested agent its tools open spends no allowance. A server passed through
+    as declared is handed none of it.
+    """
+    from lup.mcp import Coordination, External
+
+    words = codex_arguments(
+        Codex(
+            tools=CodexTools(
+                mcp=[
+                    Coordination(),
+                    External(name="other", server=RawStdioServerConfig(command="x")),
+                ]
+            )
+        ),
+        [],
+        [],
+    )
+
+    assert set(tool_server_env()) == {MEMBER_ENV, NAME_ENV, MAX_RECURSIVE_AGENT_ENV}
+    assert f"mcp_servers.coordination.env_vars={json.dumps(tool_server_env())}" in words
+    assert not any(word.startswith("mcp_servers.other.env_vars=") for word in words)
+
+
+def test_an_always_loaded_server_skips_tool_search_in_both_claude_outputs() -> None:
+    """A server a session calls on most turns should not cost a search each time.
+
+    Claude Code defers MCP tools behind its tool search and exempts a server
+    whose config says ``alwaysLoad``, whatever its transport. A session opened
+    here says it in the SDK's options, which hand Claude Code each server but
+    its instance, and a launched one in ``--mcp-config``. Codex names no such
+    control, so its launch carries nothing for it.
+    """
+    from lup.mcp import Coordination, External
+    from lup.tools.mcp import (
+        RawHttpServerConfig,
+        RawStdioServerConfig,
+        create_mcp_server,
+    )
+
+    remote = RawHttpServerConfig(type="http", url="https://tools.example/mcp")
+    quiet = RawStdioServerConfig(command="quiet")
+    declared = [
+        Coordination(always_load=True),
+        External(name="remote", server=remote, always_load=True),
+        External(name="quiet", server=quiet),
+    ]
+    agent = Claude(tools=ClaudeTools(mcp=declared))
+    opened = build_claude_options(
+        agent,
+        servers={
+            "coordination": create_mcp_server("coordination"),
+            "remote": remote,
+            "quiet": quiet,
+        },
+        binding=lambda: None,
+        resume=None,
+        session_id="s",
+    )
+    assert isinstance(opened.mcp_servers, dict)
+    handed = json.loads(
+        json.dumps(
+            {
+                name: {key: value for key, value in server.items() if key != "instance"}
+                for name, server in opened.mcp_servers.items()
+            }
+        )
+    )
+    words = claude_arguments(agent, MEMBER, None, [])
+    launched = json.loads(words[words.index("--mcp-config") + 1])["mcpServers"]
+    codex_words = codex_arguments(Codex(tools=CodexTools(mcp=declared)), [], [])
+
+    assert handed["coordination"]["type"] == "sdk"
+    for servers in (handed, launched):
+        assert servers["coordination"]["alwaysLoad"] is True
+        assert servers["remote"]["alwaysLoad"] is True
+        assert "alwaysLoad" not in servers["quiet"]
+    assert [word for word in codex_words if "alwaysLoad" in word] == []
 
 
 class Step:

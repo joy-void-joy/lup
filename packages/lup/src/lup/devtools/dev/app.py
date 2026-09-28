@@ -327,7 +327,9 @@ def create_dev_app(
         ] = False,
         no_test: Annotated[
             bool,
-            typer.Option("--no-test", help="Skip pytest"),
+            typer.Option(
+                "--no-test", help="Skip the test suites, and hold no gate slot"
+            ),
         ] = False,
         antipatterns: Annotated[
             bool,
@@ -470,7 +472,12 @@ def create_dev_app(
             ),
         ] = None,
     ) -> None:
-        """Run named tests in the suite that installs each, one run per suite."""
+        """Run named tests in the suite that installs each, one run per suite.
+
+        Holds one of the clone's gate slots as `dev check` does, and spreads
+        each suite over its share of the machine; with every slot held, it
+        waits and says so.
+        """
         declarations = declared()
         check.run_selected(
             test_roots=declarations.test_roots,
@@ -662,7 +669,13 @@ def create_dev_app(
         # retiring all of them has to name the ones already retired too, or
         # the answer would silently exclude what a previous answer dropped.
         shipped = [rule.id for rule in all_rules()]
-        for line in answers.settled(catalog, shipped, project.seams):
+        try:
+            settled = answers.settled(catalog, shipped, project.seams)
+        except ValueError as refused:
+            # A seam that cannot be written into — never written down, or
+            # naming a module that is not there — says why and where.
+            raise typer.BadParameter(str(refused)) from refused
+        for line in settled:
             typer.echo(line)
 
     @app.command("refutations")

@@ -84,7 +84,7 @@ Show the conflict prediction and recommend a strategy, then {{ ask }}
 
 ### 5a. Standard merge (clean or light conflicts)
 
-Which spelling to use depends on whether the target already carries this branch. Where it does -- `sync-base` pulled the integration branch in before the rebase, which is the route `{{ land_skill }}` arrives by -- the join already happened in the branch's own worktree, and recording it again here would put a merge commit in an integration branch whose history is otherwise linear:
+Which spelling to use depends on whether this branch already carries the target. Where it does -- `sync-base` pulled the integration branch in before the rebase, which is the route `{{ land_skill }}` arrives by -- the join already happened in the branch's own worktree, so the target is an ancestor of the branch, and a merge commit here would record a second join of two lines that no longer diverge:
 
 ```bash
 git merge --ff-only <branch>

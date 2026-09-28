@@ -50,7 +50,7 @@ from lup.launch.compilation import (
 from lup.launch.declaration import Reopening
 from lup.policy.hooks import merge_hooks
 from lup.providers.claude.hooks import CLAUDE_SEMANTICS
-from lup.providers.claude.launch import claude_settings, compiled_claude
+from lup.providers.claude.launch import claude_server, claude_settings, compiled_claude
 from lup.providers.claude.model_choice import claude_effort
 from lup.sessions.recursion import (
     recursive_agent_allowance,
@@ -1083,23 +1083,7 @@ def build_claude_options(
         0, claude_types.HookMatcher(hooks=[enforce_grants])
     )
 
-    def native_server(server: McpServerEntry) -> "claude_types.McpServerConfig":
-        """Project one entry into the server config this SDK's options take.
-
-        The projection belongs here because it is this provider's spelling: a
-        server we host becomes an SDK config, while an external one already is
-        the SDK's transport shape and passes through. Asking the neutral entry
-        to convert itself would move that spelling into library code, beside a
-        second adapter that projects the same entry into an unrelated
-        subprocess shape.
-        """
-        match server:
-            case LupMcpServerConfig():
-                return claude_types.McpSdkServerConfig(
-                    type="sdk", name=server.name, instance=server.server
-                )
-            case _:
-                return server
+    loaded = {server.name for server in config.tools.mcp if server.always_load}
 
     # The stock tools are Claude Code's coding agent, and that agent is its
     # tools and the system prompt that teaches them; a narrower grant keeps
@@ -1127,8 +1111,9 @@ def build_claude_options(
         allowed_tools=list(dict.fromkeys(allowed)),
         disallowed_tools=list(config.disallowed_tools),
         mcp_servers={
-            name: native_server(
-                relay_recursive_agent_to_mcp(server, config.environment)
+            name: claude_server(
+                relay_recursive_agent_to_mcp(server, config.environment),
+                name in loaded,
             )
             for name, server in servers.items()
         },

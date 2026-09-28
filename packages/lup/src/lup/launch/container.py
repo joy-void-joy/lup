@@ -1824,10 +1824,9 @@ def contained_argv(
             if in_repository(path)
         ],
     )
-    # Read on the host and passed in, never resolved inside: the file that
-    # answers "where does this remote point" is `.git/config`, which the
-    # container can write, so a rewrite decided in there is a rewrite the
-    # confined thing chose for itself.
+    # Read on the host and passed in, never resolved inside: a rewrite decided
+    # in there is a rewrite the confined thing chose for itself, even over a
+    # `.git/config` the boundary holds read-only.
     environ = os.environ  # lup: ignore[os-environ]
     # The credential is selected here, on the host, for the third time in this
     # function and for the same reason as the other two: everything it reads --

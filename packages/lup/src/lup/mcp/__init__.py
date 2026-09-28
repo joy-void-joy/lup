@@ -43,6 +43,7 @@ from pydantic import (
 
 from lup.coordination.identity import MEMBER_ENV, mint_member_id
 from lup.coordination.policy import COORDINATION_SERVER
+from lup.harness.environment import tool_server_env
 from lup.ledger.models import LedgerEdge, LedgerNode
 from lup.ledger.store import LedgerLayout
 from lup.orchestration.reflection import ReviewGate
@@ -174,6 +175,17 @@ class ToolServer(
     name: str
     """The server's name, which addresses its tools as ``mcp__<name>__<tool>``."""
 
+    always_load: bool = False
+    """Whether this server's tools are offered from the first turn, never deferred.
+
+    A runtime that withholds tool definitions until a search asks for them
+    spends a search call each time a deferred tool is wanted: a fair price for
+    a server reached now and then, the wrong one for tools a session calls
+    dozens of times. Claude spells it per server in both compilations; Codex
+    documents no per-server loading control, so neither of its compilations
+    says anything for it.
+    """
+
     requires: ClassVar[str] = "nothing"
     """What a session must have for this server to build anything, for a refusal."""
 
@@ -194,6 +206,15 @@ class ToolServer(
         """
         return None
 
+    def launcher_variables(self) -> list[str]:
+        """What this server reads from the environment its session's launcher made.
+
+        Nothing by default: a server passed through as declared reads what its
+        own declaration gives it, and a launched session's identity is not
+        its to be handed.
+        """
+        return []
+
 
 class HostedServer(ToolServer, ABC, frozen=True):
     """A server lup builds out of one tool group, in process or in a subprocess."""
@@ -213,6 +234,15 @@ class HostedServer(ToolServer, ABC, frozen=True):
 
     def launched(self, launch: ServeLaunch) -> RawMcpServerConfig:
         return launch.command(self)
+
+    def launcher_variables(self) -> list[str]:
+        """The roster identity and recursion allowance of the session it serves.
+
+        Whichever group it serves, it is one process of the launched session,
+        so it answers to that session's roster identity and spends that
+        session's recursion allowance.
+        """
+        return tool_server_env()
 
     def served(self) -> "ServedServer":
         """This server as a serve command names it: its class and its fields."""
@@ -327,9 +357,13 @@ class Toolset(HostedServer, frozen=True):
     requires: ClassVar[str] = "at least one tool"
 
     def __init__(
-        self, tools: Sequence[LupMcpTool] = (), *, name: str = "tools"
+        self,
+        tools: Sequence[LupMcpTool] = (),
+        *,
+        name: str = "tools",
+        always_load: bool = False,
     ) -> None:
-        BaseModel.__init__(self, tools=list(tools), name=name)
+        BaseModel.__init__(self, tools=list(tools), name=name, always_load=always_load)
 
     @model_validator(mode="after")
     def tools_are_named_apart(self) -> Self:
@@ -359,7 +393,11 @@ class Group(HostedServer, frozen=True):
     requires: ClassVar[str] = "whatever its builder reads from the session"
 
     def __init__(
-        self, builder: Callable[[], ToolGroup] | str, *, name: str | None = None
+        self,
+        builder: Callable[[], ToolGroup] | str,
+        *,
+        name: str | None = None,
+        always_load: bool = False,
     ) -> None:
         """Declare ``builder``'s group, under its own name unless ``name`` is given.
 
@@ -370,7 +408,10 @@ class Group(HostedServer, frozen=True):
             builder
         )
         BaseModel.__init__(
-            self, builder=resolved, name=resolved().name if name is None else name
+            self,
+            builder=resolved,
+            name=resolved().name if name is None else name,
+            always_load=always_load,
         )
 
     def group(self) -> ToolGroup:

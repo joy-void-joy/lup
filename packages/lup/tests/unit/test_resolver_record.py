@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from lup.coordination.refs import ActorRef
-from lup.resolver.journal import Journal
+from lup.resolver.record import Journal
 from lup.sessions.events import (
     BlockCompletedEvent,
     MessageCompletedEvent,

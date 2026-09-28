@@ -13,6 +13,6 @@ root="$shared/lup/coordination"
 set -- "$root/inbox/session-$LUP_COORDINATION_MEMBER"/*.json "$root/inbox/subagent-$LUP_COORDINATION_MEMBER-"*/*.json
 for waiting do
     [ -e "$waiting" ] || continue
-    exec python3 "${0%/*}/../runtime/coordination_delivery.py" "$root" "$LUP_COORDINATION_MEMBER"
+    exec python3 -s "${0%/*}/../runtime/coordination_delivery.py" "$root" "$LUP_COORDINATION_MEMBER"
 done
 exit 0
