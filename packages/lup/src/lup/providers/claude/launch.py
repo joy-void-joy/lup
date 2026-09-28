@@ -5,7 +5,9 @@ import shutil
 from collections.abc import Sequence
 from pathlib import Path
 from tempfile import mkdtemp
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, TypedDict
+
+from mcp.server import Server
 
 from lup.coordination.identity import LaunchedMember
 from lup.coordination.repository import launched_member
@@ -65,6 +67,13 @@ from lup.providers.profile_tree import profile_environment
 from lup.providers.user_config import UserConfigFile
 from lup.sandbox.rail import AccessibleRoot, host_run, in_repository
 from lup.sessions.layers import SessionLayers
+from lup.tools.mcp import (
+    LupMcpServerConfig,
+    McpServerEntry,
+    RawHttpServerConfig,
+    RawSseServerConfig,
+    RawStdioServerConfig,
+)
 from lup.types import EnvVars, JsonObject, JsonValue
 from lup.workspace.paths import worktrees_directory
 
@@ -329,6 +338,71 @@ def claude_settings(agent: "Claude", tree: Path | None = None) -> JsonObject:
     return {"sandbox": block, **carried}
 
 
+class ClaudeServerLoading(TypedDict, total=False):
+    """Whether Claude Code offers a server's tools from the first turn.
+
+    Claude Code defers MCP tools behind its tool search and exempts a server
+    whose config says ``alwaysLoad``, on every transport
+    (https://code.claude.com/docs/en/mcp#exempt-a-server-from-deferral). The
+    Agent SDK's config types do not declare the key and hand it to the CLI as
+    given, so each shape below is the transport's own with this key beside it.
+    """
+
+    alwaysLoad: bool
+
+
+class ClaudeStdioServer(RawStdioServerConfig, ClaudeServerLoading):
+    """A server Claude Code starts as a subprocess."""
+
+
+class ClaudeSseServer(RawSseServerConfig, ClaudeServerLoading):
+    """A server Claude Code reaches over Server-Sent Events."""
+
+
+class ClaudeHttpServer(RawHttpServerConfig, ClaudeServerLoading):
+    """A server Claude Code reaches over streamable HTTP."""
+
+
+class ClaudeSdkServer(ClaudeServerLoading):
+    """A server this process hosts, as the Agent SDK hands it to Claude Code."""
+
+    type: Literal["sdk"]
+    name: str
+    instance: Server
+
+
+type ClaudeServer = (
+    ClaudeSdkServer | ClaudeStdioServer | ClaudeSseServer | ClaudeHttpServer
+)
+"""One MCP server as Claude Code reads it."""
+
+
+def claude_server(entry: McpServerEntry, always_load: bool) -> ClaudeServer:
+    """One server in the config both outputs carry, exempt from tool search where declared.
+
+    A session opened here hands the SDK its hosted servers as instances and
+    every other as a transport; a launched one names transports only. Either
+    way the loading key rides on the entry itself, which is where Claude Code
+    reads it. The projection is this adapter's because the spelling is: asking
+    the neutral entry to convert itself would carry Claude's keys into library
+    code, beside Codex's projection of the same entry into its own tables.
+    """
+    loading = (
+        ClaudeServerLoading(alwaysLoad=True) if always_load else ClaudeServerLoading()
+    )
+    match entry:
+        case LupMcpServerConfig():
+            return ClaudeSdkServer(
+                type="sdk", name=entry.name, instance=entry.server, **loading
+            )
+        case {"type": "sse"}:
+            return ClaudeSseServer(**entry, **loading)
+        case {"type": "http"}:
+            return ClaudeHttpServer(**entry, **loading)
+        case _:
+            return ClaudeStdioServer(**entry, **loading)
+
+
 def claude_mcp_arguments(tools: "ClaudeTools") -> list[str]:
     """The declared servers as a launched CLI starts them, and no others.
 
@@ -341,7 +415,10 @@ def claude_mcp_arguments(tools: "ClaudeTools") -> list[str]:
         if tools.serve.runtime is not None
         else tools.serve.model_copy(update={"runtime": "claude"})
     )
-    servers = {server.name: server.launched(serve) for server in tools.mcp}
+    servers = {
+        server.name: claude_server(server.launched(serve), server.always_load)
+        for server in tools.mcp
+    }
     return [
         "--mcp-config",
         json.dumps({"mcpServers": servers}),

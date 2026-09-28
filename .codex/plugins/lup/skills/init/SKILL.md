@@ -162,10 +162,14 @@ uv run lup-devtools dev init drop-examples --dry-run
 uv run lup-devtools dev init drop-examples
 ```
 
-It reports the handful of lines still naming what went — a README link, two
-docstring citations, and the `"examples/"` composition root in the catalog,
-which is dead once the directory is. Fix those; the README is human-owned, so
-propose that edit rather than making it.
+It reports the handful of lines still naming what went — the `"examples/"`
+roots in the catalog, which are dead once the directory is, and whatever else
+of this project's still names it, such as a README link or a test case running
+an example module. Fix those; the README is human-owned, so propose that edit
+rather than making it. It also names the removed test modules the scaffold
+declaration does not decline yet: add them to `declined` in
+`declared_scaffold()`, so the next `dev update` leaves them out rather than
+offering each back as a conflict.
 
 Now the decisions, and there is one kind of them. Everything lup ships belongs
 to a **module** — a subject as one value, carrying its skills, its agents, its

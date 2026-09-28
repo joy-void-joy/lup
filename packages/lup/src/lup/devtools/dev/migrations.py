@@ -1194,6 +1194,24 @@ DECLARED: list[Migration] = [
             ),
         ],
     ),
+    Migration(
+        subjects=["ModuleRow.guidance_used"],
+        reason=(
+            "`dev modules` weighs each module as this project's selection "
+            "resolves it, so its one prose column split in two: what the "
+            "project ships of the module, and what the module itself declares"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Read ModuleRow.guidance_resolved where guidance_used was "
+                    "read, for the bytes this project's version of the module "
+                    "holds; ModuleRow.guidance_declared is the module's own "
+                    "sections, before any were retired or rewritten."
+                )
+            ),
+        ],
+    ),
 ]
 """Every break this library has taken since its last release, and what to do.
 
