@@ -8,7 +8,7 @@ rather than the command that had just produced it.
 
 from pathlib import Path
 
-from lup.devtools.dev.relocate import Relocation, carry_module
+from lup.devtools.dev.relocate import Relocation, carry_module, occupied
 
 
 def module_at(root: Path, *parts: str) -> Path:
@@ -68,6 +68,26 @@ def test_an_occupied_destination_is_left_alone(tmp_path: Path) -> None:
     assert carried is None
     assert existing.read_text(encoding="utf-8") == "standing = True\n"
     assert (tmp_path / "pkg" / "old_home.py").exists()
+
+
+def test_an_occupied_destination_is_named_before_anything_moves(
+    tmp_path: Path,
+) -> None:
+    """The relocation that cannot land is found while the tree is still whole.
+
+    Carrying nothing and rewriting every importer anyway aimed them all at the
+    module already standing at the new name, and the command reported that as
+    a relocation. Asked first, it is refused before either half runs.
+    """
+    source = module_at(tmp_path, "pkg", "old_home")
+    existing = module_at(tmp_path, "pkg", "new_home")
+    free = Relocation(old=["pkg", "old_home"], new=["pkg", "elsewhere"])
+    taken = Relocation(old=["pkg", "old_home"], new=["pkg", "new_home"])
+    already_moved = Relocation(old=["pkg", "gone"], new=["pkg", "new_home"])
+
+    assert occupied([tmp_path], [free, already_moved]) == []
+    [refused] = occupied([tmp_path], [free, taken])
+    assert (refused.old, refused.new) == (source, existing)
 
 
 def test_a_module_crossing_packages_lands_in_the_root_that_owns_the_name(

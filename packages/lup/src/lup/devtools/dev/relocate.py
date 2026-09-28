@@ -27,7 +27,9 @@ same tokens as importing a name from that package, and rewriting it would
 mean guessing which. The repository's conventions ask for
 ``from module import symbol`` anyway, so the guess is not worth the reach —
 such a site fails the type check with an unresolved import rather than
-passing quietly, which is the outcome that gets it fixed.
+passing quietly, which is the outcome that gets it fixed. It is named among
+the surviving mentions as well, found by the grammar: the dotted path is
+never written whole there, so the text search that finds prose cannot see it.
 """
 
 import ast
@@ -254,38 +256,12 @@ class MovedModule(BaseModel, frozen=True):
     new: Path
 
 
-def carry_module(roots: list[Path], move: Relocation) -> MovedModule | None:
-    """Move the module's own file to the path its new name spells.
+def planned_move(roots: list[Path], move: Relocation) -> MovedModule | None:
+    """Where the module's file is, and where its new name puts it, before either moves.
 
-    The half a caller should never have been left holding. Repointing every
-    importer and leaving the file where it was produces a tree where nothing
-    resolves -- which the type check does catch, but only after this command
-    reported success, so the failure arrives detached from what caused it.
-
-    Moved through ``git`` where the file is tracked, so the history follows
-    the module instead of reading as a delete beside an unrelated add. An
-    untracked file is renamed plainly.
-
-    Two cases are deliberately quiet. A source that is not there is a caller
-    doing the same relocation in the other order -- file first, imports after
-    -- and refusing that would punish the tidier sequence. A destination that
-    already exists is left alone, because overwriting one module with another
-    is not a relocation, and the type check will name whatever that tree got
-    wrong.
+    ``None`` where no root holds the module, which is a caller who moved the
+    file first and is repointing imports after.
     """
-
-    def tracked(path: Path) -> bool:
-        """Whether git is keeping this file's history, and can be asked to move it.
-
-        A tree that is not a repository at all answers the same way a file git
-        has never seen does — plainly rename it — so the exit code and the
-        empty listing collapse into one answer here rather than becoming two
-        branches at the call.
-        """
-        try:
-            return bool(git.lines("-C", str(path.parent), "ls-files", "--", path.name))
-        except sh.ErrorReturnCode:
-            return False
 
     def destination(source_root: Path) -> Path:
         """The root the new name belongs under, which need not be the old one.
@@ -310,27 +286,84 @@ def carry_module(roots: list[Path], move: Relocation) -> MovedModule | None:
             source_root,
         )
 
-    for root in roots:
-        source = root.joinpath(*move.old).with_suffix(".py")
-        if not source.is_file():
-            continue
-        target = destination(root).joinpath(*move.new).with_suffix(".py")
-        if target.exists():
-            continue
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if tracked(source):
-            # Asked of the repository holding the file, with both operands
-            # resolved: a root is wherever a module path happens to resolve
-            # against and need be no repository at all, so `-C <root>` with
-            # operands spelled from the caller's directory reads each of them
-            # twice — `packages/lup/src/packages/lup/src/...`, which git
-            # reports as a bad source rather than as a path it built.
-            top = git.out("-C", str(source.parent), "rev-parse", "--show-toplevel")
-            git.out("-C", top, "mv", str(source.resolve()), str(target.resolve()))
-        else:
-            source.rename(target)
-        return MovedModule(old=source, new=target)
-    return None
+    return next(
+        (
+            MovedModule(
+                old=source, new=destination(root).joinpath(*move.new).with_suffix(".py")
+            )
+            for root in roots
+            if (source := root.joinpath(*move.old).with_suffix(".py")).is_file()
+        ),
+        None,
+    )
+
+
+def occupied(roots: list[Path], moves: list[Relocation]) -> list[MovedModule]:
+    """Every move whose module is here to carry and whose destination is taken.
+
+    Asked of every move before anything is touched, because the file and its
+    importers are one relocation: a module that cannot land has no business
+    having its imports repointed. Doing that anyway -- carrying nothing and
+    rewriting everything -- aimed every importer at the module already there,
+    and a caller who reads the moved-and-repointed report as done learns
+    otherwise from a tree that resolves the old names against the wrong file.
+    """
+    return [
+        plan
+        for move in moves
+        if (plan := planned_move(roots, move)) is not None and plan.new.exists()
+    ]
+
+
+def carry_module(roots: list[Path], move: Relocation) -> MovedModule | None:
+    """Move the module's own file to the path its new name spells.
+
+    The half a caller should never have been left holding. Repointing every
+    importer and leaving the file where it was produces a tree where nothing
+    resolves -- which the type check does catch, but only after this command
+    reported success, so the failure arrives detached from what caused it.
+
+    Moved through ``git`` where the file is tracked, so the history follows
+    the module instead of reading as a delete beside an unrelated add. An
+    untracked file is renamed plainly.
+
+    Two cases are deliberately quiet here. A source that is not there is a
+    caller doing the same relocation in the other order -- file first,
+    imports after -- and refusing that would punish the tidier sequence. A
+    destination that already exists is left alone, because overwriting one
+    module with another is not a relocation; the command refuses that case
+    whole, through :func:`occupied`, before this or any import rewrite runs.
+    """
+
+    def tracked(path: Path) -> bool:
+        """Whether git is keeping this file's history, and can be asked to move it.
+
+        A tree that is not a repository at all answers the same way a file git
+        has never seen does — plainly rename it — so the exit code and the
+        empty listing collapse into one answer here rather than becoming two
+        branches at the call.
+        """
+        try:
+            return bool(git.lines("-C", str(path.parent), "ls-files", "--", path.name))
+        except sh.ErrorReturnCode:
+            return False
+
+    plan = planned_move(roots, move)
+    if plan is None or plan.new.exists():
+        return None
+    plan.new.parent.mkdir(parents=True, exist_ok=True)
+    if tracked(plan.old):
+        # Asked of the repository holding the file, with both operands
+        # resolved: a root is wherever a module path happens to resolve
+        # against and need be no repository at all, so `-C <root>` with
+        # operands spelled from the caller's directory reads each of them
+        # twice — `packages/lup/src/packages/lup/src/...`, which git
+        # reports as a bad source rather than as a path it built.
+        top = git.out("-C", str(plan.old.parent), "rev-parse", "--show-toplevel")
+        git.out("-C", top, "mv", str(plan.old.resolve()), str(plan.new.resolve()))
+    else:
+        plan.old.rename(plan.new)
+    return plan
 
 
 def relocate(
@@ -351,13 +384,46 @@ def surviving_mentions(
     """Every remaining mention of a moved module, wherever it is not an import.
 
     Not necessarily wrong — prose about where something used to live is a
-    legitimate thing to write — so this reports and the reader decides.
+    legitimate thing to write — so this reports and the reader decides. A
+    moved module imported by name from its package is reported too, though
+    it is always wrong: the rewrite leaves that spelling alone, and it is the
+    one a search for the dotted path cannot find.
     """
+
+    def mentions(path: Path) -> Iterator[str]:
+        text = path.read_text(encoding="utf-8")
+        declined = {number for number in submodule_imports(text, moves)}
+        for number, line in enumerate(text.splitlines(), start=1):
+            if number in declined or any(".".join(move.old) in line for move in moves):
+                yield f"{path}:{number}: {line.strip()}"
+
     return [
-        f"{path}:{number}: {line.strip()}"
-        for path in source_files(roots, suffixes)
-        for number, line in enumerate(
-            path.read_text(encoding="utf-8").splitlines(), start=1
-        )
-        if any(".".join(move.old) in line for move in moves)
+        mention for path in source_files(roots, suffixes) for mention in mentions(path)
     ]
+
+
+def submodule_imports(text: str, moves: list[Relocation]) -> list[int]:
+    """The lines importing a moved module by name from the package holding it.
+
+    ``from package import submodule`` never writes the module's dotted path
+    whole, so it is read by the grammar: an imported name that, joined to the
+    package it is imported from, spells a moved module. A source that does
+    not parse names nothing here, and its text mentions still are.
+    """
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+    moved = [move.old for move in moves]
+
+    def named(node: ast.AST) -> Iterator[int]:
+        match node:
+            case ast.ImportFrom(module=str(module), names=names, level=0):
+                package = name_parts(module) or []
+                yield from (
+                    alias.lineno for alias in names if [*package, alias.name] in moved
+                )
+            case _:
+                return
+
+    return sorted(line for node in ast.walk(tree) for line in named(node))

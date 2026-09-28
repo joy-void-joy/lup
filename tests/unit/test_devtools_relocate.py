@@ -10,12 +10,15 @@ prose — are left alone.
 
 from pathlib import Path
 
+from typer.testing import CliRunner
+
 from lup.devtools.dev.relocate import (
     Relocation,
     name_parts,
     relocate,
     surviving_mentions,
 )
+from lup_template.devtools.main import app
 
 
 def moved(old: str, new: str) -> Relocation:
@@ -130,3 +133,51 @@ def test_surviving_mentions_reports_prose_the_rewrite_cannot_reach(
     assert [mention.split(": ", 1)[1] for mention in mentions] == [
         '"""Reads through lup.paths."""'
     ]
+
+
+def test_surviving_mentions_name_a_moved_module_imported_from_its_package(
+    tmp_path: Path,
+) -> None:
+    """`from package import submodule` is never rewritten, so it is never silent.
+
+    The dotted path is not written whole there, so the text search that finds
+    prose passed over it and the relocation reported nothing left to fix,
+    over a site that no longer resolved.
+    """
+    source = tmp_path / "site.py"
+    source.write_text(
+        "from lup import (\n    paths,\n    trace,\n)\nfrom lup import pathsy\n",
+        encoding="utf-8",
+    )
+
+    mentions = surviving_mentions([tmp_path], DEEPER)
+
+    assert [mention.split(": ", 1)[0] for mention in mentions] == [f"{source}:2"]
+
+
+def test_relocate_refuses_a_destination_another_module_holds(tmp_path: Path) -> None:
+    """Nothing moves and nothing is repointed when the new name is taken.
+
+    The command used to carry nothing, since overwriting a module is not a
+    relocation, and then repoint every importer at the module standing
+    there -- a tree reported as relocated whose imports resolved against the
+    wrong file.
+    """
+    package = tmp_path / "pkg"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "old_home.py").write_text("value = 1\n", encoding="utf-8")
+    (package / "new_home.py").write_text("standing = True\n", encoding="utf-8")
+    importer = tmp_path / "site.py"
+    importer.write_text("from pkg.old_home import value\n", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        app,
+        ["dev", "relocate", "--root", str(tmp_path), "pkg.old_home=pkg.new_home"],
+    )
+
+    assert result.exit_code == 2, result.output
+    assert "already exists" in result.output
+    assert importer.read_text(encoding="utf-8") == "from pkg.old_home import value\n"
+    assert (package / "old_home.py").read_text(encoding="utf-8") == "value = 1\n"
+    assert (package / "new_home.py").read_text(encoding="utf-8") == "standing = True\n"
