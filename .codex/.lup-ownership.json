@@ -625,14 +625,14 @@
     {
       "path": ".codex/plugins/lup/skills/land/SKILL.md",
       "category": "generated",
-      "sha256": "5d44755987b30f8639366f1cdcad4cd628e98cf68a345b5f2f09af03a50f9513",
+      "sha256": "4266499a497e10eebf8a7385dc2a4549f5ac867fc57894cbe4fd95743abc8b6a",
       "semantic_id": "skill.land",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/skills/merge/SKILL.md",
       "category": "generated",
-      "sha256": "6182919aae7951d1d989523d651959cb0b391e774c6a519336cb56952b3c067c",
+      "sha256": "b29597de2ffabea4ae66bac733df69bf0b096f855a7a9ffc16dacf11612ff5d7",
       "semantic_id": "skill.merge",
       "executable": false
     },

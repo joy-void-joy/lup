@@ -226,14 +226,14 @@
     {
       "path": ".claude/plugins/lup/commands/land.md",
       "category": "generated",
-      "sha256": "2d2ec86dd69c1f30ce261f3752b48a723969dd5a89f8c48fe3f12d444e4ffcf8",
+      "sha256": "587e1bb64e11b176087b8bc8eb5efc22da55518560f6dc19f6cd9f92b4cb6680",
       "semantic_id": "skill.land",
       "executable": false
     },
     {
       "path": ".claude/plugins/lup/commands/merge.md",
       "category": "generated",
-      "sha256": "1b2738392b8976784bf3b7d9671a436997f45919cfab1cc15e79894be31d917c",
+      "sha256": "c6da92cb870fc8b2688887f5009d71d6df95af74eceb3bb309e4ec7e985096df",
       "semantic_id": "skill.merge",
       "executable": false
     },
