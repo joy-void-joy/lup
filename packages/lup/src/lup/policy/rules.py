@@ -242,8 +242,13 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
         unscoped_fetch: UnjudgedAmbient | None = None,
         refused_paths: list[RefusedPaths] | None = None,
         secret_variables: list[str] | None = None,
+        unjudged_ambient: UnjudgedAmbient = "ask",
     ) -> None:
         self.unscoped_fetch: UnjudgedAmbient | None = unscoped_fetch
+        # What legible work nothing judged answers in an uncontained session:
+        # a launched session's measured posture where a caller read one --
+        # `dev policy` reading its own session -- and the question otherwise.
+        self.unjudged_ambient: UnjudgedAmbient = unjudged_ambient
         self.refused_paths = [paths.erased() for paths in refused_paths or []]
         self.secret_variables = secret_variables or []
         self.authored = authored
@@ -427,7 +432,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
     def decide(self, event: ShellCommand) -> Decision:
         root = event.cwd or Path.cwd()
         # One measurement of one launch, read once for every fact drawn from it.
-        # lup: defer: the dispatchers also draw the unjudged posture and the
+        # lup: solved: the dispatchers also draw the unjudged posture and the
         # host-executor channel from this ledger; a composition takes neither,
         # because the ledger describes the launched session while a nested
         # agent composed here answers through its own runtime's permission
@@ -513,6 +518,7 @@ class ShellPolicy(DecisionPolicy[ShellCommand]):
                 autonomous=edits is not None and edits.autonomous,
                 allowances=[] if edits is None else edits.grants.granted(),
                 escapable=self.escapable,
+                unjudged_ambient=self.unjudged_ambient,
                 recovered=self.recovered,
                 contained=self.contained,
                 # The same root the write readings above resolve against, so

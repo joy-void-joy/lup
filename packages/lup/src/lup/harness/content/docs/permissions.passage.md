@@ -1155,13 +1155,19 @@ a question this project has not settled — a candidate corpus, or the commands
 a recorded session was actually stopped for — asked from the posture those
 same flags name.
 
-`dev policy` answers under all three placements the launcher spells —
-`none`, `inner` and `outer` — and `--placement` narrows it to one. Each
-placement decides both walls itself rather than inheriting the ledger of the
-session asking, so a reading taken inside a container still says what a host
-session is told. An `outer` reading measures what only a container can: which
-paths this machine's mount table lends from elsewhere, and which loopback
-ports a process out of sight holds.
+`dev policy` answers as the session running it: the runtime's sandbox from
+the launcher's variable, and from the ledger its dispatcher reads, whether a
+container stands around it and places work inside, which posture answers
+legible work nothing judged, and whether a host executor carries what has to
+run outside. A runtime's own per-call escape is an argument of one call and
+is not read. `--placement` names one of the placements the launcher spells —
+`none`, `inner` or `outer` — and answers for it instead: a named placement
+decides both walls itself rather than inheriting the ledger of the session
+asking, so a reading taken inside a container still says what a host session
+is told. An `outer` reading measures what only a container can: which paths
+this machine's mount table lends from elsewhere, and which loopback ports a
+process out of sight holds. The everyday sweep names its postures the same
+way, so a corpus reads alike from any session.
 
 Only what must keep allowing belongs in that corpus. A command that asks
 today is either a defect to fix or a question somebody meant, and neither is

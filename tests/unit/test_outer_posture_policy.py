@@ -27,7 +27,7 @@ from typing import Literal
 import pytest
 import sh
 
-from lup.devtools.dev.policy_explain import verdict_for
+from lup.devtools.dev.policy_explain import session_placement, verdict_for
 from lup.policy.assets.host import (
     container_owned,
     host_held_ports,
@@ -286,6 +286,29 @@ def previewed(
     return {reading.placement: reading.effect for reading in verdict.readings}
 
 
+def session_previewed(
+    command: str, posture: Posture, checkout: Path, monkeypatch: pytest.MonkeyPatch
+) -> str:
+    """What `dev policy` answers with no placement named, inside one posture."""
+    launched = posture_environment(posture)
+    for name in ("LUP_SANDBOX_ACTIVE", "LUP_BOUNDARY_NONCE"):
+        if name in launched:
+            monkeypatch.setenv(name, launched[name])
+    monkeypatch.chdir(checkout)
+    verdict = verdict_for(
+        command,
+        "shell",
+        False,
+        checkout,
+        declared_hook_set(),
+        [session_placement(checkout)],
+    )
+    monkeypatch.delenv("LUP_BOUNDARY_NONCE", raising=False)
+    monkeypatch.delenv("LUP_SANDBOX_ACTIVE", raising=False)
+    (reading,) = verdict.readings
+    return reading.effect
+
+
 @pytest.mark.parametrize(("command", "host"), SETTLED_INSIDE)
 def test_a_question_whose_harm_stays_inside_is_settled_only_by_the_container(
     runtime: Runtime,
@@ -364,6 +387,31 @@ def test_an_unread_word_under_a_command_guarding_nothing_asks_on_no_posture(
         for posture in ("none", "inner", "outer")
     } == {"allow"}
     assert set(previewed(UNGUARDED_UNREAD, checkout, monkeypatch).values()) == {"allow"}
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        pytest.param("kill 1234", id="settled-inside"),
+        pytest.param("pip install httpx", id="refused"),
+        pytest.param("frobnicate", id="unjudged"),
+        pytest.param("git status", id="read"),
+        pytest.param("uv run pip install httpx", id="uv-run-pip"),
+        pytest.param("cat .env.local", id="withheld"),
+    ],
+)
+def test_dev_policy_answers_as_the_session_it_runs_in(
+    runtime: Runtime, checkout: Path, monkeypatch: pytest.MonkeyPatch, command: str
+) -> None:
+    """Named no placement, `dev policy` reads the ledger its dispatcher reads."""
+    postures: tuple[Posture, ...] = ("none", "inner", "outer")
+    # The dispatchers first: a preview stands in the checkout, and the
+    # dispatcher scripts are found from the repository.
+    meets = {posture: met(runtime, posture, command, checkout) for posture in postures}
+    assert {
+        posture: session_previewed(command, posture, checkout, monkeypatch)
+        for posture in postures
+    } == meets
 
 
 @pytest.mark.parametrize("command", ["cat .env", "cat .env.example"])

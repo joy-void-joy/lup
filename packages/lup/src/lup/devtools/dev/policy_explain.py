@@ -26,8 +26,16 @@ from lup.harness.enforcement import (
 )
 from lup.harness.models import HookSet
 from lup.policy.kernel.fetch import scope_text
-from lup.policy.assets.host import text_at
+from lup.policy.assets.host import (
+    contained,
+    defers_unjudged,
+    delivers,
+    measured_boundary,
+    sandbox_active,
+    text_at,
+)
 from lup.policy.kernel.lex import shell_write_targets
+from lup.policy.kernel.semantics import UnjudgedAmbient
 from lup.policy.models import EditBatch, EditChange, FetchUrl, ShellCommand
 from lup.policy.rules import url_scope_row
 from lup.policy.shell_rules import ShellCommandRule
@@ -60,21 +68,50 @@ class Placement(BaseModel, frozen=True):
     name: str
     sandboxed: bool
     contained: bool
+    inside_placement: bool
+    """Whether work is measured as placed inside the container: the term a
+    container needs beside itself before it settles anything."""
+    unjudged: UnjudgedAmbient | None = None
+    """What legible work nothing judged answers uncontained; ``None`` is the
+    composition's own answer, which every named placement reads."""
+    host_executor: bool = False
+    """Whether a host executor carries what has to run outside the boundary."""
 
 
 PLACEMENTS: list[Placement] = [
-    Placement(name="none", sandboxed=False, contained=False),
-    Placement(name="inner", sandboxed=True, contained=False),
-    Placement(name="outer", sandboxed=False, contained=True),
+    Placement(name="none", sandboxed=False, contained=False, inside_placement=False),
+    Placement(name="inner", sandboxed=True, contained=False, inside_placement=False),
+    Placement(name="outer", sandboxed=False, contained=True, inside_placement=True),
 ]
-"""Every placement, rather than whichever this process happens to be in.
+"""Every placement a launch can stand up, whichever this process is in.
 
 Placement is the single fact that moves the most verdicts -- an unclassified
 command is settled by a boundary and refused without one, and a question whose
 harm stays in a container is settled only by the container -- so a reader
-given one answer has to know which one they were given before they can use it,
-and a reader given all three never has to ask.
+asking about a session they have not launched names the one they mean.
 """
+
+
+def session_placement(cwd: Path) -> Placement:
+    """The placement this session runs in, measured as its dispatcher measures it.
+
+    The ledger its launch wrote says whether a container stands around it and
+    places work inside, which posture answers legible work nothing judged, and
+    whether a host executor carries what has to run outside; the runtime's own
+    sandbox is the launcher's variable. So the answer is the one the running
+    session meets, rather than one read under a placement somebody named. A
+    runtime's own escape from its sandbox is an argument of one call, not a
+    fact about the session, and is not read.
+    """
+    measured = measured_boundary(cwd)
+    return Placement(
+        name="session",
+        sandboxed=sandbox_active(),
+        contained=contained(measured),
+        inside_placement=delivers(measured, "inside_placement"),
+        unjudged="defer" if defers_unjudged(measured) else "ask",
+        host_executor=delivers(measured, "host_executor"),
+    )
 
 
 class PolicyReading(BaseModel, frozen=True):
@@ -156,11 +193,11 @@ def read_under(
     The placement decides containment as well as the native sandbox, the way
     the launcher's one flag does: `none` opens on the host with neither wall,
     `inner` stands the runtime's own sandbox up there, and `outer` stands a
-    container up with the runtime's sandbox off inside it. Both facts come from
-    the placement rather than from the ledger this process runs behind, so a
-    reading taken inside a contained session says what happens without the
-    container -- the question the guidance sends an agent here to ask -- and a
-    reading taken on the host can still say what happens inside one.
+    container up with the runtime's sandbox off inside it. A named placement
+    takes both facts from its name rather than from the ledger this process
+    runs behind, so a reading taken inside a contained session can say what
+    happens without the container, and one taken on the host what happens
+    inside one; :func:`session_placement` takes them from the ledger instead.
 
     What an `outer` reading measures, it measures here: which paths this
     machine's mount table lends from elsewhere, and which loopback ports a
@@ -170,10 +207,12 @@ def read_under(
     policy = semantic_policy_for(
         hooks,
         sandbox_active=placement.sandboxed,
+        escapable=placement.host_executor,
         autonomous=autonomous,
         recovered=True,
         contained=placement.contained,
-        inside_placement=placement.contained,
+        inside_placement=placement.inside_placement,
+        unjudged_ambient=placement.unjudged,
     )
     match kind:
         case "shell":
@@ -205,18 +244,17 @@ def verdict_for(
     hooks: HookSet,
     placements: list[Placement] = PLACEMENTS,
 ) -> PolicyVerdict:
-    """Classify one input under every placement, rather than under one.
+    """Classify one input under each placement given, every named one unless told.
 
     ``edit`` is judged as a whole-file write of unchanged content, which is
     the shape that isolates the path gates from the anti-pattern and size
     ones: the question this command answers is whether a path may be written
     at all, not whether some particular diff passes review.
 
-    Answering both placements is what makes the reading usable. Containment
-    settles an unclassified command inside the boundary and refuses it outside,
-    so a single answer is only as good as the reader's guess about which
-    session it described -- and the guess is invisible, which is the worst
-    property an answer can have.
+    Each reading carries the placement it was taken under, because
+    containment settles an unclassified command inside the boundary and
+    refuses it outside: an answer is only as good as knowing which session it
+    described.
 
     **What no placement resolves, it says.** A session measures one fact per
     command that no reader of a bare string can: whether the snapshot in front
@@ -267,18 +305,17 @@ def declared_scopes(kind: str, hooks: HookSet) -> list[str]:
 
 
 def chosen_placements(
-    name: str | None, placements: list[Placement] = PLACEMENTS
+    name: str | None, cwd: Path, placements: list[Placement] = PLACEMENTS
 ) -> list[Placement]:
-    """Which placements to read, given a caller who may have pinned one.
+    """Which placement to read, given a caller who may have named one.
 
-    ``None`` is every one, which is the answer a reader wants and the default.
-    A pinned name narrows rather than switches, so the one thing a caller can
-    ask for is a subset of what they would otherwise have been shown -- there
-    is no setting under which this reports an answer the unpinned form would
-    not. A name no placement carries is refused with the names that exist.
+    ``None`` is this session's own, measured from the ledger its dispatcher
+    reads, so the answer is the one the session running this command meets.
+    A name reads that placement instead, whatever this session measured. A
+    name no placement carries is refused with the names that exist.
     """
     if name is None:
-        return placements
+        return [session_placement(cwd)]
     chosen = [placement for placement in placements if placement.name == name]
     if not chosen:
         known = ", ".join(placement.name for placement in placements)
@@ -295,18 +332,22 @@ def explain(
     placement: str | None = None,
     styles: StringMap = EFFECT_STYLES,
 ) -> None:
-    """Print every placement's verdict, exiting non-zero when none of them allow.
+    """Print each subject's verdict, exiting non-zero when none of them allow.
 
-    A subject every placement agrees on prints once, because repeating an
-    answer to say it did not change is how a table teaches its reader to stop
-    reading it. One that differs prints each, which is the case the reader
-    came for.
+    The verdict is this session's unless a placement is named. A subject
+    every reading agrees on prints once, because repeating an answer to say
+    it did not change is how a table teaches its reader to stop reading it.
     """
     root = Path.cwd()
     try:
         verdicts = [
             verdict_for(
-                subject, kind, autonomous, root, hooks, chosen_placements(placement)
+                subject,
+                kind,
+                autonomous,
+                root,
+                hooks,
+                chosen_placements(placement, root),
             )
             for subject in subjects
         ]

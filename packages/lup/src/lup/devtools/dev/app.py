@@ -1633,8 +1633,8 @@ def create_dev_app(
             str | None,
             typer.Option(
                 "--placement",
-                help="Show only this placement's answer: none, inner or outer"
-                " (default: show every one)",
+                help="Answer for this placement instead: none, inner or outer"
+                " (default: this session's own, read from its launch ledger)",
             ),
         ] = None,
         autonomous: Annotated[
@@ -1652,10 +1652,9 @@ def create_dev_app(
                 err=True,
             )
             raise typer.Exit(2)
-        # Every placement, not this session's. The guidance sends a reader here
-        # before they spend a turn, and one answer leaves them holding a guess
-        # about which session it described -- an invisible guess, which is the
-        # worst kind. Every answer costs one composition and ends the guess.
+        # This session's answer unless a placement is named: the guidance sends
+        # a reader here before they spend a turn, and the turn they spend is
+        # judged by the ledger their own dispatcher reads.
         policy_explain.explain(
             subjects,
             kind,
