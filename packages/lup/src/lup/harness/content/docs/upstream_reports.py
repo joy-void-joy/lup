@@ -296,11 +296,310 @@ one — a mismatched pair is refused — and that is the part a later reader wou
 otherwise have to re-run.
 """
 
+HOOK_REASON_EDIT_PROMPT = UpstreamReport(
+    slug="hook-reason-edit-prompt",
+    component="Claude Code",
+    version="2.1.283",
+    repository="anthropics/claude-code",
+    title=(
+        "A PreToolUse hook's ask reason is shown in the Bash permission prompt "
+        "and dropped from the Write and Edit prompts"
+    ),
+    body=r"""**Measured on** 2.1.283 (`@anthropic-ai/claude-code-linux-x64`), Linux x64,
+in an interactive session on a pseudo-terminal (140×60,
+`TERM=xterm-256color`), default permission mode (`⏸ manual mode on`), with
+`--model haiku`; the model is irrelevant to the defect. First observed on
+2.1.237; no changelog entry between the two mentions it.
+
+**What happens.** A `PreToolUse` hook that returns `permissionDecision: "ask"`
+with a `permissionDecisionReason` gets its prompt in every case: for `Bash`,
+`Write` and `Edit` alike. For **`Bash`** the prompt renders the reason. For
+**`Write`** and **`Edit`** the prompt shows the path, the content or diff, and
+the options, and the reason appears nowhere: not in the dialog, not in the
+byte stream written to the terminal.
+
+The hooks reference promises otherwise, without any exception by tool:
+
+> `permissionDecisionReason` | For `"allow"` and `"ask"`, shown to the user but not Claude. For `"deny"`, shown to Claude. For `"defer"`, ignored
+> — https://code.claude.com/docs/en/hooks, *PreToolUse decision control*
+
+So a policy hook can stop a file write for a reason the person answering the
+prompt is never shown, and they are asked to approve without knowing what was
+found.
+
+**Reproduction.** A project with this `.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Write|Edit",
+        "hooks": [
+          { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/ask.sh\"" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+and this `.claude/hooks/ask.sh`, which answers every matched call with the
+same four fields, each carrying a marker naming the tool:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+tool=$(jq -r '.tool_name')
+jq -cn --arg t "$tool" '{
+  systemMessage: ("SYSMSG-" + $t + ": the probe hook system message"),
+  hookSpecificOutput: {
+    hookEventName: "PreToolUse",
+    permissionDecision: "ask",
+    permissionDecisionReason: ("REASON-" + $t + ": the probe hook asks because this reason must reach the person approving"),
+    additionalContext: ("ADDCTX-" + $t + ": the probe hook additional context")
+  }
+}'
+```
+
+A `note.txt` containing `alpha`. Then, in an interactive `claude` session,
+three prompts, answering **No** to each permission prompt:
+
+1. `Run exactly this shell command with the Bash tool and nothing else: echo vendor-probe`
+2. `Use the Write tool to create the file created.txt in the current directory, containing the single line: hello. Do nothing else.`
+3. `Read note.txt, then use the Edit tool to replace the word alpha with beta in it. Do nothing else.`
+
+**Expected:** each prompt carries its `REASON-<tool>` line, as the reference
+says. **Actual:** only the `Bash` prompt does.
+
+**What the prompts show.** Rendered screens, captured through a VT100
+emulator at the moment each prompt was up, from the tool-call line down.
+
+`Bash` — the reason is there:
+
+```
+  Running the requested echo command
+  ⎿  $ echo vendor-probe
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Bash command
+
+   echo vendor-probe
+   Run the requested echo command
+
+ │ Hook PreToolUse:Bash requires confirmation for this command:
+ │ REASON-Bash: the probe hook asks because this reason must reach the person approving
+ settings.json to update hooks
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. No
+
+ Esc to cancel · Tab to amend
+```
+
+`Write` — no reason, no hook attribution:
+
+```
+● Write(created.txt)
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Create file
+ created.txt
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+  1 hello
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to create created.txt?
+ ❯ 1. Yes
+   2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)
+   3. No
+
+ Esc to cancel · Tab to amend
+```
+
+`Edit` — the same:
+
+```
+● Update(note.txt)
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Edit file
+ note.txt
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ 1 -alpha
+ 1 +beta
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to make this edit to note.txt?
+ ❯ 1. Yes
+   2. Yes, and switch to accept edits (auto-approve file edits and common file commands) for this session (shift+tab)
+   3. No
+
+ Esc to cancel · Tab to amend
+```
+
+The Write and Edit dialogs were identical, line for line, in all six
+sessions. The screen is not hiding the reason off the edge: in the raw byte
+stream written to the terminal, with every control sequence stripped,
+`REASON-Bash` occurs once per session and `REASON-Write` and `REASON-Edit`
+occur zero times.
+
+**Evidence that the reason was supplied.** The hook also logged each call with
+what it returned. From the session that answered No to all three, projected to
+four fields:
+
+```
+{"at":"2026-09-28T17:52:07+02:00","event":"PreToolUse","tool":"Bash","reason":"REASON-Bash: the probe hook asks because this reason must reach the person approving"}
+{"at":"2026-09-28T17:52:18+02:00","event":"PreToolUse","tool":"Write","reason":"REASON-Write: the probe hook asks because this reason must reach the person approving"}
+{"at":"2026-09-28T17:52:30+02:00","event":"PreToolUse","tool":"Edit","reason":"REASON-Edit: the probe hook asks because this reason must reach the person approving"}
+```
+
+The decision was honoured for all three: each prompt appeared because the hook
+asked. Only the reason attached to that decision was lost, and only for two of
+them.
+
+**Where it is dropped**, read out of the 2.1.283 bundle; identifiers are that
+build's minified names. The reason block is one component, `Tb`, which turns
+a `decisionReason` into text. For a hook it produces exactly the two lines the
+Bash prompt shows:
+
+```js
+case"hook":{let p=t.reason?`:
+${c(t.reason)}`:".",a=t.hookSource?` ${pe.dim(`[${c(t.hookSource)}]`)}`:"";
+return{reasonString:`Hook ${pe.bold(c(t.hookName))} requires confirmation for this ${u}${p}${a}`,
+       configString:`${_r(t.hookSource)} to update hooks`}}
+```
+
+The command dialog renders it unconditionally:
+
+```js
+r(s,{flexDirection:"column",children:[e(Tb,{permissionResult:h.permissionResult,toolType:"command"}), …
+```
+
+The file dialog (the one titled `Create file` / `Edit file`, with the
+`Save file to continue…` and symlink-target lines) renders it only when a
+denial-limit fallback is present:
+
+```js
+r(xi,{title:h.showingDiffInIDE?…:h.title,subtitle:h.subtitle,…,children:[ho,
+  h.permissionResult.denialLimitFallback!==void 0&&e(s,{paddingX:1,children:e(Tb,{permissionResult:h.permissionResult,toolType:"edit"})}),
+  h.showingDiffInIDE?…
+```
+
+and `denialLimitFallback` is created in one place, where the classifier's
+denial limit falls back to prompting; the bundle's three other occurrences copy
+or update an existing one:
+
+```js
+t(`Classifier denial limit exceeded, falling back to prompting: ${Ee}`,{level:"warn"}) …
+let Ie={type:"classifier",classifier:xe,reason:`${Ee}..Latest blocked action: ${n}`},Oe=KNe(g,Ie);
+return{...g,...ge&&!M&&ye&&{denialLimitFallback:fBt(Ie,…)},decisionReason:Oe}
+```
+
+So a hook's `decisionReason` reaches the file dialog and is never rendered
+there. Rendering `Tb` whenever `decisionReason` is a hook's, as the command
+dialog does, would close this.
+
+**What happens to `systemMessage` and `additionalContext`.** The same hook
+output carries both. Where they went, per tool and answer (screen: the
+rendered terminal and its raw byte stream; transcript: the session's
+`.jsonl`):
+
+| Tool | Answer | `systemMessage` on screen | `hook_*` attachments in the transcript |
+| --- | --- | --- | --- |
+| Bash | Yes | after the call, under the tool entry | `hook_success`, `hook_system_message`, `hook_additional_context` |
+| Bash | No | never written to the terminal | none |
+| Write | No | never written to the terminal | none |
+| Edit | No | never written to the terminal | none |
+
+The approved Bash call renders:
+
+```
+  Ran 1 shell command
+  ⎿  PreToolUse:Bash says: SYSMSG-Bash: the probe hook system message
+
+● The command executed successfully and output vendor-probe.
+```
+
+Two consequences:
+
+- `systemMessage` is not a way around the missing reason. It renders only once
+  the call has been approved, attached to the tool entry, and not at all when
+  it is refused. On 2.1.237 an approved `Write` rendered it the same way, as
+  `PreToolUse:Write says: …` above `Wrote 1 line to …`.
+- On a refusal, `additionalContext` is discarded for every tool, although the
+  refused call does get a tool result, the one Claude receives:
+  `The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.`
+  The reference describes `additionalContext` as a "String added to Claude's
+  context alongside the tool result" and does not say a refusal drops it.
+  Unlike the missing reason, this depends on the answer and not on the tool.
+
+**Other channels, measured.**
+
+- `PermissionRequest` fires for all three tools, from a project settings file
+  and from a plugin loaded with `--plugin-dir` alike, in the same second as
+  `PreToolUse`. Its output is a decision (allow or deny); it has no field that
+  displays text.
+- `Notification` on the `permission_prompt` matcher fires for all three, six
+  seconds after the prompt appears (`"message":"Claude needs your permission"`),
+  from both registrations. The reference says it discards `systemMessage`.
+- `terminalSequence` returned by the same `PreToolUse` hook is written before
+  the dialog: in the byte stream, the Write call's `ESC ]2;TITLE-Write: …`
+  window title sits at offset 11210 and the dialog's `Create file` at 11751.
+  Of everything measured here, that makes a window title or desktop
+  notification the only way a hook's words reach the person before they answer
+  a file prompt. It is outside the prompt, and it depends on the terminal.
+
+**The documented source label is missing too.** The reference says an `ask`
+prompt "includes a label identifying where the hook came from: `[settings]`
+for a hook from any settings file…". The Bash prompt above has no `[settings]`
+label for a hook registered in `.claude/settings.json`: `[settings]` occurs
+zero times in all six sessions' byte streams. The builder above appends the
+label only when `t.hookSource` is set, so its absence means `hookSource` was
+empty when the dialog rendered, although the hook runner computes one for
+every settings-file hook:
+
+```js
+Vt=Et?"pluginName"in _t?`plugin:${_t.pluginName}`:"plugin":bt?"skillName"in _t?`skill:${_t.skillName}`:"skill":"settings"
+```
+
+That is an inference from the symptom; the path between the runner and the
+dialog was not traced. The hint line under the reason,
+`settings.json to update hooks`, reads as a fragment; it is `_r`'s value for
+any source that is neither a plugin nor a skill, empty included.
+
+**Asks, in order of preference.**
+
+1. **Render the hook's reason in the file-edit dialog**, as the command dialog
+   already does and as the hooks reference already promises. The data arrives;
+   one dialog gates it behind an auto-mode-only condition.
+2. **Show the documented `[settings]` label** for a settings-file hook's `ask`.
+3. **Say what a refusal does to a hook's `systemMessage` and
+   `additionalContext`**, or deliver them: today both disappear when the
+   person answers No, which the reference does not mention.
+
+**Why this matters beyond one project.** The permission prompt is where a
+person decides. A hook that can gate a file write but cannot explain itself at
+that moment pushes every policy toward `deny`, whose reason at least reaches
+Claude, where an `ask` would have let a person judge. That is the wrong
+incentive for anyone writing a permission policy.
+
+The six sessions' screen captures, raw terminal streams, hook logs and
+transcript extracts are attached by whoever files this.""",
+)
+"""A file-edit prompt that never shows a hook's reason, and the gate hiding it.
+
+Kept as a declaration because the evidence is a render path read out of one
+bundle: the next release renames `Tb`, `_r` and every other minified
+identifier quoted, and a report that paraphrased them could not be checked by
+the people receiving it.
+"""
+
 ROSTER = UpstreamRoster(
     reports=[
         WORKTREE_TOKEN_WALL,
         SUBAGENT_SESSION_OUTLIVES_THREAD,
         LIST_AGENTS_REF_COLLISION,
+        HOOK_REASON_EDIT_PROMPT,
     ]
 )
 """Every report this project holds against a component it does not own."""
