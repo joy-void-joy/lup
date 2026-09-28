@@ -242,6 +242,7 @@ def test_an_operator_is_told_which_way_it_went() -> None:
     assert [said.text for said in placed] != [said.text for said in absent]
 
 
+@pytest.mark.usefixtures("unix_socket")
 def test_a_nudge_reaches_the_member_of_its_own_repository(tmp_path: Path) -> None:
     """Two repositories' ``main`` sessions listen side by side, and a wake picks one.
 
@@ -274,6 +275,7 @@ def test_a_nudge_reaches_the_member_of_its_own_repository(tmp_path: Path) -> Non
     assert frame["message"]["content"] == "look at your inbox"
 
 
+@pytest.mark.usefixtures("unix_socket")
 def test_a_socket_whose_session_is_gone_is_cleared(tmp_path: Path) -> None:
     """A crashed session leaves its socket file behind, bound by nobody.
 
@@ -289,6 +291,7 @@ def test_a_socket_whose_session_is_gone_is_cleared(tmp_path: Path) -> None:
     assert not address.exists()
 
 
+@pytest.mark.usefixtures("unix_socket")
 def test_a_socket_a_session_listens_on_is_left_to_it(tmp_path: Path) -> None:
     """Removing a live inbox would cut its session off from every nudge, silently."""
     address = tmp_path / "live.sock"

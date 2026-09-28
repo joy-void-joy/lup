@@ -230,6 +230,7 @@ def launched(
     launch.launch_claude(composition(), extra, profiles, None, None, False)
 
 
+@pytest.mark.usefixtures("unix_socket")
 def test_a_live_inbox_is_refused_by_name_rather_than_by_the_runtime(
     tmp_path: Path,
 ) -> None:
@@ -260,6 +261,7 @@ def test_a_live_inbox_is_refused_by_name_rather_than_by_the_runtime(
     assert str(refused.value).startswith(f"main is listening at {inbox}")
 
 
+@pytest.mark.usefixtures("unix_socket")
 def test_a_stale_inbox_is_cleared_and_placed(tmp_path: Path) -> None:
     """A crashed session's socket file is nobody's, so the launch takes the path."""
     inboxes = SessionInboxes(directory=str(tmp_path / "in"))
