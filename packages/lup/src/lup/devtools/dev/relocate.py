@@ -91,31 +91,37 @@ class Relocation(BaseModel, frozen=True):
     new: list[str]
 
 
+def destination(named: list[str], moves: list[Relocation]) -> list[str] | None:
+    """Where a module path lands, if one of the moves carries it.
+
+    A move carries the module it names and every module beneath it, so
+    relocating a package takes its submodules without each being declared.
+    Where two moves match, the longer one decides: a module declared on its own
+    has its file carried to the name that move spells, and following its
+    package's move instead would point the import at a module that is not
+    there. The result may be longer or shorter than what it replaces — a move
+    into or out of a subpackage changes the path's depth.
+    """
+    carrying = [move for move in moves if named[: len(move.old)] == move.old]
+    if not carrying:
+        return None
+    move = max(carrying, key=lambda move: len(move.old))
+    return [*move.new, *named[len(move.old) :]]
+
+
 class ModuleRun(BaseModel, frozen=True):
     """The token span naming one module path, as indexes into the token list."""
 
     start: int
     end: int
 
-    def renamed(
-        self, tokens: list[tokenize.TokenInfo], moves: list[Relocation]
-    ) -> list[str] | None:
-        """The replacement name tokens for this run, if it moved.
-
-        A move matches the module it names and every module beneath it, so
-        relocating a package carries its submodules without each being
-        declared. The result may be longer or shorter than what it replaces —
-        a move into or out of a subpackage changes the path's depth.
-        """
-        named = [
+    def named(self, tokens: list[tokenize.TokenInfo]) -> list[str]:
+        """The names this run spells, without the dots between them."""
+        return [
             token.string
             for token in tokens[self.start : self.end + 1]
             if token.string != "."
         ]
-        for move in moves:
-            if named[: len(move.old)] == move.old:
-                return [*move.new, *named[len(move.old) :]]
-        return None
 
 
 class ModuleEdit(BaseModel, frozen=True):
@@ -193,7 +199,7 @@ def module_edits(
 
     def found() -> Iterator[ModuleEdit]:
         for run in module_runs(tokens):
-            renamed = run.renamed(tokens, moves)
+            renamed = destination(run.named(tokens), moves)
             start, end = tokens[run.start].start, tokens[run.end].end
             if renamed is None or start[0] != end[0]:
                 continue

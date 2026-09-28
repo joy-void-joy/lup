@@ -104,6 +104,32 @@ def test_relocate_carries_submodules_of_a_moved_package(tmp_path: Path) -> None:
     )
 
 
+def test_relocate_follows_the_most_specific_move(tmp_path: Path) -> None:
+    """A module declared on its own goes where it was declared to go.
+
+    Its package moving elsewhere in the same run does not take it along: the
+    module's own file is carried to the name its move spells, and an import
+    following the package's move instead would name a module that is not there.
+    """
+    source = tmp_path / "site.py"
+    source.write_text(
+        "from lup.devtools.harness import contained\nimport lup.devtools.dev\n",
+        encoding="utf-8",
+    )
+
+    relocate(
+        [tmp_path],
+        [
+            moved("lup.devtools", "lup.tools"),
+            moved("lup.devtools.harness", "lup.harness"),
+        ],
+    )
+
+    assert source.read_text(encoding="utf-8") == (
+        "from lup.harness import contained\nimport lup.tools.dev\n"
+    )
+
+
 def test_relocate_leaves_an_imported_symbol_alone(tmp_path: Path) -> None:
     """Names after `import` in a `from` statement are symbols, not modules."""
     source = tmp_path / "site.py"
