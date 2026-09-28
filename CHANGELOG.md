@@ -18,6 +18,45 @@ field telling that answer from a person's. Observed execution still grants
 nothing on either runtime; `docs/permissions.md` ("Where a native ask is
 put") states both channels.
 
+### The library is published as `lup-agents`
+
+PyPI refuses `lup` as too close to an existing project, so the library's
+distribution is `lup-agents`. It is still imported as `lup`, and
+`packages/lup/`, `lup-devtools` and the `lup` registration in `sync.json`
+keep their names.
+
+A project built on lup renames its requirement by hand, once. No command does
+it: the `lup-devtools` a project runs is the library it is about to replace.
+In `pyproject.toml`, rename `lup[...]` to `lup-agents[...]` in
+`[project].dependencies`, and the `lup` key under `[tool.uv.sources]` to
+`lup-agents` — whether it pins a repository or the vendored copy under
+`packages/lup`. Until then uv refuses the library. A repository pin moved to a
+renamed commit, the way `dev update` moves it, fails with:
+
+```
+  × Failed to download and build `lup @
+  │ git+https://github.com/joy-void-joy/lup@<commit>#subdirectory=packages/lup`
+  ╰─▶ Package metadata name `lup-agents` does not match given name `lup`
+```
+
+and a vendored copy renamed under a root that still requires `lup`, on
+`uv lock`, `uv sync` or `uv run`, with:
+
+```
+  ├─▶ Failed to parse entry: `lup`
+  ╰─▶ `lup` references a workspace in `tool.uv.sources` (e.g., `lup = {
+      workspace = true }`), but is not a workspace member
+```
+
+After the rename, `uv sync` installs `lup-agents`, and a project pinned at a
+repository runs `uv run lup-devtools dev update` to bring the generated trees
+and the copied half to the commit it now resolves. A vendored copy's editable
+install leaves `packages/lup/src/lup.egg-info` beside the new metadata; delete
+it, or `importlib.metadata` goes on answering for `lup`.
+
+`DISTRIBUTION` in `lup.devtools.dev.library` spells only the distribution; a
+caller that passed it as the sync registration's name passes `REGISTRATION`.
+
 ## 0.4.0 — 2026-09-22
 
 ### Native execution carries no reusable approval authority
