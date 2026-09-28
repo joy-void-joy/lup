@@ -23,7 +23,8 @@ import pytest
 import lup.harness.models as models
 from lup.devtools.dev.commands import CommandSurface
 from lup.devtools.dev.documented import MENTION, WrittenCommand
-from lup.devtools.harness.composition import ClaudeComposer, CodexComposer
+from lup.providers.claude.composition import ClaudeComposer
+from lup.providers.codex.composition import CodexComposer
 from lup.harness.dependencies import SPELLED_SKILL
 from lup.harness.modules import Composition, anchored
 from lup.workspace.paths import project_root

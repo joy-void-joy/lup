@@ -213,8 +213,8 @@ than lup's, because its whole job is to be this project's own harness. The CLI
 half lives in `packages/lup/src/lup/devtools/harness/`:
 
 - `app.py` — Typer wiring only; every command body lives elsewhere
-- `composition.py` — builders wiring concrete adapter capabilities, and the
-  target roster a CLI selector names
+- `composition.py` — the target roster a CLI selector names, and the
+  accounts each runtime keeps
 - `drift.py` — console drift reporting for `generate` and `check`
 - `reconcile.py` — drift classification and the source-patch flow
 - `doctor.py` — runtime evidence against the `lup.harness.evidence` ledger
@@ -236,7 +236,9 @@ half lives in `packages/lup/src/lup/devtools/harness/`:
 
 What generation and a launch do for any project declaring an agent is the
 library's rather than the CLI's. `lup.harness.generate` holds the recipes,
-drift inspection, and atomic materialization, and
+drift inspection, and atomic materialization, with the `NativeComposer` seam
+each runtime compiles a project's content through in its own adapter
+(`lup.providers.<runtime>.composition`), and
 `packages/lup/src/lup/launch/` the launch:
 
 - `session.py` — composing a session: the runtime and host rosters, the

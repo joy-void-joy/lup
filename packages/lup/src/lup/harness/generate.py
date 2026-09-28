@@ -9,6 +9,7 @@ to concrete recipes.
 """
 
 import json
+from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
@@ -143,6 +144,33 @@ class NativeHarnessComposition(BaseModel, frozen=True, arbitrary_types_allowed=T
     the strings are all the check needs: the generated schema either declares
     them or it does not, whoever's they are.
     """
+
+
+class NativeComposer(ABC):
+    """How one runtime assembles a project's content into what a CLI opens.
+
+    One declared seam rather than a free function per runtime, and the
+    difference is not style. A function is reached by name, so adding a
+    runtime means finding every caller that names one and remembering the new
+    one — and a caller that forgets leaves that runtime silently absent
+    rather than failing. A seam is reached by the object a project declared,
+    so what ``NativeTargets`` holds is the whole of what exists.
+
+    Deliberately one method. What a runtime answers here is a composition,
+    and every part of it — the recipe, the readiness probes, the invocation
+    renderer — is that same runtime's answer, so splitting them into three
+    seams would hand a caller three objects that never vary independently.
+    The composition is the unit that varies.
+    """
+
+    @abstractmethod
+    def compose(
+        self,
+        root: Path,
+        content: ProjectContent,
+        guidance: PromptDocument | None = None,
+    ) -> NativeHarnessComposition:
+        """This runtime's composition over one project's content."""
 
 
 class HarnessGenerationConflict(RuntimeError):
