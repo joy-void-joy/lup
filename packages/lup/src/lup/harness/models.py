@@ -1520,15 +1520,16 @@ class SpawnNames(BaseModel, frozen=True):
 
 
 class SubagentCleanup(BaseModel, frozen=True):
-    """A project's decision that a subagent reports only after its background work stops.
+    """A project's decision that a subagent hands back its report only after its background work stops.
 
     Declaring one registers the fold under the runtime's subagent events: as a
     subagent starts it is told that what it arms in the background is its own
-    to stop, and as it is about to report, while any task it started is still
-    listed, the report is refused once with a reason naming each task and the
-    call that ends it. Undeclared, a subagent's report goes through with its
-    watches running, and each line they emit resumes it — the leak this
-    exists to close.
+    to stop, and at the stop that hands its report back, while any shell work
+    its own run started is still listed, that stop is refused once with a
+    reason naming each task and the call that ends it. A stop that only waits
+    on that work goes through, and a subagent it started is never named.
+    Undeclared, a subagent's report goes through with its watches running,
+    and each line they emit resumes it — the leak this exists to close.
 
     On by default, because every project delegating to subagents that wait on
     pushed output meets the same leak; the main agent is never gated, since
@@ -1749,9 +1750,9 @@ class HookSet(BaseModel, frozen=True):
         description=(
             "Whether a subagent's report waits for the background work it "
             "started: told at its start that what it arms is its own to stop, "
-            "and refused once at its stop while any of it is still listed. "
-            "None declines, and leaves a subagent's leftovers to whoever "
-            "notices them"
+            "and refused once at the stop that hands its report back while "
+            "any of it is still listed. None declines, and leaves a "
+            "subagent's leftovers to whoever notices them"
         ),
     )
     peer_policy: PeerPolicy | None = Field(

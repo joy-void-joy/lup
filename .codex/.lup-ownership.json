@@ -331,7 +331,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/subagents.py",
       "category": "generated",
-      "sha256": "b7a2620dd7e9291c7de31feee3e9413f93760a09c3a6c25f99881afce971af28",
+      "sha256": "0c4583124e9f572b6e8a7101cda7aefaab65d5975c51a3f2a64f4544e788a471",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
