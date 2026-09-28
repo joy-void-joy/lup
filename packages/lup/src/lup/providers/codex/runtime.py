@@ -38,6 +38,7 @@ from lup.launch.compilation import (
 from lup.launch.declaration import Reopening
 from lup.providers.codex.launch import (
     codex_account_environment,
+    codex_plugin_root,
     codex_sandbox_mode,
     compiled_codex,
 )
@@ -1181,7 +1182,10 @@ class CodexSessionOpener:
                 "cwd": compiled.workspace(),
                 "environment": {
                     **environment,
-                    POLICY_ROOT_ENV: str(compiled.policy_root or compiled.workspace()),
+                    POLICY_ROOT_ENV: str(
+                        compiled.policy_root
+                        or codex_plugin_root(compiled, compiled.workspace())
+                    ),
                 },
             }
         )
@@ -1217,7 +1221,7 @@ class CodexSessionOpener:
                 partial(
                     install_declared_policy,
                     home,
-                    config.policy_root or config.workspace(),
+                    config.policy_root or codex_plugin_root(config, config.workspace()),
                     seed=CodexWorktreeHomeStore().derived(home),
                     workspace=config.workspace(),
                     executable=config.executable,

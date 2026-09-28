@@ -504,6 +504,17 @@ def codex_arguments(
     ]
 
 
+def codex_plugin_root(agent: "Codex", root: Path) -> Path:
+    """The project whose Codex marketplace offers the plugin a session installs.
+
+    Codex installs a plugin from a marketplace rather than loading a
+    directory, so a built plugin is named by the project offering it; a
+    harness compiles into, and a declaration naming none installs from,
+    the checkout it opens in.
+    """
+    return agent.plugin if isinstance(agent.plugin, Path) else root
+
+
 def codex_root(agent: "Codex") -> Path:
     """The directory a launch opens in: the declared one, or where this process stands."""
     return agent.workspace().resolve()
@@ -609,7 +620,12 @@ def prepare_codex(agent: "Codex", force: bool = False) -> None:
     environment = {**inherited_environment(), **compiled_codex(launched).environment}
     home = codex_launch_home(launched, environment, root)
     prepare_codex_plugin(
-        [], home.selection.path, root, environment, force, settings=home.settings
+        [],
+        home.selection.path,
+        codex_plugin_root(launched, root),
+        environment,
+        force,
+        settings=home.settings,
     )
 
 
@@ -664,6 +680,7 @@ def codex_opening(
     environment[CODEX_HOME] = str(home.selection.path)
     harness = config.plugin if isinstance(config.plugin, Harness) else None
     image = harness.image if harness is not None else Image()
+    offered = codex_plugin_root(config, root)
 
     def authenticate(command: list[str], native_home: Path, headless: bool) -> None:
         codex_login_preflight(native_home, environment, command, headless=headless)
@@ -677,12 +694,12 @@ def codex_opening(
                     image,
                     root,
                     home.settings.personal_settings(
-                        CodexMarketplace.declared(root) is not None
+                        CodexMarketplace.declared(offered) is not None
                     ),
                 )
             )
         prepare_codex_plugin(
-            prefix, native_home, root, environment, force, settings=home.settings
+            prefix, native_home, offered, environment, force, settings=home.settings
         )
         state.installed.append(native_home)
 

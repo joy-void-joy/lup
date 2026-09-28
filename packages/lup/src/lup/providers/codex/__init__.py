@@ -320,9 +320,11 @@ class Codex(
 
     plugin: Harness | Path | None = None
     """The plugin every session runs with: a harness declaration :meth:`prepare`
-    compiles into this project's tree and installs into the session's home,
-    or a directory already built. Its MCP entries are overridden by
-    ``tools.mcp``, the session's roster of servers in both compilations."""
+    compiles into this project's tree, or the project whose Codex marketplace
+    already offers one; either way it is installed into the session's home,
+    as ``policy_root`` names it where that is set. Its MCP entries are
+    overridden by ``tools.mcp``, the session's roster of servers in both
+    compilations."""
 
     policy: HookSet | None = None
     """The semantic policy judging every call; unset, the plugin harness's.
