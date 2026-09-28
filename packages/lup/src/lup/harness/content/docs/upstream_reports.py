@@ -302,9 +302,14 @@ HOOK_REASON_EDIT_PROMPT = UpstreamReport(
     version="2.1.283",
     repository="anthropics/claude-code",
     title=(
+        # lup: ignore[native-spelling] — the event name is the subject of the
+        # report, quoted to the people who chose it
         "A PreToolUse hook's ask reason is shown in the Bash permission prompt "
         "and dropped from the Write and Edit prompts"
     ),
+    # lup: ignore[native-spelling] — the event names are the evidence, quoted
+    # back to the people who chose them; a report that paraphrased them would
+    # be unverifiable by the person receiving it
     body=r"""**Measured on** 2.1.283 (`@anthropic-ai/claude-code-linux-x64`), Linux x64,
 in an interactive session on a pseudo-terminal (140×60,
 `TERM=xterm-256color`), default permission mode (`⏸ manual mode on`), with

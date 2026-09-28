@@ -181,8 +181,8 @@ DECLARED: list[Migration] = [
                 instruction=(
                     "Nothing reads these fields of the cleanup hook's tool input. "
                     "A hook that needs a spawn's description or type reads them "
-                    "from its own PreToolUse payload, as lup.policy.kernel.spawns "
-                    "is handed them."
+                    "from the payload its runtime hands it before the call, as "
+                    "lup.policy.kernel.spawns is handed them."
                 )
             ),
         ],
