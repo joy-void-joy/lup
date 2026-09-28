@@ -59,14 +59,16 @@ def test_plugin_preparation_uses_the_actual_home_before_authentication(
     launch_session.session_argv(
         "codex",
         [],
-        boundary,
-        Mock(hooks=None),
+        boundary.recipe.source.image,
+        boundary.recipe.source.requirements,
+        None,
         tmp_path,
         CODEX_LOGIN,
         sandbox,
         {},
         prepare=calls.prepare,
         authenticate=calls.authenticate,
+        clipboard=boundary.clipboard_transport,
     )
     prefix = ["podman", "run", "-i", "image"] if sandbox.contained() else []
     home = Path("/cfg") if sandbox.contained() else tmp_path
@@ -84,14 +86,16 @@ def test_failed_plugin_preparation_stops_the_launch_before_authentication(
         launch_session.session_argv(
             "codex",
             [],
-            boundary,
-            Mock(hooks=None),
+            boundary.recipe.source.image,
+            boundary.recipe.source.requirements,
+            None,
             tmp_path,
             CODEX_LOGIN,
             LaunchSandbox.OUTER,
             {},
             authenticate=authenticate,
             prepare=Mock(side_effect=RuntimeError("plugin unavailable")),
+            clipboard=boundary.clipboard_transport,
         )
     authenticate.assert_not_called()
 

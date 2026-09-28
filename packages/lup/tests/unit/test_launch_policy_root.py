@@ -45,7 +45,16 @@ def test_interactive_launch_replaces_inherited_policy_root_and_forwards_it(
     environment: EnvVars = {POLICY_ROOT_ENV: str(tmp_path / "inherited-project")}
 
     launch_session.session_argv(
-        cli, [], composition, Mock(hooks=None), tmp_path, login, sandbox, environment
+        cli,
+        [],
+        composition.recipe.source.image,
+        composition.recipe.source.requirements,
+        None,
+        tmp_path,
+        login,
+        sandbox,
+        environment,
+        clipboard=composition.clipboard_transport,
     )
 
     assert environment[POLICY_ROOT_ENV] == str(project)

@@ -311,7 +311,9 @@ def ready_to_open(
     typer.echo("checking the host")
     opening = LaunchOpening(sandbox=settled_sandbox(sandbox, "pass `--sandbox inner`"))
     opening.findings = runtime_preflight(
-        composition,
+        composition.recipe.label,
+        composition.readiness,
+        composition.recipe.source.requirements,
         sentinels,
         opening,
         opening.sandbox.contained(),
@@ -741,8 +743,9 @@ def launch_claude(
             argv = session_argv(
                 "claude",
                 arguments,
-                composition,
-                plugin,
+                composition.recipe.source.image,
+                composition.recipe.source.requirements,
+                plugin.hooks,
                 home if home is not None else ambient_config_home(profiles.login),
                 profiles.login,
                 sandbox,
@@ -755,6 +758,7 @@ def launch_claude(
                 member=member,
                 home_seed=places,
                 standing=standing_grants(),
+                clipboard=composition.clipboard_transport,
             )
             seed_applied = places is not None
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
@@ -992,8 +996,9 @@ def launch_codex(
             argv = session_argv(
                 "codex",
                 arguments,
-                composition,
-                plugin,
+                composition.recipe.source.image,
+                composition.recipe.source.requirements,
+                plugin.hooks,
                 selected_home,
                 CODEX_LOGIN,
                 sandbox,
@@ -1006,6 +1011,7 @@ def launch_codex(
                 authenticate=authenticate,
                 prepare=prepare,
                 standing=standing_grants(),
+                clipboard=composition.clipboard_transport,
             )
             sh.Command(argv[0])(*argv[1:], _fg=True, _env=environment)
         succeeded = True

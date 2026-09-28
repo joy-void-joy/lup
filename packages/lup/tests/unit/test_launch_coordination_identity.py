@@ -57,10 +57,12 @@ def uncontained(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
 def opened(environment: dict[str, str], tmp_path: Path) -> list[str]:
     """Build the argv for one uncontained session against this environment."""
+    built = composition()
     return launch_session.session_argv(
         "claude",
         ["--model", "opus"],
-        composition(),
+        built.recipe.source.image,
+        built.recipe.source.requirements,
         Mock(),
         tmp_path,
         Mock(),

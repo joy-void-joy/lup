@@ -188,13 +188,15 @@ def test_session_authentication_uses_the_same_execution_boundary(
     argv = launch_session.session_argv(
         "codex",
         ["resume", "session"],
-        composition,
-        plugin,
+        composition.recipe.source.image,
+        composition.recipe.source.requirements,
+        plugin.hooks,
         tmp_path,
         CODEX_LOGIN,
         sandbox,
         {},
         authenticate=authenticate,
+        clipboard=composition.clipboard_transport,
     )
 
     if sandbox.contained():

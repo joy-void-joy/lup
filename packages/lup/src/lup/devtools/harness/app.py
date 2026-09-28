@@ -245,8 +245,8 @@ def create_harness_app(
                     finding
                     for index, composition in enumerate(compositions)
                     for finding in report_inside_requirements(
-                        composition,
-                        composition.recipe.source.plugins[0],
+                        composition.recipe.source.image,
+                        composition.recipe.source.requirements,
                         ambient_config_home(
                             composition.login, composition.default_config_home
                         ),

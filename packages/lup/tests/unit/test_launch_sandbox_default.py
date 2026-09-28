@@ -31,7 +31,7 @@ from lup.devtools.harness.app import create_harness_app
 from lup.devtools.harness.composition import NativeTargets
 from lup.harness.generate import NativeHarnessComposition
 from lup.devtools.harness.launch import launch_claude, launch_codex
-from lup.launch.session import session_argv
+from lup.launch.session import runtime_preflight, session_argv
 from lup.harness.codescan.common import RuleSelection
 from lup.harness.image import ContainerClient
 from lup.harness.messaging import SessionInboxes
@@ -148,7 +148,11 @@ def opened_under(seen: Mock, runtime: str) -> LaunchSandbox:
     argv = inspect.signature(session_argv).bind(*call.args, **call.kwargs)
     posture = argv.arguments["sandbox"]
     words = seen.claude_sandbox if runtime == "claude" else seen.codex_sandbox
-    assert seen.preflight.call_args.args[3] is posture.contained()
+    preflight = seen.preflight.call_args
+    roster = inspect.signature(runtime_preflight).bind(
+        *preflight.args, **preflight.kwargs
+    )
+    assert roster.arguments["contained"] is posture.contained()
     assert words.call_args.kwargs["sandbox"] is posture
     return posture
 

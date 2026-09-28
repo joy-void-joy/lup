@@ -173,7 +173,7 @@ def settled_launch(
         agents=[],
     )
     launch_session.settle_boundary(
-        plugin,
+        plugin.hooks,
         sandbox,
         [],
         sentinels,

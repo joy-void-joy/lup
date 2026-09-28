@@ -61,7 +61,7 @@ def test_every_launch_replaces_inherited_ledger_ownership(
     )
 
     launch_session.settle_boundary(
-        plugin, sandbox, [], sentinels, environment, Banner()
+        plugin.hooks, sandbox, [], sentinels, environment, Banner()
     )
 
     assert environment[ROOT_VARIABLE] == str(checkout)

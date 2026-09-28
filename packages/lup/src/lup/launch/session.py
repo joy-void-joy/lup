@@ -32,7 +32,7 @@ from lup.coordination.identity import MEMBER_ENV, NAME_ENV, LaunchedMember
 from lup.coordination.repository import RepositoryPeers, launched_member
 from lup.harness.messaging import SessionInboxes, cleared
 from lup.workspace.edition import shared_git_directory
-from lup.harness.models import HookSet, Plugin
+from lup.harness.models import HookSet
 from lup.policy.boundary import BoundaryPreflight
 from lup.policy.identity import POLICY_ROOT_ENV
 from lup.policy.profiles import compile_boundary, depended_on, measured
@@ -71,7 +71,9 @@ from lup.observability.sessions import Session, SessionRecorder
 from lup.sessions.recursion import MAX_RECURSIVE_AGENT_ENV
 from lup.types import EnvVars, JsonObject, JsonValue
 from lup.workspace.paths import agent_version, harness_runs_path, project_root
-from lup.harness.generate import NativeHarnessComposition
+from lup.harness.clipboard import ClipboardTransport
+from lup.harness.generate import RuntimeReadiness
+from lup.harness.image import Image
 from lup.launch.preflight import (
     LaunchSentinels,
     ROOT_VARIABLE,
@@ -315,7 +317,9 @@ def start_harness_transcript(
 
 
 def runtime_preflight(
-    composition: NativeHarnessComposition,
+    label: str,
+    readiness: RuntimeReadiness,
+    requirements: Manifest,
     sentinels: LaunchSentinels,
     opening: LaunchOpening,
     contained: bool = True,
@@ -337,11 +341,13 @@ def runtime_preflight(
     capability is heard from only where it is missing, which is the answer
     the launch stops on.
 
-    ``standing`` is what this machine grants every session, asked by the
-    host roster so each granted device is proved before a session gets it.
+    ``label`` names the runtime in what is said, ``readiness`` probes it, and
+    ``requirements`` is the manifest the host roster exercises. ``standing``
+    is what this machine grants every session, asked by the host roster so
+    each granted device is proved before a session gets it.
     """
-    target = composition.recipe.label
-    evidence = composition.readiness()
+    target = label
+    evidence = readiness()
     for item in evidence:
         if item.supported:
             continue
@@ -357,7 +363,7 @@ def runtime_preflight(
     versions = ", ".join(sorted({item.version for item in evidence}))
     opening.runtime = f"{target} {versions}" if versions else target
     return report_requirements(
-        composition.recipe.source.requirements,
+        requirements,
         sentinels=sentinels,
         in_passing=True,
         contained=contained,
@@ -507,8 +513,8 @@ def verify_inside(
 
 
 def report_inside_requirements(
-    composition: NativeHarnessComposition,
-    plugin: Plugin,
+    image: Image,
+    requirements: Manifest,
     config_home: Path,
     login: ProviderLogin,
     sentinels: LaunchSentinels = LaunchSentinels(),
@@ -544,12 +550,11 @@ def report_inside_requirements(
     is captured rather than shown, and ``-it`` against a pipe fails on the
     terminal it was promised.
     """
-    harness = composition.recipe.source
     credential = login.credentials_path(config_home)
     accessible = standing.roots(print)
     opening = contained_argv(
-        harness.image,
-        harness.requirements,
+        image,
+        requirements,
         project_root(),
         editor_rendezvous(login),
         credential if credential.exists() else None,
@@ -570,7 +575,7 @@ def report_inside_requirements(
     # look for a value nothing had set and report the boundary broken on a
     # machine whose boundary was fine.
     return verify_inside(
-        harness.requirements,
+        requirements,
         opening,
         setting_up=setting_up,
         sentinels=sentinels,
@@ -626,7 +631,7 @@ def editor_rendezvous(login: ProviderLogin) -> Path | None:
 
 
 def settle_boundary(
-    plugin: Plugin,
+    hooks: HookSet | None,
     sandbox: LaunchSandbox,
     findings: list[Finding],
     sentinels: LaunchSentinels,
@@ -667,7 +672,7 @@ def settle_boundary(
     wait for it.
     """
     root = project_root()
-    declared = plugin.hooks or HookSet(id="hooks.absent", policy_ids=[])
+    declared = hooks or HookSet(id="hooks.absent", policy_ids=[])
     # Before the lease asks git anything about these roots, on either posture:
     # a root whose pointer its repository does not list back is refused here
     # rather than mounted and read through, and each repository vouching for
@@ -722,8 +727,9 @@ def settle_boundary(
 def session_argv(
     cli: str,
     arguments: list[str],
-    composition: NativeHarnessComposition,
-    plugin: Plugin,
+    image: Image,
+    requirements: Manifest,
+    hooks: HookSet | None,
     config_home: Path,
     login: ProviderLogin,
     sandbox: LaunchSandbox,
@@ -738,6 +744,7 @@ def session_argv(
     prepare: Callable[[list[str], Path], None] | None = None,
     home_seed: HomeSeedPlaces | None = None,
     standing: StandingGrants = StandingGrants(),
+    clipboard: ClipboardTransport = "commands",
 ) -> list[str]:
     """The argv that opens a session, inside the declared container or on the host.
 
@@ -769,6 +776,11 @@ def session_argv(
     launches, asked here rather than handed in resolved: only here is the
     posture known, and what the registry says as it resolves belongs in
     this opening's banner.
+
+    What it reads of the declaration arrives piece by piece -- the image and
+    its manifest, the policy, the clipboard's way in -- rather than as a
+    generated harness, so a declaration whose plugin is a built directory
+    opens a session the same way as one this library compiled.
     """
     banner = cleared.banner
     # Minted where both runtimes pass through, so a session's coordination
@@ -825,7 +837,7 @@ def session_argv(
         if authenticate is not None:
             authenticate([cli], config_home, False)
         settle_boundary(
-            plugin,
+            hooks,
             sandbox,
             cleared.findings,
             sentinels,
@@ -836,19 +848,18 @@ def session_argv(
         )
         say_opening(cleared, cleared.findings, transcript)
         return [cli, *arguments]
-    harness = composition.recipe.source
     # A token crosses by name, so its value has to be in the environment of the
     # process that starts the container rather than anywhere in the argv. That
     # makes this the one place it has to be resolved: the argv builder reads
     # the same declaration for whether to pass the name, and a name passed
     # against an environment nobody populated forwards nothing.
-    carried = harness.image.forge.sourced(environment)
+    carried = image.forge.sourced(environment)
     if carried:
-        environment[harness.image.forge.token_variable] = carried
+        environment[image.forge.token_variable] = carried
     credential = login.credentials_path(config_home)
     opening = contained_argv(
-        harness.image,
-        harness.requirements,
+        image,
+        requirements,
         project_root(),
         editor_rendezvous(login),
         credential if credential.exists() else None,
@@ -887,7 +898,7 @@ def session_argv(
     # is the handful whose absence means the session can do nothing. A model
     # call and a toolchain version belong to `harness requirements --inside`.
     inside = verify_inside(
-        harness.requirements,
+        requirements,
         probing(opening),
         setting_up=False,
         sentinels=sentinels,
@@ -896,14 +907,14 @@ def session_argv(
         accessible=accessible,
     )
     if prepare is not None:
-        prepare(probing(opening, stdin=True), Path(harness.image.config_home))
+        prepare(probing(opening, stdin=True), Path(image.config_home))
     # A contained session sharing host loopback can receive a browser callback.
     # Device login is needed where that callback stays outside its namespace.
     if authenticate is not None:
         authenticate(
             [*probing(opening, stdin=True), cli],
-            Path(harness.image.config_home),
-            not harness.image.egress.shares_host_loopback(),
+            Path(image.config_home),
+            not image.egress.shares_host_loopback(),
         )
     # Both halves of one measurement, joined here because this is where the
     # second is taken. The host roster answered for the relay and the store
@@ -912,7 +923,7 @@ def session_argv(
     # from either alone would report a capability nothing asked about.
     measured_here = [*cleared.findings, *inside]
     settle_boundary(
-        plugin,
+        hooks,
         sandbox,
         measured_here,
         sentinels,
@@ -922,9 +933,7 @@ def session_argv(
         runtime=cli,
     )
     say_opening(cleared, measured_here, transcript)
-    native = harness.image.clipboard.wrap(
-        [cli, *arguments], composition.clipboard_transport
-    )
+    native = image.clipboard.wrap([cli, *arguments], clipboard)
     return [*opening, *native]
 
 
