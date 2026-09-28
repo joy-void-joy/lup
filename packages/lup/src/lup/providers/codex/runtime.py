@@ -1314,7 +1314,10 @@ class CodexSessionOpener:
                             await state.ensure_thread()
                             yield CodexHookSession(state, corrected)
                         finally:
-                            await corrected.close()
+                            try:
+                                await session.abort_active()
+                            finally:
+                                await corrected.close()
             finally:
                 try:
                     await server.close()
