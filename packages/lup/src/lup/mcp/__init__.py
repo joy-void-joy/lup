@@ -173,6 +173,17 @@ class ToolServer(
     name: str
     """The server's name, which addresses its tools as ``mcp__<name>__<tool>``."""
 
+    always_load: bool = False
+    """Whether this server's tools are offered from the first turn, never deferred.
+
+    A runtime that withholds tool definitions until a search asks for them
+    spends a search call each time a deferred tool is wanted: a fair price for
+    a server reached now and then, the wrong one for tools a session calls
+    dozens of times. Claude spells it per server in both compilations; Codex
+    documents no per-server loading control, so neither of its compilations
+    says anything for it.
+    """
+
     requires: ClassVar[str] = "nothing"
     """What a session must have for this server to build anything, for a refusal."""
 
@@ -326,9 +337,13 @@ class Toolset(HostedServer, frozen=True):
     requires: ClassVar[str] = "at least one tool"
 
     def __init__(
-        self, tools: Sequence[LupMcpTool] = (), *, name: str = "tools"
+        self,
+        tools: Sequence[LupMcpTool] = (),
+        *,
+        name: str = "tools",
+        always_load: bool = False,
     ) -> None:
-        BaseModel.__init__(self, tools=list(tools), name=name)
+        BaseModel.__init__(self, tools=list(tools), name=name, always_load=always_load)
 
     @model_validator(mode="after")
     def tools_are_named_apart(self) -> Self:
@@ -358,7 +373,11 @@ class Group(HostedServer, frozen=True):
     requires: ClassVar[str] = "whatever its builder reads from the session"
 
     def __init__(
-        self, builder: Callable[[], ToolGroup] | str, *, name: str | None = None
+        self,
+        builder: Callable[[], ToolGroup] | str,
+        *,
+        name: str | None = None,
+        always_load: bool = False,
     ) -> None:
         """Declare ``builder``'s group, under its own name unless ``name`` is given.
 
@@ -369,7 +388,10 @@ class Group(HostedServer, frozen=True):
             builder
         )
         BaseModel.__init__(
-            self, builder=resolved, name=resolved().name if name is None else name
+            self,
+            builder=resolved,
+            name=resolved().name if name is None else name,
+            always_load=always_load,
         )
 
     def group(self) -> ToolGroup:

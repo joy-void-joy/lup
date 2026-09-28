@@ -618,7 +618,11 @@ def build_session_factory(
                 environment=environment,
             )
             mcp = [
-                External(name=server.name, server=server.launched(launch))
+                External(
+                    name=server.name,
+                    server=server.launched(launch),
+                    always_load=server.always_load,
+                )
                 for server in declared_tool_servers()
                 if server.name in served
             ]
