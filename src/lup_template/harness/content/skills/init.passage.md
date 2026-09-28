@@ -366,9 +366,9 @@ proposes rather than writes. The template ships `README.md` that way, which is
 right for a file whose words are the author's and wrong for a project that
 wants its README kept current by the agent.
 
-{{ ask_2 }} — then apply the answer with `--lock` / `--unlock` on that same command,
-which rewrites the declaration and regenerates the native trees. Never
-hand-edit `human_owned_files` in the catalog.
+{{ ask_2 }} — then apply the answer with `uv run lup-devtools dev seams --own <path>`
+or `--disown <path>`, which rewrites the declaration for the regeneration below to
+compile. Never hand-edit `human_owned_files` in the catalog.
 
 ### 3. What each path role means here
 

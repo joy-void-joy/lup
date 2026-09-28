@@ -92,7 +92,7 @@ SKILL = models.Skill(
                         question="which rule families this domain keeps, with retiring the anti-pattern family altogether as one answer"
                     ),
                     "ask_2": models.AskUser(
-                        question="which files the human author owns, starting from whether README.md stays locked"
+                        question="which files the human author owns, starting from whether README.md stays human-owned"
                     ),
                     "ask_3": models.AskUser(
                         question="whether any root this domain adds needs a path role, and which"
