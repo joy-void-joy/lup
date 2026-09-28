@@ -27,6 +27,12 @@ Only this hook's own answer can set the title — an async hook's answer
 carries ``additionalContext`` and ``systemMessage`` and nothing else — so the
 ask runs while the prompt waits, bounded by the declared deadline.
 
+The same field is how the roster follows the chrome. A reopened conversation
+keeps the title it last had — the launcher names a new session and leaves a
+resumed one alone — and a ``/rename`` or a rename from another surface
+changes the title under this hook; either arrives here as a ``session_title``
+the roster does not answer to, and is taken up at the prompt it arrives with.
+
 Every failure is silence: the prompt goes on, and the session keeps its name.
 """
 
@@ -44,6 +50,7 @@ from coordination.naming import (
     Answer,
     Arrival,
     Naming,
+    adoptable,
     answer_schema,
     asking,
     compiled_for,
@@ -121,15 +128,25 @@ def asked(prompt: str, naming: Naming) -> str:
 
 
 def titled(root: Path, member_id: str, payload: Payload, naming: Naming) -> str:
-    """The title this prompt sets, blank where it sets none."""
+    """The title this prompt sets, blank where it sets none.
+
+    A title the chrome shows and the roster lacks is taken up first — it is
+    the newer choice — and handed back only where the roster had to number it
+    past a live session's name, so the two go on agreeing. One the roster
+    could not take up is left unrecorded, and taken up at the next prompt.
+    """
     member = owning(root, member_id, payload)
     if member is None:
         return ""
     titling = looked(root, member_id, member)
+    shown = payload.get("session_title", "")
+    if wanted := adoptable(member, titling, shown):
+        name = settled(root, member_id, wanted, over_a_rename=True)
+        if name:
+            concluded(root, member_id, titling, name)
+        return "" if name == shown else name
     prompt = payload.get("prompt", "")
-    if prompt.strip() and due(
-        member, titling, naming, payload.get("session_title", "")
-    ):
+    if prompt.strip() and due(member, titling, naming, shown):
         titling = asking(root, member_id, titling)
         wanted = asked(prompt, naming)
         name = settled(root, member_id, wanted) if wanted else ""

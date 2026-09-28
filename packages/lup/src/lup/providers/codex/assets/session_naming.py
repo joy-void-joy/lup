@@ -1,10 +1,18 @@
 """Codex's half of session naming, run as a bare script.
 
 Shipped verbatim into the plugin's ``hooks/runtime/`` beside the coordination
-package it imports, and registered under ``UserPromptSubmit``. It holds only
-what Codex spells for itself: the CLI a name is asked through, and the
-app-server request that names a thread. When to ask, what a name may be and
-how one is settled on the roster are :mod:`coordination.naming`'s.
+package it imports, and registered under ``UserPromptSubmit`` — and under
+``SessionStart`` for a resume. It holds only what Codex spells for itself: the
+CLI a name is asked through, the events and their fields, and the app-server
+requests that read and set a thread's name. When to ask, what a name may be
+and how one is settled on the roster are :mod:`coordination.naming`'s.
+
+A reopened thread keeps its own name. Codex reports no title to a hook, so
+``SessionStart`` with ``source`` ``resume`` records which thread was reopened,
+and at the next prompt a copy of this file reads the name that thread
+already has through ``thread/read`` — documented to carry ``thread.name``
+once one is set — and the roster takes it up. Only a thread with no name is
+asked for one, the way a new session is.
 
 Codex takes no name from a hook's answer. The output schema it documents for
 this event (https://learn.chatgpt.com/docs/hooks) admits added context, a
@@ -51,6 +59,8 @@ import subprocess
 import sys
 import tempfile
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TypedDict
 
@@ -74,9 +84,18 @@ from coordination.naming import (
     ran,
     recalled,
     request_for,
+    resuming,
     settled,
     stopped,
+    under_way,
 )
+
+
+class Payload(Arrival, total=False):
+    """What Codex hands the hook, under either event it is registered for."""
+
+    hook_event_name: str
+    source: str
 
 
 class ClientInfo(TypedDict):
@@ -93,6 +112,10 @@ class SetName(TypedDict):
     name: str
 
 
+class ReadThread(TypedDict):
+    threadId: str
+
+
 class Empty(TypedDict):
     pass
 
@@ -102,7 +125,7 @@ class Request(TypedDict):
 
     method: str
     id: int
-    params: Initialize | SetName
+    params: Initialize | SetName | ReadThread
 
 
 class Notification(TypedDict):
@@ -110,11 +133,23 @@ class Notification(TypedDict):
     params: Empty
 
 
+class ThreadRecord(TypedDict, total=False):
+    """A thread as ``thread/read`` answers, as far as its name."""
+
+    name: str | None
+
+
+class Result(TypedDict, total=False):
+    """A reply's result, as far as the requests sent here read one."""
+
+    thread: ThreadRecord
+
+
 class Reply(TypedDict, total=False):
     """One line the app-server writes, as far as waiting on a request reads it."""
 
     id: int
-    result: Empty
+    result: Result
 
 
 def asked(prompt: str, naming: Naming) -> str:
@@ -169,8 +204,9 @@ def asked(prompt: str, naming: Naming) -> str:
             return ""
 
 
-def thread_named(thread: str, name: str, deadline: float) -> bool:
-    """Name *thread* through a short-lived app-server over the session's own home.
+@contextmanager
+def app_server(deadline: float) -> Iterator[subprocess.Popen[str] | None]:
+    """A short-lived app-server over the session's own home, initialized, or nothing.
 
     The home is whatever the environment names, which is the session's: a
     hook inherits it from the runtime that spawned it. In a session of its
@@ -187,32 +223,60 @@ def thread_named(thread: str, name: str, deadline: float) -> bool:
             start_new_session=True,
         )
     except OSError:
-        return False
+        yield None
+        return
     watchdog = threading.Timer(deadline, os.killpg, (server.pid, signal.SIGKILL))
     watchdog.start()
     try:
+        greeted = requested(
+            server,
+            Request(
+                method="initialize",
+                id=0,
+                params=Initialize(clientInfo=ClientInfo(name="lup", version="0")),
+            ),
+        )
+        ready = greeted is not None and notified(
+            server, Notification(method="initialized", params=Empty())
+        )
+        yield server if ready else None
+    finally:
+        watchdog.cancel()
+        stopped(server)
+
+
+def thread_named(thread: str, name: str, deadline: float) -> bool:
+    """Give *thread* the user-facing name *name*, saying whether it took."""
+    with app_server(deadline) as server:
         return (
-            requested(
-                server,
-                Request(
-                    method="initialize",
-                    id=1,
-                    params=Initialize(clientInfo=ClientInfo(name="lup", version="0")),
-                ),
-            )
-            and notified(server, Notification(method="initialized", params=Empty()))
+            server is not None
             and requested(
                 server,
                 Request(
                     method="thread/name/set",
-                    id=2,
+                    id=1,
                     params=SetName(threadId=thread, name=name),
                 ),
             )
+            is not None
         )
-    finally:
-        watchdog.cancel()
-        stopped(server)
+
+
+def thread_name(thread: str, deadline: float) -> str | None:
+    """The user-facing name *thread* already has: blank for none, nothing unanswered."""
+    with app_server(deadline) as server:
+        result = (
+            requested(
+                server,
+                Request(method="thread/read", id=1, params=ReadThread(threadId=thread)),
+            )
+            if server is not None
+            else None
+        )
+    if result is None:
+        return None
+    name = result.get("thread", ThreadRecord()).get("name")
+    return name if isinstance(name, str) else ""
 
 
 def notified(server: subprocess.Popen[str], notification: Notification) -> bool:
@@ -224,10 +288,10 @@ def notified(server: subprocess.Popen[str], notification: Notification) -> bool:
     return True
 
 
-def requested(server: subprocess.Popen[str], request: Request) -> bool:
-    """Send one request and read until its reply, saying whether it succeeded."""
+def requested(server: subprocess.Popen[str], request: Request) -> Result | None:
+    """Send one request and read until its reply: the result, or nothing for an error."""
     if server.stdin is None or server.stdout is None:
-        return False
+        return None
     server.stdin.write(json.dumps(request) + "\n")
     server.stdin.flush()
     for line in server.stdout:
@@ -236,20 +300,35 @@ def requested(server: subprocess.Popen[str], request: Request) -> bool:
         except ValueError:
             continue
         if isinstance(reply, dict) and reply.get("id") == request["id"]:
-            return "result" in reply
-    return False
+            return reply.get("result")
+    return None
 
 
-def named_in_background(root: Path, member_id: str, thread: str, prompt: str) -> None:
-    """Ask, settle the roster's name, and give the thread the name settled."""
+def named_in_background(
+    root: Path, member_id: str, thread: str, prompt: str, adopting: bool
+) -> None:
+    """Settle the roster's name for the session, and give the thread the name settled.
+
+    *adopting* is a reopened thread, whose name is its own: kept as it stands
+    where it has one — the roster takes it up, and the thread hears back only
+    a number the roster had to add — and asked for where it has none.
+    """
     naming = compiled_for(Path(__file__))
     titling = recalled(root, member_id)
     if naming is None or titling is None:
         return
-    wanted = asked(prompt, naming)
+    deadline = naming["deadline_seconds"]
+    kept = thread_name(thread, deadline) if adopting else ""
+    if kept:
+        name = settled(root, member_id, kept, over_a_rename=True)
+        if name and name != kept:
+            thread_named(thread, name, deadline)
+        concluded(root, member_id, titling, name)
+        return
+    wanted = asked(prompt, naming) if prompt.strip() else ""
     name = settled(root, member_id, wanted) if wanted else ""
     if name and thread:
-        thread_named(thread, name, naming["deadline_seconds"])
+        thread_named(thread, name, deadline)
     concluded(root, member_id, titling, name)
 
 
@@ -273,13 +352,31 @@ def detached(arguments: list[str], prompt: str) -> None:
         worker.stdin.close()
 
 
-def hooked(root: Path, member_id: str, payload: Arrival, naming: Naming) -> None:
-    """Start what this prompt calls for, and return without waiting on it."""
+def hooked(root: Path, member_id: str, payload: Payload, naming: Naming) -> None:
+    """Start what this event calls for, and return without waiting on it.
+
+    A resume is only recorded as it happens: the session may not be on the
+    roster yet, and its thread's name is read at the next prompt instead.
+    """
+    thread, prompt = payload.get("session_id", ""), payload.get("prompt", "")
+    if payload.get("hook_event_name") == "SessionStart":
+        if (
+            payload.get("source") == "resume"
+            and thread
+            and not payload.get("agent_id")
+            and not payload.get("agent_type")
+        ):
+            resuming(root, member_id, thread)
+        return
     member = owning(root, member_id, payload)
     if member is None:
         return
     titling = looked(root, member_id, member)
-    thread, prompt = payload.get("session_id", ""), payload.get("prompt", "")
+    if titling["resumed"]:
+        if not under_way(titling, naming):
+            asking(root, member_id, titling)
+            detached(["adopt", str(root), member_id, titling["resumed"]], prompt)
+        return
     if prompt.strip() and due(member, titling, naming, None):
         asking(root, member_id, titling)
         detached(["ask", str(root), member_id, thread], prompt)
@@ -300,13 +397,19 @@ def main() -> None:
     try:
         match sys.argv[1:]:
             case ["ask", root, member_id, thread]:
-                named_in_background(Path(root), member_id, thread, sys.stdin.read())
+                named_in_background(
+                    Path(root), member_id, thread, sys.stdin.read(), adopting=False
+                )
+            case ["adopt", root, member_id, thread]:
+                named_in_background(
+                    Path(root), member_id, thread, sys.stdin.read(), adopting=True
+                )
             case ["push", _root, thread, name]:
                 naming = compiled_for(Path(__file__))
                 if naming is not None:
                     thread_named(thread, name, naming["deadline_seconds"])
             case [root, member_id, _event]:
-                payload: Arrival = json.load(sys.stdin)
+                payload: Payload = json.load(sys.stdin)
                 naming = compiled_for(Path(__file__))
                 if naming is not None:
                     hooked(

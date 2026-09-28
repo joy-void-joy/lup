@@ -45,6 +45,13 @@ RUNTIME_ENTRY = "session_naming.py"
 """What the plugin carries: the guard, and the host half the guard runs."""
 
 
+class Reopening(BaseModel, frozen=True):
+    """The event a runtime fires as a session starts, and the matcher selecting a resume."""
+
+    event: str
+    matcher: str
+
+
 class NamingSpelling(BaseModel, frozen=True):
     """What one runtime says for a naming ask, which the declaration leaves to it."""
 
@@ -66,6 +73,14 @@ class NamingSpelling(BaseModel, frozen=True):
     runtime halfway through settling a name. One that names the session
     elsewhere returns at once, and keeps the short budget every prompt-time
     fold has."""
+
+    reopening: Reopening | None = None
+    """Where the hook also hears that a session was reopened.
+
+    Needed by a runtime that reports a session's title to no hook: the resume
+    is recorded as it starts, and the name the reopened session already has
+    is read at the next prompt. None for one whose prompt hook is handed the
+    title itself, which is how a resumed title reaches it there."""
 
 
 def compiled(declared: SessionNaming, model: str, spelling: NamingSpelling) -> Naming:
@@ -105,8 +120,17 @@ def naming_hook(
         "timeout": ceil(declared.deadline_seconds) + 10 if spelling.waits else 10,
     }
     hooks = plugin_root / "hooks"
+    reopened: JsonObject = (
+        {
+            spelling.reopening.event: [
+                {"matcher": spelling.reopening.matcher, "hooks": [entry]}
+            ]
+        }
+        if spelling.reopening is not None
+        else {}
+    )
     return PromptHook(
-        registered={event: [{"hooks": [entry]}]},
+        registered={event: [{"hooks": [entry]}], **reopened},
         artifacts=[
             Artifact.generated(
                 path=hooks / "scripts" / GUARD_SCRIPT,

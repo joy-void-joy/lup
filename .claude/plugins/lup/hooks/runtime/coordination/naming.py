@@ -21,11 +21,15 @@ again, up to the declared number of attempts.
 typed rename takes, and numbered where another session answers to it: the
 model proposed it, nobody chose it, so it is a default in all but origin.
 
-**The runtime follows the roster.** Whatever last renamed the roster — this
-hook's answer or a peer's `coordination_rename` — is carried to the runtime's
-own name for the session once, the next time this hook runs, and never again
-until the roster's name moves. A title somebody set in the chrome in between
-stands until then.
+**The runtime follows the roster, and the roster follows the runtime.**
+Whatever last renamed the roster — this hook's answer or a peer's
+`coordination_rename` — is carried to the runtime's own name for the session
+once, the next time this hook runs, and never again until the roster's name
+moves. A title somebody set where the session is looked at — a ``/rename``, a
+resumed conversation's own title — is taken up by the roster the same way,
+numbered where a live session already answers to it, so whichever moved last
+is what both answer to. A runtime that reports no title is taken up only on a
+resume, from the name its own record keeps for the session it reopened.
 
 Only the root session's own prompts count. A child session that inherited its
 launcher's environment carries the same member id, so a prompt is taken as
@@ -99,12 +103,18 @@ class Titling(TypedDict):
     ``attempts`` counts the times a model was asked, answered or not;
     ``asked`` is when an ask still under way started, blank where none is,
     which keeps a slow ask from being started twice; ``pushed`` is the roster
-    name the runtime was last given.
+    name the runtime was last given; ``shown`` is the title its chrome was
+    last known to show, given or seen, which is what tells a title somebody
+    set there from one this hook put there; ``resumed`` is the native session
+    a resume reopened, whose own name the roster takes up at the next prompt,
+    blank where none is waiting.
     """
 
     attempts: int
     asked: str
     pushed: str
+    shown: str
+    resumed: str
 
 
 class Arrival(TypedDict, total=False):
@@ -260,21 +270,54 @@ def recalled(root: Path, member_id: str) -> Titling | None:
         attempts=attempts if isinstance(attempts, int) else 0,
         asked=text(found.get("asked")),
         pushed=text(found.get("pushed")),
+        shown=text(found.get("shown")),
+        resumed=text(found.get("resumed")),
     )
 
 
 def looked(root: Path, member_id: str, member: Member) -> Titling:
     """What this member's naming hook remembers, begun on a first look.
 
-    A first look takes the roster's name as the one the runtime was given: a
-    launched session's runtime was handed it at launch, and one nobody
-    launched has nothing better to show than its own default.
+    A first look takes the roster's name as the one the runtime was given and
+    shows: a launched session's runtime was handed it at launch, and one
+    nobody launched has nothing better to show than its own default. A resume
+    recorded before the member joined is kept, and begun around.
     """
     found = recalled(root, member_id)
-    if found is not None:
+    if found is not None and found["pushed"]:
         return found
+    name = current_name(member)
     return recorded(
-        root, member_id, Titling(attempts=0, asked="", pushed=current_name(member))
+        root,
+        member_id,
+        Titling(
+            attempts=found["attempts"] if found else 0,
+            asked=found["asked"] if found else "",
+            pushed=name,
+            shown=name,
+            resumed=found["resumed"] if found else "",
+        ),
+    )
+
+
+def resuming(root: Path, member_id: str, session: str) -> Titling:
+    """Record that *session* was reopened, so the next prompt takes up its name.
+
+    Written at the moment the runtime says so, which can come before the
+    session's tool server has put it on the roster: nothing here needs the
+    member, and the first look begins the rest around it.
+    """
+    found = recalled(root, member_id)
+    return recorded(
+        root,
+        member_id,
+        Titling(
+            attempts=found["attempts"] if found else 0,
+            asked=found["asked"] if found else "",
+            pushed=found["pushed"] if found else "",
+            shown=found["shown"] if found else "",
+            resumed=session,
+        ),
     )
 
 
@@ -308,20 +351,42 @@ def due(
     """Whether this prompt should ask a model what the session is called.
 
     *shown* is what the runtime reports its chrome showing, or ``None`` where
-    it reports nothing. An ask still inside its deadline is not started again:
-    the answer it is waiting for settles the name either way, and one that
-    died without concluding stops counting as under way once the deadline it
-    was given has passed.
+    it reports nothing. An ask still under way is not started again.
     """
     if len(names_of(member)) != 1 or titling["attempts"] >= naming["attempts"]:
         return False
     if shown is not None and shown not in ("", current_name(member)):
         return False
+    return not under_way(titling, naming, now)
+
+
+def under_way(titling: Titling, naming: Naming, now: datetime | None = None) -> bool:
+    """Whether an ask started inside its deadline has yet to conclude.
+
+    The answer it is waiting for settles the name either way, so a second one
+    would only race it; one that died without concluding stops counting once
+    the deadline it was given has passed.
+    """
     started = spoken_at(titling["asked"]) if titling["asked"] else None
     return (
-        started is None
-        or ((now or datetime.now(UTC)) - started).total_seconds()
-        >= naming["deadline_seconds"]
+        started is not None
+        and ((now or datetime.now(UTC)) - started).total_seconds()
+        < naming["deadline_seconds"]
+    )
+
+
+def adoptable(member: Member, titling: Titling, shown: str) -> str:
+    """The title the runtime's chrome shows that the roster should take up, else blank.
+
+    One this hook did not put there and the roster does not already answer
+    to: a resumed conversation's own title, a ``/rename``, a rename from
+    another surface. Somebody chose it where the session is looked at, so the
+    roster follows it the way the chrome follows the roster.
+    """
+    return (
+        shown
+        if shown and shown != current_name(member) and shown != titling["shown"]
+        else ""
     )
 
 
@@ -331,22 +396,31 @@ def asking(root: Path, member_id: str, titling: Titling) -> Titling:
         root,
         member_id,
         Titling(
-            attempts=titling["attempts"] + 1, asked=stamped(), pushed=titling["pushed"]
+            attempts=titling["attempts"] + 1,
+            asked=stamped(),
+            pushed=titling["pushed"],
+            shown=titling["shown"],
+            resumed=titling["resumed"],
         ),
     )
 
 
 def concluded(root: Path, member_id: str, titling: Titling, given: str) -> Titling:
-    """Record that no ask is under way, and that the runtime was *given* a name.
+    """Record that no ask is under way, and that the runtime shows *given*.
 
     Blank *given* is an ask that named nothing, which leaves what the runtime
-    was last given where it was.
+    was last given, and shows, where it was. Any resume waiting is over
+    either way.
     """
     return recorded(
         root,
         member_id,
         Titling(
-            attempts=titling["attempts"], asked="", pushed=given or titling["pushed"]
+            attempts=titling["attempts"],
+            asked="",
+            pushed=given or titling["pushed"],
+            shown=given or titling["shown"],
+            resumed="",
         ),
     )
 
@@ -386,21 +460,26 @@ def answered(reply: str, longest: int) -> str:
     return named(answer, longest)
 
 
-def settled(root: Path, member_id: str, wanted: str) -> str:
+def settled(
+    root: Path, member_id: str, wanted: str, over_a_rename: bool = False
+) -> str:
     """Rename this member to *wanted*, numbered past any live session's name.
 
-    Decided under the roster lock and against the member as it is then: a
-    member renamed since this hook read it keeps that rename, and nothing is
-    written. Hands back the name taken, or blank where none was.
+    Decided under the roster lock and against the member as it is then. A
+    name a model proposed goes only on a member still answering to its
+    default, so one renamed since this hook read it keeps that rename and
+    nothing is written; a title somebody set in the chrome is taken up
+    *over_a_rename*, since it is the newer choice. Hands back the name taken,
+    or blank where none was.
     """
     taken = ""
 
     def rename(member: Member) -> Member:
         nonlocal taken
-        if len(names_of(member)) != 1:
+        if not over_a_rename and len(names_of(member)) != 1:
             return member
         taken = unique_cli_name(wanted, names_taken(root, member_id))
-        return renamed(member, taken)
+        return member if taken == current_name(member) else renamed(member, taken)
 
     try:
         with roster_locked(root):

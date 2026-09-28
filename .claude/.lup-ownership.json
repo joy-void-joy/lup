@@ -394,7 +394,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/coordination/naming.py",
       "category": "generated",
-      "sha256": "fbabbe1491649e5551ce848c8f5b1a47aeffc6c2caf110ff2c0f29ad5b1c04b7",
+      "sha256": "3852eecff2a1006d6c6628c6571148d9b9827ce85d3c1f85f4f4d510fa94d17c",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -632,7 +632,7 @@
     {
       "path": ".claude/plugins/lup/hooks/runtime/session_naming.py",
       "category": "generated",
-      "sha256": "b68e1bb00b9f82c73e7a6a41c5e1d67c31a40bfdee20204cd6b61c617709a443",
+      "sha256": "2c270b57004c07bcb8a0c0da6260a4189c172366f9272b373246dd4f4d5ad80c",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

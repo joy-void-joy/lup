@@ -8,9 +8,9 @@ one each. The **name** is a display detail, and only one runtime has anywhere
 to put it.
 
 That asymmetry is the point of the split rather than a gap in it. What a peer
-is addressed by lives in lup's own `names.jsonl`, so a runtime with no
-launch-time name flag loses nothing: the roster answers to the same name on
-both, and renaming goes through the same command.
+is addressed by lives on its member's own file in lup's store, so a runtime
+with no launch-time name flag loses nothing: the roster answers to the same
+name on both, and renaming goes through the same command.
 """
 
 from pathlib import Path
@@ -21,6 +21,7 @@ import pytest
 import lup.devtools.harness.launch as launch
 from lup.coordination.identity import MEMBER_ENV, NAME_ENV, mint_member_id
 from lup.coordination.repository import RepositoryPeers
+from lup.harness.models import Resumption
 
 
 def composition() -> Mock:
@@ -174,11 +175,34 @@ def test_a_caller_who_named_their_own_session_still_wins(
     assert argv.index("the-one-i-meant") > argv.index("feat-coordination")
 
 
+@pytest.mark.parametrize(
+    "resume",
+    [Resumption(latest=True), Resumption(pick=True), Resumption(session="0c0ffee")],
+    ids=["continue", "resume", "session"],
+)
+def test_a_reopened_conversation_keeps_the_title_it_had(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, resume: Resumption
+) -> None:
+    """Naming it after the worktree again would throw its own title away.
+
+    The roster takes that title up at the session's next prompt instead, the
+    way it takes up a `/rename`, so the two still come to agree.
+    """
+    worktree = tmp_path / "feat-coordination"
+    worktree.mkdir()
+    captured: list[list[str]] = []  # lup: ignore[empty-collection] — argv record
+
+    launched(worktree, monkeypatch, captured, extra=[], resume=resume)
+
+    assert "--name" not in captured[0]
+
+
 def launched(
     worktree: Path,
     monkeypatch: pytest.MonkeyPatch,
     captured: list[list[str]],
     extra: list[str],
+    resume: Resumption = Resumption(),
 ) -> None:
     """Run `launch_claude` far enough to read the argv it built, and no further."""
     import sh
@@ -209,4 +233,6 @@ def launched(
     )
     monkeypatch.setattr(sh, "Command", lambda _name: lambda *args, **kwargs: None)
 
-    launch.launch_claude(composition(), extra, profiles, None, None, False)
+    launch.launch_claude(
+        composition(), extra, profiles, None, None, False, resume=resume
+    )

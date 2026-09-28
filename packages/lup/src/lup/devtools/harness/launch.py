@@ -1783,9 +1783,11 @@ def launch_claude(
             # the same command.
             #
             # Ahead of `extra_args`, so a caller who named their own session
-            # still wins.
-            "--name",
-            member.cli_name,
+            # still wins. Left off a reopened conversation, which keeps the
+            # title it last had: naming it after the worktree again would
+            # throw that away, and the roster takes the kept title up at the
+            # session's next prompt instead, the way it takes up a `/rename`.
+            *(["--name", member.cli_name] if not resume.wanted() else []),
             # Where this session binds the inbox a peer nudges it through.
             # Named by the launcher rather than left to the runtime, whose own
             # default is a directory a container does not share and a file

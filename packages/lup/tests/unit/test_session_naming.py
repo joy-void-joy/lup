@@ -145,7 +145,9 @@ def test_an_ask_under_way_is_not_started_again_until_its_deadline_passes(
     member = joined(peers, tmp_path, "dev")
     found = owned(peers, member, tmp_path)
     started = utc_now()
-    titling = Titling(attempts=1, asked=stamped(started), pushed="dev")
+    titling = Titling(
+        attempts=1, asked=stamped(started), pushed="dev", shown="dev", resumed=""
+    )
 
     assert not naming.due(
         found, titling, declared(), None, now=started + timedelta(seconds=5)
@@ -219,6 +221,62 @@ def test_the_runtime_is_given_a_roster_rename_once(tmp_path: Path) -> None:
     titling = naming.concluded(peers.root, member, titling, "chosen")
     assert naming.pending(owned(peers, member, tmp_path), titling) == ""
     assert naming.recalled(peers.root, member) == titling
+
+
+def test_a_title_somebody_set_in_the_chrome_is_taken_up_by_the_roster(
+    tmp_path: Path,
+) -> None:
+    """A `/rename`, or a reopened conversation's own title, is the newer choice.
+
+    Taken up over whatever the roster was called, since it was chosen where
+    the session is looked at; and once, since the next look finds the chrome
+    showing what the roster answers to.
+    """
+    peers = RepositoryPeers(tmp_path)
+    member = joined(peers, tmp_path, "dev")
+    peers.rename(member, "chosen-by-a-peer")
+    found = owned(peers, member, tmp_path)
+    titling = naming.looked(peers.root, member, found)
+
+    assert naming.adoptable(found, titling, "") == ""
+    assert naming.adoptable(found, titling, "chosen-by-a-peer") == ""
+    assert naming.adoptable(found, titling, "my-own-title") == "my-own-title"
+    assert (
+        naming.settled(peers.root, member, "my-own-title", over_a_rename=True)
+        == "my-own-title"
+    )
+    titling = naming.concluded(peers.root, member, titling, "my-own-title")
+    assert (
+        naming.adoptable(owned(peers, member, tmp_path), titling, "my-own-title") == ""
+    )
+
+
+def test_a_title_taken_up_is_numbered_past_a_live_session_that_has_it(
+    tmp_path: Path,
+) -> None:
+    peers = RepositoryPeers(tmp_path)
+    joined(peers, tmp_path, "taken")
+    member = joined(peers, tmp_path, "dev")
+
+    assert naming.settled(peers.root, member, "taken", over_a_rename=True) == "taken-2"
+
+
+def test_a_resume_heard_before_the_session_joined_waits_for_its_first_look(
+    tmp_path: Path,
+) -> None:
+    """A runtime reports a resume as the session starts, which can be before
+    its tool server has put it on the roster; the first look begins around it.
+    """
+    peers = RepositoryPeers(tmp_path)
+    member = mint_member_id()
+    naming.resuming(peers.root, member, "thread-9")
+    peers.join(member, tmp_path, cli_name="dev")
+
+    titling = naming.looked(peers.root, member, owned(peers, member, tmp_path))
+
+    assert titling["resumed"] == "thread-9"
+    assert titling["pushed"] == "dev"
+    assert naming.concluded(peers.root, member, titling, "kept")["resumed"] == ""
 
 
 @pytest.mark.parametrize(

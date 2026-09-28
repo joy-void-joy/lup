@@ -12,7 +12,7 @@ from lup.providers.codex.subagents import CODEX_EFFORT, CodexModelTiers
 from lup.providers.drift_prompt import drift_hook
 from lup.providers.peer_delivery import delivery_artifacts, delivery_command
 from lup.providers.codex.native_tools import CodexNativeTools
-from lup.providers.session_naming import NamingSpelling, naming_hook
+from lup.providers.session_naming import NamingSpelling, Reopening, naming_hook
 from lup.providers.roster_prompt import (
     departure_hook,
     folded,
@@ -890,6 +890,10 @@ class CodexHookRenderer(ArtifactRenderer[HookSet]):
                         # exploring until its deadline instead of answering.
                         arguments=CodexNativeTools().arguments(),
                         waits=False,
+                        # Codex hands no hook a session's title, so a resume
+                        # is heard where the session starts, and the name the
+                        # reopened thread already has is read after it.
+                        reopening=Reopening(event="SessionStart", matcher="resume"),
                     ),
                 ),
             ]

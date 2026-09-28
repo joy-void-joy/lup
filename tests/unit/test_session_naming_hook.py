@@ -72,15 +72,22 @@ from pathlib import Path
 
 record = Path(__file__).with_name("asked.jsonl")
 answer = json.loads(Path(__file__).with_name("answer.json").read_text())
+kept = Path(__file__).with_name("kept.json")
 arguments = sys.argv[1:]
 if arguments[:1] == ["app-server"]:
     for line in sys.stdin:
         message = json.loads(line)
+        result = {}
         if message.get("method") == "thread/name/set":
             with record.open("a") as log:
                 log.write(json.dumps({"named": message["params"]}) + "\\n")
+        if message.get("method") == "thread/read":
+            with record.open("a") as log:
+                log.write(json.dumps({"read": message["params"]}) + "\\n")
+            name = json.loads(kept.read_text()) if kept.exists() else None
+            result = {"thread": {"id": message["params"]["threadId"], "name": name}}
         if "id" in message:
-            print(json.dumps({"id": message["id"], "result": {}}), flush=True)
+            print(json.dumps({"id": message["id"], "result": result}), flush=True)
     sys.exit(0)
 prompt = sys.stdin.read()
 with record.open("a") as log:
@@ -93,8 +100,9 @@ else:
 """One program standing in for both runtimes' CLIs, answering *answer.json*.
 
 Records every ask with the prompt it was handed, and every thread it was
-asked to name, beside itself: what the runtime would have been asked is what
-these tests assert, since no model is reached from a unit test."""
+asked to read or name, beside itself: what the runtime would have been asked
+is what these tests assert, since no model is reached from a unit test. A
+thread read answers with the name in *kept.json*, or none."""
 
 
 class Named(TypedDict):
@@ -102,12 +110,28 @@ class Named(TypedDict):
     name: str
 
 
+class Read(TypedDict):
+    threadId: str
+
+
 class Asked(TypedDict, total=False):
-    """One line of the stand-in's record: an ask and its prompt, or a thread named."""
+    """One line of the stand-in's record: an ask and its prompt, a thread read or named."""
 
     arguments: list[str]
     prompt: str
     named: Named
+    read: Read
+
+
+class Heard(TypedDict, total=False):
+    """What either runtime hands the hook, as far as these tests send it."""
+
+    session_id: str
+    cwd: str
+    hook_event_name: str
+    prompt: str
+    session_title: str
+    source: str
 
 
 def rendered(tree: str) -> Path:
@@ -177,13 +201,33 @@ class Session:
 
     def prompted(self, prompt: str, title: str | None = None) -> str:
         """What the hook prints for one prompt, with *title* where the chrome reports one."""
-        payload = {
-            "session_id": "root-session",
-            "cwd": str(self.repository),
-            "hook_event_name": self.event,
-            "prompt": prompt,
-            **({"session_title": title} if title is not None else {}),
-        }
+        payload = Heard(
+            session_id="root-session",
+            cwd=str(self.repository),
+            hook_event_name=self.event,
+            prompt=prompt,
+        )
+        if title is not None:
+            payload["session_title"] = title
+        return self.heard(payload)
+
+    def reopened(self) -> str:
+        """What the hook prints as Codex starts this session again from its thread."""
+        return self.heard(
+            Heard(
+                session_id="root-session",
+                cwd=str(self.repository),
+                hook_event_name="SessionStart",
+                source="resume",
+            )
+        )
+
+    def kept(self, name: str | None) -> None:
+        """The name the thread already has, as a thread read answers it."""
+        (self.bin / "kept.json").write_text(json.dumps(name))
+
+    def heard(self, payload: Heard) -> str:
+        """What the rendered guard prints for one event's payload."""
         return str(
             sh.sh(
                 str(self.guard),
@@ -347,20 +391,37 @@ def test_claude_carries_a_roster_rename_to_the_title_once(
     ("target", "tree", "event"),
     [pytest.param(claude_target, ".claude", CLAUDE_PROMPT_EVENT, id="claude")],
 )
-def test_claude_leaves_a_title_somebody_set_and_asks_no_more_than_declared(
+def test_claude_asks_no_more_than_declared_of_prompts_that_name_nothing(
     target: Callable[[Path], NativeHarnessComposition],
     tree: str,
     event: str,
     tmp_path: Path,
 ) -> None:
-    """A greeting names nothing and is asked again; a chosen title is never asked over."""
+    """A greeting names nothing and the next prompt is asked again, to the limit."""
     session = Session(target, tree, event, tmp_path, None)
 
-    assert session.prompted("hi", title="somebody-chose-this") == ""
-    assert session.asked() == []
     assert [session.prompted("hi", title="dev") for _ in range(4)] == [""] * 4
     assert len(session.asked()) == 3
     assert session.called() == "dev"
+
+
+@pytest.mark.parametrize(
+    ("target", "tree", "event"),
+    [pytest.param(claude_target, ".claude", CLAUDE_PROMPT_EVENT, id="claude")],
+)
+def test_claude_never_asks_over_a_title_somebody_set(
+    target: Callable[[Path], NativeHarnessComposition],
+    tree: str,
+    event: str,
+    tmp_path: Path,
+) -> None:
+    """The chosen title is taken up instead, and no model is asked for another."""
+    session = Session(target, tree, event, tmp_path, "never-asked")
+
+    assert session.prompted("hi", title="somebody-chose-this") == ""
+    assert session.prompted("Name each session", title="somebody-chose-this") == ""
+    assert session.asked() == []
+    assert session.called() == "somebody-chose-this"
 
 
 @pytest.mark.parametrize(
@@ -394,3 +455,122 @@ def test_codex_names_the_session_and_its_thread_without_holding_the_prompt(
     assert session.concluded(3)[2:] == [
         Asked(named=Named(threadId="root-session", name="chosen"))
     ]
+
+
+def test_only_the_runtime_that_hides_titles_listens_for_a_resume() -> None:
+    """Codex reports no title to a hook, so it is told as a thread is reopened.
+
+    Claude Code hands its prompt hook the title a reopened conversation kept,
+    so it needs no second event, and registers none.
+    """
+    claude = json.loads(
+        shipped(claude_target)[rendered(".claude") / "hooks" / "hooks.json"].content
+    )["hooks"]
+    codex = json.loads(
+        shipped(codex_target)[rendered(".codex") / "hooks" / "hooks.json"].content
+    )["hooks"]
+
+    assert not [
+        entry
+        for group in claude.get("SessionStart", [])
+        for entry in group["hooks"]
+        if GUARD_SCRIPT in entry["command"]
+    ]
+    [group] = [
+        group
+        for group in codex["SessionStart"]
+        if any(GUARD_SCRIPT in entry["command"] for entry in group["hooks"])
+    ]
+    assert group["matcher"] == "resume"
+
+
+@pytest.mark.parametrize(
+    ("target", "tree", "event"),
+    [pytest.param(claude_target, ".claude", CLAUDE_PROMPT_EVENT, id="claude")],
+)
+def test_claude_takes_up_a_title_set_where_the_session_is_looked_at(
+    target: Callable[[Path], NativeHarnessComposition],
+    tree: str,
+    event: str,
+    tmp_path: Path,
+) -> None:
+    """A reopened conversation's own title, then a `/rename`: the roster follows both.
+
+    Nothing is asked for either: the title was chosen, and the chrome already
+    shows it, so nothing is handed back.
+    """
+    session = Session(target, tree, event, tmp_path, "never-asked")
+
+    assert session.prompted("continue", title="old-conversation") == ""
+    assert session.called() == "old-conversation"
+    assert session.prompted("carry on", title="my-own-title") == ""
+    assert session.called() == "my-own-title"
+    assert session.asked() == []
+
+
+@pytest.mark.parametrize(
+    ("target", "tree", "event"),
+    [pytest.param(claude_target, ".claude", CLAUDE_PROMPT_EVENT, id="claude")],
+)
+def test_claude_hands_back_a_title_the_roster_had_to_number(
+    target: Callable[[Path], NativeHarnessComposition],
+    tree: str,
+    event: str,
+    tmp_path: Path,
+) -> None:
+    """A live session already answers to the title, so both move to the numbered one."""
+    session = Session(target, tree, event, tmp_path, "never-asked")
+    session.peers.join(mint_member_id(), session.repository, cli_name="taken")
+
+    answered = session.prompted("carry on", title="taken")
+
+    assert json.loads(answered)["hookSpecificOutput"]["sessionTitle"] == "taken-2"
+    assert session.called() == "taken-2"
+
+
+@pytest.mark.parametrize(
+    ("target", "tree", "event"),
+    [pytest.param(codex_target, ".codex", CODEX_PROMPT_EVENT, id="codex")],
+)
+def test_codex_takes_up_the_name_a_reopened_thread_already_has(
+    target: Callable[[Path], NativeHarnessComposition],
+    tree: str,
+    event: str,
+    tmp_path: Path,
+) -> None:
+    """Heard as the thread is reopened, read at the next prompt, and never asked for."""
+    session = Session(target, tree, event, tmp_path, "never-asked")
+    session.kept("kept-name")
+
+    assert session.reopened() == ""
+    assert session.prompted("continue") == ""
+    [read] = session.concluded(1)
+
+    assert read == Asked(read=Read(threadId="root-session"))
+    assert session.called() == "kept-name"
+
+
+@pytest.mark.parametrize(
+    ("target", "tree", "event"),
+    [pytest.param(codex_target, ".codex", CODEX_PROMPT_EVENT, id="codex")],
+)
+def test_codex_names_a_reopened_thread_that_had_no_name(
+    target: Callable[[Path], NativeHarnessComposition],
+    tree: str,
+    event: str,
+    tmp_path: Path,
+) -> None:
+    """A thread with no name of its own is asked for one, as a new session is."""
+    session = Session(target, tree, event, tmp_path, "session-naming-hook")
+    session.kept(None)
+
+    session.reopened()
+    session.prompted("Name each session after its work")
+    read, ask, named = session.concluded(3)
+
+    assert read == Asked(read=Read(threadId="root-session"))
+    assert ask.get("arguments", [])[:2] == ["exec", "--ephemeral"]
+    assert named == Asked(
+        named=Named(threadId="root-session", name="session-naming-hook")
+    )
+    assert session.called() == "session-naming-hook"
