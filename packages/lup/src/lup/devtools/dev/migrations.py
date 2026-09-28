@@ -138,6 +138,33 @@ class RenderedMigrations(BaseModel, frozen=True):
 
 DECLARED: list[Migration] = [
     Migration(
+        subjects=[
+            "ModuleRun.renamed",
+            "ModuleEdit",
+            "ModuleEdit.row",
+            "ModuleEdit.start",
+            "ModuleEdit.end",
+            "ModuleEdit.text",
+            "module_edits",
+            "apply_edits",
+        ],
+        reason=(
+            "`dev relocate` plans a file's rewrite as splices that may span rows "
+            "and split an import statement, which a one-row edit of a dotted run "
+            "could not express"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Call respellings(tokens, moves) from lup.devtools.dev.relocate "
+                    "for the splices a file's tokens need, and apply_splices(text, "
+                    "splices) to write them; destination(named, moves) answers where "
+                    "a dotted path lands, which ModuleRun.renamed used to."
+                )
+            ),
+        ],
+    ),
+    Migration(
         subjects=["last_release_tag"],
         reason=(
             "the migrations gate measures from the release commit rather than "
