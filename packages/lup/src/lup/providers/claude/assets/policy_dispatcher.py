@@ -63,6 +63,7 @@ from host import (
     sandbox_active,
 )
 from kernel.decision import KernelDecision, sandbox_escaped
+from caller_payload import caller_of
 from policy_data import (
     AGENT_IDENTITY_ENV,
     AUTONOMOUS_AGENT_IDENTITIES,
@@ -230,11 +231,15 @@ def dispatch(payload):
         payload["agent_type"] if "agent_type" in payload else ""
     ) or declared_identity(AGENT_IDENTITY_ENV)
     autonomous = agent_identity in AUTONOMOUS_AGENT_IDENTITIES
+    # Which conversation of this session made the call, so what it holds and
+    # what it is asked about are its own roster row's — a subagent's where
+    # one called — read the way the caller hook reads it for the tool server.
+    caller = caller_of(payload)
     if name == "Bash":
         unsandboxed = spent_escape(tool_input)
         # A command names no file it will write, so what it changed can only
         # be read afterwards against what stood here before it ran.
-        claim_window_opened(session_directory)
+        claim_window_opened(session_directory, caller)
         return bash_decision(
             tool_input["command"],
             managed_root(),
@@ -280,6 +285,7 @@ def dispatch(payload):
             ),
             path,
             session_directory,
+            caller,
         )
     if name == "Write":
         path = tool_input["file_path"]
@@ -297,14 +303,16 @@ def dispatch(payload):
             ),
             path,
             session_directory,
+            caller,
         )
     if name == "SendMessage":
         # Every string the call carries rather than a named field, the reading
         # the refusal table already takes: which key this runtime spells a
         # recipient in is its own business, and the roster answers for all of
-        # them. A target nobody on it answers to passes through untouched,
-        # which is what leaves subagent continuation and every other session
-        # this repository does not hold working untouched.
+        # them. A target nobody on it answers to passes through untouched, and
+        # so does this session or one of its own subagents: a subagent
+        # reporting to `main` or the session steering its subagent never
+        # leaves the process, so there is no record another worktree misses.
         return peer_send_decision(
             [value for value in tool_input.values() if isinstance(value, str)],
             session_directory,
@@ -506,7 +514,7 @@ def observe(payload):
         publish_edition(path)
         # The tier that needs no comparison: the call said which file, so the
         # claim it leaves is one another session can act on unqualified.
-        named_claim_recorded(path, session_root(payload))
+        named_claim_recorded(path, session_root(payload), caller_of(payload))
         # Repaired before checked, because the repair rewrites the file: run
         # the other way round and the diagnostics describe lines that have
         # already moved. Both reports reach the agent together, which is the
@@ -519,7 +527,7 @@ def observe(payload):
         return []
     # What the command changed, read against the snapshot its own PreToolUse
     # took, and contested where another session had a window open across it.
-    claim_window_closed(session_root(payload))
+    claim_window_closed(session_root(payload), caller_of(payload))
     return [
         *written_review(command, session_root(payload) or Path.cwd()),
         # What the boundary refused, named as the boundary rather than left

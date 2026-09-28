@@ -70,6 +70,7 @@ import kernel.lex as shell_lex
 from kernel.review import copied_paths, literal_input
 from kernel.shell import auto_escape_matches
 import policy_data as declared_policy
+from caller_payload import caller_of
 from policy_data import AUTO_ESCAPE_PREFIXES
 from policy_data import AGENT_IDENTITY_ENV, AUTONOMOUS_AGENT_IDENTITIES
 from policy_data import DIAGNOSTICS_COMMAND, REPAIR_COMMAND
@@ -124,7 +125,7 @@ def patch_changes(command, cwd):
     return changes
 
 
-def patch_decision(command, cwd, autonomous):
+def patch_decision(command, cwd, autonomous, caller):
     """Judge every decoded path, including the source of a move and peer claims."""
     return joined(
         [
@@ -140,6 +141,7 @@ def patch_decision(command, cwd, autonomous):
                 ),
                 change.path,
                 cwd,
+                caller,
             )
             for change in patch_changes(command, cwd)
         ]
@@ -163,17 +165,21 @@ def dispatch(payload, permission_request=False):
         agent_type in AUTONOMOUS_AGENT_IDENTITIES
         or declared_identity(AGENT_IDENTITY_ENV) in AUTONOMOUS_AGENT_IDENTITIES
     )
+    # Which conversation of this session made the call, so what it holds and
+    # what it is asked about are its own roster row's — a subagent's where
+    # one called — read the way the caller hook reads it for the tool server.
+    caller = caller_of(payload)
     if name == "Bash":
         envelope = literal_input(tool_input["command"], "apply_patch")
         if envelope is not None:
-            return patch_decision(envelope, session_directory, autonomous)
+            return patch_decision(envelope, session_directory, autonomous, caller)
         requested_escape = spent_escape(tool_input)
         # The snapshot a comparison afterwards is read against, taken only on
         # the event that runs immediately before the call: a permission
         # request runs before the prompt, and a window opened there would span
         # however long somebody took to answer it.
         if not permission_request:
-            claim_window_opened(session_directory)
+            claim_window_opened(session_directory, caller)
         escaped = requested_escape or auto_escape_matches(
             tool_input["command"], AUTO_ESCAPE_PREFIXES
         )
@@ -218,7 +224,9 @@ def dispatch(payload, permission_request=False):
         # not one per surface.
         return fetch_decision(tool_input["url"], session_directory)
     if name == "apply_patch":
-        return patch_decision(tool_input["command"], session_directory, autonomous)
+        return patch_decision(
+            tool_input["command"], session_directory, autonomous, caller
+        )
     if name == "collaborationspawn_agent":
         # Measured on 0.155.1: the spawn carries `task_name` and `message`,
         # and the hook names the tool this way. It carries no description to
@@ -427,7 +435,7 @@ def observe(payload):
         ]
         for target in changed:
             publish_edition(target)
-            named_claim_recorded(target, directory)
+            named_claim_recorded(target, directory, caller_of(payload))
         return [
             finding
             for target in changed
@@ -439,7 +447,7 @@ def observe(payload):
         ]
     # What the command changed, read against the snapshot its own PreToolUse
     # took, and contested where another session had a window open across it.
-    claim_window_closed(Path(root) if root else None)
+    claim_window_closed(Path(root) if root else None, caller_of(payload))
     return [
         *written_review(command, Path(root) if root else Path.cwd()),
         *boundary_account(

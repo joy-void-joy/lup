@@ -75,6 +75,29 @@ live does it reach the last claimant of all, so that a message to a session
 that has stopped is refused with when it left and what it concluded rather
 than queued for nobody. A message to one's own address is refused too.
 
+**An id always reaches its row.** A name is chosen and may spell anything,
+another member's id included, so an address is resolved as an id first and as
+a name only where no member carries it; `coordination roster` prints the id
+beside every name. That is what settles two rows a reader cannot tell apart by
+name, and every verb taking an id — a console's `--id`, a lock, a handoff —
+reaches a subagent's row by it as readily as a session's.
+
+**A native subagent is a row of its own**, beneath its session's. The session
+and its subagents share one tool server, so which of them made a coordination
+call is carried by the call: a hook both runtimes fire before a coordination
+tool runs writes the calling subagent's id into it, read off the runtime's own
+payload, and the verbs act on that subagent's row — its description, its
+name, its locks, its inbox — and leave the session's alone. The row is keyed
+by the runtime's subagent id under the session's, named what the spawn called
+it where the runtime records that (numbered like any default name), and live
+while its session is: it ends when the subagent stops, forwarding whatever it
+never read to its session, and with its session in any case. A subagent
+reaches the session that dispatched it at that session's address. What a
+subagent's calls change is held on its row, so a sibling writing there is
+asked, and the session writing under a subagent it has running is asked too;
+a subagent is not asked about its own session's claims, since the session
+dispatched it into that work.
+
 A launcher mints both halves and exports them as `LUP_COORDINATION_MEMBER` and
 `LUP_COORDINATION_NAME`, and can prove them, the way `LUP_AGENT_IDENTITY` is
 proven: a hook is spawned by the runtime CLI with the CLI's own environment, so
@@ -510,8 +533,11 @@ durable record every worktree folds and every later session can read; a native
 send is a call whose text exists only inside whichever process received it. So
 where both would reach the same member the native send is stopped and told
 where the durable one is, and where it reaches somebody the roster has never
-heard of nothing happens at all — a subagent this session started is on no
-repository roster, so continuing one goes through untouched.
+heard of nothing happens at all. A send between two conversations of one
+session goes through untouched as well — a subagent reporting to the session
+that dispatched it, or the session steering or continuing one of its own —
+because it never leaves the process, so there is no record another worktree
+could have read.
 
 A native *listing* of who can be reached is the different case, and refusing it
 would be wrong rather than merely strict. Measured against a live account, most

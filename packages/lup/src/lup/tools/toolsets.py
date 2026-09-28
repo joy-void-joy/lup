@@ -34,6 +34,7 @@ from typing import Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel
 
+from lup.coordination.policy import COORDINATION_SERVER
 from lup.coordination.wake import WakePath
 from lup.ledger.models import LedgerEdge, LedgerNode
 from lup.ledger.store import LedgerLayout
@@ -228,7 +229,7 @@ def registered(
     ]
 
 
-def coordination_group(name: str = "coordination") -> ToolGroup:
+def coordination_group(name: str = COORDINATION_SERVER) -> ToolGroup:
     """The repository's own verbs, bound to this session's identity and checkout.
 
     Built only for a session the roster knows by name. A process with no

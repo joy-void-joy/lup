@@ -136,6 +136,14 @@ class RosterMember(BaseModel, frozen=True):
     thinks to look. A peer says what it can actually do instead.
     """
 
+    parent: str = ""
+    """The session this member is a native subagent of, empty for every other member.
+
+    The one relation between rows the roster keeps: a subagent is somebody
+    else to the harness, with work and holdings of its own, and still part of
+    the session it runs in — listed beneath it, and gone when it is.
+    """
+
     cli_name: str = ""
     """What this member is called now, empty until something named it.
 
@@ -201,6 +209,7 @@ def folded_member(member: store.Member) -> RosterMember:
             store.text(wake.get("scope")),
         ),
         delivery=carried(store.text(member.get("delivery")), Delivery.INBOX),
+        parent=store.parent_of(member),
         cli_name=store.current_name(member),
     )
 

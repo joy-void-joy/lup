@@ -16,6 +16,7 @@ from types import ModuleType
 
 import pytest
 
+from lup.coordination.bare.store import Caller
 from lup.providers.codex.patch import patched_files, patched_paths
 from lup.types import JsonObject
 
@@ -294,9 +295,12 @@ class TestDispatchedPatches:
             calls.append(path)
             return []
 
+        def claimed(path: str, _cwd: Path, _caller: Caller) -> None:
+            calls.append(path)
+
         monkeypatch.setattr(dispatcher, "repaired_directives", record)
         monkeypatch.setattr(dispatcher, "file_diagnostics", record)
-        monkeypatch.setattr(dispatcher, "named_claim_recorded", record)
+        monkeypatch.setattr(dispatcher, "named_claim_recorded", claimed)
         monkeypatch.setenv("PLUGIN_DATA", str(tmp_path / "data"))
         payload = {
             "tool_name": "Bash" if shell else "apply_patch",

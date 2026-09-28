@@ -20,6 +20,7 @@ from pathlib import Path
 # resolve, for the interpreter and for a type checker alike.
 sys.path.insert(0, str(Path(__file__).parents[1] / "runtime"))
 from kernel.decision import KernelDecision, sandbox_escaped
+from caller_payload import caller_of
 from policy_data import (
     AGENT_IDENTITY_ENV,
     AUTONOMOUS_AGENT_IDENTITIES,
@@ -3310,11 +3311,20 @@ def peer_send_decision(values: list[str], cwd: Path | None) -> KernelDecision:
     offered rather than a named field, because which field a runtime spells a
     recipient in is that runtime's business and this half answers for all of
     them.
+
+    This session and its own subagents are left out of the spellings: a send
+    between two of them never leaves the process, so it leaves nothing any
+    other worktree could have read — a subagent reporting to the session that
+    dispatched it, or the session steering one of its own.
     """
     directory = peer_directory(cwd)
-    if directory is None:
+    if PEER_POLICY is None or directory is None:
         return decide_peer_send(values, [], PEER_POLICY)
-    return decide_peer_send(values, store.addresses(directory), PEER_POLICY)
+    return decide_peer_send(
+        values,
+        store.addresses(directory, beside=declared_identity(PEER_POLICY["member_env"])),
+        PEER_POLICY,
+    )
 
 
 def peer_listing_decision() -> KernelDecision:
@@ -3723,31 +3733,42 @@ def written_review(command: str, cwd: Path) -> list[str]:
     ]
 
 
-def foreign_claim_decision(path_text: str, cwd: Path | None) -> KernelDecision | None:
-    """Whether a live session other than this one is already in the named file.
+def foreign_claim_decision(
+    path_text: str, cwd: Path | None, caller: store.Caller
+) -> KernelDecision | None:
+    """Whether a live member other than this caller is already in the named file.
 
     The roster and the claim record are both live, so both are folded here and
     handed over as the names they resolve to — the kernel reads no filesystem
     and decides from what it is given.
+
+    *caller* is the conversation making the call, as its runtime's host half
+    read it off the payload: a subagent is judged as its own row, so its
+    sibling's claims are asked about and its session's are not.
     """
     directory = peer_directory(cwd)
     if PEER_POLICY is None or directory is None:
         return None
+    session = declared_identity(PEER_POLICY["member_env"])
     return decide_foreign_claim(
         path_text,
         store.claim_holders(
-            directory, path_text, declared_identity(PEER_POLICY["member_env"])
+            directory,
+            path_text,
+            store.acting_id(session, caller),
+            session=session,
         ),
         PEER_POLICY,
     )
 
 
-def claim_window_opened(cwd: Path | None) -> None:
+def claim_window_opened(cwd: Path | None, caller: store.Caller) -> None:
     """Snapshot the tree before a command whose writes no input names.
 
     Only a command needs this. Every other writing call says which file it is
     about, and a call that names its own target is attributed from the target
-    rather than from a comparison.
+    rather than from a comparison. The window is the calling row's own, so
+    two subagents' commands running at once each close their own.
     """
     if PEER_POLICY is None:
         return
@@ -3755,43 +3776,50 @@ def claim_window_opened(cwd: Path | None) -> None:
         cwd,
         PEER_POLICY["store"],
         PEER_POLICY["windows_dir"],
-        declared_identity(PEER_POLICY["member_env"]),
+        store.acting_id(declared_identity(PEER_POLICY["member_env"]), caller),
     )
 
 
-def claim_window_closed(cwd: Path | None) -> None:
+def claim_window_closed(cwd: Path | None, caller: store.Caller) -> None:
     """Attribute what a command changed, contested where nothing could tell."""
     if PEER_POLICY is None:
         return
     directory = peer_directory(cwd)
-    mine = declared_identity(PEER_POLICY["member_env"])
+    session = declared_identity(PEER_POLICY["member_env"])
     closed = close_claim_window(
-        cwd, PEER_POLICY["store"], PEER_POLICY["windows_dir"], mine
+        cwd,
+        PEER_POLICY["store"],
+        PEER_POLICY["windows_dir"],
+        store.acting_id(session, caller),
     )
     if directory is not None:
-        store.record_claims(directory, mine, closed["paths"])
+        store.record_claims(
+            directory, store.acting(directory, session, caller), closed["paths"]
+        )
 
 
-def named_claim_recorded(path_text: str, cwd: Path | None) -> None:
+def named_claim_recorded(
+    path_text: str, cwd: Path | None, caller: store.Caller
+) -> None:
     """Attribute a change to the exact file the call named.
 
     The tier that needs no comparison: the call said which file, so what this
-    leaves on the session's own member file is evidence of the state that
-    session left the path in, rather than of what a before-and-after could
-    narrow the writer down to.
+    leaves on the calling row's own file — the subagent's where one made the
+    call, joined on the way — is evidence of the state that row left the path
+    in, rather than of what a before-and-after could narrow the writer down to.
     """
     directory = peer_directory(cwd)
     if PEER_POLICY is None or directory is None or not path_text:
         return
     store.record_claims(
         directory,
-        declared_identity(PEER_POLICY["member_env"]),
+        store.acting(directory, declared_identity(PEER_POLICY["member_env"]), caller),
         [str(Path(path_text).resolve())],
     )
 
 
 def edit_claim_decision(
-    verdict: KernelDecision, path_text: str, cwd: Path | None
+    verdict: KernelDecision, path_text: str, cwd: Path | None, caller: store.Caller
 ) -> KernelDecision:
     """One edit's own verdict, settled together with any claim over its path.
 
@@ -3799,7 +3827,7 @@ def edit_claim_decision(
     answer about the same file: what the content gates decided, and whether
     somebody else is already in it, are two questions and one approval.
     """
-    return settled_with_claim(verdict, foreign_claim_decision(path_text, cwd))
+    return settled_with_claim(verdict, foreign_claim_decision(path_text, cwd, caller))
 
 
 def announced(effect, tool_name, reason, dialogs=("Edit", "Write")):
@@ -3961,11 +3989,15 @@ def dispatch(payload):
         payload["agent_type"] if "agent_type" in payload else ""
     ) or declared_identity(AGENT_IDENTITY_ENV)
     autonomous = agent_identity in AUTONOMOUS_AGENT_IDENTITIES
+    # Which conversation of this session made the call, so what it holds and
+    # what it is asked about are its own roster row's — a subagent's where
+    # one called — read the way the caller hook reads it for the tool server.
+    caller = caller_of(payload)
     if name == "Bash":
         unsandboxed = spent_escape(tool_input)
         # A command names no file it will write, so what it changed can only
         # be read afterwards against what stood here before it ran.
-        claim_window_opened(session_directory)
+        claim_window_opened(session_directory, caller)
         return bash_decision(
             tool_input["command"],
             managed_root(),
@@ -4011,6 +4043,7 @@ def dispatch(payload):
             ),
             path,
             session_directory,
+            caller,
         )
     if name == "Write":
         path = tool_input["file_path"]
@@ -4028,14 +4061,16 @@ def dispatch(payload):
             ),
             path,
             session_directory,
+            caller,
         )
     if name == "SendMessage":
         # Every string the call carries rather than a named field, the reading
         # the refusal table already takes: which key this runtime spells a
         # recipient in is its own business, and the roster answers for all of
-        # them. A target nobody on it answers to passes through untouched,
-        # which is what leaves subagent continuation and every other session
-        # this repository does not hold working untouched.
+        # them. A target nobody on it answers to passes through untouched, and
+        # so does this session or one of its own subagents: a subagent
+        # reporting to `main` or the session steering its subagent never
+        # leaves the process, so there is no record another worktree misses.
         return peer_send_decision(
             [value for value in tool_input.values() if isinstance(value, str)],
             session_directory,
@@ -4237,7 +4272,7 @@ def observe(payload):
         publish_edition(path)
         # The tier that needs no comparison: the call said which file, so the
         # claim it leaves is one another session can act on unqualified.
-        named_claim_recorded(path, session_root(payload))
+        named_claim_recorded(path, session_root(payload), caller_of(payload))
         # Repaired before checked, because the repair rewrites the file: run
         # the other way round and the diagnostics describe lines that have
         # already moved. Both reports reach the agent together, which is the
@@ -4250,7 +4285,7 @@ def observe(payload):
         return []
     # What the command changed, read against the snapshot its own PreToolUse
     # took, and contested where another session had a window open across it.
-    claim_window_closed(session_root(payload))
+    claim_window_closed(session_root(payload), caller_of(payload))
     return [
         *written_review(command, session_root(payload) or Path.cwd()),
         # What the boundary refused, named as the boundary rather than left

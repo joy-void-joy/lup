@@ -43,7 +43,13 @@ from typing import TypedDict
 # interpreter and for a type checker alike.
 sys.path.insert(0, str(Path(__file__).parent))
 from coordination.mail import Message, consume, spoken, waiting
-from coordination.store import MEMBER_KIND, Actor, conversation_of, text
+from coordination.store import (
+    MEMBER_KIND,
+    Actor,
+    conversation_of,
+    subagent_actor,
+    text,
+)
 
 EVENT_FIELD = "hookEventName"
 EVENT_NAME = "PreToolUse"
@@ -101,11 +107,15 @@ def publish(answer: HookOutput) -> None:
 
 
 def deliver(
-    root: Path, member_id: str, send: Callable[[HookOutput], None] = publish
+    root: Path,
+    member_id: str,
+    agent: str = "",
+    send: Callable[[HookOutput], None] = publish,
 ) -> HookOutput | None:
-    """Take this member's mail and say what the session should be told.
+    """Take one conversation's mail and say what it should be told.
 
-    The inbox is keyed by the conversation this session is on the roster as,
+    The inbox is keyed by the conversation this call is on the roster as —
+    this session's, or *agent*'s where the call is one of its subagents' —
     spelled by the shipped fold rather than assembled here: a sender writes to
     the same key through the typed half, and a directory only one of them
     could name is a message nobody receives.
@@ -114,7 +124,12 @@ def deliver(
     arrived between the listing and the deletion waits for the next call
     rather than leaving unseen.
     """
-    inbox = conversation_of(Actor(kind=MEMBER_KIND, id=member_id))
+    reader = (
+        subagent_actor(member_id, agent)
+        if agent
+        else Actor(kind=MEMBER_KIND, id=member_id)
+    )
+    inbox = conversation_of(reader)
     messages = waiting(root, inbox)
     if not messages:
         return None
@@ -134,7 +149,13 @@ class HookInput(TypedDict, total=False):
 
 
 def main() -> None:
-    """Deliver only a root tool event; diagnose failures without blocking work."""
+    """Deliver each tool event its own conversation's mail; diagnose failures without blocking work.
+
+    A subagent's event, which carries its ``agent_id``, is handed that
+    subagent's own inbox and never its session's: the session's mail waits for
+    the session's own next call. An event naming an agent type and no id is
+    not a subagent this session's roster holds a row for, and takes nothing.
+    """
     try:
         event: HookInput = json.load(sys.stdin)
         member = sys.argv[2]
@@ -142,13 +163,15 @@ def main() -> None:
             event.get("session_id")
         ):
             return
-        if text(event.get("agent_id")) or text(event.get("agent_type")):
+        agent = text(event.get("agent_id"))
+        if not agent and text(event.get("agent_type")):
             return
-        if not member or not all(
-            character.isalnum() or character in "-_" for character in member
+        if not all(
+            name and all(character.isalnum() or character in "-_" for character in name)
+            for name in (member, agent or member)
         ):
             return
-        deliver(Path(sys.argv[1]), member)
+        deliver(Path(sys.argv[1]), member, agent)
     except Exception as error:
         print(
             f"Peer mail delivery failed ({type(error).__name__}); mail remains pending. Check hook input and store permissions.",

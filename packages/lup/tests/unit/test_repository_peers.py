@@ -555,6 +555,26 @@ async def test_a_rewind_unsays_the_description_and_the_verbs_ask_again(
     )
 
 
+async def test_a_send_reports_what_is_queued_for_its_recipient(
+    tmp_path: Path,
+) -> None:
+    """The recipient's queue, this message included, and never the sender's own."""
+    peers, _reviewer = joined(tmp_path, "reviewer")
+    tools = verbs(peers, "abc123", tmp_path / "dev")
+    await tools["coordination_describe"].handler({"description": "rewriting"})
+    peers.send("dev", "waiting for the sender, not the recipient")
+
+    first = await tools["coordination_send"].handler(
+        {"address": "reviewer", "text": "one"}
+    )
+    second = await tools["coordination_send"].handler(
+        {"address": "reviewer", "text": "two"}
+    )
+
+    assert json.loads(response_text(first))["outstanding"] == 1
+    assert json.loads(response_text(second))["outstanding"] == 2
+
+
 async def test_a_send_to_ones_own_address_is_refused(tmp_path: Path) -> None:
     """The name resolved, to the sender, which is the one peer it cannot mean."""
     peers = RepositoryPeers(tmp_path)
