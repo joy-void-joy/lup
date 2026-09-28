@@ -108,6 +108,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `dev py info` | Inspect a Python object — adapts to modules, classes, functions, values. |
 | `dev py source` | View source code for a Python object, or a package file tree with --tree. |
 | `dev py imports` | Show what a module imports, or what imports it (--reverse). |
+| `dev py layers` | Show how a package&#x27;s top-level entries import each other, and which pairs close. |
 | `dev py text` | Search literal source text within explicitly selected Python paths. |
 | `dev py search` | Search project source and installed package exports by name. |
 | `dev usage claude` | Show live Claude Code usage with pacing bars (Anthropic OAuth). |
