@@ -14,10 +14,9 @@ import asyncio
 
 from pydantic import AnyHttpUrl, BaseModel, Field
 
-from lup import Claude
+from lup import Claude, InnerSandbox
 from lup.harness.models import HookSet
 from lup.providers.claude.hooks import CLAUDE_SEMANTICS
-from lup.launch.declaration import InnerSandbox
 from lup.providers.claude import ClaudeTools
 from lup.policy.hooks import LupHooksConfig
 from lup.policy.enforcement import SemanticToolPolicy, create_policy_hooks

@@ -6,14 +6,31 @@ open a session by importing an adapter — the tier
 `seam-boundary` fails the build over everywhere else in the library. The
 agents below are what prevents that, asserted here so the root cannot quietly
 become a vocabulary.
+
+The fields a launch adds to an agent's declaration are taken from the same
+door, and resolved the same way: each is the class its declaration module
+defines, and none of the machinery behind them loads until one is named.
 """
 
 import subprocess
 import sys
 
 import lup
+import lup.launch.declaration as declaration
 
 AGENTS = {"Claude", "Codex"}
+
+LAUNCH_VOCABULARY = {
+    "InnerSandbox",
+    "Latest",
+    "Member",
+    "Mount",
+    "NoSandbox",
+    "OuterContainer",
+    "Pick",
+    "Recording",
+    "Reopen",
+}
 
 
 def in_a_fresh_interpreter(source: str) -> str:
@@ -47,6 +64,16 @@ def test_root_exports_only_portable_runtime_conveniences() -> None:
         # The one way to name a model no catalog lists, which every model
         # argument a root agent takes accepts.
         "CustomModel",
+        # The fields a launch adds to an agent's declaration.
+        "InnerSandbox",
+        "Latest",
+        "Member",
+        "Mount",
+        "NoSandbox",
+        "OuterContainer",
+        "Pick",
+        "Recording",
+        "Reopen",
         "SessionId",
         "SessionSummary",
         "Turn",
@@ -101,3 +128,44 @@ def test_naming_an_agent_loads_its_adapter_but_no_provider_sdk() -> None:
     )
 
     assert reported == "lup.providers.claude lup.providers.codex False"
+
+
+def test_each_launch_field_is_the_class_its_declaration_module_defines() -> None:
+    """The root hands back the declaration's own class, not a copy or a stand-in.
+
+    Identity rather than equality of names: a field taken from the root and one
+    taken from `lup.launch.declaration` have to be the same class, or a
+    declaration built from one would fail an `isinstance` against the other.
+    """
+    assert LAUNCH_VOCABULARY <= set(lup.__all__)
+    assert [
+        name
+        for name in sorted(LAUNCH_VOCABULARY)
+        if getattr(lup, name) is not getattr(declaration, name)
+    ] == []
+
+
+def test_importing_lup_loads_no_launch_machinery() -> None:
+    """The launch vocabulary is deferred for the same reason the agents are.
+
+    Its declaration module stands beside the harness, policy and sandbox
+    machinery a launch composes, several hundred modules deep; a caller who
+    imported `lup` for a type annotation pays for none of it.
+    """
+    reported = in_a_fresh_interpreter(
+        "import sys, lup; print('lup.launch' in sys.modules)"
+    )
+
+    assert reported == "False"
+
+
+def test_naming_a_launch_field_loads_its_declaration_but_no_provider_sdk() -> None:
+    """A launch field is provider-neutral, so naming one reaches no SDK either."""
+    reported = in_a_fresh_interpreter(
+        "import sys; "
+        "from lup import InnerSandbox, Reopen; "
+        "print(InnerSandbox.__module__, Reopen.__module__, "
+        "'claude_agent_sdk' in sys.modules)"
+    )
+
+    assert reported == "lup.launch.declaration lup.launch.declaration False"

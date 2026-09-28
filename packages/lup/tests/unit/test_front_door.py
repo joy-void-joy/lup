@@ -1,9 +1,9 @@
 """The front-door rule: nothing inside the library imports from the package root.
 
 The root re-exports the library's public names for its users and resolves the
-agents lazily. These pin both spellings that read it from inside, the module
-each diagnostic sends a reader to, the scope that leaves the front door's users
-alone, and the live library at zero.
+agents and the launch vocabulary lazily. These pin both spellings that read it
+from inside, the module each diagnostic sends a reader to, the scope that
+leaves the front door's users alone, and the live library at zero.
 """
 
 import importlib
@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from lup import DEFERRED
 from lup.devtools.dev.boundaries import library_sources
 from lup.execution.shell import git
 from lup.harness.codescan.boundaries import (
@@ -33,10 +34,12 @@ ROOT = source(
     "from typing import TYPE_CHECKING\n"
     "from lup.sessions.surface import Agent\n"
     "if TYPE_CHECKING:\n"
+    "    from lup.launch.declaration import InnerSandbox\n"
     "    from lup.providers.claude import Claude\n",
     FRONT_DOOR_PATH,
 )
-"""A root re-exporting one name eagerly and one agent it resolves lazily."""
+"""A root re-exporting one name eagerly, and one agent and one launch field it
+resolves lazily."""
 
 
 def audit(text: str, path: str = LIBRARY_MODULE) -> list[RuleFinding]:
@@ -57,6 +60,12 @@ def audit(text: str, path: str = LIBRARY_MODULE) -> list[RuleFinding]:
             LIBRARY_MODULE,
             1,
             "from lup.providers.claude import Claude",
+        ),
+        (
+            "from lup import InnerSandbox\n",
+            LIBRARY_MODULE,
+            1,
+            "from lup.launch.declaration import InnerSandbox",
         ),
         (
             "import lup\n\nagent = lup.Agent\n",
@@ -98,6 +107,7 @@ def audit(text: str, path: str = LIBRARY_MODULE) -> list[RuleFinding]:
     ids=[
         "from-import",
         "lazy-agent",
+        "lazy-launch-field",
         "attribute",
         "attribute-through-a-submodule-import",
         "aliased-root",
@@ -215,3 +225,23 @@ def test_the_live_library_reads_nothing_through_its_front_door(
     findings = front_door_findings(AuditedProject(sources=library))
 
     assert [f"{item.path}:{item.line} {item.message}" for item in findings] == []
+
+
+def test_the_live_root_names_each_deferred_name_where_its_table_resolves_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The table the module hook reads and the block a checker reads are one list.
+
+    Spelled twice because neither can be derived from the other: the
+    ``TYPE_CHECKING`` block never runs, and a checker cannot read a table. A
+    row the block lacks is a name no checker sees and no diagnostic can send a
+    reader to; a block naming another module types a name as a class the hook
+    never hands back.
+    """
+    library = live_library(monkeypatch)
+    [root] = [held for held in library if held.path == Path(FRONT_DOOR_PATH)]
+    exports = front_door_exports(root.text)
+
+    assert {
+        name: module for name, module in exports.items() if name in DEFERRED
+    } == DEFERRED

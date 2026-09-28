@@ -1,4 +1,4 @@
-"""Every shipped example takes its agent from the package root.
+"""Every shipped example takes its agent and its launch fields from the root.
 
 The corpus that teaches the library is the first thing a reader copies, so what
 it reaches for is what they learn to reach for. A root exporting no agent could
@@ -7,11 +7,13 @@ directly, which is the one tier `seam-boundary` fails the build over everywhere
 else in the library, and the front door would be the defect.
 
 This fails on the import line rather than on the day somebody tries the
-example, and it is deliberately about the *agent* rather than about adapter
-imports in general: an example whose whole subject is provider-specific policy
-legitimately names `InnerSandbox`. What none of them may do is reach past
-the root for `Claude` or `Codex`, because a reader who has to know
-`lup.providers.claude` exists to get an agent has already been failed.
+example, and it is deliberately about the names the root resolves on first
+access -- the agents and the fields a launch adds to one -- rather than about
+library imports in general: an example whose whole subject is policy
+legitimately reaches into `lup.policy`. What none of them may do is reach past
+the root for `Claude` or `InnerSandbox`, because a reader who has to know
+`lup.providers.claude` or `lup.launch.declaration` exists to declare an agent
+has already been failed.
 """
 
 import ast
@@ -19,11 +21,13 @@ from pathlib import Path
 
 import pytest
 
+from lup import DEFERRED
+
 EXAMPLES = Path(__file__).resolve().parents[2] / "examples"
 
-# The agents the root exports. Importing one from the adapter defining it is
-# what this test refuses; the adapters are where they live, not where an
-# example is supposed to find them.
+# The agents the root exports, which every example running a turn between them
+# has to demonstrate; the adapters are where they live, not where an example
+# is supposed to find them.
 AGENTS = {"Claude", "Codex"}
 
 
@@ -44,18 +48,18 @@ def imported_names(tree: ast.Module) -> list[tuple[str, str]]:
 
 
 @pytest.mark.parametrize("path", example_sources(), ids=lambda p: p.name)
-def test_an_agent_is_taken_from_the_package_root(path: Path) -> None:
+def test_a_deferred_name_is_taken_from_the_package_root(path: Path) -> None:
     imported = imported_names(ast.parse(path.read_text(encoding="utf-8")))
     reached = [
         (module, name)
         for module, name in imported
-        if name in AGENTS and module != "lup"
+        if name in DEFERRED and module != "lup"
     ]
 
     assert not reached, (
-        f"{path.name} takes its agent from {reached[0][0]!r}. An agent is "
-        "exported from the package root — `from lup import Claude` — and an "
-        "example that reaches past it teaches a reader to do the same."
+        f"{path.name} takes {reached[0][1]} from {reached[0][0]!r}. It is "
+        f"exported from the package root — `from lup import {reached[0][1]}` — "
+        "and an example that reaches past it teaches a reader to do the same."
     )
 
 
