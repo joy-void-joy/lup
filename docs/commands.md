@@ -274,6 +274,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | Command | What it does |
 | --- | --- |
 | `sync upstream` | Print a measured upstream defect, or list the ones declared. |
+| `sync usage` | Show what each tracked project imports from a package, name by name. |
 | `sync status` | Show tracked projects and their sync status (read-only). |
 | `sync fetch` | Clone missing repos and fetch cached ones (network + writes). |
 | `sync log` | List commits to review: everything upstream added since the last sync. |
