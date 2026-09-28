@@ -30,6 +30,8 @@ from lup.execution.shell import git
 
 Side = Literal["ours", "theirs"]
 
+# lup: ignore[library-default] — git's own index stage numbers for a
+# conflicted path, which no project chooses
 STAGES: dict[Literal["base", "ours", "theirs"], int] = {
     "base": 1,
     "ours": 2,

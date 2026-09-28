@@ -25,13 +25,13 @@ from collections.abc import Iterator
 from itertools import groupby
 from operator import attrgetter
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 
 from pydantic import BaseModel, Field
 
 ImportKind = Literal["load", "deferred", "typing"]
 
-KINDS: list[ImportKind] = ["load", "deferred", "typing"]
+KINDS: list[ImportKind] = list(get_args(ImportKind))
 """Every place an import can run from, in the order a reader weighs them."""
 
 
