@@ -9,8 +9,8 @@ import asyncio
 import logging
 import os
 import shutil
-from collections.abc import Callable, Sequence
-from contextlib import AbstractContextManager, nullcontext
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from datetime import datetime
 from pathlib import Path
 from tempfile import mkdtemp
@@ -26,8 +26,8 @@ from lup.providers.login import ProviderLogin
 from lup.providers.profile_tree import profile_directory
 from lup.providers.profiles import DefaultHomeProfile, ProfileDirectory
 from lup.providers.user_config import UserConfig, UserConfigFile
-from lup.devtools.harness.config_volume import HomeSeedPlaces, named_file
-from lup.devtools.harness.contained import contained_argv, read_config_home
+from lup.launch.config_volume import HomeSeedPlaces, named_file
+from lup.launch.container import contained_argv, read_config_home
 from lup.providers.claude.model_choice import (
     claude_default_effort,
     claude_model_id,
@@ -78,7 +78,8 @@ from lup.policy.boundary import BoundaryPreflight
 from lup.policy.identity import POLICY_ROOT_ENV
 from lup.policy.profiles import compile_boundary, depended_on, measured
 from lup.policy.snapshots import accept_destination_policies, destination_authorities
-from lup.devtools.pointer_trust import judged_roots, store_exposure
+from lup.launch.pointer_trust import judged_roots, store_exposure
+from lup.launch.refusal import LaunchRefused
 from lup.sandbox.rail import (
     AccessibleRoot,
     fleet_lease,
@@ -136,7 +137,7 @@ from lup.devtools.harness.drift import (
     generate_with_report,
 )
 from lup.harness.generate import NativeHarnessComposition
-from lup.devtools.harness.preflight import (
+from lup.launch.preflight import (
     LaunchSentinels,
     ROOT_VARIABLE,
     exclude_sandbox_placeholders,
@@ -147,6 +148,22 @@ from lup.devtools.harness.preflight import (
 )
 from lup.devtools.dev.worktree import RelocationHint, refuse_redirected_pointers
 from lup.devtools.layout import find_tree_dir
+
+
+@contextmanager
+def usage_refusals() -> Iterator[None]:
+    """Say a launch the library refused as this command line's own usage error.
+
+    The library refuses in its own exception, which names what to fix and
+    nothing about a command line; here the refusal reaches the operator the
+    way every other bad invocation does, as a usage error and its exit code.
+    Held once at each entry point -- the launchers and the commands that ask
+    the library for a boundary -- rather than at every call into it.
+    """
+    try:
+        yield
+    except LaunchRefused as refusal:
+        raise typer.BadParameter(str(refusal)) from refusal
 
 
 def declared_mounts(
@@ -1459,6 +1476,7 @@ def placed_inbox(
     )
 
 
+@usage_refusals()
 def launch_claude(
     composition: NativeHarnessComposition,
     extra_args: list[str],
@@ -1892,6 +1910,7 @@ def prepare_codex_plugin(
 
 # For the reason spelled at `launch_claude`: the mode is one optional argument
 # among the ones that actually decide how a runtime starts.
+@usage_refusals()
 def launch_codex(
     composition: NativeHarnessComposition,
     extra_args: list[str],

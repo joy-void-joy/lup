@@ -298,12 +298,12 @@ wall, and the wall does not widen a session that was only meant to plan.
 **`outer` needs a program, because a container is not something a request
 can conjure.** The image, the mount table, the credential and the login are
 the application's, so it builds the wrapper with
-`lup.devtools.harness.contained.contained_cli` and names the result:
+`lup.launch.container.contained_cli` and names the result:
 
 ```python
 from pathlib import Path
 
-from lup.devtools.harness.contained import contained_cli
+from lup.launch.container import contained_cli
 from lup.harness.image import Image
 from lup.harness.requirements import Manifest
 from lup.providers.claude.login import CLAUDE_LOGIN

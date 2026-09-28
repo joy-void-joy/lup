@@ -8,7 +8,7 @@ import pytest
 from lup.devtools.harness import launch
 from lup.launch.declaration import LaunchSandbox
 from lup.devtools.harness.policy_refresh import refresh_destination_policy
-from lup.devtools.harness.preflight import (
+from lup.launch.preflight import (
     LaunchSentinels,
     ROOT_VARIABLE,
     NONCE_VARIABLE,

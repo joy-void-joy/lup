@@ -498,7 +498,7 @@ class SessionEgress(BaseModel, frozen=True):
         exactly that: a filtered session opened, the launch said the boundary
         was up, the proxy was already gone, and three passes read it as a name
         that would not resolve. A corpse costs nothing and is the only copy of
-        why. :func:`~lup.devtools.harness.contained.start_egress` reads it and
+        why. :func:`~lup.launch.container.start_egress` reads it and
         then clears it, so at most one is ever kept.
         """
         return [

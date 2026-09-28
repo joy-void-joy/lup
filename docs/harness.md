@@ -216,17 +216,12 @@ half lives in `packages/lup/src/lup/devtools/harness/`:
 - `app.py` — Typer wiring only; every command body lives elsewhere
 - `composition.py` — builders wiring concrete adapter capabilities, and the
   target roster a CLI selector names
-- `generate.py` — recipes, drift inspection, and atomic materialization
 - `drift.py` — console drift reporting for `generate` and `check`
 - `reconcile.py` — drift classification and the source-patch flow
 - `doctor.py` — runtime evidence against the `lup.harness.evidence` ledger
 - `resolve.py` — persisted-resolver glue: broker, snapshots, factories
 - `launch.py` — the shared preflight a launcher opens a session past
   (generation, runtime probes, base freshness) and the native launchers
-- `preflight.py` — minting a launch's boundary, measuring it, and writing it
-  down for the session
-- `contained.py` — opening a native session inside the container the project
-  declares
 - `settings.py` — rendering a runtime's project settings from what the
   harness declares
 - `accretion.py` — what the boundary has been widened for, and which of it
@@ -238,6 +233,23 @@ half lives in `packages/lup/src/lup/devtools/harness/`:
 - `sandbox.py` — exercising the Python sandbox through its container and
   persistent REPL
 - `generated_paths.py` — which file each typed declaration compiles to
+
+What generation and a launch do for any project declaring an agent is the
+library's rather than the CLI's. `lup.harness.generate` holds the recipes,
+drift inspection, and atomic materialization, and
+`packages/lup/src/lup/launch/` the launch:
+
+- `preflight.py` — minting a launch's boundary, measuring it, and writing it
+  down for the session
+- `container.py` — opening a native session inside the container the project
+  declares
+- `config_volume.py`, `environments.py`, `superseded.py` — what a contained
+  session keeps between launches: its configuration volume, its project
+  environments, and what a split volume left to sweep
+- `pointer_trust.py` — which roots host git may enter, and which
+  repositories lup comes to trust
+- `refusal.py` — `LaunchRefused`, the refusal a launch that cannot open
+  raises, which a command line turns into its own usage error
 
 ## What the plugin ships
 

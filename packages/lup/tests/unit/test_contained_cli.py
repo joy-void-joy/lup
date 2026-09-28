@@ -16,7 +16,7 @@ from unittest.mock import Mock
 import pytest
 from pydantic import BaseModel
 
-from lup.devtools.harness import contained
+from lup.launch import container
 from lup.policy.identity import POLICY_ROOT_ENV
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.providers.codex.login import CODEX_LOGIN
@@ -30,7 +30,7 @@ ARGV = ["podman", "run", "-i", "image"]
 def recorded(monkeypatch: pytest.MonkeyPatch) -> Mock:
     """The argv builder, stubbed, so the call it was made with can be read."""
     builder = Mock(side_effect=lambda *args, **kwargs: list(ARGV))
-    monkeypatch.setattr(contained, "contained_argv", builder)
+    monkeypatch.setattr(container, "contained_argv", builder)
     return builder
 
 
@@ -39,7 +39,7 @@ def written(tmp_path: Path, recorded: Mock, lease: Lease | None = None) -> Path:
     root = tmp_path / "checkout"
     root.mkdir()
     sh.Command("git").bake("-C", str(root), _tty_out=False)("init", "-b", "main")
-    return contained.contained_cli(
+    return container.contained_cli(
         tmp_path / "enter.sh",
         Mock(),
         Mock(),
@@ -101,14 +101,14 @@ def test_codex_prepares_the_container_home_before_a_wrapper_can_start(
     image = Mock(config_home="/private/runtime-home")
     execute = Mock(return_value="verified\n")
     monkeypatch.setattr(sh, "Command", Mock(return_value=execute))
-    monkeypatch.setattr(contained, "worker_lease", lambda _root: Lease())
+    monkeypatch.setattr(container, "worker_lease", lambda _root: Lease())
     wrapper = tmp_path / "enter.sh"
     if worker:
-        contained.worker_cli(
+        container.worker_cli(
             wrapper, image, Mock(), root, None, None, CODEX_LOGIN, "codex"
         )
     else:
-        contained.contained_cli(wrapper, image, Mock(), root, "codex", CODEX_LOGIN)
+        container.contained_cli(wrapper, image, Mock(), root, "codex", CODEX_LOGIN)
     assert CODEX_LOGIN.home_preparation is not None
     execute.assert_called_once_with(
         *ARGV[1:],
@@ -126,10 +126,10 @@ def test_a_failed_codex_home_preparation_never_publishes_a_wrapper(
 ) -> None:
     execute = Mock(side_effect=RuntimeError("plugin missing"))
     monkeypatch.setattr(sh, "Command", Mock(return_value=execute))
-    monkeypatch.setattr(contained, "worker_lease", lambda _root: Lease())
+    monkeypatch.setattr(container, "worker_lease", lambda _root: Lease())
     wrapper = tmp_path / "enter.sh"
     with pytest.raises(RuntimeError, match="plugin missing"):
-        contained.contained_cli(
+        container.contained_cli(
             wrapper, Mock(config_home="/cfg"), Mock(), tmp_path, "codex", CODEX_LOGIN
         )
     assert not wrapper.exists()
@@ -180,13 +180,13 @@ with open(os.environ["LUP_NATIVE_PROBE_RECORD"], "a") as record:
     monkeypatch.setenv("LUP_NATIVE_PROBE_RECORD", str(log))
     monkeypatch.setenv(POLICY_ROOT_ENV, str(tmp_path / "unrelated ambient project"))
     monkeypatch.setattr(
-        contained,
+        container,
         "contained_argv",
         Mock(return_value=[str(engine), "run", "-i", "image"]),
     )
-    monkeypatch.setattr(contained, "worker_lease", lambda _root: Lease())
+    monkeypatch.setattr(container, "worker_lease", lambda _root: Lease())
     monkeypatch.chdir(tmp_path)
-    wrapper = contained.contained_cli(
+    wrapper = container.contained_cli(
         tmp_path / "enter.sh",
         Mock(config_home="/cfg"),
         Mock(),

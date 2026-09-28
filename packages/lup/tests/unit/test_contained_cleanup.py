@@ -17,11 +17,11 @@ import pytest
 import sh
 
 import lup.devtools.harness.clean as clean
-import lup.devtools.harness.contained as contained
+import lup.launch.container as contained
 from lup.devtools.dev.worktree import said_environment_removed
-from lup.devtools.harness.config_volume import HomeHelper
-from lup.devtools.harness.superseded import SupersededFile, SupersededRecord
-from lup.devtools.harness.environments import (
+from lup.launch.config_volume import HomeHelper
+from lup.launch.superseded import SupersededFile, SupersededRecord
+from lup.launch.environments import (
     claim_of,
     claimed,
     environment_directory,
@@ -160,13 +160,11 @@ def engine(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Engine:
     held = Engine()
     monkeypatch.setattr(sh, "Command", lambda binary: held)
     monkeypatch.setattr(clean, "sibling_worktrees", lambda root: [])
-    monkeypatch.setattr(
-        "lup.devtools.harness.config_volume.sibling_worktrees", lambda root: []
-    )
+    monkeypatch.setattr("lup.launch.config_volume.sibling_worktrees", lambda root: [])
     layout = Mock()
     layout.name.return_value = "lup"
     monkeypatch.setattr(
-        "lup.devtools.harness.config_volume.repository_layout",
+        "lup.launch.config_volume.repository_layout",
         Mock(return_value=layout),
     )
     monkeypatch.setattr(contained, "repository_layout", Mock(return_value=layout))

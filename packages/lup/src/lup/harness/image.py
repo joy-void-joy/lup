@@ -1153,7 +1153,7 @@ USER $UID:$GID
         Bound at the same name inside, because the container's CLI looks for it
         under *its* configuration home and the name is the runtime's own. Which
         host directory arrives here is not the launch's home and is
-        :func:`~lup.devtools.harness.contained.contained_argv`'s to say.
+        :func:`~lup.launch.container.contained_argv`'s to say.
         """
         return ["-v", f"{rendezvous}:{self.config_home}/{rendezvous.name}:rw"]
 

@@ -1,7 +1,7 @@
 """The config volumes a split superseded, and when each may go.
 
 A split copies an old config volume's history into the per-runtime volumes
-(:func:`~lup.devtools.harness.config_volume.split_config_volumes`) and keeps
+(:func:`~lup.launch.config_volume.split_config_volumes`) and keeps
 the old one: a copy nobody has read yet is not a reason to destroy the
 original. What is kept has to be removed by something, though, and the day
 it was superseded cannot live on the volume itself — an engine's volume

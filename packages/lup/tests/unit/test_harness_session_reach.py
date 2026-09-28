@@ -9,7 +9,7 @@ failure these hold still.
 
 from pathlib import Path
 
-from lup.devtools.harness.contained import declaration_digest
+from lup.launch.container import declaration_digest
 from lup.harness.egress import SessionEgress
 from lup.harness.image import Image
 

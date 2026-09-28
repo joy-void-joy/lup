@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 import lup.devtools.harness.launch as launch
-from lup.devtools.harness.config_volume import HomeFile
+from lup.launch.config_volume import HomeFile
 from lup.harness.image import Image
 from lup.providers.claude.config_home import ClaudeConfigHome
 from lup.providers.claude.home_seed import ClaudeHomeSeed

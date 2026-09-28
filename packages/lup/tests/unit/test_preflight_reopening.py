@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from lup.devtools.harness.preflight import (
+from lup.launch.preflight import (
     LaunchSentinels,
     record_preflight,
     reopened,

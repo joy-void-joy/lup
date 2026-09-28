@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from lup.devtools.harness.contained import (
+from lup.launch.container import (
     checkout_tag,
     finished_tags,
     image_tag,

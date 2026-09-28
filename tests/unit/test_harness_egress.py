@@ -12,9 +12,9 @@ from pathlib import Path
 
 import pytest
 import sh
-import typer
 
-import lup.devtools.harness.contained as contained
+import lup.launch.container as contained
+from lup.launch.refusal import LaunchRefused
 from lup.harness.egress import AllowedHost, PROXY_LABEL, SessionEgress, Unproxied
 from lup.harness.image import Docker, Image
 from lup.harness.requirements import Manifest
@@ -326,7 +326,7 @@ def test_a_proxy_that_starts_and_stops_is_reported_in_its_own_words(
         return call
 
     monkeypatch.setattr(sh, "Command", spelled)
-    with pytest.raises(typer.BadParameter) as refusal:
+    with pytest.raises(LaunchRefused) as refusal:
         contained.settled(SessionEgress(), "feat", Docker(), Path("egress.conf"), 0)
 
     assert "Bungled" in str(refusal.value)
@@ -822,7 +822,7 @@ def test_a_network_from_an_older_declaration_is_rebuilt(
     monkeypatch.setattr(sh, "Command", spelled)
     # The rebuilt proxy never comes up under this fake, so the launch refuses
     # after its grace window. What is under test is everything before that.
-    with pytest.raises(typer.BadParameter):
+    with pytest.raises(LaunchRefused):
         contained.start_egress(SessionEgress(), "feat", Docker(), tmp_path)
 
     # The proxy goes before the network holding it, then the network is made

@@ -30,7 +30,7 @@ from lup.launch.declaration import LaunchSandbox
 from lup.providers.claude.launch import claude_sandbox_arguments
 from lup.providers.codex.launch import writable_root_arguments
 from lup.devtools.harness.policy_refresh import refresh_destination_policy
-from lup.devtools.harness.preflight import (
+from lup.launch.preflight import (
     NONCE_VARIABLE,
     ROOT_VARIABLE,
     LaunchSentinels,

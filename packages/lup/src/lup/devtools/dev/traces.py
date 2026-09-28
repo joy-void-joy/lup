@@ -39,15 +39,9 @@ from pydantic import BaseModel
 from lup.devtools.utils import decode_stderr, output_json
 from lup.execution.shell import git
 from lup.workspace.paths import notes_path, project_root
+from lup.workspace.shared_directory import ARCHIVE_DIRECTORY_NAME
 
 logger = logging.getLogger(__name__)
-
-ARCHIVE_DIRECTORY_NAME = "trace-archive"
-"""What the archive directory is called inside the common directory.
-
-A default rather than a frozen name so a caller can say where to keep an
-archive, which is what a test needs and what a repository holding two of them
-would need. The location it sits in is still derived; only the leaf is named."""
 
 
 class ArchivedTraces(BaseModel):

@@ -8,12 +8,8 @@ so everybody concludes the gate is slow.
 
 from pathlib import Path
 
-from lup.devtools.dev.admission import (
-    MINIMUM_WORKERS,
-    SLOT_DIRECTORY,
-    admitted,
-    slot_paths,
-)
+from lup.devtools.dev.admission import MINIMUM_WORKERS, admitted, slot_paths
+from lup.workspace.shared_directory import SLOT_DIRECTORY
 
 
 def test_a_run_with_the_machine_to_itself_keeps_every_worker(tmp_path: Path) -> None:

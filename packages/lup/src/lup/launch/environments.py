@@ -2,7 +2,7 @@
 
 One per project root, under ``~/.cache/lup/environments``, bound over the
 root's environment directory inside the container (see
-:func:`~lup.devtools.harness.contained.held_environments`). A worktree lives
+:func:`~lup.launch.container.held_environments`). A worktree lives
 for a feature and its environment outlived it: a venv per branch ever opened,
 each hundreds of megabytes, with nothing left to say which checkout it had
 been — the name carries the directory's last component and a digest of its

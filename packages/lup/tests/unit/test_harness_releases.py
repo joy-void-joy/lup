@@ -20,7 +20,7 @@ import httpx
 import pydantic
 import pytest
 
-from lup.devtools.harness.contained import image_tag
+from lup.launch.container import image_tag
 from lup.harness.image import Image
 from lup.harness.notice import Notice
 from lup.harness.releases import (

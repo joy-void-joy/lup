@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from lup.coordination.identity import LaunchedMember
-from lup.devtools.harness.preflight import NONCE_VARIABLE, ROOT_VARIABLE
+from lup.launch.preflight import NONCE_VARIABLE, ROOT_VARIABLE
 from lup.policy.assets.host import measured_boundary
 from lup.providers.identity import RUNTIME_DECIDED_ENV
 from lup.harness.environment import (

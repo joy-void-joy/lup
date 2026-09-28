@@ -16,7 +16,8 @@ from types import SimpleNamespace
 import pytest
 import typer
 
-from lup.devtools.pointer_trust import judged_roots, store_exposure
+from lup.launch.pointer_trust import judged_roots, store_exposure
+from lup.launch.refusal import LaunchRefused
 from lup.execution.shell import git
 from lup.harness.process import ExitStatus, LaunchRequest, ProcessLauncher
 from lup.sandbox.checked import PointerCheckedLauncher, RedirectedPointer
@@ -276,7 +277,7 @@ def test_a_repository_built_where_a_session_writes_is_not_trusted_on_sight(
 def test_a_first_sighting_waits_while_a_session_runs_in_it(
     plain: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import lup.devtools.pointer_trust as pointer_trust
+    import lup.launch.pointer_trust as pointer_trust
 
     monkeypatch.setattr(pointer_trust, "live_session", lambda _repository: True)
     worktree = beside(plain, "x")
@@ -412,10 +413,10 @@ def test_a_container_start_refuses_before_any_broker(
     clone: Path, tmp_path: Path, own_store: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Worker launches reach the engine here without a boundary preflight."""
-    from lup.devtools.harness import contained
+    from lup.launch import container
 
     side = clone / "tree" / "side"
-    monkeypatch.setattr(contained, "resolved_agent_clis", unreachable)
+    monkeypatch.setattr(container, "resolved_agent_clis", unreachable)
     arguments = {
         "image": None,
         "manifest": None,
@@ -427,11 +428,11 @@ def test_a_container_start_refuses_before_any_broker(
         "lease": Lease(),
     }
     with pytest.raises(Reached):
-        contained.contained_argv(**arguments)  # type: ignore[arg-type]
+        container.contained_argv(**arguments)  # type: ignore[arg-type]
     exposed = {**arguments, "lease": Lease(writable={own_store: "x"})}
-    with pytest.raises(typer.BadParameter, match="store of trusted"):
-        contained.contained_argv(**exposed)  # type: ignore[arg-type]
+    with pytest.raises(LaunchRefused, match="store of trusted"):
+        container.contained_argv(**exposed)  # type: ignore[arg-type]
 
     redirect(side, evil_gitdir(tmp_path / "built"))
-    with pytest.raises(typer.BadParameter, match="redirected"):
-        contained.contained_argv(**arguments)  # type: ignore[arg-type]
+    with pytest.raises(LaunchRefused, match="redirected"):
+        container.contained_argv(**arguments)  # type: ignore[arg-type]

@@ -125,7 +125,7 @@ from lup.devtools import sync_state
 from lup.devtools.dev.records import log_ref_updates
 from lup.harness.credential import remote_url, same_repository
 import lup.harness.content.docs.upstream_reports as upstream_reports
-from lup.devtools.harness.preflight import reopened
+from lup.launch.preflight import reopened
 from lup.devtools.subapps import subapp
 from lup.devtools.utils import decode_stderr, format_table, short_sha
 from lup.execution.shell import git
@@ -137,7 +137,7 @@ from lup.harness.toolchain import (
     granted_device_requirement,
 )
 from lup.policy.assets.host import launched, measured_boundary
-from lup.devtools.pointer_trust import judged_roots
+from lup.launch.pointer_trust import judged_roots
 from lup.sandbox.rail import AccessibleRoot
 
 if TYPE_CHECKING:
@@ -786,7 +786,7 @@ def refuse_redirected_location(
 
     The location is discovered from the repository that vouches for it, found
     by path or remembered from the host, rather than trusted for where it sits
-    -- see :func:`lup.devtools.pointer_trust.judged_roots`. A repository met for the
+    -- see :func:`lup.launch.pointer_trust.judged_roots`. A repository met for the
     first time is remembered or reported, and only a real mismatch refuses.
     """
     trust = judged_roots([location], operator=Path.cwd())

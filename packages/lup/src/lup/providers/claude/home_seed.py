@@ -116,7 +116,7 @@ class ClaudeHomeSeed(BaseModel, frozen=True):
         """What a seed came to against a volume, read back from where the launch wrote it.
 
         The files a three-way settle wrote (see
-        :func:`~lup.devtools.harness.config_volume.settle_home_seed`): the
+        :func:`~lup.launch.config_volume.settle_home_seed`): the
         settings as applied, the document with only its preferences kept,
         and the key bindings.
         """

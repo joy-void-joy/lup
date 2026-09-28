@@ -31,9 +31,9 @@ from lup.devtools.harness.composition import NativeTargets, claude_profile_direc
 from lup.ledger.models import LedgerNode
 from lup.ledger.store import LedgerLayout
 from lup.observability.sessions import SessionRecorder, session_recorder
-from lup.devtools.harness.config_volume import HomeHelper, kept_for_superseded
-from lup.devtools.harness.superseded import SupersededFile
-from lup.devtools.harness.contained import (
+from lup.launch.config_volume import HomeHelper, kept_for_superseded
+from lup.launch.superseded import SupersededFile
+from lup.launch.container import (
     checkout_tag,
     image_tag,
     report_egress,
@@ -234,33 +234,34 @@ def create_harness_app(
             }
             for index in range(len(manifests))
         ]
-        findings = (
-            [
-                finding
-                for index, composition in enumerate(compositions)
-                for finding in launch.report_inside_requirements(
-                    composition,
-                    composition.recipe.source.plugins[0],
-                    launch.ambient_config_home(
-                        composition.login, composition.default_config_home
+        with launch.usage_refusals():
+            findings = (
+                [
+                    finding
+                    for index, composition in enumerate(compositions)
+                    for finding in launch.report_inside_requirements(
+                        composition,
+                        composition.recipe.source.plugins[0],
+                        launch.ambient_config_home(
+                            composition.login, composition.default_config_home
+                        ),
+                        composition.login,
+                        setting_up=not launch_only,
+                        skipped=sorted(exercised_before[index]),
+                        banner=None if index == 0 else Banner(),
+                    )
+                ]
+                if inside
+                else launch.report_requirements(
+                    Manifest.across(
+                        [
+                            composition.recipe.source.requirements
+                            for composition in compositions
+                        ]
                     ),
-                    composition.login,
                     setting_up=not launch_only,
-                    skipped=sorted(exercised_before[index]),
-                    banner=None if index == 0 else Banner(),
                 )
-            ]
-            if inside
-            else launch.report_requirements(
-                Manifest.across(
-                    [
-                        composition.recipe.source.requirements
-                        for composition in compositions
-                    ]
-                ),
-                setting_up=not launch_only,
             )
-        )
         if not findings:
             typer.echo(
                 "No container requirements selected."

@@ -22,7 +22,7 @@ import sh
 import typer
 from typer.testing import CliRunner
 
-import lup.devtools.harness.contained as contained
+import lup.launch.container as contained
 import lup.devtools.harness.launch as launch
 import lup.launch.declaration as declaration
 from lup.launch.declaration import LaunchSandbox

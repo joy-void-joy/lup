@@ -14,7 +14,7 @@ import pytest
 import tomlkit
 
 import lup.devtools.harness.launch as launch
-from lup.devtools.harness.config_volume import HomeFile
+from lup.launch.config_volume import HomeFile
 from lup.harness.image import Image
 from lup.providers.codex.home import CodexWorktreeHomeStore, personalized_codex_config
 from lup.providers.codex.preferences import (

@@ -105,7 +105,7 @@ from lup.devtools.dev.worktree import (
     copy_gitignored_extras,
     sync_dependencies,
 )
-from lup.devtools.harness.contained import (
+from lup.launch.container import (
     engine_absence,
     worker_cli,
     worker_wrapper_path,

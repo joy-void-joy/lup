@@ -8,7 +8,7 @@ import sh
 
 import lup.devtools.harness.launch as launch
 from lup.launch.declaration import LaunchSandbox
-from lup.devtools.harness.preflight import LaunchSentinels
+from lup.launch.preflight import LaunchSentinels
 from lup.harness.messaging import SessionInboxes
 
 

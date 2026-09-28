@@ -24,6 +24,7 @@ import json
 import os
 import shlex
 import stat
+import sys
 import time
 from datetime import UTC, datetime
 from collections import deque
@@ -32,14 +33,13 @@ from ipaddress import IPv4Address
 from pathlib import Path
 
 import sh
-import typer
 from lup.policy.identity import POLICY_ROOT_ENV
 from pydantic import BaseModel, Field
 from rich.console import Console
 from rich.live import Live
 from rich.text import Text
 
-from lup.devtools.harness.preflight import LaunchSentinels, ROOT_VARIABLE
+from lup.launch.preflight import LaunchSentinels, ROOT_VARIABLE
 from lup.harness.credential import committer, fleet_rewrites
 from lup.harness.devices import (
     Device,
@@ -58,18 +58,17 @@ from lup.harness.notice import Banner, Notice
 from lup.harness.releases import resolved_agent_clis
 from lup.harness.requirements import Manifest
 from lup.coordination.bare.store import STORE_DIR
-from lup.devtools.dev.admission import SLOT_DIRECTORY
-from lup.devtools.dev.traces import ARCHIVE_DIRECTORY_NAME
+from lup.workspace.shared_directory import ARCHIVE_DIRECTORY_NAME, SLOT_DIRECTORY
 from lup.harness.terminal import host_timezone
 from lup.providers.login import ProviderLogin
 from lup.providers.runtime_homes import runtime_logins
-from lup.devtools.harness.superseded import SupersededFile
-from lup.devtools.harness.environments import (
+from lup.launch.superseded import SupersededFile
+from lup.launch.environments import (
     HeldEnvironment,
     claimed,
     sweep_environments,
 )
-from lup.devtools.harness.config_volume import (
+from lup.launch.config_volume import (
     HomeFile,
     HomeHelper,
     HomeSeedPlaces,
@@ -81,7 +80,8 @@ from lup.devtools.harness.config_volume import (
     swept_superseded_notice,
 )
 from lup.sandbox.attribution import WRITE_REFUSAL_MARKERS
-from lup.devtools.pointer_trust import judged_roots, store_exposure
+from lup.launch.pointer_trust import judged_roots, store_exposure
+from lup.launch.refusal import LaunchRefused
 from lup.sandbox.rail import (
     AccessibleRoot,
     Lease,
@@ -163,7 +163,7 @@ def state_volume_name(root: Path, login: ProviderLogin) -> str:
     sign-in per feature.
 
     Per runtime, so one CLI's sessions never read the other's transcripts or
-    credentials (:mod:`lup.devtools.harness.config_volume`). Not per person:
+    credentials (:mod:`lup.launch.config_volume`). Not per person:
     a volume every repository shared would carry one project's transcripts
     and settings into every other. The person's settings reach it by being
     seeded at each launch, and what a session changes goes back to their own
@@ -703,7 +703,7 @@ def start_egress(
         try:
             client(*egress.connect_arguments(project))
         except sh.ErrorReturnCode as error:
-            raise typer.BadParameter(
+            raise LaunchRefused(
                 f"Could not attach proxy {egress.proxy_name(project)} to network "
                 f"{egress.network_name(project)}. Launch stopped.\n"
                 f"Error: {error.stderr.decode('utf-8', 'replace').strip()}\n"
@@ -731,7 +731,7 @@ def start_egress(
         )
         client(*egress.connect_arguments(project))
     except sh.ErrorReturnCode as error:
-        raise typer.BadParameter(
+        raise LaunchRefused(
             f"Could not start or connect proxy {egress.proxy_name(project)}. "
             "Launch stopped.\n"
             f"Error: {error.stderr.decode('utf-8', 'replace').strip()}\n"
@@ -769,7 +769,7 @@ def settled(
     if running(name, engine):
         return
     spoken = proxy_log(name, engine)
-    raise typer.BadParameter(
+    raise LaunchRefused(
         f"Proxy {name} exited within {grace:g}s of starting. Launch stopped.\n"
         f"Check its configuration: {configuration}\n"
         "Proxy log:\n" + (spoken or "No log output was available.")
@@ -1493,8 +1493,8 @@ def build_image(
                 )
         except sh.ErrorReturnCode as error:
             for line in recent:
-                typer.echo(line)
-            raise typer.BadParameter(
+                print(line)
+            raise LaunchRefused(
                 f"Image build failed: {tag} (exit code {error.exit_code}).\n"
                 f"Dockerfile: {dockerfile}\nFull build log: {log}\n"
                 "Fix the error in the build log, then rerun the launcher."
@@ -1703,13 +1703,13 @@ def contained_argv(
     else:
         found = detected_client()
         if found is None:
-            raise typer.BadParameter(
+            raise LaunchRefused(
                 "No working Docker or Podman client was found. Install one to "
                 "launch in a container. To run on the host using the runtime's "
                 "sandbox, choose `--sandbox inner`."
             )
         if not found.drives_its_server():
-            raise typer.BadParameter(found.consequence())
+            raise LaunchRefused(found.consequence())
         client = found.engine()
     # Every root this launch mounts, before host git reads any of them -- the
     # lease's own layout questions and the prune guard below both run git
@@ -1718,9 +1718,9 @@ def contained_argv(
     # of trusted repositories refuses the launch before anything starts.
     trust = judged_roots([root, *(item.path for item in accessible)], operator=root)
     for notice in trust.notices:
-        typer.echo(notice, err=True)
+        print(notice, file=sys.stderr)
     if trust.refusal:
-        raise typer.BadParameter(trust.refusal)
+        raise LaunchRefused(trust.refusal)
     # Readied before the lease is read, because the lease binds only the
     # directories that exist: one git or lup makes on first use cannot be
     # made later under the read-only shared directory. A read-only root is
@@ -1729,7 +1729,7 @@ def contained_argv(
     said.add(preparation_notice(prepared_across(readied, SHARED_STATE)))
     lease = lease if lease is not None else fleet_lease(root, accessible)
     if exposed := store_exposure(lease):
-        raise typer.BadParameter(exposed)
+        raise LaunchRefused(exposed)
     # Rebound before rendering, so the tag, the build, and the session all
     # read the same resolved copy -- and only they: the declaration the
     # ownership digests hash never carries a resolved version.
@@ -2068,7 +2068,7 @@ def contained_cli(
     opening.extend(["env", f"{POLICY_ROOT_ENV}={root}"])
     if login.home_preparation is not None:
         preparation = login.home_preparation.command(root, Path(image.config_home))
-        typer.echo(str(sh.Command(opening[0])(*opening[1:], *preparation)), nl=False)
+        print(str(sh.Command(opening[0])(*opening[1:], *preparation)), end="")
     return written_wrapper(wrapper, opening, program)
 
 
