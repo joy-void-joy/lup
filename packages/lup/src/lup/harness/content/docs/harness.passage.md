@@ -564,6 +564,19 @@ plugin is never mistaken for the cache. Personal trust state, credentials,
 active run state, and cache contents are never generated or committed. Review
 hook trust with the native hooks surface after generation.
 
+`lup-devtools harness claude|codex` composes its session from the library:
+the gates a launch clears, the boundary it measures and records, the
+container it opens in and the argv on either side of it live in
+`lup.launch.session` and `lup.launch.container`, and each runtime's own
+spelling of the same launch in `lup.providers.claude.launch` and
+`lup.providers.codex.launch`. What stays with the command is this
+repository's workflow around a session — regenerating every tree, syncing
+the base, checkpoints, the launch modes — and the mapping from its flags to
+the launch. A program launches a declared agent through the same
+composition with `Claude(...).launch()` or `Codex(...).launch()`, and
+`command()` prints the process either would start; `docs/library.md`
+describes the declaration.
+
 ### Opening a session the anti-pattern gate leaves alone
 
 `--ignore-antipatterns`, on both launchers, for the sessions where the rules

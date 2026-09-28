@@ -228,8 +228,8 @@ tools: an import path is what crosses the process boundary.
 
 Typed output remains available with no built-in. On `Claude`, `allowed_tools`
 controls automatic approval within the declared tools and `disallowed_tools`
-narrows it; neither adds an undeclared tool. Plugin directories require
-`"stock"`, since a plugin can introduce delegated authority.
+narrows it; neither adds an undeclared tool. A session opened here with a
+plugin requires `"stock"`, since a plugin can introduce delegated authority.
 
 Explicit session hooks remain attached when built-in tools are granted. Codex
 enables the verified declared project policy plugin for an explicit built-in grant while keeping
@@ -247,6 +247,78 @@ session when application tools require another dynamic binding. The adapter
 rejects an incompatible resume before sending user input. Typed output does
 not ride that channel — each turn carries its own `outputSchema` — so the
 model a turn is asked for may change from one turn to the next.
+
+## Launching
+
+A declaration is compiled twice. `open()` and `ask()` compile it into SDK
+options for a session this process drives; `command()` compiles the same
+fields into the `(argv, env, cwd)` an interactive CLI starts with, and
+`launch()` runs that command in the foreground, the terminal handed over until
+the session ends. The fields a launch adds are typed values from
+`lup.launch.declaration`, and each means one thing to both compilations:
+
+```python
+from pathlib import Path
+
+from lup import Claude
+from lup.launch.declaration import Latest, Member, Mount, OuterContainer, Recording
+from lup.mcp import CodeIntel, Coordination
+from lup.providers.claude import ClaudeTools
+
+agent = Claude(
+    model="opus",
+    tools=ClaudeTools(mcp=[Coordination(), CodeIntel()]),
+    plugin=Path(".claude/plugins/lup"),  # or a Harness, which prepare() compiles
+    sandbox=OuterContainer(mounts=[Mount(path=Path("../notes"), writable=True)]),
+    identity=Member(name="reviewer"),
+    record=Recording(transcript=True),
+    resume=Latest(),
+    max_recursive_agent=2,
+    profile="work",
+)
+
+
+class Checkpoint:  # a LaunchStep: the repository's workflow, not the session's
+    def before(self) -> None: ...
+
+    def after(self, succeeded: bool) -> None: ...
+
+
+command = agent.command("--verbose")  # printable: str(command) is its argv
+agent.prepare()  # compile the plugin and settle the home; nothing launched
+agent.check()  # the CLI's probes, the declared requirements, the login
+status = agent.launch("--verbose", steps=[Checkpoint()])
+```
+
+| Field | A session opened here | A launched CLI |
+|---|---|---|
+| `sandbox` | One settings document: `InnerSandbox` enables Claude Code's sandbox with the policy's exclusions and the mounts' write widening, anything else stands it down; Codex's mode narrowed by the wall. `OuterContainer` needs the program entering the container in `cli_path` / `executable` | The same document as `--settings` (Codex: the `--sandbox` envelope and its writable roots); `OuterContainer` builds and verifies the container and starts the CLI inside it |
+| `plugin` | Claude's first plugin directory, which takes `builtin="stock"`; Codex installs the plugin its project's marketplace offers | `--plugin-dir` (Claude); installed into the launch's home (Codex). A `Harness` is compiled into the project's tree by `prepare()` |
+| `policy` | Hooks judging every call in process; unset, the plugin harness's own | The plugin's dispatcher, and the boundary the launch measures and records |
+| `tools.mcp` | Hosted in process | `--mcp-config` with `--strict-mcp-config` (Claude), `--config mcp_servers.*` (Codex): the declared roster, never the plugin's |
+| `identity` | Joins the coordination roster through the session's environment | The same, plus `--name` and the inbox socket on Claude |
+| `record` | The run's journal, transcript and ledger entry, kept while the session is open | The same, around the foreground CLI |
+| `resume` | `Latest()` resumes the newest session on record; `Pick()` is refused | `--continue` / `--resume` (Claude), `resume --last` / `resume` (Codex); `Reopen(session=...)` names one |
+| `max_recursive_agent` | `LUP_MAX_RECURSIVE_AGENT`, never more than this process has left | The same variable |
+| `profile`, `home` | The account's configuration home | Claude: the same home; Codex: a home derived from the account's for the worktree |
+
+What a launch does not say it assumes, and a session opened here does not:
+an unset `sandbox` is the verified container wherever Docker or Podman answers
+and the inner sandbox, with a warning, where neither does; built-in tools left
+unnamed are the runtime's stock; the permission mode is the CLI's own rather
+than a program's `bypassPermissions`; an unset identity is the worktree's name
+on the roster; an unset record is the run's transcript. `launched()` answers
+the declaration with those filled in. What only a program driving turns can
+honour — in-process `hooks`, a submission gate, `layers`, `max_turns` — a
+launch refuses in the field's own words rather than dropping.
+
+`steps` are the repository's own workflow around a launch — a checkpoint, a
+base-freshness sync, a companion tree regenerated — each a `LaunchStep` with
+`before()` and `after(succeeded)`. They nest as `with` blocks do: every
+`before` in the order given, the session, then every `after` in reverse, run
+however the session ended. `Codex.prepare(force=True)` reinstalls a plugin
+whose version has not moved; Claude loads its plugin from the directory at each
+start, so its `prepare()` takes no such flag.
 
 ## Layering
 

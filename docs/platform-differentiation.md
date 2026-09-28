@@ -108,6 +108,41 @@ skill-only plugins do not require hook evidence.
 
 Neither runtime remembers an approval. An observed execution records that it ran and nothing more, so every ask re-enters review on both. A queue answer releases one exact retry: the receipt binds the captured documents, resolved paths, origin policy and accepted destination policies. `test_codex_review_delivery.py` verifies native notification, blocking, independent settlement and one-use replay using an inert local Responses server.
 
+## The launch declaration's intended differences
+
+Every launch field on `Claude` and `Codex` compiles into both a session
+opened in process and a launched CLI, with the same meaning. Where a
+runtime or an output has no word for a field, the declaration refuses it
+rather than dropping it, and the difference is this list:
+
+- **Inbox socket.** Claude Code binds the inbox a peer nudges it through
+  (`--messaging-socket-path`) and shows the roster name in its chrome
+  (`--name`); Codex takes neither flag, and a Codex session reads its mail
+  at its next tool call. A session opened in process binds no inbox on
+  either runtime: the program driving its turns is what wakes it.
+- **A way out of the sandbox.** `InnerSandbox(escapable=True)` and
+  `excluded_commands` are Claude Code's `allowUnsandboxedCommands` and
+  `excludedCommands`; Codex's workspace-write envelope has no per-command
+  exit, so a Codex declaration asking for one is refused.
+- **Sandbox mode.** Codex states how much a session may do by how far it
+  may reach, so its own `sandbox_mode` is reconciled with the wall
+  (`codex_sandbox_mode`: the narrower wins inside the inner sandbox, the
+  container takes `danger-full-access` unless a mode is declared); Claude
+  keeps the permission mode and the sandbox apart.
+- **The picker.** `Pick()` is the runtime's own terminal picker, so only a
+  launch takes it; a session opened in process refuses it and resumes
+  `Latest()` or a named session instead.
+- **Codex's home.** A launched Codex session runs in a home derived from
+  the account's for its worktree; a session opened in process runs in the
+  account's home itself. Claude runs in the account's home either way.
+- **A built plugin.** Claude loads a plugin directory; Codex installs from
+  a marketplace, so a built Codex plugin is named by the project whose
+  marketplace offers it.
+- **What only a program honours.** In-process `hooks`, a submission gate,
+  `layers` and `max_turns` (and Codex's delegated tools and corrections)
+  shape a session a program drives; a launch refuses them, since the
+  policy it enforces reaches it through the plugin's dispatcher.
+
 ## Parity audit of generated artifact families
 
 Every family in `.claude/` vs `.codex/`/`.agents/`, with an explicit decision.
