@@ -6015,8 +6015,8 @@ def test_installing_asks_and_the_verbs_that_fetch_nothing_do_not() -> None:
     assert effect("uv sync --all-extras") == "ask"
     assert effect("uv sync --frozen") == "allow"
     assert effect("uv sync --locked --all-extras") == "allow"
-    assert effect("uv lock --upgrade-package lup") == "allow"
-    assert effect("uv cache clean lup") == "allow"
+    assert effect("uv lock --upgrade-package lup-agents") == "allow"
+    assert effect("uv cache clean lup-agents") == "allow"
     assert effect("uv remove ruff") == "allow"
 
 

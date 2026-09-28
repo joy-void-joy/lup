@@ -127,13 +127,13 @@ VENDORING_MANIFEST = """\
 [project]
 name = "app"
 version = "0.1.0"
-dependencies = ["lup"]
+dependencies = ["lup-agents"]
 
 [tool.uv.workspace]
 members = ["packages/*"]
 
 [tool.uv.sources]
-lup = { workspace = true }
+lup-agents = { workspace = true }
 """
 """A project resolving lup from the copy under ``packages/lup``."""
 
@@ -141,10 +141,10 @@ GIT_MANIFEST = """\
 [project]
 name = "app"
 version = "0.1.0"
-dependencies = ["lup"]
+dependencies = ["lup-agents"]
 
 [tool.uv.sources]
-lup = { git = "https://github.com/joy-void-joy/lup", branch = "main", subdirectory = "packages/lup" }
+lup-agents = { git = "https://github.com/joy-void-joy/lup", branch = "main", subdirectory = "packages/lup" }
 """
 """The same project after `dev library git`: lup is a dependency, not a tree."""
 

@@ -486,16 +486,27 @@ def pinned_source(name: str, root: Path | None = None) -> "GitSource | None":
     """The git pin a registration of this name follows, where the project has one.
 
     Only the library's own registration follows one: ``[tool.uv.sources]``
-    pins the ``lup`` distribution, and the registration of that name is the
+    pins the library's distribution, and that registration names the
     repository the project consumes it from. Imported where it is asked
     rather than at the top, because the library module reads this module's
     registrations to decide where to pin from, and so imports it first.
     """
-    from lup.devtools.dev.library import DISTRIBUTION, read_git_source
+    from lup.devtools.dev.library import REGISTRATION, read_git_source
 
-    if name != DISTRIBUTION:
+    if name != REGISTRATION:
         return None
     return read_git_source(root if root is not None else project_root())
+
+
+def installed_as(name: str) -> str:
+    """The distribution a registration of this name is installed as.
+
+    The same name for every registration but the library's own, whose
+    repository is registered as ``lup`` and published under another name.
+    """
+    from lup.devtools.dev.library import DISTRIBUTION, REGISTRATION
+
+    return DISTRIBUTION if name == REGISTRATION else name
 
 
 def completed(entry: ProjectEntry, root: Path) -> ProjectEntry:
@@ -516,7 +527,7 @@ def completed(entry: ProjectEntry, root: Path) -> ProjectEntry:
         return PROJECT_ENTRY_ADAPTER.validate_python({**entry, "url": pinned.url})
     if "url" in entry or "remote" in entry or "path" in entry:
         return entry
-    declared = distribution_repository(entry["name"])
+    declared = distribution_repository(installed_as(entry["name"]))
     if not declared:
         return entry
     return PROJECT_ENTRY_ADAPTER.validate_python({**entry, "url": declared})

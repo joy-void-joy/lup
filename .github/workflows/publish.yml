@@ -21,6 +21,6 @@ jobs:
         with:
           enable-cache: true
       - name: Build the distribution
-        run: uv build --package lup
+        run: uv build --package lup-agents
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

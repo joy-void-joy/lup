@@ -1279,6 +1279,57 @@ DECLARED: list[Migration] = [
             ),
         ],
     ),
+    Migration(
+        subjects=["DISTRIBUTION"],
+        reason=(
+            "PyPI refuses `lup` as too close to an existing project, so the "
+            "library's distribution is `lup-agents`; `import lup`, "
+            "`packages/lup/`, `lup-devtools` and the `lup` sync registration "
+            "keep their names, and DISTRIBUTION, which also stood for that "
+            "registration, spells only the distribution"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "In pyproject.toml, rename the requirement lup[...] to "
+                    "lup-agents[...] in [project].dependencies and the `lup` key "
+                    "under [tool.uv.sources] to `lup-agents`, whether it pins a "
+                    "repository or the vendored copy under packages/lup. No "
+                    "command does this: the lup-devtools a project runs is the "
+                    "library being replaced, and uv refuses to move it -- a "
+                    "repository pin with 'Package metadata name `lup-agents` "
+                    "does not match given name `lup`', a vendored copy with "
+                    "'`lup` references a workspace in `tool.uv.sources` (e.g., "
+                    "`lup = { workspace = true }`), but is not a workspace "
+                    "member'. Then install the renamed library:"
+                ),
+                command=["uv", "sync"],
+            ),
+            MigrationStep(
+                instruction=(
+                    "A project pinned at a repository then brings the generated "
+                    "trees and the copied half to the commit it now resolves:"
+                ),
+                command=["uv", "run", "lup-devtools", "dev", "update"],
+            ),
+            MigrationStep(
+                instruction=(
+                    "A vendored copy's editable install leaves its old metadata "
+                    "beside the new, and importlib.metadata goes on answering "
+                    "for `lup` until it is deleted:"
+                ),
+                command=["rm", "-r", "packages/lup/src/lup.egg-info"],
+            ),
+            MigrationStep(
+                instruction=(
+                    "A caller that passed DISTRIBUTION from "
+                    "lup.devtools.dev.library as the sync registration's name "
+                    "passes REGISTRATION instead; DISTRIBUTION is the "
+                    "requirement, source key, lock entry and index name."
+                )
+            ),
+        ],
+    ),
 ]
 """Every break this library has taken since its last release, and what to do.
 
