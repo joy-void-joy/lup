@@ -45,6 +45,7 @@ from .syntax import (
 )
 from .words import (
     SCRATCH_VERB_FLAGS,
+    carried_setting,
     effective_command,
     flag_write_targets,
     flag_write_words,
@@ -61,6 +62,7 @@ from .words import (
     unlocated_write,
     unread_over_tracked,
     unread_question,
+    uv_command_words,
     uv_run_words,
     SCOPE_PHRASES,
     write_checkpoint,
@@ -1341,12 +1343,59 @@ class ReadSegment(TypedDict):
     directory: str | None
 
 
+def uv_run_placement(words: list[str], directory: str | None) -> Placement | None:
+    """The command a `uv run` hands its words to, standing where uv runs it.
+
+    `uv run` puts this project's environment on the path and runs the words
+    after its own options as their own command, from the directory
+    `--directory` names where one does -- uv's global spelling or run's own.
+    ``None`` where the words are not a `uv run` of a program: another verb,
+    nothing to run, or `-c` and `-m` standing where a program would.
+    """
+    if not words or posixpath.basename(words[0]) != "uv":
+        return None
+    normalized = uv_command_words(words)
+    if normalized is None or normalized[1:2] != ["run"]:
+        return None
+    program = uv_run_words(normalized)
+    if not program or program[0].startswith("-"):
+        return None
+    options = normalized[2 : len(normalized) - len(program)]
+    moved = [
+        carried["value"]
+        for position, word in enumerate(options)
+        if (carried := carried_setting(word, ["--directory"], options[position + 1 :]))[
+            "value"
+        ]
+    ]
+    if not moved:
+        return Placement(words=program, directory=directory)
+    if opaque_argument(moved[-1]):
+        return Placement(words=program, directory=None)
+    return Placement(words=program, directory=joined_directory(directory, moved[-1]))
+
+
 def read_segments(command: str, rows: list[ShellRuleRow]) -> list[ReadSegment]:
-    """Every segment of one command line, as the readers of it see them."""
+    """Every segment of one command line, as the readers of it see them.
+
+    A `uv run` handing its words to a program is read as that program, where
+    uv runs it: `uv run rm x` removes the `x` that `rm x` removes, and a
+    reader that stopped at `uv` named nothing the host could place.
+    """
     return [
         ReadSegment(words=read, directory=here)
-        for placement in shell_placements(command)
-        for words in [effective_command(placement["words"])["words"]]
+        for spelled in shell_placements(command)
+        for effective in [effective_command(spelled["words"])["words"]]
+        for handed in [uv_run_placement(effective, spelled["directory"])]
+        for placement in [
+            Placement(words=effective, directory=spelled["directory"])
+            if handed is None
+            else Placement(
+                words=effective_command(handed["words"])["words"],
+                directory=handed["directory"],
+            )
+        ]
+        for words in [placement["words"]]
         if words
         for carried in [command_directory(words, rows)]
         for read in [command_words_read(words, rows)]

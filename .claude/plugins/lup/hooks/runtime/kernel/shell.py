@@ -80,6 +80,7 @@ from .withheld import (
 )
 from .semantics import UnjudgedAmbient
 from .lex import (
+    command_directory,
     command_segments,
     guarded_write_targets,
     joined_directory,
@@ -96,6 +97,7 @@ from .lex import (
     simple_commands,
     substitutions,
     tee_operands,
+    uv_run_placement,
 )
 from .syntax import Command, Script, Word, expands, readable_prefix, word_text
 from .effects import STRENGTH, declared_verdict, member_for
@@ -795,12 +797,18 @@ def decide_segment_words(
             return refused
         return decide_command_rows(words, context["rows"], write_facts(context))
     if executable == "uv" and len(words) > 1:
+        # What `uv run` hands its words to, judged as its own command where
+        # uv runs it; `decide_uv` says which programs that verdict answers for.
+        handed = uv_run_placement(words, directory)
         return decide_uv(
             words,
             context["runner_targets"],
             context["target_tables"],
             write_facts(context),
             rows=context["rows"],
+            program=None
+            if handed is None
+            else decide_shell_segment(handed["words"], context, handed["directory"]),
         )
     decided = decide_command_rows(words, context["rows"], write_facts(context))
     # A variable a later command sees stays in this process, unless it is one
@@ -872,17 +880,25 @@ def decide_shell_segment(
         return unjudged(
             "this segment names a file from a directory a `cd` left unreadable"
         ).advising("Spell the path in full, or run the command in its own call.")
+    # Where the command's own globals stand it, which the placed words no
+    # longer spell: `uv --directory d run rm x` hands `rm x` to `d`.
+    moved = command_directory(words, context["rows"])
+    here = (
+        None
+        if moved is None
+        else directory
+        if not moved
+        else joined_directory(directory, moved)
+    )
     # A command word nobody can read is read as each program whose verb the
     # words after it name, and the spelling's own verdict is the floor.
     return strictest_reading(
-        decide_placed_words(placed, context, directory, operands_judged),
+        decide_placed_words(placed, context, here, operands_judged),
         [
             Reading(
                 word=placed[0],
                 spelled=program,
-                decision=decide_placed_words(
-                    [program, *placed[1:]], context, directory
-                ),
+                decision=decide_placed_words([program, *placed[1:]], context, here),
             )
             for program in unread_programs(placed, context["rows"])
         ],

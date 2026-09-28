@@ -2323,8 +2323,16 @@ def decide_uv(
     facts: WriteFacts | None = None,
     frozen: tuple[str, ...] = UV_FROZEN_FLAGS,
     rows: list[ShellRuleRow] | None = None,
+    program: KernelDecision | None = None,
 ) -> KernelDecision:
     """Classify a uv invocation, gating dependency and inline-code forms.
+
+    ``program`` is the verdict the command `uv run` hands its words to earns
+    as its own, which answers for a program that is neither an interpreter, a
+    module nor a declared target: `uv run pip install x` is `pip install x`
+    with this project's environment on its path, and answers as it does. A
+    refusal there stands before any question uv's own options raise; a program
+    the vocabulary names nothing about leaves `uv run` unjudged as it was.
 
     A declared target states what reaching it does, its placement and its
     reason, so a toolchain that has to run outside the sandbox says so once
@@ -2489,6 +2497,21 @@ def decide_uv(
                 )
                 if nested.hard:
                     return nested
+        # A program the kernel knows answers as itself, and its refusal before
+        # any question about uv's own options: `uv run --with x pip install y`
+        # is `pip install y`, which is refused whatever else is fetched.
+        declared = next(
+            (row for row in runner_targets if row["name"] == run_command), None
+        )
+        ran = (
+            program
+            if not interpreted
+            and module_root is None
+            and not (bare_target and declared is not None)
+            else None
+        )
+        if ran is not None and ran.effect == "deny":
+            return ran
         risky = ["-w", "--with", "--with-editable", "--with-requirements"]
         # Named in the question, because what is being installed is the whole
         # of what an approver weighs: "external code" told them a source was
@@ -2552,15 +2575,14 @@ def decide_uv(
             return KernelDecision(
                 "allow", "a script file can be read, where inline code cannot"
             )
-        declared = next(
-            (row for row in runner_targets if row["name"] == run_command), None
-        )
         if bare_target and declared is not None:
             return declared_target_decision(
                 declared, run_words, target_tables, measured
             )
         if bare_target and len(run_words) == 2 and run_words[1] == "--help":
             return KernelDecision("allow", "command help is read-only")
+        if ran is not None and not ran.unlisted:
+            return ran
     # `uv tool run` is `uvx` by its other name, so the tool it runs is read by
     # the same grammar, past uv's globals on either side of `run`.
     if subcommand == "tool":

@@ -637,6 +637,9 @@ def uv_rules(
             # verb is the kernel's or one of the subcommands below.
             effects=[declare("changes_nothing")],
             value_flags=list(global_values),
+            # Runs uv from another directory, as `git -C` runs git, so the
+            # program a `uv run` hands its words to stands there.
+            directory_flags=["--directory"],
             subcommands=[
                 ShellSubcommandRule(
                     name="pip",

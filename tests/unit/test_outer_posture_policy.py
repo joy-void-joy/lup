@@ -378,6 +378,41 @@ def test_a_committed_environment_file_reads_on_every_posture(
     assert set(previewed(command, checkout, monkeypatch).values()) == {"allow"}
 
 
+@pytest.mark.parametrize(
+    ("command", "program"),
+    [
+        pytest.param("uv run pip install httpx", "pip install httpx", id="pip"),
+        pytest.param("uv -q run pip install httpx", "pip install httpx", id="uv-q"),
+        pytest.param("uv run python -c 'x'", "python -c 'x'", id="python-inline"),
+        pytest.param("uv run git status", "git status", id="git-status"),
+        pytest.param("uv run rm -rf /opt/probe", "rm -rf /opt/probe", id="rm"),
+        pytest.param(
+            "uv --directory /opt run rm -rf probe", "rm -rf /opt/probe", id="moved-rm"
+        ),
+        pytest.param(
+            "uv run git push --force origin feat",
+            "git push --force origin feat",
+            id="force-push",
+        ),
+    ],
+)
+def test_a_program_uv_runs_answers_as_itself(
+    runtime: Runtime,
+    checkout: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    command: str,
+    program: str,
+) -> None:
+    """`uv run` puts this project's environment on the path and judges nothing."""
+    postures: tuple[Posture, ...] = ("none", "inner", "outer")
+    assert {
+        posture: met(runtime, posture, command, checkout) for posture in postures
+    } == {posture: met(runtime, posture, program, checkout) for posture in postures}
+    assert previewed(command, checkout, monkeypatch) == previewed(
+        program, checkout, monkeypatch
+    )
+
+
 @pytest.mark.parametrize("command", UNREAD_COMMAND_AS_BEFORE)
 def test_an_unread_command_word_no_reading_objects_to_is_answered_as_before(
     runtime: Runtime, checkout: Path, monkeypatch: pytest.MonkeyPatch, command: str

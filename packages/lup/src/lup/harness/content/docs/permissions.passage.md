@@ -311,9 +311,14 @@ each declares its `effects`, its `refuses`, its placement, and its reason.
 Blessing a toolchain is the common case and it is one word,
 `runs_declared_target`. A project that means to stop a target — one that
 spends money, runs for an hour, or publishes something — refuses it there.
-Leaving it off is not the same answer: an undeclared target reaches no
-judgment, which denies unsandboxed and defers under the boundary, where the
-policy has stated nothing and the runtime's own permissions decide.
+A program the shell vocabulary judges is judged as itself: `uv run` puts this
+project's environment on the path and nothing more, so `uv run pip install x`
+and `uv -q run pip install x` are refused as `pip install x` is, whatever uv
+options surround them, and `uv run git status` reads as `git status` —
+standing in the directory `--directory` names, where one does. Leaving a
+program off both tables is not the same answer: it reaches no judgment,
+which denies unsandboxed and defers under the boundary, where the policy has
+stated nothing and the runtime's own permissions decide.
 
 That table also answers `uv run -m <root>.<module>`, on the root segment, and
 one criterion settles every `uv run` form: an invocation is refused when it

@@ -8413,7 +8413,9 @@ SHELL_RULES: list[ShellRuleRow] = [
             "--project",
             "--config-file",
         ],
-        "directory_flags": [],
+        "directory_flags": [
+            "--directory",
+        ],
         "reason": "",
         "recovery": "",
     },

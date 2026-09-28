@@ -597,6 +597,18 @@ SHELL_POLICY_CASES = [
     DecisionCase(input="uv run node -e 'x'", effect="deny"),
     DecisionCase(input="uv run python -W ignore", effect="deny"),
     DecisionCase(input="uv run bun install", effect="deny"),
+    # A program `uv run` hands its words to answers as that program: the
+    # environment on its path changes nothing the vocabulary judges it by, and
+    # its refusal stands before any question about uv's own options.
+    DecisionCase(input="uv run pip install httpx", effect="deny"),
+    DecisionCase(input="uv -q run pip install httpx", effect="deny"),
+    DecisionCase(input="uv run -- pip install httpx", effect="deny"),
+    DecisionCase(input="uv run --with x pip install httpx", effect="deny"),
+    DecisionCase(input="uv run env pip install httpx", effect="deny"),
+    DecisionCase(input="uv run uv run pip install httpx", effect="deny"),
+    DecisionCase(input="uv run git status", effect="allow"),
+    DecisionCase(input="uv run --with x git status", effect="ask"),
+    DecisionCase(input="uv run git push --force origin feat", effect="ask"),
     DecisionCase(
         input="uv --unknown-option run lup-devtools dev questions answer abc --as operator",
         effect="deny",
