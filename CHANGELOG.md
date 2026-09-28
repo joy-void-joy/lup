@@ -9,8 +9,9 @@ subagent's `coordination_describe` replaced its orchestrator's row, a lock
 held a file for the whole session, and a subagent could not reach the
 session that dispatched it (#505). Each subagent is now a row of its own
 beneath its session's, keyed by the runtime's subagent id under the
-session's, named from its spawn where the runtime records one, and live
-while its session is.
+session's, named from its spawn — on Claude Code from the spawn's meta
+file, on Codex from the `agent_path` atop the subagent's own rollout — and
+live while its session is.
 
 A new `PreToolUse` hook on each runtime, matched to the coordination
 server's tools, writes the calling conversation into the call's hidden
