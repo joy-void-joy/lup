@@ -117,6 +117,7 @@ def test_a_declared_handle_reaches_the_roster_and_survives_the_fold(
     ]
 
 
+@pytest.mark.usefixtures("unix_socket")
 def test_the_roster_row_is_what_actually_wakes_the_member(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -178,6 +179,7 @@ def test_a_session_declares_the_id_its_inbox_checks_beside_the_path(
     )
 
 
+@pytest.mark.usefixtures("unix_socket")
 def test_a_nudge_names_the_session_it_is_for(tmp_path: Path) -> None:
     """The receiving inbox drops a frame whose id disagrees with its own.
 
@@ -198,6 +200,7 @@ def test_a_nudge_names_the_session_it_is_for(tmp_path: Path) -> None:
     assert frames[0]["session_id"] == "9b1f0689-78cb"
 
 
+@pytest.mark.usefixtures("unix_socket")
 def test_a_member_that_named_no_session_asks_for_no_check(tmp_path: Path) -> None:
     """Omitted rather than sent empty, because the runtime reads them apart.
 
@@ -212,3 +215,26 @@ def test_a_member_that_named_no_session_asks_for_no_check(tmp_path: Path) -> Non
     )
 
     assert "session_id" not in frames[0]
+
+
+def test_a_process_refused_a_socket_says_so_rather_than_blaming_the_peer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The boundary the call ran inside is named, not an inbox nobody tried.
+
+    Measured in a Claude Code Bash sandbox: `socket(AF_UNIX)` itself fails
+    with EPERM there, before any path is connected to, and reporting that as
+    nobody listening sends the reader looking for a dead peer.
+    """
+
+    def refused(*_arguments: int) -> socket.socket:
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(socket, "socket", refused)
+
+    roused = wake(WakePath(runtime="claude", handle=str(tmp_path / "in.sock")), "look")
+
+    assert not roused.reached
+    assert roused.error_type == "UnixSocketRefused"
+    assert "may not open a Unix socket" in roused.reason
+    assert "nothing is listening" not in roused.reason

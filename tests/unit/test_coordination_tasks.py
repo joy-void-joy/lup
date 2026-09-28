@@ -9,6 +9,8 @@ import socket
 from pathlib import Path
 from threading import Thread
 
+import pytest
+
 from lup.coordination.refs import ActorRef
 from lup.coordination.rendering import USER_HOLDER, render, user_tasks
 from lup.coordination.tasks import Blocks, Task
@@ -136,6 +138,7 @@ def test_a_member_with_no_wake_path_is_told_so_rather_than_nudged() -> None:
     )
 
 
+@pytest.mark.usefixtures("unix_socket")
 def test_a_claude_peer_is_woken_by_a_frame_written_to_its_own_inbox(
     tmp_path: Path,
 ) -> None:
@@ -167,6 +170,7 @@ def test_a_claude_peer_is_woken_by_a_frame_written_to_its_own_inbox(
     }
 
 
+@pytest.mark.usefixtures("unix_socket")
 def test_a_claude_peer_whose_inbox_has_gone_leaves_the_mail_waiting(
     tmp_path: Path,
 ) -> None:

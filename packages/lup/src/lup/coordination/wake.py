@@ -192,6 +192,12 @@ def injected(
     *patience* bounds the write rather than leaving it to the kernel, because
     a socket file can outlive the process that bound it, and the worst this
     call is allowed to cost is a peer that stays un-nudged.
+
+    A process that may not open a Unix socket at all is told so apart from a
+    peer that is not listening. Measured in a Claude Code Bash sandbox, where
+    the socket itself is refused with EPERM before any inbox is tried, and
+    reporting that as nobody listening sent the reader looking for a dead
+    peer rather than at the boundary the call ran inside.
     """
     frame = {
         "type": "user",
@@ -199,7 +205,18 @@ def injected(
         **({"session_id": session} if session else {}),
     }
     try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as peer:
+        peer = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    except OSError as refused:
+        return Woken(
+            reached=False,
+            reason=(
+                f"this process may not open a Unix socket ({refused}), so no "
+                "inbox is reachable from here; the mail waits for the peer"
+            ),
+            error_type="UnixSocketRefused",
+        )
+    try:
+        with peer:
             peer.settimeout(patience)
             peer.connect(str(inbox))
             peer.sendall(json.dumps(frame).encode() + b"\n")
