@@ -14,7 +14,7 @@ from lup.coordination.mail import ActorMail
 from lup.coordination.mailbox import AnswerDoor
 from lup.coordination.refs import ActorRef
 from lup.coordination.sessions import ActorInbox, create_inbox_hooks
-from lup.resolver.journal import Journal
+from lup.resolver.record import Journal
 
 from lup.policy.hooks import LupHookInput
 
