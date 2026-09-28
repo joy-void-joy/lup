@@ -211,6 +211,11 @@ class Roster(BaseModel, frozen=True):
             ],
         )
 
+    # lup: defer: the page's table of entries importing each other both ways is
+    # authored and says ten; `dev py layers lup` measures fourteen, adding
+    # coordination-policy, harness-providers, harness-sandbox, launch-providers
+    # and mcp-providers and losing tools-sandbox. Derive the pair list from
+    # `lup.devtools.py.layers` and keep only each pair's explanation authored
     def imports(self, importer: str, imported: str) -> dict[Path, int]:
         """How many import statements in each module under one path reach one other.
 

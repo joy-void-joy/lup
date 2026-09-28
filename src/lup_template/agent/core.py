@@ -476,6 +476,11 @@ def build_session_factory(
     bare_prompt: bool = False,
 ) -> SessionBuild:
     """Assemble tools and return a fully configured neutral factory."""
+    # lup: defer: this factory and `provider_factory` are the half of the
+    # composition root still copied: the user settled that both become library
+    # code taking a declaration of the adopter's tool groups and kinds, so an
+    # update reaches them by the library pin rather than by a hand-port;
+    # `lup.tools.toolsets.assembled` moved, these two did not
     from lup.policy.hooks import (
         create_permission_hooks,
         create_tool_allowlist_hook,

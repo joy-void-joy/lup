@@ -23,6 +23,7 @@ import sh
 import lup.devtools.dev.branches as branches
 import lup.devtools.dev.git_guards as git_guards_mod
 import lup.devtools.dev.pr as pr
+import lup.devtools.dev.preview as preview
 import lup.devtools.dev.worktree as worktree
 from lup.devtools.dev.conflict_app import create_conflict_app
 from lup.devtools.dev.declarations import DevDeclarations
@@ -238,6 +239,36 @@ def create_git_app(declared: Callable[[], DevDeclarations]) -> typer.Typer:
     ) -> None:
         """Full branch inventory: containment, PRs, unique commits, diff sizes."""
         branches.survey(as_json)
+
+    @app.command("preview")
+    def preview_cmd(
+        names: Annotated[
+            list[str], typer.Argument(help="Branches or commits to preview")
+        ],
+        into: Annotated[
+            str | None,
+            typer.Option(
+                "--into",
+                help="What they would land in (default: the integration branch)",
+            ),
+        ] = None,
+        as_json: Annotated[
+            bool,
+            typer.Option("--json", help="Output as JSON"),
+        ] = False,
+    ) -> None:
+        """Say what landing each branch would change, conflict on, and share.
+
+        Merges each in memory, touching no index or working tree, so the
+        answer is about content: a branch every change of which already
+        stands in the target reads as nothing new, however its commits were
+        rewritten. Each commit no patch-id matches is paired with the target
+        commit carrying its subject, and read as rewritten where the two
+        change the same lines. Given several, it names the files each pair
+        of them both touched, which is what orders a sweep.
+        """
+        target = into if into is not None else branches.get_integration_branch()
+        preview.run_preview(names, target, as_json)
 
     @app.command("merge-driver")
     def merge_driver_cmd() -> None:

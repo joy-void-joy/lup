@@ -8,6 +8,11 @@ cannot finish says which steps did not, rather than reporting the success
 that sends an agent off diagnosing phantom errors in correct code.
 """
 
+# lup: defer: tests here errored twice, and one in test_devtools_delete_branch
+# once, across four full 16-worker runs of the suite on 2026-09-19, each
+# passing alone; every fixture builds its own repository under tmp_path, so it
+# is not another session's checkout -- measure it under load if it recurs
+
 from pathlib import Path
 from unittest.mock import Mock
 
