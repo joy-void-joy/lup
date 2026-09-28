@@ -3560,6 +3560,8 @@ def test_every_tool_server_asks_for_what_its_launcher_exported() -> None:
     assert {
         name: server.get("env_vars") for name, server in parsed["mcp_servers"].items()
     } == {name: tool_server_env() for name in startup_names(declared_tool_groups())}
+
+
 def rendered_servers(harness: Harness) -> tuple[JsonObject, JsonObject]:
     """Each runtime's rendering of the ``notes`` server, Claude's first."""
     declaration = next(

@@ -405,6 +405,8 @@ def test_a_launched_codex_hands_the_servers_lup_hosts_what_its_launcher_exported
     assert set(tool_server_env()) == {MEMBER_ENV, NAME_ENV, MAX_RECURSIVE_AGENT_ENV}
     assert f"mcp_servers.coordination.env_vars={json.dumps(tool_server_env())}" in words
     assert not any(word.startswith("mcp_servers.other.env_vars=") for word in words)
+
+
 def test_an_always_loaded_server_skips_tool_search_in_both_claude_outputs() -> None:
     """A server a session calls on most turns should not cost a search each time.
 
