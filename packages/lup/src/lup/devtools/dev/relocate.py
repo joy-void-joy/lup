@@ -794,7 +794,7 @@ def surviving_mentions(
     def mentions(path: Path) -> Iterator[str]:
         text = path.read_text(encoding="utf-8")
         declined = {number for number in submodule_imports(text, moves)}
-        for number, line in enumerate(text.splitlines(), start=1):
+        for number, line in enumerate(io.StringIO(text).readlines(), start=1):
             if number in declined or any(".".join(move.old) in line for move in moves):
                 yield f"{path}:{number}: {line.strip()}"
 

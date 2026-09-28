@@ -408,6 +408,18 @@ def test_surviving_mentions_reports_prose_the_rewrite_cannot_reach(
     ]
 
 
+def test_surviving_mentions_number_rows_the_way_the_tokenizer_does(
+    tmp_path: Path,
+) -> None:
+    """A mention is reported at the row the grammar and an editor both count."""
+    source = tmp_path / "site.py"
+    source.write_text("\x0c\n'''Reads through lup.paths.'''\n", encoding="utf-8")
+
+    mentions = surviving_mentions([tmp_path], DEEPER)
+
+    assert [mention.split(": ", 1)[0] for mention in mentions] == [f"{source}:2"]
+
+
 def test_surviving_mentions_name_a_moved_module_the_rewrite_declined(
     tmp_path: Path,
 ) -> None:
