@@ -318,10 +318,21 @@ def text_cmd(
         bool,
         typer.Option("--ignore-case", "-i", help="Match without case sensitivity"),
     ] = False,
+    prose: Annotated[
+        bool,
+        typer.Option(
+            "--prose",
+            help="Search only docstrings and comments, as the prose rules read them",
+        ),
+    ] = False,
 ) -> None:
-    """Search literal source text within explicitly selected Python paths."""
+    """Search literal source text within explicitly selected Python paths.
+
+    ``--prose`` narrows the search to what a person reads as a sentence, which
+    is how a candidate for a prose rule is found before the rule is written.
+    """
     try:
-        matches = source_text_matches(pattern, paths, ignore_case)
+        matches = source_text_matches(pattern, paths, ignore_case, prose)
     except (OSError, UnicodeError, ValueError) as error:
         fail(str(error))
     for match in matches:
