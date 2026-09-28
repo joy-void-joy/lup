@@ -185,9 +185,9 @@ def rename_in_pyproject(
     ``[project.scripts]`` to ``[project.entry-points."lup.devtools"]``, and
     matching the whole old line went on silently succeeding at nothing. A
     renamed project kept an entry point naming a package that no longer
-    existed — failing later as ``must register exactly one 'lup.devtools'
-    application entry point; found 2``, which names neither the manifest nor
-    the rename — and shipped none of its package data, which was never matched
+    existed — failing later where ``lup-devtools`` refuses two registered
+    applications, far from the manifest line that left the second one — and
+    shipped none of its package data, which was never matched
     at all.
 
     A key that moves tables keeps its value, so the value is what is matched.
@@ -284,7 +284,7 @@ def drop_stale_metadata(
     under the new name without removing the old. Both sit on the import path
     the editable install adds, so ``importlib.metadata`` reads two
     distributions each registering the ``lup.devtools`` application, and
-    every `lup-devtools` command refuses with "found 2" until the stale one
+    every `lup-devtools` command refuses, naming both, until the stale one
     goes. It is an ignored build product, so nothing tracked goes with it.
     """
     stale = root / "src" / f"{distribution.replace('-', '_')}.egg-info"
