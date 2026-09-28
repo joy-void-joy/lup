@@ -104,6 +104,22 @@ def test_relocate_carries_submodules_of_a_moved_package(tmp_path: Path) -> None:
     )
 
 
+def test_relocate_counts_rows_the_way_the_tokenizer_does(tmp_path: Path) -> None:
+    """A form feed is whitespace to Python and a line break to `splitlines`.
+
+    Rows read one way and spliced another put every edit below the form feed
+    one row early, over whatever line happened to be there.
+    """
+    source = tmp_path / "site.py"
+    source.write_text("\x0c\nfrom lup.paths import sessions_dir\n", encoding="utf-8")
+
+    relocate([tmp_path], DEEPER)
+
+    assert source.read_text(encoding="utf-8") == (
+        "\x0c\nfrom lup.workspace.paths import sessions_dir\n"
+    )
+
+
 def test_relocate_follows_the_most_specific_move(tmp_path: Path) -> None:
     """A module declared on its own goes where it was declared to go.
 

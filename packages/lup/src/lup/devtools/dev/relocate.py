@@ -214,9 +214,12 @@ def apply_edits(text: str, edits: list[ModuleEdit]) -> str:
     """Splice every respelled module path into the source that named it.
 
     Rightmost first, so an edit's recorded columns still address the line it
-    was read from when two imports share one.
+    was read from when two imports share one. Rows are read by the reader the
+    tokenizer was given, which ends a line at a newline alone: ``splitlines``
+    also ends one at a form feed, and a row counted that way is a different
+    line from the one the edit was read off.
     """
-    lines = text.splitlines(keepends=True)
+    lines = io.StringIO(text).readlines()
     for edit in sorted(edits, key=lambda edit: edit.start, reverse=True):
         line = lines[edit.row - 1]
         lines[edit.row - 1] = f"{line[: edit.start]}{edit.text}{line[edit.end :]}"
