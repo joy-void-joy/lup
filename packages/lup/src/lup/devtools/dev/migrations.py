@@ -284,7 +284,7 @@ DECLARED: list[Migration] = [
             ),
             MigrationStep(
                 instruction=(
-                    "Read lup.DEFERRED where lup.CONSTRUCTORS was read: it maps "
+                    "Read lup.LAZY_EXPORTS where lup.CONSTRUCTORS was read: it maps "
                     "Claude and Codex, among every name the package root "
                     "resolves on first access, to the modules defining them."
                 )
@@ -1149,17 +1149,17 @@ DECLARED: list[Migration] = [
         ],
     ),
     Migration(
-        subjects=["AGENTS"],
+        subjects=["AGENTS", "DEFERRED"],
         reason=(
             "the package root resolves the launch vocabulary on first access "
             "the way it resolves the agents, through one table naming the "
-            "module each deferred name is defined in, so the table is named "
+            "module each lazy export is defined in, so the table is named "
             "for what it holds"
         ),
         steps=[
             MigrationStep(
                 instruction=(
-                    "Read lup.DEFERRED where lup.AGENTS was read. It maps every "
+                    "Read lup.LAZY_EXPORTS where lup.AGENTS was read. It maps every "
                     "name the root resolves on first access to its module; a "
                     "caller that wanted the agents alone keeps the rows for "
                     "Claude and Codex."

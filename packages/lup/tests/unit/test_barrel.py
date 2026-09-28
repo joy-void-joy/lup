@@ -146,7 +146,7 @@ def test_each_launch_field_is_the_class_its_declaration_module_defines() -> None
 
 
 def test_importing_lup_loads_no_launch_machinery() -> None:
-    """The launch vocabulary is deferred for the same reason the agents are.
+    """The launch vocabulary resolves lazily for the same reason the agents do.
 
     Its declaration module stands beside the harness, policy and sandbox
     machinery a launch composes, several hundred modules deep; a caller who

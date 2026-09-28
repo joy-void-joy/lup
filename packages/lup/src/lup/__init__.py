@@ -64,7 +64,7 @@ if TYPE_CHECKING:
     from lup.providers.claude import Claude
     from lup.providers.codex import Codex
 
-# Where each deferred name is defined, so the resolution below is a lookup
+# Where each lazy export is defined, so the resolution below is a lookup
 # rather than a branch per name -- a third adapter, or another launch field,
 # is one row.
 # lup: ignore[library-default] — the names this library defines and the
@@ -72,7 +72,7 @@ if TYPE_CHECKING:
 # choice made for an adopter: a provider arrives here as an adapter, and a row
 # an adopter replaced would point `from lup import Claude` at something lup
 # never wrote.
-DEFERRED = {
+LAZY_EXPORTS = {
     "Claude": "lup.providers.claude",
     "Codex": "lup.providers.codex",
     "InnerSandbox": "lup.launch.declaration",
@@ -102,16 +102,16 @@ def __getattr__(
     | Recording
     | Reopen
 ]:
-    """Resolve a deferred name on first access, and nothing else.
+    """Resolve a lazy export on first access, and nothing else.
 
     PEP 562's module hook, used for exactly the names above. Anything else
     raises the ``AttributeError`` Python would have raised anyway, in the same
     words, so a typo at the front door reads as a typo rather than as an import
     failure somewhere inside an adapter or the launch machinery.
     """
-    if name not in DEFERRED:
+    if name not in LAZY_EXPORTS:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    return getattr(import_module(DEFERRED[name]), name)
+    return getattr(import_module(LAZY_EXPORTS[name]), name)
 
 
 __all__ = [  # lup: ignore[all-export] -- the package-root public API
