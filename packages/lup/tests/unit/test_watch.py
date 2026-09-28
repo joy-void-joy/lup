@@ -11,6 +11,8 @@ import socket
 from pathlib import Path
 from threading import Event, Thread
 
+import pytest
+
 from lup.coordination.identity import member_ref, mint_member_id
 from lup.coordination.repository import RepositoryPeers
 from lup.coordination.roster import Delivery
@@ -100,6 +102,7 @@ def test_a_member_filter_narrows_the_mail_and_not_the_roster(tmp_path: Path) -> 
     ]
 
 
+@pytest.mark.usefixtures("unix_socket")
 def test_nudging_wakes_a_peer_through_its_inbox_and_says_so_for_one_without(
     tmp_path: Path,
 ) -> None:

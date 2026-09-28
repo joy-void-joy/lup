@@ -17,6 +17,7 @@ import pytest
 import lup.launch.declaration as declaration
 import lup.providers.claude.runtime as claude_runtime
 from lup.coordination.identity import MEMBER_ENV, NAME_ENV, LaunchedMember
+from lup.harness.environment import tool_server_env
 from lup.harness.image import ContainerClient
 from lup.harness.models import HookSandbox, HookSet
 from lup.launch.compilation import allowance_environment
@@ -62,6 +63,7 @@ from lup.providers.codex.launch import (
 from lup.providers.codex.login import CODEX_HOME
 from lup.sessions.events import SessionId, SessionSummary
 from lup.sessions.recursion import MAX_RECURSIVE_AGENT_ENV
+from lup.tools.mcp import RawStdioServerConfig
 
 MEMBER = LaunchedMember(member_id="member-1", cli_name="reviewer")
 
@@ -373,6 +375,36 @@ def test_declared_servers_are_the_launched_sessions_whole_roster() -> None:
     assert any(
         word.startswith("mcp_servers.coordination.command=") for word in codex_words
     )
+
+
+def test_a_launched_codex_hands_the_servers_lup_hosts_what_its_launcher_exported() -> (
+    None
+):
+    """Codex starts a stdio server under a fixed base environment, forwarding nothing else.
+
+    So a server lup hosts names the roster identity and recursion allowance in
+    ``env_vars``, or its coordination server joins the roster under no id and
+    a nested agent its tools open spends no allowance. A server passed through
+    as declared is handed none of it.
+    """
+    from lup.mcp import Coordination, External
+
+    words = codex_arguments(
+        Codex(
+            tools=CodexTools(
+                mcp=[
+                    Coordination(),
+                    External(name="other", server=RawStdioServerConfig(command="x")),
+                ]
+            )
+        ),
+        [],
+        [],
+    )
+
+    assert set(tool_server_env()) == {MEMBER_ENV, NAME_ENV, MAX_RECURSIVE_AGENT_ENV}
+    assert f"mcp_servers.coordination.env_vars={json.dumps(tool_server_env())}" in words
+    assert not any(word.startswith("mcp_servers.other.env_vars=") for word in words)
 
 
 class Step:

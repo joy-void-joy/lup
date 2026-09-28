@@ -42,6 +42,7 @@ from pydantic import (
 )
 
 from lup.coordination.identity import MEMBER_ENV, mint_member_id
+from lup.harness.environment import tool_server_env
 from lup.ledger.models import LedgerEdge, LedgerNode
 from lup.ledger.store import LedgerLayout
 from lup.orchestration.reflection import ReviewGate
@@ -193,6 +194,15 @@ class ToolServer(
         """
         return None
 
+    def launcher_variables(self) -> list[str]:
+        """What this server reads from the environment its session's launcher made.
+
+        Nothing by default: a server passed through as declared reads what its
+        own declaration gives it, and a launched session's identity is not
+        its to be handed.
+        """
+        return []
+
 
 class HostedServer(ToolServer, ABC, frozen=True):
     """A server lup builds out of one tool group, in process or in a subprocess."""
@@ -212,6 +222,15 @@ class HostedServer(ToolServer, ABC, frozen=True):
 
     def launched(self, launch: ServeLaunch) -> RawMcpServerConfig:
         return launch.command(self)
+
+    def launcher_variables(self) -> list[str]:
+        """The roster identity and recursion allowance of the session it serves.
+
+        Whichever group it serves, it is one process of the launched session,
+        so it answers to that session's roster identity and spends that
+        session's recursion allowance.
+        """
+        return tool_server_env()
 
     def served(self) -> "ServedServer":
         """This server as a serve command names it: its class and its fields."""

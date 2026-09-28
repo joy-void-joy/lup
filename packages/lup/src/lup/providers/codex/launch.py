@@ -403,21 +403,32 @@ def codex_mcp_arguments(tools: "CodexTools") -> list[str]:
 
     Declared per session over whatever the home or the plugin carries under
     the same names, so the declaration's roster is what the session serves.
+
+    A server reading what the launcher exported names it in ``env_vars``,
+    because Codex starts a stdio server under a fixed base environment and
+    forwards nothing else: without it, a coordination server joins the roster
+    under no id, and a nested agent its tools open spends no allowance.
     """
     serve = (
         tools.serve
         if tools.serve.runtime is not None
         else tools.serve.model_copy(update={"runtime": "codex"})
     )
-    return [
-        argument
+    launched = [
+        (server.name, key, value)
         for server in tools.mcp
         for key, value in dict(server.launched(serve)).items()
         if key != "type"
-        for argument in (
-            "--config",
-            f"mcp_servers.{server.name}.{key}={json.dumps(value)}",
-        )
+    ]
+    forwarded = [
+        (server.name, "env_vars", named)
+        for server in tools.mcp
+        if (named := server.launcher_variables())
+    ]
+    return [
+        argument
+        for name, key, value in [*launched, *forwarded]
+        for argument in ("--config", f"mcp_servers.{name}.{key}={json.dumps(value)}")
     ]
 
 

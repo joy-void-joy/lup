@@ -60,6 +60,7 @@ from lup.devtools.dev.workflow import FrontendSpec, PublishSpec, WorkflowSpec
 from lup.devtools.project import DevProject
 from lup.harness.contracts import NativeSpellings
 from lup.harness.enforcement import declared_role_rows
+from lup.harness.environment import tool_server_env
 from lup.policy.boundary import depends_on
 from lup.coordination.policy import inbox_refusal, peer_policy
 from lup.policy.refused_tools import RefusedTool
@@ -276,6 +277,11 @@ def agent_tool_servers(
     (Codex gives ten seconds) drops the losers of that race, and what the
     session sees is two tool groups simply missing on the boot that built
     the environment and present on every boot after.
+
+    Every server asks for what the launcher exported for it: whichever group
+    it serves, it is one process of the launched session, so it answers to
+    that session's roster identity and spends that session's recursion
+    allowance.
     """
     launch = ServeLaunch(session=HARNESS_SESSION, needs=session_needs)
     started = startup_names(declared_tool_groups())
@@ -299,6 +305,7 @@ def agent_tool_servers(
                     for word in [*launch.options(), *server.served().arguments()]
                 ),
             ],
+            env_vars=tool_server_env(),
             startup_timeout_seconds=startup_deadline_seconds,
         )
         # What a runtime starts when a session opens, read off the same
