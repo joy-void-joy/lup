@@ -64,15 +64,10 @@ Summarize:
 ### 4. Predict conflict severity
 
 ```bash
-# Dry-run merge to see what would conflict
-git merge --no-commit --no-ff <branch> 2>&1 || true
-
-# If conflicts arose, list them
-git diff --name-only --diff-filter=U 2>/dev/null
-
-# Abort the trial merge
-git merge --abort 2>/dev/null || true
+uv run lup-devtools git preview <branch> --into HEAD
 ```
+
+It merges in memory, touching neither the index nor this working tree, and names the files that would conflict — or, where nothing would, every file the merge changes and by how many lines. `nothing new` means the current branch already holds every line the source carries, however its commits were rewritten.
 
 Classify the merge into one of:
 

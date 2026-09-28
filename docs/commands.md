@@ -144,6 +144,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `git freshness` | Report how far this checkout sits behind its own remote and its base. |
 | `git pr-body` | Generate a PR body (summary, commits, test plan) from branch commits. |
 | `git survey` | Full branch inventory: containment, PRs, unique commits, diff sizes. |
+| `git preview` | Say what landing each branch would change, conflict on, and share. |
 | `git merge-driver` | Register the ownership-manifest merge driver `.gitattributes` names. |
 | `git delete` | Delete a branch and its worktree, and origin&#x27;s copy if it is spent. |
 | `git retire` | Retire a branch through a pull request, so its commits outlive it. |
