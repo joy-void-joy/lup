@@ -611,7 +611,7 @@
     {
       "path": ".codex/plugins/lup/skills/merge/SKILL.md",
       "category": "generated",
-      "sha256": "0494fcc91fe792a91dcb56a941915df2cd00b9db24fee05cfec1251eaf758f30",
+      "sha256": "6182919aae7951d1d989523d651959cb0b391e774c6a519336cb56952b3c067c",
       "semantic_id": "skill.merge",
       "executable": false
     },
