@@ -32,6 +32,15 @@ from lup import (
     SessionSummary,   # one conversation the provider has on record
     TurnId,           # the provider's identity for one turn; a fork is cut at it
     CustomModel,      # a model id outside the runtime's catalog, on purpose
+    OuterContainer,   # the wall a launch opens behind: the verified container,
+    InnerSandbox,     # the runtime's own sandbox on the host,
+    NoSandbox,        # or the semantic policy alone
+    Mount,            # a folder outside the working tree the session reaches
+    Member,           # the session's name on the coordination roster
+    Recording,        # what is kept of the session beside the runtime's record
+    Latest,           # reopen the newest session in the workspace,
+    Pick,             # the one the runtime's picker offers, at a terminal,
+    Reopen,           # or the one named by its id
 )
 ```
 
@@ -62,9 +71,17 @@ asyncio.run(main())
 Pydantic model declaring one agent whole — model, prompt, tools, permissions,
 workspace, and the layers its sessions are wrapped in — and each is also what
 opens those sessions: there is no client to build from a declaration.
-Everything else here is vocabulary, a name to annotate against, and vocabulary
-alone builds nothing: the typed result is a Pydantic model the program
-declares itself.
+The launch vocabulary is the fields a launch adds to that declaration, each a
+typed value from `lup.launch.declaration` (**Launching** below). Everything
+else here is vocabulary, a name to annotate against, and vocabulary alone
+builds nothing: the typed result is a Pydantic model the program declares
+itself.
+
+The agents and the launch vocabulary resolve on first access, because each
+stands on several hundred modules — an agent on its provider's tools, a
+launch field on the harness, policy and sandbox machinery a launch composes.
+So `import lup` loads neither an adapter nor that machinery, and naming either
+still loads no provider SDK: opening a session does.
 
 ### Asking
 
@@ -254,14 +271,14 @@ A declaration is compiled twice. `open()` and `ask()` compile it into SDK
 options for a session this process drives; `command()` compiles the same
 fields into the `(argv, env, cwd)` an interactive CLI starts with, and
 `launch()` runs that command in the foreground, the terminal handed over until
-the session ends. The fields a launch adds are typed values from
-`lup.launch.declaration`, and each means one thing to both compilations:
+the session ends. The fields a launch adds are typed values the package root
+exports, defined in `lup.launch.declaration`, and each means one thing to
+both compilations:
 
 ```python
 from pathlib import Path
 
-from lup import Claude
-from lup.launch.declaration import Latest, Member, Mount, OuterContainer, Recording
+from lup import Claude, Latest, Member, Mount, OuterContainer, Recording
 from lup.mcp import CodeIntel, Coordination
 from lup.providers.claude import ClaudeTools
 

@@ -38,12 +38,16 @@ The package root is deliberately small. `Claude` and `Codex` are frozen
 Pydantic models, each declaring one agent whole — model, system prompt, tools,
 permissions, workspace, and the layers its sessions are wrapped in — and each
 is also what opens those sessions: there is no client to build from one.
+Beside them is what a launch adds to a declaration: the wall its session opens
+behind, `OuterContainer`, `InnerSandbox` or `NoSandbox`, with the `Mount`s it
+reaches; its `Member` identity on the coordination roster; its `Recording`;
+and the session it reopens, `Latest()`, `Pick()` or `Reopen(session=...)`.
 Everything else at the root is vocabulary to annotate against: `Agent`,
 `Conversation`, and `Turn` for code naming neither provider, and
 `TurnResult`, `TurnInput`, `TurnMessage`, `SessionId`, `SessionSummary`,
-`TurnId`, and `CustomModel`. The two agents resolve on
-first access, so `import lup` pulls neither adapter, and naming one still
-loads no SDK: opening a session does.
+`TurnId`, and `CustomModel`. The agents and the launch fields resolve on
+first access, so `import lup` pulls neither adapter nor the launch machinery,
+and naming one still loads no SDK: opening a session does.
 
 `ask` is the only verb. `await agent.ask(prompt, Model)` opens a session,
 takes one turn, and closes the session however the turn ended; asked without
