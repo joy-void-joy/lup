@@ -161,6 +161,7 @@ Run any of them with `uv run lup-devtools <command>`, and add `--help` for its a
 | `git conflict list` | Show conflicted files with scope classification (in-scope vs out-of-scope). |
 | `git conflict status` | Detect conflict state, list files, and show both sides&#x27; history. |
 | `git conflict audit` | Post-resolution deletion audit: check for accidentally dropped code. |
+| `git conflict union` | Settle a conflict where both sides inserted at one place, keeping both. |
 | `git conflict complete` | Finalize the merge/rebase/cherry-pick after all conflicts are resolved. |
 | `git hooks install` | Install every git hook this repository declares. |
 | `git hooks status` | Report what this clone refuses, at every moment a hook sits at. |

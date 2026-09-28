@@ -233,7 +233,7 @@
     {
       "path": ".claude/plugins/lup/commands/merge.md",
       "category": "generated",
-      "sha256": "1b2738392b8976784bf3b7d9671a436997f45919cfab1cc15e79894be31d917c",
+      "sha256": "9f13bded14a4430eee885d48f810c814cf76aece758cbf3702c6abe8d7965b79",
       "semantic_id": "skill.merge",
       "executable": false
     },
