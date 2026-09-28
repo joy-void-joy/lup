@@ -54,8 +54,10 @@ from packaging.requirements import Requirement
 from lup.workspace.paths import manifest_table, project_root
 from lup.execution.shell import git
 from lup.devtools.sync import load_projects
+from lup.harness.codescan.common import LIBRARY_PACKAGE_ROOT
 from lup.harness.credential import parse_remote, remote_url, resolved_host
 from lup.devtools.project import Tracker
+from lup.types import JsonObject, JsonValue
 from lup.devtools.utils import decode_stderr, slug_from_remote
 from lup.providers.routing import Provider
 
@@ -69,6 +71,13 @@ VENDORED_SIBLINGS = {"src": VENDORED_SRC, "tests": f"{VENDORED_ROOT}/tests"}
 naming the plain root wants its vendored twin exactly while the package is
 there, and wants it gone the moment the package is not."""
 DISTRIBUTION = "lup"
+"""The name the library is required and published under, which is not the
+name it is imported by: a requirement, a ``[tool.uv.sources]`` key, a lock
+entry and an index lookup spell this, and ``import lup`` does not."""
+REGISTRATION = "lup"
+"""The ``sync.json`` registration naming lup's repository, which ``refs/lup``,
+``sync setup lup`` and a scaffold's ``project`` all spell: the repository the
+distribution is built from, named apart from the distribution itself."""
 # lup: ignore[constant-declaration] — the glob this repository's own uv workspace
 # is laid out as, which the manifest below already states
 WORKSPACE_MEMBERS = ["packages/*"]
@@ -223,14 +232,22 @@ def git_source(
             )
 
 
+def declared_source(manifest: JsonObject | None) -> JsonValue:
+    """What ``[tool.uv.sources]`` declares for :data:`DISTRIBUTION`, if anything."""
+    match manifest:
+        case {"tool": {"uv": {"sources": dict(sources)}}} if DISTRIBUTION in sources:
+            return sources[DISTRIBUTION]
+    return None
+
+
 def read_mode(root: Path) -> LibraryMode:
     """Classify the acquisition mode ``pyproject.toml`` declares."""
     with (root / "pyproject.toml").open("rb") as handle:
         data = tomllib.load(handle)
-    match data:
-        case {"tool": {"uv": {"sources": {"lup": {"workspace": True}}}}}:
+    match declared_source(data):
+        case {"workspace": True}:
             return LibraryMode.LOCAL
-        case {"tool": {"uv": {"sources": {"lup": {"git": str()}}}}}:
+        case {"git": str()}:
             return LibraryMode.GIT
         case _:
             return LibraryMode.PUBLISHED
@@ -245,12 +262,7 @@ def read_git_source(root: Path) -> GitSource | None:
     on every read, and a launch opened to repair a conflicted manifest is the
     one that must not fail over it.
     """
-    match manifest_table(root / "pyproject.toml"):
-        case {"tool": {"uv": {"sources": {"lup": dict(source)}}}}:
-            declared = source
-        case _:
-            return None
-    match declared:
+    match declared_source(manifest_table(root / "pyproject.toml")):
         case {"git": str(url), "branch": str(ref)}:
             return GitSource(url=url, ref_kind="branch", ref=ref)
         case {"git": str(url), "tag": str(ref)}:
@@ -263,7 +275,7 @@ def read_git_source(root: Path) -> GitSource | None:
             return None
 
 
-def configured_repository(root: Path, project: str = DISTRIBUTION) -> str:
+def configured_repository(root: Path, project: str = REGISTRATION) -> str:
     """The dependency's repository, from its pin or named sync registration."""
     source = read_git_source(root)
     if source is not None:
@@ -287,7 +299,7 @@ def configured_repository(root: Path, project: str = DISTRIBUTION) -> str:
 
 
 def repository_url(
-    root: Path, url: str | None = None, project: str = DISTRIBUTION
+    root: Path, url: str | None = None, project: str = REGISTRATION
 ) -> str:
     """Require a declared dependency source, allowing an explicit override."""
     found = url if url is not None else configured_repository(root, project)
@@ -301,7 +313,7 @@ def repository_url(
     return found
 
 
-def library_trackers(root: Path, project: str = DISTRIBUTION) -> list[Tracker]:
+def library_trackers(root: Path, project: str = REGISTRATION) -> list[Tracker]:
     """Route library defects to its configured forge, preserving the host."""
     url = configured_repository(root, project)
     address = parse_remote(url)
@@ -317,7 +329,9 @@ def library_trackers(root: Path, project: str = DISTRIBUTION) -> list[Tracker]:
         Tracker(
             repository=f"{host}/{slug_from_remote(url)}",
             what="the framework this project is built on",
-            components=[DISTRIBUTION],
+            # A report names the module it is about, and modules are named
+            # by the import root, whatever the distribution is called.
+            components=[LIBRARY_PACKAGE_ROOT],
         )
     ]
 

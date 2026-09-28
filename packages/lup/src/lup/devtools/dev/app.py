@@ -1191,7 +1191,7 @@ def create_dev_app(
     ) -> None:
         """Resolve lup from its repository, for use before a release is published."""
         scaffold = declared().scaffold
-        project = scaffold.project if scaffold is not None else library_mod.DISTRIBUTION
+        project = scaffold.project if scaffold is not None else library_mod.REGISTRATION
         source_url = library_mod.repository_url(project_root(), url, project)
         library_mod.git_library(
             library_mod.git_source(source_url, branch=branch, tag=tag, rev=rev),
