@@ -273,12 +273,16 @@ def looked(root: Path, mine: str, checkout: str) -> Folded:
         return names.get(member_id) or member_id
 
     def holders(claim: Held) -> list[str]:
-        """Every session on one claim, by id, as the look keys them."""
-        return sorted(
-            {
+        """Every session on one claim, by id, as the look keys them.
+
+        In the order the claim lists its holders, once each: two of one
+        session's subagents on a path are that session once.
+        """
+        return list(
+            dict.fromkeys(
                 sessions.get(held_by, held_by)
                 for held_by in [text(holder.get("id")) for holder in claim["holders"]]
-            }
+            )
         )
 
     def worktree_of(member: Member) -> str:
