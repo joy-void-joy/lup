@@ -135,6 +135,26 @@ def test_surviving_mentions_reports_prose_the_rewrite_cannot_reach(
     ]
 
 
+def test_surviving_mentions_name_a_moved_module_imported_from_its_package(
+    tmp_path: Path,
+) -> None:
+    """`from package import submodule` is never rewritten, so it is never silent.
+
+    The dotted path is not written whole there, so the text search that finds
+    prose passed over it and the relocation reported nothing left to fix,
+    over a site that no longer resolved.
+    """
+    source = tmp_path / "site.py"
+    source.write_text(
+        "from lup import (\n    paths,\n    trace,\n)\nfrom lup import pathsy\n",
+        encoding="utf-8",
+    )
+
+    mentions = surviving_mentions([tmp_path], DEEPER)
+
+    assert [mention.split(": ", 1)[0] for mention in mentions] == [f"{source}:2"]
+
+
 def test_relocate_refuses_a_destination_another_module_holds(tmp_path: Path) -> None:
     """Nothing moves and nothing is repointed when the new name is taken.
 

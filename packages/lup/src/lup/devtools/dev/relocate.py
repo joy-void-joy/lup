@@ -27,7 +27,9 @@ same tokens as importing a name from that package, and rewriting it would
 mean guessing which. The repository's conventions ask for
 ``from module import symbol`` anyway, so the guess is not worth the reach —
 such a site fails the type check with an unresolved import rather than
-passing quietly, which is the outcome that gets it fixed.
+passing quietly, which is the outcome that gets it fixed. It is named among
+the surviving mentions as well, found by the grammar: the dotted path is
+never written whole there, so the text search that finds prose cannot see it.
 """
 
 import ast
@@ -382,13 +384,46 @@ def surviving_mentions(
     """Every remaining mention of a moved module, wherever it is not an import.
 
     Not necessarily wrong — prose about where something used to live is a
-    legitimate thing to write — so this reports and the reader decides.
+    legitimate thing to write — so this reports and the reader decides. A
+    moved module imported by name from its package is reported too, though
+    it is always wrong: the rewrite leaves that spelling alone, and it is the
+    one a search for the dotted path cannot find.
     """
+
+    def mentions(path: Path) -> Iterator[str]:
+        text = path.read_text(encoding="utf-8")
+        declined = {number for number in submodule_imports(text, moves)}
+        for number, line in enumerate(text.splitlines(), start=1):
+            if number in declined or any(".".join(move.old) in line for move in moves):
+                yield f"{path}:{number}: {line.strip()}"
+
     return [
-        f"{path}:{number}: {line.strip()}"
-        for path in source_files(roots, suffixes)
-        for number, line in enumerate(
-            path.read_text(encoding="utf-8").splitlines(), start=1
-        )
-        if any(".".join(move.old) in line for move in moves)
+        mention for path in source_files(roots, suffixes) for mention in mentions(path)
     ]
+
+
+def submodule_imports(text: str, moves: list[Relocation]) -> list[int]:
+    """The lines importing a moved module by name from the package holding it.
+
+    ``from package import submodule`` never writes the module's dotted path
+    whole, so it is read by the grammar: an imported name that, joined to the
+    package it is imported from, spells a moved module. A source that does
+    not parse names nothing here, and its text mentions still are.
+    """
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+    moved = [move.old for move in moves]
+
+    def named(node: ast.AST) -> Iterator[int]:
+        match node:
+            case ast.ImportFrom(module=str(module), names=names, level=0):
+                package = name_parts(module) or []
+                yield from (
+                    alias.lineno for alias in names if [*package, alias.name] in moved
+                )
+            case _:
+                return
+
+    return sorted(line for node in ast.walk(tree) for line in named(node))
