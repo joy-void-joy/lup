@@ -4,8 +4,9 @@ A project built on this template reaches ``lup`` one of three ways, and the
 mode is a property of ``pyproject.toml`` that can be changed at any time:
 
 ``published``
-    The release from PyPI. Upgrading is ``uv lock --upgrade-package lup``
-    plus a harness regeneration, rather than a merge against a vendored fork.
+    The release from PyPI, published as ``lup-agents``. Upgrading is
+    ``uv lock --upgrade-package lup-agents`` plus a harness regeneration,
+    rather than a merge against a vendored fork.
 ``git``
     The repository itself, resolved at a branch, tag, or commit. The default
     for a new project while no release is published: it gives an adopter the
@@ -70,7 +71,7 @@ VENDORED_SIBLINGS = {"src": VENDORED_SRC, "tests": f"{VENDORED_ROOT}/tests"}
 """Each plain search root and the vendored one that shadows it. A search path
 naming the plain root wants its vendored twin exactly while the package is
 there, and wants it gone the moment the package is not."""
-DISTRIBUTION = "lup"
+DISTRIBUTION = "lup-agents"
 """The name the library is required and published under, which is not the
 name it is imported by: a requirement, a ``[tool.uv.sources]`` key, a lock
 entry and an index lookup spell this, and ``import lup`` does not."""
@@ -127,7 +128,7 @@ rather than sniffed back out of its root."""
 
 
 class LibraryMode(StrEnum):
-    """Where the ``lup`` distribution is resolved from."""
+    """Where the ``lup-agents`` distribution is resolved from."""
 
     PUBLISHED = "published"
     GIT = "git"
@@ -350,7 +351,7 @@ def requirement_for(entry: str, version: str | None) -> str:
 
 
 def apply_dependency(document: tomlkit.TOMLDocument, version: str | None) -> list[str]:
-    """Restate the ``lup`` requirement in ``[project].dependencies``."""
+    """Restate the ``lup-agents`` requirement in ``[project].dependencies``."""
     dependencies = document["project"]["dependencies"]
     for index, entry in enumerate(dependencies):
         if Requirement(str(entry)).name != DISTRIBUTION:
@@ -370,7 +371,7 @@ def apply_source(
     mode: LibraryMode,
     git: GitSource | None = None,
 ) -> list[str]:
-    """Declare, or clear, the ``[tool.uv.sources]`` override for ``lup``."""
+    """Declare, or clear, the ``[tool.uv.sources]`` override for ``lup-agents``."""
     sources = document["tool"]["uv"]["sources"]
     match mode:
         case LibraryMode.PUBLISHED:

@@ -475,7 +475,7 @@ def test_the_library_registration_follows_its_git_pin(
         SHIPPED,
         manifest=(
             '[tool.lup]\nagent_version = "0.1.0"\n\n'
-            f'[tool.uv.sources]\nlup = {{ git = "{pinned}", branch = "dev" }}\n'
+            f'[tool.uv.sources]\nlup-agents = {{ git = "{pinned}", branch = "dev" }}\n'
         ),
     )
     standing_in(monkeypatch, checkout)
@@ -496,7 +496,8 @@ def test_a_registration_nothing_places_falls_back_to_its_distribution(
 
     Root files are the project's own from the first day, so its `sync.json`
     never receives the url; the installed library says where it comes from
-    instead. A registration this machine placed keeps its own answer.
+    instead -- asked under the distribution's name, which is not the
+    registration's. A registration this machine placed keeps its own answer.
     """
     checkout = project(
         tmp_path,
@@ -505,7 +506,8 @@ def test_a_registration_nothing_places_falls_back_to_its_distribution(
     )
     standing_in(monkeypatch, checkout)
     no_rewrites(monkeypatch)
-    monkeypatch.setattr(sync, "distribution_repository", lambda name: str(upstream))
+    declared = {"lup-agents": str(upstream)}
+    monkeypatch.setattr(sync, "distribution_repository", lambda name: declared[name])
 
     assert sync.find_project("lup").get("url") == str(upstream)
     assert [root.path for root in sync.accessible_roots(lambda _said: None)] == [

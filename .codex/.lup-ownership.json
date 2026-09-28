@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "606f7f69f464e97a3775bcab8335c57e52a3d758c2c3c9cca8e46e60ee0a0cbb",
+  "source_digest": "57527dbe4f484fa71a9aaf24ba6dfb224a0cf422dc0fceb6c9a281f5cfe59de4",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -58,7 +58,7 @@
     {
       "path": ".codex/plugins/lup/TEMPLATE_AGENTS.md",
       "category": "generated",
-      "sha256": "51d71f2c14e4eed4389d7bcd4c19de0779985d35f17daecd63422984c94179cc",
+      "sha256": "2cad27468e772a50288d63d8a97a013f5b0959e23d8dbee9614d89611ae1d341",
       "semantic_id": "harness.template-guidance",
       "executable": false
     },
@@ -387,7 +387,7 @@
     {
       "path": ".codex/plugins/lup/hooks/scripts/carrier_drift.sh",
       "category": "generated",
-      "sha256": "bb99c5c3c88da8aef83223a4d8ceddd736234bed61a07e01fc94c9247104ccdc",
+      "sha256": "bcd2919db736993f2883d35f1ce6e6e5fbc4139e3838bb2d10d4da2fdb9ec6d2",
       "semantic_id": "hooks.lup-policy",
       "executable": true
     },
@@ -464,7 +464,7 @@
     {
       "path": ".codex/plugins/lup/skills/brainstorm/SKILL.md",
       "category": "generated",
-      "sha256": "1eae3cce9f094a0b4ff1e55872dc9c020af3ef407b80e8c38dc81ee2c851954f",
+      "sha256": "d77020e37a75dc2b542d965351dfbdfd8a4618c9d3a0c5dd6dc1a639e5d9cbad",
       "semantic_id": "skill.brainstorm",
       "executable": false
     },
@@ -590,14 +590,14 @@
     {
       "path": ".codex/plugins/lup/skills/init/SKILL.md",
       "category": "generated",
-      "sha256": "58c815948bbfa905f165a27e4cc9508ce690d528e96217cdf28f26132cd14bad",
+      "sha256": "02a1dfd994286b541429a5c27e5a45c44bf6d3daf396d1d2e9f7931b9ce445b9",
       "semantic_id": "skill.init",
       "executable": false
     },
     {
       "path": ".codex/plugins/lup/skills/install/SKILL.md",
       "category": "generated",
-      "sha256": "4a0e07d9ae2c34f30c0b27f180a24ee0fc6336218ff28f9421873d41b60141fe",
+      "sha256": "26226e4fa6c19a6e650ba42f1e9362c7a5e475e54ab98913d42ea2a6eb1a3f78",
       "semantic_id": "skill.install",
       "executable": false
     },

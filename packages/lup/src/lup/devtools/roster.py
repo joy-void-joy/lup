@@ -177,7 +177,7 @@ class DevtoolsDeclarations(BaseModel, frozen=True, arbitrary_types_allowed=True)
         optional extra, so constructing an app a project declined makes that
         project carry a dependency for a command it does not serve. Measured —
         a project retiring ``dashboard`` still could not start its CLI without
-        ``lup[web]``, because the roster built the dashboard before the
+        ``lup-agents[web]``, because the roster built the dashboard before the
         selection ever saw it.
 
         Defaulting to none keeps every existing caller correct: a project that
