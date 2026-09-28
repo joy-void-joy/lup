@@ -28,6 +28,8 @@ import typer
 from pydantic import BaseModel
 
 from lup.workspace.paths import project_root
+from lup.devtools.dev.documented import generated_files
+from lup.devtools.dev.library import VENDORED_ROOT
 from lup.devtools.dev.plugin import set_marketplace_name
 from lup.devtools.dev.tracked import tracked_files
 from lup_template.harness.catalog import declared_plugin
@@ -79,20 +81,27 @@ def is_renamer_module(path: Path) -> bool:
     return path.as_posix().endswith("devtools/dev/init.py")
 
 
-INITIALIZATION_MODULES = ["devtools/dev/init.py", "devtools/dev/app.py"]
-"""Where initialization's own vocabulary is written down, for a caller that
-does not say. A module that names what initialization removes says the name
-because that is its subject, so a scan reporting lines still naming a deleted
-path skips these for the same reason the rename skips the renamer: its
-literals are the command rather than a reference the command left dangling."""
+INITIALIZATION_FILES = [
+    "devtools/dev/init.py",
+    "devtools/dev/app.py",
+    "harness/content/skills/init.passage.md",
+    "harness/content/skills/install.passage.md",
+    "harness/content/modules/examples.py",
+    "tests/unit/test_devtools_drop_examples.py",
+]
+"""Where what initialization removes is the subject, for a caller that does not
+say: the commands removing it, the skill running them, the install guidance
+leaving the same trees behind, the module declaring the demonstrations, and the
+tests driving their removal. Each names a removed path because that is what it
+is about, so a scan reporting lines still naming one skips these for the same
+reason the rename skips the renamer: their literals are the subject rather
+than a reference the command left dangling."""
 
 
-def declares_initialization(
-    path: Path, modules: list[str] = INITIALIZATION_MODULES
-) -> bool:
-    """Whether ``path`` is one of initialization's own declaring modules."""
+def about_initialization(path: Path, files: list[str] = INITIALIZATION_FILES) -> bool:
+    """Whether ``path`` is one of the files whose subject is what initialization removes."""
     spelled = path.as_posix()
-    return any(spelled.endswith(module) for module in modules)
+    return any(spelled.endswith(file) for file in files)
 
 
 def rename_match(matched: str, new_name: str) -> str:
@@ -363,6 +372,12 @@ same, because it says `examples/` on purpose, as the data a test drives. What
 the ignore rules keep out — an environment, a dependency tree, a build's
 output — needs no entry here: the scan reads only what the checkout holds."""
 
+UPSTREAM_TREES = [VENDORED_ROOT]
+"""Trees whose text is upstream's rather than this project's, for a caller that
+does not say: the library, where it is vendored beside the application. What
+it names is repaired where upstream writes it, and the next update replaces
+the copy here whole."""
+
 
 def drop_scaffold_demonstrations(
     root: Path,
@@ -405,7 +420,10 @@ def mention_pattern(path: Path) -> re.Pattern[str]:
 
 
 def surviving_mentions(
-    root: Path, removed: list[Path], skipped_trees: list[str] = SKIPPED_TREES
+    root: Path,
+    removed: list[Path],
+    skipped_trees: list[str] = SKIPPED_TREES,
+    upstream_trees: list[str] = UPSTREAM_TREES,
 ) -> list[str]:
     """Every line still naming something that was just removed.
 
@@ -423,16 +441,25 @@ def surviving_mentions(
     ignore rules keep out are exactly the ones naming a removed directory
     most often and owned by nobody: a virtual environment's installed
     packages, a frontend's dependencies, whatever a build left behind.
+
+    Nor what the checkout holds on somebody else's behalf. A generated file is
+    repaired at its source, which the scan reads where that source is this
+    project's, and regenerated after; the library's own tree is upstream's
+    prose about upstream's examples. Either would be a line reported to
+    somebody who is not the one to repair it.
     """
     patterns = [mention_pattern(path) for path in removed]
+    generated = generated_files(root)
     scanned = [
         path
         for rel in sorted(
             tracked_files(others=True, suffixes=(".py", ".md", ".toml"), root=root)
         )
         if (path := root / rel).is_file()
+        and rel not in generated
+        and not any(PurePosixPath(rel).is_relative_to(tree) for tree in upstream_trees)
         and not any(part in skipped_trees for part in PurePosixPath(rel).parts)
-        and not declares_initialization(path)
+        and not about_initialization(path)
         and not any(path.is_relative_to(root / going) for going in removed)
     ]
     return [

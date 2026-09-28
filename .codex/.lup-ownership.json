@@ -590,7 +590,7 @@
     {
       "path": ".codex/plugins/lup/skills/init/SKILL.md",
       "category": "generated",
-      "sha256": "c422cbc60d5c3f78096c0450d703cf902035e93ac4f45c75c10fb86db4939921",
+      "sha256": "3368a40f2cdd59ee5a4a1c3b9bca93db3abef9ed4d00fd58c3d404413ee23273",
       "semantic_id": "skill.init",
       "executable": false
     },

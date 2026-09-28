@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from lup.harness.ownership import OwnedArtifact, OwnershipManifest
 from lup_template.devtools.dev.init import (
     SCAFFOLD_DEMONSTRATIONS,
     drop_scaffold_demonstrations,
@@ -129,6 +130,52 @@ def test_a_file_written_since_the_last_commit_is_still_read(checkout: Path) -> N
     mentions = surviving_mentions(checkout, SCAFFOLD_DEMONSTRATIONS)
 
     assert any("NOTES.md:1" in line for line in mentions)
+
+
+def test_what_the_checkout_holds_for_somebody_else_is_not_read(
+    checkout: Path,
+) -> None:
+    """A generated page, the vendored library, and a file about the removal itself.
+
+    Each names the directory and none is this project's line to repair: the
+    page is rewritten from its source, the library is upstream's prose, and
+    the skill running the removal names what it removes because that is its
+    subject.
+    """
+    naming = "Run `uv run -m examples.one_shot` first.\n"
+    page = checkout / "docs" / "runs.md"
+    library = checkout / "packages" / "lup" / "src" / "lup" / "sessions.py"
+    skill = (
+        checkout / "src" / "pkg" / "harness" / "content" / "skills" / "init.passage.md"
+    )
+    for written in [page, library, skill]:
+        written.parent.mkdir(parents=True, exist_ok=True)
+        written.write_text(naming, encoding="utf-8")
+    manifest = OwnershipManifest(
+        schema_version=1,
+        generator_version="0",
+        source_digest="0",
+        target_requirements=[],
+        files=[
+            OwnedArtifact(
+                path=Path("docs/runs.md"),
+                category="generated",
+                sha256="0",
+                semantic_id="docs.runs",
+            )
+        ],
+    )
+    (checkout / ".claude").mkdir()
+    (checkout / ".claude" / ".lup-ownership.json").write_text(
+        manifest.model_dump_json(), encoding="utf-8"
+    )
+
+    mentions = surviving_mentions(checkout, SCAFFOLD_DEMONSTRATIONS)
+
+    assert not any("docs/runs.md" in line for line in mentions)
+    assert not any("packages/lup" in line for line in mentions)
+    assert not any("init.passage.md" in line for line in mentions)
+    assert any(line.startswith("  README.md:1:") for line in mentions)
 
 
 @pytest.mark.parametrize(

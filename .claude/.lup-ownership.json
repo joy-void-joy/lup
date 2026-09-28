@@ -212,7 +212,7 @@
     {
       "path": ".claude/plugins/lup/commands/init.md",
       "category": "generated",
-      "sha256": "59067f3d28ee7b26f2c6cb86ee7bf123ed6151549acc98e59aea1626a3105771",
+      "sha256": "3c3a2c8166b01f8942ccf5134b021de6ee84d6fec0593b7940bc81aff3ea1e0a",
       "semantic_id": "skill.init",
       "executable": false
     },
