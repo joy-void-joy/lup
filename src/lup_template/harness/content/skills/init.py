@@ -27,7 +27,7 @@ def where_taken(
 SKILL = models.Skill(
     id="skill.init",
     name="init",
-    description="Initialize the self-improvement loop for a specific domain",
+    description="Make this checkout a project for one domain — choose its modules, settle its seams, rename and scaffold it",
     tools=[
         "Bash(git:*, uv run lup-devtools:*, uv sync:*, uv run pyright:*, uv run ruff:*, uv run pytest:*)",
         "Read",
