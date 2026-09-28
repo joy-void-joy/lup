@@ -19,7 +19,7 @@ import pytest
 
 from lup.coordination.wake import WakePath, wake
 from lup.harness.image import Image
-from lup.harness.messaging import SessionInboxes, cleared
+from lup.harness.messaging import SessionInboxes, UnixSocketRefused, cleared
 
 # The four directories Claude Code will scan for peers, as its own binary
 # spells them. Written out rather than imported because they are the runtime's
@@ -306,3 +306,25 @@ def test_a_socket_a_session_listens_on_is_left_to_it(tmp_path: Path) -> None:
 def test_a_path_nothing_is_at_is_clear(tmp_path: Path) -> None:
     """The ordinary case: the first session to be placed there."""
     assert cleared(tmp_path / "fresh.sock")
+
+
+@pytest.mark.usefixtures("socket_refused")
+def test_a_path_nothing_is_at_needs_no_socket_to_be_clear(tmp_path: Path) -> None:
+    """The first session placed there launches from a shell that refuses sockets."""
+    assert cleared(tmp_path / "fresh.sock")
+
+
+@pytest.mark.usefixtures("socket_refused")
+def test_a_process_refused_a_socket_says_so_rather_than_answering_for_the_path(
+    tmp_path: Path,
+) -> None:
+    """Neither answer is safe unasked: one removes a live inbox, one blames nobody."""
+    address = tmp_path / "held.sock"
+    address.touch()
+
+    with pytest.raises(UnixSocketRefused) as refused:
+        cleared(address)
+
+    assert "may not open a Unix socket" in str(refused.value)
+    assert str(address) in str(refused.value)
+    assert address.exists()

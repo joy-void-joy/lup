@@ -217,8 +217,9 @@ def test_a_member_that_named_no_session_asks_for_no_check(tmp_path: Path) -> Non
     assert "session_id" not in frames[0]
 
 
+@pytest.mark.usefixtures("socket_refused")
 def test_a_process_refused_a_socket_says_so_rather_than_blaming_the_peer(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
     """The boundary the call ran inside is named, not an inbox nobody tried.
 
@@ -226,12 +227,6 @@ def test_a_process_refused_a_socket_says_so_rather_than_blaming_the_peer(
     with EPERM there, before any path is connected to, and reporting that as
     nobody listening sends the reader looking for a dead peer.
     """
-
-    def refused(*_arguments: int) -> socket.socket:
-        raise PermissionError(1, "Operation not permitted")
-
-    monkeypatch.setattr(socket, "socket", refused)
-
     roused = wake(WakePath(runtime="claude", handle=str(tmp_path / "in.sock")), "look")
 
     assert not roused.reached

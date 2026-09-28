@@ -276,3 +276,37 @@ def test_a_stale_inbox_is_cleared_and_placed(tmp_path: Path) -> None:
 
     assert placed == inbox
     assert not Path(inbox).exists()
+
+
+@pytest.mark.usefixtures("socket_refused")
+def test_a_launch_refused_a_socket_names_that_rather_than_a_listener(
+    tmp_path: Path,
+) -> None:
+    """A shell that refuses ``socket(AF_UNIX)`` cannot ask who holds the inbox.
+
+    So the launch says that, with whom the roster names there, rather than a
+    bare ``PermissionError`` or a listener nobody asked about.
+    """
+    inboxes = SessionInboxes(directory=str(tmp_path / "in"))
+    inboxes.serve()
+    inbox = inboxes.socket(tmp_path, "main")
+    Path(inbox).touch()
+    RepositoryPeers(tmp_path).join(
+        mint_member_id(),
+        tmp_path,
+        cli_name="main",
+        wake=WakePath(runtime="claude", handle=inbox),
+    )
+
+    with pytest.raises(LaunchRefused) as refusal:
+        launch_session.placed_inbox(
+            inboxes,
+            tmp_path,
+            LaunchedMember(member_id=mint_member_id(), cli_name="main"),
+        )
+
+    said = str(refusal.value)
+    assert said.startswith("this process may not open a Unix socket")
+    assert f"listens at {inbox}" in said
+    assert "the roster names main" in said
+    assert Path(inbox).exists()

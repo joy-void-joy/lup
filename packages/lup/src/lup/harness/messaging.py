@@ -181,6 +181,16 @@ class SessionInboxes(BaseModel, frozen=True):
         ]
 
 
+class UnixSocketRefused(OSError):
+    """This process may not open a Unix socket, so it cannot ask who holds one.
+
+    Raised apart from any answer a probe gets, because a Claude Code Bash
+    sandbox refuses ``socket(AF_UNIX)`` with EPERM before any path is tried:
+    read as nobody listening, a live inbox would be removed; read as somebody
+    listening, the reader would go looking for a session that is not there.
+    """
+
+
 def cleared(address: Path, patience: float = 1.0) -> bool:
     """Whether a session can bind *address*, removing a socket nobody answers on.
 
@@ -193,8 +203,21 @@ def cleared(address: Path, patience: float = 1.0) -> bool:
     nothing reads it and the next session to bind there would otherwise meet
     it. A connection opened and closed with no frame written is no message,
     so the probe costs a live session nothing.
+
+    A path nothing is at is clear without a probe, so only a path something
+    holds needs a socket to ask with; where this process may not open one,
+    that is :class:`UnixSocketRefused`, naming the path it could not ask about.
     """
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
+    if not address.exists():
+        return True
+    try:
+        opened = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    except OSError as refused:
+        raise UnixSocketRefused(
+            f"this process may not open a Unix socket ({refused}), so it "
+            f"cannot ask whether a session listens at {address}"
+        ) from refused
+    with opened as probe:
         probe.settimeout(patience)
         answered = probe.connect_ex(str(address))
     if answered == errno.ECONNREFUSED and address.is_socket():

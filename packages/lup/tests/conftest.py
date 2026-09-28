@@ -202,3 +202,18 @@ def unix_socket() -> None:
             f"this process may not open a Unix socket ({refused}); delivery "
             "through one cannot be measured here"
         )
+
+
+@pytest.fixture
+def socket_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """This process is refused ``socket(AF_UNIX)``, as a Claude Code Bash sandbox is.
+
+    Refused at construction with EPERM, before any path is tried, which is
+    the one thing the code under test has to tell apart from a peer that is
+    not listening.
+    """
+
+    def refused(*_arguments: int) -> socket.socket:
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(socket, "socket", refused)

@@ -30,7 +30,7 @@ from lup.launch.config_volume import HomeSeedPlaces
 from lup.launch.container import contained_argv
 from lup.coordination.identity import MEMBER_ENV, NAME_ENV, LaunchedMember
 from lup.coordination.repository import RepositoryPeers, launched_member
-from lup.harness.messaging import SessionInboxes, cleared
+from lup.harness.messaging import SessionInboxes, UnixSocketRefused, cleared
 from lup.workspace.edition import shared_git_directory
 from lup.harness.models import HookSet
 from lup.policy.boundary import BoundaryPreflight
@@ -1014,11 +1014,24 @@ def placed_inbox(
     Refused where something already listens there, before the runtime can say
     so itself: its own refusal tells the reader to remove a socket that
     belongs to a live session. This one names the session, off the roster.
+    Refused too where something is there and this process may not open a
+    socket to ask whether it listens, saying that rather than guessing.
     """
     if inboxes.serve() is None:
         return None
     inbox = inboxes.socket(shared_git_directory(root), member.cli_name)
-    if cleared(Path(inbox)):
+    try:
+        clear = cleared(Path(inbox))
+    except UnixSocketRefused as refused:
+        named = RepositoryPeers(root).woken_through(inbox)
+        raise LaunchRefused(
+            f"{refused}, the inbox this session would bind, where the roster "
+            f"names {', '.join(named) or 'no session'}. lup leaves an inbox it "
+            "cannot ask about alone rather than risk cutting a live session off "
+            "from its nudges: launch from a shell that may open a Unix socket, "
+            "or remove the file once no session holds it"
+        ) from refused
+    if clear:
         return inbox
     holders = RepositoryPeers(root).woken_through(inbox)
     raise LaunchRefused(
