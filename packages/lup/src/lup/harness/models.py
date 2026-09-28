@@ -1541,11 +1541,10 @@ class SubagentCleanup(BaseModel, frozen=True):
     """Whether the subagent is told at its start; the stop-time refusal is the
     declaration itself."""
 
-    gate: str = "`uv run lup-devtools dev check`"
     scoped: str = "`uv run lup-devtools dev check --changed`"
-    record: str = "your report"
-    """How this project spells the gate, its scoped form, and where a delegated
-    agent names what it could not check.
+    tests: str = "`uv run lup-devtools dev test`"
+    """How this project spells the scoped check and the runner a delegated
+    agent points at the tests its change reaches.
 
     Declared rather than written into the notice, because the notice ships
     into a project that named its own devtools CLI and would otherwise read

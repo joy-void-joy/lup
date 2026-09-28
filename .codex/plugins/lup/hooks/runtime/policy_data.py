@@ -2206,9 +2206,8 @@ SPAWN_NAMES: SpawnNameRow | None = {
 }
 
 VERIFICATION: VerificationRow = {
-    "gate": "`uv run lup-devtools dev check`",
     "scoped": "`uv run lup-devtools dev check --changed`",
-    "record": "your report",
+    "tests": "`uv run lup-devtools dev test`",
 }
 
 SHELL_RULES: list[ShellRuleRow] = [

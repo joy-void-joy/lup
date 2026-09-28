@@ -126,17 +126,16 @@ class PathRoleRow(TypedDict):
 
 
 class VerificationRow(TypedDict):
-    """How this project spells the gate a delegated agent is pointed at.
+    """How this project spells the checks a delegated agent is pointed at.
 
-    Three strings rather than one sentence, because the notice is composed
+    Two strings rather than one sentence, because the notice is composed
     where it is read and only the spellings are the project's. A repository
     that named its devtools CLI something else reads its own invocation here,
     where a verbatim notice names one it does not serve.
     """
 
-    gate: str
     scoped: str
-    record: str
+    tests: str
 
 
 class SpawnNameRow(TypedDict):

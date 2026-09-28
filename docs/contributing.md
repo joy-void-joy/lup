@@ -34,8 +34,11 @@ it is not is owed on every commit, and treating it as owed is how several
 agents sharing one working tree each start the whole suite at once. Over a tree
 still being edited that answer is about a state that never existed, and a
 failure in it cannot be attributed to whoever caused it — so a delegated agent
-runs the scoped pair, names what it could not check, and leaves the gate and
-the commit to whoever dispatched it.
+runs the scoped pair over what its change reaches and leaves the full gate to
+whoever lands it. Whether it commits follows the tree it works in: in a
+worktree of its own it commits its work, and in a checkout it shares it leaves
+the commit to whoever dispatched it, since a commit there would carry what the
+others left half-edited beside its change.
 
 The other two are the loop while a change is still moving. `dev check
 --changed` runs ruff and pyright over the Python files changed since the

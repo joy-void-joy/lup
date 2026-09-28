@@ -592,25 +592,55 @@ def test_a_project_that_declined_registers_nothing_and_carries_nothing() -> None
     assert quiet.artifacts == []
 
 
-def test_the_start_event_tells_the_subagent_what_it_verifies(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("target", "plugin", "recording", "event", "ending_call"),
+    [
+        pytest.param(
+            claude_target,
+            CLAUDE_PLUGIN,
+            "payloads-claude-print.jsonl",
+            CLAUDE_SUBAGENT_START_EVENT,
+            "TaskStop",
+            id="claude",
+        ),
+        pytest.param(
+            codex_target,
+            CODEX_PLUGIN,
+            "payloads-codex.jsonl",
+            CODEX_SUBAGENT_START_EVENT,
+            "write_stdin",
+            id="codex",
+        ),
+    ],
+)
+def test_the_start_event_tells_the_subagent_what_it_verifies_and_commits(
+    target: Callable[[Path], NativeHarnessComposition],
+    plugin: Path,
+    recording: str,
+    event: str,
+    ending_call: str,
+    tmp_path: Path,
+) -> None:
     """The other half of what is true at that moment, and the costlier half.
 
     A delegated agent inherits the repository's guidance and reads, correctly,
     that the full gate is what has to be green — and nothing there says it is
-    not the one to run it. Several agents dispatched into one working tree
-    each start the whole suite over a tree the others are still editing, so
-    the answer is about a state that never existed and a failure in it cannot
-    be attributed to whoever caused it.
-
-    Said at the start rather than refused at the call, because a refusal lands
-    after the agent has planned around running it.
+    not the one to run it. So it is told the scoped pair is its to run and
+    the gate is whoever lands it. Whether it commits depends on whose tree it
+    is in: a builder dispatched into a worktree of its own was told to leave
+    the commit to its caller while its brief said to commit, and followed the
+    brief — so the sentence names both places rather than assuming one.
     """
-    guard = laid_out(tmp_path / "plugin")
-    [start] = recorded("payloads-claude-print.jsonl", CLAUDE_SUBAGENT_START_EVENT)
+    guard = laid_out(tmp_path / "plugin", target, plugin)
+    [start] = recorded(recording, event)
 
     said = json.loads(judged(guard, start))["hookSpecificOutput"]["additionalContext"]
 
-    assert "--changed" in said
-    assert "dev check" in said
+    assert "`uv run lup-devtools dev check --changed` and" in said
+    assert "`uv run lup-devtools dev test` over what your change reaches" in said
+    assert "leave the full gate to whoever lands it" in said
+    assert "In a worktree of your own, commit your work" in said
+    assert "in a checkout you share, leave the commit to your caller" in said
+    assert "and the commit to your caller" not in said
     # Both halves arrive together or a subagent reads neither.
-    assert "TaskStop" in said
+    assert ending_call in said
