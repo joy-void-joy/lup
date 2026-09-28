@@ -1045,6 +1045,23 @@ DECLARED: list[Migration] = [
         ],
     ),
     Migration(
+        subjects=["RepositoryPeers.naming_settled"],
+        reason=(
+            "a native subagent's row is named under the same lock a session's "
+            "join takes, from the shipped store a hook writes it through, so "
+            "the lock moved to the store both halves stand on"
+        ),
+        steps=[
+            MigrationStep(
+                instruction=(
+                    "Hold `with naming_settled(peers.root):` from "
+                    "lup.coordination.bare.store where `with "
+                    "peers.naming_settled():` was held."
+                )
+            ),
+        ],
+    ),
+    Migration(
         subjects=["HookSandbox.credential_paths", "ExecutionBoundary.credential_paths"],
         reason=(
             "the file tools and the OS sandbox are refused every path "

@@ -10,7 +10,9 @@ from lup.harness.codescan.antipatterns import DOCUMENT_IN_HAND, rule_set_for
 from lup.providers.peer_delivery import delivery_artifacts, delivery_command
 from lup.providers.drift_prompt import drift_hook
 from lup.providers.subagent_cleanup import cleanup_hooks
+from lup.providers.coordination_caller import caller_hooks
 from lup.providers.roster_prompt import (
+    PromptHook,
     departure_hook,
     folded,
     prompt_hook,
@@ -65,7 +67,7 @@ from lup.policy.dispatcher import (
 from lup.policy.kernel.rows import PathRoleRow
 from lup.policy.refused_tools import routed_for
 from lup.providers.claude.subagents import model_alias
-from lup.types import ModelTier
+from lup.types import JsonValue, ModelTier
 
 
 class ClaudeSpellings(NativeSpellings):
@@ -601,7 +603,7 @@ CLAUDE_DISPATCHER = DispatcherDeclaration(
     observation_event="PostToolUse",
     observed_tools=["Edit", "Write", "Bash"],
     failure="conservative_ask",
-    runtime_modules=["policy_data"],
+    runtime_modules=["caller_payload", "policy_data"],
 )
 """Everything Claude Code spells differently from every other runtime.
 
@@ -660,6 +662,26 @@ CLAUDE_SUBAGENT_CLEANUP = (
 
 # lup: ignore[constant-declaration] — the runtime's wire spelling of its own
 # event, which no project could choose differently and still be heard
+CLAUDE_CALLER_EVENT = "PreToolUse"
+"""The event Claude Code fires before a tool runs, where the caller is stamped.
+
+Documented at https://code.claude.com/docs/en/hooks under "PreToolUse" and
+measured on 2.1.283 against a probe tool server: an ``updatedInput`` returned
+with no ``permissionDecision`` replaced an MCP call's arguments before the
+server received them, and every event fired inside a subagent carried its
+``agent_id``. The runtime's own spelling of the moment, so not a value a
+project could choose.
+"""
+
+CLAUDE_CALLER_PAYLOAD = (
+    resources.files("lup.providers.claude")
+    .joinpath("assets/caller_payload.py")
+    .read_text("utf-8")
+)
+"""The host half of the caller hook, shipped verbatim for its entry and the dispatcher."""
+
+# lup: ignore[constant-declaration] — the runtime's wire spelling of its own
+# event, which no project could choose differently and still be heard
 CLAUDE_EXIT_EVENT = "SessionEnd"
 """The event Claude Code fires as a session ends, before its process exits.
 
@@ -683,14 +705,14 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
         self.spellings = spellings
 
     def render(self, source: HookSet) -> ArtifactTree:
-        command = [
+        command: list[JsonValue] = [
             {
                 "type": "command",
                 "command": guarded_hook_command("CLAUDE_PLUGIN_ROOT"),
                 "timeout": 30,
             }
         ]
-        decided = [
+        decided: list[JsonValue] = [
             {
                 "matcher": "|".join(
                     routed_for(CLAUDE_DISPATCHER.routed_tools, source.refused_tools)
@@ -698,7 +720,7 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                 "hooks": command,
             }
         ]
-        observed = [
+        observed: list[JsonValue] = [
             {
                 "matcher": "|".join(CLAUDE_DISPATCHER.observed_tools),
                 "hooks": command,
@@ -711,7 +733,7 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
         # widened one keeps those apart — every matching hook runs, and the
         # most restrictive verdict wins, so a delivery that only ever allows
         # cannot loosen what the policy decided beside it.
-        delivery = [
+        delivery: list[JsonValue] = [
             {
                 "matcher": "",
                 "hooks": [
@@ -749,11 +771,15 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
         # The row that arrived under the prompt event ends under the ending
         # one, written by the session itself, so a clean exit is exact and
         # the pulse only has to answer for the exits nothing announces.
+        # A subagent's own row ends under the stop event its runtime fires for
+        # it, beside the cleanup registered there, and is told apart from the
+        # session's ending by the subagent's id in the payload.
         departure = departure_hook(
             Path(f".claude/plugins/{self.plugin_name}"),
             "CLAUDE_PLUGIN_ROOT",
             source,
             CLAUDE_EXIT_EVENT,
+            CLAUDE_SUBAGENT_STOP_EVENT,
         )
         # A subagent is told at its start what it arms is its own to stop,
         # and refused once at its stop while any of it is still listed.
@@ -766,25 +792,49 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
             CLAUDE_SUBAGENT_START_EVENT,
             CLAUDE_SUBAGENT_STOP_EVENT,
         )
+        # Every coordination call says which conversation made it, matched to
+        # the coordination server's tools as this runtime scopes a plugin's
+        # own servers.
+        caller = caller_hooks(
+            Path(f".claude/plugins/{self.plugin_name}"),
+            "CLAUDE_PLUGIN_ROOT",
+            source,
+            CLAUDE_CALLER_PAYLOAD,
+            "lup.providers.claude.assets.caller_payload",
+            CLAUDE_CALLER_EVENT,
+            lambda server: f"{plugin_served_tool(self.plugin_name, server)}__.*",
+        )
+        # Folded rather than merged, because two sources register under one
+        # event — the policy and the caller hook before a tool, the cleanup
+        # and the departure at a subagent's stop — and a merge would keep
+        # whichever was written last.
+        registered = folded(
+            [
+                PromptHook(
+                    registered={
+                        event: (
+                            observed
+                            if event == CLAUDE_DISPATCHER.observation_event
+                            else [*decided, *delivery]
+                        )
+                        for event in CLAUDE_DISPATCHER.hook_events
+                    },
+                    artifacts=[],
+                ),
+                roster,
+                departure,
+                cleanup,
+                caller,
+            ]
+        )
         hooks = {
             "description": (
-                "Lup semantic permission policy, peer delivery, the roster's "
-                "changes at each prompt, this session's departure as it ends, "
+                "Lup semantic permission policy, peer delivery, the calling "
+                "subagent on each coordination call, the roster's changes at "
+                "each prompt, a session's or subagent's departure as it ends, "
                 "and a subagent's report waiting on its background work"
             ),
-            "hooks": {
-                **{
-                    event: (
-                        observed
-                        if event == CLAUDE_DISPATCHER.observation_event
-                        else [*decided, *delivery]
-                    )
-                    for event in CLAUDE_DISPATCHER.hook_events
-                },
-                **roster.registered,
-                **departure.registered,
-                **cleanup.registered,
-            },
+            "hooks": registered.registered,
         }
         evidence = {"schemaVersion": 1, "policyIds": source.policy_ids}
         return ArtifactTree(
@@ -818,6 +868,7 @@ class ClaudeHookRenderer(ArtifactRenderer[HookSet]):
                 *roster.artifacts,
                 *departure.artifacts,
                 *cleanup.artifacts,
+                *caller.artifacts,
                 *store_artifacts(
                     Path(f".claude/plugins/{self.plugin_name}"), source.id
                 ),

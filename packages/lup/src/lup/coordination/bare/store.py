@@ -27,6 +27,9 @@ processes, and every relation between members derived at the read:
   fact about their two files rather than a third record about both.
 - **a name** is on the member that answers to it, with the names it answered
   to before beside it, so a reference somebody wrote down still resolves.
+- **a subagent** is a member of its own, keyed under the session it runs in
+  and naming that session as its parent, so it is present exactly while that
+  session is and nothing has to beat for it.
 
 What is left is bounded by the population rather than by its history: a member
 that stops takes its file to ``departed/``, and the sweep deletes that after
@@ -57,8 +60,10 @@ a field a newer library adds must not make its file unreadable here.
 import fcntl
 import json
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from itertools import count
 from pathlib import Path
 from typing import TypedDict
 from uuid import uuid4
@@ -117,6 +122,37 @@ to it and to nothing else: a spawned agent is live because the process that
 spawned it says so, and the person is never finished at all.
 """
 
+SUBAGENT_KIND = "subagent"
+"""What a native subagent is on the roster: one conversation inside a session.
+
+A row of its own rather than the session's, because the subagent is somebody
+else to the harness: it describes different work, holds different files, and
+is addressed apart from the conversation that dispatched it. Sharing the
+session's row made each subagent's description replace the orchestrator's,
+and made a lock hold a file for the whole session rather than for the one
+subagent writing it.
+
+It answers for its presence through its session rather than a pulse of its
+own: a subagent cannot outlive the session it runs in, and nothing beats for
+it between the calls it makes.
+"""
+
+SUBAGENT_DELIVERY = "inbox"
+"""How mail reaches a subagent: its runtime's tool hook, before its next call.
+
+The typed roster's spelling of that mode, written here because this is the one
+writer of a subagent's row and it cannot import the roster.
+"""
+
+CALLER_FIELD = "lup_caller"
+"""The argument a coordination call carries naming the conversation that made it.
+
+Written by the caller hook both runtimes fire before a coordination tool runs,
+and read by the tool server, which one session's conversations all share: the
+call alone does not say whether the session or one of its subagents made it,
+and the hook's payload does.
+"""
+
 STALE_AFTER_SECONDS = 120.0
 """How long a member's silence reads as absence.
 
@@ -157,6 +193,21 @@ class Named(TypedDict, total=False):
 
     cli_name: str
     at: str
+
+
+class Caller(TypedDict, total=False):
+    """Which conversation of a session made a call, as its runtime's hook says.
+
+    A blank ``agent_id`` is the session's own conversation. Both runtimes put
+    the id and the type in every tool hook payload fired inside a subagent,
+    and leave them off the session's own. ``name`` is what the spawn called
+    the subagent, blank where that runtime's hook cannot read it.
+    """
+
+    agent_id: str
+    agent_type: str
+    cwd: str
+    name: str
 
 
 class Claiming(TypedDict):
@@ -208,6 +259,7 @@ class Member(TypedDict, total=False):
     kind: str
     id: str
     round: int
+    parent: str
     names: list[Named]
     task: str
     description: str
@@ -377,6 +429,44 @@ def session_actor(member_id: str) -> Actor:
     return Actor(kind=MEMBER_KIND, id=member_id)
 
 
+def subagent_id(session: str, agent: str) -> str:
+    """The roster id of one native subagent, nested under the session it runs in.
+
+    The runtime's own id for the subagent, qualified by its session's. Nothing
+    here can prove the runtime's id unique beyond the process that minted it,
+    and a row keyed by it alone would let one session's call act on another
+    session's subagent; keyed under the session, a call can only ever name a
+    row of its own.
+    """
+    return f"{session}-{agent}"
+
+
+def subagent_actor(session: str, agent: str) -> Actor:
+    """The identity one native subagent is a member under."""
+    return Actor(kind=SUBAGENT_KIND, id=subagent_id(session, agent))
+
+
+def parent_of(member: Member) -> str:
+    """The session a subagent's row runs in, blank for every other member."""
+    if text(member.get("kind")) != SUBAGENT_KIND:
+        return ""
+    return text(member.get("parent"))
+
+
+def actor_named(root: Path, member_id: str) -> Actor:
+    """The member one bare id names here: a subagent where one carries it, else a session.
+
+    An id alone is what a person types and what a claim or a message records,
+    so every verb taking one resolves it here rather than assuming the kind —
+    which is what lets a subagent's row be described, locked and read by the
+    id the roster prints for it.
+    """
+    subagent = Actor(kind=SUBAGENT_KIND, id=member_id)
+    return (
+        subagent if member_of(root, subagent) is not None else session_actor(member_id)
+    )
+
+
 def member_path(root: Path, member: Actor) -> Path:
     """Where one member's own file sits while it is here.
 
@@ -424,6 +514,7 @@ def blank_member(kind: str, member_id: str) -> Member:
         kind=kind,
         id=member_id,
         round=1,
+        parent="",
         names=[],
         task="",
         description="",
@@ -512,6 +603,131 @@ def beat(root: Path, member: Actor) -> None:
         return
 
 
+@contextmanager
+def naming_settled(root: Path) -> Iterator[None]:
+    """Hold the one lock a member cannot decide its own name without.
+
+    Every other write a member makes is about itself and is taken under its
+    own lock. A name is decided against every other member's, so two members
+    choosing at once would both read the same directory and both take the
+    same name — which is precisely the collision the numbered default exists
+    to rule out.
+
+    Held for a read of the members directory and one write, and released
+    whatever happens inside: a refused name must not leave the store's lock
+    standing for the next member to wait on.
+    """
+    lock = root / ROSTER_LOCK
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    with lock.open("a", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def unique_cli_name(wanted: str, taken: Collection[str]) -> str:
+    """*wanted* where nobody else answers to it, else the first free numbered form.
+
+    Numbered rather than refused, because the name is a default nobody chose:
+    two sessions opened in one worktree are two peers and both are called
+    after it, and two sessions' subagents spawned under one name are two rows,
+    so the second has to be reachable by a name that is not the first's. A
+    name somebody chose is refused instead, by the caller that knows it was
+    chosen.
+    """
+    if wanted not in taken:
+        return wanted
+    return next(
+        candidate
+        for candidate in (f"{wanted}-{ordinal}" for ordinal in count(2))
+        if candidate not in taken
+    )
+
+
+def joined_subagent(root: Path, session: str, caller: Caller) -> Actor | None:
+    """Put one subagent's row down beneath its session, unless one stands already.
+
+    A subagent joins by acting rather than by announcing itself: its first
+    coordination call, or the first file a call of its changes, is what puts
+    it here. Nothing is created beneath a session that never joined, for the
+    reason a beat creates nothing — a session that never coordinates leaves no
+    sign of having been able to, and its subagents are part of it.
+
+    Named what its spawn called it, numbered where a live member already
+    answers to that — which is why this takes the store's naming lock rather
+    than the subagent's own: the name is decided against every other member's,
+    and the tool server and the permission dispatcher recording what one call
+    changed can both arrive first. Its id reaches it whatever it is called.
+    ``None`` where no row stands for the call to act on.
+    """
+    agent = text(caller.get("agent_id"))
+    parent = read_member(member_path(root, session_actor(session)), running=True)
+    if not session or not agent or parent is None:
+        return None
+    actor = subagent_actor(session, agent)
+    try:
+        with naming_settled(root):
+            if read_member(member_path(root, actor), running=True) is None:
+                member = blank_member(SUBAGENT_KIND, text(actor.get("id")))
+                member["parent"] = session
+                kind = text(caller.get("agent_type")) or "native"
+                member["task"] = f"{kind} subagent of {current_name(parent) or session}"
+                member["delivery"] = SUBAGENT_DELIVERY
+                member["worktree"] = text(caller.get("cwd")) or text(
+                    parent.get("worktree")
+                )
+                spawned = text(caller.get("name"))
+                taken = [
+                    current_name(standing)
+                    for standing in present(root)
+                    if standing.get("running")
+                ]
+                if spawned:
+                    member = renamed(member, unique_cli_name(spawned, taken))
+                write_member(root, member)
+    except OSError:
+        return None
+    return actor
+
+
+def called_by[Value](
+    arguments: dict[str, Value], caller: Caller
+) -> dict[str, Value | Caller]:
+    """A coordination call's arguments, with the conversation making it written in.
+
+    Written over whatever arrived under :data:`CALLER_FIELD`, so what an agent
+    put there is never what the server reads. Each runtime's caller hook reads
+    its own payload into *caller* and hands the result back in its own
+    envelope; this is the one part they share.
+    """
+    return {**arguments, CALLER_FIELD: caller}
+
+
+def acting_id(session: str, caller: Caller) -> str:
+    """The id of the row one call acts on, read without joining anything.
+
+    For a check that must not write — whose claims a call would be asked
+    about, which window a command's snapshot is kept under.
+    """
+    agent = text(caller.get("agent_id"))
+    return subagent_id(session, agent) if agent else session
+
+
+def acting(root: Path, session: str, caller: Caller) -> Actor:
+    """The row one call acts on: its subagent's own where one made it, else its session's.
+
+    The subagent's row is joined on the way, so the first thing a subagent
+    does on the roster is enough to put it there.
+    """
+    agent = text(caller.get("agent_id"))
+    if not agent:
+        return session_actor(session)
+    joined_subagent(root, session, caller)
+    return subagent_actor(session, agent)
+
+
 def members(root: Path) -> list[Member]:
     """Every member whose file is still under ``members/``, oldest arrival first.
 
@@ -578,6 +794,40 @@ def pulsed(member: Member, now: datetime, window: float) -> Member:
     return gone
 
 
+def housed(member: Member, sessions: list[str]) -> Member:
+    """A subagent as its session leaves it: here only while that session is.
+
+    *sessions* are the sessions still running. Every other member passes
+    through, since only a subagent answers for itself through somebody else.
+    """
+    parent = parent_of(member)
+    if not parent or not member.get("running") or parent in sessions:
+        return member
+    gone = member.copy()
+    gone["running"] = False
+    gone["error"] = f"its session {parent} stopped"
+    return gone
+
+
+def pulsed_members(
+    root: Path, now: datetime, mine: str = "", window: float = STALE_AFTER_SECONDS
+) -> list[Member]:
+    """Every member still under ``members/``, as its own pulse and its session's leave it.
+
+    *mine* is the reading member's own id, which is never read as absent.
+    """
+    here = [
+        member if text(member.get("id")) == mine else pulsed(member, now, window)
+        for member in members(root)
+    ]
+    sessions = [
+        text(member.get("id"))
+        for member in here
+        if text(member.get("kind")) == MEMBER_KIND and member.get("running")
+    ]
+    return [housed(member, sessions) for member in here]
+
+
 def present(
     root: Path,
     now: datetime | None = None,
@@ -600,10 +850,7 @@ def present(
     reached.
     """
     moment_now = now or datetime.now(UTC)
-    here = [
-        member if text(member.get("id")) == mine else pulsed(member, moment_now, window)
-        for member in members(root)
-    ]
+    here = pulsed_members(root, moment_now, mine, window)
     standing = {conversation_of(member_actor(member)) for member in here}
     return sorted(
         [
@@ -807,13 +1054,23 @@ def covering(
 
 
 def claim_holders(
-    root: Path, target: str, mine: str, now: datetime | None = None
+    root: Path,
+    target: str,
+    mine: str,
+    now: datetime | None = None,
+    session: str = "",
 ) -> list[str]:
     """Who else, still working here, is holding the path a write would land on.
 
     Live holders other than the asker. A claim expires with the member that
     made it, so a departed holder is nobody to ask; and a member meeting its
     own claim on every edit would be asked about its own work.
+
+    *session* is the session *mine* runs in, where the asker is one of its
+    subagents, and what it holds is not asked about either: the session
+    dispatched this subagent into that work. The other way round is asked —
+    a session writing under a subagent it has running is the one overwriting
+    work in progress — and so is one subagent writing under its sibling.
     """
     live = live_ids(root, now)
     names = called(root, now)
@@ -822,7 +1079,7 @@ def claim_holders(
             names.get(holder) or holder
             for row in covering(root, Path(target).resolve(), live, now)
             for holder in [actor_id(found) for found in row["holders"]]
-            if holder and holder != mine
+            if holder and holder not in (mine, session)
         }
     )
 
@@ -864,7 +1121,7 @@ def unclaimed(member: Member, prefix: Path) -> Member:
     return settled
 
 
-def record_claims(root: Path, mine: str, paths: list[str]) -> bool:
+def record_claims(root: Path, mine: Actor, paths: list[str]) -> bool:
     """Write down what one member's call just changed, under that member's lock.
 
     The dispatcher's write. It runs after the work has already happened, so
@@ -877,15 +1134,28 @@ def record_claims(root: Path, mine: str, paths: list[str]) -> bool:
     contest is what a reader derives from meeting them — the same answer,
     arrived at from evidence rather than from a list of suspects.
     """
-    if not mine or not paths:
+    if not actor_id(mine) or not paths:
         return False
-    return (
-        revised(root, session_actor(mine), lambda member: claimed(member, paths, False))
-        is not None
-    )
+    return revised(root, mine, lambda member: claimed(member, paths, False)) is not None
 
 
-def addresses(root: Path, now: datetime | None = None) -> list[str]:
+def family(root: Path, session: str, now: datetime | None = None) -> list[str]:
+    """Every live member one session answers for: itself, and its subagents.
+
+    What never leaves that session. A native send between two of them is one
+    conversation of a session reaching another inside the same process, so
+    nothing any other worktree could read is lost by carrying it natively.
+    """
+    return [
+        text(member.get("id"))
+        for member in present(root, now)
+        if member.get("running")
+        and session
+        and session in (text(member.get("id")), parent_of(member))
+    ]
+
+
+def addresses(root: Path, now: datetime | None = None, beside: str = "") -> list[str]:
     """Every spelling that currently reaches a live member of this roster.
 
     Ids, the kind-qualified label a door prints, and whatever each member is
@@ -903,38 +1173,66 @@ def addresses(root: Path, now: datetime | None = None) -> list[str]:
     Live members only. A session that has left is not somewhere a durable
     message would arrive either, so redirecting a send to it would trade one
     call reaching nobody for another.
+
+    *beside* is the session asking, whose own :func:`family` is left out —
+    and so is every name one of them answers to now, whoever else once did:
+    a sender naming it means the conversation it reaches in its own process.
     """
-    live = live_ids(root, now)
+    standing = [member for member in present(root, now) if member.get("running")]
+    own = family(root, beside, now)
+    reached = [member for member in standing if text(member.get("id")) not in own]
+    ids = [text(member.get("id")) for member in reached]
+    kept = [
+        current_name(member) for member in standing if text(member.get("id")) in own
+    ]
     return sorted(
         {
-            *live,
-            *[f"{MEMBER_KIND}:{member}" for member in live],
+            *ids,
+            *[
+                f"{text(member.get('kind'))}:{text(member.get('id'))}"
+                for member in reached
+            ],
             *[
                 claiming["cli_name"]
                 for claiming in naming(root, now)
-                if claiming["id"] in live
+                if claiming["id"] in ids and claiming["cli_name"] not in kept
             ],
         }
     )
 
 
 def listing_lines(root: Path, now: datetime | None = None) -> list[str]:
-    """One line per live member, as somebody choosing who to reach reads it."""
+    """One line per live member, as somebody choosing who to reach reads it.
 
-    def described(member: Member) -> list[str]:
-        """The parts one member's line is joined from, blanks included."""
+    A subagent's line is indented beneath its session's, which is the one
+    relation a reader needs to tell a session from a conversation inside it.
+    """
+
+    def described(member: Member) -> str:
+        """One member's line, joined from whichever of its parts are said."""
         worktree = text(member.get("worktree"))
-        return [
+        parts = [
             current_name(member) or text(member.get("id")),
             Path(worktree).name if worktree else "",
             text(member.get("description")) or text(member.get("task")),
             text(member.get("delivery")),
         ]
+        return " — ".join(part for part in parts if part)
 
+    standing = [member for member in present(root, now) if member.get("running")]
+    sessions = [text(member.get("id")) for member in standing if not parent_of(member)]
     return [
-        " — ".join(part for part in described(member) if part)
-        for member in present(root, now)
-        if member.get("running")
+        line
+        for head in standing
+        if parent_of(head) not in sessions
+        for line in [
+            described(head),
+            *[
+                f"  {described(child)}"
+                for child in standing
+                if parent_of(child) and parent_of(child) == text(head.get("id"))
+            ],
+        ]
     ]
 
 
@@ -949,6 +1247,10 @@ def depart(root: Path, member: Actor, summary: str = "", error: str = "") -> boo
     A member that never joined leaves nothing: there is no file to move, and a
     departed stub for a member that never arrived is a row no listing should
     carry.
+
+    A session takes its subagents with it, since none of them can outlive the
+    process it runs in, and a row left standing beneath a departed session
+    would be a subagent the read calls gone and nothing ever moves.
     """
     if not actor_id(member):
         return False
@@ -963,24 +1265,27 @@ def depart(root: Path, member: Actor, summary: str = "", error: str = "") -> boo
         return False
     discarded(member_path(root, member))
     discarded(member_lock(root, member))
+    if actor_kind(member) == MEMBER_KIND:
+        for child in members(root):
+            if parent_of(child) == actor_id(member):
+                depart(root, member_actor(child), error="its session left")
     return True
 
 
 def lapsed(
     root: Path, now: datetime | None = None, window: float = STALE_AFTER_SECONDS
 ) -> list[Member]:
-    """Every member still under ``members/`` whose pulse has stopped.
+    """Every member still under ``members/`` whose pulse, or whose session's, has stopped.
 
     What a sweep would move, without moving it — which is what lets a console
     say what it is about to do before doing it. The departed are not here:
     they have already been moved, and a sweep that reported them would report
     the same rows on every run.
     """
-    moment_now = now or datetime.now(UTC)
     return [
-        gone
-        for member in members(root)
-        if not (gone := pulsed(member, moment_now, window)).get("running")
+        member
+        for member in pulsed_members(root, now or datetime.now(UTC), window=window)
+        if not member.get("running")
     ]
 
 

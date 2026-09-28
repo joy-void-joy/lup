@@ -23,6 +23,7 @@ from lup.coordination.repository import (
     PeerDepartedError,
     PeerView,
     RepositoryPeers,
+    nested,
 )
 from lup.coordination.roster import Delivery
 from lup.coordination.touches import HeldPath
@@ -40,15 +41,24 @@ def peer_line(view: PeerView) -> str:
     `coordination holdings` is where the paths already live. Contested is
     called out separately because it is the half a reader acts on — it means
     two sessions are in the same place and neither knows.
+
+    The id rides beside a name, because it is the spelling that always
+    reaches this row: a name may be what another row once answered to, and
+    a person resolving that needs the one that cannot collide.
     """
     where = Path(view.member.worktree).name if view.member.worktree else ""
     state = "" if view.member.running else " [gone]"
     holding = f"holding {len(view.holding)}" if view.holding else ""
     contested = f"{len(view.contested)} contested" if view.contested else ""
+    named = (
+        f"{view.cli_name} ({view.member.actor.id})"
+        if view.cli_name
+        else view.member.actor.id
+    )
     return " — ".join(
         part
         for part in (
-            f"{view.address}{state}",
+            f"{named}{state}",
             where,
             view.doing,
             holding,
@@ -93,14 +103,16 @@ def create_coordination_app() -> typer.Typer:
         rather than everyone who ever joined: whether the peer a person sent
         something to is still there is a question the listing has to answer,
         and a roster read a month on must not answer it with a month of
-        history.
+        history. A session's native subagents are indented beneath it.
         """
         listing = peers().recent()
         if not listing:
             typer.echo("No session is working in this repository.")
             return
-        for view in listing:
+        for view in nested(listing):
             typer.echo(peer_line(view))
+            for child in view.subagents:
+                typer.echo(f"  {peer_line(child)}")
 
     @app.command("join")
     def join_cmd(

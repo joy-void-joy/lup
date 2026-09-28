@@ -58,6 +58,7 @@ from .store import (
     beat,
     called,
     held,
+    parent_of,
     present,
     session_actor,
     revised,
@@ -245,15 +246,27 @@ def looked(root: Path, mine: str, checkout: str) -> Folded:
     reported, and a description its own session cleared on a rewind reads as
     unsaid — a peer is told the task that session is on rather than what a
     discarded conversation said.
+
+    A peer is a session. What its subagents hold is folded into its row, so a
+    file one of them is writing reads as that session's, and two of one
+    session's subagents on one path is that session's business rather than a
+    contest another session is told about.
     """
+    everyone = present(root, mine=mine)
     members = {
         text(member.get("id")): member
-        for member in present(root, mine=mine)
+        for member in everyone
         if text(member.get("kind")) == MEMBER_KIND
     }
+    sessions = {
+        text(member.get("id")): parent_of(member) or text(member.get("id"))
+        for member in everyone
+        if member.get("running")
+    }
     names = called(root)
-    live = [member_id for member_id, member in members.items() if member.get("running")]
-    claims = [claim for claim in held(root, live) if concerns(claim, checkout)]
+    claims = [
+        claim for claim in held(root, list(sessions)) if concerns(claim, checkout)
+    ]
 
     def name(member_id: str) -> str:
         """What a peer is called, falling back to the id nothing has named."""
@@ -261,7 +274,12 @@ def looked(root: Path, mine: str, checkout: str) -> Folded:
 
     def holders(claim: Held) -> list[str]:
         """Every session on one claim, by id, as the look keys them."""
-        return [text(holder.get("id")) for holder in claim["holders"]]
+        return sorted(
+            {
+                sessions.get(held_by, held_by)
+                for held_by in [text(holder.get("id")) for holder in claim["holders"]]
+            }
+        )
 
     def worktree_of(member: Member) -> str:
         """Which checkout a peer is working in, by name, blank where it is nowhere."""
@@ -283,7 +301,7 @@ def looked(root: Path, mine: str, checkout: str) -> Folded:
     contested = {
         claim["subject"]: [name(holder) for holder in holders(claim)]
         for claim in claims
-        if len(claim["holders"]) > 1
+        if len(holders(claim)) > 1
     }
     standing = {
         text(notice.get("id")): stated(notice)

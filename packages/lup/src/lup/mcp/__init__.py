@@ -42,6 +42,7 @@ from pydantic import (
 )
 
 from lup.coordination.identity import MEMBER_ENV, mint_member_id
+from lup.coordination.policy import COORDINATION_SERVER
 from lup.ledger.models import LedgerEdge, LedgerNode
 from lup.ledger.store import LedgerLayout
 from lup.orchestration.reflection import ReviewGate
@@ -241,7 +242,7 @@ class ServedServer(BaseModel, frozen=True):
 class Coordination(HostedServer, frozen=True):
     """The repository's roster verbs, bound to this session's identity."""
 
-    name: str = "coordination"
+    name: str = COORDINATION_SERVER
     requires: ClassVar[str] = "a roster identity"
 
     def group(self) -> ToolGroup:

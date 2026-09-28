@@ -20,6 +20,15 @@ from lup.coordination.identity import MEMBER_ENV
 from lup.policy.peer_policy import PeerPolicy
 from lup.policy.refused_paths import RefusedPaths
 
+COORDINATION_SERVER = "coordination"
+"""The tool server a session's coordination verbs are served from.
+
+The one name the server's declaration and the hook stamping each call's
+caller have to agree on: a runtime addresses a tool by the server carrying it,
+so a hook matched against any other name stamps nothing and every subagent
+acts as its session again.
+"""
+
 SEND_REDIRECT = (
     "a native send to a session on this repository's roster leaves no record"
     " any other worktree can read"
@@ -79,9 +88,11 @@ def peer_policy(
     claim_reason: str = CLAIM_HELD,
     send_recovery: str = SEND_RECOVERY,
     claim_recovery: str = CLAIM_RECOVERY,
+    server: str = COORDINATION_SERVER,
 ) -> PeerPolicy:
     """This repository's sessions, as the compiled permission hook reads them."""
     return PeerPolicy(
+        server=server,
         store=[STORE_DIR, COORDINATION_DIR],
         windows_dir=WINDOWS_DIR,
         member_env=MEMBER_ENV,
