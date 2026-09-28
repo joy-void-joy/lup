@@ -254,7 +254,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/lex.py",
       "category": "generated",
-      "sha256": "e39eaded61e57b51b1cea071f09dab0eaa04044f45a63f72be734770a2100e98",
+      "sha256": "d19351924de4521f6e2133e6c2a9a8a36530b0f0f79873783e054d32d2beb992",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -317,7 +317,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/shell.py",
       "category": "generated",
-      "sha256": "3db4db05a25ac99a7fb50a9f3bdebc6bf5ca4f2b833682e9ebac1e181ed77abe",
+      "sha256": "709e37a6ffca6b9bde53ac52edfe4903e9d6c3b43d04db0875a925234a9221cd",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },
@@ -366,7 +366,7 @@
     {
       "path": ".codex/plugins/lup/hooks/runtime/kernel/words.py",
       "category": "generated",
-      "sha256": "e30ff2a336e5f3aca4ae987d54ec2699af57616ab4f87e91fd02979b1585f11e",
+      "sha256": "45902d218defccce934b1a56f7d30272b4771c2f34bdb6f6026b3bff2429a4fd",
       "semantic_id": "hooks.lup-policy",
       "executable": false
     },

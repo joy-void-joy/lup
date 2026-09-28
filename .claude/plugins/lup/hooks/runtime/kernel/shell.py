@@ -14,6 +14,7 @@ from .decision import (
     SUBSTITUTION_SENTINEL,
     carrying_readings,
     joined_decision,
+    recovery_dischargeable,
     unjudged,
 )
 from .settlement import SettlementFacts, settle
@@ -57,6 +58,8 @@ from .words import (
     read_wrapper,
     uv_command_words,
     uv_run_words,
+    write_checkpoint,
+    write_scope,
     xargs_payload,
 )
 from .bindings import (
@@ -82,6 +85,7 @@ from .semantics import UnjudgedAmbient
 from .lex import (
     command_directory,
     command_segments,
+    git_worked_tree,
     guarded_write_targets,
     joined_directory,
     list_commands,
@@ -93,11 +97,13 @@ from .lex import (
     read_segments,
     shell_flag_write_targets,
     shell_path_verb_targets,
+    shell_worked_trees,
     shell_write_targets,
     simple_commands,
     substitutions,
     tee_operands,
     uv_run_placement,
+    verb_path_words,
 )
 from .syntax import Command, Script, Word, expands, readable_prefix, word_text
 from .effects import STRENGTH, declared_verdict, member_for
@@ -660,16 +666,29 @@ def decide_segment_words(
             f"the git ext transport in {transport!r} can run commands",
         )
     if executable == "git":
-        # lup: defer: the segment reading consumes `--work-tree` before these
+        # lup: solved: the segment reading consumes `--work-tree` before these
         # grants read the words, so `git --work-tree=/tmp restore --source=HEAD
         # README.md` and `git --work-tree /tmp checkout HEAD -- README.md` are
         # granted as a restore of this checkout while they overwrite a tree
         # outside it that no reflog or capture holds. Decide whether a consumed
         # `--work-tree` withdraws the grants or places their operands in that
         # tree, where the write scope would then answer for them.
+        # Placed there: the reading spells each pathspec from the tree, and a
+        # grant resting on this checkout's history holds only for paths the
+        # checkout answers for. Elsewhere the row's question stands, and the
+        # write scope says where the loss lands.
+        held = not any(
+            write_checkpoint(
+                write_scope(
+                    operand["path"], context["path_roles"], context["checkout_root"]
+                )
+            )
+            == "unrecoverable"
+            for operand in verb_path_words(words, context["rows"])
+        )
         recognized = (
-            git_checkout_pathspec(words)
-            or git_restore_source(words)
+            (git_checkout_pathspec(words) if held else None)
+            or (git_restore_source(words) if held else None)
             or git_restore_unchanged(
                 words, context["recoverable_targets"], context["path_rules"]
             )
@@ -892,7 +911,7 @@ def decide_shell_segment(
     )
     # A command word nobody can read is read as each program whose verb the
     # words after it name, and the spelling's own verdict is the floor.
-    return strictest_reading(
+    verdict = strictest_reading(
         decide_placed_words(placed, context, here, operands_judged),
         [
             Reading(
@@ -902,6 +921,36 @@ def decide_shell_segment(
             )
             for program in unread_programs(placed, context["rows"])
         ],
+    )
+    worked = git_worked_tree(words, directory, context["rows"])
+    if (
+        worked
+        and recovery_dischargeable(verdict)
+        and write_checkpoint(
+            write_scope(worked, context["path_roles"], context["checkout_root"])
+        )
+        == "unrecoverable"
+    ):
+        return unheld_loss(verdict, worked)
+    return verdict
+
+
+def unheld_loss(decision: KernelDecision, tree: str) -> KernelDecision:
+    """A loss a capture would answer for, landing in a tree no capture holds.
+
+    A capture is a snapshot of this checkout, so the question it retires is
+    about a loss here. Git moved into another tree -- `--work-tree` naming
+    one, `-C` standing in one -- changes files there, and `reset --hard` or
+    a bare `clean` changes that whole tree without naming a path the loss
+    could be read from. So every part of the question keeps it.
+    """
+    return decision.revised(
+        reason=f"{decision.reason} — in {tree}, which no capture of this checkout"
+        " holds",
+        checkpoint="unrecoverable",
+        findings=tuple(
+            part.revised(checkpoint="unrecoverable") for part in decision.findings
+        ),
     )
 
 
@@ -1733,6 +1782,7 @@ def shell_posture_targets(command: str, rows: list[ShellRuleRow]) -> list[str]:
                 *shell_write_targets(command),
                 *shell_path_verb_targets(command, rows),
                 *shell_flag_write_targets(command, rows),
+                *shell_worked_trees(command, rows),
                 *landed,
                 *unplaced,
             ]

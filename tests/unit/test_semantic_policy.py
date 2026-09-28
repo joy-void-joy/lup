@@ -3611,6 +3611,54 @@ def test_a_git_global_does_not_move_a_protected_file_past_its_question(
         assert generated.effect == effect, (command, generated.reason)
 
 
+@pytest.mark.parametrize(
+    ("command", "effect"),
+    [
+        ("git reset --hard", "allow"),
+        ("git --work-tree=. reset --hard", "allow"),
+        ("git --work-tree=/srv/wt reset --hard", "ask"),
+        ("git -C /srv/wt reset --hard", "ask"),
+        ("git --work-tree=/srv/wt restore notes.md", "ask"),
+        ("git --work-tree=/srv/wt restore --source=HEAD notes.md", "ask"),
+        ("git --work-tree /srv/wt restore --source=HEAD notes.md", "ask"),
+        ("git restore --source=HEAD notes.md", "allow"),
+        ("git --work-tree=.. restore --source=HEAD notes.md", "allow"),
+    ],
+)
+def test_git_moved_into_another_tree_loses_what_no_capture_holds(
+    tmp_path: Path, command: str, effect: str
+) -> None:
+    """A work tree git stands outside is where its pathspecs and its loss land.
+
+    `--work-tree` reads a pathspec from the tree's top where git stands
+    outside it, and a capture of this checkout holds nothing there -- so a
+    grant resting on this checkout's history does not reach it, and a loss the
+    capture would have settled keeps its question. A tree that holds where git
+    stands moves nothing. Canonically and in the shipped kernel alike.
+    """
+    committed_tree(tmp_path, "notes.md")
+    policy = ShellPolicy(
+        SHELL_RULES, runner_targets=FIXTURE_RUNNER_TARGETS, recovered=True
+    )
+    bundled = load_bundled_kernel(tmp_path / "runtime", "shell")
+
+    decided = policy.decide(ShellCommand(command=command, cwd=tmp_path))
+    generated = bundled.decide_shell(
+        command,
+        policy.rules,
+        path_rules=policy.path_rules,
+        existing_targets=["notes.md"],
+        tracked_targets=["notes.md"],
+        recoverable_targets=["notes.md"],
+        recovered=True,
+    )
+
+    assert (decided.effect, generated.effect) == (effect, effect), (
+        decided.reason,
+        generated.reason,
+    )
+
+
 def test_restoring_a_file_that_holds_no_pending_work_changes_nothing(
     tmp_path: Path,
 ) -> None:

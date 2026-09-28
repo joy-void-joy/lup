@@ -9,6 +9,7 @@ rewritten documents cannot come to read one command two ways.
 """
 
 import posixpath
+from pathlib import PurePosixPath
 from typing import TypedDict
 
 from .archives import archive_write
@@ -51,6 +52,7 @@ from .words import (
     flag_write_words,
     git_apply_words,
     global_span,
+    git_checkout_operands,
     git_restore_operands,
     git_rm_operands,
     opaque_argument,
@@ -1250,15 +1252,18 @@ def command_directory(words: list[str], rows: list[ShellRuleRow]) -> str | None:
     were both answered about a file the command was never going to touch.
 
     Only the globals a rule declares as naming a directory, which is narrower
-    than the globals that consume a word: ``--git-dir`` and ``--work-tree``
-    consume one and move no operand. Only before the subcommand, because
+    than the globals that consume a word: ``--git-dir`` names a repository and
+    moves no operand, and ``--work-tree`` moves a pathspec alone, which
+    :func:`command_words_read` places. Only before the subcommand, because
     after it the spelling is somebody else's -- ``git commit -C`` reuses a
     message.
 
     ``""`` where the command names none, and ``None`` where it names one this
-    cannot read, because a guess there puts every path in a directory the
-    command may never have entered.
+    cannot read -- a work tree included -- because a guess there puts every
+    path in a directory the command may never have entered.
     """
+    if git_work_tree(words, rows) is None:
+        return None
     head = words[: global_span(words, rows)]
     directory = ""
     declared = [
@@ -1269,6 +1274,75 @@ def command_directory(words: list[str], rows: list[ShellRuleRow]) -> str | None:
             return None
         directory = posixpath.join(directory, named["path"])
     return directory
+
+
+def git_work_tree(words: list[str], rows: list[ShellRuleRow]) -> str | None:
+    """The tree a git command reads its pathspecs from, where it stands outside it.
+
+    `--work-tree` names the tree git checks files out into. Standing inside
+    it, git reads a pathspec from where it stands, so nothing moves; standing
+    outside -- the case the flag exists for -- it reads one from the tree's
+    top, and `git --work-tree=/home/x restore .bashrc` rewrites
+    `/home/x/.bashrc`. A relative tree is read from where `-C` stood git, and
+    one that only climbs holds the directory it climbs from. An absolute tree
+    is read as one the command stands outside or at the top of, which is
+    where a session stands.
+
+    ``""`` where the command names no tree or one it stands inside, and
+    ``None`` where it names one this cannot read.
+    """
+    if not words or posixpath.basename(words[0]) != "git":
+        return ""
+    head = words[: global_span(words, rows)]
+    named = [row["path"] for row in flag_write_words(head, ["--work-tree"])]
+    if not named:
+        return ""
+    if opaque_argument(named[-1]):
+        return None
+    climbed = PurePosixPath(posixpath.normpath(named[-1])).parts
+    return "" if all(part in (".", "..") for part in climbed) else named[-1]
+
+
+def git_worked_tree(
+    words: list[str], directory: str | None, rows: list[ShellRuleRow]
+) -> str | None:
+    """Where a git command changes a working tree, when a global moved it there.
+
+    The tree `--work-tree` names where the command stands outside it, and
+    otherwise the directory `-C` stands git in, each read from ``directory``,
+    where the shell stands. A verb that names no path -- `reset --hard`, a
+    bare `clean` -- changes that whole tree, which is why it is named apart
+    from any operand. ``""`` where no global moved it, and ``None`` where one
+    moved it somewhere this cannot read.
+    """
+    if not words or posixpath.basename(words[0]) != "git":
+        return ""
+    moved = command_directory(words, rows)
+    if moved is None:
+        return None
+    here = directory if not moved else joined_directory(directory, moved)
+    tree = git_work_tree(words, rows)
+    if tree:
+        return joined_directory(here, tree)
+    return here if moved else ""
+
+
+def shell_worked_trees(command: str, rows: list[ShellRuleRow]) -> list[str]:
+    """Every tree a git segment of this command changes away from where it stands.
+
+    ``$`` for one no reader can place, as the posture question takes a path
+    it cannot place.
+    """
+    return [
+        "$" if tree is None else tree
+        for spelled in shell_placements(command)
+        for tree in [
+            git_worked_tree(
+                effective_command(spelled["words"])["words"], spelled["directory"], rows
+            )
+        ]
+        if tree != ""
+    ]
 
 
 def command_words_read(words: list[str], rows: list[ShellRuleRow]) -> list[str]:
@@ -1287,6 +1361,11 @@ def command_words_read(words: list[str], rows: list[ShellRuleRow]) -> list[str]:
     as it would have been written without them. Only the value-carrying ones:
     a global the row asks about -- ``git -c`` -- stays exactly where it is,
     because the question it raises is the row's to raise.
+
+    A work tree the command stands outside is consumed into its pathspecs:
+    each operand a path verb reads is spelled from the tree, as git reads it,
+    while a flag's file stays where the command stands -- `git
+    --work-tree=../wt diff --output=o.txt` writes `./o.txt`.
     """
     head = words[: global_span(words, rows)]
     valued = [flag for row in command_rows(words, rows) for flag in row["value_flags"]]
@@ -1297,7 +1376,16 @@ def command_words_read(words: list[str], rows: list[ShellRuleRow]) -> list[str]:
             [named["at"]] if named["prefix"] else [named["at"] - 1, named["at"]]
         )
     ]
-    return [word for index, word in enumerate(words) if index not in consumed]
+    read = [word for index, word in enumerate(words) if index not in consumed]
+    tree = git_work_tree(words, rows)
+    if not tree:
+        return read
+    moved = {
+        operand["at"]: f"{operand['prefix']}{posixpath.join(tree, operand['path'])}"
+        for operand in verb_path_words(read, rows)
+        if not posixpath.isabs(operand["path"])
+    }
+    return [moved.get(index, word) for index, word in enumerate(read)]
 
 
 def path_words(words: list[str], rows: list[ShellRuleRow]) -> list[PathWord]:
@@ -1457,14 +1545,17 @@ def placed_words(
 def verb_path_words(words: list[str], rows: list[ShellRuleRow]) -> list[PathWord]:
     """The words one segment's path-writing verb reads its operands out of.
 
-    A restore's and a removal's are found past git's globals, as every reader
-    naming paths finds them: `git --no-pager restore <path>` rewrites the
-    path, and a reading that missed it placed nothing and asked the host about
-    nothing.
+    A restore's, a checkout's and a removal's are found past git's globals, as
+    every reader naming paths finds them: `git --no-pager restore <path>` and
+    `git checkout HEAD -- <path>` rewrite the path, and a reading that missed
+    it placed nothing and asked the host about nothing.
     """
     restore = git_restore_operands(words, global_span(words, rows))
     if restore is not None:
         return restore["named"]
+    checkout = git_checkout_operands(words, global_span(words, rows))
+    if checkout is not None:
+        return checkout
     removed = git_rm_operands(words, rows)
     if removed is not None:
         return removed

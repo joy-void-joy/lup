@@ -269,6 +269,21 @@ protected file asks by the same spellings, and a patch handed to `git
 pending — read the subcommand where it is written, since a global they did
 not model could change what they cover, and missing one costs a question.
 
+`--work-tree` moves the pathspecs where git stands outside the tree: `git
+--work-tree=/home/x restore .bashrc` is read as a restore of
+`/home/x/.bashrc`, a `checkout <ref> -- <path>` likewise, while a flag's own
+file stays where git stands, and a tree that holds where git stands — `.`,
+`..` — moves nothing. `--git-dir` names a repository and moves nothing. A
+grant resting on this checkout's history — a checkout or restore from a
+named ref — holds only for paths this checkout answers for, so a placed path
+elsewhere meets the row's question and the write scope's reading of where
+it lands. And where git works in a tree outside the checkout, by
+`--work-tree` or `-C`, a loss a capture would have settled keeps its
+question, because the capture is of this checkout: `git -C ../other reset
+--hard` and `git --work-tree=/srv/wt reset --hard` ask where `git reset
+--hard` is settled. The tree is named to the container question too, so a
+tree the host lent keeps the question there.
+
 Placing a file on a protected path is asked the same way, whether or not
 anything stood there: a path created is written as surely as one replaced,
 and no capture answers whose it is. Every path a command writes — a `cp`,

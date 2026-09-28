@@ -358,6 +358,71 @@ def test_a_target_the_host_lent_from_outside_the_checkout_keeps_the_question(
     assert previewed(command, checkout, monkeypatch)["outer"] == "ask"
 
 
+@pytest.mark.parametrize(
+    "spelled",
+    [
+        pytest.param("git --work-tree={tree} reset --hard", id="reset-work-tree"),
+        pytest.param("git -C {tree} reset --hard", id="reset-C"),
+        pytest.param("git --work-tree={tree} restore README.md", id="restore"),
+        pytest.param(
+            "git --work-tree {tree} restore --source=HEAD README.md",
+            id="restore-source",
+        ),
+        pytest.param("git --work-tree={tree} clean -fd", id="clean"),
+    ],
+)
+def test_git_moved_into_a_lent_tree_keeps_the_question_there(
+    runtime: Runtime, checkout: Path, monkeypatch: pytest.MonkeyPatch, spelled: str
+) -> None:
+    """A work tree git is pointed at is where its loss lands, not this checkout.
+
+    A capture of the checkout holds none of the tree, and the container holds
+    none of what the host lent it, so no wall settles the question. The tree
+    stands outside the temporary root, which is disposable wherever it is.
+    """
+    lent = "/srv/lent-tree"
+    ledger = checkout / ".lup" / "preflight" / "launch.json"
+    measured = json.loads(ledger.read_text(encoding="utf-8"))
+    ledger.write_text(
+        json.dumps({**measured, "writable_roots": [*measured["writable_roots"], lent]}),
+        encoding="utf-8",
+    )
+    command = spelled.format(tree=lent)
+    postures: tuple[Posture, ...] = ("none", "inner", "outer")
+
+    assert {met(runtime, posture, command, checkout) for posture in postures} == {"ask"}
+    assert set(previewed(command, checkout, monkeypatch).values()) == {"ask"}
+
+
+@pytest.mark.parametrize(
+    ("command", "standing"),
+    [
+        pytest.param("git --work-tree=. reset --hard", "git reset --hard", id="reset"),
+        pytest.param(
+            "git --work-tree=. restore --source=HEAD README.md",
+            "git restore --source=HEAD README.md",
+            id="restore-source",
+        ),
+    ],
+)
+def test_a_work_tree_git_stands_in_moves_nothing(
+    runtime: Runtime,
+    checkout: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    command: str,
+    standing: str,
+) -> None:
+    postures: tuple[Posture, ...] = ("none", "inner", "outer")
+    meets = {posture: met(runtime, posture, standing, checkout) for posture in postures}
+
+    assert {
+        posture: met(runtime, posture, command, checkout) for posture in postures
+    } == meets
+    assert previewed(command, checkout, monkeypatch) == previewed(
+        standing, checkout, monkeypatch
+    )
+
+
 def test_a_setting_a_container_holds_leaves_the_verb_its_landing(
     runtime: Runtime, checkout: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
