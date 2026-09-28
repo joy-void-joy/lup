@@ -24,7 +24,7 @@ from httpx import ASGITransport, AsyncClient
 from lup.providers.harness import AdapterName
 from lup.harness.models import ResolveSpec, SkillInvocation
 from lup.channels.models import utc_now
-from lup.resolver.journal import Journal, JournalEntry, PhaseChangedEvent, RunEvent
+from lup.resolver.record import Journal, JournalEntry, PhaseChangedEvent, RunEvent
 from lup.sessions.events import TurnEvent
 from lup.coordination.mailbox import AnswerDoor, RecordedAnswer
 from lup.coordination.questions import QuestionAnswer

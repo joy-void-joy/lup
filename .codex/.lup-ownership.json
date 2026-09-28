@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "71f92e268dbf459450620c1cc8f7e7b37882804f906bb9798fa4bf5d203c5273",
+  "source_digest": "7d4c7f50603b382a373148c7cf4abbb4e715d923cb601e2f737eccc8d63ad707",
   "target_requirements": [
     "codex-cli>=0.144"
   ],
@@ -590,7 +590,7 @@
     {
       "path": ".codex/plugins/lup/skills/init/SKILL.md",
       "category": "generated",
-      "sha256": "c422cbc60d5c3f78096c0450d703cf902035e93ac4f45c75c10fb86db4939921",
+      "sha256": "1a49171f06f58e8b7d3605a21f546582d2bcb2fe14d6a8bb66c6501b92e6fb07",
       "semantic_id": "skill.init",
       "executable": false
     },
@@ -611,7 +611,7 @@
     {
       "path": ".codex/plugins/lup/skills/merge/SKILL.md",
       "category": "generated",
-      "sha256": "0494fcc91fe792a91dcb56a941915df2cd00b9db24fee05cfec1251eaf758f30",
+      "sha256": "6182919aae7951d1d989523d651959cb0b391e774c6a519336cb56952b3c067c",
       "semantic_id": "skill.merge",
       "executable": false
     },

@@ -296,7 +296,7 @@ owns the subject, then regenerate.
 - /lup:hooks — Inspect and modify the canonical semantic permission policy
 - /lup:implementer — Implement one resolver concern inside its leased worktree
 - /lup:import — Import a feature or pattern from a tracked project or local Git source
-- /lup:init — Initialize the self-improvement loop for a specific domain
+- /lup:init — Make this checkout a project for one domain — choose its modules, settle its seams, rename and scaffold it
 - /lup:install — Install lup plugin and scaffolding into a target repo
 - /lup:land — Land every branch that has not reached the integration branch, and clear the ones that have
 - /lup:merge — Merge a branch or resolve existing merge conflicts

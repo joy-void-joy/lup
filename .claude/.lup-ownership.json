@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generator_version": "0.2.0",
-  "source_digest": "71f92e268dbf459450620c1cc8f7e7b37882804f906bb9798fa4bf5d203c5273",
+  "source_digest": "7d4c7f50603b382a373148c7cf4abbb4e715d923cb601e2f737eccc8d63ad707",
   "target_requirements": [
     "claude-code"
   ],
@@ -212,7 +212,7 @@
     {
       "path": ".claude/plugins/lup/commands/init.md",
       "category": "generated",
-      "sha256": "59067f3d28ee7b26f2c6cb86ee7bf123ed6151549acc98e59aea1626a3105771",
+      "sha256": "a405ebd2987d46949ddbf0e940ae65769950ba0ef99cec0adf15757b6d8d4e49",
       "semantic_id": "skill.init",
       "executable": false
     },
@@ -233,7 +233,7 @@
     {
       "path": ".claude/plugins/lup/commands/merge.md",
       "category": "generated",
-      "sha256": "02f007287f301b62021409ac5e1e16ab1a3a905c48eb51c5bff297c7fe23e097",
+      "sha256": "1b2738392b8976784bf3b7d9671a436997f45919cfab1cc15e79894be31d917c",
       "semantic_id": "skill.merge",
       "executable": false
     },
@@ -772,7 +772,7 @@
     {
       "path": "docs/harness.md",
       "category": "generated",
-      "sha256": "a79ea30ffc0ac91fba586e575a3cedd36da719b187d4c9c67875e07c336b3be0",
+      "sha256": "6b5581af36ca43801846c93bf11ba2ae4cc115516583f17a44cd426d251c01e7",
       "semantic_id": "docs.harness",
       "executable": false
     },

@@ -1,6 +1,6 @@
-# Initialize Self-Improvement Loop
+# Initialize a Project
 
-This command sets up the project identity, renames the source package, and customizes the feedback collection, metrics, and trace analysis for your specific agent domain.
+This command makes this checkout a project for one agent domain: it settles the project's identity, chooses the modules the project takes, puts each seam the library ships at a default to the user, renames the source package, and generates the scaffolding for the domain.
 
 **This project builds on an agent SDK, not raw model API calls.** The SDK is the default and expected framework. If the user wants bare API calls instead, ask them to explain why -- the SDK provides structured outputs, tool use, subagents, and hooks out of the box.
 
@@ -366,9 +366,9 @@ proposes rather than writes. The template ships `README.md` that way, which is
 right for a file whose words are the author's and wrong for a project that
 wants its README kept current by the agent.
 
-{{ ask_2 }} — then apply the answer with `--lock` / `--unlock` on that same command,
-which rewrites the declaration and regenerates the native trees. Never
-hand-edit `human_owned_files` in the catalog.
+{{ ask_2 }} — then apply the answer with `uv run lup-devtools dev seams --own <path>`
+or `--disown <path>`, which rewrites the declaration for the regeneration below to
+compile. Never hand-edit `human_owned_files` in the catalog.
 
 ### 3. What each path role means here
 

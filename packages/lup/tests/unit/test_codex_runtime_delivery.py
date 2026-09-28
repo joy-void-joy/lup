@@ -13,7 +13,7 @@ from lup.providers.codex.app_server import CodexAppServer, RpcMessage, RpcNotifi
 from lup.providers.codex.hooks import COMMAND_APPROVAL
 from lup.providers.codex import Codex
 from lup.providers.codex.runtime import CodexConversationState, CodexTurnChannel
-from lup.resolver.journal import Journal
+from lup.resolver.record import Journal
 from lup.types import JsonObject, JsonValue
 
 

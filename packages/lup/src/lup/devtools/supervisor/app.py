@@ -19,7 +19,7 @@ from fastapi.responses import StreamingResponse
 
 from lup.providers.harness import AdapterName
 from lup.channels.models import utc_now
-from lup.resolver.journal import Journal, JournalEntry
+from lup.resolver.record import Journal, JournalEntry
 from lup.coordination.mailbox import (
     AnswerDoor,
     AnswerOffer,

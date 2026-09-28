@@ -17,7 +17,7 @@ from lup.coordination.cohort import ActorCohort
 from lup.coordination.mailbox import PendingQuestion as SharedPendingQuestion
 from lup.coordination.mailbox import QuestionMailbox as SharedMailbox
 from lup.coordination.mailbox import AnswerOffer, MailboxConflictError
-from lup.resolver.journal import Journal
+from lup.resolver.record import Journal
 from lup.resolver.models import MaterialQuestion, ResolveState
 
 
