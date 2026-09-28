@@ -31,6 +31,7 @@ from lup.workspace.paths import project_root
 from lup.devtools.dev.documented import generated_files
 from lup.devtools.dev.library import VENDORED_ROOT
 from lup.devtools.dev.plugin import set_marketplace_name
+from lup.devtools.dev.scaffold import ScaffoldFile, ScaffoldSource
 from lup.devtools.dev.tracked import tracked_files
 from lup_template.harness.catalog import declared_plugin
 from lup.execution.shell import git
@@ -400,6 +401,32 @@ def drop_scaffold_demonstrations(
         for path in present:
             git("rm", "-r", "--quiet", str(path), _cwd=str(root))
     return [f"  {path.as_posix()}: removed" for path in present]
+
+
+def undeclined_copies(
+    removed: list[Path], source: ScaffoldSource, package: str
+) -> list[str]:
+    """Each removed path the copied half still carries, spelled as a decline is.
+
+    `dev update` merges upstream's copied half, so a file this project deleted
+    that the scaffold still compiles comes back as a conflict the first time
+    upstream changes it. Declined in the scaffold declaration, it is absent
+    from every scaffold commit instead, and nothing is offered back. A path
+    outside every copied root — `examples/` itself — is this project's own from
+    its first day and has nothing to decline.
+    """
+    return [
+        copied.upstream().as_posix()
+        for path in removed
+        for root in source.roots
+        if PurePosixPath(path).is_relative_to(root.resolved(package))
+        and not source.declines(
+            copied := ScaffoldFile(
+                root=root,
+                relative=PurePosixPath(path).relative_to(root.resolved(package)),
+            )
+        )
+    ]
 
 
 def mention_pattern(path: Path) -> re.Pattern[str]:

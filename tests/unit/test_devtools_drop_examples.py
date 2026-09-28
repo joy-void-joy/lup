@@ -12,12 +12,14 @@ from pathlib import Path
 
 import pytest
 
+from lup.devtools.dev.scaffold import ScaffoldSource
 from lup.harness.ownership import OwnedArtifact, OwnershipManifest
 from lup_template.devtools.dev.init import (
     SCAFFOLD_DEMONSTRATIONS,
     drop_scaffold_demonstrations,
     mention_pattern,
     surviving_mentions,
+    undeclined_copies,
 )
 from tests.unit.repos import initialized_repo
 
@@ -176,6 +178,25 @@ def test_what_the_checkout_holds_for_somebody_else_is_not_read(
     assert not any("packages/lup" in line for line in mentions)
     assert not any("init.passage.md" in line for line in mentions)
     assert any(line.startswith("  README.md:1:") for line in mentions)
+
+
+def test_a_removed_copy_is_named_until_the_scaffold_declines_it() -> None:
+    """Deleted here and still compiled upstream, a file is an update's conflict.
+
+    Spelled as upstream spells it, which is how a decline is written; a path
+    outside every copied root is this project's own and has nothing to decline.
+    """
+    removed = [Path("examples"), Path("tests/unit/test_policy_examples.py")]
+
+    assert undeclined_copies(removed, ScaffoldSource(), "pkg") == [
+        "tests/unit/test_policy_examples.py"
+    ]
+    assert undeclined_copies([Path("src/pkg/demo.py")], ScaffoldSource(), "pkg") == [
+        "src/lup_template/demo.py"
+    ]
+    assert (
+        undeclined_copies(removed, ScaffoldSource(declined=["tests/unit"]), "pkg") == []
+    )
 
 
 @pytest.mark.parametrize(
