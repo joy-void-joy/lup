@@ -26,6 +26,7 @@ from pydantic import ValidationError
 from typer.testing import CliRunner
 
 import lup.devtools.harness.launch as launch
+from lup.launch.session import LaunchOpening
 from lup.launch.declaration import LaunchSandbox
 import lup.providers.claude.usage.reader as claude_usage
 from lup.devtools.harness.composition import NativeTargets
@@ -331,7 +332,7 @@ def test_a_launch_refuses_a_stored_default_home_as_a_bad_parameter(
     composition = Mock()
     composition.recipe.source.plugins = [plugin]
     composition.recipe.source.image.inboxes = SessionInboxes(directory="")
-    monkeypatch.setattr(launch, "ready_to_open", lambda *a, **k: launch.LaunchOpening())
+    monkeypatch.setattr(launch, "ready_to_open", lambda *a, **k: LaunchOpening())
     monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
     monkeypatch.setattr(
         launch,

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-import lup.devtools.harness.launch as launch
+import lup.providers.claude.session as claude_session
 from lup.launch.config_volume import HomeFile
 from lup.harness.image import Image
 from lup.providers.claude.config_home import ClaudeConfigHome
@@ -64,7 +64,7 @@ def test_what_a_session_changed_is_read_back_and_carried(
         "hooks": {"Stop": []},
     }
     monkeypatch.setattr(
-        launch,
+        claude_session,
         "read_config_home",
         lambda image, root, login, names: [
             HomeFile(name="settings.json", content=json.dumps(volume).encode()),
@@ -73,7 +73,7 @@ def test_what_a_session_changed_is_read_back_and_carried(
     )
     config = UserConfigFile(tmp_path / "lup")
 
-    launch.carry_claude_home(
+    claude_session.carry_claude_home(
         Image(), tmp_path, CLAUDE_LOGIN, seed, account, config, UserConfig()
     )
 
@@ -93,9 +93,9 @@ def test_a_volume_that_cannot_be_read_moves_nothing(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     seed = ClaudeHomeSeed.compose(account, UserConfig())
-    monkeypatch.setattr(launch, "read_config_home", lambda *a, **k: [])
+    monkeypatch.setattr(claude_session, "read_config_home", lambda *a, **k: [])
 
-    launch.carry_claude_home(
+    claude_session.carry_claude_home(
         Image(),
         tmp_path,
         CLAUDE_LOGIN,

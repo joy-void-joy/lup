@@ -15,6 +15,7 @@ import sh
 import typer
 
 import lup.devtools.harness.launch as launch
+from lup.launch.session import LaunchOpening
 from lup.launch.declaration import LaunchSandbox
 import lup.providers.profile_tree as profile_tree
 from lup.providers.claude.config_home import (
@@ -90,7 +91,7 @@ def launched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Launched:
     monkeypatch.setattr(
         launch,
         "ready_to_open",
-        lambda *a, **k: launch.LaunchOpening(sandbox=LaunchSandbox.INNER),
+        lambda *a, **k: LaunchOpening(sandbox=LaunchSandbox.INNER),
     )
     monkeypatch.setattr(launch, "project_root", lambda: project)
     monkeypatch.setattr(profile_tree, "project_root", lambda: project)
@@ -338,7 +339,7 @@ def test_a_contained_claude_launch_leaves_the_accounts_theme_alone(
     monkeypatch.setattr(
         launch,
         "ready_to_open",
-        lambda *a, **k: launch.LaunchOpening(sandbox=LaunchSandbox.OUTER),
+        lambda *a, **k: LaunchOpening(sandbox=LaunchSandbox.OUTER),
     )
 
     claude(config)

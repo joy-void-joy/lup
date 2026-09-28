@@ -33,6 +33,11 @@ from lup.ledger.store import LedgerLayout
 from lup.observability.sessions import SessionRecorder, session_recorder
 from lup.launch.config_volume import HomeHelper, kept_for_superseded
 from lup.launch.superseded import SupersededFile
+from lup.launch.session import (
+    ambient_config_home,
+    report_inside_requirements,
+    report_requirements,
+)
 from lup.launch.container import (
     checkout_tag,
     image_tag,
@@ -239,20 +244,21 @@ def create_harness_app(
                 [
                     finding
                     for index, composition in enumerate(compositions)
-                    for finding in launch.report_inside_requirements(
+                    for finding in report_inside_requirements(
                         composition,
                         composition.recipe.source.plugins[0],
-                        launch.ambient_config_home(
+                        ambient_config_home(
                             composition.login, composition.default_config_home
                         ),
                         composition.login,
                         setting_up=not launch_only,
                         skipped=sorted(exercised_before[index]),
                         banner=None if index == 0 else Banner(),
+                        standing=launch.standing_grants(),
                     )
                 ]
                 if inside
-                else launch.report_requirements(
+                else report_requirements(
                     Manifest.across(
                         [
                             composition.recipe.source.requirements
@@ -260,6 +266,7 @@ def create_harness_app(
                         ]
                     ),
                     setting_up=not launch_only,
+                    standing=launch.standing_grants(),
                 )
             )
         if not findings:
@@ -697,9 +704,7 @@ def create_harness_app(
             ] = False,
         ) -> None:
             """Install the declared plugin and verify native discovery in the selected home."""
-            launch.prepare_codex_plugin(
-                [], codex_home, project_root(), {}, force, trust_project
-            )
+            launch.install_codex_plugin_home(codex_home, force, trust_project)
 
         @app.command(
             "codex",

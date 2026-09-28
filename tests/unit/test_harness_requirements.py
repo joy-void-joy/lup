@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-import lup.devtools.harness.launch as launch
+import lup.launch.session as launch_session
 from lup.harness.egress import SessionEgress
 from lup.harness.image import Podman
 from lup.providers.claude.confinement import CLAUDE_CONFINEMENT
@@ -610,7 +610,7 @@ def test_the_launch_probe_drops_the_terminal_it_cannot_have() -> None:
     """
     opening = ["podman", "run", "--rm", "-it", "-v", "vol:/cfg", "lup-agent:abc"]
 
-    assert launch.probing(opening) == [
+    assert launch_session.probing(opening) == [
         "podman",
         "run",
         "--rm",

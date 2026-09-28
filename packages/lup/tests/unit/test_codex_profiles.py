@@ -12,6 +12,8 @@ import tomlkit
 from typer.testing import CliRunner
 
 import lup.devtools.harness.launch as launch
+from lup.launch.session import LaunchOpening
+from lup.providers.codex.session import prepare_codex_plugin
 from lup.launch.declaration import LaunchSandbox
 import lup.providers.codex.install as installation
 from lup.providers.codex.account import read_account
@@ -213,7 +215,7 @@ def test_launcher_selects_the_same_settings_for_preparation_auth_and_session(
     monkeypatch.setattr(
         launch,
         "ready_to_open",
-        Mock(return_value=launch.LaunchOpening(sandbox=sandbox)),
+        Mock(return_value=LaunchOpening(sandbox=sandbox)),
     )
     monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
     monkeypatch.setattr(launch, "non_interactive_environment", lambda environment: {})
@@ -303,7 +305,7 @@ def test_profile_payload_crosses_stdin_only(
     settings = CodexProfileSettings.capture(source_home(tmp_path), "review")
     command = Mock(return_value="")
     monkeypatch.setattr(sh, "Command", Mock(return_value=command))
-    launch.prepare_codex_plugin(
+    prepare_codex_plugin(
         ["podman", "run", "-i", "image"],
         tmp_path / "destination",
         tmp_path,

@@ -385,28 +385,30 @@ def test_the_boundary_refuses_a_mismatch_and_an_exposed_store(
     clone: Path, tmp_path: Path, own_store: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Both postures settle their boundary here, so both refuse here."""
-    from lup.devtools.harness import launch
+    import lup.launch.session as launch_session
 
     side = clone / "tree" / "side"
-    monkeypatch.setattr(launch, "project_root", lambda: side)
-    monkeypatch.setattr(launch, "compile_boundary", unreachable)
+    monkeypatch.setattr(launch_session, "project_root", lambda: side)
+    monkeypatch.setattr(launch_session, "compile_boundary", unreachable)
     plugin = SimpleNamespace(hooks=None)
     sandbox = SimpleNamespace(contained=lambda: False)
     arguments = {"sandbox": sandbox, "findings": [], "sentinels": None}
     extra = {"environment": None, "banner": None}
     with pytest.raises(Reached):
-        launch.settle_boundary(plugin, **arguments, **extra)  # type: ignore[arg-type]
+        launch_session.settle_boundary(plugin, **arguments, **extra)  # type: ignore[arg-type]
     assert (clone).resolve() in known_repositories()
 
     monkeypatch.setattr(
-        launch, "fleet_lease", lambda *_a, **_k: Lease(writable={own_store: "x"})
+        launch_session,
+        "fleet_lease",
+        lambda *_a, **_k: Lease(writable={own_store: "x"}),
     )
-    with pytest.raises(typer.BadParameter, match="store of trusted"):
-        launch.settle_boundary(plugin, **arguments, **extra)  # type: ignore[arg-type]
+    with pytest.raises(LaunchRefused, match="store of trusted"):
+        launch_session.settle_boundary(plugin, **arguments, **extra)  # type: ignore[arg-type]
 
     redirect(side, evil_gitdir(tmp_path / "built"))
-    with pytest.raises(typer.BadParameter, match="redirected"):
-        launch.settle_boundary(plugin, **arguments, **extra)  # type: ignore[arg-type]
+    with pytest.raises(LaunchRefused, match="redirected"):
+        launch_session.settle_boundary(plugin, **arguments, **extra)  # type: ignore[arg-type]
 
 
 def test_a_container_start_refuses_before_any_broker(

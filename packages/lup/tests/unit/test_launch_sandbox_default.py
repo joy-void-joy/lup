@@ -24,16 +24,14 @@ from typer.testing import CliRunner
 
 import lup.launch.container as contained
 import lup.devtools.harness.launch as launch
+import lup.launch.session as launch_session
 import lup.launch.declaration as declaration
 from lup.launch.declaration import LaunchSandbox
 from lup.devtools.harness.app import create_harness_app
 from lup.devtools.harness.composition import NativeTargets
 from lup.harness.generate import NativeHarnessComposition
-from lup.devtools.harness.launch import (
-    launch_claude,
-    launch_codex,
-    session_argv,
-)
+from lup.devtools.harness.launch import launch_claude, launch_codex
+from lup.launch.session import session_argv
 from lup.harness.codescan.common import RuleSelection
 from lup.harness.image import ContainerClient
 from lup.harness.messaging import SessionInboxes
@@ -83,6 +81,7 @@ def seen(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Mock:
     monkeypatch.setattr(launch, "generate_with_report", lambda *a, **k: None)
     monkeypatch.setattr(launch, "generate_targets", lambda *a, **k: None)
     monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
+    monkeypatch.setattr(launch_session, "project_root", lambda: tmp_path)
     monkeypatch.setattr(launch, "carry_claude_home", lambda *a, **k: None)
     monkeypatch.setattr(launch, "sweep_ledgers", lambda root: 0)
     monkeypatch.setattr(launch, "exclude_sandbox_placeholders", lambda root: [])

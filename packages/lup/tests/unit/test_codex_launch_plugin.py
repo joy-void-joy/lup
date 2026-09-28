@@ -7,7 +7,8 @@ from unittest.mock import ANY, AsyncMock, Mock
 import pytest
 import sh
 
-import lup.devtools.harness.launch as launch
+import lup.launch.session as launch_session
+import lup.providers.codex.session as codex_session
 from lup.launch.declaration import LaunchSandbox
 import lup.providers.codex.install as installation
 import lup.providers.codex.runtime as runtime
@@ -36,13 +37,14 @@ def boundary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Mock:
     composition.recipe.source.image.forge.sourced.return_value = ""
     composition.recipe.source.image.clipboard = ClipboardBridge()
     composition.clipboard_transport = "commands"
-    monkeypatch.setattr(launch, "accessible_roots", lambda *args: [])
-    monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
-    monkeypatch.setattr(launch, "settle_boundary", Mock())
-    monkeypatch.setattr(launch, "say_opening", Mock())
-    monkeypatch.setattr(launch, "verify_inside", Mock(return_value=[]))
+    monkeypatch.setattr(launch_session, "project_root", lambda: tmp_path)
+    monkeypatch.setattr(launch_session, "settle_boundary", Mock())
+    monkeypatch.setattr(launch_session, "say_opening", Mock())
+    monkeypatch.setattr(launch_session, "verify_inside", Mock(return_value=[]))
     monkeypatch.setattr(
-        launch, "contained_argv", Mock(return_value=["podman", "run", "-it", "image"])
+        launch_session,
+        "contained_argv",
+        Mock(return_value=["podman", "run", "-it", "image"]),
     )
     return composition
 
@@ -54,7 +56,7 @@ def test_plugin_preparation_uses_the_actual_home_before_authentication(
     sandbox: LaunchSandbox,
 ) -> None:
     calls = Mock()
-    launch.session_argv(
+    launch_session.session_argv(
         "codex",
         [],
         boundary,
@@ -79,7 +81,7 @@ def test_failed_plugin_preparation_stops_the_launch_before_authentication(
 ) -> None:
     authenticate = Mock()
     with pytest.raises(RuntimeError, match="plugin unavailable"):
-        launch.session_argv(
+        launch_session.session_argv(
             "codex",
             [],
             boundary,
@@ -101,7 +103,7 @@ def test_container_preparation_runs_the_owned_installer_in_the_same_boundary(
     execute = Mock(return_value="verified\n")
     command = Mock(return_value=execute)
     monkeypatch.setattr(sh, "Command", command)
-    launch.prepare_codex_plugin(
+    codex_session.prepare_codex_plugin(
         ["podman", "run", "image"], Path("/cfg"), tmp_path, {"FIXTURE": "yes"}, True
     )
     command.assert_called_once_with("podman")

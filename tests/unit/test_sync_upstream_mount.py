@@ -25,7 +25,7 @@ import sh
 
 from lup.devtools import sync
 from lup.devtools.dev.policy_explain import verdict_for
-from lup.devtools.harness import launch
+import lup.launch.session as launch_session
 from lup.launch.declaration import LaunchSandbox
 from lup.providers.claude.launch import claude_sandbox_arguments
 from lup.providers.codex.launch import writable_root_arguments
@@ -161,7 +161,7 @@ def settled_launch(
     policy accepted for every checkout granted, and the repositories a later
     worktree may be accepted beneath.
     """
-    monkeypatch.setattr(launch, "project_root", lambda: checkout)
+    monkeypatch.setattr(launch_session, "project_root", lambda: checkout)
     sentinels = LaunchSentinels()
     plugin = Plugin(
         id="test.upstream",
@@ -172,7 +172,7 @@ def settled_launch(
         skills=[],
         agents=[],
     )
-    launch.settle_boundary(
+    launch_session.settle_boundary(
         plugin,
         sandbox,
         [],

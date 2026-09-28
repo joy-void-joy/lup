@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 
-import lup.devtools.harness.launch as launch
+import lup.launch.session as launch_session
 from lup.launch.declaration import LaunchSandbox
 from lup.harness.clipboard import ClipboardBridge
 from lup.policy.identity import POLICY_ROOT_ENV
@@ -31,13 +31,12 @@ def test_interactive_launch_replaces_inherited_policy_root_and_forwards_it(
     workspace = tmp_path / "scratch"
     workspace.mkdir()
     monkeypatch.chdir(workspace)
-    monkeypatch.setattr(launch, "project_root", lambda: project)
-    monkeypatch.setattr(launch, "accessible_roots", lambda *args: [])
-    monkeypatch.setattr(launch, "settle_boundary", Mock())
-    monkeypatch.setattr(launch, "say_opening", Mock())
-    monkeypatch.setattr(launch, "verify_inside", Mock(return_value=[]))
+    monkeypatch.setattr(launch_session, "project_root", lambda: project)
+    monkeypatch.setattr(launch_session, "settle_boundary", Mock())
+    monkeypatch.setattr(launch_session, "say_opening", Mock())
+    monkeypatch.setattr(launch_session, "verify_inside", Mock(return_value=[]))
     contained = Mock(return_value=["podman", "run", "-it", "image"])
-    monkeypatch.setattr(launch, "contained_argv", contained)
+    monkeypatch.setattr(launch_session, "contained_argv", contained)
     composition = Mock()
     composition.recipe.source.image.config_home = "/cfg"
     composition.recipe.source.image.forge.sourced.return_value = ""
@@ -45,7 +44,7 @@ def test_interactive_launch_replaces_inherited_policy_root_and_forwards_it(
     composition.clipboard_transport = "commands"
     environment: EnvVars = {POLICY_ROOT_ENV: str(tmp_path / "inherited-project")}
 
-    launch.session_argv(
+    launch_session.session_argv(
         cli, [], composition, Mock(hooks=None), tmp_path, login, sandbox, environment
     )
 

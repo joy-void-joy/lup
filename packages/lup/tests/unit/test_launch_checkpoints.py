@@ -7,6 +7,7 @@ import pytest
 import sh
 
 import lup.devtools.harness.launch as launch
+from lup.launch.session import LaunchOpening
 from lup.launch.declaration import LaunchSandbox
 from lup.launch.preflight import LaunchSentinels
 from lup.harness.messaging import SessionInboxes
@@ -54,7 +55,7 @@ def test_claude_checkpoints_before_preflight_and_after_close(
     profiles.launch_home.return_value = None
     preflight = Mock(
         side_effect=lambda *a, **k: (
-            events.append("ready") or launch.LaunchOpening(sandbox=k["sandbox"])
+            events.append("ready") or LaunchOpening(sandbox=k["sandbox"])
         )
     )
     monkeypatch.setattr(
@@ -118,7 +119,7 @@ def test_codex_checkpoints_before_preflight_and_after_close(
     store = Mock()
     preflight = Mock(
         side_effect=lambda *a, **k: (
-            events.append("ready") or launch.LaunchOpening(sandbox=k["sandbox"])
+            events.append("ready") or LaunchOpening(sandbox=k["sandbox"])
         )
     )
     monkeypatch.setattr(

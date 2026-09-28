@@ -22,7 +22,7 @@ import typer
 from typer.testing import CliRunner
 
 from lup.devtools.dev import policy_explain, pr
-from lup.devtools.harness import launch
+import lup.devtools.harness.app as harness_app
 from lup.providers.claude.login import CLAUDE_LOGIN
 from lup.providers.codex.home import CodexWorktreeHomeStore
 from lup.providers.codex.login import CODEX_LOGIN
@@ -83,7 +83,7 @@ def test_container_requirements_respect_launch_only(
     tmp_path: Path,
 ) -> None:
     checks = Mock(return_value=[])
-    monkeypatch.setattr(launch, "report_inside_requirements", checks)
+    monkeypatch.setattr(harness_app, "report_inside_requirements", checks)
     monkeypatch.setenv(login.config_home_env, str(tmp_path))
     arguments = ["harness", "requirements", target, "--inside"]
 
@@ -104,7 +104,7 @@ def test_all_container_requirements_select_each_runtimes_default_home(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     checks = Mock(return_value=[])
-    monkeypatch.setattr(launch, "report_inside_requirements", checks)
+    monkeypatch.setattr(harness_app, "report_inside_requirements", checks)
     monkeypatch.delenv(CLAUDE_LOGIN.config_home_env, raising=False)
     monkeypatch.delenv(CODEX_LOGIN.config_home_env, raising=False)
 

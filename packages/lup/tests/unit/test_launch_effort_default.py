@@ -13,6 +13,7 @@ import pytest
 import sh
 
 import lup.devtools.harness.launch as launch
+from lup.launch.session import LaunchOpening
 from lup.launch.declaration import LaunchSandbox
 from lup.harness.messaging import SessionInboxes
 
@@ -53,7 +54,7 @@ def launched(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[list[str]]
     monkeypatch.setattr(
         launch,
         "ready_to_open",
-        lambda *a, **k: launch.LaunchOpening(sandbox=LaunchSandbox.INNER),
+        lambda *a, **k: LaunchOpening(sandbox=LaunchSandbox.INNER),
     )
     monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
     monkeypatch.setattr(launch, "ambient_config_home", lambda *a, **k: tmp_path)

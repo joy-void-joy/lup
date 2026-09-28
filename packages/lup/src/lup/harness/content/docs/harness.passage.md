@@ -192,7 +192,8 @@ Python to a launched native plugin.
    preimage and applies a conflict-free proposal atomically, then saves the
    manifest. Stale proposals are rejected.
 6. **Launch** — `lup.providers.*.harness_runtime` probes native CLI
-   capabilities, and `lup.devtools.harness.launch` runs the native CLI in the
+   capabilities, `lup.launch.session` composes the session a launch opens,
+   and `lup.devtools.harness.launch` runs the native CLI in the
    foreground of the launching terminal, over the non-interactive defaults
    from `lup.harness.environment`. `lup.harness.process` is the
    captured-output launcher seam the resolver and the base-freshness probe run
@@ -218,8 +219,9 @@ half lives in `packages/lup/src/lup/devtools/harness/`:
 - `reconcile.py` — drift classification and the source-patch flow
 - `doctor.py` — runtime evidence against the `lup.harness.evidence` ledger
 - `resolve.py` — persisted-resolver glue: broker, snapshots, factories
-- `launch.py` — the shared preflight a launcher opens a session past
-  (generation, runtime probes, base freshness) and the native launchers
+- `launch.py` — this repository's gates before a session (generation, base
+  freshness, worktree pointers), its registrations handed to the library as
+  standing grants, and the native launchers mapping flags onto the session
 - `settings.py` — rendering a runtime's project settings from what the
   harness declares
 - `accretion.py` — what the boundary has been widened for, and which of it
@@ -237,6 +239,11 @@ library's rather than the CLI's. `lup.harness.generate` holds the recipes,
 drift inspection, and atomic materialization, and
 `packages/lup/src/lup/launch/` the launch:
 
+- `session.py` — composing a session: the runtime and host rosters, the
+  boundary compiled, measured and refused where it fell short, the argv that
+  opens the session inside the container or on the host, and its transcript;
+  what each runtime adds around one (its login, its plugin, its home carried
+  back) is `lup.providers.<runtime>.session`
 - `preflight.py` — minting a launch's boundary, measuring it, and writing it
   down for the session
 - `container.py` — opening a native session inside the container the project

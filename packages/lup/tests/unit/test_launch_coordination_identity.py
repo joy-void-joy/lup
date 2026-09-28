@@ -18,9 +18,10 @@ from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
-import typer
 
 import lup.devtools.harness.launch as launch
+import lup.launch.session as launch_session
+from lup.launch.refusal import LaunchRefused
 from lup.launch.declaration import LaunchSandbox
 from lup.coordination.identity import (
     MEMBER_ENV,
@@ -48,16 +49,15 @@ def composition() -> Mock:
 @pytest.fixture
 def uncontained(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Everything an uncontained `session_argv` reaches that is not its subject."""
-    monkeypatch.setattr(launch, "accessible_roots", lambda _told: [])
-    monkeypatch.setattr(launch, "settle_boundary", lambda *a, **k: None)
-    monkeypatch.setattr(launch, "say_opening", lambda *a, **k: None)
-    monkeypatch.setattr(launch, "project_root", lambda: tmp_path)
+    monkeypatch.setattr(launch_session, "settle_boundary", lambda *a, **k: None)
+    monkeypatch.setattr(launch_session, "say_opening", lambda *a, **k: None)
+    monkeypatch.setattr(launch_session, "project_root", lambda: tmp_path)
     monkeypatch.setattr(launch, "carry_claude_home", lambda *a, **k: None)
 
 
 def opened(environment: dict[str, str], tmp_path: Path) -> list[str]:
     """Build the argv for one uncontained session against this environment."""
-    return launch.session_argv(
+    return launch_session.session_argv(
         "claude",
         ["--model", "opus"],
         composition(),
@@ -198,7 +198,9 @@ def launched(
 
     profiles = Mock()
     profiles.launch_home.return_value = None
-    monkeypatch.setattr(launch, "ready_to_open", lambda *a, **k: launch.LaunchOpening())
+    monkeypatch.setattr(
+        launch, "ready_to_open", lambda *a, **k: launch_session.LaunchOpening()
+    )
     monkeypatch.setattr(launch, "project_root", lambda: worktree)
     monkeypatch.setattr(launch, "carry_claude_home", lambda *a, **k: None)
     monkeypatch.setattr(launch, "ambient_config_home", lambda *a, **k: worktree)
@@ -250,8 +252,8 @@ def test_a_live_inbox_is_refused_by_name_rather_than_by_the_runtime(
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as holder:
         holder.bind(inbox)
         holder.listen(1)
-        with pytest.raises(typer.BadParameter) as refused:
-            launch.placed_inbox(inboxes, tmp_path, minted)
+        with pytest.raises(LaunchRefused) as refused:
+            launch_session.placed_inbox(inboxes, tmp_path, minted)
 
     assert str(refused.value).startswith(f"main is listening at {inbox}")
 
@@ -264,7 +266,7 @@ def test_a_stale_inbox_is_cleared_and_placed(tmp_path: Path) -> None:
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as crashed:
         crashed.bind(inbox)
 
-    placed = launch.placed_inbox(
+    placed = launch_session.placed_inbox(
         inboxes, tmp_path, LaunchedMember(member_id=mint_member_id(), cli_name="main")
     )
 
