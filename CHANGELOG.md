@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+### Claude asks natively; only Codex parks a review
+
+0.4.0's note on native approval authority says a call parks in
+`.lup/questions.jsonl` until an operator's single-use answer releases it.
+That is Codex alone, whose pre-tool boundary has no ask effect. Claude has
+rendered every policy ask as a native permission request since 0.4.0 itself,
+carrying the reason that earned it, and parks nothing, so `dev questions`
+never lists a Claude call.
+
+What a rendered ask rests on is the session answering to a person. An
+autonomy mode answers it on the session's behalf, the operations the
+`human_only` reviewer reserves included, and the hook payload carries no
+field telling that answer from a person's. Observed execution still grants
+nothing on either runtime; `docs/permissions.md` ("Where a native ask is
+put") states both channels.
+
 ## 0.4.0 — 2026-09-22
 
 ### Native execution carries no reusable approval authority
