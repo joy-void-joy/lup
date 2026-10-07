@@ -1,0 +1,116 @@
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv]
+# The package age gate: nothing published in the last three days resolves.
+exclude-newer = "3 days"
+
+[tool.ruff]
+target-version = "py314"
+# Where the workspace packages' modules live, so their imports sort as first-party.
+src = ["packages/*/src"]
+# The bridge's interim hooks run as uv scripts with their own dependencies, and go
+# when the after-call diff is installed (`docs/after-call-diff.md`).
+extend-exclude = [".claude"]
+
+[tool.ruff.format]
+# Python files only: the code examples in the Markdown docs keep their own layout.
+exclude = ["*.md"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+# Each rule here overlaps or contradicts the owner its comment names: a lup rule
+# (`docs/conventions.md`), pyright, or ruff's formatter. "Fires only on" means every
+# finding lands on a construct the owner refuses outright, so it can only repeat it.
+ignore = [
+    # Data shapes
+    "PYI024", "UP014", "SLOT002",            # fire only on named tuples: `namedtuple`
+    "RUF008", "RUF009", "RUF033", "RUF049",  # fire only on dataclasses: `dataclass`
+    # Names
+    "PYI001",  # steers a stub's type variables to a leading underscore: `private-name`
+    "PYI018", "PYI043", "PYI046", "PYI047", "PYI049", "UP049",  # fire only on private names: `private-name`
+    # Dispatch
+    "PLR0911",  # fights guard clauses: `elif`
+    "PLR5501",  # steers an `else` holding an `if` to `elif`: `elif`
+    "SIM116",   # steers `if` chains to dict lookups: `elif`, `match`
+    # Constants
+    "PLR2004",   # pushes values into module constants: `constant-home`
+    "ASYNC109",  # flags a `timeout` parameter, which is where a duration lives: `constant-home`
+    # Collections and loops
+    "PLR1714",                        # steers repeated comparisons to a set literal: `set-shape`
+    "PERF401", "PERF402", "PERF403",  # overlap: `collection-loop`
+    # Parsing
+    "B034", "FURB167",                          # fire only on `re` calls: `regex`
+    "FURB166", "FURB188", "YTT101", "YTT303",  # fire only on a slice of a `str`: `string-slice`
+    # Types
+    "ANN001", "ANN002", "ANN003",  # pyright strict reports a parameter without a type
+    "ANN401", "PYI032",            # fire only on `Any`: `any-type`
+    "TC006",                       # fires only on `cast`, and steers to a quoted type: `cast`
+    # Errors
+    "SIM105",  # steers to `contextlib.suppress`: `suppress`
+    "B022",    # fires only on `contextlib.suppress`: `suppress`
+    "E722",    # overlaps: `bare-except`
+    "BLE001",  # flags `except Exception`, which is the steer: `except-baseexception`
+    # Libraries per job
+    "PTH", "S103",  # overlap, `S103` firing only on `os.chmod`: `os-path`, `os-file-ops`
+    "S602", "S603", "S604", "S605", "S606", "S607", "S609",  # fire only on process calls: `subprocess`, `os-shell`
+    "ASYNC220", "ASYNC221",  # fire only on process calls, and steer to asyncio's: `subprocess`, `os-shell`
+    "PLW1509", "PLW1510", "UP021", "UP022",  # fire only on `subprocess` calls: `subprocess`
+    "B003", "PLE1507", "PLW1507", "PLW1508", "SIM112",  # fire only on `os.environ` and `os.getenv`: `os-environ`
+    # Docstrings
+    "D417",  # `Args:` sections aren't used: prose docstrings
+    "D203",  # contradicts `D211`, kept as the formatter's choice: no blank line before a class docstring
+    "D213",  # contradicts `D212`, kept: the summary starts on the docstring's first line
+    # Suppressions and directives
+    "PGH003", "PGH004", "RUF100", "RUF101", "RUF102", "RUF103", "RUF104",  # about `noqa`, `type: ignore` and ruff's own suppression comments: `suppression-comment`
+    "TD",  # shapes TODO comments, where deferred work is `# lup: defer(…)`: `defer`
+    # Formatting
+    "COM812", "COM819",  # the formatter decides trailing commas: ruff's formatter
+    # No convention decides it
+    "CPY001",  # no copyright header has been chosen: the operator's call
+]
+# `# lup:` directives aren't commented-out code (`ERA001`).
+task-tags = ["lup"]
+
+[tool.ruff.lint.flake8-type-checking]
+# A pydantic field's type is read at runtime, so its import stays out of a
+# `TYPE_CHECKING` block.
+runtime-evaluated-base-classes = ["pydantic.BaseModel", "pydantic_settings.BaseSettings"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests are exempt from lup's rules; ruff keeps these test-only exemptions.
+"packages/*/tests/**" = ["S101", "D", "ARG", "INP001"]
+
+[tool.pyright]
+typeCheckingMode = "strict"
+pythonVersion = "3.14"
+enableTypeIgnoreComments = false
+# The workspace packages; scratch work under `tmp/` stays out of the gate.
+include = ["packages"]
+
+[tool.pytest]
+# The package sources are collected too, so `--doctest-modules` runs their
+# docstring examples as tests.
+testpaths = ["packages/*/tests", "packages/*/src"]
+# `importlib` lets two packages' test modules share a name.
+addopts = ["--doctest-modules", "--import-mode=importlib"]
+
+[tool.importlinter]
+root_packages = ["lup_dev"]
+# Lets a contract name a package outside `root_packages`, such as `lup_dashboard`.
+include_external_packages = true
+
+# The library never imports the environment (`docs/conventions.md`, *Imports and boundaries*).
+[[tool.importlinter.contracts]]
+name = "lup_dev never imports lup_dashboard"
+type = "forbidden"
+source_modules = ["lup_dev"]
+forbidden_modules = ["lup_dashboard"]
+
+[dependency-groups]
+dev = [
+    "import-linter>=2.15",
+    "pyright>=1.1.414",
+    "pytest>=9.1.1",
+    "ruff>=0.16.10",
+]
