@@ -22,7 +22,7 @@ So each entry below names what enforces it. "Convention only" is the exception a
 
 Every concern has exactly one owner, so two tools never report the same thing in two ways or steer in opposite directions.
 
-- **lup's rules** own the conventions in this document. They live only in lup's typed engine (`docs/after-call-diff.md`, *The engine*), read one typed tree, and **refuse at the edit**: a finding on the lines an edit touches stops it. Each rule names the mistake it prevents and where it steers.
+- **lup's rules** own the conventions in this document. They live only in lup's typed engine (`docs/judging-writes.md`, *The engine*), read one typed tree, and **refuse at the edit**: a finding on the lines an edit touches stops it. Each rule names the mistake it prevents and where it steers.
 - **ruff** owns generic Python hygiene: its own catalog, `select = ["ALL"]`, minus every rule that overlaps or contradicts a lup rule (listed in *ruff's selection*). Its findings arrive as information at each checkpoint, like type errors, and must be clean when the turn ends and at the gate.
 - **pyright**, in strict mode, owns types. Same channel as ruff.
 - **import-linter** owns the import boundaries, over the whole import graph at the gate; the engine reads the same contracts to check each file's own imports at the edit.
@@ -40,9 +40,9 @@ The first lup ran ruff's defaults and pyright's standard mode; its strictness ca
 
 **The first lup.** 76 ABC classes and 13 `Protocol` classes. ABCs were the seams an adapter fills (`sessions/capabilities.py`, 10 of them); Protocols were what callers held (`Agent`, `Conversation`, `Turn`), so test doubles fit structurally. The split lived only in `docs/patterns.md` and a docstring. The seams held: `sessions/capabilities.py` had 11 commits and no fix, against 131 fixes in the two adapters. Its `abc-capability` rule (5 suppressions, all in one file) and `abstract-declaration` rule enforced the ABC shape.
 
-**Enforced by:** `protocol` (a `Protocol` definition is a finding; one for a shape we don't own carries an `ignore` with its reason, which asks the operator), `interface-shape` (`ABC` named in the bases of any class with abstract members; no class inheriting two of our ABCs). pyright's `reportAbstractUsage` covers instantiating an abstract class.
+- **An ABC is small:** one to three abstract methods and no concrete behaviour, as the first lup's capability rule had it (`docs/architecture.md` in `lup-legacy`). It's what kept the seams small. Behaviour shared by its users lives in a plain class composed over it.
 
-**Open:** whether an ABC keeps the first lup's limit of one to three abstract methods and no concrete behaviour (`docs/architecture.md` in `lup-legacy`). Lean: keep it, in `interface-shape`; it's what kept the seams small.
+**Enforced by:** `protocol` (a `Protocol` definition is a finding; one for a shape we don't own carries an `ignore` with its reason, which asks the operator), `interface-shape` (`ABC` named in the bases of any class with abstract members; no class inheriting two of our ABCs; one to three abstract methods and no concrete behaviour). pyright's `reportAbstractUsage` covers instantiating an abstract class.
 
 ## Data shapes
 
@@ -50,14 +50,14 @@ The first lup ran ruff's defaults and pyright's standard mode; its strictness ca
 - **pydantic models** for every shape we declare. No `dataclass`, no `NamedTuple`.
 - **Model configuration as class keywords** (`class Turn(BaseModel, frozen=True)`), never a `model_config =` assignment.
 - **A list default is a literal** (`steps: list[Step] = []`, which pydantic copies per instance), not `Field(default_factory=list)`. A factory that does real work stays.
-- **Open: frozen by default.** Lean: every model is frozen unless it (or a base) says `frozen=False`, so mutability is a choice someone wrote down.
-- **Open: where `TypedDict` is allowed.** Lean: only to type a dict someone else defines (a vendor payload, a third-party API); our own shapes are models.
+- **Frozen by default.** Every model is frozen unless it, or a base, says `frozen=False`, so mutability is a choice someone wrote down.
+- **`BaseModel` everywhere; no `TypedDict` of our own.** A `TypedDict` appears only where a third-party API is typed with one, and then it's theirs: Anthropic's SDK, for one, takes its request parameters as `TypedDict`s (`MessageParam`) and returns pydantic models.
 
 **Why.** One way to declare a shape, validated where it's declared. Configuration in the class header reads with the class.
 
 **The first lup.** 1,840 pydantic classes, no dataclass and no NamedTuple. 1,559 used class keywords and no class body assigned `model_config` (the rule held fully). 240 `TypedDict` classes, 113 of them in the hook kernel, which couldn't import pydantic. `default-factory`: no suppressions, 2 refusals. It contradicted `empty-collection` (its steer `= []` was flagged by it), which the loop rule below removes.
 
-**Enforced by:** `dataclass`, `namedtuple`, `model-config`, `default-factory`; `model-mutability` and `typed-dict` if the two open points are agreed.
+**Enforced by:** `dataclass`, `namedtuple`, `model-config`, `default-factory`, `model-mutability` (a model neither frozen nor saying `frozen=False`), `typed-dict` (a `TypedDict` class we define).
 
 ## Names
 
@@ -83,13 +83,13 @@ The first lup ran ruff's defaults and pyright's standard mode; its strictness ca
   ```
 - **A `match` decides through its patterns.** A guard on a wildcard (`case _ if seconds < 60:`) is an `if` chain dressed as a `match`. A guard on a real pattern that binds what it reads is fine: `case Lease(reason=str() as reason) if reason:`.
 - **No chain of `isinstance` narrowing the same subject:** a `match` on the subject's class.
-- **Open: dispatching on our own model variants from outside.** The first lup's `own-model-dispatch` steered a `match` on our own union's members to a method on the base, so the variants answer for themselves. Lean: keep it in the typed engine, scoped to unions we define, since it needed narrowing twice in the first lup.
+- **Our own model variants answer for themselves.** Dispatching from outside on the members of a union we define (a `match` on their classes, an `isinstance` on one) steers to a method on the base, which each variant implements. Scoped to unions we define, since the first lup's `own-model-dispatch` needed narrowing twice.
 
 **Why.** A `match` names the subject once and makes each arm a pattern of it; a chain hides which value decides. Guard clauses keep comparisons flat.
 
 **The first lup.** 491 `match` statements, no `elif` line and no wildcard guard anywhere, 409 single `isinstance` narrowings. `elif-chain`: no suppression, 11 refusals. Its message said "three or more ways" while in practice it refused every `elif`; here it says what it does. `own-model-dispatch` misfired and was narrowed (c5e855170), and it contradicted `isinstance-chain`'s steer.
 
-**Enforced by:** `elif`, `wildcard-guard`, `isinstance-chain`, and `own-model-dispatch` if kept. ruff's `PLR0911` (too many returns) and `SIM116` (an `if` chain to a dict lookup) are off: they fight guard clauses and `match`.
+**Enforced by:** `elif`, `wildcard-guard`, `isinstance-chain`, `own-model-dispatch`. ruff's `PLR0911` (too many returns) and `SIM116` (an `if` chain to a dict lookup) are off: they fight guard clauses and `match`.
 
 ## Constants
 
@@ -98,15 +98,15 @@ The first lup ran ruff's defaults and pyright's standard mode; its strictness ca
 | Constant | Its home |
 |---|---|
 | A number or duration: a retry count, a timeout, a size limit | an overridable default: a parameter default or a model field default |
-| An environment variable's name | the package's one pydantic-settings model; its fields are the variables |
-| A path or file name | the package's one layout module, which says where everything is stored, as a model's fields |
-| A runtime's wire spelling: a tool name, a protocol field | that adapter's vocabulary module |
+| An environment variable's name | the package's `settings.py`: its one pydantic-settings model, whose fields are the variables |
+| A path or file name | the package's `layout.py`, which says where everything is stored, as a model's fields |
+| A runtime's wire spelling: a tool name, a hook event, a protocol field | that adapter's `Spellings` |
 
 In its home, a constant needs no suppression. Anywhere else the rule fires and names the home.
 
-**Open:**
-- the exact homes (module names, and whether layout and settings are one module or two);
-- tables of choices (an allowlist, a set of subcommands). Lean: numbers and durations first, tables added if review shows misses.
+**Wire spellings map lup's own words.** lup declares its own vocabulary once: its tool names, hook events and the like. A `Spellings` ABC has one abstract member per word, and each adapter implements it with its runtime's spelling. Adding a word forces every adapter to answer it, so the runtimes can't drift apart silently, where a dict would miss an entry until something broke at runtime. The first lup had this as its `NativeSpellings` ABC (`docs/patterns.md` in `lup-legacy`, *Closed By Construction*).
+
+**Tables of choices** (an allowlist, a set of subcommands) aren't checked at first: the rule fires on numbers and durations, and tables are added if review shows misses.
 
 **Why.** A number like `AGENT_RETRIES = 2` is a judgement a caller may want to change; frozen as a constant, they'd have to edit lup. Names and paths are a different problem: spread across files, nobody can find where things are stored or which variables are read. One home per kind answers both.
 
@@ -117,7 +117,7 @@ In its home, a constant needs no suppression. Anywhere else the rule fires and n
 ## Collections and loops
 
 **Decision.**
-- **No fixed-length tuple types.** `tuple[str, int]` becomes a model naming each field. `tuple[X, ...]` is a sequence and is fine. Aliases are caught where they're defined.
+- **No tuple types; `list[X]` is the one spelling of a sequence.** `tuple[str, int]` becomes a model naming each field, and `tuple[X, ...]` becomes `list[X]`. Two spellings of "a sequence" would be one more fork for each session to pick. Where a third-party API takes a tuple (`sh`'s positional keywords) or hashing needs one, an `ignore` says so. A frozen model's list field can still be appended to; that's left to review. Aliases are caught where they're defined.
 - **No sets as records.** `set`, `frozenset` and their aliases, declared or built, steer to a dict keyed by the members or a list of models. A set that truly has nothing to record (things already seen) takes an `ignore` with its reason.
 - **No collection filled in a loop.** A collection created empty and then filled by `append`, `add`, `extend`, `update` or item assignment in a loop steers to a comprehension, or to a nested function that `yield`s when the loop has control flow a comprehension can't hold.
 - **Dicts are for tables, not records.** Reading a dict or mapping by a literal key (`payload.get("name")`, `payload["name"]`) is refused: the keys are known, so it's a record; validate it once into a model and read its fields. A dict read by a computed key is a real lookup table and is fine. Declaring dicts is fine. A `TypedDict` read by its keys is fine, since it's already the typed shape.
@@ -139,7 +139,7 @@ In its home, a constant needs no suppression. Anywhere else the rule fires and n
 - **No regular expressions:** `re` and `regex` are refused at the import, once per module, since using them is one decision.
 - **No hand-splitting a `str` or `bytes`:** `.split(sep)`, `.rsplit(sep)`, `.partition`, `.rpartition`. `.split()` with no separator and `.splitlines()` are fine.
 - **No slicing a `str` or `bytes`** to take it apart by position.
-- **Open:** `.strip(chars)` and `.replace` on a `str`. Lean: include them, same reason (7 and 10 suppressions in the first lup).
+- **No `.strip(chars)` or `.replace` on a `str` or `bytes`** to take it apart or rewrite it: same reason (7 and 10 suppressions in the first lup). `.strip()` with no argument trims whitespace and is fine.
 - An agent's output is never hand-parsed: typed answers come through `lup_submit` (`docs/library.md`).
 
 The parsers to reach for: `json`, `tomllib` (`tomlkit` to edit), `csv`, `urllib.parse`, `pathlib`, `email`, `shlex`, `ast`, `datetime.fromisoformat`, `packaging.version` and `packaging.requirements`, `xml.etree.ElementTree`, `trafilatura` or `beautifulsoup4` for web pages. A grammar of our own gets a parser library.
@@ -148,7 +148,7 @@ The parsers to reach for: `json`, `tomllib` (`tomlkit` to edit), `csv`, `urllib.
 
 **The first lup.** `import-re` and `re-call`: 18 and 20 suppressions. `string-split` was syntax-only: 79 suppressions, and it flagged `shlex.split` and `re.split`. Typed, it reads the receiver's type; the spike confirmed it leaves those out.
 
-**Enforced by:** `regex`, `string-split`, `string-slice`, and `string-strip` and `string-replace` if agreed.
+**Enforced by:** `regex`, `string-split`, `string-slice`, `string-strip`, `string-replace`.
 
 ## Truncation and comments
 
@@ -181,7 +181,7 @@ The parsers to reach for: `json`, `tomllib` (`tomlkit` to edit), `csv`, `urllib.
 
 **The first lup.** 82 exception classes under 67 separate roots, most straight from `RuntimeError` or `ValueError`. It classified runtime faults by matching substrings of messages (`providers/claude/runtime.py:142-290`), against its own principle.
 
-**Enforced by:** `error-root` (typed: an exception class not descending from its package's root), `suppress`, `bare-except`, `except-baseexception`; names by ruff's `N818`. Proposed: `error-text`, reading an exception's message to decide (`"x" in str(exc)`). ruff's `SIM105` (which steers *to* `contextlib.suppress`), `E722` and `BLE001` are off: the first overlaps and contradicts `suppress`, the other two overlap lup's rules and `BLE001` contradicts the steer to `Exception`.
+**Enforced by:** `error-root` (typed: an exception class not descending from its package's root), `suppress`, `bare-except`, `except-baseexception`; names by ruff's `N818`. `error-text` refuses deciding on an exception's message (`"x" in str(exc)`). ruff's `SIM105` (which steers *to* `contextlib.suppress`), `E722` and `BLE001` are off: the first overlaps and contradicts `suppress`, the other two overlap lup's rules and `BLE001` contradicts the steer to `Exception`.
 
 ## Libraries per job
 
@@ -230,7 +230,7 @@ The parsers to reach for: `json`, `tomllib` (`tomlkit` to edit), `csv`, `urllib.
 - On the finding's line, or alone on the line above.
 - **Every rule accepts it.** Adding one asks the operator.
 - `# noqa`, `# type: ignore` and `# pyright: ignore` are refused. ruff runs with `--ignore-noqa`, pyright with `enableTypeIgnoreComments = false`, and lup filters their findings through its own `ignore`.
-- The rest of the `# lup:` grammar (`defer`, notes, removing a note) is in `docs/after-call-diff.md`, *The `# lup:` directives*.
+- The rest of the `# lup:` grammar (`defer`, notes, removing a note) is in `docs/judging-writes.md`, *The `# lup:` directives*.
 
 **The first lup.** 783 typed directives in the library, 40 in its application, 112 in its tests (the test exemption didn't apply in lup itself). Placement bugs: a file-wide ignore after the docstring was silently inert (#213), and the edit hook and the audit disagreed on 18 files.
 
@@ -300,23 +300,26 @@ Tests are exempt from lup's rules. A file's test role comes from the test roots 
 | `wildcard-guard` | `case _ if …`, `case name if …` | a pattern binding what the guard reads, or guard clauses |
 | `isinstance-chain` | the same subject narrowed by `isinstance` in two or more arms | `match` on its class |
 | `constant-home` | a module-level constant outside its home | its home (*Constants*) |
-| `tuple-shape` | a fixed-length tuple type, aliases included | a model naming each field |
+| `model-mutability` | a model neither frozen nor saying `frozen=False` | `frozen=True`, or `frozen=False` written down |
+| `typed-dict` | a `TypedDict` class we define | a pydantic model |
+| `own-model-dispatch` | dispatching from outside on the members of a union we define | a method on the base that each variant implements |
+| `tuple-shape` | a tuple type, aliases included | `list[X]`, or a model naming each field |
 | `set-shape` | `set`, `frozenset` and aliases, declared or built | a dict keyed by the members, or a list of models |
 | `collection-loop` | a collection created empty and filled in a loop | a comprehension, or a nested function that `yield`s |
 | `dict-literal-key` | a dict or mapping read by a literal key | a model validated once |
 | `regex` | `import re`, `import regex` | the format's parser |
 | `string-split` | `.split(sep)`, `.rsplit(sep)`, `.partition`, `.rpartition` on `str` or `bytes` | the format's parser |
 | `string-slice` | a slice of a `str` or `bytes` | the format's parser |
+| `string-strip`, `string-replace` | `.strip(chars)`, `.lstrip(chars)`, `.rstrip(chars)`, `.replace(…)` on `str` or `bytes` | the format's parser |
 | `silent-truncation` | a sequence cut at a literal bound | the whole value; a saved full copy where a format forces a limit |
 | `historical-voice` | history words in comments and docstrings | what is, not how it got there |
 | `docstring-code` | double backticks or a Sphinx role in a docstring | single backticks |
 | `any-type`, `cast`, `bare-object` | `typing.Any`, `cast(…)`, an `object` annotation | the real type, `JsonValue`/`JsonObject`, a type parameter |
 | `error-root` | an exception class outside its package's root | the package's root error |
+| `error-text` | deciding on an exception's message (`"x" in str(exc)`) | the exception's type or its structured fields |
 | `suppress`, `bare-except`, `except-baseexception` | `contextlib.suppress`, `except:`, `except BaseException` | handle, log or re-raise; catch `Exception` or narrower |
 | `subprocess`, `os-shell`, `argparse`, `os-path`, `os-file-ops`, `os-environ`, `rich-progress`, `pdf-extraction` | the library a job doesn't use | the one it does (*Libraries per job*) |
 | `suppression-comment` | `# noqa`, `# type: ignore`, `# pyright: ignore` | `# lup: ignore(…)` |
-
-Proposed, not yet agreed: `model-mutability`, `typed-dict`, `own-model-dispatch`, `string-strip`, `string-replace`, `error-text`.
 
 Dropped from the first lup's catalog, with why:
 - `constant-declaration`, `library-default`: replaced by `constant-home`;
@@ -335,17 +338,17 @@ Each with its alternative and where it lives. **(yours, agreed)** marks what the
 
 1. **(yours, agreed)** lup's rules live only in its typed engine, from the first rule; ruff keeps its generic checks with every overlapping or contradicting rule off. *Alternative:* lup's bans as ruff `banned-api` entries and a syntax checker first, which splits where rules live and is how the first lup's patchwork started. *Where:* the engine; `pyproject.toml`.
 2. **(yours, agreed)** ABCs for every interface we own; `Protocol` avoided. *Alternative:* the first lup's split (ABC for seams, Protocol for what callers hold), never written down. *Where:* `protocol`, `interface-shape`.
-3. **(yours)** An ABC keeps the one-to-three-abstract-methods limit. *Alternative:* no size limit. *Where:* `interface-shape`.
-4. **(yours)** Models frozen by default. *Alternative:* mutable by default, as pydantic is. *Where:* `model-mutability`.
-5. **(yours)** `TypedDict` only for dicts someone else defines. *Alternative:* allowed anywhere pydantic is too heavy. *Where:* `typed-dict`.
+3. **(yours, agreed)** An ABC keeps the one-to-three-abstract-methods limit and no concrete behaviour. *Alternative:* no size limit. *Where:* `interface-shape`.
+4. **(yours, agreed)** Models frozen by default. *Alternative:* mutable by default, as pydantic is. *Where:* `model-mutability`.
+5. **(yours, agreed)** `BaseModel` everywhere; a `TypedDict` only where a third-party API is typed with one, and then theirs. *Alternative:* `TypedDict` anywhere pydantic is too heavy. *Where:* `typed-dict`.
 6. **(yours, agreed)** No `elif`; `match` for structure; guard clauses for comparisons; no wildcard guards. *Alternative:* `elif` allowed up to two arms. *Where:* `elif`, `wildcard-guard`.
-7. **(yours)** Keep `own-model-dispatch`, scoped to our own unions. *Alternative:* convention only. *Where:* the engine.
-8. **(yours, agreed in direction)** Constants by home: numbers and durations become overridable defaults; variable names, paths and wire spellings go to one home each. The exact homes, and whether tables count, are open. *Alternative:* the first lup's two rules, or leaving strings alone. *Where:* `constant-home`.
+7. **(yours, agreed)** Keep `own-model-dispatch`, scoped to our own unions. *Alternative:* convention only. *Where:* the engine.
+8. **(yours, agreed)** Constants by home: numbers and durations become overridable defaults; variable names go to the package's `settings.py`, paths to its `layout.py`, wire spellings to each adapter's `Spellings`, an ABC mapping lup's own words. Tables of choices wait until review shows misses. *Alternatives:* the first lup's two rules; leaving strings alone; a dict per adapter, which can miss a word silently. *Where:* `constant-home`.
 9. **(yours, agreed)** The loop rule fires on the loop, not the empty literal. *Alternative:* the first lup's `empty-collection`, or ruff's `PERF` rules. *Where:* `collection-loop`.
 10. **(yours, agreed)** Reading a dict by a literal key is refused; declaring dicts is fine; `frozendict` waits for Python 3.15 (#7). *Alternative:* the first lup's `dict-get` and signature rules. *Where:* `dict-literal-key`.
-11. **(yours)** `.strip(chars)` and `.replace` on a `str` join the parsing rules. *Alternative:* left out. *Where:* `string-strip`, `string-replace`.
+11. **(yours, agreed)** `.strip(chars)` and `.replace` on a `str` join the parsing rules. *Alternative:* left out. *Where:* `string-strip`, `string-replace`.
 12. **(yours, agreed)** `…Error` names (ruff `N818`) and one root exception per package. *Alternative:* names as events (`LaunchRefused`), independent roots. *Where:* `error-root`, `pyproject.toml`.
-13. **(yours)** `error-text`, refusing decisions on an exception's message. *Alternative:* convention only. *Where:* the engine.
+13. **(yours, agreed)** `error-text`, refusing decisions on an exception's message. *Alternative:* convention only. *Where:* the engine.
 14. **(yours, agreed)** Prose docstrings, required on modules, classes and module-level definitions; nested helpers exempt. *Alternative:* Google sections. *Where:* `pyproject.toml` (ruff `D`).
 15. **(yours, agreed)** Inline code in single backticks, and examples as doctests run by the gate. *Alternatives:* reStructuredText's double backticks or Sphinx roles; examples as prose only. *Where:* `docstring-code`; the gate's pytest configuration.
 16. **(yours, agreed)** One suppression syntax, `# lup: ignore(…)`, for lup, ruff and pyright findings alike. *Alternative:* `noqa` back for ruff codes. *Where:* the engine; `pyproject.toml`.
