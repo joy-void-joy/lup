@@ -189,15 +189,15 @@ The control runs as its own small host process. A hold within the hour keeps its
 ### Policy
 
 - **Walls plus protected-path review, and no verdicts on commands** (leaning yes). Inside the container a command simply runs. Effects that can't be undone are stopped by a wall where they pass. Protected paths are reviewed before they land. The shell-spelling analyzer, per-command verdicts and `dev policy` go.
-- **Every write path is judged the same way, by its result.** Whatever the tool (Edit, Write, a `sed`, a script, `apply_patch`), what changed is diffed, and code rules and holds apply to that diff. No command's spelling is parsed.
-  - **Tentative: the worktree's state is judged, not each call.** lup keeps one accepted state per worktree. At each checkpoint it compares the worktree with that state and judges whatever changed, whichever call or process made it.
-  - **A checkpoint** runs whenever a call finishes and no other call is running, and again at turn end. It's built from four runtime-neutral events (session started, call started, call finished, turn ended), so it works the same on every runtime.
-  - **This settles what judging each call's before and after left open:** parallel calls, writes landing after their call, and someone else's edit charged to the agent (`docs/after-call-diff.md`).
-- **Tentative: lup asks, refuses, or stays silent; it never says "allow".**
-  - **ask:** a change to the design waits for the operator: a new file (the one that matters most to them), a new module, a new public name, a changed signature. These show design better than a line count does, so asks come from them. On Claude Code it's the runtime's own prompt before the call. Where a runtime can't ask before a call, the change is held at the checkpoint instead.
-  - **refuse:** a code rule's finding, or a design change that bypassed the ask (a new file made through the shell), is put back with the agent's version saved.
-  - **silent:** everything else goes through the runtime's own permission mode.
-  - The earlier "allow" (a small change goes through) would skip that mode. The earlier "defer" (a large edit, by line count, goes to the runtime's mode) is now what silence does for everything. The line count goes with it, and so does the word: Claude Code's own `defer` decision means pausing a headless run.
+- **Every write path is judged the same way, by what it produces.** Whatever the tool (Edit, Write, a `sed`, a script, `apply_patch`), code rules and asks apply to the content it produces. No command's spelling is parsed.
+  - **`Edit` and `Write` are judged before they land,** on the content they would produce, so a refused edit never touches the file.
+  - **Everything else is judged at a checkpoint.** lup keeps one accepted state per worktree, compares the worktree with it, and judges whatever changed, whichever call or process made it. This covers parallel calls and writes landing after their call.
+  - **A checkpoint** runs whenever a call finishes and no other call is running, and again at turn end. It's built from four runtime-neutral events (session started, call started, call finished, turn ended), so it works the same on every runtime (`docs/after-call-diff.md`).
+- **lup allows, asks, or refuses.**
+  - **allow:** tests, scratch, docs and data at any size, and any production edit the code rules pass. There's no line count: in auto mode, edits inside the working directory skip the classifier anyway, and the first lup's 3-line limit mostly made agents split edits. The allow keeps routine work from interrupting, which is what the operator relied on in the first lup.
+  - **ask:** a change to the design waits for the operator: a new production file or a whole-file overwrite (the one that matters most to them), a protected path, an added suppression, and a public-API change (a package root's names, a new class, a changed signature of a definition that existed when the session started). These show design better than a line count does. On Claude Code it's the runtime's own prompt before the call. Where a runtime can't ask before a call, the change is held at the checkpoint instead.
+  - **refuse:** a code rule's finding, or a design change that bypassed the ask (a new file made through the shell). The change doesn't land, or is put back, with the agent's version saved.
+  - **Every verdict is logged** (tool, path, outcome, reason), so how often lup asks can be measured and tuned.
 
   The point of an ask is that the operator understands the codebase's overall design and redirects early when an approach looks shaky or differs from what they had in mind. Guidance never teaches splitting a change to slip under a limit.
 - **A container is required whenever an agent can run code or write files.**
@@ -228,9 +228,9 @@ The control runs as its own small host process. A hold within the hour keeps its
   - **A refused write is restored, and the agent's version saved** at a path the refusal names. The agent fixes the listed lines in the saved copy (with a `sed`, or an Edit after reading just those lines) and moves it into place; the move is judged like any write. Nothing is resent whole.
   - **Each rule names the design mistake it prevents and where it steers.** The regex rule names silent parsing bugs; `tuple-shape` and `set-shape` name positional data a reviewer has to decode ("what is field 5?"). A rule that can't name one goes.
   - **A rule that misfires is that rule's bug,** and a noisy rule is rewritten until it fires only where a design choice is at stake.
-  - **Tentative: rules read one typed tree.** Each file is parsed once and type-checked once, and every rule reads types straight from that tree. No regex, and no separate oracle asked about one position at a time. The leaning is pyright's own tree, built against its source at a pinned release, pending a spike (`docs/after-call-diff.md`).
-  - **Tentative: `# lup:` comments are one grammar.** A directive is written as a call (`# lup: ignore("tuple-shape", why="…")`), and anything that isn't a call is a note. A call to an unknown directive is a finding, and so is an `ignore` without its reason. Every rule accepts `ignore`, and adding one asks the operator. A directive pointing at a record (a later `defer`) must point at a committed one.
-- **Information never travels on a "blocking" channel.** Type errors arrive as plain context, limited to the files touched, at each checkpoint (tentative; earlier: "once a burst of edits settles"). What must be fixed before finishing is enforced when the turn ends. The formatter runs at commit.
+  - **Rules read one typed tree, from the first rule.** Each file is parsed once and type-checked once, and every rule reads types straight from that tree: pyright's own tree, built against its source at a pinned release, as a spike measured (`docs/after-call-diff.md`). No regex, no separate oracle asked about one position at a time, and no syntax-only first stage, which is how the first lup's catalog grew into a patchwork. The conventions the rules enforce, and which tool owns each, are in `docs/conventions.md`.
+  - **`# lup:` comments are one grammar.** A directive is written as a call (`# lup: ignore("tuple-shape", why="…")`), and anything that isn't a call is a note. A call to an unknown directive is a finding, and so is an `ignore` without its reason. Every rule accepts `ignore`, and adding one asks the operator. `defer` points at a GitHub issue or carries a condition the gate can check; the ledger's to-do items point at GitHub issues too. A note added in the same session can be removed freely; removing a committed one is reported.
+- **Information never travels on a "blocking" channel.** Type errors and ruff's findings arrive as plain context, limited to the files touched, at each checkpoint. What must be fixed before finishing is enforced when the turn ends. The formatter runs at commit.
 - **Tests are exempt from code rules, and the rule docs say so.** A file's test role comes from the declared test roots, nested projects included. In the art studio the exemption existed but never applied, because a pytest root gave its files no test role. lup's own architecture rules (front-door, seam-boundary and the like) apply only to lup itself.
 - **No flaky tests.** A test that fails and then passes is a failure to fix. Changed and new tests run repeatedly and under load before they land. Tests depending on the real clock or on wall-clock timing are refused. A unit test over about 10 s fails the gate unless it's declared slow with a reason.
 - **Tests stub every agent and network call.** The library ships a fake agent, and a guard refuses real calls during tests.
@@ -276,6 +276,9 @@ The control runs as its own small host process. A hold within the hour keeps its
 - **In lup, behind a typed protocol** between the sessions and the dashboard (agents, the inbox, reviews, the ledger, budgets), so the page can be redesigned without touching the rest. It ships prebuilt, so no project builds its stack.
 - **The first screen is the agents**, as a tree: what each is doing, what it waits on, and its spend, with its reviews and questions underneath.
 - **The operator's inbox:** reviews, open questions from agents, and the ledger's open work.
+  - **Messages are reviews, and reviews are messages:** one mechanism. An agent's message is read and answered the way a change is reviewed: the operator sees every waiting message at once, comments on its lines, agrees with a stated lean, replies to several at once with answers that refer to one another, and leaves some unanswered for later.
+  - **It's generic and asynchronous both ways:** agents write to the operator and the operator replies in their own time, beyond deciding things. The plain linear question and answer stays.
+  - Numbered decisions, each with its lean, show as separate items answerable "leaning", "undecided" or "leave open", so a question can't scroll away and an answer to one doesn't wait on another.
 - **Controls:** budgets, pause, pace and spawn caps; runs are shown.
 - **Every key is also a button or a menu entry.**
 - **Its readability and navigation need a redesign** (see Still to discuss).
@@ -442,7 +445,7 @@ The operator's to decide:
 7. **A maintaining session as a room lup declares:** leaning yes, if nothing in maintaining falls outside what a room can declare.
 
 **Still to discuss:**
-- **The dashboard's design:** readability, lag, filtering auto-allowed files, keys and buttons, spawning, budget controls.
+- **The dashboard's design:** readability, lag, filtering auto-allowed files, keys and buttons, spawning, budget controls, and how the inbox's messages-as-reviews look and are answered (see *The dashboard*).
 - **The CLI's naming:** answering a review is approving a request, not answering a question.
 - **One standard for warnings and diagnostics:** the actionable part in a form that can be parsed, as with `uv run --with package`; code-rule findings take pyright's shape.
 - **The one sentence for each core part and module,** once the library and environment split settles the list.
@@ -462,6 +465,7 @@ The operator's to decide:
 - Does a maintaining session need anything a room can't declare?
 - If the write layer is pursued: can it sit on a frozen snapshot with a hardlinked environment, can the host's view of it keep `.git` and editor configs out of reach until review, how does git behave inside it (commits, refs, merging back), and what does merging a layer back cost?
 - Is Claude's native structured output a tool that hooks see? (Codex's isn't.)
+- Does a `PreToolUse` hook's `allow` skip auto mode's classifier? No vendor doc says, and the first lup never measured it.
 - Which of Claude Code's own commands use `Agent` internally, and would break when it's denied?
 - Is the keepalive flag on for a subscription account?
 - Does a dated Arch Linux Archive mirror hold against `pacman -Sy` in the image?
@@ -478,17 +482,17 @@ The agent's proposal. How work is cut into branches is the agent's to do; this o
 **The bridge.** Until the new lup hosts itself, sessions run plain Claude Code with no lup plugin, and the operator reviews by hand. What burned the operator in manual review before lup: files that looked fine but carried a large design direction or a flaky decision (a regex in place of a parser), and a prompt for every decision, which wore review down into approving everything. What let them review where it mattered was approving whole new files, and the code rules pointing at the risky decisions. So the bridge (the agent's proposal):
 - a short design note before the code of each piece (its modules, what each is for, its public API), approved in its pull request before implementation starts;
 - a `permissions.ask` rule on `Write`, so every new file reaches the operator as a prompt, and no other prompts (it does prompt in auto mode, tested). Tentative: once the after-call diff is installed, its hook asks before a new file or a suppression lands, and this blanket rule goes;
-- the code rules as early as possible, starting with the three that catch a design decision (parsers over regex, `tuple-shape`, `set-shape`), as a hook in the build's own sessions. Tentative: each suppression is asked of the operator as it's added, in place of a pull-request check listing them;
-- one concern per branch. Tentative: branches land on `dev` once the gate passes, landed by the agent, with a merge commit whose message lists every design decision taken, its alternative and where it lives in the code, plus what changed and why, and how it was tested. The first lup's `dev` worked the same way. Earlier, each branch was a pull request into `main` that the operator merged;
+- the code rules as early as possible, typed from the first rule, starting with those that catch a design decision (parsers over regex, `string-split`, `tuple-shape`, `set-shape`), as a hook in the build's own sessions; until they land, the first lup's checker runs as an asynchronous interim hook. Each suppression is asked of the operator as it's added, in place of a pull-request check listing them;
+- one concern per branch. Branches land on `dev` once the gate passes, landed by the agent, with a merge commit whose message lists every design decision taken, its alternative and where it lives in the code, plus what changed and why, and how it was tested. The first lup's `dev` worked the same way. Earlier, each branch was a pull request into `main` that the operator merged;
 - `main` protected on GitHub ("require a pull request before merging"), so no direct push reaches it. A release is a pull request from `dev` to `main` that the operator reviews and merges; `gh pr merge` asks;
 - Codex works in the bridge too, reading the same `AGENTS.md` (`CLAUDE.md` imports it). Its declared gap: it has no per-tool prompt, so on Codex a new file doesn't reach the operator as a prompt, and the pull request names every new file instead;
 - the after-call diff, once built, is installed in the build's own sessions as a plain hook, so the bridge shrinks as it's built.
 
 The starting files (`AGENTS.md`, `CLAUDE.md`, `.claude/settings.json`, `.gitignore`) are staged in the old repository's `tmp/direction-research/day-one/`; this brief goes in as `DESIGN.md`.
 
-1. **In parallel: the library's first slice, and the after-call diff with the code rules.**
+1. **First the code rules and the allow policy, then the library's first slice.** The operator relies on the first two most, so they come back first.
+   - Judging every write (`docs/after-call-diff.md`), with its three outcomes (allow, ask, refuse), restored declines and saved versions, and the typed engine with the code rules (`docs/conventions.md`). It's the review workflow, every call goes through it, and its cost on a large repository (a git snapshot per command took 1.4–2.8 s at 300k files) is the main technical unknown.
    - The library: `Claude`/`Codex` with typed output, the fake agent and the test guard. live-translator can move to it at once, and the environment launches through it.
-   - The after-call diff with its three outcomes, restored declines and saved versions, and the code rules that judge it, starting with the three that catch a design decision. It's the review workflow, every call goes through it, and its cost on a large repository (a git snapshot per command took 1.4–2.8 s at 300k files) is the main technical unknown.
 2. **The declaration and the CLI skeleton.** `Project` and its selections, a CLI that loads lazily, `lup new`, `lup docs`.
 3. **Launch.** A container per session, mounts, secrets through host services, the harness compiled at launch, the session settings, native orchestration tools denied.
 4. **lup's own tools.** Spawn, message, wait, ask, handoff; the one hook (hold and delivery); the roster; the ledger as the place for open work.
