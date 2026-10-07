@@ -155,7 +155,7 @@ The parts that cut across everything (the one hook, the dashboard's protocol, th
 - **Native tools for the agent's own work; lup's tools for everything between agents, and between an agent and the operator.**
   - Kept native: Edit, Read, Bash, `apply_patch`, search, web, background processes, the agent's own task list, `Skill`.
   - Denied by default: `Agent`, `SendMessage`, `ListAgents`, `EnterWorktree`/`ExitWorktree`, and Codex's own spawn.
-  - `AskUserQuestion` stays only in sessions the operator is attached to; detached workers ask through lup's tool, which reaches the inbox.
+  - `AskUserQuestion` is denied once lup's inbox exists, and the agent is pointed at lup's own ask tool, which reaches the inbox. Until then it stays in the terminal, in sessions the operator is attached to.
 - **Waiting is one mechanism.** A wait is a hold inside the tool call, released by the operator's answer, so the agent doesn't have to manage it.
   - Holds are wanted: they pause the agent so the operator can catch up.
   - When a held call returns, its result says it was held and carries the operator's comment, so the agent knows it was seen and whether to change course.

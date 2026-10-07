@@ -48,16 +48,18 @@ The first lup ran ruff's defaults and pyright's standard mode; its strictness ca
 
 **Decision.**
 - **pydantic models** for every shape we declare. No `dataclass`, no `NamedTuple`.
-- **Model configuration as class keywords** (`class Turn(BaseModel, frozen=True)`), never a `model_config =` assignment.
+- **Model configuration as class keywords** (`class Turn(Model, extra="forbid")`), never a `model_config =` assignment, which reads like a field. The one exception is `lup.types.Settings` (below).
 - **A list default is a literal** (`steps: list[Step] = []`, which pydantic copies per instance), not `Field(default_factory=list)`. A factory that does real work stays.
-- **Frozen by default.** Every model is frozen unless it, or a base, says `frozen=False`, so mutability is a choice someone wrote down.
+- **Frozen by default, without saying so.** Every model derives from `lup.types.Model`, which is frozen. A model that must change derives from `lup.types.MutableModel` instead, so mutability is a choice written in the header. Settings derive from `lup.types.Settings`, also frozen. No model writes `frozen` itself.
+  - **Why the bases are built this way.** pyright reads a model's frozenness from its own header, defaulting to not frozen, and refuses a not-frozen class inheriting a frozen one; that's why the first lup wrote `frozen=True` on every model. `Model`'s metaclass tells pyright that its subclasses are frozen by default (PEP 681's `frozen_default`), so silence means frozen and pyright still refuses `point.x = 2`. The metaclass extends pydantic's own, from a private module: the lockfile pins pydantic, and `lup`'s tests fail at once if an upgrade moves it.
+  - **Why `Settings` differs.** pyright also refuses a frozen class over pydantic-settings' base, so `Settings` freezes through `model_config`, the one place it's set. pyright doesn't see that freeze; pydantic enforces it.
 - **`BaseModel` everywhere; no `TypedDict` of our own.** A `TypedDict` appears only where a third-party API is typed with one, and then it's theirs: Anthropic's SDK, for one, takes its request parameters as `TypedDict`s (`MessageParam`) and returns pydantic models.
 
 **Why.** One way to declare a shape, validated where it's declared. Configuration in the class header reads with the class.
 
 **The first lup.** 1,840 pydantic classes, no dataclass and no NamedTuple. 1,559 used class keywords and no class body assigned `model_config` (the rule held fully). 240 `TypedDict` classes, 113 of them in the hook kernel, which couldn't import pydantic. `default-factory`: no suppressions, 2 refusals. It contradicted `empty-collection` (its steer `= []` was flagged by it), which the loop rule below removes.
 
-**Enforced by:** `dataclass`, `namedtuple`, `model-config`, `default-factory`, `model-mutability` (a model neither frozen nor saying `frozen=False`), `typed-dict` (a `TypedDict` class we define).
+**Enforced by:** `dataclass`, `namedtuple`, `model-config`, `default-factory`, `model-mutability` (a model deriving straight from pydantic's `BaseModel` or `BaseSettings` instead of lup's bases, or writing `frozen` in its header), `typed-dict` (a `TypedDict` class we define).
 
 ## Names
 
@@ -165,7 +167,7 @@ The parsers to reach for: `json`, `tomllib` (`tomlkit` to edit), `csv`, `urllib.
 ## Types
 
 **Decision.**
-- **No `typing.Any`, no `cast`, no bare `object` annotation.** JSON whose schema lives elsewhere is `JsonValue` or `JsonObject` (from `lup.types`); everything else gets its real type or a type parameter.
+- **No `typing.Any`, no `cast`, no bare `object` annotation.** JSON whose schema lives elsewhere is pydantic's `JsonValue`, or `lup.types.JsonObject` for an object; everything else gets its real type or a type parameter.
 - **pyright strict.** Modern spellings: PEP 695 type parameters, `X | None`, builtin generics.
 - **Python 3.14's lazily evaluated annotations**, so no `from __future__ import annotations` and no quoted annotations.
 
@@ -285,7 +287,7 @@ Tests are exempt from lup's rules. A file is a test if pytest collects it as a t
 | `protocol` | a `Protocol` definition | an ABC; `ignore` with its reason for a shape we don't own |
 | `interface-shape` | abstract members without `ABC` in the bases; a class inheriting two of our ABCs | `ABC` in the bases; one ABC per implementation |
 | `dataclass`, `namedtuple` | `dataclasses`, `collections.namedtuple`, `typing.NamedTuple` | a pydantic model |
-| `model-config` | `model_config = …` in a class body | class keywords |
+| `model-config` | `model_config = …` in a class body, except `lup.types.Settings` | class keywords |
 | `default-factory` | `Field(default_factory=list)` and the like | a literal default |
 | `private-name` | a leading underscore on a module, class, function or variable name | nested inside its only caller, or public |
 | `all-export` | `__all__` outside a package's root | import from the defining module |
@@ -293,7 +295,7 @@ Tests are exempt from lup's rules. A file is a test if pytest collects it as a t
 | `wildcard-guard` | `case _ if …`, `case name if …` | a pattern binding what the guard reads, or guard clauses |
 | `isinstance-chain` | the same subject narrowed by `isinstance` in two or more arms | `match` on its class |
 | `constant-home` | a module-level constant outside its home | its home (*Constants*) |
-| `model-mutability` | a model neither frozen nor saying `frozen=False` | `frozen=True`, or `frozen=False` written down |
+| `model-mutability` | a model deriving straight from `BaseModel` or `BaseSettings`, or writing `frozen` in its header | `lup.types.Model`, `MutableModel` or `Settings` |
 | `typed-dict` | a `TypedDict` class we define | a pydantic model |
 | `own-model-dispatch` | dispatching from outside on the members of a union we define | a method on the base that each variant implements |
 | `tuple-shape` | a tuple type, aliases included | `list[X]`, or a model naming each field |
@@ -332,7 +334,7 @@ Each with its alternative and where it lives. **(yours, agreed)** marks what the
 1. **(yours, agreed)** lup's rules live only in its typed engine, from the first rule; ruff keeps its generic checks with every overlapping or contradicting rule off. *Alternative:* lup's bans as ruff `banned-api` entries and a syntax checker first, which splits where rules live and is how the first lup's patchwork started. *Where:* the engine; `pyproject.toml`.
 2. **(yours, agreed)** ABCs for every interface we own; `Protocol` avoided. *Alternative:* the first lup's split (ABC for seams, Protocol for what callers hold), never written down. *Where:* `protocol`, `interface-shape`.
 3. **(yours, agreed)** An ABC keeps the one-to-three-abstract-methods limit and no concrete behaviour. *Alternative:* no size limit. *Where:* `interface-shape`.
-4. **(yours, agreed)** Models frozen by default. *Alternative:* mutable by default, as pydantic is. *Where:* `model-mutability`.
+4. **(yours, agreed)** Models frozen by default without saying so: `lup.types.Model` is frozen, `MutableModel` isn't, `Settings` is; no model writes `frozen`. *Alternatives:* `frozen=True` on every model, which pyright demands without the metaclass; freezing through `model_config`, which reads like a field. *Where:* `lup/types.py`, `model-mutability`.
 5. **(yours, agreed)** `BaseModel` everywhere; a `TypedDict` only where a third-party API is typed with one, and then theirs. *Alternative:* `TypedDict` anywhere pydantic is too heavy. *Where:* `typed-dict`.
 6. **(yours, agreed)** No `elif`; `match` for structure; guard clauses for comparisons; no wildcard guards. *Alternative:* `elif` allowed up to two arms. *Where:* `elif`, `wildcard-guard`.
 7. **(yours, agreed)** Keep `own-model-dispatch`, scoped to our own unions. *Alternative:* convention only. *Where:* the engine.
