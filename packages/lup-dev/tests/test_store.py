@@ -5,8 +5,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from lup_dev.changes import Changed, Store
 from lup_dev.layout import Layout
+from lup_dev.policy.store import Changed, Store
 
 if TYPE_CHECKING:
     from conftest import Shell

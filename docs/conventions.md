@@ -251,11 +251,32 @@ The parsers to reach for: `json`, `tomllib` (`tomlkit` to edit), `csv`, `urllib.
 
 import-linter checks the whole graph at the gate. The engine reads the same contracts and checks each edited file's own imports at the edit, so a wrong import is refused when it's written. These contracts are lup's; a project declares its own.
 
-**A runtime is named only in its adapter.** Everything a runtime spells its own way (its hook events and payload fields, its tool names, how it hears a report, the variables it sets in the commands it runs) lives in its adapter; the rest of lup speaks its own words and sees a runtime through an interface (`lup_dev.runtime.Runtime`). That's how features stay on both runtimes by construction: Codex rotted in the first lup because features were built per runtime above the adapter (`AGENTS.md`, *Both runtimes*). An import contract can't see a name in a string or a comment, so a rule does: a runtime's name outside its adapter is a finding. Data that names a runtime's own files (`.claude/`, `.codex/` among the protected paths) and the one place listing the adapters carry an `ignore` saying so.
+**A runtime is named only in its adapter.** Everything a runtime spells its own way (its hook events and payload fields, its tool names, how it hears a report, the variables it sets in the commands it runs) lives in its adapter; the rest of lup speaks its own words and sees a runtime through an interface (`lup_dev.policy.runtime.Runtime`). That's how features stay on both runtimes by construction: Codex rotted in the first lup because features were built per runtime above the adapter (`AGENTS.md`, *Both runtimes*). An import contract can't see a name in a string or a comment, so a rule does: a runtime's name outside its adapter is a finding. Data that names a runtime's own files (`.claude/`, `.codex/` among the protected paths) and the one place listing the adapters carry an `ignore` saying so.
 
 **The first lup.** `front-door`, `seam-boundary` and `kernel-imports` were custom rules over an AST scanner. Its tool layer still reached into environment packages (`tools/toolsets.py:38-43` imported coordination, ledger and orchestration).
 
 **Enforced by:** import-linter (a new dependency, agreed), and the engine at the edit; `runtime-mention` for names.
+
+## Package layout
+
+**Decision.**
+- **A subpackage is named for the subsystem it implements.** Where the first lup had the same subsystem, its name is reused, so what's read in `lup-legacy` maps onto the same place: `codescan` (its `harness/codescan`), `policy`.
+- **A word the library uses means the same thing in the environment:** `adapters` holds each runtime's adapter in `lup` and in `lup_dev` alike.
+- **Every subpackage's `__init__.py` docstring says in one line what it is.**
+- **Package-wide modules stay at the root:** errors, settings, layout, the project declaration, the clock, the command line.
+- **Subsystems import downwards only,** declared as an import-linter `layers` contract. In `lup_dev`: `adapters` > `policy` > `codescan` > `catalog`, so the runtimes' adapters sit on judging, judging on reading code, and everything on the catalog's data.
+
+| `lup_dev` | What it is |
+|---|---|
+| root | `errors.py`, `settings.py`, `layout.py`, `project.py`, `clock.py`, `cli.py` |
+| `catalog/` | the data that sets lup's policy, protected: path patterns, and the rule catalog to come |
+| `codescan/` | reading code: the engine's contract and client, the `# lup:` directives, conditions, ruff |
+| `policy/` | judging every write: roles, the judgement, the checkpoint and its store, holds, verdicts, reports |
+| `adapters/` | each runtime's hooks, the only code naming a runtime |
+
+**Why.** A flat package hides which modules belong together: `lup_dev` reached 21 top-level modules with its first piece. A subpackage per subsystem says what a module is part of before it's opened, and the layer order says which subsystem may know about which.
+
+**Enforced by:** the `layers` contract in `pyproject.toml`; the names and docstrings by review.
 
 ## ruff's selection
 
@@ -354,3 +375,4 @@ Each with its alternative and where it lives. **(yours, agreed)** marks what the
 17. **(yours, agreed)** import-linter for the boundaries, read by the engine at the edit too. *Alternative:* custom import rules in the engine alone. *Where:* `pyproject.toml`.
 18. Each rule's suggested fix passes every other rule, as a test over the catalog. *Alternative:* review catching contradictions. *Where:* the engine's tests.
 19. **(yours, agreed)** A runtime is named only in its adapter: an import contract keeps the adapters behind the one place listing them, and `runtime-mention` refuses a runtime's name elsewhere. *Alternative:* convention only, which is how the first lup's features came to be built per runtime. *Where:* `pyproject.toml`, the engine.
+20. **(yours, agreed)** A subpackage per subsystem, named as in the first lup where the subsystem is the same, with a library word meaning the same in the environment; a one-line `__init__.py` docstring each; package-wide modules at the root; subsystems importing downwards only. *Alternative:* a flat package. *Where:* `pyproject.toml` (the `layers` contract), each package.

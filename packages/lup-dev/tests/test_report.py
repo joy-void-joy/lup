@@ -2,9 +2,16 @@
 
 from pathlib import Path
 
-from lup_dev.checker import Finding, Position, Span
-from lup_dev.judge import Ask, RemovedNote
-from lup_dev.report import Refused, asked, information, refusal, removed_notes, turn_end
+from lup_dev.codescan.contract import Finding, Position, Span
+from lup_dev.policy.judge import Ask, RemovedNote
+from lup_dev.policy.report import (
+    Refused,
+    asked,
+    information,
+    refusal,
+    removed_notes,
+    turn_end,
+)
 
 PATH = Path("src/lup/claude.py")
 

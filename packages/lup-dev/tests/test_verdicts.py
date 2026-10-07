@@ -3,7 +3,7 @@
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from lup_dev.verdicts import Tally, Verdict, VerdictLog
+from lup_dev.policy.verdicts import Tally, Verdict, VerdictLog
 
 if TYPE_CHECKING:
     from pathlib import Path

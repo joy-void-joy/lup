@@ -20,30 +20,28 @@ asks on a runtime that can't ask before a call, and moves the accepted tree on.
 A call that runs a subagent isn't counted as running: the subagent's own calls
 are, so its writes are judged as it makes them rather than when it ends. The
 files changed are re-checked for the type errors of the files importing them, in
-one background pass per worktree, which the turn's end waits for.
+one background pass per worktree (`importers.py`), which the turn's end waits for.
 """
 
 import difflib
 import secrets
-import sys
 from abc import ABC, abstractmethod
-from datetime import timedelta
 from pathlib import Path
 from typing import Literal, override
 
 import sh
-from filelock import FileLock, Timeout
+from filelock import FileLock
 
 from lup.types import Model, MutableModel
-from lup_dev.changes import Held, Store, read_model, write_model
-from lup_dev.checker import Checker, FileReport, Finding, Source
 from lup_dev.clock import Clock
-from lup_dev.conditions import declared
-from lup_dev.holds import HeldFile, Hold, Holds
-from lup_dev.judge import Change, Judge, Judgement, RemovedNote
-from lup_dev.layout import Layout, StoreLayout
-from lup_dev.project import Declared, load
-from lup_dev.report import (
+from lup_dev.codescan.conditions import declared
+from lup_dev.codescan.contract import Checker, FileReport, Finding, Source
+from lup_dev.codescan.ruff import Linter
+from lup_dev.layout import Layout
+from lup_dev.policy.holds import HeldFile, Hold, Holds
+from lup_dev.policy.importers import ImportersPass, Spawner
+from lup_dev.policy.judge import Change, Judge, Judgement, RemovedNote
+from lup_dev.policy.report import (
     Refused,
     information,
     refusal,
@@ -51,37 +49,11 @@ from lup_dev.report import (
     sections,
     turn_end,
 )
-from lup_dev.roles import Roles
-from lup_dev.ruff import Linter
-from lup_dev.runtime import Runtime
-from lup_dev.verdicts import Answer, Verdict, VerdictLog
-
-
-class Spawner(ABC):
-    """Starts the background importers pass of a worktree."""
-
-    @abstractmethod
-    def spawn(self, worktree: Path, log: Path) -> None:
-        """Start the pass for the worktree at `worktree`, printing to `log`."""
-
-
-class BackgroundSpawner(Spawner):
-    """Starts the pass as its own process, detached from the hook that asks for it."""
-
-    @override
-    def spawn(self, worktree: Path, log: Path) -> None:
-        log.parent.mkdir(parents=True, exist_ok=True)
-        sh.Command(sys.executable)(
-            "-m",
-            "lup_dev.cli",
-            "importers",
-            str(worktree),
-            _bg=True,
-            _bg_exc=False,
-            _new_session=True,
-            _out=str(log),
-            _err=str(log),
-        )
+from lup_dev.policy.roles import Roles
+from lup_dev.policy.runtime import Runtime
+from lup_dev.policy.store import Held, Store, read_model, write_model
+from lup_dev.policy.verdicts import Answer, Verdict, VerdictLog
+from lup_dev.project import Declared, load
 
 
 class Services(Model, arbitrary_types_allowed=True):
@@ -179,125 +151,6 @@ class Located(Model):
     """Which worktree a session runs in."""
 
     worktree: Path
-
-
-class ImportersState(MutableModel):
-    """What the background importers pass has left to do, and what it found."""
-
-    pending: list[Path] = []
-    """Files changed since the pass took its last batch."""
-    found: list[FileReport] = []
-    """What the pass found, waiting for the next checkpoint."""
-
-
-class ImportersPass(Model):
-    """One worktree's background pass re-checking the files importing what changed.
-
-    One pass at a time. The pass holds a lock for its whole life, which the system
-    frees however the process ends; a change while it runs adds to what it does
-    next. It stops only once nothing is pending, releasing its lock before the
-    state's, so a request never finds it gone with work left behind.
-    """
-
-    layout: StoreLayout
-    root: Path
-
-    def guard(self) -> FileLock:
-        """Return the lock guarding the pass's state."""
-        self.layout.home.mkdir(parents=True, exist_ok=True)
-        return FileLock(self.layout.importers_lock)
-
-    def runner(self) -> FileLock:
-        """Return the lock a running pass holds."""
-        self.layout.home.mkdir(parents=True, exist_ok=True)
-        return FileLock(self.layout.importers_run, timeout=0)
-
-    def state(self) -> ImportersState:
-        """Read the pass's state; hold its guard."""
-        return read_model(self.layout.importers, ImportersState) or ImportersState()
-
-    def running(self) -> bool:
-        """Say whether a pass runs now: whether its lock is held."""
-        probe = self.runner()
-        try:
-            probe.acquire()
-        except Timeout:
-            return True
-        probe.release()
-        return False
-
-    def request(self, changed: list[Path], spawner: Spawner) -> None:
-        """Ask for the files importing `changed` to be re-checked.
-
-        Starts a pass unless one runs; one that runs takes these next.
-        """
-        if not changed:
-            return
-        with self.guard():
-            state = self.state()
-            state.pending = list(dict.fromkeys([*state.pending, *changed]))
-            write_model(self.layout.importers, state)
-            if self.running():
-                return
-        spawner.spawn(self.root, self.layout.importers_log)
-
-    def run(self, checker: Checker) -> None:
-        """Run the pass until nothing is pending; return at once if another runs."""
-        runner = self.runner()
-        try:
-            runner.acquire()
-        except Timeout:
-            return
-        try:
-            while self.step(checker, runner):
-                pass
-        finally:
-            if runner.is_locked:
-                runner.release()
-
-    def step(self, checker: Checker, runner: FileLock) -> bool:
-        """Re-check one batch; say whether to look for another."""
-        with self.guard():
-            state = self.state()
-            batch = state.pending
-            if not batch:
-                runner.release()
-                return False
-            state.pending = []
-            write_model(self.layout.importers, state)
-        found = checker.importers(self.root, batch)
-        with self.guard():
-            state = self.state()
-            state.found = [*state.found, *found]
-            write_model(self.layout.importers, state)
-        return True
-
-    def collect(self) -> list[FileReport]:
-        """Take what the pass found since the last collection."""
-        with self.guard():
-            state = self.state()
-            found = state.found
-            state.found = []
-            write_model(self.layout.importers, state)
-        return found
-
-    def wait(
-        self,
-        checker: Checker,
-        clock: Clock,
-        patience: timedelta = timedelta(minutes=10),
-        poll: timedelta = timedelta(seconds=1),
-    ) -> None:
-        """Wait for the pass to finish, so no type error surfaces after the turn.
-
-        Work left pending with no pass running (one that failed as it started)
-        is done here.
-        """
-        deadline = clock.now() + patience
-        while self.running() and clock.now() < deadline:
-            clock.sleep(poll.total_seconds())
-        if not self.running():
-            self.run(checker)
 
 
 def decoded(content: bytes | None) -> str | None:

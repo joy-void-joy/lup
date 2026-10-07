@@ -15,23 +15,24 @@ import sh
 import typer
 
 from lup_dev.adapters import claude, codex
-from lup_dev.changes import Git
-from lup_dev.checker import Checker, Finding, Source
-from lup_dev.checkpoint import BackgroundSpawner, Bench, Services, Worktree
 from lup_dev.clock import SystemClock
-from lup_dev.conditions import loaded
-from lup_dev.directives import Checking, Fired, Gate, GitHubIssues
+from lup_dev.codescan.conditions import loaded
+from lup_dev.codescan.contract import Checker, Finding, Source
+from lup_dev.codescan.directives import Checking, Fired, Gate, GitHubIssues
+from lup_dev.codescan.ruff import Ruff
 from lup_dev.errors import LupDevError
-from lup_dev.holds import Response, answer, waiting
-from lup_dev.judge import finding
 from lup_dev.layout import Layout
-from lup_dev.report import finding_lines
-from lup_dev.ruff import Ruff
+from lup_dev.policy.checkpoint import Bench, Services, Worktree
+from lup_dev.policy.holds import Response, answer, waiting
+from lup_dev.policy.importers import BackgroundSpawner
+from lup_dev.policy.judge import finding
+from lup_dev.policy.report import finding_lines
+from lup_dev.policy.store import Git
+from lup_dev.policy.verdicts import VerdictLog
 from lup_dev.settings import LupDevSettings
-from lup_dev.verdicts import VerdictLog
 
 if TYPE_CHECKING:
-    from lup_dev.runtime import Runtime
+    from lup_dev.policy.runtime import Runtime
 
 app = typer.Typer(no_args_is_help=True, help="Develop a project with agents.")
 hook = typer.Typer(no_args_is_help=True, help="Answer a runtime's hook.")
@@ -49,7 +50,7 @@ class EngineMissingError(LupDevError):
 def engine() -> Checker:
     """Return the typed engine the judge asks about files."""
     message = (
-        "the typed engine (`lup_dev.checker.EngineChecker`) isn't installed yet: "
+        "the typed engine (`lup_dev.codescan.engine`) isn't installed yet: "
         "it lands with the engine's own branch"
     )
     raise EngineMissingError(message)

@@ -33,8 +33,8 @@ from pydantic import Field, TypeAdapter
 from pydantic.alias_generators import to_camel
 
 from lup.types import JsonObject, Model, Settings
-from lup_dev.before import Decision, Overwrite, Replacement, before
-from lup_dev.checkpoint import (
+from lup_dev.policy.before import Decision, Overwrite, Replacement, before
+from lup_dev.policy.checkpoint import (
     Bench,
     CallFinished,
     CallStarted,
@@ -42,7 +42,7 @@ from lup_dev.checkpoint import (
     SessionStarted,
     TurnEnded,
 )
-from lup_dev.runtime import Runtime
+from lup_dev.policy.runtime import Runtime
 
 
 class Variables(Settings):

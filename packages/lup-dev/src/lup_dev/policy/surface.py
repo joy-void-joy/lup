@@ -14,7 +14,7 @@ compares them.
 from typing import Literal
 
 from lup.types import Model
-from lup_dev.checker import Surface
+from lup_dev.codescan.contract import Surface
 
 
 class ApiChange(Model):

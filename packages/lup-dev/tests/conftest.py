@@ -17,7 +17,8 @@ from typing import TYPE_CHECKING, Literal
 import pytest
 import sh
 
-from lup_dev.checker import (
+from lup_dev.clock import Clock
+from lup_dev.codescan.contract import (
     Checker,
     FileReport,
     Finding,
@@ -28,12 +29,12 @@ from lup_dev.checker import (
     Span,
     Surface,
 )
-from lup_dev.checkpoint import Bench, Services, Spawner
-from lup_dev.clock import Clock
-from lup_dev.directives import Defer, Directive, Ignore, Malformed, Note
+from lup_dev.codescan.directives import Defer, Directive, Ignore, Malformed, Note
+from lup_dev.codescan.ruff import Linter
 from lup_dev.layout import Layout
-from lup_dev.ruff import Linter
-from lup_dev.runtime import Runtime
+from lup_dev.policy.checkpoint import Bench, Services
+from lup_dev.policy.importers import Spawner
+from lup_dev.policy.runtime import Runtime
 
 if TYPE_CHECKING:
     from collections.abc import Callable

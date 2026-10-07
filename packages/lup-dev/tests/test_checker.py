@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from lup_dev.checker import FileReport
-from lup_dev.directives import Defer, Ignore, Malformed, Note
+from lup_dev.codescan.contract import FileReport
+from lup_dev.codescan.directives import Defer, Ignore, Malformed, Note
 
 PATH = "packages/lup/src/lup/claude.py"
 REPORT = {

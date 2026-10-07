@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING
 import pytest
 
 from lup_dev.adapters import claude, codex
-from lup_dev.changes import read_model
-from lup_dev.checker import Checker, FileReport, Source
-from lup_dev.checkpoint import Bench, Running, Services
-from lup_dev.holds import Holds, Response, waiting
+from lup_dev.codescan.contract import Checker, FileReport, Source
+from lup_dev.policy.checkpoint import Bench, Running, Services
+from lup_dev.policy.holds import Holds, Response, waiting
+from lup_dev.policy.store import read_model
 
 if TYPE_CHECKING:
     from conftest import Kit
@@ -250,9 +250,7 @@ def post(repo: Path, response: object, call: str = "p1") -> str:
     )
 
 
-def test_codex_hears_a_refusal_after_the_original_result(
-    on_codex: Bench, repo: Path
-) -> None:
+def test_codex_hears_a_refusal_beside_the_result(on_codex: Bench, repo: Path) -> None:
     codex.hook(
         payload(
             repo,
@@ -271,11 +269,10 @@ def test_codex_hears_a_refusal_after_the_original_result(
             on_codex,
         )
     )
-    assert output["decision"] == "block"
-    assert output["reason"].startswith(
-        "Success. Updated the following files:\nM src/pkg/core.py\n\n"
-        "lup refused 1 file."
-    )
+    said = output["hookSpecificOutput"]
+    assert said["hookEventName"] == "PostToolUse"
+    assert said["additionalContext"].startswith("lup refused 1 file.")
+    assert "decision" not in output
 
 
 def test_codex_holds_an_ask_until_the_operator_answers(
@@ -302,8 +299,8 @@ def test_codex_holds_an_ask_until_the_operator_answers(
 
     kit.clock.on_sleep.append(approve)
     output = json.loads(codex.hook(post(repo, {"output": "done"}), on_codex))
-    assert output["reason"].startswith(
-        '{"output": "done"}\n\nThe operator approved the held change to src/pkg/new.py.'
+    assert output["hookSpecificOutput"]["additionalContext"].startswith(
+        "The operator approved the held change to src/pkg/new.py."
     )
     assert (repo / "src" / "pkg" / "new.py").exists()
 
@@ -347,6 +344,26 @@ def test_codex_stop_blocks_while_touched_files_have_type_errors(
     output = json.loads(codex.hook(raw, on_codex))
     assert output["decision"] == "block"
     assert output["reason"].startswith("lup won't end the turn yet")
+
+
+def test_codex_tells_the_agent_when_a_checkpoint_fails(
+    broken: Services, repo: Path
+) -> None:
+    bench = Bench(runtime=codex.Codex(), services=broken)
+    codex.hook(
+        payload(
+            repo,
+            "PreToolUse",
+            turn_id="u1",
+            tool_name="Bash",
+            tool_input={},
+            tool_use_id="b1",
+        ),
+        bench,
+    )
+    (repo / CORE).write_text((repo / CORE).read_text() + "z = 1\n")
+    output = json.loads(codex.hook(post(repo, "", call="b1"), bench))
+    assert "lup's judge failed" in output["hookSpecificOutput"]["additionalContext"]
 
 
 def test_codex_knows_its_own_sessions(monkeypatch: pytest.MonkeyPatch) -> None:

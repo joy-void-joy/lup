@@ -17,7 +17,7 @@ from typing import Literal
 from filelock import FileLock
 
 from lup.types import Model
-from lup_dev.roles import Role
+from lup_dev.policy.roles import Role
 
 type VerdictOutcome = Literal["allow", "ask", "refuse", "hold"]
 type Answer = Literal["approved", "declined", "unanswered"]

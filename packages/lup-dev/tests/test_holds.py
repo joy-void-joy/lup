@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from lup_dev.holds import HeldFile, HoldError, Holds, Response, answer, waiting
+from lup_dev.policy.holds import HeldFile, HoldError, Holds, Response, answer, waiting
 
 if TYPE_CHECKING:
     from conftest import FakeRuntime, Kit

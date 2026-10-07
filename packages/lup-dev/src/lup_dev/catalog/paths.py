@@ -1,7 +1,7 @@
 """The path patterns lup's roles start from, before a project adds its own.
 
 Patterns are relative to a worktree's root and matched whole, `**` spanning any
-number of directories (`PurePath.full_match`). `lup_dev.roles` says how each list
+number of directories (`PurePath.full_match`). `lup_dev.policy.roles` says how each list
 is used and in which order (`docs/judging-writes.md`, *What each change gets*).
 """
 
