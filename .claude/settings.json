@@ -2,10 +2,23 @@
   "autoMemoryEnabled": false,
   "subagentPromptCacheTtl": "1h",
   "permissions": {
-    "ask": ["Write", "Bash(gh pr merge:*)"],
+    "ask": ["Bash(gh pr merge:*)"],
     "deny": ["Artifact", "SendFeedback", "Workflow", "ScheduleWakeup", "ReportFindings"]
   },
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --script \"$CLAUDE_PROJECT_DIR/.claude/hooks/interim_review.py\"",
+            "timeout": 14700,
+            "statusMessage": "Checking whether this write waits for review"
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Write|Edit",
