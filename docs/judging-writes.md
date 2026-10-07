@@ -291,14 +291,14 @@ It's kept per repository, beside the store. An answer comes after its verdict (w
 | allow | `PreToolUse` answers `allow` | nothing to answer: Codex doesn't ask for `apply_patch` inside the workspace |
 | ask | `PreToolUse` answers `ask` | held at the checkpoint, answered from the terminal |
 | refuse | `PreToolUse` answers `deny`, or put back at the checkpoint | put back at the checkpoint |
-| How the agent hears | `additionalContext` beside the result | `decision: block` replaces the result, so lup puts the original output first, in full, then the report |
-| When judging itself fails | a file tool's write is denied, naming the failure; other calls go on, told | the call's result is replaced by it and the failure; a turn ends after one block |
+| How the agent hears | `additionalContext` beside the result | the same: `additionalContext` beside the result, which reaches the agent untouched |
+| When judging itself fails | a file tool's write is denied, naming the failure; other calls go on, told | the agent is told beside the call's result; a turn ends after one block |
 | Its sessions' commands carry | `CLAUDE_CODE_CHILD_SESSION=1` | `CODEX_THREAD_ID` |
 | Configured in | `.claude/settings.json` | `.codex/hooks.json`, run only once its hash is trusted, so the operator trusts it after each change (in Codex's `/hooks`; there's no command for it) |
 
 On Codex a refused `apply_patch` lands for the moment between the call and the checkpoint; on Claude Code a refused `Edit` never lands. That's the declared difference.
 
-Codex's `PostToolUse` also takes `additionalContext`, which its docs say "is added as extra developer context" beside the result, as on Claude Code. The `decision: block` row is the design as agreed; switching would make both runtimes hear reports the same way, and keep the original result untouched.
+Both runtimes hear a report the same way. Codex's docs say a `PostToolUse` hook's `additionalContext` "is added as extra developer context". Past the handler's `additionalContextLimit` (2,500 tokens by default), Codex keeps the whole text in a file and shows a preview pointing at it, so the hook configuration raises the limit for reports to arrive whole.
 
 ## Where things live
 
@@ -346,7 +346,7 @@ The `lup-dev` command is this piece's stand-in until the declaration and CLI pie
 ## Installing it here
 
 - `.claude/settings.json` gets the hooks (`SessionStart`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, `SubagentStop`, each `lup-dev hook claude`, matching every tool) and the narrow `Bash` allow rules, and loses the `permissions.ask` on `Write` and the interim checker hook (`.claude/hooks/interim_rules.py`, removed).
-- `.codex/hooks.json` gets the same hooks (`lup-dev hook codex`; no `PostToolUseFailure`, no `PermissionRequest`), with `PostToolUse` and `Stop` given a `timeout` above a day for holds.
+- `.codex/hooks.json` gets the same hooks (`lup-dev hook codex`; no `PostToolUseFailure`, no `PermissionRequest`), with `PostToolUse` and `Stop` given a `timeout` above a day for holds, and `PostToolUse` an `additionalContextLimit` high enough for a whole report.
 - `.gitignore` gets `.lup/` (already there).
 - The typed engine is wired in one place, `cli.engine()`, which raises until the engine lands.
 
@@ -419,3 +419,5 @@ Taken while building it:
 45. An answer to an ask or a hold is appended as the same verdict under the same key. *Alternative:* log an ask only once answered, which a hook that dies would lose. *Where:* `policy/verdicts.py`.
 46. Two suppressions: git's `-z` output split on its NUL separators (`policy/store.py`), and the file tool's own replacement applied with `str.replace` (`policy/before.py`). *Alternatives:* a git library (dulwich, pygit2) for the store, a new dependency; slicing, which another rule refuses. *Where:* those two lines.
 47. When judging itself fails, a file tool's write is denied and other calls go on, told; a turn's end is blocked once. *Alternative:* a crash, which a runtime treats as no decision, letting a write meant for review through. *Where:* `adapters/`.
+48. **(yours, agreed)** Codex hears a report through `additionalContext`, as Claude Code does. *Alternative:* `decision: block`, which replaces the call's result, so lup repeated the original output before the report. *Where:* `adapters/codex.py`.
+49. **(yours, agreed)** `lup_dev` is grouped by subsystem: `codescan/`, `policy/`, `adapters/`, `catalog/`, with package-wide modules at the root (`docs/conventions.md`, *Package layout*). An import contract keeps `adapters` > `policy` > `codescan` > `catalog`. *Alternative:* the flat package of 21 modules. *Where:* `packages/lup-dev/src/lup_dev/`, `pyproject.toml`.
