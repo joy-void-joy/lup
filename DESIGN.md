@@ -147,6 +147,10 @@ The parts that cut across everything (the one hook, the dashboard's protocol, th
   - Claude Code's built-in types run as top-level sessions with `--agent` (measured: `--agent Explore` narrows the tools to read-only).
   - lup's own agent types are definitions in its Python API.
   - Only lup's spawn lets a Claude session hand work to a Codex worker, or the reverse.
+  - **Work in another project is spawned there.** "Fix nori's core bug" from a lup session spawns a worker in nori's worktree, which runs under nori's own declaration, rules and reviews and reports back, so nobody quits and remounts.
+    - A host-side lup service launches it. The asking agent never leaves its container, and can start only sessions, with typed arguments, never arbitrary host commands. So spawning is automatic: the worker shows on the dashboard, and budgets bound it.
+    - A session writes only in its own project. The projects it knows are mounted read-only, so it can read how one works and brief the worker well.
+    - It needs registered projects, so a name like `nori` resolves to a repository.
   - Why not native subagents: with `subagentPromptCacheTtl: "1h"` they get the 1-hour cache too, so cache rebuilds don't separate the two. What does is seeing, pausing, messaging and budgeting every worker as part of the whole. Keeping native `Agent` for short jobs stays open, to settle by measuring the new spawn (Open questions).
 - **Native tools for the agent's own work; lup's tools for everything between agents, and between an agent and the operator.**
   - Kept native: Edit, Read, Bash, `apply_patch`, search, web, background processes, the agent's own task list, `Skill`.
@@ -204,6 +208,14 @@ The control runs as its own small host process. A hold within the hour keeps its
   - **Interactively, without a container engine:** there's no lup policy, only the runtime's own permission mode, and launching that way takes an explicit `--dangerously-…` flag.
   - **From code:** a call with Bash and `sandbox="none"` raises, unless it sets a `dangerously_…` flag. A call with no tools needs no container.
   - **Mounts are one declaration.** Inside a container they're bind mounts. With `sandbox="none"` they become the allow-list for the file tools.
+- **Leaving the wall is a request with a typed reason (tentative; the reasons are open).** The first lup's `# lup: escalate[sandbox]: <why>` comment becomes a lup tool call whose reason is a field, so nothing parses a command. Each reason gets its own outcome, a selection like everything else. The reasons below are the ones agents actually gave for `escalate[sandbox]` in the first lup's transcripts:
+  - **work in another project:** lup's spawn there, automatic (see *Sessions*);
+  - **credentials** (push, opening a pull request, publishing): a host service that does that one action, asked per action;
+  - **a protected path** (runtime settings, generated harness files): the ordinary ask;
+  - **a tool or device the container lacks** (a pinned toolchain under the home directory, a GPU, audio, a display): a reviewed command on the host, plus a note that the room's image should carry it;
+  - **repairing the environment** (git pointers after a repository moved): a reviewed command on the host.
+
+  Several of the first lup's escalations came from its per-call sandbox (a unix socket refused, a read-only symlink), which the container as the only wall removes.
 - **Network: leaning open egress.** Filtering produced constant friction and reviews that were mostly fine. So nothing secret is mounted, apart from the runtime's own login (below).
 - **Secrets: leaning the art studio's pattern.** No secrets and no GitHub credentials in the container. Project secrets live in host services the container reaches by name, and pushes happen from the host.
   - **The runtime's own login is the one secret a container has to hold**, since Claude Code and Codex can't run without it, and open egress could send it out. It's hidden from the agent's commands by the runtime's own sandbox, configured only for that and not as the wall (whether it runs nested in the container is a check owed).
@@ -220,6 +232,7 @@ The control runs as its own small host process. A hold within the hour keeps its
 - **Reviews happen before, by default.** The operator steers early rather than finding a patchy approach hours later. Examples, docs and guidance are reviewed after: they land, the operator is told, and one step reverts them. Comments and declines on a launch review become the first input of the session that launch starts.
 - **A declined change is restored, never lost.** The agent's version is saved at a path the refusal names, beside the operator's comment. The agent revises the lines in question in the saved copy and moves it into place, and the move is judged like any write. Nothing is resent whole. Restoring matters: a change left in place invites building on a design the operator just turned down.
 - **Trust on launch is ported as it is.** The host-zone fingerprint, the review in the dashboard, and launching from the approved copy.
+  - Until it's ported, the judge gets the same review: refreshing the installed judge from `dev` shows its diff since the copy the operator last approved, and the approved copy keeps judging until they approve. The operator is sure of what runs before it runs (`docs/after-call-diff.md`).
 
 ### Code rules and the gate
 
