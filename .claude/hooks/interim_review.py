@@ -104,8 +104,15 @@ class Settings(BaseSettings, env_prefix="LUP_INTERIM_REVIEW_"):
     """The variable a first-lup launch names the answers store with; unset here, so the host's default applies."""
     poll: timedelta = timedelta(seconds=2)
     """How often a waiting call looks for the operator's answer."""
-    patience: timedelta = timedelta(hours=4)
-    """How long a call waits before it's refused; the hooks' timeouts in `.claude/settings.json` sit just above it."""
+    patience: timedelta = timedelta(days=20)
+    """How long a call waits before it's refused: effectively as long as it takes, since waiting never re-prompts the agent.
+
+    It's bounded only because Claude Code lets a call continue through the normal
+    permission flow when a hook times out ("don't count on a stalled hook to act as
+    a gate", its hooks docs), so the hook must decide before its timeout, which
+    `.claude/settings.json` sets just above this. Twenty days stays under the
+    longest timer Node, which runs Claude Code, can hold: about 24.8 days.
+    """
     notify: bool = True
     """Whether a review that starts waiting raises a desktop notice through `notify-send`, where it's installed."""
 
