@@ -10,7 +10,7 @@ target-version = "py314"
 # Where the workspace packages' modules live, so their imports sort as first-party.
 src = ["packages/*/src"]
 # The bridge's interim hooks run as uv scripts with their own dependencies, and go
-# when the after-call diff is installed (`docs/after-call-diff.md`).
+# when the after-call diff is installed (`docs/judging-writes.md`).
 extend-exclude = [".claude"]
 
 [tool.ruff.format]

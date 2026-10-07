@@ -11,7 +11,7 @@ This is the first piece of `DESIGN.md`'s build order, built alongside the librar
 - the typed engine and the code rules (the conventions they enforce are in `docs/conventions.md`);
 - type errors and ruff's findings as information at each checkpoint;
 - the `# lup:` directives: `ignore`, `defer`, notes, and removing a note;
-- the acceptance guard;
+- tests written as a specification, expressed with protected paths and mounts;
 - the verdict log;
 - the hooks for Claude Code and Codex, and installing them in this repository.
 
@@ -52,7 +52,6 @@ lup never stays silent on a write it judges. Staying silent would send the call 
 | Change | Outcome |
 |---|---|
 | A test, scratch (`tmp/`), docs or data file, at any size | allow |
-| A declared acceptance test | ask (see *The acceptance guard*) |
 | `DESIGN.md` or `AGENTS.md` | ask: they're the operator's |
 | A protected path | ask |
 | Production code with a rule finding on the lines the change touches | refuse, every finding in the file listed, the agent's version saved |
@@ -63,18 +62,17 @@ lup never stays silent on a write it judges. Staying silent would send the call 
 | Any other production edit | allow, once the rules pass it |
 
 **Path roles.** Each path has one role, the first that matches:
-1. **protected:** the project declaration; dependency manifests and lockfiles (`pyproject.toml`, `uv.lock`, `package.json`, `bun.lock`); what runs outside the agent's reach (`.github/`, git hooks and `.git/config`, `.pre-commit-config.yaml`, `.vscode/`, `.devcontainer/`, `.claude/`, `.codex/`); what widens a later launch (`sync.json`, `sync.json.local`); secrets (`.env*.local`);
-2. **acceptance:** the acceptance tests a project declares (none by default);
-3. **operator's documents:** `DESIGN.md`, `AGENTS.md`;
-4. **test:** under a test root pytest reads (`testpaths` in the nearest `pyproject.toml`), nested projects included;
-5. **scratch:** `tmp/` at any depth, and the saved versions under `.lup/`;
-6. **docs:** Markdown files and `docs/`;
-7. **data:** JSON, CSV, YAML and other data formats outside a source tree;
-8. **production:** everything else.
+1. **protected:** the project declaration; dependency manifests and lockfiles (`pyproject.toml`, `uv.lock`, `package.json`, `bun.lock`); what runs outside the agent's reach (`.github/`, git hooks and `.git/config`, `.pre-commit-config.yaml`, `.vscode/`, `.devcontainer/`, `.claude/`, `.codex/`); what widens a later launch (`sync.json`, `sync.json.local`); secrets (`.env*.local`); and whatever the project adds;
+2. **operator's documents:** `DESIGN.md`, `AGENTS.md`;
+3. **test:** a module pytest collects as a test: under a root it reads (`testpaths` in the nearest `pyproject.toml`, nested projects included) and matching its `python_files` patterns. A source module pytest reads only for its doctests stays production (`docs/conventions.md`, *Tests*);
+4. **scratch:** `tmp/` at any depth, and the saved versions under `.lup/`;
+5. **docs:** Markdown files and `docs/`;
+6. **data:** JSON, CSV, YAML and other data formats outside a source tree;
+7. **production:** everything else.
 
 Production is the default, so a file nobody classified is gated rather than waved through.
 
-**Open:** where a project declares its roles before the declaration piece exists. Lean: start `Project` now with only the fields this piece reads (`tests`, `protected` additions, `acceptance`), shaped as `DESIGN.md`'s example, and let the declaration piece grow it. The alternative is defaults plus pytest's `testpaths` only, with acceptance tests waiting for the declaration piece.
+**Where a project declares its roles:** a minimal `Project` starts in this piece, with only the fields it reads: its test roots and its additions to the protected paths, shaped as `DESIGN.md`'s example (`Project(tests=[…], protected=Protected.default().add(…))`). The declaration piece grows it.
 
 ## The public-API ask
 
@@ -187,6 +185,7 @@ ruff runs with `--ignore-noqa`, and pyright with `enableTypeIgnoreComments = fal
 ## Shell commands
 
 - **On the host (now, in the bridge):** narrow allow rules in Claude Code's own settings, such as `Bash(uv run pytest:*)`, `Bash(uv run pyright:*)`, `Bash(git status:*)`, `Bash(git diff:*)`. Claude Code matches them, so lup parses no commands; auto mode keeps narrow rules and drops broad ones. Here they're written by hand in `.claude/settings.json`; the launch piece generates them from the declaration. Everything else goes to the runtime's own mode, and what a command writes is judged at the checkpoint either way.
+- **The prompts the runtime's mode shows** reach the operator in the review dashboard as soon as possible: in the bridge, the interim review hook answers Claude Code's `PermissionRequest`, which fires whenever a prompt would be shown, by parking it as a review.
 - **In a container (the launch piece):** every command runs; the container is the wall.
 - **A probe owed:** whether a `PreToolUse` hook's `allow` skips auto mode's classifier. No vendor doc says so and the first lup never measured it. If it does, the hook can allow commands itself where the classifier only adds latency.
 
@@ -211,13 +210,13 @@ Pyright has no plugin API, and its published package is one bundled file whose i
 - **Upgrades:** the rule code compiled unchanged against pyright releases 17 months apart; about 40 lines of project setup broke.
 - **Cost:** a 3.5 MB bundle plus 28 MB of standard-library stubs, and 1.5–2.7 GB of memory on a 700-file project. With many sessions, that's per worktree, which is why idle processes stop.
 
-**The spike's questions, with the leans:**
-1. **Aliases:** flag a fixed-tuple alias where it's defined, and its uses only when it's defined outside the project.
-2. **`Any`:** flag `string-split` on a receiver declared `Any`, but not on one pyright can't infer, so findings don't depend on the environment being installed.
-3. **Unions:** flag `str | X` when any member is `str` or `bytes`.
-4. **Edge tuples:** don't flag `tuple[()]` or `tuple[int, *tuple[str, ...]]`.
-5. **Checkpoint scope:** re-check only the changed files; files that import them are left to the gate (re-checking importers took 12–45 s on the first lup's library).
-6. **Type stubs:** ship the pinned standard-library stubs beside the bundle.
+**The spike's questions, as decided:**
+1. **Aliases:** a tuple alias is flagged where it's defined, and its uses only when it's defined outside the project.
+2. **`Any`:** `string-split` fires on a receiver declared `Any`, but not on one pyright can't infer, so findings don't depend on the environment being installed.
+3. **Unions:** `str | X` is flagged when any member is `str` or `bytes`.
+4. **Tuples:** `list[X]` is the one spelling of a sequence (`docs/conventions.md`), so `tuple-shape` flags every tuple type; the spike's edge tuples need no special case.
+5. **Files that import a changed one:** the rules read only the changed files, so their findings come at the edit. The changed files' importers are re-checked for type errors in the background, and their errors arrive at the next checkpoint. One background pass at a time per worktree: a change while one runs marks it to run once more afterwards, over everything changed, never a second process. The turn-end check waits for the pass, so no type error surfaces after the session.
+6. **Type stubs:** the pinned standard-library stubs ship beside the bundle.
 
 ## The `# lup:` directives
 
@@ -239,11 +238,13 @@ Pyright has no plugin API, and its published package is one bundled file whose i
 - one present when the session started can be removed too, and the removal is reported: the turn-end check lists the committed notes removed this session, for the agent's report and the merge commit's message, so feedback never vanishes silently;
 - once the ledger exists, a note pointing at a record is removed when its record is closed.
 
-## The acceptance guard
+## Tests written as a specification
 
-Some work is built against tests written beforehand as its specification: the operator, or an agent they asked, writes acceptance tests for what a feature must do, and another session implements until they pass. The failure it guards against is the implementing agent changing the tests to match its implementation, which makes them pass and the feature still wrong.
+Some work is built against tests written beforehand: the operator, or an agent they asked, writes the tests a feature must pass, and another session implements until they pass. The failure to guard against is the implementing agent changing the tests to match its implementation, which makes them pass and the feature still wrong.
 
-A project declares which test files are its acceptance tests (none by default). Editing one asks the operator. A room declared as implementing against them refuses the edit outright, when rooms exist. The first lup had this as an opt-in it never turned on for itself.
+The first lup had an "acceptance guard" for it, an opt-in path role it never turned on for itself. Here it needs no construct of its own:
+- **asked:** a project adds those tests to its protected paths, so editing one asks the operator;
+- **refused outright:** a room implementing against them mounts them read-only, so the wall refuses the write, once rooms exist.
 
 ## The verdict log
 
@@ -330,23 +331,23 @@ Each with its alternative and where it lives. **(yours, agreed)** marks what the
 4. **(yours, agreed)** No line count: any production edit the rules pass is allowed unless something asks. *Alternative:* the first lup's 3-line threshold. *Where:* `judge.py`.
 5. **(yours, agreed)** `Edit` and `Write` are judged before they land; the checkpoint judges everything else. *Alternative:* the checkpoint for every write, which restores refused edits after the fact. *Where:* `before.py`.
 6. **(yours, agreed)** The allow table: tests, scratch, docs and data at any size; production gated by the rules; asks on new or whole-file production writes, protected paths and suppressions. *Where:* `roles.py`, `judge.py`.
-7. **(yours)** `DESIGN.md` and `AGENTS.md` ask. *Alternative:* allowed like other docs and reviewed after. *Where:* `roles.py`.
-8. **(yours)** Where path roles are declared before the declaration piece: a minimal `Project` now. *Alternative:* defaults and pytest's `testpaths` only. *Where:* `roles.py`, `lup_project.py`.
+7. **(yours, agreed)** `DESIGN.md` and `AGENTS.md` ask. *Alternative:* allowed like other docs and reviewed after. *Where:* `roles.py`.
+8. **(yours, agreed)** Where path roles are declared before the declaration piece: a minimal `Project` now, with test roots and protected-path additions. *Alternative:* defaults and pytest's `testpaths` only. *Where:* `roles.py`, `lup_project.py`.
 9. **(yours, agreed to try)** Ask on a public-API change: a package root's names, a new class, a changed signature of a definition that existed when the session started. *Alternative:* no public-API ask. *Where:* `surface.py`, the engine.
 10. **(yours, agreed)** Every verdict logged from day one, summarized by `lup-dev verdicts`. *Alternative:* reconstruct from transcripts, as the first lup's study had to. *Where:* `verdicts.py`.
 11. **(yours, agreed)** You're asked in Claude Code's prompt (or through the interim review hook); Codex holds at the checkpoint. *Alternative:* holds on both runtimes. *Where:* `before.py`, `holds.py`.
 12. **(yours, agreed)** The typed engine on pyright's own tree from the first rule, with no syntax-only stage. *Alternatives:* mypy's tree; ruff's `banned-api` plus a syntax checker first. *Where:* `checker/`.
-13. **(yours)** The spike's six questions, with the leans above. *Where:* `checker/`.
+13. **(yours, agreed)** The spike's six questions, as decided above: no tuple types at all, and importers re-checked in one background pass per worktree, waited on at turn end. *Alternative:* importers left to the gate, which could surface a type error after the session. *Where:* `checker/`, `checkpoint.py`.
 14. **(yours, agreed)** `# lup:` directives as calls, everything else a note, a wrong directive a finding. *Where:* `directives.py`.
 15. **(yours, agreed)** `defer` points at a GitHub issue or carries a checkable condition; the ledger's to-do items point at GitHub issues. *Alternative:* `defer` pointing only at ledger records. *Where:* `directives.py`.
 16. **(yours, agreed)** Removing a note: free if added this session; reported if committed; through its record once the ledger exists. *Alternative:* the first lup's refusal. *Where:* `judge.py`, `directives.py`.
 17. **(yours, agreed)** The judge runs from a local copy installed from `dev`. *Alternative:* the worktree's own copy. *Where:* the hook commands.
-18. **(yours)** The acceptance guard in this piece, as a path role. *Alternative:* left for rooms. *Where:* `roles.py`.
-19. **(yours)** Shell commands on the host through narrow allow rules in Claude Code's settings. *Alternative:* a lup vocabulary, which needs the shell parser `DESIGN.md` drops. *Where:* `.claude/settings.json`.
+18. **(yours, agreed)** No acceptance guard of its own: tests written as a specification are protected paths a project adds, and read-only mounts in a room. *Alternative:* the first lup's opt-in `acceptance` path role. *Where:* `roles.py` (protected-path additions).
+19. **(yours, agreed for now)** Shell commands on the host through narrow allow rules in Claude Code's settings; the prompts the rest causes reach the review dashboard as soon as possible (in the bridge, through the interim hook's `PermissionRequest`). *Alternative:* a lup vocabulary, which needs the shell parser `DESIGN.md` drops. *Where:* `.claude/settings.json`.
 20. Content committed elsewhere isn't judged; commits made locally since the previous checkpoint are. *Alternatives:* judge it all, which replays history as new writes; set aside anything equal to `HEAD`, which let a write-and-commit through. *Where:* `changes.py`.
 21. Findings on touched lines refuse; the refusal lists every finding in the file. *Alternative:* any finding in a touched file refuses. *Where:* `judge.py`, `report.py`.
 22. Type errors and ruff's findings are information at each checkpoint and refuse only at turn end. *Alternative:* refuse at the checkpoint, which `DESIGN.md` rules out. *Where:* `judge.py`.
 23. A refused new file comes back through `Write`; a refused edit through its saved copy. *Alternative:* hold the moved copy at the checkpoint for the operator, which Claude Code can't prompt for there. *Where:* `before.py`, `report.py`.
 24. `lup-dev holds` refuses to answer from inside a session; the real separation waits for containers. *Where:* `holds.py`.
-25. **(yours)** The note's name: it now judges edits before they land, not after the call. Proposed: `docs/judging-writes.md`.
+25. **(yours, agreed)** The note is `docs/judging-writes.md`: it judges edits before they land, not only after the call. *Alternative:* keep `docs/after-call-diff.md`.
 26. **(yours, agreed)** The judge's own source is reviewed before an installed copy runs, not asked at each edit: refreshing from `dev` shows its diff since the last approved copy, which keeps running until the operator approves. *Alternative:* a protected path asked at every edit, which reviews each step rather than what will run. *Where:* the judge's installer.
