@@ -98,6 +98,8 @@ All under `packages/lup/src/lup/`.
 - **Claude** through `claude-agent-sdk` (0.2.164 today), the official SDK. It runs the Claude Code CLI as a subprocess and bundles a pinned copy of it (2.1.292 today).
 - **Codex** through `openai-codex` (0.160.1), the official Python SDK, marked stable. It runs `codex app-server` over JSON-RPC and depends on a pinned Codex binary (`openai-codex-cli-bin`).
 
+Each runtime is an optional extra: `lup[claude]`, `lup[codex]`, or both. A project installs only the side it uses. Building a `Codex(...)` without the `codex` extra fails at once, naming the extra to install. lup's own tests install both, since every shared construct is tested on both runtimes.
+
 **The runtime versions are the ones the lock file pins**, not whatever is on `PATH`. Today this machine has three Codex installs on `PATH` (0.156.1 from npm shadowing 0.160.0 in `/usr/bin`), behind a shell function that still calls the old `lup-devtools`. Production code like live-translator shouldn't depend on that. The environment's interactive launch is a separate question for the launch piece.
 
 Each `ask` is one turn in a fresh session, with the session kept open only while lup may need to ask again (see *Typed output*).
@@ -116,8 +118,9 @@ A bare `Claude(...)` or `Codex(...)` has no tools. In the first lup the default 
 
 - **Claude:** built-in tools off (`tools=[]`), no MCP servers (`strict_mcp_config`), no skills or plugins, and no filesystem settings (`setting_sources=[]`), so the user's and project's hooks, `CLAUDE.md` and MCP servers don't load. **Checked on every call:** the CLI's first message lists the tools the session loaded (checked against the effects probe's stream). If it lists anything but the structured-output tool, the call stops with `ToolsPresent` before the prompt is sent.
 - **Codex:** environment tools off (shell, `apply_patch`, `view_image`), web search disabled, its own subagents disabled (`agents.enabled=false`; `--disable multi_agent` alone isn't enough on current models), and the other built-in features disabled (apps, image generation, goals, sleep, plugins). It also runs in lup's own Codex home, so the user's MCP servers and hooks don't load (see the next section).
+  - Environment tools are removed per thread with `environments: []`, which the app-server protocol documents (as experimental).
+  - The SDK's `thread_start` doesn't take that field, so lup starts the thread through the SDK client's raw `request(method, params)`, which reaches any app-server method the SDK doesn't wrap.
   - **Declared gap:** Codex has no API that lists a session's tools, so this is configuration, not a per-call check.
-  - The setting that removes environment tools for an app-server process (`CODEX_EXEC_SERVER_URL=none`) is in Codex's source but not its docs. The Python SDK doesn't expose the documented per-thread alternative (`environments: []`).
   - So a live check, run by hand whenever the pinned Codex version changes, confirms the request carries no tools (Codex's rollout trace records the raw request). It becomes part of the capability check when that lands.
 
 ## Out of the operator's history
@@ -176,13 +179,18 @@ The dashboard will read the same records once events exist. That's the later sli
 **The guard is on in every test session of every project that installs lup**, through a pytest plugin entry point (`pytest11`). Under it:
 - **A real turn refuses to start**, raising `RealCallInTest`, which names the fixture to use instead.
 - **Network connections are refused** except to loopback addresses and Unix sockets, through `pytest-socket`, which the plugin turns on for the session.
+  - `pytest-socket` is a small pytest plugin. During tests it replaces Python's socket, so any connection outside the allowed hosts raises `SocketBlockedError`.
+  - It covers only the test process. That's why the guard above refuses real runtime subprocesses separately.
+  - It offers a per-test marker that re-enables the network (`enable_socket`). The gate will list uses of it like suppressions.
 
 Real calls belong in the live check above, not in tests (`AGENTS.md`: tests that reached real agents were slow and flaky). nori, which `DECISIONS.md` cites as having such a guard, in fact has a clock guard; neither nori nor the first lup refused real calls. So this is new.
 
 ## Repository layout
 
+One repository holding a few packages, versioned and installed separately, sharing one lock file (a uv workspace):
+
 ```
-pyproject.toml          the uv workspace: members, dev dependencies (ruff, pyright, pytest), tool config
+pyproject.toml          the workspace: members, dev dependencies (ruff, pyright, pytest), tool config
 packages/lup/           the library: distribution `lup`, imported as `lup`
   pyproject.toml
   src/lup/
@@ -190,15 +198,37 @@ packages/lup/           the library: distribution `lup`, imported as `lup`
 docs/                   one design note per piece
 ```
 
-The environment will be `packages/lup-env/` (distribution `lup-env`, imported as `lup_env`) when its first piece starts. Python 3.14, as in the first lup and every downstream project. `lup` and `lup-env` are both free on PyPI. Publishing is a decision for the release piece; the first lup's tag-triggered publish never ran (no trusted publisher was set up), and every downstream project installed from git.
+Two more packages arrive with their first pieces:
+- `packages/lup-dev/` (distribution `lup-dev`, imported as `lup_dev`): the environment, meaning everything a project uses only while it's being developed.
+- `packages/lup-dashboard/`: the dashboard, the one part with its own stack (the web build), behind the typed protocol `DESIGN.md` describes.
+
+Dependencies run one way only: `lup-dashboard` depends on `lup-dev`, which depends on `lup`.
+
+**Python 3.14 or later**, for its lazily evaluated annotations (PEP 649). The alternative is 3.12 with `from __future__ import annotations` in every file, which turns every annotation into a string. Pydantic resolves those strings, except:
+- names imported only for type checking;
+- models defined inside a function;
+- anything else that reads annotations at runtime, which gets strings.
+
+The first lup required 3.14 from its first week without recording why.
+
+`lup`, `lup-dev` and `lup-dashboard` are free on PyPI. Publishing is a decision for the release piece. The first lup's tag-triggered publish never ran (no trusted publisher was set up), and every downstream project installed from git.
 
 ## Decisions
 
 Each with the alternative, and where it lives. The ones marked **(yours)** are shape decisions for the operator.
 
-1. **(yours)** Workspace layout and names: a uv workspace, `packages/lup` as `lup`, later `packages/lup-env` as `lup-env`/`lup_env`. *Alternatives:* one distribution with an `env` extra (the split in `DESIGN.md` becomes a convention instead of a dependency boundary); a namespace package `lup.env` (two distributions sharing `lup`, awkward with `lup/__init__.py`). *Where:* `pyproject.toml`, `packages/`.
-2. **(yours)** Python 3.14 or later. *Alternative:* 3.13, for projects outside the operator's own; none exists yet. *Where:* `packages/lup/pyproject.toml`.
-3. **(yours, three new dependencies)** `claude-agent-sdk` and `openai-codex` to drive the runtimes; `pytest-socket` for the network guard. *Alternatives:* lup's own subprocess and JSON-RPC clients, which is what the first lup did for Codex, before an official SDK existed; `codex exec --json`, whose event stream drops the error classification (`willRetry`, `codexErrorInfo`), so errors could only be told apart by parsing text; a hand-written socket patch for the guard. *Where:* `claude.py`, `codex.py`, `testing/plugin.py`.
+1. **(yours, agreed)** One repository with a uv workspace. The packages are `lup`, later `lup-dev` (`lup_dev`), and `lup-dashboard`, with dependencies running one way. *Alternatives:* one distribution with extras, where the split in `DESIGN.md` becomes a convention instead of a dependency boundary; or a namespace package `lup.dev`, which is awkward beside `lup/__init__.py`. *Where:* `pyproject.toml`, `packages/`.
+2. **(yours, agreed)** Python 3.14 or later, for lazy annotations. *Alternative:* 3.12 with `from __future__ import annotations` everywhere. *Where:* `packages/lup/pyproject.toml`.
+3. **(yours, agreed)** Three new dependencies:
+   - `claude-agent-sdk` and `openai-codex`, as the optional extras `lup[claude]` and `lup[codex]`;
+   - `pytest-socket`, for the network guard.
+
+   *Alternatives:*
+   - lup's own subprocess and JSON-RPC clients, which is what the first lup did for Codex before an official SDK existed. The Codex SDK's raw `request` covers what it doesn't wrap.
+   - `codex exec --json`, whose event stream drops the error classification (`willRetry`, `codexErrorInfo`), so errors could only be told apart by parsing text.
+   - A hand-written socket patch for the guard.
+
+   *Where:* `claude.py`, `codex.py`, `testing/plugin.py`.
 4. The SDKs' pinned runtime binaries, not `PATH`. *Alternative:* `PATH`, as the first lup did. *Where:* `claude.py`, `codex.py`.
 5. `ask` returns the output itself; per-call facts go to the call record. *Alternative:* a `Reply[T]` wrapper with `.output`, `.usage` and `.cost`, which every caller would unwrap. *Where:* `agent.py`.
 6. Native typed output on both runtimes, with lup's validation and re-asks on top, and a string carrier for schemas Codex's strict mode refuses. *Alternative:* a submit tool lup hosts, as the first lup did on Claude. It let a gate reject a submission mid-turn, but needed the prompt to name the tool and raced with native output. *Where:* `output.py`, `agent.py`.
