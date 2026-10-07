@@ -87,7 +87,7 @@ async def test_translates_a_segment(fake_agents: FakeAgents) -> None:
 |---|---|---|---|
 | Front door | `lup/__init__.py` bound the neutral names and resolved `Claude`, `Codex` and the launch vocabulary on first access, through one table; a `TYPE_CHECKING` block gave checkers the real classes; nothing inside the library imported from it | **Kept** | `import lup` reaches neither SDK until an agent is named. That is also what makes the runtimes optional extras |
 | Neutral code and adapters | `sessions/` was provider-neutral; `providers/claude/` and `providers/codex/` each held a declaration and its runtime, plus much launch and home machinery | **Kept, as `adapters/`.** The launch, home, profile and preference machinery belongs to the environment | `DESIGN.md` says "an adapter per runtime". In the first lup, "provider" also meant model providers and compatible endpoints (`routing.py`) |
-| The declaration | 36 fields on `Claude`, mixing the library's (model, prompt, tools, layers) with a launch's (sandbox, plugin, policy, identity, companions, profile, home, endpoint) | **Reshaped:** `model`, `system_prompt`, `effort`, `layers`. Launch fields come with rooms, in the environment | `DESIGN.md`'s split between what production code imports and what development uses |
+| The declaration | 36 fields on `Claude`, mixing what production code needs (model, prompt, tools, layers) with what only developing a project needs (plugin, policy, identity, companions, profiles) | **Reshaped:** `model`, `system_prompt`, `effort`, `layers` in this slice. Every other field is placed in *Where the first lup's fields go* | `DESIGN.md`'s split between what production code imports and what development uses |
 | Default tools | `builtin="web"` and `permission_mode="bypassPermissions"`: a bare `Claude(...)` could search and fetch | **Reshaped:** no tools but lup's own, checked per call on Claude | live-translator had to get "no tools" built upstream before it could rely on it |
 | Protocols | Structural `Agent`, `Conversation`, `Turn` in `sessions/surface.py`, satisfied by having the methods | **Kept.** `Agent` now; `Conversation` and `Turn` arrive with conversations | Code naming no runtime, and the fake, satisfy them without registering |
 | The result | `TurnResult[T]`: `output`, `messages`, `blocks`, `usage`, `duration`, `identifiers`; failures only as errors | **Kept, slimmer:** `output`, `usage`, `duration`, `session_id`, `rejected`. `messages` arrives with project tools, when a turn has something in it | Callers outside the library read `.output` about 25 times, `.usage` 8, `.duration` 6, `.session_id` 5 |
@@ -100,6 +100,23 @@ async def test_translates_a_segment(fake_agents: FakeAgents) -> None:
 | Out of the operator's history | Sessions from code ran in the operator's config home by default. Derived homes copied the credentials file, because Claude Code replaces it on refresh | **Reshaped:** no session persistence and no user settings (see below) | Same result, no second login to keep fresh |
 | Driving Codex | lup's own JSON-RPC client for `codex app-server` | **Reshaped:** the official `openai-codex` SDK, whose raw `request` reaches anything it doesn't wrap | The SDK exists now |
 | Fake and guard | Test doubles in lup's own tests only (`tests/unit/doubles.py`); no guard against real calls | **New:** both ship in the library | live-translator's 60-line stub |
+
+## Where the first lup's fields go
+
+A plain ask can carry tools without becoming a room. `DESIGN.md` draws the line at running code or writing files: "a container is required whenever an agent can run code or write files". Web search, a project's own function tools (they run in the caller's process) and reading a directory need no container.
+
+| Where | The first lup's fields |
+|---|---|
+| This slice | `model`, `system_prompt`, `effort`, `layers` |
+| The tools slice: a plain declaration, no container | `tools` (web, read-only file tools, MCP servers, lup function tools); `cwd` and the directories it may read; `max_turns` |
+| A slice for products others use | `endpoint`, `api_key` |
+| The conversations slice | `resume` and history; `delta_streaming`, for live events |
+| Observability | `record`: what is kept of a session |
+| The runtime's process | `environment`: the variables it starts with |
+| The containers slice, where rooms build on it | `sandbox` and writable mounts, with Bash and the tools that write |
+| The environment (`lup-dev`), for developing a project | `plugin` (the compiled harness), `policy`, `hooks`, `requirements` (checks before a launch), `identity` (a place on the roster), `companions` (processes kept beside a session), `max_recursive_agent` (spawn depth, which belongs to budgets), and the account fields `profile`, `home`, `move_sessions` |
+| Derived, not declared | `permission_mode`, `allowed_tools`, `disallowed_tools`: lup sets permissions from the declared tools, so a declaration can't contradict its own tools |
+| Dropped | `max_thinking_tokens` (superseded by `effort` in the SDK); `setting_sources`, `cli_path`, `max_buffer_size`, `stderr_tail_lines` and the `extra_args` escape hatch (adapter internals); `subagents` (`DESIGN.md`'s spawn replaces native subagents); `submission_gate_resolver` (the gate moves to `ask`, see below) |
 
 ## Typed answers: `lup_submit` and its guard
 
@@ -260,8 +277,12 @@ Each with the alternative and where it lives. **(yours)** marks the operator's.
 4. **(yours, agreed)** `adapters/`, not `providers/`. *Alternative:* the first lup's name. *Where:* `lup/adapters/`.
 5. **(yours, agreed)** `ask` returns `TurnResult[T]`. *Alternatives:* the output itself; the output plus an opt-in recorder. *Where:* `sessions/results.py`.
 6. **(yours, agreed)** Typed answers through `lup_submit` on both runtimes, guarded at turn end. Native structured output is used on neither. *Alternatives:* the first lup's split (a tool on Claude, native on Codex) with a "Correction required" re-send; native output on both. *Where:* `sessions/submission.py`, `adapters/*/runtime.py`.
-7. **(yours)** `gate` is a parameter of `ask`, not of the declaration. A gate checks one output type, and a declaration answers many. *Alternative:* the first lup's `submission_gate_resolver` field on the declaration. *Where:* `sessions/declaration.py`.
-8. **(yours)** The declaration's fields: `model`, `system_prompt`, `effort`, `layers`. *Alternative:* the first lup's 36. *Where:* `adapters/*/__init__.py`.
+7. **(yours)** `gate` is a parameter of `ask`, not of the declaration.
+   - A gate checks one output type, and a declaration answers many. On the declaration, the first lup needed a resolver from output type to gate, which erased the type and re-validated the answer to recover it.
+   - Its own docstring (`sessions/composition.py`) says moving the gate beside the output type on the turn "would remove it entirely".
+   - *Alternatives:* the first lup's resolver on the declaration; both, with the declaration's as a default; a gate method on the output model, which lacks the context a reviewer needs.
+   - *Where:* `sessions/declaration.py`.
+8. **(yours)** This slice's fields are `model`, `system_prompt`, `effort` and `layers`, and every one of the first lup's 36 fields has a place in *Where the first lup's fields go*. *Alternative:* carrying more of them into this slice before anything uses them. *Where:* `adapters/*/__init__.py`.
 9. Layers as one field with four layers. *Alternative:* flat fields on the declaration. *Where:* `sessions/layers.py`.
 10. No session persistence and no user settings for calls from code, until rooms need an own config home. *Alternative:* the first lup's derived homes with a copied login. *Where:* `adapters/*/runtime.py`.
 11. The fake replaces the adapter under the real `ask`. *Alternatives:* a fake `Agent`; monkeypatching per project. *Where:* `sessions/contract.py`, `testing/fake.py`.
