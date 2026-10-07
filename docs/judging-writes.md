@@ -229,7 +229,7 @@ Pyright has no plugin API, and its published package is one bundled file whose i
 2. **`Any`:** `string-split` fires on a receiver declared `Any`, but not on one pyright can't infer, so findings don't depend on the environment being installed.
 3. **Unions:** `str | X` is flagged when any member is `str` or `bytes`.
 4. **Tuples:** `list[X]` is the one spelling of a sequence (`docs/conventions.md`), so `tuple-shape` flags every tuple type; the spike's edge tuples need no special case.
-5. **Files that import a changed one:** the rules read only the changed files, so their findings come at the edit. The changed files' importers are re-checked for type errors in the background, and their errors arrive at the next checkpoint. One background pass at a time per worktree: a change while one runs marks it to run once more afterwards, over everything changed, never a second process. The turn-end check waits for the pass, so no type error surfaces after the session. Built (`policy/checkpoint.py`, `ImportersPass`) as a lock the pass holds for its whole life, which the system frees however the process ends: a request adds its files to what's pending and starts a process only when the lock is free; the pass takes everything pending, batch after batch, and releases its lock only once nothing is, under the state's own lock, so no request finds it gone with work left. Two requests racing can start a second process, which finds the lock held and exits without running a pass. Work left pending with no pass running is done by the turn's end while it waits.
+5. **Files that import a changed one:** the rules read only the changed files, so their findings come at the edit. The changed files' importers are re-checked for type errors in the background, and their errors arrive at the next checkpoint. One background pass at a time per worktree: a change while one runs marks it to run once more afterwards, over everything changed, never a second process. The turn-end check waits for the pass, so no type error surfaces after the session. Built (`policy/importers.py`, `ImportersPass`) as a lock the pass holds for its whole life, which the system frees however the process ends: a request adds its files to what's pending and starts a process only when the lock is free; the pass takes everything pending, batch after batch, and releases its lock only once nothing is, under the state's own lock, so no request finds it gone with work left. Two requests racing can start a second process, which finds the lock held and exits without running a pass. Work left pending with no pass running is done by the turn's end while it waits.
 6. **Type stubs:** the pinned standard-library stubs ship beside the bundle.
 
 ## The `# lup:` directives
@@ -314,29 +314,36 @@ In lup itself, the judge's own source isn't asked about at each edit: the judge 
 
 ## Modules
 
-In `packages/lup-dev/src/lup_dev/`:
+In `packages/lup-dev/src/lup_dev/`, by subsystem (`docs/conventions.md`, *Package layout*), highest layer first:
 
 | Module | What it's for |
 |---|---|
+| **`adapters/`** | **Each runtime's hooks: the only modules naming a runtime** |
+| `adapters/claude.py`, `adapters/codex.py` | Each runtime's payloads in, its outputs out, and the variables it sets in its commands |
+| **`policy/`** | **Judging every write** |
 | `policy/roles.py` | Path roles: which role a path has |
-| `catalog/paths.py` | The default path patterns each role starts from, as data the operator reviews |
-| `project.py` | The minimal `Project` declaration (`Protected`, `Pytest`), and loading it from `[tool.lup]` |
-| `codescan/conditions.py` | The `Condition` ABC, the stock `PythonAvailable` and `PackageReleased`, and reading a project's conditions |
-| `policy/runtime.py` | The `Runtime` ABC: what the core needs to know about a runtime |
-| `policy/before.py` | A file tool's replacement or whole write before it lands: the would-be content, then the judgement |
-| `policy/checkpoint.py` | The runtime-neutral events, the in-flight set, deciding when to judge, the checkpoint, holds at the checkpoint, the importers pass |
-| `policy/store.py` | The store: snapshot, compare, set aside what was committed elsewhere, restore, save, move the accepted tree forward |
 | `policy/judge.py` | One judgement over a set of changed files, shared by `policy/before.py` and the checkpoint: role, rules, public API, directives, outcome |
 | `policy/surface.py` | Comparing a file's public surface before and after |
-| `codescan/ruff.py` | ruff's findings on the changed files, in the engine's `Finding` shape |
-| `codescan/contract.py` | The client for the engine: findings, type errors, surfaces, directives for a set of files |
-| `codescan/directives.py` | The `# lup:` directive models, and checking them |
+| `policy/before.py` | A file tool's replacement or whole write before it lands: the would-be content, then the judgement |
+| `policy/checkpoint.py` | The runtime-neutral events, the in-flight set, deciding when to judge, the checkpoint, holds at the checkpoint |
+| `policy/importers.py` | The background pass re-checking the files that import what changed |
+| `policy/store.py` | The store: snapshot, compare, set aside what was committed elsewhere, restore, save, move the accepted tree forward |
 | `policy/holds.py` | Holds: waiting for an answer, and answering |
 | `policy/verdicts.py` | The verdict log and its summary |
 | `policy/report.py` | The reports, in pyright's shape |
-| `clock.py` | The clock judging reads and waits on, which tests drive |
+| `policy/runtime.py` | The `Runtime` ABC: what the core needs to know about a runtime, which each adapter implements |
+| **`codescan/`** | **Reading code** |
+| `codescan/contract.py` | The engine's contract: findings, type errors, surfaces, directives for a set of files; the engine's client lands beside it as `codescan/engine.py` |
+| `codescan/directives.py` | The `# lup:` directive models, and checking them |
+| `codescan/conditions.py` | The `Condition` ABC, the stock `PythonAvailable` and `PackageReleased`, and reading a project's conditions |
+| `codescan/ruff.py` | ruff's findings on the changed files, in the engine's `Finding` shape |
+| **`catalog/`** | **The data that sets lup's policy, protected** |
+| `catalog/paths.py` | The default path patterns each role starts from |
+| **root** | **Package-wide** |
+| `project.py` | The minimal `Project` declaration (`Protected`, `Pytest`), and loading it from `[tool.lup]` |
 | `settings.py`, `layout.py` | The environment variables `lup_dev` reads; where it keeps what it stores |
-| `adapters/claude.py`, `adapters/codex.py` | Each runtime's payloads in, its outputs out, and the variables it sets in its commands: the only modules naming a runtime |
+| `clock.py` | The clock judging reads and waits on, which tests drive |
+| `errors.py` | `LupDevError`, the root of what `lup_dev` raises |
 | `cli.py` | `lup-dev hook claude\|codex`, `lup-dev rules check`, `lup-dev holds`, `lup-dev verdicts`; the one place listing the adapters |
 
 The rules live in `packages/lup-dev/checker/`, a TypeScript project built into one file.
@@ -381,7 +388,7 @@ Each with its alternative and where it lives. **(yours, agreed)** marks what the
 10. **(yours, agreed)** Every verdict logged from day one, summarized by `lup-dev verdicts`. *Alternative:* reconstruct from transcripts, as the first lup's study had to. *Where:* `policy/verdicts.py`.
 11. **(yours, agreed)** You're asked in Claude Code's prompt (or through the interim review hook); Codex holds at the checkpoint. *Alternative:* holds on both runtimes. *Where:* `policy/before.py`, `policy/holds.py`.
 12. **(yours, agreed)** The typed engine on pyright's own tree from the first rule, with no syntax-only stage. *Alternatives:* mypy's tree; ruff's `banned-api` plus a syntax checker first. *Where:* `checker/`.
-13. **(yours, agreed)** The spike's six questions, as decided above: no tuple types at all, and importers re-checked in one background pass per worktree, waited on at turn end. *Alternative:* importers left to the gate, which could surface a type error after the session. *Where:* `checker/`, `policy/checkpoint.py`.
+13. **(yours, agreed)** The spike's six questions, as decided above: no tuple types at all, and importers re-checked in one background pass per worktree, waited on at turn end. *Alternative:* importers left to the gate, which could surface a type error after the session. *Where:* `checker/`, `policy/importers.py`.
 14. **(yours, agreed)** `# lup:` directives as calls, everything else a note, a wrong directive a finding. *Where:* `codescan/directives.py`.
 15. **(yours, agreed)** `defer` carries a required `why`, an `issue`, a `when` naming a `Condition` declared in Python, or both; a closed issue is reported; the ledger's to-do items point at GitHub issues. *Alternatives:* a condition written as a requirement string in the comment; `defer` pointing only at ledger records. *Where:* `codescan/directives.py`, the gate.
 16. **(yours, agreed)** Removing a note: free if added this session; reported if committed; through its record once the ledger exists. *Alternative:* the first lup's refusal. *Where:* `policy/judge.py`, `codescan/directives.py`.
@@ -415,7 +422,7 @@ Taken while building it:
 41. At the edit, a conditions module is read without running it; at the gate it's imported. *Alternative:* import it at the edit, which runs a project's code in every hook. *Where:* `codescan/conditions.py`.
 42. A closed issue or a condition that holds fails `lup-dev rules check`. *Alternative:* list them without failing, which lets them pile up. *Where:* `cli.py`, `codescan/directives.py`.
 43. `PackageReleased` holds for that version or a later final one; `PythonAvailable` reads uv's list of interpreters. *Alternatives:* that exact version; the interpreter running the gate. *Where:* `codescan/conditions.py`.
-44. One importers pass per worktree is a lock the pass holds for its life. *Alternative:* its process id checked with `os.kill(pid, 0)`, which kills the process on Windows and is fooled by a reused id. *Where:* `policy/checkpoint.py`.
+44. One importers pass per worktree is a lock the pass holds for its life. *Alternative:* its process id checked with `os.kill(pid, 0)`, which kills the process on Windows and is fooled by a reused id. *Where:* `policy/importers.py`.
 45. An answer to an ask or a hold is appended as the same verdict under the same key. *Alternative:* log an ask only once answered, which a hook that dies would lose. *Where:* `policy/verdicts.py`.
 46. Two suppressions: git's `-z` output split on its NUL separators (`policy/store.py`), and the file tool's own replacement applied with `str.replace` (`policy/before.py`). *Alternatives:* a git library (dulwich, pygit2) for the store, a new dependency; slicing, which another rule refuses. *Where:* those two lines.
 47. When judging itself fails, a file tool's write is denied and other calls go on, told; a turn's end is blocked once. *Alternative:* a crash, which a runtime treats as no decision, letting a write meant for review through. *Where:* `adapters/`.
