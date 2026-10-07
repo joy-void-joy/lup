@@ -279,7 +279,7 @@ On Codex a refused `apply_patch` lands for the moment between the call and the c
 | Saved versions | `<worktree>/.lup/saved/` | The agent has to edit and move them |
 | The judge itself | A local copy installed from `dev` (`uv tool install` from the `dev` checkout), refreshed when `dev` moves | An agent editing the rules in its worktree isn't judged by its own edit, and a broken judge in a worktree can't refuse every write including its own fix (in the first lup, conflict markers in the compiled hook refused every command). A branch changing the rules runs them in its own tests until it lands |
 
-In lup itself, the judge's own source isn't a protected path in this piece: the judge that runs is the installed copy, and what reaches `dev` is reviewed at the release. `DESIGN.md`'s protection of lup's policy and launch code arrives with trust on launch.
+In lup itself, the judge's own source isn't asked about at each edit: the judge that runs is the installed copy, so an edit in a worktree can't change what judges it. It's protected after the edit and before it runs, the way the art studio's trust on launch worked. Refreshing the installed judge from `dev` shows the operator the diff of its source since the copy they last approved, and the approved copy keeps judging until they approve the new one. The operator sees exactly what will run before it runs. `DESIGN.md`'s protection of lup's policy and launch code is this same review, applied to every launch once trust on launch is ported.
 
 ## Modules
 
@@ -349,3 +349,4 @@ Each with its alternative and where it lives. **(yours, agreed)** marks what the
 23. A refused new file comes back through `Write`; a refused edit through its saved copy. *Alternative:* hold the moved copy at the checkpoint for the operator, which Claude Code can't prompt for there. *Where:* `before.py`, `report.py`.
 24. `lup-dev holds` refuses to answer from inside a session; the real separation waits for containers. *Where:* `holds.py`.
 25. **(yours)** The note's name: it now judges edits before they land, not after the call. Proposed: `docs/judging-writes.md`.
+26. **(yours, agreed)** The judge's own source is reviewed before an installed copy runs, not asked at each edit: refreshing from `dev` shows its diff since the last approved copy, which keeps running until the operator approves. *Alternative:* a protected path asked at every edit, which reviews each step rather than what will run. *Where:* the judge's installer.
