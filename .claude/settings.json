@@ -13,7 +13,7 @@
           {
             "type": "command",
             "command": "uv run --script \"$CLAUDE_PROJECT_DIR/.claude/hooks/interim_review.py\"",
-            "timeout": 14700,
+            "timeout": 1728300,
             "statusMessage": "Checking whether this write waits for review"
           }
         ]
@@ -26,7 +26,7 @@
           {
             "type": "command",
             "command": "uv run --script \"$CLAUDE_PROJECT_DIR/.claude/hooks/interim_review.py\"",
-            "timeout": 14700,
+            "timeout": 1728300,
             "statusMessage": "Waiting for your answer in the review dashboard"
           }
         ]
