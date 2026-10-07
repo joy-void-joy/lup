@@ -5,7 +5,7 @@
 """Judge a Python file the agent just wrote with the first lup's anti-pattern rules.
 
 An interim check for the bridge, until lup's own rule engine lands
-(`docs/after-call-diff.md`); then this file and its hook go. It runs after each
+(`docs/judging-writes.md`); then this file and its hook go. It runs after each
 Write or Edit, in the background, and wakes the agent with the findings.
 
 The first lup's checker judges a file outside its repository when told where
