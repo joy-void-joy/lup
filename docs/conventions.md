@@ -142,7 +142,9 @@ In its home, a constant needs no suppression. Anywhere else the rule fires and n
 - **No `.strip(chars)` or `.replace` on a `str` or `bytes`** to take it apart or rewrite it: same reason (7 and 10 suppressions in the first lup). `.strip()` with no argument trims whitespace and is fine.
 - An agent's output is never hand-parsed: typed answers come through `lup_submit` (`docs/library.md`).
 
-The parsers to reach for: `json`, `tomllib` (`tomlkit` to edit), `csv`, `urllib.parse`, `pathlib`, `email`, `shlex`, `ast`, `datetime.fromisoformat`, `packaging.version` and `packaging.requirements`, `xml.etree.ElementTree`, `trafilatura` or `beautifulsoup4` for web pages. A grammar of our own gets a parser library.
+The parsers to reach for: `json`, `tomllib` (`tomlkit` to edit), `csv`, `urllib.parse`, `pathlib`, `email`, `shlex`, `ast`, `datetime.fromisoformat`, `packaging.version` and `packaging.requirements`, `trafilatura` or `beautifulsoup4` for web pages. A grammar of our own gets a parser library.
+
+**Open: XML.** ruff's `S313`–`S319` flag the standard library's XML parsers: Python 3.14's docs say Expat below 2.7.2 may be vulnerable, and the interpreter uv installed carries 2.6.3. Lean: `defusedxml` is XML's parser, a dependency only where a project reads XML, and the rules stay on.
 
 **Why.** Quick regex and split patches matched the cases tried and failed quietly on the rest; the bugs were hard to find. A parser fails loudly.
 
@@ -169,7 +171,7 @@ The parsers to reach for: `json`, `tomllib` (`tomlkit` to edit), `csv`, `urllib.
 
 **The first lup.** `typing.Any` never imported, `cast` 7 times; PEP 695 on 53 classes and 76 functions, no `TypeVar`. pyright ran in standard mode, never strict.
 
-**Enforced by:** `any-type`, `cast`, `bare-object`; modern spellings by ruff's `UP` rules; ruff's `ANN401` is off (it overlaps `any-type`).
+**Enforced by:** `any-type`, `cast`, `bare-object` (which accepts the `object` parameters Python's own protocols require, as in `__eq__` and `__exit__`); modern spellings by ruff's `UP` rules; return types by ruff's `ANN2xx`.
 
 ## Errors
 
@@ -206,6 +208,7 @@ The parsers to reach for: `json`, `tomllib` (`tomlkit` to edit), `csv`, `urllib.
 
 **Decision.**
 - **Prose,** not `Args:`/`Returns:` sections, which repeat what the signature says.
+- **Open: the first line's mood.** ruff's `D401` wants a function's first line in the imperative ("Return the saved path.") and flags noun phrases ("The saved path."). Lean: keep it on, since it's a checked, uniform answer and PEP 257's own convention.
 - **Required on modules, classes, and module-level functions and methods.** Nested helpers are exempt (ruff's `D1` rules don't reach them; checked).
 - **Inline code in single backticks,** as in Markdown and these docs. Not double backticks (reStructuredText) and not Sphinx roles.
 - **Examples as doctests.** A docstring may show a call and its result:
@@ -217,7 +220,7 @@ The parsers to reach for: `json`, `tomllib` (`tomlkit` to edit), `csv`, `urllib.
 
 **The first lup.** 81% of functions had a docstring, 0.5% used `Args:` sections. Inline code: 1,561 docstrings used double backticks only, 1,076 single only, 721 both, and 863 used Sphinx roles.
 
-**Enforced by:** ruff's `D1` rules, with one of each conflicting pair chosen (`D203` against `D211`, `D212` against `D213`) and `D417` off; `docstring-code`, which refuses double backticks and Sphinx roles in docstrings; the doctests by the gate.
+**Enforced by:** ruff's `D1` rules, with one of each conflicting pair chosen (`D211` over `D203`, `D212` over `D213`) and `D417` off; `docstring-code`, which refuses double backticks and Sphinx roles in docstrings; the doctests by the gate.
 
 ## Suppressions and directives
 
@@ -229,7 +232,7 @@ The parsers to reach for: `json`, `tomllib` (`tomlkit` to edit), `csv`, `urllib.
 
 - On the finding's line, or alone on the line above.
 - **Every rule accepts it.** Adding one asks the operator.
-- `# noqa`, `# type: ignore` and `# pyright: ignore` are refused. ruff runs with `--ignore-noqa`, pyright with `enableTypeIgnoreComments = false`, and lup filters their findings through its own `ignore`.
+- `# noqa`, ruff's own `# ruff: noqa` and `# ruff: disable`, `# type: ignore` and `# pyright: ignore` are refused. ruff runs with `--ignore-noqa`, pyright with `enableTypeIgnoreComments = false`, and lup filters their findings through its own `ignore`.
 - The rest of the `# lup:` grammar (`defer`, notes, removing a note) is in `docs/judging-writes.md`, *The `# lup:` directives*.
 
 **The first lup.** 783 typed directives in the library, 40 in its application, 112 in its tests (the test exemption didn't apply in lup itself). Placement bugs: a file-wide ignore after the docstring was silently inert (#213), and the edit hook and the audit disagreed on 18 files.
@@ -251,32 +254,22 @@ import-linter checks the whole graph at the gate. The engine reads the same cont
 
 ## ruff's selection
 
-`select = ["ALL"]`, minus each rule that overlaps or contradicts a lup rule, listed with the rule that owns its concern:
+`select = ["ALL"]`, minus each rule that overlaps or contradicts an owner in this document. **The list lives in the root `pyproject.toml`,** each rule beside a comment naming the owner of its concern, grouped by this document's sections; it isn't repeated here, so the two can't disagree. The full pass over ruff's 810 rules (ruff 0.16.10) produced it, and its merge commit (`2baa4b3`) gives each rule's reason and the rules considered and kept.
 
-| ruff rule | Off because | Owner |
-|---|---|---|
-| `SIM105` | steers to `contextlib.suppress` | `suppress` |
-| `E722`, `BLE001` | overlap; `BLE001` contradicts the steer to `Exception` | `bare-except`, `except-baseexception` |
-| `PLR2004` | pushes values into module constants | `constant-home` |
-| `PLR0911` | fights guard clauses | `elif` |
-| `SIM116` | steers `if` chains to dict lookups | `elif`, `match` |
-| `PERF401`–`PERF403` | overlap | `collection-loop` |
-| `PTH` | overlap | `os-path`, `os-file-ops` |
-| `S602`–`S607` | overlap | `subprocess`, `os-shell` |
-| `ANN` | pyright strict reports missing annotations; `ANN401` overlaps | `any-type` |
-| `D417` | `Args:` sections aren't used | prose docstrings |
-| one of `D203`/`D211`, one of `D212`/`D213` | each pair contradicts itself | ruff |
-| `COM812`, `ISC001` | conflict with ruff's formatter | ruff's formatter |
+What the pass settled beyond the rules this document names:
+- **Return types are ruff's.** pyright strict reports a parameter without a type, but not a function without a return type, so only `ANN001`–`ANN003` and `ANN401` are off; `ANN201`–`ANN206` stay, nested helpers and tests included.
+- **`ISC001` stays on:** ruff's formatter no longer conflicts with it. `COM812` and `COM819` are off for the formatter.
+- **Rules that fire only on what a lup rule refuses are off,** so a finding comes once, from its owner: the named-tuple, dataclass, private-name, `re`, string-slice, `Any`, `cast`, `contextlib.suppress`, subprocess and `os.environ` rules among them.
+- **Rules that steer against a convention are off:** `PLR5501` (steers to `elif`), `PLR1714` (to a set literal), `ASYNC109` (flags a `timeout` parameter, the home of a duration), `TD` (TODO comments, where deferred work is `defer`).
+- **`CPY001` is off** until a copyright header is chosen.
+- **Configured rather than off:** `ERA001` takes `lint.task-tags = ["lup"]`; `TC003` takes `runtime-evaluated-base-classes = ["pydantic.BaseModel", "pydantic_settings.BaseSettings"]`, so a field's type isn't moved into a `TYPE_CHECKING` block, which would break the model at runtime.
+- **The gate runs `ruff check --ignore-noqa`:** ruff has no setting for it.
 
-Configured rather than off:
-- `ERA001`: `lint.task-tags = ["lup"]`;
-- `TC003`: `flake8-type-checking.runtime-evaluated-base-classes = ["pydantic.BaseModel"]`, so a pydantic field's type isn't moved into a `TYPE_CHECKING` block, which would break the model at runtime.
-
-The full pass over ruff's catalog against this document is part of the implementation; its result is this table, reviewed in that pull request.
+A rule added later says which ruff rules it turns off, in `pyproject.toml`.
 
 ## Tests
 
-Tests are exempt from lup's rules. A file's test role comes from the test roots pytest itself reads (`testpaths` in the nearest `pyproject.toml`), nested projects included, until the project declaration names them. In the first lup the exemption existed but never applied in one project, because test roles came from somewhere other than the suites the gate runs. ruff and pyright still run on tests, with ruff's test-only exemptions (`S101`, `PLR2004`, `D`, `ARG`, `INP001`).
+Tests are exempt from lup's rules. A file is a test if pytest collects it as a test module: under a root pytest reads (`testpaths` in the nearest `pyproject.toml`, nested projects included) and matching its `python_files` patterns (`test_*.py` by default), until the project declaration names its tests. The patterns matter: the source directories are in `testpaths` too, so pytest runs their doctests, and a source module collected only for its doctests stays production code. In the first lup the exemption existed but never applied in one project, because test roles came from somewhere other than the suites the gate runs. ruff and pyright still run on tests, with ruff's test-only exemptions (`S101`, `D`, `ARG`, `INP001`).
 
 ## Keeping the rules cohesive
 

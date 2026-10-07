@@ -64,7 +64,7 @@ lup never stays silent on a write it judges. Staying silent would send the call 
 **Path roles.** Each path has one role, the first that matches:
 1. **protected:** the project declaration; dependency manifests and lockfiles (`pyproject.toml`, `uv.lock`, `package.json`, `bun.lock`); what runs outside the agent's reach (`.github/`, git hooks and `.git/config`, `.pre-commit-config.yaml`, `.vscode/`, `.devcontainer/`, `.claude/`, `.codex/`); what widens a later launch (`sync.json`, `sync.json.local`); secrets (`.env*.local`); and whatever the project adds;
 2. **operator's documents:** `DESIGN.md`, `AGENTS.md`;
-3. **test:** under a test root pytest reads (`testpaths` in the nearest `pyproject.toml`), nested projects included;
+3. **test:** a module pytest collects as a test: under a root it reads (`testpaths` in the nearest `pyproject.toml`, nested projects included) and matching its `python_files` patterns. A source module pytest reads only for its doctests stays production (`docs/conventions.md`, *Tests*);
 4. **scratch:** `tmp/` at any depth, and the saved versions under `.lup/`;
 5. **docs:** Markdown files and `docs/`;
 6. **data:** JSON, CSV, YAML and other data formats outside a source tree;
