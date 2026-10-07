@@ -121,6 +121,14 @@ type = "forbidden"
 source_modules = ["lup_dev"]
 forbidden_modules = ["lup_dashboard"]
 
+# The judging core never names a runtime: each runtime's spellings live in its
+# adapter, and only the command line lists the adapters.
+[[tool.importlinter.contracts]]
+name = "only lup_dev.cli imports the runtime adapters"
+type = "protected"
+protected_modules = ["lup_dev.adapters"]
+allowed_importers = ["lup_dev.cli"]
+
 [dependency-groups]
 dev = [
     "import-linter>=2.15",
