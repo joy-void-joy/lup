@@ -4,9 +4,18 @@ version = "0.1.0"
 description = "The environment for developing a project with agents."
 requires-python = ">=3.14"
 dependencies = [
+    "filelock>=4.0.10",
+    "httpx>=0.28.1",
     "lup",
+    "packaging>=26.3",
     "pydantic>=2.12",
+    "sh>=2.4.0",
+    "tenacity>=9.1.4",
+    "typer>=0.27.2",
 ]
+
+[project.scripts]
+lup-dev = "lup_dev.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.12.23,<0.13.0"]
