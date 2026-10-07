@@ -137,7 +137,7 @@ Each rule names the mistake it prevents and where it steers: one line in the ref
 
 **Which findings refuse.** A refusal comes from findings on the lines the change touched; for a new file, that's every line. The refusal lists every finding in the file, so one pass fixes them all. The art studio's agent resent a 550-line file four times, once per rule. Findings on lines the change didn't touch are listed under their own heading and don't refuse. They exist only where a rule is newer than the code, and the update that brings a rule shows its findings to the project.
 
-## The engine: one typed tree (open)
+## The engine: one typed tree (lean: A, measured)
 
 The operator wants one unified typed tree: each file parsed once and type-checked once, with every rule reading types straight from that tree. That rules out the first lup's approach: a syntax tree, plus a pyright language server asked about one position at a time, whose hover text then had to be read (`codescan/oracle.py`).
 
@@ -163,13 +163,36 @@ Pyright has no plugin API, and its published package is one bundled file (`dist/
   - staying warm between checkpoints means driving mypy's internal incremental machinery, or paying a cached build each time;
   - pyright would still run separately for the type errors.
 
-**Lean: A, after a spike.** On its own branch:
-1. build `pyright-internal` at a pinned tag;
-2. load this repository;
-3. write `tuple-shape` and `string-split` as visitors;
-4. measure a checkpoint.
+**Nothing existing does this.**
+- The one project that ran lint rules over pyright's typed tree, Zzzen/pyright-lint, has been dead since February 2023.
+- basedpyright adds its rules inside a fork and has no extension API.
+- ty, Pyrefly and Zuban offer no plugin API.
+- Pyright's own type server (`pyright-typeserver`, published September 2026) answers type queries over a protocol. That keeps rules in Python, but it's one query per expression, which is the oracle approach this section rules out. Its protocol is also at 0.x.
 
-If the internals turn out too unstable to build against, B is the fallback.
+**A spike measured A** (pyright 1.1.414; about 970 lines of TypeScript, kept as evidence in the session's scratch directory, not landed):
+- **Same answers as pyright.** It loads a project the way the pyright CLI does. Its type errors on the first lup's library matched the CLI's exactly: 32 of 32, same file, line, column and rule.
+- **The rules cost under 1% of the check**, at most 8 ms per file.
+- **Warm re-checks.**
+  - One changed file: median 65–270 ms (range 10–620).
+  - Ten changed files: 0.5–2.7 s, over this note's 300 ms target.
+  - Nearly all of it is pyright's own re-check, which the type errors need anyway, so B couldn't be faster.
+  - The machine was heavily loaded throughout, so these are pessimistic.
+- **Accuracy.** The typed `string-split` correctly leaves out `shlex.split` and `re.split`, which a syntax-only rule flags. It missed nothing while the project's environment was installed, and lost 1 of 112 findings without it. `tuple-shape` caught every alias form tried (`TypeAlias`, `type X = …`, `typing.Tuple`, string annotations, `cast("tuple[…]", v)`).
+- **Directives.** The text after `lup:` parses in place with pyright's own expression parser, so `ignore(…)`, notes and wrong directives all worked.
+- **Upgrades.** The rule code compiled unchanged against pyright releases 17 months apart. Only about 40 lines of project setup broke.
+- **Cost:**
+  - a 3.5 MB bundle, plus pyright's 28 MB of standard-library type stubs shipped beside it;
+  - 1.5–2.7 GB of memory on a 700-file project.
+
+**Lean: A.** Questions the spike raised, with the leans:
+1. **Aliases:** flag a fixed-tuple alias where it's defined, and its uses only when it's defined outside the project.
+2. **`Any`:** flag `string-split` on a receiver declared `Any`, but not on one pyright can't infer (Unknown), so findings don't depend on the environment being installed.
+3. **Unions:** flag `str | X` when any member is `str` or `bytes`.
+4. **Edge tuples:** don't flag `tuple[()]` or `tuple[int, *tuple[str, ...]]`.
+5. **Checkpoint scope:** re-check only the changed files at a checkpoint. Files that import them are left to the gate, since re-checking importers took 12–45 s on the first lup's library.
+6. **Type stubs:** ship the pinned standard-library type stubs beside the bundle.
+
+B stays the fallback if building against pyright's internals turns out too costly to keep up.
 
 Whichever engine is chosen also reads everything else lup reads in Python source, the `# lup:` directives included, so there's one parser.
 
@@ -244,7 +267,7 @@ Each with its alternative and where it lives. The ones marked **(yours)** are th
 3. **(yours, agreed)** lup asks, refuses or stays silent, and never says "allow". "Defer" and the line count go. *Alternative:* keep "allow" for small edits, which would skip the runtime's own mode. *Where:* `asking.py`, `hooks/`.
 4. **(yours, agreed)** You're asked in Claude Code before a new file or a suppression lands. Shell-made ones are refused, and the blanket `Write` prompt goes. Codex gets a hold. *Alternative:* a hold on both runtimes, answered from the terminal. *Where:* `asking.py`, `holds.py`.
 5. **(yours, agreed)** The four rules, with `set-shape` as broad as before. *Where:* the engine.
-6. **(yours, open)** The engine: pyright's tree built from source (A, lean, after a spike) or mypy's (B). *Where:* `checker/` or `rules/`.
+6. **(yours, leaning A)** The engine: pyright's own tree, built against its source at a pinned release (A, measured by the spike), or mypy's (B). Also the spike's six questions (aliases, `Any`, unions, edge tuples, checkpoint scope, type stubs). *Alternatives:* pyright's type server, queried one expression at a time; mypy's tree. *Where:* `checker/`.
 7. **(yours, agreed)** `# lup:` directives as calls, everything else a note, a wrong directive a finding. `ignore` only for now. *Alternatives:* `ignore[rule] why` read by a grammar library; TOML in the comment (`# lup: ignore = { rule = "tuple-shape", why = "…" }`). *Where:* `directives.py`.
 8. Content equal to `HEAD` isn't judged. *Alternatives:* judge it, which makes every checkout replay history as new writes; recognize git commands, which is the command-spelling parsing `DESIGN.md` removed. *Where:* `changes.py`.
 9. Findings on touched lines refuse; the refusal lists every finding in the file. *Alternative:* any finding in a touched file refuses. *Where:* `judge.py`, `report.py`.
