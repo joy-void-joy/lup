@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Literal
 
 from lup.types import Model
-from lup_dev.directives import Directive
+from lup_dev.codescan.directives import Directive
 
 
 class Position(Model):

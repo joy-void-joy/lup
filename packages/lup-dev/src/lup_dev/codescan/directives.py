@@ -34,7 +34,7 @@ from tenacity import (
 )
 
 from lup.types import Model
-from lup_dev.conditions import Condition
+from lup_dev.codescan.conditions import Condition
 
 
 class IssueRef(Model):

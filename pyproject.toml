@@ -133,6 +133,14 @@ type = "protected"
 protected_modules = ["lup_dev.adapters"]
 allowed_importers = ["lup_dev.cli"]
 
+# lup_dev's subsystems, highest first: a subpackage may import those below it,
+# never those above (`docs/conventions.md`, *Package layout*).
+[[tool.importlinter.contracts]]
+name = "lup_dev's subsystems import downwards"
+type = "layers"
+containers = ["lup_dev"]
+layers = ["adapters", "policy", "codescan", "catalog"]
+
 [dependency-groups]
 dev = [
     "import-linter>=2.15",

@@ -14,7 +14,7 @@ import sh
 from pydantic import TypeAdapter
 
 from lup.types import Model
-from lup_dev.checker import Finding, Position, Source, Span
+from lup_dev.codescan.contract import Finding, Position, Source, Span
 from lup_dev.layout import CheckoutLayout
 
 

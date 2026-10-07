@@ -9,17 +9,17 @@ import pytest
 from typer.testing import CliRunner
 
 from lup_dev import cli
-from lup_dev.directives import IssueRef, Issues
-from lup_dev.holds import HeldFile, HoldError, Holds, waiting
+from lup_dev.codescan.directives import IssueRef, Issues
 from lup_dev.layout import Layout
-from lup_dev.verdicts import Verdict, VerdictLog
+from lup_dev.policy.holds import HeldFile, HoldError, Holds, waiting
+from lup_dev.policy.verdicts import Verdict, VerdictLog
 
 if TYPE_CHECKING:
     from conftest import Kit, Shell
 
-    from lup_dev.checker import Checker
-    from lup_dev.checkpoint import Services
-    from lup_dev.ruff import Linter
+    from lup_dev.codescan.contract import Checker
+    from lup_dev.codescan.ruff import Linter
+    from lup_dev.policy.checkpoint import Services
 
 runner = CliRunner()
 

@@ -18,16 +18,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from lup.types import Model
-from lup_dev.changes import read_model, write_model
 from lup_dev.errors import LupDevError
 from lup_dev.layout import Layout, StoreLayout
-from lup_dev.roles import Role
+from lup_dev.policy.roles import Role
+from lup_dev.policy.store import read_model, write_model
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from lup_dev.clock import Clock
-    from lup_dev.runtime import Runtime
+    from lup_dev.policy.runtime import Runtime
 
 
 class HoldError(LupDevError):

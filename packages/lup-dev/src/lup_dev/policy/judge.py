@@ -25,8 +25,15 @@ from pathlib import Path
 from typing import Literal
 
 from lup.types import Model
-from lup_dev.checker import Checker, FileReport, Finding, Position, Source, Span
-from lup_dev.directives import (
+from lup_dev.codescan.contract import (
+    Checker,
+    FileReport,
+    Finding,
+    Position,
+    Source,
+    Span,
+)
+from lup_dev.codescan.directives import (
     Checking,
     Directive,
     Fired,
@@ -34,10 +41,10 @@ from lup_dev.directives import (
     added_suppressions,
     missing,
 )
+from lup_dev.codescan.ruff import Linter
 from lup_dev.errors import LupDevError
-from lup_dev.roles import Role, Roles
-from lup_dev.ruff import Linter
-from lup_dev.surface import api_changes
+from lup_dev.policy.roles import Role, Roles
+from lup_dev.policy.surface import api_changes
 
 type AskKind = Literal[
     "protected", "operator-document", "new-file", "whole-file", "public-api", "ignore"

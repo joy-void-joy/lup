@@ -40,7 +40,7 @@ from typing import Annotated, Literal, override
 from pydantic import Field, JsonValue, TypeAdapter
 
 from lup.types import Model, Settings
-from lup_dev.checkpoint import (
+from lup_dev.policy.checkpoint import (
     Bench,
     CallFinished,
     CallStarted,
@@ -48,8 +48,8 @@ from lup_dev.checkpoint import (
     SessionStarted,
     TurnEnded,
 )
-from lup_dev.report import sections
-from lup_dev.runtime import Runtime
+from lup_dev.policy.report import sections
+from lup_dev.policy.runtime import Runtime
 
 
 class Variables(Settings):

@@ -10,8 +10,8 @@ The texts name no runtime: each adapter carries them as its runtime hears them.
 from pathlib import Path
 
 from lup.types import Model
-from lup_dev.checker import Finding
-from lup_dev.judge import Ask, RemovedNote
+from lup_dev.codescan.contract import Finding
+from lup_dev.policy.judge import Ask, RemovedNote
 
 
 class Refused(Model):
@@ -35,7 +35,7 @@ class Refused(Model):
 def finding_lines(finding: Finding, indent: str = "  ") -> list[str]:
     """Spell one finding as pyright does, with lup's steer beneath it.
 
-    >>> from lup_dev.checker import Position, Span
+    >>> from lup_dev.codescan.contract import Position, Span
     >>> at = Position(line=41, column=12)
     >>> found = Finding(path=Path("a.py"), span=Span(start=at, end=at), owner="lup",
     ...     rule="tuple-shape", message="a tuple hides its fields", steer="a model")

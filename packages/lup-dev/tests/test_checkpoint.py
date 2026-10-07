@@ -6,25 +6,25 @@ from typing import TYPE_CHECKING
 
 from filelock import FileLock
 
-from lup_dev.before import Overwrite, Replacement, before
-from lup_dev.changes import read_model
-from lup_dev.checker import FileReport, Finding, Position, Span
-from lup_dev.checkpoint import (
+from lup_dev.codescan.contract import FileReport, Finding, Position, Span
+from lup_dev.policy.before import Overwrite, Replacement, before
+from lup_dev.policy.checkpoint import (
     CallFinished,
     CallStarted,
-    ImportersPass,
     Reply,
     Session,
     SessionStarted,
     TurnEnded,
     Worktree,
 )
-from lup_dev.holds import Holds, Response, waiting
+from lup_dev.policy.holds import Holds, Response, waiting
+from lup_dev.policy.importers import ImportersPass
+from lup_dev.policy.store import read_model
 
 if TYPE_CHECKING:
     from conftest import Kit, Shell
 
-    from lup_dev.verdicts import VerdictLog
+    from lup_dev.policy.verdicts import VerdictLog
 
 CORE = Path("src/pkg/core.py")
 SESSION = "s1"

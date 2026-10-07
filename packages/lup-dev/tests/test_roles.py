@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from lup_dev.policy.roles import Roles
 from lup_dev.project import Project, ProjectError, Protected, Pytest, load
-from lup_dev.roles import Roles
 
 
 def roles(

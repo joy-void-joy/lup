@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Literal
 import httpx
 import pytest
 
-from lup_dev.conditions import (
+from lup_dev.codescan.conditions import (
     Condition,
     PackageIndex,
     PackageReleased,
@@ -15,7 +15,7 @@ from lup_dev.conditions import (
     declared,
     loaded,
 )
-from lup_dev.directives import (
+from lup_dev.codescan.directives import (
     Checking,
     Defer,
     Directive,
@@ -203,7 +203,7 @@ def test_conditions_are_read_without_running_and_loaded_at_the_gate(repo: Path) 
     (repo / "src" / "cond_one").mkdir()
     (repo / "src" / "cond_one" / "__init__.py").write_text("")
     (repo / "src" / "cond_one" / "conditions.py").write_text(
-        "from lup_dev.conditions import PythonAvailable\n"
+        "from lup_dev.codescan.conditions import PythonAvailable\n"
         'python_315 = PythonAvailable(version="3.15")\n'
         "limit: int = 3\n"
     )

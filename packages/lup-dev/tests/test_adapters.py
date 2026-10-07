@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING
 import pytest
 
 from lup_dev.adapters import claude, codex
-from lup_dev.changes import read_model
-from lup_dev.checker import Checker, FileReport, Source
-from lup_dev.checkpoint import Bench, Running, Services
-from lup_dev.holds import Holds, Response, waiting
+from lup_dev.codescan.contract import Checker, FileReport, Source
+from lup_dev.policy.checkpoint import Bench, Running, Services
+from lup_dev.policy.holds import Holds, Response, waiting
+from lup_dev.policy.store import read_model
 
 if TYPE_CHECKING:
     from conftest import Kit

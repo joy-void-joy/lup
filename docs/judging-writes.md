@@ -70,7 +70,7 @@ lup never stays silent on a write it judges. Staying silent would send the call 
 6. **data:** JSON, CSV, YAML and other data formats outside a source tree, which is anything under a `src/` directory or in a directory holding an `__init__.py`;
 7. **production:** everything else.
 
-Production is the default, so a file nobody classified is gated rather than waved through. The default patterns are data in `lup_dev/catalog/paths.py`, which the operator reviews; `roles.py` holds the matching.
+Production is the default, so a file nobody classified is gated rather than waved through. The default patterns are data in `lup_dev/catalog/paths.py`, which the operator reviews; `policy/roles.py` holds the matching.
 
 A deleted file asks where it's protected or one of the operator's documents, and is otherwise allowed: the public-API ask covers what other code loses. A write outside the session's worktree isn't judged here; edits in another repository come with launch and spawn.
 
@@ -91,7 +91,7 @@ The operator worries this may ask too much, so it's measured from day one throug
 
 ## Before an edit lands
 
-For `Edit` and `Write`, lup knows the file's content after the call before anything is written. The adapter reads each as one of two proposals in lup's own words (`before.py`), so the core never names a runtime's tools:
+For `Edit` and `Write`, lup knows the file's content after the call before anything is written. The adapter reads each as one of two proposals in lup's own words (`policy/before.py`), so the core never names a runtime's tools:
 - **a whole write (`Write`):** the content it carries.
 - **a replacement (`Edit`):** the current file with `old_string` replaced by `new_string`, once, or everywhere with `replace_all`. If `old_string` isn't there exactly as the tool requires, lup allows the call, and the tool fails on its own.
 
@@ -115,7 +115,7 @@ The judging core never sees a runtime. Each runtime's adapter turns its hooks in
 | turn ended | `Stop` | `Stop` |
 | a subagent's conversation ended | `SubagentStop` | `SubagentStop` |
 
-The events live in `checkpoint.py`; the adapters in `lup_dev/adapters/`, the only modules that name a runtime (an import contract keeps them behind `lup_dev.cli`, and `docs/conventions.md` has the rule).
+The events live in `policy/checkpoint.py`; the adapters in `lup_dev/adapters/`, the only modules that name a runtime (an import contract keeps them behind `lup_dev.cli`, and `docs/conventions.md` has the rule).
 
 **A checkpoint runs whenever a call finishes and no other call is running,** and again when the turn ends. Parallel calls are judged together once the last one finishes; a late background write is judged at the next checkpoint. The checkpoint is before the agent's next model request, so a refusal reaches the agent before it writes its next line.
 
@@ -192,7 +192,7 @@ They're information, not refusals (`DESIGN.md`: "information never travels on a 
 - when the turn ends, the `Stop` hook refuses to end it while files touched this session, or files importing them where the pass found errors, have type errors, warnings or ruff findings, saying which;
 - the formatter runs at commit.
 
-ruff runs with `--ignore-noqa`, and pyright with `enableTypeIgnoreComments = false`; lup filters both through its own `# lup: ignore`, so there's one suppression syntax (`docs/conventions.md`). ruff is the project's own (`.venv/bin/ruff`) where it has one, run on the would-be content through stdin under the file's name, so the project's configuration applies (`ruff.py`).
+ruff runs with `--ignore-noqa`, and pyright with `enableTypeIgnoreComments = false`; lup filters both through its own `# lup: ignore`, so there's one suppression syntax (`docs/conventions.md`). ruff is the project's own (`.venv/bin/ruff`) where it has one, run on the would-be content through stdin under the file's name, so the project's configuration applies (`codescan/ruff.py`).
 
 **At the gate, `lup-dev rules check`** checks every Python file as the turn's end does, and fails on any finding: lup's (production only; tests are exempt), pyright's, ruff's, each through `# lup: ignore`, and each deferral whose issue is closed or whose condition holds. Since ruff and pyright alone don't read lup's `ignore`, this is the check that decides whether a finding is kept.
 
@@ -229,7 +229,7 @@ Pyright has no plugin API, and its published package is one bundled file whose i
 2. **`Any`:** `string-split` fires on a receiver declared `Any`, but not on one pyright can't infer, so findings don't depend on the environment being installed.
 3. **Unions:** `str | X` is flagged when any member is `str` or `bytes`.
 4. **Tuples:** `list[X]` is the one spelling of a sequence (`docs/conventions.md`), so `tuple-shape` flags every tuple type; the spike's edge tuples need no special case.
-5. **Files that import a changed one:** the rules read only the changed files, so their findings come at the edit. The changed files' importers are re-checked for type errors in the background, and their errors arrive at the next checkpoint. One background pass at a time per worktree: a change while one runs marks it to run once more afterwards, over everything changed, never a second process. The turn-end check waits for the pass, so no type error surfaces after the session. Built (`checkpoint.py`, `ImportersPass`) as a lock the pass holds for its whole life, which the system frees however the process ends: a request adds its files to what's pending and starts a process only when the lock is free; the pass takes everything pending, batch after batch, and releases its lock only once nothing is, under the state's own lock, so no request finds it gone with work left. Two requests racing can start a second process, which finds the lock held and exits without running a pass. Work left pending with no pass running is done by the turn's end while it waits.
+5. **Files that import a changed one:** the rules read only the changed files, so their findings come at the edit. The changed files' importers are re-checked for type errors in the background, and their errors arrive at the next checkpoint. One background pass at a time per worktree: a change while one runs marks it to run once more afterwards, over everything changed, never a second process. The turn-end check waits for the pass, so no type error surfaces after the session. Built (`policy/checkpoint.py`, `ImportersPass`) as a lock the pass holds for its whole life, which the system frees however the process ends: a request adds its files to what's pending and starts a process only when the lock is free; the pass takes everything pending, batch after batch, and releases its lock only once nothing is, under the state's own lock, so no request finds it gone with work left. Two requests racing can start a second process, which finds the lock held and exits without running a pass. Work left pending with no pass running is done by the turn's end while it waits.
 6. **Type stubs:** the pinned standard-library stubs ship beside the bundle.
 
 ## The `# lup:` directives
@@ -256,7 +256,7 @@ Pyright has no plugin API, and its published package is one bundled file whose i
   - `PythonAvailable(version="3.15")` holds once uv lists a final release of that version (`uv python list`); `PackageReleased(name=…, version=…)` once the package index has that version or a later final release, yanked ones left out. Both take what they read as a field, so a test hands them a fake.
   - A closed issue (`gh issue view --json state`) or a condition that holds fails `lup-dev rules check`, so the comment is updated or removed before the gate passes.
 
-**What the judge reports about directives**, as lup findings on the directive's line (each directive answers for itself in `directives.py`): `unused-ignore` (an `ignore` whose rule doesn't fire on the line it covers, from any owner), `malformed-directive` (what the engine reports as malformed: an unknown call, or one missing what it needs), `defer-issue` (an `issue` that's neither a number nor `owner/repo#7`), `defer-condition` (a `when` naming no declared condition), and at the gate `defer-closed` and `defer-due`. They live beside the directives until the rule catalog (`lup_dev/catalog/`) holds them.
+**What the judge reports about directives**, as lup findings on the directive's line (each directive answers for itself in `codescan/directives.py`): `unused-ignore` (an `ignore` whose rule doesn't fire on the line it covers, from any owner), `malformed-directive` (what the engine reports as malformed: an unknown call, or one missing what it needs), `defer-issue` (an `issue` that's neither a number nor `owner/repo#7`), `defer-condition` (a `when` naming no declared condition), and at the gate `defer-closed` and `defer-due`. They live beside the directives until the rule catalog (`lup_dev/catalog/`) holds them.
 
 **Removing a note:**
 - a note or directive added during this session can be removed freely, so an agent can take back its own `defer`;
@@ -318,22 +318,22 @@ In `packages/lup-dev/src/lup_dev/`:
 
 | Module | What it's for |
 |---|---|
-| `roles.py` | Path roles: which role a path has |
+| `policy/roles.py` | Path roles: which role a path has |
 | `catalog/paths.py` | The default path patterns each role starts from, as data the operator reviews |
 | `project.py` | The minimal `Project` declaration (`Protected`, `Pytest`), and loading it from `[tool.lup]` |
-| `conditions.py` | The `Condition` ABC, the stock `PythonAvailable` and `PackageReleased`, and reading a project's conditions |
-| `runtime.py` | The `Runtime` ABC: what the core needs to know about a runtime |
-| `before.py` | A file tool's replacement or whole write before it lands: the would-be content, then the judgement |
-| `checkpoint.py` | The runtime-neutral events, the in-flight set, deciding when to judge, the checkpoint, holds at the checkpoint, the importers pass |
-| `changes.py` | The store: snapshot, compare, set aside what was committed elsewhere, restore, save, move the accepted tree forward |
-| `judge.py` | One judgement over a set of changed files, shared by `before.py` and the checkpoint: role, rules, public API, directives, outcome |
-| `surface.py` | Comparing a file's public surface before and after |
-| `ruff.py` | ruff's findings on the changed files, in the engine's `Finding` shape |
-| `checker.py` | The client for the engine: findings, type errors, surfaces, directives for a set of files |
-| `directives.py` | The `# lup:` directive models, and checking them |
-| `holds.py` | Holds: waiting for an answer, and answering |
-| `verdicts.py` | The verdict log and its summary |
-| `report.py` | The reports, in pyright's shape |
+| `codescan/conditions.py` | The `Condition` ABC, the stock `PythonAvailable` and `PackageReleased`, and reading a project's conditions |
+| `policy/runtime.py` | The `Runtime` ABC: what the core needs to know about a runtime |
+| `policy/before.py` | A file tool's replacement or whole write before it lands: the would-be content, then the judgement |
+| `policy/checkpoint.py` | The runtime-neutral events, the in-flight set, deciding when to judge, the checkpoint, holds at the checkpoint, the importers pass |
+| `policy/store.py` | The store: snapshot, compare, set aside what was committed elsewhere, restore, save, move the accepted tree forward |
+| `policy/judge.py` | One judgement over a set of changed files, shared by `policy/before.py` and the checkpoint: role, rules, public API, directives, outcome |
+| `policy/surface.py` | Comparing a file's public surface before and after |
+| `codescan/ruff.py` | ruff's findings on the changed files, in the engine's `Finding` shape |
+| `codescan/contract.py` | The client for the engine: findings, type errors, surfaces, directives for a set of files |
+| `codescan/directives.py` | The `# lup:` directive models, and checking them |
+| `policy/holds.py` | Holds: waiting for an answer, and answering |
+| `policy/verdicts.py` | The verdict log and its summary |
+| `policy/report.py` | The reports, in pyright's shape |
 | `clock.py` | The clock judging reads and waits on, which tests drive |
 | `settings.py`, `layout.py` | The environment variables `lup_dev` reads; where it keeps what it stores |
 | `adapters/claude.py`, `adapters/codex.py` | Each runtime's payloads in, its outputs out, and the variables it sets in its commands: the only modules naming a runtime |
@@ -369,53 +369,53 @@ The `lup-dev` command is this piece's stand-in until the declaration and CLI pie
 
 Each with its alternative and where it lives. **(yours, agreed)** marks what the operator decided; **(yours)** what still waits on them.
 
-1. **(yours, agreed)** Judge state against the last accepted state, at checkpoints. *Alternative:* a snapshot before and after each call. *Where:* `changes.py`, `judge.py`.
-2. **(yours, agreed)** The checkpoint is "no call running", built from four runtime-neutral events. *Alternative:* `PostToolBatch` on Claude, a lock on Codex. *Where:* `checkpoint.py`.
-3. **(yours, agreed)** lup allows, asks or refuses; it never stays silent on a write it judges. *Alternative:* ask, refuse or stay silent, which the operator first agreed and then reversed: the allow is what keeps routine work from interrupting. *Where:* `judge.py`, `adapters/`.
-4. **(yours, agreed)** No line count: any production edit the rules pass is allowed unless something asks. *Alternative:* the first lup's 3-line threshold. *Where:* `judge.py`.
-5. **(yours, agreed)** `Edit` and `Write` are judged before they land; the checkpoint judges everything else. *Alternative:* the checkpoint for every write, which restores refused edits after the fact. *Where:* `before.py`.
-6. **(yours, agreed)** The allow table: tests, scratch, docs and data at any size; production gated by the rules; asks on new or whole-file production writes, protected paths and suppressions. *Where:* `roles.py`, `judge.py`.
-7. **(yours, agreed)** `DESIGN.md` and `AGENTS.md` ask. *Alternative:* allowed like other docs and reviewed after. *Where:* `roles.py`.
-8. **(yours, agreed)** Where path roles are declared before the declaration piece: a minimal `Project` now, with test roots and protected-path additions. *Alternative:* defaults and pytest's `testpaths` only. *Where:* `roles.py`, `lup_project.py`.
-9. **(yours, agreed to try)** Ask on a public-API change: a package root's names, a new class, a changed signature of a definition that existed when the session started. *Alternative:* no public-API ask. *Where:* `surface.py`, the engine.
-10. **(yours, agreed)** Every verdict logged from day one, summarized by `lup-dev verdicts`. *Alternative:* reconstruct from transcripts, as the first lup's study had to. *Where:* `verdicts.py`.
-11. **(yours, agreed)** You're asked in Claude Code's prompt (or through the interim review hook); Codex holds at the checkpoint. *Alternative:* holds on both runtimes. *Where:* `before.py`, `holds.py`.
+1. **(yours, agreed)** Judge state against the last accepted state, at checkpoints. *Alternative:* a snapshot before and after each call. *Where:* `policy/store.py`, `policy/judge.py`.
+2. **(yours, agreed)** The checkpoint is "no call running", built from four runtime-neutral events. *Alternative:* `PostToolBatch` on Claude, a lock on Codex. *Where:* `policy/checkpoint.py`.
+3. **(yours, agreed)** lup allows, asks or refuses; it never stays silent on a write it judges. *Alternative:* ask, refuse or stay silent, which the operator first agreed and then reversed: the allow is what keeps routine work from interrupting. *Where:* `policy/judge.py`, `adapters/`.
+4. **(yours, agreed)** No line count: any production edit the rules pass is allowed unless something asks. *Alternative:* the first lup's 3-line threshold. *Where:* `policy/judge.py`.
+5. **(yours, agreed)** `Edit` and `Write` are judged before they land; the checkpoint judges everything else. *Alternative:* the checkpoint for every write, which restores refused edits after the fact. *Where:* `policy/before.py`.
+6. **(yours, agreed)** The allow table: tests, scratch, docs and data at any size; production gated by the rules; asks on new or whole-file production writes, protected paths and suppressions. *Where:* `policy/roles.py`, `policy/judge.py`.
+7. **(yours, agreed)** `DESIGN.md` and `AGENTS.md` ask. *Alternative:* allowed like other docs and reviewed after. *Where:* `policy/roles.py`.
+8. **(yours, agreed)** Where path roles are declared before the declaration piece: a minimal `Project` now, with test roots and protected-path additions. *Alternative:* defaults and pytest's `testpaths` only. *Where:* `policy/roles.py`, `lup_project.py`.
+9. **(yours, agreed to try)** Ask on a public-API change: a package root's names, a new class, a changed signature of a definition that existed when the session started. *Alternative:* no public-API ask. *Where:* `policy/surface.py`, the engine.
+10. **(yours, agreed)** Every verdict logged from day one, summarized by `lup-dev verdicts`. *Alternative:* reconstruct from transcripts, as the first lup's study had to. *Where:* `policy/verdicts.py`.
+11. **(yours, agreed)** You're asked in Claude Code's prompt (or through the interim review hook); Codex holds at the checkpoint. *Alternative:* holds on both runtimes. *Where:* `policy/before.py`, `policy/holds.py`.
 12. **(yours, agreed)** The typed engine on pyright's own tree from the first rule, with no syntax-only stage. *Alternatives:* mypy's tree; ruff's `banned-api` plus a syntax checker first. *Where:* `checker/`.
-13. **(yours, agreed)** The spike's six questions, as decided above: no tuple types at all, and importers re-checked in one background pass per worktree, waited on at turn end. *Alternative:* importers left to the gate, which could surface a type error after the session. *Where:* `checker/`, `checkpoint.py`.
-14. **(yours, agreed)** `# lup:` directives as calls, everything else a note, a wrong directive a finding. *Where:* `directives.py`.
-15. **(yours, agreed)** `defer` carries a required `why`, an `issue`, a `when` naming a `Condition` declared in Python, or both; a closed issue is reported; the ledger's to-do items point at GitHub issues. *Alternatives:* a condition written as a requirement string in the comment; `defer` pointing only at ledger records. *Where:* `directives.py`, the gate.
-16. **(yours, agreed)** Removing a note: free if added this session; reported if committed; through its record once the ledger exists. *Alternative:* the first lup's refusal. *Where:* `judge.py`, `directives.py`.
+13. **(yours, agreed)** The spike's six questions, as decided above: no tuple types at all, and importers re-checked in one background pass per worktree, waited on at turn end. *Alternative:* importers left to the gate, which could surface a type error after the session. *Where:* `checker/`, `policy/checkpoint.py`.
+14. **(yours, agreed)** `# lup:` directives as calls, everything else a note, a wrong directive a finding. *Where:* `codescan/directives.py`.
+15. **(yours, agreed)** `defer` carries a required `why`, an `issue`, a `when` naming a `Condition` declared in Python, or both; a closed issue is reported; the ledger's to-do items point at GitHub issues. *Alternatives:* a condition written as a requirement string in the comment; `defer` pointing only at ledger records. *Where:* `codescan/directives.py`, the gate.
+16. **(yours, agreed)** Removing a note: free if added this session; reported if committed; through its record once the ledger exists. *Alternative:* the first lup's refusal. *Where:* `policy/judge.py`, `codescan/directives.py`.
 17. **(yours, agreed)** The judge runs from a local copy installed from `dev`. *Alternative:* the worktree's own copy. *Where:* the hook commands.
-18. **(yours, agreed)** No acceptance guard of its own: tests written as a specification are protected paths a project adds, and read-only mounts in a room. *Alternative:* the first lup's opt-in `acceptance` path role. *Where:* `roles.py` (protected-path additions).
+18. **(yours, agreed)** No acceptance guard of its own: tests written as a specification are protected paths a project adds, and read-only mounts in a room. *Alternative:* the first lup's opt-in `acceptance` path role. *Where:* `policy/roles.py` (protected-path additions).
 19. **(yours, agreed for now)** Shell commands on the host through narrow allow rules in Claude Code's settings; the prompts the rest causes reach the review dashboard as soon as possible (in the bridge, through the interim hook's `PermissionRequest`). *Alternative:* a lup vocabulary, which needs the shell parser `DESIGN.md` drops. *Where:* `.claude/settings.json`.
-20. Content committed elsewhere isn't judged; commits made locally since the previous checkpoint are. *Alternatives:* judge it all, which replays history as new writes; set aside anything equal to `HEAD`, which let a write-and-commit through. *Where:* `changes.py`.
-21. Findings on touched lines refuse; the refusal lists every finding in the file. *Alternative:* any finding in a touched file refuses. *Where:* `judge.py`, `report.py`.
-22. Type errors and ruff's findings are information at each checkpoint and refuse only at turn end. *Alternative:* refuse at the checkpoint, which `DESIGN.md` rules out. *Where:* `judge.py`.
-23. A refused new file comes back through `Write`; a refused edit through its saved copy. *Alternative:* hold the moved copy at the checkpoint for the operator, which Claude Code can't prompt for there. *Where:* `before.py`, `report.py`.
-24. `lup-dev holds` refuses to answer from inside a session; the real separation waits for containers. *Where:* `holds.py`.
+20. Content committed elsewhere isn't judged; commits made locally since the previous checkpoint are. *Alternatives:* judge it all, which replays history as new writes; set aside anything equal to `HEAD`, which let a write-and-commit through. *Where:* `policy/store.py`.
+21. Findings on touched lines refuse; the refusal lists every finding in the file. *Alternative:* any finding in a touched file refuses. *Where:* `policy/judge.py`, `policy/report.py`.
+22. Type errors and ruff's findings are information at each checkpoint and refuse only at turn end. *Alternative:* refuse at the checkpoint, which `DESIGN.md` rules out. *Where:* `policy/judge.py`.
+23. A refused new file comes back through `Write`; a refused edit through its saved copy. *Alternative:* hold the moved copy at the checkpoint for the operator, which Claude Code can't prompt for there. *Where:* `policy/before.py`, `policy/report.py`.
+24. `lup-dev holds` refuses to answer from inside a session; the real separation waits for containers. *Where:* `policy/holds.py`.
 25. **(yours, agreed)** The note is `docs/judging-writes.md`: it judges edits before they land, not only after the call. *Alternative:* keep `docs/after-call-diff.md`.
 26. **(yours, agreed)** The judge's own source is reviewed before an installed copy runs, not asked at each edit: refreshing from `dev` shows its diff since the last approved copy, which keeps running until the operator approves. *Alternative:* a protected path asked at every edit, which reviews each step rather than what will run. *Where:* the judge's installer.
 
 Taken while building it:
 
-27. **(yours, agreed)** A runtime is named only in its adapter (`lup_dev/adapters/`): its payloads, tool names, how it hears a report, and the variables it sets in its commands. The core sees a runtime through `Runtime` (its name, whether it asks before a call, whether this process runs inside one of its sessions), and only `cli.py` lists the adapters, which an import contract keeps. A `runtime-mention` rule, for the engine, refuses a runtime's name elsewhere (`docs/conventions.md`). *Alternative:* `hooks/claude.py` and `hooks/codex.py` beside a core that names them. *Where:* `adapters/`, `runtime.py`, `pyproject.toml`.
-28. **(yours, agreed)** The default path patterns are data in `lup_dev/catalog/paths.py`, which the operator reviews; `roles.py` holds the matching. *Alternative:* defaults in `roles.py`. *Where:* `catalog/paths.py`.
+27. **(yours, agreed)** A runtime is named only in its adapter (`lup_dev/adapters/`): its payloads, tool names, how it hears a report, and the variables it sets in its commands. The core sees a runtime through `Runtime` (its name, whether it asks before a call, whether this process runs inside one of its sessions), and only `cli.py` lists the adapters, which an import contract keeps. A `runtime-mention` rule, for the engine, refuses a runtime's name elsewhere (`docs/conventions.md`). *Alternative:* `hooks/claude.py` and `hooks/codex.py` beside a core that names them. *Where:* `adapters/`, `policy/runtime.py`, `pyproject.toml`.
+28. **(yours, agreed)** The default path patterns are data in `lup_dev/catalog/paths.py`, which the operator reviews; `policy/roles.py` holds the matching. *Alternative:* defaults in `policy/roles.py`. *Where:* `catalog/paths.py`.
 29. An adapter's variables (`CLAUDE_CODE_CHILD_SESSION`, `CODEX_THREAD_ID`) are its runtime's wire spellings, read by a small settings model in the adapter. *Alternative:* fields of `settings.py`, which would name the runtimes in the core. *Where:* `adapters/`.
 30. `.gitignore` is protected. *Alternative:* left unprotected, which lets one shell write hide every later file from the checkpoint. *Where:* `catalog/paths.py`.
-31. A `conftest.py` under a test root is a test. *Alternative:* production, since pytest doesn't collect it as a test module, which would gate a suite's fixtures. *Where:* `roles.py`.
-32. A source tree is anything under `src/` or in a directory holding an `__init__.py`, where data files are production; `docs/` is the root's. *Alternative:* `docs/` at any depth, which would wave through Python under a package's `docs/`. *Where:* `roles.py`, `catalog/paths.py`.
-33. Deleting a protected path or an operator's document asks; deleting anything else is allowed. *Alternative:* every production deletion asks. *Where:* `judge.py`.
-34. An approval covers the path's design asks (a new file, a whole write, a public-API change) for the session; a protected path, an operator's document and each `ignore` ask every time. *Alternative:* it covers every ask on the path. *Where:* `judge.py` (`Ask.covered`).
-35. Removing a definition or class that existed when the session started doesn't ask; removing a name from a package's root does, as written above. *Alternative:* any removal of a session-start definition asks. *Where:* `surface.py`.
-36. A write outside the session's worktree isn't judged; the runtime decides. *Alternative:* refuse it. *Where:* `before.py`.
-37. A file tool's write is judged against the accepted content, not the file on disk. *Alternative:* the disk, which would let a command's unjudged write ride in with an edit. *Where:* `before.py`.
-38. A call that runs a subagent isn't counted as running; a checkpoint's report waits as mail for every other conversation whose calls finished since the last one; a subagent's end clears its calls. *Alternative:* count the spawn, which would judge a subagent's writes only when it ends, and tell only its parent. *Where:* `checkpoint.py`, `adapters/`.
+31. A `conftest.py` under a test root is a test. *Alternative:* production, since pytest doesn't collect it as a test module, which would gate a suite's fixtures. *Where:* `policy/roles.py`.
+32. A source tree is anything under `src/` or in a directory holding an `__init__.py`, where data files are production; `docs/` is the root's. *Alternative:* `docs/` at any depth, which would wave through Python under a package's `docs/`. *Where:* `policy/roles.py`, `catalog/paths.py`.
+33. Deleting a protected path or an operator's document asks; deleting anything else is allowed. *Alternative:* every production deletion asks. *Where:* `policy/judge.py`.
+34. An approval covers the path's design asks (a new file, a whole write, a public-API change) for the session; a protected path, an operator's document and each `ignore` ask every time. *Alternative:* it covers every ask on the path. *Where:* `policy/judge.py` (`Ask.covered`).
+35. Removing a definition or class that existed when the session started doesn't ask; removing a name from a package's root does, as written above. *Alternative:* any removal of a session-start definition asks. *Where:* `policy/surface.py`.
+36. A write outside the session's worktree isn't judged; the runtime decides. *Alternative:* refuse it. *Where:* `policy/before.py`.
+37. A file tool's write is judged against the accepted content, not the file on disk. *Alternative:* the disk, which would let a command's unjudged write ride in with an edit. *Where:* `policy/before.py`.
+38. A call that runs a subagent isn't counted as running; a checkpoint's report waits as mail for every other conversation whose calls finished since the last one; a subagent's end clears its calls. *Alternative:* count the spawn, which would judge a subagent's writes only when it ends, and tell only its parent. *Where:* `policy/checkpoint.py`, `adapters/`.
 39. Codex's `PermissionRequest` isn't answered: the design's "answered `allow`" was based on it firing for every patch, and it fires only for patches that need approval (*Checks owed*). *Alternative:* answer `allow`, which would let patches outside the worktree through unjudged. *Where:* `adapters/codex.py`.
-40. What's wrong with a directive is reported by the judge as its own findings (`unused-ignore`, `malformed-directive`, `defer-issue`, `defer-condition`, `defer-closed`, `defer-due`), each directive answering for itself through a `Comment` base. *Alternative:* the engine reports them, and the judge dispatches on directive kinds. *Where:* `directives.py`.
-41. At the edit, a conditions module is read without running it; at the gate it's imported. *Alternative:* import it at the edit, which runs a project's code in every hook. *Where:* `conditions.py`.
-42. A closed issue or a condition that holds fails `lup-dev rules check`. *Alternative:* list them without failing, which lets them pile up. *Where:* `cli.py`, `directives.py`.
-43. `PackageReleased` holds for that version or a later final one; `PythonAvailable` reads uv's list of interpreters. *Alternatives:* that exact version; the interpreter running the gate. *Where:* `conditions.py`.
-44. One importers pass per worktree is a lock the pass holds for its life. *Alternative:* its process id checked with `os.kill(pid, 0)`, which kills the process on Windows and is fooled by a reused id. *Where:* `checkpoint.py`.
-45. An answer to an ask or a hold is appended as the same verdict under the same key. *Alternative:* log an ask only once answered, which a hook that dies would lose. *Where:* `verdicts.py`.
-46. Two suppressions: git's `-z` output split on its NUL separators (`changes.py`), and the file tool's own replacement applied with `str.replace` (`before.py`). *Alternatives:* a git library (dulwich, pygit2) for the store, a new dependency; slicing, which another rule refuses. *Where:* those two lines.
+40. What's wrong with a directive is reported by the judge as its own findings (`unused-ignore`, `malformed-directive`, `defer-issue`, `defer-condition`, `defer-closed`, `defer-due`), each directive answering for itself through a `Comment` base. *Alternative:* the engine reports them, and the judge dispatches on directive kinds. *Where:* `codescan/directives.py`.
+41. At the edit, a conditions module is read without running it; at the gate it's imported. *Alternative:* import it at the edit, which runs a project's code in every hook. *Where:* `codescan/conditions.py`.
+42. A closed issue or a condition that holds fails `lup-dev rules check`. *Alternative:* list them without failing, which lets them pile up. *Where:* `cli.py`, `codescan/directives.py`.
+43. `PackageReleased` holds for that version or a later final one; `PythonAvailable` reads uv's list of interpreters. *Alternatives:* that exact version; the interpreter running the gate. *Where:* `codescan/conditions.py`.
+44. One importers pass per worktree is a lock the pass holds for its life. *Alternative:* its process id checked with `os.kill(pid, 0)`, which kills the process on Windows and is fooled by a reused id. *Where:* `policy/checkpoint.py`.
+45. An answer to an ask or a hold is appended as the same verdict under the same key. *Alternative:* log an ask only once answered, which a hook that dies would lose. *Where:* `policy/verdicts.py`.
+46. Two suppressions: git's `-z` output split on its NUL separators (`policy/store.py`), and the file tool's own replacement applied with `str.replace` (`policy/before.py`). *Alternatives:* a git library (dulwich, pygit2) for the store, a new dependency; slicing, which another rule refuses. *Where:* those two lines.
 47. When judging itself fails, a file tool's write is denied and other calls go on, told; a turn's end is blocked once. *Alternative:* a crash, which a runtime treats as no decision, letting a write meant for review through. *Where:* `adapters/`.

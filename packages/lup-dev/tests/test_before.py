@@ -3,9 +3,9 @@
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from lup_dev.before import Overwrite, Replacement, before
-from lup_dev.changes import read_model
-from lup_dev.checkpoint import Session, SessionStarted
+from lup_dev.policy.before import Overwrite, Replacement, before
+from lup_dev.policy.checkpoint import Session, SessionStarted
+from lup_dev.policy.store import read_model
 
 if TYPE_CHECKING:
     from conftest import Kit

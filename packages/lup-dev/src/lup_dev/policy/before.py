@@ -19,9 +19,9 @@ from pathlib import Path
 from typing import Literal, override
 
 from lup.types import Model
-from lup_dev.checkpoint import Bench, Pending, decoded, opened, verdict
-from lup_dev.judge import Change
-from lup_dev.report import Refused, asked, refusal
+from lup_dev.policy.checkpoint import Bench, Pending, decoded, opened, verdict
+from lup_dev.policy.judge import Change
+from lup_dev.policy.report import Refused, asked, refusal
 
 
 class Proposal(Model, ABC):

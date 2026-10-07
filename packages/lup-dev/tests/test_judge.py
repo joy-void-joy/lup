@@ -5,9 +5,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from lup_dev.judge import Change, Judge, Judgement, touched_lines
+from lup_dev.policy.judge import Change, Judge, Judgement, touched_lines
+from lup_dev.policy.roles import Roles
 from lup_dev.project import Project
-from lup_dev.roles import Roles
 
 if TYPE_CHECKING:
     from conftest import Kit
