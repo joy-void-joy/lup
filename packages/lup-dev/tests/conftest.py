@@ -272,6 +272,21 @@ def commit(root: Path, message: str = "change") -> None:
     git(root, "commit", "-q", "-m", message)
 
 
+class Shell:
+    """git in a test's repositories."""
+
+    def git(self, root: Path, *arguments: str) -> str:
+        return git(root, *arguments)
+
+    def commit(self, root: Path, message: str = "change") -> None:
+        commit(root, message)
+
+
+@pytest.fixture
+def shell() -> Shell:
+    return Shell()
+
+
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
     """A git repository with a small project, its first commit made."""
@@ -323,6 +338,12 @@ class Kit:
                 spawner=self.spawner,
             ),
         )
+
+
+@pytest.fixture
+def runtimes() -> list[FakeRuntime]:
+    """Two runtimes, neither running this test inside one of its sessions."""
+    return [FakeRuntime("first"), FakeRuntime("second")]
 
 
 @pytest.fixture

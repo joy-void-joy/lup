@@ -492,11 +492,19 @@ def kept(report: FileReport, findings: list[Finding]) -> list[Finding]:
 
 
 def verdict(
-    bench: Bench, session: str, tool: str, judgement: Judgement, *, held: bool = False
+    bench: Bench,
+    session: str,
+    tool: str,
+    judgement: Judgement,
+    hold: Hold | None = None,
 ) -> Verdict:
-    """Record a judgement as a verdict: `held` where it waits for the operator."""
+    """Record a judgement as a verdict.
+
+    A file `hold` waits on is logged under a key its answer is logged under too.
+    """
+    held = hold is not None and judgement.path in [each.path for each in hold.files]
     return Verdict(
-        key=secrets.token_hex(8),
+        key=held_key(hold, judgement.path) if hold and held else secrets.token_hex(8),
         time=bench.services.clock.now(),
         session=session,
         runtime=bench.runtime.name(),
@@ -506,6 +514,11 @@ def verdict(
         outcome="hold" if held else judgement.outcome,
         reasons=judgement.reasons(),
     )
+
+
+def held_key(hold: Hold, path: Path) -> str:
+    """Name the verdict on one file a hold waits on."""
+    return f"{hold.key}:{path}"
 
 
 def held_diff(store: Store, accepted: str, files: list[HeldFile]) -> str:
@@ -629,8 +642,10 @@ def act(bench: Bench, worktree: Worktree, snapshot: Snapshot, judged: Fates) -> 
     held = [
         HeldFile(
             path=judgement.path,
+            role=judgement.role,
             blob=store.blob(snapshot.taken, judgement.path) or "",
-            reasons=[ask.reason for ask in judgement.asks],
+            reasons=[ask.kind for ask in judgement.asks],
+            asks=[ask.reason for ask in judgement.asks],
         )
         for judgement in judged.held
     ]
@@ -701,12 +716,9 @@ def checkpoint(bench: Bench, worktree: Worktree, key: str, agent: str) -> Checke
         )
         deciding = [plan.change.path for plan in planned if plan.decide]
         acted = act(bench, worktree, snapshot, fates(bench, judgements, deciding))
-        held = [] if acted.hold is None else [each.path for each in acted.hold.files]
         worktree.verdicts(services.layout).append(
             [
-                verdict(
-                    bench, key, "checkpoint", judgement, held=judgement.path in held
-                )
+                verdict(bench, key, "checkpoint", judgement, acted.hold)
                 for judgement in judgements
                 if judgement.path in deciding
             ]
@@ -852,13 +864,13 @@ def answered(bench: Bench, key: str, hold: Hold, answer: Answer) -> list[Verdict
     """Record the operator's answer to a hold, one verdict per file."""
     return [
         Verdict(
-            key=f"{hold.key}:{held.path}",
+            key=held_key(hold, held.path),
             time=bench.services.clock.now(),
             session=key,
             runtime=bench.runtime.name(),
             tool="checkpoint",
             path=held.path,
-            role="production",
+            role=held.role,
             outcome="hold",
             reasons=held.reasons,
             answer=answer,

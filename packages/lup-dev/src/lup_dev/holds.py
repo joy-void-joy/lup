@@ -21,6 +21,7 @@ from lup.types import Model
 from lup_dev.changes import read_model, write_model
 from lup_dev.errors import LupDevError
 from lup_dev.layout import Layout, StoreLayout
+from lup_dev.roles import Role
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -50,10 +51,13 @@ class HeldFile(Model):
     """One file a hold waits on."""
 
     path: Path
+    role: Role
     blob: str
     """The held content's object id in the store."""
     reasons: list[str]
-    """What the change asks, one line each."""
+    """The kinds of ask, as the verdict log records them."""
+    asks: list[str]
+    """What the change asks, one line each, for the operator."""
 
 
 class Hold(Model):

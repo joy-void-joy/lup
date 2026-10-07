@@ -172,7 +172,12 @@ class Store(Model):
         return store.text("write-tree")
 
     def ref(self, name: str) -> str | None:
-        """Return the tree a store ref names, or none where it isn't set."""
+        """Return the tree a store ref names, or none where it isn't set.
+
+        A store not created yet has no refs.
+        """
+        if not self.layout.snapshots.is_dir():
+            return None
         found = self.snapshots().run(
             "rev-parse", "--verify", "--quiet", name, ok=[0, 1]
         )
