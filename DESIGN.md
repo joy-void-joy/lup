@@ -59,6 +59,16 @@ The split is what a project imports in its production code, against what it uses
 
 Python 3.14 or later, for its lazily evaluated annotations. The library's runtimes are the optional extras `lup[claude]` and `lup[codex]` (`docs/library.md`).
 
+**The library's shape (tentative; detail in `docs/library.md`):**
+- **Split.** Runtime-neutral code under `lup/sessions/` and `lup/tools/`; one adapter per runtime under `lup/adapters/`.
+- **Results.** `ask` returns a `TurnResult[T]` (`output`, `usage`, `duration`, `session_id`, `rejected`); a failure is always an error.
+- **Layers.** One `layers` field on the declaration carries timeout, recovery (on tenacity), submission and trace.
+- **What the declaration doesn't hold:**
+  - tools are `lup_tool` constructs;
+  - the endpoint and API key are given when the client is created;
+  - resume and history belong to the session holder;
+  - transcripts belong to lup's own writer.
+
 ### The environment: core and modules
 
 The whole may be larger than any agent can hold, as long as each part can be held on its own:
@@ -246,11 +256,15 @@ The control runs as its own small host process. A hold within the hour keeps its
 - **The client is the declaration:**
   ```python
   translator = Claude(model="opus", system_prompt=PROMPT)            # no tools: no container
-  answer = await translator.ask(segment.model_dump_json(), Translations)
+  result = await translator.ask(segment.model_dump_json(), Translations)
+  result.output                                                      # Translations
   ```
 - **A room has the same shape, and is the library's.** It's declared in `lup_project.py` and used from code, waiting (`room.ask()`) or detached (`room.spawn()`), or in a terminal (`room.launch()`, or `lup launch claude audiobook`). One declaration compiles two ways: to SDK options for code, and to argv for the terminal. `Claude(...).launch()`, `.command()` and `.prepare()` already work that way on today's dev (merge `008d23ca1`), and `harness claude|codex` is built on them. The parity checklist in `tmp/lup-dx-overhaul.md` maps every harness flag and launch step to a declaration field. The verbs are open (see Open questions).
 - **Publishing stays outside the room.** An audiobook pipeline ("turn this page into an episode and publish it") runs the room to produce the episode, and host code publishes it, with credentials the container never sees.
-- **Typed output, leaning native on both runtimes, with one requirement:** the final output keeps everything a normal tool has, hooks included, so a gate (validation, reflection) can hold it. Where a runtime gives no hook, the library's own gate validates, holds, or rejects with feedback and asks again.
+- **Typed output through a lup tool on both runtimes (tentative; earlier leaning: native on both).** The answer is submitted through `lup_submit`, an ordinary lup tool whose input is the output model, so it keeps everything a normal tool has, hooks included.
+  - **Corrections happen inside the turn.** Validation, and any `before` hook on the output tool (a review answering `Allow()` or `Deny(reason)`), reject with feedback, and the agent corrects its answer without being re-prompted.
+  - **The turn can't end without an accepted answer.** lup's own stop hook refuses the ending: in-process on Claude, a same-thread continuation on Codex.
+  - **Native structured output is used on neither runtime.** Codex's isn't a tool call, so nothing could reject it inside the turn, and its strict-schema subset forced a carrier (`docs/library.md`).
 - **Supervision.** Rooms and anything long-running appear on the dashboard and fall under budgets; a quick call with no tools records only its cost. Sessions started from code run under their own config home, so they never appear among the operator's own sessions, history or messages.
 - **A persistent REPL (leaning yes).** A tool for agents run from code and in rooms, inside the wall. The agent can freeze, fork and rewind its state, and it must be light.
 - **Delegation from code** is a nested call through the client, or lup's spawn. No third route.

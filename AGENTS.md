@@ -13,7 +13,7 @@ This repository is the second lup. The first (`joy-void-joy/lup-legacy`, archive
 ## How work goes
 
 1. **A design note first.** For each piece, open a draft pull request holding only `docs/<piece>.md`: its modules, what each is for, its public API, and the choices it makes with their alternatives. Implement once the operator approves it. The note stays as that piece's documentation, kept true as the code changes.
-2. **One concern per branch, as a GitHub pull request.** Its description lists every design decision taken, with its alternative and the file it lives in; then what changed and why, how it was tested, and a short note on how the work felt (see *Delegating*). The operator merges: never merge into `main` or push to it yourself.
+2. **One concern per branch, as a GitHub pull request.** Its description lists every design decision taken, with its alternative and the file it lives in; then what changed and why, how it was tested, and a short note on how the work felt (see *Delegating*). The operator merges: never merge into `main` or push to it yourself. A simple doc change skips the ceremony: it rides along with the work it belongs to, or goes in a small pull request with a few lines of description.
 3. **Create files with your file tool, never through the shell.** On Claude Code, every `Write` reaches the operator as a prompt, which is how they see the design forming; a file made by a heredoc or a script skips that. Codex has no such prompt yet, so on Codex, name every new file in the pull request description.
 4. **Commit early and atomically**, before you report: `type(scope): what changed and why`.
 
