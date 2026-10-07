@@ -12,6 +12,7 @@ lup's format, and the call waits here until it's answered in the first lup's
 dashboard:
 - a new production file, or a Write over a whole existing one;
 - a protected path: manifests, lockfiles, runtime settings and hooks, CI, editor configs;
+- one of the operator's documents, `DESIGN.md` and `AGENTS.md` at a worktree's root;
 - an edit that adds a `# lup: ignore` suppression to a Python file.
 
 An approval lets the call through, with the operator's note and line comments
@@ -76,6 +77,11 @@ class Settings(BaseSettings, env_prefix="LUP_INTERIM_REVIEW_"):
     Manifests and lockfiles choose what runs; runtime settings and hooks, CI,
     pre-commit and editor configs run outside the agent's own calls;
     `.gitignore` decides what review can see; `.env*` holds secrets.
+    """
+    operator_documents: list[str] = ["DESIGN.md", "AGENTS.md"]
+    """The operator's documents, as patterns relative to the worktree.
+
+    Changing one is a design decision, so every write to one asks.
     """
     python_suffixes: list[str] = [".py", ".pyi"]
     answers_variable: str = "LUP_REVIEW_ANSWERS"
@@ -262,6 +268,9 @@ def verdict(relative: Path, tool: str, before: str | None, after: str, settings:
     if protected is not None:
         reason = f"{relative} is a protected path ({protected})"
         return Verdict(review=Review(rule="interim-protected-path", reason=reason, purpose="policy_override"))
+    if any(relative.full_match(pattern) for pattern in settings.operator_documents):
+        reason = f"{relative} is one of the operator's documents"
+        return Verdict(review=Review(rule="interim-operator-document", reason=reason, purpose="policy_override"))
     if not any(relative.full_match(pattern) for pattern in settings.production):
         return Verdict()
     if before is None:
