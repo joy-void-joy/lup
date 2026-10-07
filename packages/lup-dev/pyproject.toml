@@ -3,8 +3,14 @@ name = "lup-dev"
 version = "0.1.0"
 description = "The environment for developing a project with agents."
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "lup",
+    "pydantic>=2.12",
+]
 
 [build-system]
 requires = ["uv_build>=0.12.23,<0.13.0"]
 build-backend = "uv_build"
+
+[tool.uv.sources]
+lup = { workspace = true }

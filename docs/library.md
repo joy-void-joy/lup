@@ -237,7 +237,7 @@ It's derived from the `TurnResult` (or the error) and the request, so the two ca
 ```
 packages/lup/src/lup/
   __init__.py              the front door: neutral names bound, Claude and Codex resolved on first use
-  types.py                 JsonObject and the other shared aliases
+  types.py                 Model, MutableModel and Settings, the bases every model starts from; JsonObject
   sessions/
     surface.py             Agent, the protocol code naming no runtime holds
     declaration.py         the fields every declaration has, and ask: the layers around the adapter

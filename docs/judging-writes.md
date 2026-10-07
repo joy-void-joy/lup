@@ -227,11 +227,17 @@ Pyright has no plugin API, and its published package is one bundled file whose i
 
 **`ignore`:** `# lup: ignore("tuple-shape", why="sh takes its redirections as positional tuples")`, on the finding's line or alone on the line above. Every rule accepts it. Adding one asks the operator. An `ignore` without its reason, or whose rule doesn't fire there, is a finding. Removing one is free: it only makes the rule apply.
 
-**`defer`:** work that waits, pointing at where it's tracked or at when it's due:
-- `# lup: defer(issue=7)` points at a GitHub issue in this repository; `issue="owner/repo#7"` elsewhere. The ledger's to-do items point at GitHub issues too, so a `defer` stays valid when the ledger arrives.
-- `# lup: defer(when="python>=3.15", why="…")` carries a condition the gate can check, in the form of a Python requirement read with `packaging.requirements`: `python` means an interpreter uv can install, any other name a release on the package index. When it holds, the gate lists the note as due.
-- A `defer` needs an `issue`, or a `when` with its `why`. Free text alone is a note, not a deferral: nothing could ever tell it's due.
-- Checked: its syntax and fields at the edit; the issue's existence and the condition at the gate, which may reach GitHub and the index (tests stub both).
+**`defer`:** work knowingly left undone, written on the code it's about, so the next reader sees the gap is known and tracked instead of fixing it blind or calling it pre-existing:
+```python
+# lup: defer(issue=12, why="retries ignore Codex's reset time until its SDK reports it")
+# lup: defer(when=sdk_reports_cache_ttl, why="read the TTL from the SDK instead of assuming an hour")
+```
+- **`why` is required:** what's left undone here, in one line.
+- **It needs a way to come back: an `issue`, a `when`, or both.** Without either it's a note nothing would ever close, which is how the first lup's notes piled up.
+- **`issue`** is an issue number in this repository, or `"owner/repo#7"` elsewhere. The ledger's to-do items point at GitHub issues too, so a `defer` stays valid when the ledger arrives. A `defer` whose issue is closed is reported, so the comment never outlives the work it points at.
+- **`when`** names a condition written in Python, which wakes the deferral when it holds. A condition is an instance of lup's `Condition` ABC (one method, `holds() -> bool`), declared in the module the project's declaration names for its conditions. lup ships stock ones (`PythonAvailable(version="3.15")`, `PackageReleased(name=…, version=…)`); a project subclasses its own. The comment holds only the name, so nothing in a comment is ever run, and the condition is typed and tested like any code.
+- **Work that isn't about one spot in the code** isn't a `defer`: it's only an issue (as `frozendict`, issue #7).
+- **Checked:** its syntax and fields at the edit, and that `when` names a declared condition; at the gate, the issue's state and the condition, which may reach GitHub and the package index (tests stub both).
 
 **Removing a note:**
 - a note or directive added during this session can be removed freely, so an agent can take back its own `defer`;
@@ -339,7 +345,7 @@ Each with its alternative and where it lives. **(yours, agreed)** marks what the
 12. **(yours, agreed)** The typed engine on pyright's own tree from the first rule, with no syntax-only stage. *Alternatives:* mypy's tree; ruff's `banned-api` plus a syntax checker first. *Where:* `checker/`.
 13. **(yours, agreed)** The spike's six questions, as decided above: no tuple types at all, and importers re-checked in one background pass per worktree, waited on at turn end. *Alternative:* importers left to the gate, which could surface a type error after the session. *Where:* `checker/`, `checkpoint.py`.
 14. **(yours, agreed)** `# lup:` directives as calls, everything else a note, a wrong directive a finding. *Where:* `directives.py`.
-15. **(yours, agreed)** `defer` points at a GitHub issue or carries a checkable condition; the ledger's to-do items point at GitHub issues. *Alternative:* `defer` pointing only at ledger records. *Where:* `directives.py`.
+15. **(yours, agreed)** `defer` carries a required `why`, an `issue`, a `when` naming a `Condition` declared in Python, or both; a closed issue is reported; the ledger's to-do items point at GitHub issues. *Alternatives:* a condition written as a requirement string in the comment; `defer` pointing only at ledger records. *Where:* `directives.py`, the gate.
 16. **(yours, agreed)** Removing a note: free if added this session; reported if committed; through its record once the ledger exists. *Alternative:* the first lup's refusal. *Where:* `judge.py`, `directives.py`.
 17. **(yours, agreed)** The judge runs from a local copy installed from `dev`. *Alternative:* the worktree's own copy. *Where:* the hook commands.
 18. **(yours, agreed)** No acceptance guard of its own: tests written as a specification are protected paths a project adds, and read-only mounts in a room. *Alternative:* the first lup's opt-in `acceptance` path role. *Where:* `roles.py` (protected-path additions).

@@ -36,6 +36,8 @@ ignore = [
     # Constants
     "PLR2004",   # pushes values into module constants: `constant-home`
     "ASYNC109",  # flags a `timeout` parameter, which is where a duration lives: `constant-home`
+    # Data shapes
+    "RUF012",  # flags a model's `= []` default, which pydantic copies, since it can't see through `lup.types.Model` to pydantic: `default-factory`
     # Collections and loops
     "PLR1714",                        # steers repeated comparisons to a set literal: `set-shape`
     "PERF401", "PERF402", "PERF403",  # overlap: `collection-loop`
@@ -74,8 +76,14 @@ task-tags = ["lup"]
 
 [tool.ruff.lint.flake8-type-checking]
 # A pydantic field's type is read at runtime, so its import stays out of a
-# `TYPE_CHECKING` block.
-runtime-evaluated-base-classes = ["pydantic.BaseModel", "pydantic_settings.BaseSettings"]
+# `TYPE_CHECKING` block. Models derive from lup's bases (`lup.types`).
+runtime-evaluated-base-classes = [
+    "pydantic.BaseModel",
+    "pydantic_settings.BaseSettings",
+    "lup.types.Model",
+    "lup.types.MutableModel",
+    "lup.types.Settings",
+]
 
 [tool.ruff.lint.per-file-ignores]
 # Tests are exempt from lup's rules; ruff keeps these test-only exemptions.
@@ -96,11 +104,17 @@ testpaths = ["packages/*/tests", "packages/*/src"]
 addopts = ["--doctest-modules", "--import-mode=importlib"]
 
 [tool.importlinter]
-root_packages = ["lup_dev"]
+root_packages = ["lup", "lup_dev"]
 # Lets a contract name a package outside `root_packages`, such as `lup_dashboard`.
 include_external_packages = true
 
 # The library never imports the environment (`docs/conventions.md`, *Imports and boundaries*).
+[[tool.importlinter.contracts]]
+name = "lup never imports lup_dev or lup_dashboard"
+type = "forbidden"
+source_modules = ["lup"]
+forbidden_modules = ["lup_dev", "lup_dashboard"]
+
 [[tool.importlinter.contracts]]
 name = "lup_dev never imports lup_dashboard"
 type = "forbidden"
