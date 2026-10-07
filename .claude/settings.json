@@ -4,5 +4,21 @@
   "permissions": {
     "ask": ["Write", "Bash(gh pr merge:*)"],
     "deny": ["Artifact", "SendFeedback", "Workflow", "ScheduleWakeup", "ReportFindings"]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --script \"$CLAUDE_PROJECT_DIR/.claude/hooks/interim_rules.py\"",
+            "async": true,
+            "asyncRewake": true,
+            "timeout": 300
+          }
+        ]
+      }
+    ]
   }
 }
