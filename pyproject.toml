@@ -5,6 +5,10 @@ members = ["packages/*"]
 # The package age gate: nothing published in the last three days resolves.
 exclude-newer = "3 days"
 
+[tool.lup]
+# lup's own declaration (`docs/judging-writes.md`, *What each change gets*).
+project = "lup_project:project"
+
 [tool.ruff]
 target-version = "py314"
 # Where the workspace packages' modules live, so their imports sort as first-party.
@@ -120,6 +124,14 @@ name = "lup_dev never imports lup_dashboard"
 type = "forbidden"
 source_modules = ["lup_dev"]
 forbidden_modules = ["lup_dashboard"]
+
+# The judging core never names a runtime: each runtime's spellings live in its
+# adapter, and only the command line lists the adapters.
+[[tool.importlinter.contracts]]
+name = "only lup_dev.cli imports the runtime adapters"
+type = "protected"
+protected_modules = ["lup_dev.adapters"]
+allowed_importers = ["lup_dev.cli"]
 
 [dependency-groups]
 dev = [

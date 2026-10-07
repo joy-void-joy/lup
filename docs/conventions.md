@@ -246,13 +246,16 @@ The parsers to reach for: `json`, `tomllib` (`tomlkit` to edit), `csv`, `urllib.
 **Decision.** Declared as import-linter contracts in `pyproject.toml`:
 - the library never imports the environment (`lup` never imports `lup_dev`, and `lup_dev` never imports `lup_dashboard`);
 - a runtime's SDK is imported only in its adapter (`lup.adapters.claude`, `lup.adapters.codex`);
+- a runtime's adapter is imported only where the adapters are listed: in `lup_dev`, the hook adapters (`lup_dev.adapters`) only by `lup_dev.cli`;
 - nothing inside `lup` imports from its front door (`lup/__init__.py`).
 
 import-linter checks the whole graph at the gate. The engine reads the same contracts and checks each edited file's own imports at the edit, so a wrong import is refused when it's written. These contracts are lup's; a project declares its own.
 
+**A runtime is named only in its adapter.** Everything a runtime spells its own way (its hook events and payload fields, its tool names, how it hears a report, the variables it sets in the commands it runs) lives in its adapter; the rest of lup speaks its own words and sees a runtime through an interface (`lup_dev.runtime.Runtime`). That's how features stay on both runtimes by construction: Codex rotted in the first lup because features were built per runtime above the adapter (`AGENTS.md`, *Both runtimes*). An import contract can't see a name in a string or a comment, so a rule does: a runtime's name outside its adapter is a finding. Data that names a runtime's own files (`.claude/`, `.codex/` among the protected paths) and the one place listing the adapters carry an `ignore` saying so.
+
 **The first lup.** `front-door`, `seam-boundary` and `kernel-imports` were custom rules over an AST scanner. Its tool layer still reached into environment packages (`tools/toolsets.py:38-43` imported coordination, ledger and orchestration).
 
-**Enforced by:** import-linter (a new dependency, agreed), and the engine at the edit.
+**Enforced by:** import-linter (a new dependency, agreed), and the engine at the edit; `runtime-mention` for names.
 
 ## ruff's selection
 
@@ -315,6 +318,7 @@ Tests are exempt from lup's rules. A file is a test if pytest collects it as a t
 | `suppress`, `bare-except`, `except-baseexception` | `contextlib.suppress`, `except:`, `except BaseException` | handle, log or re-raise; catch `Exception` or narrower |
 | `subprocess`, `os-shell`, `argparse`, `os-path`, `os-file-ops`, `os-environ`, `rich-progress`, `pdf-extraction` | the library a job doesn't use | the one it does (*Libraries per job*) |
 | `suppression-comment` | `# noqa`, `# type: ignore`, `# pyright: ignore` | `# lup: ignore(…)` |
+| `runtime-mention` | a runtime's name (`claude`, `codex`, in any case) in a name, string, comment or docstring outside its adapter | lup's own words, with the runtime's spelling in its adapter |
 
 Dropped from the first lup's catalog, with why:
 - `constant-declaration`, `library-default`: replaced by `constant-home`;
@@ -349,3 +353,4 @@ Each with its alternative and where it lives. **(yours, agreed)** marks what the
 16. **(yours, agreed)** One suppression syntax, `# lup: ignore(…)`, for lup, ruff and pyright findings alike. *Alternative:* `noqa` back for ruff codes. *Where:* the engine; `pyproject.toml`.
 17. **(yours, agreed)** import-linter for the boundaries, read by the engine at the edit too. *Alternative:* custom import rules in the engine alone. *Where:* `pyproject.toml`.
 18. Each rule's suggested fix passes every other rule, as a test over the catalog. *Alternative:* review catching contradictions. *Where:* the engine's tests.
+19. **(yours, agreed)** A runtime is named only in its adapter: an import contract keeps the adapters behind the one place listing them, and `runtime-mention` refuses a runtime's name elsewhere. *Alternative:* convention only, which is how the first lup's features came to be built per runtime. *Where:* `pyproject.toml`, the engine.
