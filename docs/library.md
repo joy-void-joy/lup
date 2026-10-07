@@ -51,9 +51,21 @@ result.output            # Translations
 result.usage.cost_usd    # where the runtime reports it
 ```
 
-- **`ask(prompt, output, gate=None)` returns a `TurnResult[T]`.** Its `output` is an instance of the output model, or the answer's text when no model is given.
+- **`ask(prompt, output)` returns a `TurnResult[T]`.** Its `output` is an instance of the output model, or the answer's text when no model is given.
+- **`output` is a model type or an output tool.** `ask(prompt, Forecast)` uses the default output tool for `Forecast`. To review an answer before it's accepted, build the output tool yourself, with a pre-call hook on it:
+
+  ```python
+  from lup.tools import Allow, Deny, Submit
+
+  async def cites_sources(forecast: Forecast) -> Allow | Deny:
+      if not forecast.sources:
+          return Deny("Cite at least one source for the probability.")
+      return Allow()
+
+  result = await forecaster.ask(question, Submit(Forecast, before=[cites_sources]))
+  ```
+
 - **A failure is always an error,** never an empty result.
-- **`gate` is an optional async check on the validated answer.** It returns a verdict: accepted, or rejected with a message the agent reads.
 - **A runtime-neutral protocol.** Code that shouldn't care which runtime it gets takes an `Agent`, the protocol both declarations satisfy.
 
 ```python
@@ -108,25 +120,25 @@ A plain ask can carry tools without becoming a room. `DESIGN.md` draws the line 
 | Where | The first lup's fields |
 |---|---|
 | This slice | `model`, `system_prompt`, `effort`, `layers` |
-| The tools slice: a plain declaration, no container | `tools` (web, read-only file tools, MCP servers, lup function tools); `cwd` and the directories it may read; `max_turns` |
-| A slice for products others use | `endpoint`, `api_key` |
-| The conversations slice | `resume` and history; `delta_streaming`, for live events |
-| Observability | `record`: what is kept of a session |
-| The runtime's process | `environment`: the variables it starts with |
+| The tools slice: a plain declaration, no container | `tools`, as a list of `lup_tool` constructs. A runtime's built-ins (web search, read-only file tools) become lup-provided constructs each adapter maps to its native tool. Also `cwd` and the directories it may read, and `max_turns` |
+| The client's creation | `endpoint` and `api_key`, as one connection value given when the client is created (the first lup's `ClaudeCompatibleEndpoint` already held both), in a slice for products others use |
+| The session holder | `resume` and history, as `agent.open(resume=…)` and `conversation.history()`, like the first lup's `Agent` and `Conversation`; `delta_streaming`, as the conversation's live events |
+| lup's transcript writer | `record`: what is kept of a session, through the trace layer |
+| Passed straight through | `environment`: a plain mapping of variables the runtime's process starts with |
 | The containers slice, where rooms build on it | `sandbox` and writable mounts, with Bash and the tools that write |
 | The environment (`lup-dev`), for developing a project | `plugin` (the compiled harness), `policy`, `hooks`, `requirements` (checks before a launch), `identity` (a place on the roster), `companions` (processes kept beside a session), `max_recursive_agent` (spawn depth, which belongs to budgets), and the account fields `profile`, `home`, `move_sessions` |
 | Derived, not declared | `permission_mode`, `allowed_tools`, `disallowed_tools`: lup sets permissions from the declared tools, so a declaration can't contradict its own tools |
-| Dropped | `max_thinking_tokens` (superseded by `effort` in the SDK); `setting_sources`, `cli_path`, `max_buffer_size`, `stderr_tail_lines` and the `extra_args` escape hatch (adapter internals); `subagents` (`DESIGN.md`'s spawn replaces native subagents); `submission_gate_resolver` (the gate moves to `ask`, see below) |
+| Dropped | `max_thinking_tokens` (superseded by `effort` in the SDK); `setting_sources`, `cli_path`, `max_buffer_size`, `stderr_tail_lines` and the `extra_args` escape hatch (adapter internals); `subagents` (`DESIGN.md`'s spawn replaces native subagents); `submission_gate_resolver` (a review is a hook on the output tool, see below) |
 
-## Typed answers: `lup_submit` and its guard
+## Typed answers: the output tool and its guard
 
-1. **The tool.** A typed ask gives the session one lup tool, `lup_submit`, whose input is the output model.
-2. **The handler is the guard.** It validates the submission with pydantic, then runs the `gate` if one was given.
-   - A rejection answers the tool call with every validation error, or the gate's message.
-   - The agent corrects its answer within the same turn, with its own context. No new prompt is sent.
+1. **The tool.** A typed ask gives the session one lup tool, `lup_submit`, whose input is the output model. It's `Submit(Forecast)`, built for you when `ask` is given the model type.
+2. **The handler validates.** pydantic checks the submission, then the tool's `before` hooks run on the validated value.
+   - A hook answers `Allow()` or `Deny(reason)`, the same decisions as the first lup's neutral hooks (`policy/hooks.py`). A hook on the output tool receives the typed answer, not raw JSON.
+   - A rejection, whether every validation error or a hook's reason, answers the tool call. The agent corrects its answer within the same turn, with its own context. No new prompt is sent.
    - An accepted answer is kept for the turn.
-3. **The turn can't end without an accepted answer.**
-   - **On Claude**, an in-process `Stop` hook (the SDK runs hooks as Python callbacks) refuses to let the turn finish, saying why: "call `lup_submit` with your answer". The turn continues; it isn't restarted.
+3. **The turn can't end without an accepted answer.** This is lup's own `stop` hook, the first lup's `create_tool_gate` applied to the end of a turn, delivered through each adapter.
+   - **On Claude**, it's an in-process `Stop` hook (the SDK runs hooks as Python callbacks). It refuses to let the turn finish, saying why: "call `lup_submit` with your answer". The turn continues; it isn't restarted.
    - **On Codex**, hooks are commands configured in files, not callbacks. So when the turn ends without an accepted answer, the adapter continues the same thread with that one sentence. The conversation stays, and the original request isn't re-sent.
 4. **Bounded.** `layers.submission.attempts` (default 3) counts rejected answers and refused endings together. Past it, the ask stops the turn and raises `OutputMissing`, carrying every rejected attempt in full.
 5. **Untyped asks** get no tool. The answer is the final message's text.
@@ -135,11 +147,16 @@ A plain ask can carry tools without becoming a room. `DESIGN.md` draws the line 
 
 ## Tools, minimally
 
-A lup tool is a Python function with a typed input model and a typed output model, declared with `@lup_tool`. It is delivered in each runtime's own way:
+A lup tool is a Python function with a typed input model and a typed output model, declared with `@lup_tool`. It can carry `before` hooks, typed on its input, which run in lup's process before the handler. It is delivered in each runtime's own way:
 - **Claude:** through the SDK's in-process server, so the tool runs in the caller's process. The agent sees it as `mcp__lup__submit`.
 - **Codex:** as a dynamic tool on the thread, answered in-process through the SDK client's server-request callback.
 
-The tool construct is public, but in this slice the only tool is `lup_submit`. Project tools, groups and toolsets, and the declaration's `tools` field come with the tools slice. They don't need a container: a function tool runs in the caller's process, not in the agent's.
+The tool construct is public, but in this slice the only tool is `lup_submit`. The tools slice adds:
+- project tools, groups and toolsets;
+- the declaration's `tools` field;
+- the neutral `Hooks` construct for the runtime's own tools: `pre_tool_use`, `post_tool_use`, `stop` matchers, like the first lup's `LupHooksConfig`.
+
+None of them needs a container: a function tool runs in the caller's process, not in the agent's.
 
 ## The layers an ask runs in
 
@@ -205,7 +222,7 @@ It's derived from the `TurnResult` (or the error) and the request, so the two ca
 **The fake replaces the adapter, not the agent.** A test's `Claude(...)` goes through the real `ask`: layers, the guard's bookkeeping, the record. Only the turn is scripted.
 - `fake_agents.answer(Output, value)` queues an accepted answer for the next ask of that output type.
 - `fake_agents.answer_text(str)` queues an answer for a plain ask.
-- `fake_agents.reject_then(Output, invalid_json, value)` scripts a rejected submission before the accepted one, to exercise `rejected` and the gate.
+- `fake_agents.reject_then(Output, invalid_json, value)` scripts a rejected submission before the accepted one, to exercise `rejected` and the output tool's hooks.
 - `fake_agents.fail(Output, error)` scripts a failure.
 - `fake_agents.calls` lists every call, with its declaration and prompt.
 - An ask with nothing scripted raises `UnscriptedAsk`, naming the output type and the prompt.
@@ -226,11 +243,11 @@ packages/lup/src/lup/
     declaration.py         the fields every declaration has, and ask: the layers around the adapter
     contract.py            what an adapter implements: open a session, run a turn; and the seam the fake replaces
     layers.py              SessionLayers, Recovery, Submission
-    submission.py          lup_submit: validation, the gate, the accepted answer, the rejected ones
+    submission.py          Submit and lup_submit: validation, the before hooks, the accepted answer, the rejected ones
     results.py             TurnResult, Usage, Rejection
     errors.py              the errors above
   tools/
-    tool.py                @lup_tool: a typed Python function as a tool
+    tool.py                @lup_tool: a typed Python function as a tool, with before hooks; Allow, Deny
   adapters/
     claude/__init__.py     the Claude declaration
     claude/runtime.py      the Agent SDK session: options, in-process tools, the Stop guard, the tool check
@@ -277,11 +294,11 @@ Each with the alternative and where it lives. **(yours)** marks the operator's.
 4. **(yours, agreed)** `adapters/`, not `providers/`. *Alternative:* the first lup's name. *Where:* `lup/adapters/`.
 5. **(yours, agreed)** `ask` returns `TurnResult[T]`. *Alternatives:* the output itself; the output plus an opt-in recorder. *Where:* `sessions/results.py`.
 6. **(yours, agreed)** Typed answers through `lup_submit` on both runtimes, guarded at turn end. Native structured output is used on neither. *Alternatives:* the first lup's split (a tool on Claude, native on Codex) with a "Correction required" re-send; native output on both. *Where:* `sessions/submission.py`, `adapters/*/runtime.py`.
-7. **(yours)** `gate` is a parameter of `ask`, not of the declaration.
-   - A gate checks one output type, and a declaration answers many. On the declaration, the first lup needed a resolver from output type to gate, which erased the type and re-validated the answer to recover it.
-   - Its own docstring (`sessions/composition.py`) says moving the gate beside the output type on the turn "would remove it entirely".
-   - *Alternatives:* the first lup's resolver on the declaration; both, with the declaration's as a default; a gate method on the output model, which lacks the context a reviewer needs.
-   - *Where:* `sessions/declaration.py`.
+7. **(yours, agreed in direction)** A review is a `before` hook on the output tool (`Submit(Forecast, before=[...])`), not a separate gate.
+   - The hook receives the typed answer and returns `Allow()` or `Deny(reason)`, the first lup's neutral hook decisions.
+   - On the declaration, the first lup needed a resolver from output type to gate, which erased the type and re-validated the answer to recover it. Its own docstring (`sessions/composition.py`) says moving the gate beside the output type "would remove it entirely".
+   - *Alternatives:* a `gate=` parameter on `ask`; the first lup's resolver on the declaration; a review method on the output model, which lacks the context a reviewer needs.
+   - *Where:* `tools/tool.py`, `sessions/submission.py`.
 8. **(yours)** This slice's fields are `model`, `system_prompt`, `effort` and `layers`, and every one of the first lup's 36 fields has a place in *Where the first lup's fields go*. *Alternative:* carrying more of them into this slice before anything uses them. *Where:* `adapters/*/__init__.py`.
 9. Layers as one field with four layers. *Alternative:* flat fields on the declaration. *Where:* `sessions/layers.py`.
 10. No session persistence and no user settings for calls from code, until rooms need an own config home. *Alternative:* the first lup's derived homes with a copied login. *Where:* `adapters/*/runtime.py`.
