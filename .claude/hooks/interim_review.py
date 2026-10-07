@@ -82,12 +82,15 @@ class Settings(BaseSettings, env_prefix="LUP_INTERIM_REVIEW_"):
         ".devcontainer/**",
         ".gitignore",
         ".env*",
+        "**/lup_dev/catalog/**",
     ]
     """Paths every write to asks, as patterns relative to the worktree.
 
     Manifests and lockfiles choose what runs; runtime settings and hooks, CI,
     pre-commit and editor configs run outside the agent's own calls;
-    `.gitignore` decides what review can see; `.env*` holds secrets.
+    `.gitignore` decides what review can see; `.env*` holds secrets;
+    `lup_dev/catalog/` is the data that sets lup's policy (its rules, its path
+    roles), which the operator reviews before it changes.
     """
     operator_documents: list[str] = ["DESIGN.md", "AGENTS.md"]
     """The operator's documents, as patterns relative to the worktree.
