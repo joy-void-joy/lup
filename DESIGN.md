@@ -213,7 +213,13 @@ The control runs as its own small host process. A hold within the hour keeps its
   - **credentials** (push, opening a pull request, publishing): a host service that does that one action, asked per action;
   - **a protected path** (runtime settings, generated harness files): the ordinary ask;
   - **a tool or device the container lacks** (a pinned toolchain under the home directory, a GPU, audio, a display): a reviewed command on the host, plus a note that the room's image should carry it;
-  - **repairing the environment** (git pointers after a repository moved): a reviewed command on the host.
+  - **repairing the environment** (git pointers after a repository moved): a reviewed command on the host;
+  - **anything else:** a free-text reason, always reviewed. Unknown problems are the case the list can't foresee: once, nobody realized the sandbox hid the GPU, and the agent had to escalate every few commands to debug it.
+
+  Three things keep that case from turning into a prompt per command (tentative):
+  - **Answers can be scoped.** The operator can answer one request "for this session, for this reason" as well as "once".
+  - **Repeats are the signal.** Every escalation is logged with its reason. The same reason coming back means the room's declaration is missing something (a device, a mount, a toolchain), and it surfaces on the dashboard as that, to fix at the source.
+  - **Launch says what the wall hides.** A launch reports what the host has that the container doesn't: GPUs and other devices, toolchains on the host's `PATH`. A hidden GPU is then visible before anyone debugs it.
 
   Several of the first lup's escalations came from its per-call sandbox (a unix socket refused, a read-only symlink), which the container as the only wall removes.
 - **Network: leaning open egress.** Filtering produced constant friction and reviews that were mostly fine. So nothing secret is mounted, apart from the runtime's own login (below).
