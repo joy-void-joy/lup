@@ -106,8 +106,8 @@ def rules_check(
     """Check files as the gate does: lup's rules, pyright, ruff and the deferrals.
 
     `# lup: ignore` applies to every owner's findings. A deferral whose issue is
-    closed, or whose condition holds, fails the check. Tests are checked by
-    pyright and ruff only.
+    closed, or whose condition holds, fails the check. lup's rules read production
+    and protected modules; tests are checked by pyright and ruff only.
     """
     root = toplevel(Path.cwd())
     layout = Layout.of(LupDevSettings())
@@ -122,12 +122,7 @@ def rules_check(
         .text("ls-files", "--cached", "--others", "--exclude-standard")
         .splitlines()
     ]
-    checked = [
-        path
-        for path in listed
-        if worktree.roles.is_python(path)
-        and worktree.roles.role(path) in ["production", "test"]
-    ]
+    checked = [path for path in listed if worktree.roles.checked(path)]
     if not checked:
         typer.echo("lup checked no files.")
         return
@@ -140,11 +135,11 @@ def rules_check(
     def found(path: Path) -> list[Finding]:
         report = next(each for each in reports if each.path == path)
         every = [*report.findings, *(each for each in ruff if each.path == path)]
-        production = worktree.roles.role(path) == "production"
+        ruled = worktree.roles.ruled(path)
         kept = [
             each
             for each in every
-            if (production or each.owner != "lup")
+            if (ruled or each.owner != "lup")
             and not any(
                 directive.keeps(each.rule, each.span.start.line)
                 for directive in report.directives

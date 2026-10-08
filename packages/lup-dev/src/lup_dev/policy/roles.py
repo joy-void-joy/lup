@@ -10,8 +10,9 @@
 6. **data:** data formats outside a source tree;
 7. **production:** everything else, so a file nobody classified is gated.
 
-The table of what each role gets is in `docs/judging-writes.md`, *What each change
-gets*.
+A protected Python module gets lup's rules as production code does: protection
+adds the operator's review, it doesn't take the rules away. The table of what each
+role gets is in `docs/judging-writes.md`, *What each change gets*.
 """
 
 import tomllib
@@ -74,6 +75,23 @@ class Roles(Model):
     def is_python(self, path: Path) -> bool:
         """Say whether `path` is a Python module, which the rules read."""
         return matches(PurePath(path.name), self.paths.python)
+
+    def ruled(self, path: Path) -> bool:
+        """Say whether lup's rules read `path`: a production or protected module.
+
+        >>> roles = Roles(root=Path("/nowhere"), project=Project())
+        >>> [roles.ruled(Path(p)) for p in ["a.py", ".claude/h.py", "tests/test_a.py"]]
+        [True, True, False]
+        """
+        return self.is_python(path) and self.role(path) in ["production", "protected"]
+
+    def checked(self, path: Path) -> bool:
+        """Say whether pyright's and ruff's findings in `path` are reported.
+
+        A module lup's rules read, or a test: tests are exempt from lup's rules,
+        not from pyright and ruff.
+        """
+        return self.ruled(path) or (self.is_python(path) and self.role(path) == "test")
 
     def is_test(self, path: Path) -> bool:
         """Say whether pytest collects `path` as a test, or reads it as a conftest."""
