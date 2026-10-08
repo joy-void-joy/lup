@@ -10,9 +10,11 @@ for these events, named by the payload's `hook_event_name`:
 - `PermissionRequest`, whenever Claude Code is about to show a permission prompt,
   for any tool, the judge's asks included. The prompt is queued for review
   instead, saying what Claude Code asks permission for; nothing it asks is
-  allowed without the operator. A tool whose prompt is a question rather than a
-  permission (`AskUserQuestion`) stays in the terminal: the dashboard can only
-  approve or decline.
+  allowed without the operator, but for a Write or Edit landing only in
+  scratch: `tmp/` in a worktree of the session's repository, or the session's
+  own scratchpad. A tool whose prompt is a question rather than a permission
+  (`AskUserQuestion`) stays in the terminal: the dashboard can only approve or
+  decline.
 - `PostToolBatch`, after each batch of tool calls, to pass on what the operator
   wrote when approving a prompt (below).
 - `PreToolUse`, before each Write or Edit, only in a session started before the
@@ -123,6 +125,10 @@ class Settings(BaseSettings, env_prefix="LUP_INTERIM_REVIEW_"):
 
     Changing one is a design decision, so every write to one asks.
     """
+    scratch: list[str] = ["tmp/**"]
+    """Scratch in a worktree, as patterns relative to it: gitignored, so nothing in it lands."""
+    scratchpad: str = "/tmp/claude-*/*/{session}/scratchpad/**"
+    """Claude Code's scratchpad for one session, as a pattern with the session's id in place of `{session}`."""
     terminal_tools: list[str] = ["AskUserQuestion"]
     """Tools whose prompt asks the operator a question rather than for permission.
 
@@ -759,12 +765,33 @@ def notes_file(checkout: Path, session: str, agent: str) -> Path:
     return checkout / ".lup/approval-notes" / session / f"{agent or 'session'}.jsonl"
 
 
+def scratch_write(payload: PermissionPayload, common: Path, settings: Settings) -> bool:
+    """Whether a prompted Write or Edit lands only in scratch, which the operator doesn't review.
+
+    Scratch is `settings.scratch` in any worktree of the session's repository, or
+    the session's own scratchpad. The path is resolved first, so a `..` or a
+    symlink can't lead out of either.
+    """
+    if payload.tool_name not in ["Write", "Edit"]:
+        return False
+    path = (payload.cwd / PathInput.model_validate(payload.tool_input).file_path).resolve()
+    if path.full_match(settings.scratchpad.format(session=payload.session_id)):
+        return True
+    directory = next(parent for parent in path.parents if parent.is_dir())
+    toplevel = git(directory, "rev-parse", "--show-toplevel")
+    shared = git(directory, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if toplevel is None or shared is None or Path(shared) != common:
+        return False
+    return any(path.full_match(str(Path(toplevel) / pattern)) for pattern in settings.scratch)
+
+
 def permission(payload: PermissionPayload, settings: Settings, outside: Outside) -> PermissionAnswer | None:
     """Queue one permission prompt in the dashboard instead of the terminal, and answer it from there.
 
-    An approval allows this call only. What the operator wrote with it waits
-    in the notes file until the batch holding the call ends (`delivered`),
-    since a PermissionRequest's answer can't carry context.
+    A Write or Edit landing only in scratch is allowed without asking
+    (`scratch_write`). An approval allows this call only. What the operator
+    wrote with it waits in the notes file until the batch holding the call
+    ends (`delivered`), since a PermissionRequest's answer can't carry context.
     """
     if payload.tool_name in settings.terminal_tools:
         return None
@@ -775,6 +802,8 @@ def permission(payload: PermissionPayload, settings: Settings, outside: Outside)
             f"Claude Code asks permission for this {payload.tool_name} call, but {payload.cwd} is in no git checkout, "
             "so the review dashboard can't be reached. Tell the operator."
         )
+    if scratch_write(payload, Path(common), settings):
+        return PermissionAnswer(decision=PermissionDecision(behavior="allow"))
     checkout = Path(checkout_text)
     change = prompted_write(payload)
     request = Request(
