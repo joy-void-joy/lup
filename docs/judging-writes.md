@@ -53,7 +53,7 @@ lup never stays silent on a write it judges. Staying silent would send the call 
 |---|---|
 | A test, scratch (`tmp/`), docs or data file, at any size | allow |
 | `DESIGN.md` or `AGENTS.md` | ask: they're the operator's |
-| A protected path | ask |
+| A protected path | ask; a protected Python module gets the rules too, so a finding on the lines the change touches refuses it |
 | Production code with a rule finding on the lines the change touches | refuse, every finding in the file listed, the agent's version saved |
 | A new production file, or overwriting a whole existing one | ask |
 | A change to the public API (see below) | ask |
@@ -70,7 +70,9 @@ lup never stays silent on a write it judges. Staying silent would send the call 
 6. **data:** JSON, CSV, YAML and other data formats outside a source tree, which is anything under a `src/` directory or in a directory holding an `__init__.py`;
 7. **production:** everything else.
 
-Production is the default, so a file nobody classified is gated rather than waved through. The default patterns are data in `lup_dev/catalog/paths.py`, which the operator reviews; `policy/roles.py` holds the matching.
+Production is the default, so a file nobody classified is gated rather than waved through.
+
+**A protected Python module gets lup's rules as production code does** (#14): protection adds the operator's review, it doesn't take the rules away. A finding on the lines a change touches refuses it, since refuse wins over ask; a clean change asks, with any design ask beside the protected one, and no approval covers the protected ask. Its type errors and ruff's findings are information like any module's, and must be clean at the turn's end; `lup-dev rules check` reads it too. `policy/roles.py` says which modules the rules read (`ruled`: production and protected) and whose pyright and ruff findings are reported (`checked`: those, and tests). The default patterns are data in `lup_dev/catalog/paths.py`, which the operator reviews; `policy/roles.py` holds the matching.
 
 A deleted file asks where it's protected or one of the operator's documents, and is otherwise allowed: the public-API ask covers what other code loses. A write outside the session's worktree isn't judged here; edits in another repository come with launch and spawn.
 
@@ -272,11 +274,11 @@ Pyright has no plugin API, and its published package is one bundled file whose i
 - Each is the module `example/module.py` of a small package the engine's tests assemble, which run every rule's pair. A rule without both files fails a test.
 
 **How each tool treats the examples,** since the flagged ones are deliberately wrong and sit in the package's source:
-- **The judge:** a write to an example asks the operator, and is never refused. Protected comes first among the roles (`policy/roles.py`), so everything under `catalog/` is protected, and the judge runs lup's rules only on production files (`policy/judge.py`), as `lup-dev rules check` does (`cli.py`).
+- **The judge:** a write to an example asks the operator, and gets lup's rules like any protected module (#14): a flagged example's own finding would refuse it, at the edit and in `lup-dev rules check`. Nothing exempts them, since the examples are moving into the rule table as strings; until they have, the flagged modules don't pass the judge.
 - **The gate's ruff and pyright:** the flagged modules are left out by pattern (ruff's `lint.exclude`, pyright's `ignore`); the formatter still formats them. The fixed modules are checked like any code, and again by the engine's tests, with every rule, as a package of their own. ruff's `INP001` is off for the examples, each being a module on its own.
 - **pytest:** `catalog/examples/` is ignored, so no example is imported for its doctests or collected as a test.
 - *Alternatives:* the examples under a test root, which the tests' exemptions would cover but which sits outside the protected catalog; or files the tools don't read as Python, which would lose the gate's check of the fixed modules.
-- **The same reach covers every module under `catalog/`,** `catalog/paths.py` included: none gets lup's rules, at the edit, at the turn's end or at `lup-dev rules check`, so lup's own policy data is held to its conventions by the operator's review and the gate's ruff and pyright alone. An open question, with a lean (#14): run lup's rules on protected Python files too (refuse comes before ask), and exempt the flagged examples in lup's declaration.
+- **Every module under `catalog/`,** `catalog/paths.py` included, gets lup's rules at the edit, at the turn's end and at `lup-dev rules check`, and the operator's review besides (*What each change gets*).
 
 **`docs/rules.md` is compiled from the table** (`lup-dev rules docs`, which asks the engine) and committed: the one generated file. It opens by saying it's generated from `lup_dev/catalog/rules.ts`, and that the table is what to edit. A gate test compiles it again and fails when the committed copy is stale. `docs/conventions.md`'s table of rules becomes a pointer to it, and a test checks that every rule id it names under *Enforced by:* is one the engine has. The engine's bundle is built, never committed.
 
@@ -486,4 +488,5 @@ Taken while building it:
 53. **(yours, agreed)** `docs/rules.md` is the one generated, committed file, compiled from the table, with a gate test failing when it's stale; the engine's bundle is never committed. *Alternative:* a hand-kept table in `docs/conventions.md`. *Where:* `docs/rules.md`, `codescan/`.
 54. A rule's examples are files, by its id: the flagged module fires only that rule, the fixed one passes every rule, ruff and pyright, and a rule without both fails a test. *Alternative:* examples as strings in the catalog, which the gate's ruff and pyright couldn't read. *Where:* `catalog/examples/`, the engine's tests.
 55. **(yours, agreed)** Selection and exemptions are the project's declaration's; the table holds no project's exemptions. *Alternative:* exempt modules on each rule's entry. *Where:* the declaration piece; `lup_project.py` until then.
-56. The examples live in the package's source, under the protected catalog: the judge asks about them and never refuses one; the gate's ruff and pyright leave out the flagged modules by pattern and check the fixed ones; pytest ignores them. *Alternatives:* examples under a test root, outside the protected catalog; files the tools don't read as Python, which loses the gate's check of the fixed ones. *Where:* `pyproject.toml`, `catalog/examples/`.
+56. The examples live in the package's source, under the protected catalog: the judge asks about them, and since #14 runs lup's rules on them like any protected module, so a flagged one would be refused; the gate's ruff and pyright leave out the flagged modules by pattern and check the fixed ones; pytest ignores them. *Alternatives:* examples under a test root, outside the protected catalog; files the tools don't read as Python, which loses the gate's check of the fixed ones. *Where:* `pyproject.toml`, `catalog/examples/`.
+57. **(yours, agreed)** A protected Python module gets lup's rules as production code does, and still asks: a finding refuses it, a clean change asks (#14). Nothing is exempted, since the rules' examples are moving into the table as strings. *Alternative:* protected wins and the rules don't apply, which left `catalog/` checked by review and the gate's ruff and pyright alone. *Where:* `policy/roles.py` (`ruled`, `checked`), `policy/judge.py`, `policy/checkpoint.py`, `cli.py`.
