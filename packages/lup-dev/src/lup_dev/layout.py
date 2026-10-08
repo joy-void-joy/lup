@@ -180,6 +180,34 @@ class CheckoutLayout(Model):
         """Say where the version refused in refusal `number` is saved, by its path."""
         return self.saved / str(number) / path
 
+    @property
+    def tool(self) -> Path:
+        """The package installed as the judge, `lup-dev`, in a checkout of lup."""
+        return self.root / "packages" / "lup-dev"
+
+    @property
+    def build_script(self) -> Path:
+        """The engine's build, which writes the bundle the installed judge carries."""
+        return self.tool / "checker" / "build.py"
+
+    @property
+    def judge_source(self) -> list[Path]:
+        """Everything the installed judge carries, from a checkout of lup's root.
+
+        Both packages' metadata and source (`lup` is a dependency of `lup-dev`),
+        the engine's source the bundle is built from, and `uv.lock`, whose
+        versions the installed copy's dependencies are held to.
+        """
+        library = Path("packages") / "lup"
+        return [
+            library / "pyproject.toml",
+            library / "src",
+            Path("packages") / "lup-dev" / "pyproject.toml",
+            Path("packages") / "lup-dev" / "src",
+            Path("packages") / "lup-dev" / "checker",
+            Path("uv.lock"),
+        ]
+
 
 class Layout(Model):
     """Where lup's state lives for one user: `$XDG_STATE_HOME/lup`, and its sockets."""
@@ -221,3 +249,8 @@ class Layout(Model):
     def session_worktree(self, session: str) -> Path:
         """Say where the worktree a session started in is recorded."""
         return self.session_index / f"{session}.json"
+
+    @property
+    def approval(self) -> Path:
+        """The commit of lup the operator last approved as the judge that runs."""
+        return self.state / "judge" / "approved.json"
