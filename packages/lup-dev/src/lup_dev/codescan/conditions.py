@@ -181,7 +181,7 @@ def module_file(root: Path, module: str) -> Path:
     Its parent packages are imported to find it, as Python's import system does.
     """
     roots = import_roots(root, Pyproject.read(CheckoutLayout(root=root).pyproject))
-    with importable(roots):
+    with importable(roots, root):
         try:
             spec = importlib.util.find_spec(module)
         except ImportError as missing:
@@ -224,7 +224,7 @@ def loaded(root: Path, project: Project) -> dict[str, Condition]:
     if project.conditions is None:
         return {}
     roots = import_roots(root, Pyproject.read(CheckoutLayout(root=root).pyproject))
-    with importable(roots):
+    with importable(roots, root):
         module = importlib.import_module(project.conditions)
     return {
         name: value
