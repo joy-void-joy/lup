@@ -147,7 +147,7 @@ In its home, a constant needs no suppression. Anywhere else the rule fires and n
 
 The parsers to reach for: `json`, `tomllib` (`tomlkit` to edit), `csv`, `urllib.parse`, `pathlib`, `email`, `shlex`, `ast`, `datetime.fromisoformat`, `packaging.version` and `packaging.requirements`, `trafilatura` or `beautifulsoup4` for web pages. A grammar of our own gets a parser library.
 
-**Open: XML.** ruff's `S313`–`S319` flag the standard library's XML parsers: Python 3.14's docs say Expat below 2.7.2 may be vulnerable, and the interpreter uv installed carries 2.6.3. Lean: `defusedxml` is XML's parser, a dependency only where a project reads XML, and the rules stay on.
+**XML is read with `defusedxml`.** ruff's `S313`–`S319` flag the standard library's XML parsers, and stay on: Python 3.14's docs say Expat below 2.7.2 may be vulnerable, and the interpreter uv installed carries 2.6.3. `defusedxml` is a dependency only where a project reads XML.
 
 **Why.** Quick regex and split patches matched the cases tried and failed quietly on the rest; the bugs were hard to find. A parser fails loudly.
 
@@ -211,7 +211,7 @@ The parsers to reach for: `json`, `tomllib` (`tomlkit` to edit), `csv`, `urllib.
 
 **Decision.**
 - **Prose,** not `Args:`/`Returns:` sections, which repeat what the signature says.
-- **Open: the first line's mood.** ruff's `D401` wants a function's first line in the imperative ("Return the saved path.") and flags noun phrases ("The saved path."). Lean: keep it on, since it's a checked, uniform answer and PEP 257's own convention.
+- **A function's first line is in the imperative** ("Return the saved path.", not "The saved path."), as ruff's `D401` checks: a checked, uniform answer, and PEP 257's own convention.
 - **Required on modules, classes, and module-level functions and methods.** Nested helpers are exempt (ruff's `D1` rules don't reach them; checked).
 - **Inline code in single backticks,** as in Markdown and these docs. Not double backticks (reStructuredText) and not Sphinx roles.
 - **Examples as doctests.** A docstring may show a call and its result:
@@ -344,3 +344,5 @@ Each with its alternative and where it lives. **(yours, agreed)** marks what the
 18. Each rule's suggested fix passes every other rule, as a test over the catalog. *Alternative:* review catching contradictions. *Where:* the engine's tests.
 19. **(yours, agreed)** A runtime is named only in its adapter: an import contract keeps the adapters behind the one place listing them, and `runtime-mention` refuses a runtime's name elsewhere. *Alternative:* convention only, which is how the first lup's features came to be built per runtime. *Where:* `pyproject.toml`, the engine.
 20. **(yours, agreed)** A subpackage per subsystem, named as in the first lup where the subsystem is the same, with a library word meaning the same in the environment; a one-line `__init__.py` docstring each; package-wide modules at the root; subsystems importing downwards only. *Alternative:* a flat package. *Where:* `pyproject.toml` (the `layers` contract), each package.
+21. **(yours, agreed)** XML is read with `defusedxml`, a dependency only where a project reads XML, and ruff's `S313`–`S319` stay on. *Alternative:* the standard library's parsers with those rules off, trusting the bundled Expat. *Where:* `pyproject.toml` (the rules stay selected).
+22. **(yours, agreed)** A function's first line is in the imperative, ruff's `D401`. *Alternative:* noun phrases ("The saved path."), which read as well but have no check to keep them uniform. *Where:* `pyproject.toml` (the rule stays selected).
