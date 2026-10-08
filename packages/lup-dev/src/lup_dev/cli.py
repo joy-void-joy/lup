@@ -23,6 +23,7 @@ from lup_dev.codescan.engine import EngineChecker
 from lup_dev.codescan.reference import reference
 from lup_dev.codescan.ruff import Ruff
 from lup_dev.errors import LupDevError
+from lup_dev.install import Installer, Terminal, Uv
 from lup_dev.layout import CheckoutLayout, Layout
 from lup_dev.policy.checkpoint import Bench, Services, Worktree
 from lup_dev.policy.holds import Response, answer, waiting
@@ -221,6 +222,29 @@ def holds_decline(
         SystemClock(),
     )
     typer.echo(f"Declined {key}.")
+
+
+@app.command("install")
+def install() -> None:
+    """Install this checkout's judge as the one that runs, once you approve its source.
+
+    Run it yourself from the `dev` checkout: it builds the engine, shows the diff of
+    everything the judge carries since the commit you approved last, and installs
+    only if you approve. Declined, the copy installed before keeps judging.
+    """
+    installer = Installer(
+        checkout=toplevel(Path.cwd()),
+        layout=Layout.of(LupDevSettings()),
+        toolchain=Uv(),
+        reviewer=Terminal(),
+        clock=SystemClock(),
+        runtimes=runtimes(),
+    )
+    approval = installer.install()
+    if approval is None:
+        typer.echo("Declined: the judge installed before keeps judging.")
+        return
+    typer.echo(f"Installed the judge at {approval.commit}; it judges from now on.")
 
 
 @app.command("verdicts")

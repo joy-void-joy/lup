@@ -54,6 +54,7 @@ lup never stays silent on a write it judges. Staying silent would send the call 
 | A test, scratch (`tmp/`), docs or data file, at any size | allow |
 | `DESIGN.md` or `AGENTS.md` | ask: they're the operator's |
 | A protected path | ask; a protected Python module gets the rules too, so a finding on the lines the change touches refuses it |
+| A path the project's declaration excludes | allow, nothing reported; a protected one still asks |
 | Production code with a rule finding on the lines the change touches | refuse, every finding in the file listed, the agent's version saved |
 | A new production file, or overwriting a whole existing one | ask |
 | A change to the public API (see below) | ask |
@@ -64,11 +65,12 @@ lup never stays silent on a write it judges. Staying silent would send the call 
 **Path roles.** Each path has one role, the first that matches:
 1. **protected:** the project declaration; dependency manifests and lockfiles (`pyproject.toml`, `uv.lock`, `package.json`, `bun.lock`); what runs outside the agent's reach (`.github/`, git's own directory and hooks (`.git/`, `.githooks/`, `.husky/`), `.pre-commit-config.yaml`, `.vscode/`, `.devcontainer/`, `.claude/`, `.codex/`); what widens a later launch (`sync.json`, `sync.json.local`); secrets (`.env*.local`); `.gitignore`, since what it ignores the checkpoint never sees; and whatever the project adds;
 2. **operator's documents:** `DESIGN.md`, `AGENTS.md`;
-3. **test:** a module pytest collects as a test: under a root it reads (`testpaths` in the nearest `pyproject.toml` holding pytest's options, nested projects included; the root itself without any) and matching its `python_files` patterns, or a `conftest.py` under such a root. A source module pytest reads only for its doctests stays production (`docs/conventions.md`, *Tests*);
-4. **scratch:** `tmp/` at any depth, and the saved versions under `.lup/`;
-5. **docs:** Markdown files and the root's `docs/`;
-6. **data:** JSON, CSV, YAML and other data formats outside a source tree, which is anything under a `src/` directory or in a directory holding an `__init__.py`;
-7. **production:** everything else.
+3. **excluded:** what the project's declaration holds to nothing (`Project.excluded`): no lup rules, no ruff or pyright findings reported, writes allowed. A path both protected and excluded stays protected: it still asks, without rules or findings, so exclusion takes the checks away, never the operator's review;
+4. **test:** a module pytest collects as a test: under a root it reads (`testpaths` in the nearest `pyproject.toml` holding pytest's options, nested projects included; the root itself without any) and matching its `python_files` patterns, or a `conftest.py` under such a root. A source module pytest reads only for its doctests stays production (`docs/conventions.md`, *Tests*);
+5. **scratch:** `tmp/` at any depth, and the saved versions under `.lup/`;
+6. **docs:** Markdown files and the root's `docs/`;
+7. **data:** JSON, CSV, YAML and other data formats outside a source tree, which is anything under a `src/` directory or in a directory holding an `__init__.py`;
+8. **production:** everything else.
 
 Production is the default, so a file nobody classified is gated rather than waved through.
 
@@ -76,7 +78,7 @@ Production is the default, so a file nobody classified is gated rather than wave
 
 A deleted file asks where it's protected or one of the operator's documents, and is otherwise allowed: the public-API ask covers what other code loses. A write outside the session's worktree isn't judged here; edits in another repository come with launch and spawn.
 
-**Where a project declares its roles:** a minimal `Project` starts in this piece (`lup_dev/project.py`), with only the fields it reads: its test roots, its additions to the protected paths, and the module declaring its conditions, shaped as `DESIGN.md`'s example (`Project(tests=[Pytest(root=…)], protected=Protected.default().add(…), conditions="pkg.conditions")`). It's loaded from `[tool.lup] project = "pkg.module:project"`, importing from the worktree's root, its `src/`, and each uv workspace member and its `src/`, since the judge runs from its own installed copy; without one, the defaults apply, and one that can't be loaded is an error rather than a silent fallback. The declaration piece grows it.
+**Where a project declares its roles:** a minimal `Project` starts in this piece (`lup_dev/project.py`), with only the fields it reads: its test roots, its additions to the protected paths, the paths it excludes, and the module declaring its conditions, shaped as `DESIGN.md`'s example (`Project(tests=[Pytest(root=…)], protected=Protected.default().add(…), excluded=[…], conditions="pkg.conditions")`). `excluded` is the settled part of `DESIGN.md`'s open question 8; compiling the declaration into the tools' own settings (ruff's and pyright's exclusions among them) is the declaration piece's. It's loaded from `[tool.lup] project = "pkg.module:project"`, importing from the worktree's root, its `src/`, and each uv workspace member and its `src/`, since the judge runs from its own installed copy; without one, the defaults apply, and one that can't be loaded is an error rather than a silent fallback. The declaration piece grows it.
 
 ## The public-API ask
 
@@ -365,9 +367,17 @@ Both runtimes hear a report the same way. Codex's docs say a `PostToolUse` hook'
 | Saved versions | `<worktree>/.lup/saved/` | The agent has to edit and move them |
 | A worktree's engine: its socket, and its lock and log | `$XDG_RUNTIME_DIR/lup/<id>.sock` (or `lup-<user>` in the system's temporary directory); the lock and log in the store | A socket's path holds about a hundred bytes, which the store's path can exceed |
 | The built engine and its stubs | `lup_dev/codescan/bundle/`, built by `packages/lup-dev/checker/build.py`, ignored by git | The installed package carries it, so the judge finds its engine beside it |
-| The judge itself | A local copy installed from `dev` (`uv tool install` from the `dev` checkout), refreshed when `dev` moves | An agent editing the rules in its worktree isn't judged by its own edit, and a broken judge in a worktree can't refuse every write including its own fix (in the first lup, conflict markers in the compiled hook refused every command). A branch changing the rules runs them in its own tests until it lands |
+| The judge itself | A local copy installed from `dev` by `lup-dev install` (`uv tool install` from the `dev` checkout), refreshed when `dev` moves; the hooks run it as `"$(uv tool dir --bin)/lup-dev"` | An agent editing the rules in its worktree isn't judged by its own edit, and a broken judge in a worktree can't refuse every write including its own fix (in the first lup, conflict markers in the compiled hook refused every command). A branch changing the rules runs them in its own tests until it lands |
+| The commit the operator approved last | `$XDG_STATE_HOME/lup/judge/approved.json` | The next refresh shows the judge's source since it |
 
 In lup itself, the judge's own source isn't asked about at each edit: the judge that runs is the installed copy, so an edit in a worktree can't change what judges it. It's protected after the edit and before it runs, the way the art studio's trust on launch worked. Refreshing the installed judge from `dev` shows the operator the diff of its source since the copy they last approved, and the approved copy keeps judging until they approve the new one. The operator sees exactly what will run before it runs. `DESIGN.md`'s protection of lup's policy and launch code is this same review, applied to every launch once trust on launch is ported.
+
+**The installer** (`lup_dev/install.py`, `lup-dev install`), run by the operator from the `dev` checkout:
+1. It refuses inside an agent's session (by the variables each runtime sets, as for holds), so an agent never approves the judge that judges it; and it refuses when the judge's source has changes not committed, which the copy would carry unreviewed.
+2. It builds the engine (`packages/lup-dev/checker/build.py`).
+3. It shows, in a pager, the diff of everything the installed judge carries since the commit approved last, or whole the first time: both packages' `pyproject.toml` and `src/`, the engine's source (`packages/lup-dev/checker/`), and `uv.lock`. Tests and docs aren't carried, so they aren't shown. An approved commit no longer in the repository shows everything.
+4. Approved, it installs `packages/lup-dev` with `uv tool install --force`, and records the commit. Declined, nothing changes.
+- **How uv installs it.** `uv tool install` from the workspace member's directory honours `lup`'s workspace source, installing it from the checkout as a path dependency; both packages are copies, not editable, and `lup_dev` carries the built bundle (checked with a scratch `UV_TOOL_DIR` and `UV_TOOL_BIN_DIR`, where the copy listed its rules and answered hooks). But it resolves the tool's other dependencies afresh, ignoring `uv.lock`: the first trial got `filelock` 4.0.12, `tenacity` 9.2.1 and `typer` 0.27.3 where the lock pins 4.0.10, 9.1.4 and 0.27.2. So the installer exports the lock's versions (`uv export --package lup-dev --no-dev --no-emit-workspace`) and passes them as `--constraints`, and the copy runs what the gate ran.
 
 ## Modules
 
@@ -400,11 +410,12 @@ In `packages/lup-dev/src/lup_dev/`, by subsystem (`docs/conventions.md`, *Packag
 | `catalog/paths.py` | The default path patterns each role starts from |
 | `catalog/rules.ts` | lup's rules, one entry each: its mistake, its steer, its check and its examples, compiled into the engine |
 | **root** | **Package-wide** |
-| `project.py` | The minimal `Project` declaration (`Protected`, `Pytest`), and loading it from `[tool.lup]` |
+| `project.py` | The minimal `Project` declaration (`Protected`, `Pytest`, `excluded`), and loading it from `[tool.lup]` |
+| `install.py` | Installing the judge: the operator reviews its source since the commit approved last before a new copy runs |
 | `settings.py`, `layout.py` | The environment variables `lup_dev` reads; where it keeps what it stores |
 | `clock.py` | The clock judging reads and waits on, which tests drive |
 | `errors.py` | `LupDevError`, the root of what `lup_dev` raises |
-| `cli.py` | `lup-dev hook claude\|codex`, `lup-dev rules check`, `lup-dev holds`, `lup-dev verdicts`; the one place listing the adapters |
+| `cli.py` | `lup-dev hook claude\|codex`, `lup-dev rules check`, `lup-dev holds`, `lup-dev verdicts`, `lup-dev install`; the one place listing the adapters |
 
 The rules live in `catalog/rules.ts`. The engine that runs them lives in `packages/lup-dev/checker/`, a TypeScript project built with the table into one file, which is never committed.
 
@@ -412,14 +423,28 @@ The `lup-dev` command is this piece's stand-in until the declaration and CLI pie
 
 ## Installing it here
 
-- `.claude/settings.json` gets the hooks (`SessionStart`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, `SubagentStop`, each `lup-dev hook claude`, matching every tool) and the narrow `Bash` allow rules, and loses the `permissions.ask` on `Write` and the interim checker hook (`.claude/hooks/interim_rules.py`, removed).
-- `.codex/hooks.json` gets the same hooks (`lup-dev hook codex`; no `PostToolUseFailure`, no `PermissionRequest`), with `PostToolUse` and `Stop` given a `timeout` above a day for holds, and `PostToolUse` an `additionalContextLimit` high enough for a whole report.
+- **`.claude/settings.json`:**
+  - the installed judge's hooks, `"$(uv tool dir --bin)/lup-dev" hook claude`, on `SessionStart`, `PreToolUse`, `PostToolUse` and `PostToolUseFailure` (matching every tool), `Stop` and `SubagentStop`; `Stop` and `SubagentStop` get 1,200 seconds, since the turn's end waits for the importers pass;
+  - the interim review hook (`.claude/hooks/interim_review.py`) kept only as the carrier of prompts to the review dashboard, on `PermissionRequest` and `PostToolBatch`: the judge decides what's asked, and its `ask` reaches the dashboard through the prompt it causes (*Checks owed*). The hook's own `PreToolUse` write review is no longer registered; its code stays until no session started with the old settings runs, since such a session would still send it `PreToolUse` and a hook that stopped answering it would block every write there;
+  - the old checker's hook removed, and `.claude/hooks/interim_rules.py` with it;
+  - the narrow `Bash` allow rules: the gate's commands (`uv run pytest`, `uv run pyright`, `uv run ruff check`, `uv run ruff format --check`, `uv run lint-imports`) and read-only git (`git status`, `git diff`, `git log`).
+- **`.codex/hooks.json`:** the same hooks with `hook codex`, every tool matched by leaving the matcher out; no `PostToolUseFailure` and no `PermissionRequest`, which Codex's adapter doesn't answer. `PostToolUse`, `Stop` and `SubagentStop` get a `timeout` of 90,000 seconds, above a hold's day, and `PostToolUse` an `additionalContextLimit` of 20,000 tokens, so a report arrives whole; past it, Codex keeps the whole text in a file and shows a preview pointing there. Codex runs a project's hooks only once trusted, in its `/hooks`.
+- **`lup_project.py`** excludes `.claude/hooks/**`: the interim hooks are uv scripts with their own dependencies, outside the conventions, and go with the bridge. They stay protected.
+- **Why the hooks name the tool's bin directory** rather than `lup-dev` on the `PATH`: a shell with a worktree's environment activated finds that worktree's own `lup-dev` first, which is exactly the copy the installed judge exists not to run. `uvx lup-dev` was the other way to reach an installed tool, but where none is installed it fetches a package of that name from the index. Until the operator's first install, the command isn't there, and every runtime treats a hook that fails that way as no decision.
 - `.gitignore` gets `.lup/` (already there).
-- The typed engine is wired in one place, `cli.engine()`. It's built before installing (`uv run packages/lup-dev/checker/build.py`), and the installed package carries the bundle.
+- The typed engine is wired in one place, `cli.engine()`, and built by the installer before the copy is made; the installed package carries the bundle.
+
+**The first install, and checking it live** (the operator's, from the `dev` checkout):
+1. `git -C <dev checkout> pull --ff-only origin dev`, then `uv run lup-dev install` from the checkout, in their own terminal: read the review, and approve.
+2. `"$(uv tool dir --bin)/lup-dev" --help` lists the commands; `"$(uv tool dir --bin)/lup-dev" rules list` lists the engine's rules.
+3. Restart the Claude Code sessions in the repository: a session reads its hooks when it starts. In Codex, trust the project's hooks in `/hooks`.
+4. Live checks in a fresh session: ask the agent to create a new module under `packages/lup-dev/src/` with the `Write` tool, which should reach the review dashboard as an ask, settling the check owed on `PermissionRequest`; ask it to add `import re` to an existing module with `Edit`, which should be refused with the report, the file unchanged and the version saved under `.lup/saved/`; ask it to write a docs file, which should pass without a prompt.
+5. `lup-dev verdicts` (installed or from the checkout) shows those verdicts.
 
 ## Checks owed
 
 - **Auto mode:** whether a `PreToolUse` hook's `allow` skips the classifier. Still open: Claude Code's permission docs say a mod's approval skips it, and nothing about a hook's.
+- **A judge's `ask` reaching the dashboard:** whether Claude Code's `PermissionRequest` hook runs for the prompt a `PreToolUse` hook's `ask` causes. Its hooks reference says each half: a hook's `"ask"` "prompts the user to confirm", and "also forces a permission prompt in auto mode"; `PermissionRequest` "runs when Claude Code is about to ask you for permission to use a tool", and its hooks "run only when Claude Code is about to ask you for permission, or when it would otherwise auto-deny a call that can't prompt". It never says the two meet in so many words, so it's inferred from those, and checked live by the operator's first ask after installing (*Installing it here*).
 - **The engine:** that it checks content not yet on disk, as pyright's language server does an open buffer. Settled: it opens the file with that content, as an editor's buffer, and puts the disk's back at the next request unless the edit landed (`tests/test_engine.py`, *would-be content*).
 - **Holds, settled:** which variables each runtime sets in the commands it runs.
   - Claude Code's environment-variable reference: `CLAUDE_CODE_CHILD_SESSION` is "set to `1` in subprocesses Claude Code spawns via the Bash, PowerShell, and Monitor tools, hook commands, and status line commands", and, unlike `CLAUDECODE`, "only set by Claude Code itself when it launches a subprocess and not by IDE extensions", whose terminals the operator may answer from. Observed in this session's commands.
@@ -499,3 +524,10 @@ Taken while building it:
 58. **(yours, agreed)** pyright's warnings are reported like its errors: information at each checkpoint, clean at the turn's end, and the gate runs `pyright --warnings`. *Alternative:* errors only, the pyright CLI's exit status. *Where:* the engine (`report.ts`).
 59. One engine per worktree on a Unix socket, started by the hook that finds none under a lock, stopping after `LUP_ENGINE_IDLE` (15 minutes by default) or for a client expecting another build, which is told apart by the bundle's size and modification time. *Alternatives:* a TCP port, which any local user could reach; an engine per hook, which reloads the project each time (1.4 s on this repository). *Where:* `codescan/engine.py`, `checker/src/server.ts`, `settings.py`.
 60. The importers pass runs a file at a time, and a check waiting behind it runs between two files; a check that changed the disk makes the pass look again. *Alternative:* the pass whole, which on the first lup's library held a check behind 27 seconds of re-checking. *Where:* `checker/src/engine.ts`, `checker/src/server.ts`.
+61. **(yours, agreed)** `Project.excluded`: paths held to nothing, with their own role after the operator's documents. A path both protected and excluded stays protected and asks, without rules or findings. *Alternative:* exclusion before protection, which would let a write to an excluded hook land unasked. *Where:* `project.py`, `policy/roles.py`; `lup_project.py` excludes `.claude/hooks/**`.
+62. **(yours, agreed)** The installer shows everything the installed judge carries since the commit approved last, asks, installs and records the commit; declined, the copy before keeps judging. *Alternative:* review at each edit of the judge's source (decision 26). *Where:* `install.py`, `lup-dev install`.
+63. The installed copy's dependencies are held to `uv.lock` by constraints exported from it, since `uv tool install` resolves a tool afresh. *Alternatives:* let it resolve, which ran newer versions than the gate's on the first trial; `uv tool install --with-requirements`, which adds rather than constrains. *Where:* `install.py` (`Uv.install`).
+64. The installer refuses inside an agent's session, and when the judge's source has changes not committed. *Alternative:* trusting whoever runs it, which would let an agent approve the judge that judges it, or install source the review didn't show. *Where:* `install.py`.
+65. The hooks run `"$(uv tool dir --bin)/lup-dev"`. *Alternatives:* `lup-dev` on the `PATH`, which an activated worktree environment shadows with its own copy; `uvx lup-dev`, which fetches from the index where none is installed. *Where:* `.claude/settings.json`, `.codex/hooks.json`.
+66. The interim review hook carries prompts to the dashboard, on `PermissionRequest` and `PostToolBatch`, and its own write review is no longer registered; its code for it stays while sessions started with the old settings run. *Alternative:* removing that code now, which would block every write in those sessions. *Where:* `.claude/settings.json`, `.claude/hooks/interim_review.py`.
+67. The narrow `Bash` allow rules are the gate's commands and read-only git. *Alternative:* the note's four examples only. *Where:* `.claude/settings.json`.

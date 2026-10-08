@@ -98,6 +98,25 @@ def test_the_declaration_itself_is_protected(repo: Path) -> None:
     assert roles(repo, declaration=declaration).role(declaration) == "protected"
 
 
+def test_an_excluded_path_is_held_to_nothing(repo: Path) -> None:
+    project = Project(excluded=["vendor/**", ".claude/hooks/**", "tests/legacy/**"])
+    excluded = roles(repo, project)
+    for path in ["vendor/lib.py", "tests/legacy/test_old.py"]:
+        assert excluded.role(Path(path)) == "excluded", path
+        assert not excluded.ruled(Path(path))
+        assert not excluded.checked(Path(path))
+    assert excluded.role(Path("src/pkg/core.py")) == "production"
+
+
+def test_exclusion_never_lifts_protection(repo: Path) -> None:
+    excluded = roles(repo, Project(excluded=[".claude/hooks/**", "DESIGN.md"]))
+    hook = Path(".claude/hooks/review.py")
+    assert excluded.role(hook) == "protected"
+    assert not excluded.ruled(hook)
+    assert not excluded.checked(hook)
+    assert excluded.role(Path("DESIGN.md")) == "operator"
+
+
 def test_without_a_declaration_the_defaults_apply(repo: Path) -> None:
     declared = load(repo)
     assert declared.source is None

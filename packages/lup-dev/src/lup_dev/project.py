@@ -81,6 +81,13 @@ class Project(Model):
     """The test roots; none leaves it to pytest's configuration in `pyproject.toml`."""
     protected: Protected = Field(default_factory=Protected.default)
     """The paths every write to asks about: lup's defaults and the project's own."""
+    excluded: list[str] = []
+    """Paths held to nothing, as patterns from the root, matched as `protected` is.
+
+    No lup rules, no ruff or pyright findings reported, and writes allowed. A
+    path both protected and excluded still asks: exclusion takes the checks
+    away, never the operator's review.
+    """
     conditions: str | None = None
     """The module declaring the project's conditions, by its dotted name.
 
