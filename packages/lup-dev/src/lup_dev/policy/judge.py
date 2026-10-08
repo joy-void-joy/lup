@@ -10,7 +10,7 @@ so a change gets the same outcome whichever way it was made (`docs/judging-write
 | An operator's document | ask |
 | A protected path | ask |
 | Production code with a rule finding on the lines the change touches | refuse |
-| A new production file, or a whole-file write over one | ask |
+| A production file being created, or a whole-file write over one | ask |
 | A change to the public API | ask |
 | An added `# lup: ignore` | ask |
 | Any other production change | allow, once the rules pass it |
@@ -64,7 +64,7 @@ class Change(Model):
     path: Path
     """The file, relative to the worktree's root."""
     before: str | None
-    """Its content before the change: the last accepted; none where it's new."""
+    """Its content before the change: the last accepted; none where it creates it."""
     after: str | None
     """Its content after the change; none where the change deletes it."""
     baseline: str | None
@@ -83,7 +83,7 @@ class Ask(Model):
     def covered(self) -> bool:
         """Say whether an approval of the path earlier in the session covers this ask.
 
-        A new file, a whole-file write and a public-API change show the file's
+        A file being created, a whole-file write and a public-API change show the
         design, which an approval already showed. A protected path, an operator's
         document and each suppression are asked every time.
         """
@@ -112,7 +112,7 @@ class Judgement(Model):
     information: list[Finding] = []
     """pyright's and ruff's findings in the file, once `ignore`s apply."""
     removed: list[RemovedNote] = []
-    """Comments present when the session started that the file no longer holds."""
+    """Comments present when the session started that are gone from the file."""
 
     def reasons(self) -> list[str]:
         """Say why the outcome, for the verdict log: rules, kinds of ask, or the role.
@@ -132,7 +132,7 @@ class Judgement(Model):
 def touched_lines(before: str | None, after: str) -> list[int]:
     r"""List the lines of `after` a change from `before` touches, counted from 1.
 
-    Every line of a new file. For a deletion, the line now at the place where
+    Every line of a file being created. For a deletion, the line standing where
     lines were removed, or the last line where they were at the end, since
     joining code there can make a finding.
 
@@ -305,14 +305,18 @@ class Judge(Model, arbitrary_types_allowed=True):
                 )
 
     def kept(self, versions: Versions) -> list[Finding]:
-        """Return every owner's findings in the after version, once `ignore`s apply."""
+        """Return every owner's findings in the after version, once `ignore`s apply.
+
+        A rule the declaration exempts the file from is left out too.
+        """
         if versions.after is None:
             return []
         directives = versions.after.directives
         return [
             found
             for found in [*versions.after.findings, *versions.ruff]
-            if not any(
+            if not self.roles.exempt(found.path, found.rule)
+            and not any(
                 directive.keeps(found.rule, found.span.start.line)
                 for directive in directives
             )
@@ -380,7 +384,7 @@ class Judge(Model, arbitrary_types_allowed=True):
         return [*kept, *problems]
 
     def design(self, change: Change, versions: Versions) -> list[Ask]:
-        """List the design asks of a production change: new, whole, public API."""
+        """List the design asks of a production change: created, whole, public API."""
         new_file = f"{change.path} is a new production file"
         new = [Ask(kind="new-file", reason=new_file)] if change.before is None else []
         replaced = change.whole and change.before is not None

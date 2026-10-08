@@ -1,4 +1,4 @@
-"""Installing the judge: the operator reviews its source before a new copy runs.
+"""Installing the judge: the operator reviews its source before a copy of it runs.
 
 The judge that runs is a copy installed from a checkout of lup (`uv tool install`),
 never a worktree's own source, so an agent's edit can't change what judges it
@@ -178,7 +178,7 @@ class Installer(Model, arbitrary_types_allowed=True):
     def review(self, since: str | None, commit: str) -> Review:
         """Show the judge's source as it changed from `since` to `commit`.
 
-        From nothing when `since` is none, or no longer in the repository.
+        From nothing when `since` is none, or missing from the repository.
         """
         git = Git(cwd=self.checkout)
         empty = git.run("hash-object", "-t", "tree", "--stdin", stdin=b"").stdout

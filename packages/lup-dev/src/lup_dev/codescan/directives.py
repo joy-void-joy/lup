@@ -340,7 +340,7 @@ type Directive = Annotated[
 
 
 def missing(kept: list[Directive], since: list[Directive]) -> list[Directive]:
-    """List the comments of `since` that `kept` no longer holds, each time removed.
+    """List the comments of `since` missing from `kept`, each time removed.
 
     A comment moved to another line is the same comment: they're compared by what
     they say, not where.

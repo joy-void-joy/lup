@@ -1670,4 +1670,291 @@ export const rules = {
             ],
         },
     },
+
+    // Parsing (`docs/conventions.md`, *Parsing*), continued.
+
+    'string-strip': {
+        mistake: 'Stripping given characters off text takes it apart by hand, and fails quietly on the input it wasn\'t tried on.',
+        steer: "Read the text with its format's parser; `.strip()` with no argument, which trims whitespace, is fine.",
+        check(file) {
+            for (const call of file.methodCalls(['strip', 'lstrip', 'rstrip'])) {
+                const chars = call.argument('chars', 0);
+                if (chars && !file.isNone(chars) && file.isText(call.receiver)) {
+                    file.report(call.node, `\`.${call.method}(…)\` strips given characters off a \`${file.printType(call.receiver)}\``);
+                }
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        def release(tag: str) -> str:
+                            """Return the release a tag names: \`1.2\` for \`v1.2\`."""
+                            return tag.lstrip("v")
+                    `,
+                    rewritten: python`
+                        from packaging.version import Version
+
+
+                        def release(tag: str) -> str:
+                            """Return the release a tag names: \`1.2\` for \`v1.2\`."""
+                            return str(Version(tag))
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    def tidy(line: str) -> str:
+                        """Trim the whitespace around a line."""
+                        return line.strip()
+                `,
+            ],
+        },
+    },
+
+    'string-replace': {
+        mistake: 'Rewriting text by replacing pieces of it edits a format by hand, and fails quietly on the input it wasn\'t tried on.',
+        steer: "Build or rewrite the text with its format's own tools: `urllib.parse.quote`, `shlex.join`, `json.dumps`.",
+        check(file) {
+            for (const call of file.methodCalls(['replace'])) {
+                if (file.isText(call.receiver)) {
+                    file.report(call.node, `\`.replace(…)\` rewrites a \`${file.printType(call.receiver)}\``);
+                }
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        def escaped(url: str) -> str:
+                            """Return a URL with its spaces escaped."""
+                            return url.replace(" ", "%20")
+                    `,
+                    rewritten: python`
+                        from urllib.parse import quote
+
+
+                        def escaped(url: str) -> str:
+                            """Return a URL with its spaces escaped."""
+                            return quote(url, safe=":/?=&")
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    from datetime import datetime
+
+
+                    def midnight(moment: datetime) -> datetime:
+                        """Return the start of a moment's day."""
+                        return moment.replace(hour=0, minute=0, second=0, microsecond=0)
+                `,
+            ],
+        },
+    },
+
+    // Truncation and comments (`docs/conventions.md`, *Truncation and comments*).
+
+    'silent-truncation': {
+        mistake: 'A sequence cut at a fixed bound to make it fit drops what lies past it, and nothing says so.',
+        steer: 'Keep the whole value; where a format forces a limit, save the full copy, point at it, and say so in an `ignore`.',
+        check(file) {
+            for (const sliced of file.slices()) {
+                if (sliced.step || file.isText(sliced.receiver)) {
+                    continue;
+                }
+                const start = file.integerLiteral(sliced.start);
+                const end = file.integerLiteral(sliced.end);
+                const head = (sliced.start === undefined || start === 0) && end !== undefined && end > 0;
+                const tail = start !== undefined && start < 0 && sliced.end === undefined;
+                if (head || tail) {
+                    file.report(sliced.node, `\`${sliced.text}\` cuts a \`${file.printType(sliced.receiver)}\` at a literal bound`);
+                }
+            }
+            for (const call of file.callsTo(['itertools.islice'])) {
+                const stop = call.node.d.args.length === 2 ? file.integerLiteral(call.argument('stop', 1)) : undefined;
+                if (stop !== undefined) {
+                    file.report(call.node, `\`${file.text(call.node)}\` cuts an iterable at a literal bound`);
+                }
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        def shown(rows: list[str]) -> list[str]:
+                            """Return the rows a report shows."""
+                            return rows[:200]
+                    `,
+                    rewritten: python`
+                        from pathlib import Path
+
+
+                        def shown(rows: list[str], saved: str) -> str:
+                            """Return the report: every row, saved whole where the report points."""
+                            Path(saved).write_text("\\n".join(rows))
+                            return f"{len(rows)} rows, in {saved}"
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    def body(rows: list[str]) -> list[str]:
+                        """Return the rows after the header."""
+                        return rows[1:]
+                `,
+            ],
+        },
+    },
+
+    'historical-voice': {
+        mistake: 'A comment or docstring telling how the code came to be means something only against a version the reader never sees.',
+        steer:
+            'Say what is: "the call waits", not "the call now waits"; "a file being created", not "a new file". ' +
+            'History belongs in the commit message.',
+        check(file) {
+            const single = ['new', 'newly', 'now', 'fixed', 'previously', 'formerly', 'anymore'];
+            const pairs = [['no', 'longer']];
+            for (const prose of file.prose()) {
+                const words = file.words(prose);
+                words.forEach((word, index) => {
+                    const next = words[index + 1];
+                    const pair = pairs.find(([first, second]) => word.text === first && next?.text === second);
+                    if (pair) {
+                        file.report(word.range, `"${pair.join(' ')}" tells how the code came to be`);
+                    }
+                    if (single.includes(word.text)) {
+                        file.report(word.range, `"${word.text}" tells how the code came to be`);
+                    }
+                });
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        import time
+
+
+                        def pause(seconds: float) -> None:
+                            """Pause before the next try, which now waits a second at least."""
+                            time.sleep(max(seconds, 1))
+                    `,
+                    rewritten: python`
+                        import time
+
+
+                        def pause(seconds: float) -> None:
+                            """Pause before the next try, for a second at least."""
+                            time.sleep(max(seconds, 1))
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    def described(old: str, replacement: str) -> str:
+                        """Describe an edit: its \`old_string\` and \`new_string\`, which "the new text" names."""
+                        return f"{old} -> {replacement}"
+                `,
+            ],
+        },
+    },
+
+    // Docstrings and comments (`docs/conventions.md`, *Docstrings and comments*).
+
+    'docstring-code': {
+        mistake: "reStructuredText's double backticks and Sphinx roles are a second way to mark code, beside Markdown's.",
+        steer: 'Mark inline code with single backticks: `name`, `print`.',
+        check(file) {
+            for (const docstring of file.docstrings()) {
+                for (const mark of file.codeMarks(docstring)) {
+                    file.report(
+                        mark.range,
+                        mark.written === '``' ? 'this marks code with double backticks' : `\`${mark.written}\` is a Sphinx role`
+                    );
+                }
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        def greet(name: str) -> str:
+                            """Return a greeting for \`\`name\`\`; see :func:\`print\`."""
+                            return f"hello {name}"
+                    `,
+                    rewritten: python`
+                        def greet(name: str) -> str:
+                            """Return a greeting for \`name\`; see \`print\`."""
+                            return f"hello {name}"
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    def greet(name: str) -> str:
+                        """Return a greeting. Usage: \`greet("Ada")\`."""
+                        return f"hello {name}"
+                `,
+            ],
+        },
+    },
+
+    // Imports and boundaries (`docs/conventions.md`, *Imports and boundaries*).
+
+    'runtime-mention': {
+        mistake:
+            'A runtime named outside its adapter builds a feature for one runtime above the seam, where the others ' +
+            'quietly lack it.',
+        steer:
+            "Speak in lup's own words and capabilities (`runtime.asks_before()`); the runtime's spelling, and the " +
+            'evidence behind a capability, belong in its adapter.',
+        check(file) {
+            for (const mention of file.mentionsOf(['claude', 'codex'])) {
+                if (`.${file.moduleName}.`.includes(`.adapters.${mention.name}.`)) {
+                    continue;
+                }
+                file.report(
+                    mention.range,
+                    mention.kind === 'name'
+                        ? `\`${file.text(mention.range)}\` holds a runtime's name, \`${mention.name}\``
+                        : `this ${mention.kind} names a runtime, \`${mention.name}\``
+                );
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        def asks_first(runtime: str) -> bool:
+                            """Say whether a runtime asks before a call runs."""
+                            return runtime == "claude"
+                    `,
+                    rewritten: python`
+                        from abc import ABC, abstractmethod
+
+
+                        class Runtime(ABC):
+                            """One agent runtime, as lup sees it."""
+
+                            @abstractmethod
+                            def asks_before(self) -> bool:
+                                """Say whether the runtime can ask the operator before a call runs."""
+
+
+                        def asks_first(runtime: Runtime) -> bool:
+                            """Say whether a runtime asks before a call runs."""
+                            return runtime.asks_before()
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    def settings_home(name: str) -> str:
+                        """Return where a runtime keeps its settings, by the name its adapter gives."""
+                        return f".{name}"
+                `,
+            ],
+        },
+    },
 } satisfies Catalog;

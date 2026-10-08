@@ -12,8 +12,8 @@ Codex has no file tools that say what they'll write before they write it: its
 `apply_patch` is judged at the checkpoint, like a command. Its `PreToolUse` can't
 ask, so an ask is held at the checkpoint, the agent waiting inside the hook until
 the operator answers from a terminal (`lup-dev holds`). The agent hears a
-checkpoint's report as `additionalContext` beside the call's result, as on Claude
-Code, and the result reaches it untouched.
+checkpoint's report as `additionalContext` beside the call's result, and the result
+reaches it untouched.
 
 What this relies on, from Codex's hooks documentation and its source at
 `rust-v0.156.1` (`codex-rs/hooks/schema/generated/`):

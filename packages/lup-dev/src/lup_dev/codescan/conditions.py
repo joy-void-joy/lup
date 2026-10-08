@@ -45,7 +45,7 @@ class Condition(Model, ABC):
 
     @abstractmethod
     def holds(self) -> bool:
-        """Say whether the condition holds now, so the deferral it wakes is due."""
+        """Say whether the condition holds, so the deferral it wakes is due."""
 
 
 class Pythons(Model, ABC):

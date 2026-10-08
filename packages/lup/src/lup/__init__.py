@@ -16,6 +16,6 @@ the project uses only while it's being developed. It grows to hold
 - a fake agent, and a guard that keeps tests from reaching real agents or the
   network.
 
-For now it holds the shared types every model and settings class builds on
+So far it holds the shared types every model and settings class builds on
 (`lup.types`); the clients come with the library's first slice (`docs/library.md`).
 """

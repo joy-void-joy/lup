@@ -74,6 +74,17 @@ class Pytest(Model):
     """pytest's `python_files` patterns, its defaults unless the project says."""
 
 
+class Exemption(Model):
+    """A rule lifted from some paths, with the reason the operator approved."""
+
+    rule: str
+    """The rule's id, as `lup-dev rules list` names it."""
+    paths: list[str]
+    """Where it's lifted, as patterns from the root, matched as `protected` is."""
+    why: str
+    """Why the rule doesn't hold there."""
+
+
 class Project(Model):
     """What a project declares about itself that judging writes reads."""
 
@@ -87,6 +98,13 @@ class Project(Model):
     No lup rules, no ruff or pyright findings reported, and writes allowed. A
     path both protected and excluded still asks: exclusion takes the checks
     away, never the operator's review.
+    """
+    exempt: list[Exemption] = []
+    """Rules lifted from whole files, each with its reason.
+
+    An `ignore` keeps one finding out, on its line; an exemption keeps one rule's
+    findings out of every file its patterns match. Every other rule still holds
+    there.
     """
     conditions: str | None = None
     """The module declaring the project's conditions, by its dotted name.

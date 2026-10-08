@@ -227,6 +227,31 @@ def test_rules_check_leaves_excluded_paths_out(
     assert result.output.strip() == "lup checked no files."
 
 
+def test_rules_check_lifts_an_exempt_rule_from_its_paths(
+    fakes: Kit, repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (repo / "src" / "decl_lift").mkdir()
+    (repo / "src" / "decl_lift" / "__init__.py").write_text("")
+    (repo / "src" / "decl_lift" / "lup_project.py").write_text(
+        "from lup_dev.project import Exemption, Project\n"
+        "project = Project(exempt=[Exemption(\n"
+        '    rule="regex", paths=["src/pkg/**"], why="a grammar"\n'
+        ")])\n"
+    )
+    (repo / "pyproject.toml").write_text(
+        '[tool.lup]\nproject = "decl_lift.lup_project:project"\n'
+        '[tool.pytest]\ntestpaths = ["tests", "src"]\n'
+    )
+    (repo / "src" / "pkg" / "core.py").write_text(
+        "x = 1  # BAD regex\ny = (1, 2)  # BAD tuple-shape\n"
+    )
+    monkeypatch.chdir(repo)
+    result = runner.invoke(cli.app, ["rules", "check", "src/pkg/core.py"])
+    assert result.exit_code == 1
+    assert "tuple-shape" in result.output
+    assert "regex" not in result.output
+
+
 class Closed(Issues):
     def state(self, issue: IssueRef) -> Literal["open", "closed"]:
         return "closed"

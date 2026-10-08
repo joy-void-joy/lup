@@ -83,7 +83,7 @@ class Reply(Model):
 
 
 class Call(Model):
-    """A tool call running now."""
+    """A tool call in flight."""
 
     key: str
     agent: str
@@ -280,7 +280,7 @@ def begin(bench: Bench, worktree: Worktree, key: str) -> None:
 
 
 def opened(bench: Bench, session: str, cwd: Path) -> Worktree | None:
-    """Return the worktree a session runs in, starting the session if it's new."""
+    """Return the worktree a session runs in, starting the session on its first call."""
     root = locate(cwd, session, bench.services.layout)
     if root is None:
         return None
@@ -432,7 +432,7 @@ class Snapshot(Model):
     store: Store
     session: str
     taken: str
-    """The worktree as it is now."""
+    """The worktree as it stands."""
     accepted: str
     start: str | None
     """The tree the session started from."""
@@ -466,7 +466,7 @@ class Acted(Model):
     refused: list[Refused] = []
     hold: Hold | None = None
     landed: list[Judgement] = []
-    """The files accepted, judged now or before they landed."""
+    """The files accepted, judged at this checkpoint or before they landed."""
 
 
 def act(bench: Bench, worktree: Worktree, snapshot: Snapshot, judged: Fates) -> Acted:

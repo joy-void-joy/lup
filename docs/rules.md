@@ -1404,3 +1404,219 @@ def size(value: int | str) -> int:
         return value
     return len(value)
 ```
+
+
+## `string-strip`
+
+Stripping given characters off text takes it apart by hand, and fails quietly on the input it wasn't tried on.
+
+**Steer:** Read the text with its format's parser; `.strip()` with no argument, which trims whitespace, is fine.
+
+**Flags:**
+
+```python
+def release(tag: str) -> str:
+    """Return the release a tag names: `1.2` for `v1.2`."""
+    return tag.lstrip("v")
+```
+
+Done the steer's way:
+
+```python
+from packaging.version import Version
+
+
+def release(tag: str) -> str:
+    """Return the release a tag names: `1.2` for `v1.2`."""
+    return str(Version(tag))
+```
+
+**Leaves alone:**
+
+```python
+def tidy(line: str) -> str:
+    """Trim the whitespace around a line."""
+    return line.strip()
+```
+
+
+## `string-replace`
+
+Rewriting text by replacing pieces of it edits a format by hand, and fails quietly on the input it wasn't tried on.
+
+**Steer:** Build or rewrite the text with its format's own tools: `urllib.parse.quote`, `shlex.join`, `json.dumps`.
+
+**Flags:**
+
+```python
+def escaped(url: str) -> str:
+    """Return a URL with its spaces escaped."""
+    return url.replace(" ", "%20")
+```
+
+Done the steer's way:
+
+```python
+from urllib.parse import quote
+
+
+def escaped(url: str) -> str:
+    """Return a URL with its spaces escaped."""
+    return quote(url, safe=":/?=&")
+```
+
+**Leaves alone:**
+
+```python
+from datetime import datetime
+
+
+def midnight(moment: datetime) -> datetime:
+    """Return the start of a moment's day."""
+    return moment.replace(hour=0, minute=0, second=0, microsecond=0)
+```
+
+
+## `silent-truncation`
+
+A sequence cut at a fixed bound to make it fit drops what lies past it, and nothing says so.
+
+**Steer:** Keep the whole value; where a format forces a limit, save the full copy, point at it, and say so in an `ignore`.
+
+**Flags:**
+
+```python
+def shown(rows: list[str]) -> list[str]:
+    """Return the rows a report shows."""
+    return rows[:200]
+```
+
+Done the steer's way:
+
+```python
+from pathlib import Path
+
+
+def shown(rows: list[str], saved: str) -> str:
+    """Return the report: every row, saved whole where the report points."""
+    Path(saved).write_text("\n".join(rows))
+    return f"{len(rows)} rows, in {saved}"
+```
+
+**Leaves alone:**
+
+```python
+def body(rows: list[str]) -> list[str]:
+    """Return the rows after the header."""
+    return rows[1:]
+```
+
+
+## `historical-voice`
+
+A comment or docstring telling how the code came to be means something only against a version the reader never sees.
+
+**Steer:** Say what is: "the call waits", not "the call now waits"; "a file being created", not "a new file". History belongs in the commit message.
+
+**Flags:**
+
+```python
+import time
+
+
+def pause(seconds: float) -> None:
+    """Pause before the next try, which now waits a second at least."""
+    time.sleep(max(seconds, 1))
+```
+
+Done the steer's way:
+
+```python
+import time
+
+
+def pause(seconds: float) -> None:
+    """Pause before the next try, for a second at least."""
+    time.sleep(max(seconds, 1))
+```
+
+**Leaves alone:**
+
+```python
+def described(old: str, replacement: str) -> str:
+    """Describe an edit: its `old_string` and `new_string`, which "the new text" names."""
+    return f"{old} -> {replacement}"
+```
+
+
+## `docstring-code`
+
+reStructuredText's double backticks and Sphinx roles are a second way to mark code, beside Markdown's.
+
+**Steer:** Mark inline code with single backticks: `name`, `print`.
+
+**Flags:**
+
+```python
+def greet(name: str) -> str:
+    """Return a greeting for ``name``; see :func:`print`."""
+    return f"hello {name}"
+```
+
+Done the steer's way:
+
+```python
+def greet(name: str) -> str:
+    """Return a greeting for `name`; see `print`."""
+    return f"hello {name}"
+```
+
+**Leaves alone:**
+
+```python
+def greet(name: str) -> str:
+    """Return a greeting. Usage: `greet("Ada")`."""
+    return f"hello {name}"
+```
+
+
+## `runtime-mention`
+
+A runtime named outside its adapter builds a feature for one runtime above the seam, where the others quietly lack it.
+
+**Steer:** Speak in lup's own words and capabilities (`runtime.asks_before()`); the runtime's spelling, and the evidence behind a capability, belong in its adapter.
+
+**Flags:**
+
+```python
+def asks_first(runtime: str) -> bool:
+    """Say whether a runtime asks before a call runs."""
+    return runtime == "claude"
+```
+
+Done the steer's way:
+
+```python
+from abc import ABC, abstractmethod
+
+
+class Runtime(ABC):
+    """One agent runtime, as lup sees it."""
+
+    @abstractmethod
+    def asks_before(self) -> bool:
+        """Say whether the runtime can ask the operator before a call runs."""
+
+
+def asks_first(runtime: Runtime) -> bool:
+    """Say whether a runtime asks before a call runs."""
+    return runtime.asks_before()
+```
+
+**Leaves alone:**
+
+```python
+def settings_home(name: str) -> str:
+    """Return where a runtime keeps its settings, by the name its adapter gives."""
+    return f".{name}"
+```

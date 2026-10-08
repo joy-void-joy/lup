@@ -7,7 +7,7 @@ import pytest
 
 from lup_dev.policy.judge import Change, Judge, Judgement, touched_lines
 from lup_dev.policy.roles import Roles
-from lup_dev.project import Project
+from lup_dev.project import Exemption, Project
 
 if TYPE_CHECKING:
     from conftest import Kit
@@ -153,6 +153,19 @@ def test_an_excluded_protected_module_asks_without_its_findings(
     assert judgement.outcome == "ask"
     assert [ask.kind for ask in judgement.asks] == ["protected"]
     assert judgement.refusing == []
+
+
+def test_an_exempt_rule_is_lifted_from_its_paths_alone(judge: Judging) -> None:
+    lifted = Exemption(rule="regex", paths=["src/pkg/**"], why="a grammar")
+    project = Project(exempt=[lifted])
+    after = CORE + "y = 2  # BAD regex\nz = 3  # BAD tuple-shape\n"
+    judgement = judge(edit("src/pkg/core.py", CORE, after), project=project)
+    assert [found.rule for found in judgement.refusing] == ["tuple-shape"]
+    elsewhere = judge(edit("src/other.py", None, after, baseline=None), project=project)
+    assert sorted(found.rule for found in elsewhere.refusing) == [
+        "regex",
+        "tuple-shape",
+    ]
 
 
 def test_protected_files_that_arent_python_only_ask(judge: Judging) -> None:

@@ -84,7 +84,7 @@ class StoreLayout(Model):
 
     @property
     def calls(self) -> Path:
-        """The calls running now, read and written under `calls_lock`."""
+        """The calls in flight, read and written under `calls_lock`."""
         return self.home / "calls.json"
 
     @property

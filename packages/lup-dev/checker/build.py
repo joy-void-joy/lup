@@ -174,7 +174,7 @@ def bundle(places: Places, source: Path) -> None:
     stubs = source / "packages" / "pyright-internal" / "typeshed-fallback"
     shutil.rmtree(places.bundle.stubs, ignore_errors=True)
     stubs.copy(places.bundle.stubs)
-    # Replaced last and at once, so a running engine sees the new build only whole.
+    # Replaced last and at once, so a running engine sees the rebuilt bundle only whole.
     partial.replace(target)
 
 

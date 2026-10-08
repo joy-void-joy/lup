@@ -1,9 +1,9 @@
 """Comparing a file's public surface before and after a change, for the public-API ask.
 
 A change to what other code depends on is a design change, so it's asked like a
-new file (`docs/judging-writes.md`, *The public-API ask*):
+file being created (`docs/judging-writes.md`, *The public-API ask*):
 - a name added to or removed from a package's root (`__init__.py`);
-- a new class;
+- a class added;
 - a changed signature of a definition that existed when the session started.
 
 Names created during the session don't ask: the operator sees them when the file
@@ -46,7 +46,8 @@ def api_changes(
     """List how `after` changes the public surface of `before`.
 
     `baseline` is the file's surface when the session started, none where it
-    didn't exist; `before` is its surface before this change, none where it's new.
+    didn't exist; `before` is its surface before this change, none where this
+    change creates it.
 
     >>> start = Surface(exported=["ask"], classes=["Client"])
     >>> later = Surface(exported=["ask", "spawn"], classes=["Client", "Room"])

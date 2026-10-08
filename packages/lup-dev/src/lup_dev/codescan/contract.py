@@ -75,7 +75,7 @@ class Parameter(Model):
 class Signature(Model):
     """A function's or method's signature.
 
-    Named by its dotted name inside its module: `submit`, `Claude.ask`.
+    Named by its dotted name inside its module: `submit`, `Agent.ask`.
     """
 
     name: str
