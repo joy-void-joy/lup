@@ -292,3 +292,632 @@ def price(prices: dict[str, int], item: str, first: list[int]) -> int:
     """Look an item's price up in the table, and add the first extra."""
     return prices[item] + first[0]
 ```
+
+
+## `subprocess`
+
+A second library for running programs, beside the one the rest of the code uses, splits how commands are run, checked and reported.
+
+**Steer:** Run programs with `sh`: `sh.git("status")`, or `sh.Command(path)(…)` for one found by path.
+
+**Flags:**
+
+```python
+import subprocess
+
+
+def status() -> str:
+    """Return the working tree's status."""
+    return subprocess.run(["git", "status"], capture_output=True, text=True).stdout
+```
+
+Done the steer's way:
+
+```python
+import sh
+
+
+def status() -> str:
+    """Return the working tree's status."""
+    return str(sh.git("status"))
+```
+
+**Leaves alone:**
+
+```python
+import asyncio
+
+
+async def pause() -> None:
+    """Give other tasks a turn."""
+    await asyncio.sleep(0)
+```
+
+
+## `os-shell`
+
+Running a program through the shell, or in place of this process, hides its arguments from the reader and its failure from the caller.
+
+**Steer:** Run programs with `sh`, which takes the arguments as a list and raises when the program fails.
+
+**Flags:**
+
+```python
+import os
+
+
+def fetch() -> int:
+    """Fetch the remote's commits."""
+    return os.system("git fetch")
+```
+
+Done the steer's way:
+
+```python
+import sh
+
+
+def fetch() -> None:
+    """Fetch the remote's commits."""
+    sh.git("fetch")
+```
+
+**Leaves alone:**
+
+```python
+import os
+
+
+def process() -> int:
+    """Return this process's id."""
+    return os.getpid()
+```
+
+
+## `argparse`
+
+A second library for command lines, beside the one lup commands use, splits how options are declared, checked and documented.
+
+**Steer:** Declare the command line with `typer`.
+
+**Flags:**
+
+```python
+import argparse
+
+
+def main() -> None:
+    """Greet the name given."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("name")
+    print(f"hello {parser.parse_args().name}")
+```
+
+Done the steer's way:
+
+```python
+import typer
+
+app = typer.Typer()
+
+
+@app.command()
+def main(name: str) -> None:
+    """Greet `name`."""
+    typer.echo(f"hello {name}")
+```
+
+**Leaves alone:**
+
+```python
+import typer
+
+
+def ask() -> bool:
+    """Ask whether to go on."""
+    return typer.confirm("Go on?")
+```
+
+
+## `os-path`
+
+Paths handled as strings lose what a path knows, and each place joins and splits them its own way.
+
+**Steer:** Handle paths with `pathlib`: `Path(root) / "docs"`, `path.suffix`, `path.parent`.
+
+**Flags:**
+
+```python
+import os
+
+
+def docs(root: str) -> str:
+    """Return where the docs are."""
+    return os.path.join(root, "docs")
+```
+
+Done the steer's way:
+
+```python
+from pathlib import Path
+
+
+def docs(root: str) -> Path:
+    """Return where the docs are."""
+    return Path(root) / "docs"
+```
+
+```python
+from os.path import splitext
+
+
+def stem(name: str) -> str:
+    """Return a file name without its extension."""
+    return splitext(name)[0]
+```
+
+Done the steer's way:
+
+```python
+from pathlib import PurePath
+
+
+def stem(name: str) -> str:
+    """Return a file name without its extension."""
+    return PurePath(name).stem
+```
+
+**Leaves alone:**
+
+```python
+import os
+
+
+def processors() -> int:
+    """Return how many processors there are."""
+    return os.cpu_count() or 1
+```
+
+
+## `os-file-ops`
+
+Files handled through string paths, beside `pathlib`, split how files are found, written and removed.
+
+**Steer:** Handle files with `pathlib`: `path.unlink()`, `path.mkdir(parents=True)`, `path.iterdir()`.
+
+**Flags:**
+
+```python
+import os
+
+
+def names(directory: str) -> list[str]:
+    """List the names in a directory."""
+    return os.listdir(directory)
+```
+
+Done the steer's way:
+
+```python
+from pathlib import Path
+
+
+def names(directory: str) -> list[str]:
+    """List the names in a directory."""
+    return [entry.name for entry in Path(directory).iterdir()]
+```
+
+**Leaves alone:**
+
+```python
+import os
+
+
+def process() -> int:
+    """Return this process's id."""
+    return os.getpid()
+```
+
+
+## `os-environ`
+
+An environment variable read where it's used can't be found or listed, and a missing one fails deep inside the code.
+
+**Steer:** Read environment variables as fields of the package's settings model (`settings.py`, pydantic-settings), validated once.
+
+**Flags:**
+
+```python
+import os
+
+
+def editor() -> str:
+    """Return the editor the user chose."""
+    return os.getenv("EDITOR", "vi")
+```
+
+Done the steer's way:
+
+```python
+from lup.types import Settings
+
+
+class Environment(Settings):
+    """The environment variables read here, one field each."""
+
+    editor: str = "vi"
+
+
+def editor() -> str:
+    """Return the editor the user chose."""
+    return Environment().editor
+```
+
+**Leaves alone:**
+
+```python
+import os
+
+
+def process() -> int:
+    """Return this process's id."""
+    return os.getpid()
+```
+
+
+## `rich-progress`
+
+A second library for progress bars splits how long work shows its progress.
+
+**Steer:** Show progress with `tqdm`.
+
+**Flags:**
+
+```python
+from rich.progress import track
+
+
+def total(sizes: list[int]) -> int:
+    """Add up the sizes, showing progress."""
+    return sum(track(sizes))
+```
+
+Done the steer's way:
+
+```python
+from tqdm import tqdm
+
+
+def total(sizes: list[int]) -> int:
+    """Add up the sizes, showing progress."""
+    return sum(tqdm(sizes))
+```
+
+**Leaves alone:**
+
+```python
+from rich.console import Console
+
+
+def show(text: str) -> None:
+    """Print text with its markup."""
+    Console().print(text)
+```
+
+
+## `pdf-extraction`
+
+A text extractor's empty result reads as an empty document, so a scanned PDF passes as blank.
+
+**Steer:** Read the document whole, as a document a model reads, rather than the text a library extracts.
+
+**Flags:**
+
+```python
+from pypdf import PdfReader
+
+
+def text(path: str) -> str:
+    """Return a PDF's text."""
+    return "".join(page.extract_text() for page in PdfReader(path).pages)
+```
+
+Done the steer's way:
+
+```python
+from pathlib import Path
+
+
+def document(path: str) -> bytes:
+    """Return a PDF whole, for a model that reads documents."""
+    return Path(path).read_bytes()
+```
+
+**Leaves alone:**
+
+```python
+from pathlib import Path
+
+
+def size(path: str) -> int:
+    """Return a PDF's size in bytes."""
+    return Path(path).stat().st_size
+```
+
+
+## `suppress`
+
+An error swallowed by `suppress` leaves no trace of what failed, or why.
+
+**Steer:** Handle the error, log it, or let it rise; where a library can skip the case itself, let it.
+
+**Flags:**
+
+```python
+from contextlib import suppress
+from pathlib import Path
+
+
+def remove(path: str) -> None:
+    """Remove a file, if it's there."""
+    with suppress(FileNotFoundError):
+        Path(path).unlink()
+```
+
+Done the steer's way:
+
+```python
+from pathlib import Path
+
+
+def remove(path: str) -> None:
+    """Remove a file, if it's there."""
+    Path(path).unlink(missing_ok=True)
+```
+
+**Leaves alone:**
+
+```python
+from contextlib import ExitStack
+
+
+def stack() -> ExitStack:
+    """Return an empty stack of exits."""
+    return ExitStack()
+```
+
+
+## `bare-except`
+
+A bare `except:` catches everything, `KeyboardInterrupt` and `SystemExit` included, and hides why.
+
+**Steer:** Catch `Exception` or something narrower, and handle, log or re-raise it.
+
+**Flags:**
+
+```python
+def number(text: str) -> int:
+    """Read a number, or zero."""
+    try:
+        return int(text)
+    except:
+        return 0
+```
+
+Done the steer's way:
+
+```python
+def number(text: str) -> int:
+    """Read a number, or zero."""
+    try:
+        return int(text)
+    except ValueError:
+        return 0
+```
+
+**Leaves alone:**
+
+```python
+def number(text: str) -> int:
+    """Read a number, or zero."""
+    try:
+        return int(text)
+    except (ValueError, OverflowError):
+        return 0
+```
+
+
+## `except-baseexception`
+
+Catching `BaseException` catches `KeyboardInterrupt` and `SystemExit` too, so nothing can stop the code.
+
+**Steer:** Catch `Exception` or something narrower, and handle, log or re-raise it.
+
+**Flags:**
+
+```python
+def number(text: str) -> int:
+    """Read a number, or zero."""
+    try:
+        return int(text)
+    except BaseException:
+        return 0
+```
+
+Done the steer's way:
+
+```python
+def number(text: str) -> int:
+    """Read a number, or zero."""
+    try:
+        return int(text)
+    except ValueError:
+        return 0
+```
+
+**Leaves alone:**
+
+```python
+def wait() -> None:
+    """Wait until interrupted."""
+    try:
+        input()
+    except KeyboardInterrupt:
+        return
+```
+
+
+## `suppression-comment`
+
+A second suppression syntax hides a finding without the operator ever being asked.
+
+**Steer:** Keep one finding with `# lup: ignore("<rule>", why="<reason>")`, which asks the operator.
+
+**Flags:**
+
+```python
+def width() -> int:
+    """Return the width."""
+    return 1  # noqa: PLR2004
+```
+
+Done the steer's way:
+
+```python
+def width() -> int:
+    """Return the width."""
+    return 1
+```
+
+```python
+def width() -> int:
+    """Return the width."""
+    return "1"  # type: ignore[return-value]
+```
+
+Done the steer's way:
+
+```python
+def width() -> int:
+    """Return the width."""
+    return 1
+```
+
+**Leaves alone:**
+
+```python
+def width() -> int:
+    """Return the width."""
+    # the type checker reads this
+    return 1
+```
+
+
+## `any-type`
+
+`Any` turns type checking off for everything it touches.
+
+**Steer:** Give the real type, a type parameter, or `JsonValue` or `JsonObject` for JSON whose schema lives elsewhere.
+
+**Flags:**
+
+```python
+from typing import Any
+
+
+def size(value: Any) -> int:
+    """Return the size of `value`."""
+    return len(value)
+```
+
+Done the steer's way:
+
+```python
+def size(value: str | list[str]) -> int:
+    """Return the size of `value`."""
+    return len(value)
+```
+
+**Leaves alone:**
+
+```python
+def anything(values: list[bool]) -> bool:
+    """Say whether any value holds."""
+    return any(values)
+```
+
+
+## `cast`
+
+`cast` asserts a type without checking it, so a wrong one passes silently.
+
+**Steer:** Narrow with `isinstance` or `match`, or validate with a model, so the type is checked.
+
+**Flags:**
+
+```python
+from typing import cast
+
+
+def text(value: str | int) -> str:
+    """Return `value`, which callers pass as text."""
+    return cast("str", value)
+```
+
+Done the steer's way:
+
+```python
+def text(value: str | int) -> str:
+    """Return `value` as text."""
+    return value if isinstance(value, str) else str(value)
+```
+
+**Leaves alone:**
+
+```python
+def unsigned(data: bytes) -> list[int]:
+    """Read bytes as unsigned numbers."""
+    return memoryview(data).cast("B").tolist()
+```
+
+
+## `bare-object`
+
+`object` as a type says nothing about the value, so every use needs a check the type could have done.
+
+**Steer:** Give the real type, a type parameter, or `JsonValue` or `JsonObject` for JSON whose schema lives elsewhere.
+
+**Flags:**
+
+```python
+def first(values: list[object]) -> object:
+    """Return the first of `values`."""
+    return values[0]
+```
+
+Done the steer's way:
+
+```python
+def first[T](values: list[T]) -> T:
+    """Return the first of `values`."""
+    return values[0]
+```
+
+**Leaves alone:**
+
+```python
+class Point:
+    """A point, equal to another at the same place."""
+
+    def __init__(self, x: int) -> None:
+        """Place the point."""
+        self.x = x
+
+    def __eq__(self, other: object) -> bool:
+        """Say whether `other` is a point at the same place."""
+        return isinstance(other, Point) and other.x == self.x
+
+    def __hash__(self) -> int:
+        """Hash the point by its place."""
+        return hash(self.x)
+```

@@ -353,4 +353,734 @@ export const rules = {
             ],
         },
     },
+
+    // Libraries per job (`docs/conventions.md`, *Libraries per job*).
+
+    subprocess: {
+        mistake:
+            'A second library for running programs, beside the one the rest of the code uses, splits how ' +
+            'commands are run, checked and reported.',
+        steer: 'Run programs with `sh`: `sh.git("status")`, or `sh.Command(path)(…)` for one found by path.',
+        check(file) {
+            for (const imported of file.importsOf(['subprocess'])) {
+                file.report(imported.node, `this import brings in \`${imported.module}\``);
+            }
+            const spawners = ['create_subprocess_exec', 'create_subprocess_shell'];
+            for (const used of file.uses(spawners.map((name) => `asyncio.subprocess.${name}`))) {
+                file.report(used.node, `this uses \`${used.name}\``);
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        import subprocess
+
+
+                        def status() -> str:
+                            """Return the working tree's status."""
+                            return subprocess.run(["git", "status"], capture_output=True, text=True).stdout
+                    `,
+                    rewritten: python`
+                        import sh
+
+
+                        def status() -> str:
+                            """Return the working tree's status."""
+                            return str(sh.git("status"))
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    import asyncio
+
+
+                    async def pause() -> None:
+                        """Give other tasks a turn."""
+                        await asyncio.sleep(0)
+                `,
+            ],
+        },
+    },
+
+    'os-shell': {
+        mistake:
+            "Running a program through the shell, or in place of this process, hides its arguments from the " +
+            'reader and its failure from the caller.',
+        steer: 'Run programs with `sh`, which takes the arguments as a list and raises when the program fails.',
+        check(file) {
+            const runners = ['system', 'popen', 'posix_spawn', 'posix_spawnp', 'startfile'];
+            const execs = ['execl', 'execle', 'execlp', 'execlpe', 'execv', 'execve', 'execvp', 'execvpe'];
+            const spawns = ['spawnl', 'spawnle', 'spawnlp', 'spawnlpe', 'spawnv', 'spawnve', 'spawnvp', 'spawnvpe'];
+            for (const used of file.uses([...runners, ...execs, ...spawns].map((name) => `os.${name}`))) {
+                file.report(used.node, `this uses \`${used.name}\``);
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        import os
+
+
+                        def fetch() -> int:
+                            """Fetch the remote's commits."""
+                            return os.system("git fetch")
+                    `,
+                    rewritten: python`
+                        import sh
+
+
+                        def fetch() -> None:
+                            """Fetch the remote's commits."""
+                            sh.git("fetch")
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    import os
+
+
+                    def process() -> int:
+                        """Return this process's id."""
+                        return os.getpid()
+                `,
+            ],
+        },
+    },
+
+    argparse: {
+        mistake:
+            'A second library for command lines, beside the one lup commands use, splits how options are ' +
+            'declared, checked and documented.',
+        steer: 'Declare the command line with `typer`.',
+        check(file) {
+            for (const imported of file.importsOf(['argparse', 'optparse', 'getopt'])) {
+                file.report(imported.node, `this import brings in \`${imported.module}\``);
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        import argparse
+
+
+                        def main() -> None:
+                            """Greet the name given."""
+                            parser = argparse.ArgumentParser()
+                            parser.add_argument("name")
+                            print(f"hello {parser.parse_args().name}")
+                    `,
+                    rewritten: python`
+                        import typer
+
+                        app = typer.Typer()
+
+
+                        @app.command()
+                        def main(name: str) -> None:
+                            """Greet \`name\`."""
+                            typer.echo(f"hello {name}")
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    import typer
+
+
+                    def ask() -> bool:
+                        """Ask whether to go on."""
+                        return typer.confirm("Go on?")
+                `,
+            ],
+        },
+    },
+
+    'os-path': {
+        mistake: 'Paths handled as strings lose what a path knows, and each place joins and splits them its own way.',
+        steer: 'Handle paths with `pathlib`: `Path(root) / "docs"`, `path.suffix`, `path.parent`.',
+        check(file) {
+            for (const imported of file.importsOf(['os.path', 'posixpath', 'ntpath', 'genericpath'])) {
+                file.report(imported.node, `this import brings in \`${imported.module}\``);
+            }
+            for (const used of file.uses(['os.path', 'posixpath', 'ntpath'])) {
+                file.report(used.node, `this uses \`${used.name}\``);
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        import os
+
+
+                        def docs(root: str) -> str:
+                            """Return where the docs are."""
+                            return os.path.join(root, "docs")
+                    `,
+                    rewritten: python`
+                        from pathlib import Path
+
+
+                        def docs(root: str) -> Path:
+                            """Return where the docs are."""
+                            return Path(root) / "docs"
+                    `,
+                },
+                {
+                    code: python`
+                        from os.path import splitext
+
+
+                        def stem(name: str) -> str:
+                            """Return a file name without its extension."""
+                            return splitext(name)[0]
+                    `,
+                    rewritten: python`
+                        from pathlib import PurePath
+
+
+                        def stem(name: str) -> str:
+                            """Return a file name without its extension."""
+                            return PurePath(name).stem
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    import os
+
+
+                    def processors() -> int:
+                        """Return how many processors there are."""
+                        return os.cpu_count() or 1
+                `,
+            ],
+        },
+    },
+
+    'os-file-ops': {
+        mistake: 'Files handled through string paths, beside `pathlib`, split how files are found, written and removed.',
+        steer: 'Handle files with `pathlib`: `path.unlink()`, `path.mkdir(parents=True)`, `path.iterdir()`.',
+        check(file) {
+            const operations = [
+                'remove',
+                'unlink',
+                'rename',
+                'renames',
+                'replace',
+                'mkdir',
+                'makedirs',
+                'rmdir',
+                'removedirs',
+                'listdir',
+                'scandir',
+                'walk',
+                'stat',
+                'lstat',
+                'chmod',
+                'lchmod',
+                'symlink',
+                'readlink',
+                'link',
+                'getcwd',
+                'getcwdb',
+            ];
+            for (const used of file.uses(operations.map((name) => `os.${name}`))) {
+                file.report(used.node, `this uses \`${used.name}\``);
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        import os
+
+
+                        def names(directory: str) -> list[str]:
+                            """List the names in a directory."""
+                            return os.listdir(directory)
+                    `,
+                    rewritten: python`
+                        from pathlib import Path
+
+
+                        def names(directory: str) -> list[str]:
+                            """List the names in a directory."""
+                            return [entry.name for entry in Path(directory).iterdir()]
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    import os
+
+
+                    def process() -> int:
+                        """Return this process's id."""
+                        return os.getpid()
+                `,
+            ],
+        },
+    },
+
+    'os-environ': {
+        mistake:
+            "An environment variable read where it's used can't be found or listed, and a missing one fails " +
+            'deep inside the code.',
+        steer:
+            "Read environment variables as fields of the package's settings model (`settings.py`, " +
+            'pydantic-settings), validated once.',
+        check(file) {
+            const readers = [
+                ...['environ', 'environb', 'getenv', 'getenvb'].map((name) => `os.${name}`),
+                ...['load_dotenv', 'dotenv_values'].map((name) => `dotenv.main.${name}`),
+            ];
+            for (const used of file.uses(readers)) {
+                file.report(used.node, `this uses \`${used.name}\``);
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        import os
+
+
+                        def editor() -> str:
+                            """Return the editor the user chose."""
+                            return os.getenv("EDITOR", "vi")
+                    `,
+                    rewritten: python`
+                        from lup.types import Settings
+
+
+                        class Environment(Settings):
+                            """The environment variables read here, one field each."""
+
+                            editor: str = "vi"
+
+
+                        def editor() -> str:
+                            """Return the editor the user chose."""
+                            return Environment().editor
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    import os
+
+
+                    def process() -> int:
+                        """Return this process's id."""
+                        return os.getpid()
+                `,
+            ],
+        },
+    },
+
+    'rich-progress': {
+        mistake: 'A second library for progress bars splits how long work shows its progress.',
+        steer: 'Show progress with `tqdm`.',
+        check(file) {
+            for (const imported of file.importsOf(['rich.progress'])) {
+                file.report(imported.node, `this import brings in \`${imported.module}\``);
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        from rich.progress import track
+
+
+                        def total(sizes: list[int]) -> int:
+                            """Add up the sizes, showing progress."""
+                            return sum(track(sizes))
+                    `,
+                    rewritten: python`
+                        from tqdm import tqdm
+
+
+                        def total(sizes: list[int]) -> int:
+                            """Add up the sizes, showing progress."""
+                            return sum(tqdm(sizes))
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    from rich.console import Console
+
+
+                    def show(text: str) -> None:
+                        """Print text with its markup."""
+                        Console().print(text)
+                `,
+            ],
+        },
+    },
+
+    'pdf-extraction': {
+        mistake: "A text extractor's empty result reads as an empty document, so a scanned PDF passes as blank.",
+        steer: 'Read the document whole, as a document a model reads, rather than the text a library extracts.',
+        check(file) {
+            const extractors = ['pypdf', 'PyPDF2', 'PyPDF4', 'pdfminer', 'pdfplumber', 'fitz', 'pymupdf', 'pdftotext'];
+            for (const imported of file.importsOf(extractors)) {
+                file.report(imported.node, `this import brings in \`${imported.module}\``);
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        from pypdf import PdfReader
+
+
+                        def text(path: str) -> str:
+                            """Return a PDF's text."""
+                            return "".join(page.extract_text() for page in PdfReader(path).pages)
+                    `,
+                    rewritten: python`
+                        from pathlib import Path
+
+
+                        def document(path: str) -> bytes:
+                            """Return a PDF whole, for a model that reads documents."""
+                            return Path(path).read_bytes()
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    from pathlib import Path
+
+
+                    def size(path: str) -> int:
+                        """Return a PDF's size in bytes."""
+                        return Path(path).stat().st_size
+                `,
+            ],
+        },
+    },
+
+    // Errors (`docs/conventions.md`, *Errors*).
+
+    suppress: {
+        mistake: 'An error swallowed by `suppress` leaves no trace of what failed, or why.',
+        steer: 'Handle the error, log it, or let it rise; where a library can skip the case itself, let it.',
+        check(file) {
+            for (const used of file.uses(['contextlib.suppress'])) {
+                file.report(used.node, `this uses \`${used.name}\``);
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        from contextlib import suppress
+                        from pathlib import Path
+
+
+                        def remove(path: str) -> None:
+                            """Remove a file, if it's there."""
+                            with suppress(FileNotFoundError):
+                                Path(path).unlink()
+                    `,
+                    rewritten: python`
+                        from pathlib import Path
+
+
+                        def remove(path: str) -> None:
+                            """Remove a file, if it's there."""
+                            Path(path).unlink(missing_ok=True)
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    from contextlib import ExitStack
+
+
+                    def stack() -> ExitStack:
+                        """Return an empty stack of exits."""
+                        return ExitStack()
+                `,
+            ],
+        },
+    },
+
+    'bare-except': {
+        mistake: 'A bare `except:` catches everything, `KeyboardInterrupt` and `SystemExit` included, and hides why.',
+        steer: 'Catch `Exception` or something narrower, and handle, log or re-raise it.',
+        check(file) {
+            for (const clause of file.exceptClauses()) {
+                if (!clause.d.typeExpr) {
+                    file.report(clause.d.exceptToken, 'this `except:` names nothing to catch');
+                }
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        def number(text: str) -> int:
+                            """Read a number, or zero."""
+                            try:
+                                return int(text)
+                            except:
+                                return 0
+                    `,
+                    rewritten: python`
+                        def number(text: str) -> int:
+                            """Read a number, or zero."""
+                            try:
+                                return int(text)
+                            except ValueError:
+                                return 0
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    def number(text: str) -> int:
+                        """Read a number, or zero."""
+                        try:
+                            return int(text)
+                        except (ValueError, OverflowError):
+                            return 0
+                `,
+            ],
+        },
+    },
+
+    'except-baseexception': {
+        mistake: 'Catching `BaseException` catches `KeyboardInterrupt` and `SystemExit` too, so nothing can stop the code.',
+        steer: 'Catch `Exception` or something narrower, and handle, log or re-raise it.',
+        check(file) {
+            for (const clause of file.exceptClauses()) {
+                for (const caught of file.caught(clause)) {
+                    if (caught.class === 'builtins.BaseException') {
+                        file.report(caught.node, 'this clause catches `BaseException`');
+                    }
+                }
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        def number(text: str) -> int:
+                            """Read a number, or zero."""
+                            try:
+                                return int(text)
+                            except BaseException:
+                                return 0
+                    `,
+                    rewritten: python`
+                        def number(text: str) -> int:
+                            """Read a number, or zero."""
+                            try:
+                                return int(text)
+                            except ValueError:
+                                return 0
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    def wait() -> None:
+                        """Wait until interrupted."""
+                        try:
+                            input()
+                        except KeyboardInterrupt:
+                            return
+                `,
+            ],
+        },
+    },
+
+    'suppression-comment': {
+        mistake: 'A second suppression syntax hides a finding without the operator ever being asked.',
+        steer: 'Keep one finding with `# lup: ignore("<rule>", why="<reason>")`, which asks the operator.',
+        check(file) {
+            const markers = [
+                'noqa',
+                'type: ignore',
+                'pyright: ignore',
+                'pyright: basic',
+                'pyright: standard',
+                'pyright: report',
+                'ruff: noqa',
+                'ruff: disable',
+            ];
+            for (const comment of file.commentsStartingWith(markers)) {
+                file.report(comment.range, `\`# ${comment.text}\` is a suppression comment`);
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        def width() -> int:
+                            """Return the width."""
+                            return 1  # noqa: PLR2004
+                    `,
+                    rewritten: python`
+                        def width() -> int:
+                            """Return the width."""
+                            return 1
+                    `,
+                },
+                {
+                    code: python`
+                        def width() -> int:
+                            """Return the width."""
+                            return "1"  # type: ignore[return-value]
+                    `,
+                    rewritten: python`
+                        def width() -> int:
+                            """Return the width."""
+                            return 1
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    def width() -> int:
+                        """Return the width."""
+                        # the type checker reads this
+                        return 1
+                `,
+            ],
+        },
+    },
+
+    // Types (`docs/conventions.md`, *Types*).
+
+    'any-type': {
+        mistake: '`Any` turns type checking off for everything it touches.',
+        steer: 'Give the real type, a type parameter, or `JsonValue` or `JsonObject` for JSON whose schema lives elsewhere.',
+        check(file) {
+            for (const used of file.uses(['typing.Any', 'typing_extensions.Any'])) {
+                file.report(used.node, used.renamed ? `\`Any\` is imported as \`${used.renamed}\`` : 'this is `Any`');
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        from typing import Any
+
+
+                        def size(value: Any) -> int:
+                            """Return the size of \`value\`."""
+                            return len(value)
+                    `,
+                    rewritten: python`
+                        def size(value: str | list[str]) -> int:
+                            """Return the size of \`value\`."""
+                            return len(value)
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    def anything(values: list[bool]) -> bool:
+                        """Say whether any value holds."""
+                        return any(values)
+                `,
+            ],
+        },
+    },
+
+    cast: {
+        mistake: '`cast` asserts a type without checking it, so a wrong one passes silently.',
+        steer: 'Narrow with `isinstance` or `match`, or validate with a model, so the type is checked.',
+        check(file) {
+            for (const used of file.uses(['typing.cast', 'typing_extensions.cast'])) {
+                file.report(used.node, 'this is `cast`');
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        from typing import cast
+
+
+                        def text(value: str | int) -> str:
+                            """Return \`value\`, which callers pass as text."""
+                            return cast("str", value)
+                    `,
+                    rewritten: python`
+                        def text(value: str | int) -> str:
+                            """Return \`value\` as text."""
+                            return value if isinstance(value, str) else str(value)
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    def unsigned(data: bytes) -> list[int]:
+                        """Read bytes as unsigned numbers."""
+                        return memoryview(data).cast("B").tolist()
+                `,
+            ],
+        },
+    },
+
+    'bare-object': {
+        mistake: '`object` as a type says nothing about the value, so every use needs a check the type could have done.',
+        steer: 'Give the real type, a type parameter, or `JsonValue` or `JsonObject` for JSON whose schema lives elsewhere.',
+        check(file) {
+            for (const written of file.typesNaming(['builtins.object'])) {
+                if (!file.inDunderParameter(written.node)) {
+                    file.report(
+                        written.node,
+                        written.alias ? `\`${written.alias}\` is an alias of \`object\`` : 'this type is `object`'
+                    );
+                }
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        def first(values: list[object]) -> object:
+                            """Return the first of \`values\`."""
+                            return values[0]
+                    `,
+                    rewritten: python`
+                        def first[T](values: list[T]) -> T:
+                            """Return the first of \`values\`."""
+                            return values[0]
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    class Point:
+                        """A point, equal to another at the same place."""
+
+                        def __init__(self, x: int) -> None:
+                            """Place the point."""
+                            self.x = x
+
+                        def __eq__(self, other: object) -> bool:
+                            """Say whether \`other\` is a point at the same place."""
+                            return isinstance(other, Point) and other.x == self.x
+
+                        def __hash__(self) -> int:
+                            """Hash the point by its place."""
+                            return hash(self.x)
+                `,
+            ],
+        },
+    },
 } satisfies Catalog;
