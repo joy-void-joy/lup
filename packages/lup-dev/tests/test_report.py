@@ -5,15 +5,19 @@ from pathlib import Path
 from lup_dev.codescan.contract import Finding, Position, Span
 from lup_dev.policy.judge import Ask, RemovedNote
 from lup_dev.policy.report import (
+    Moved,
+    MovedFile,
     Refused,
     asked,
     information,
+    moved,
     refusal,
     removed_notes,
     turn_end,
 )
 
-PATH = Path("src/lup/claude.py")
+ROOT = Path("/work/lup")
+PATH = ROOT / "src/lup/claude.py"
 
 
 def found(
@@ -48,7 +52,7 @@ def at(line: int, column: int = 1) -> Position:
 def test_the_refusal_report_has_the_documented_shape() -> None:
     refused = Refused(
         path=PATH,
-        saved=Path(".lup/saved/3/src/lup/claude.py"),
+        saved=ROOT / ".lup/saved/3/src/lup/claude.py",
         new=False,
         refusing=[
             found(
@@ -71,14 +75,14 @@ def test_the_refusal_report_has_the_documented_shape() -> None:
 def test_several_files_and_untouched_findings() -> None:
     first = Refused(
         path=PATH,
-        saved=Path(".lup/saved/4/src/lup/claude.py"),
+        saved=ROOT / ".lup/saved/4/src/lup/claude.py",
         new=False,
         refusing=[found(at(1, 1), "regex", "uses re")],
         untouched=[found(at(9, 1), "tuple-shape", "a tuple")],
     )
     second = Refused(
-        path=Path("src/lup/new.py"),
-        saved=Path(".lup/saved/4/src/lup/new.py"),
+        path=ROOT / "src/lup/new.py",
+        saved=ROOT / ".lup/saved/4/src/lup/new.py",
         new=True,
         refusing=[found(at(2, 1), "regex", "uses re")],
     )
@@ -88,11 +92,12 @@ def test_several_files_and_untouched_findings() -> None:
     )
     assert (
         "  On lines this change didn't touch, which don't refuse:\n"
-        "    src/lup/claude.py:9:1 - tuple-shape: a tuple" in report
+        "    /work/lup/src/lup/claude.py:9:1 - tuple-shape: a tuple" in report
     )
     assert (
         "write the file again with your file tool, where the operator sees it whole:\n"
-        "  src/lup/new.py (from .lup/saved/4/src/lup/new.py)" in report
+        "  /work/lup/src/lup/new.py (from /work/lup/.lup/saved/4/src/lup/new.py)"
+        in report
     )
 
 
@@ -142,7 +147,7 @@ def test_information_sections() -> None:
     assert report.startswith(
         "Type errors and ruff's findings in the files changed "
         "(information; clean them before the turn ends):\n"
-        "  src/lup/claude.py:3:1"
+        "  /work/lup/src/lup/claude.py:3:1"
     )
     assert "lup's findings on lines no change touched (information):" in report
     assert "Type errors in files that import what changed" in report
@@ -150,7 +155,7 @@ def test_information_sections() -> None:
 
 def test_removed_notes_and_turn_end() -> None:
     assert removed_notes([RemovedNote(path=PATH, text="the limit")]).endswith(
-        "  src/lup/claude.py: # lup: the limit"
+        "  /work/lup/src/lup/claude.py: # lup: the limit"
     )
     assert turn_end([found(at(1, 1), "E501", "too long", owner="ruff")]).startswith(
         "lup won't end the turn yet"
@@ -163,3 +168,35 @@ def test_what_is_asked() -> None:
         Ask(kind="public-api", reason="a adds the class `B`"),
     ]
     assert asked(asks) == "lup asks: a is new; a adds the class `B`"
+
+
+def test_a_move_of_head_is_told_as_its_commits() -> None:
+    told = moved(
+        [
+            Moved(
+                worktree=ROOT,
+                head="1a2b3c",
+                files=[
+                    MovedFile(
+                        path=PATH,
+                        findings=[found(at(3, 1), "regex", "uses re")],
+                        asks=[Ask(kind="new-file", reason=f"{PATH} is new")],
+                    ),
+                    MovedFile(path=ROOT / "README.md"),
+                ],
+                hold="ab12cd",
+            )
+        ]
+    )
+    assert told == (
+        "HEAD moved to 1a2b3c in /work/lup, bringing content no checkpoint judged. "
+        "It was judged once, as its commits', and stays as committed:\n"
+        "/work/lup/src/lup/claude.py\n"
+        "  /work/lup/src/lup/claude.py:3:1 - regex: uses re\n"
+        "  asks: /work/lup/src/lup/claude.py is new\n"
+        "lup's findings in them fail the gate: fix them in a later commit.\n"
+        "The operator is asked about the rest after the fact "
+        "(hold ab12cd, `lup-dev holds`)."
+    )
+    quiet = Moved(worktree=ROOT, head="1a2b3c", files=[MovedFile(path=PATH)])
+    assert moved([quiet]) == ""

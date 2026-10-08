@@ -12,6 +12,11 @@ A replacement whose string isn't there exactly as the tool requires is allowed:
 the tool fails on its own. A refused write never touches the file, and the agent's
 version is saved. A write allowed or asked is remembered until its call finishes,
 so the checkpoint after it accepts that content as already judged.
+
+A write is judged in the worktree of the session's repository its path is in,
+which the session then holds; a write in the repository's own git directory
+asks, since what's there runs outside the agent's reach; a write anywhere else
+isn't judged here.
 """
 
 from abc import ABC, abstractmethod
@@ -19,9 +24,19 @@ from pathlib import Path
 from typing import Literal, override
 
 from lup.types import Model
-from lup_dev.policy.checkpoint import Bench, Pending, decoded, opened, verdict
-from lup_dev.policy.judge import Change
-from lup_dev.policy.report import Refused, asked, refusal
+from lup_dev.policy.checkpoint import (
+    Attributed,
+    Bench,
+    Pending,
+    Worktree,
+    decoded,
+    holding,
+    verdict,
+)
+from lup_dev.policy.judge import Ask, Change, Judgement
+from lup_dev.policy.report import Refused, asked, placed, refusal
+from lup_dev.policy.verdicts import VerdictLog
+from lup_dev.policy.worktrees import place
 
 
 class Proposal(Model, ABC):
@@ -101,19 +116,37 @@ class Decision(Model):
 def before(bench: Bench, proposal: Proposal, session: str, cwd: Path) -> Decision:
     """Judge a file tool's proposed write before it lands.
 
-    A file outside the session's worktree isn't judged: edits in another
+    A file outside the session's repository isn't judged: edits in another
     repository come with launch and spawn.
     """
-    worktree = opened(bench, session, cwd)
-    if worktree is None or not proposal.path.is_relative_to(worktree.root):
+    here = place(proposal.path)
+    held = holding(bench, session, cwd, here)
+    if here is None or held is None or here.repository != held.repository:
         return Decision(outcome=None)
-    path = proposal.path.relative_to(worktree.root)
-    disk = worktree.root / path
+    disk = proposal.path
     after = proposal.content(disk.read_text() if disk.is_file() else None)
     if after is None:
         return Decision(outcome="allow")
-    store = worktree.store
     services = bench.services
+    if here.worktree is None:
+        reason = (
+            f"{here.repository / here.path} is in the repository's git directory, "
+            "which runs outside the agent's reach"
+        )
+        judgement = Judgement(
+            path=here.path,
+            role="protected",
+            outcome="ask",
+            asks=[Ask(kind="protected", reason=reason)],
+        )
+        to = Attributed(worktree=here.repository, session=session, tool=proposal.tool)
+        VerdictLog(path=services.layout.verdicts(here.repository)).append(
+            [verdict(bench, to, judgement)]
+        )
+        return Decision(outcome="ask", reason=asked(judgement.asks))
+    worktree = Worktree.of(here.worktree, held.repository, services.layout)
+    path = here.path
+    store = worktree.store
     with worktree.lock():
         state = store.state()
         record = worktree.session(session, bench.runtime)
@@ -127,8 +160,10 @@ def before(bench: Bench, proposal: Proposal, session: str, cwd: Path) -> Decisio
             baseline=decoded(store.content(store.started(session), path)),
             whole=proposal.whole() and (earlier is not None or disk.is_file()),
         )
-        judgement = worktree.judge(services, record).judge([change], inform=False)[0]
-        logged = verdict(bench, session, proposal.tool, judgement)
+        judge = worktree.judge(services, record.approved)
+        judgement = judge.judge([change], inform=False)[0]
+        to = Attributed(worktree=worktree.root, session=session, tool=proposal.tool)
+        logged = verdict(bench, to, judgement)
         match judgement.outcome:
             case "refuse":
                 number = state.saved + 1
@@ -136,11 +171,11 @@ def before(bench: Bench, proposal: Proposal, session: str, cwd: Path) -> Decisio
                 state.saved = number
                 store.remember(state)
                 refused = Refused(
-                    path=path,
+                    path=worktree.root / path,
                     saved=saved,
                     new=earlier is None,
-                    refusing=judgement.refusing,
-                    untouched=judgement.untouched,
+                    refusing=placed(worktree.root, judgement.refusing),
+                    untouched=placed(worktree.root, judgement.untouched),
                 )
                 decision = Decision(outcome="refuse", reason=refusal([refused]))
             case "ask" | "allow" as outcome:

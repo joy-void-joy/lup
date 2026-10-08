@@ -15,6 +15,13 @@ the operator answers from a terminal (`lup-dev holds`). The agent hears a
 checkpoint's report as `additionalContext` beside the call's result, and the result
 reaches it untouched.
 
+A Codex session holds only the worktree it started in, a declared gap until rooms
+(`docs/judging-writes.md`, *Every worktree of the repository*): its hooks' `cwd` is
+the "Working directory for the session", and `Bash` and `apply_patch` carry only
+`tool_input.command` (its hooks docs), which lup doesn't parse. Under its
+`workspace-write` sandbox a write elsewhere lies outside the writable roots, so
+Codex's own approval decides it.
+
 What this relies on, from Codex's hooks documentation and its source at
 `rust-v0.156.1` (`codex-rs/hooks/schema/generated/`):
 - the inputs: `PreToolUse` and `PostToolUse` carry `tool_use_id`, `PostToolUse` its

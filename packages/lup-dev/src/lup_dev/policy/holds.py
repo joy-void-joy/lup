@@ -7,6 +7,12 @@ agent waits inside the hook while the operator answers with `lup-dev holds appro
 comment beside it; an approval with a comment passes the comment on. Unanswered
 within the patience, the change is put back and saved, and the hold stays open.
 
+What a move of `HEAD` asks is already committed, and isn't put back, so on every
+runtime it's kept as a hold no agent waits on, with the commit it came from
+(*A move's asks, after the fact*). Its answer is logged when it's given, and told
+to the session that found the move at its next checkpoint; a decline changes no
+file.
+
 Nobody answers their own hold: answering refuses to run inside an agent's session,
 as each runtime's adapter recognizes it. That stops a mistake, not a determined
 agent; the real separation comes with containers.
@@ -15,13 +21,14 @@ agent; the real separation comes with containers.
 import secrets
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from lup.types import Model
 from lup_dev.errors import LupDevError
 from lup_dev.layout import Layout, StoreLayout
 from lup_dev.policy.roles import Role
-from lup_dev.policy.store import read_model, write_model
+from lup_dev.policy.store import Git, read_model, write_model
+from lup_dev.policy.verdicts import Verdict, VerdictLog
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -66,15 +73,32 @@ class Hold(Model):
     key: str
     worktree: Path
     session: str
+    """The session that made the change, or for a move's, that found it."""
     created: datetime
     files: list[HeldFile]
     diff: str
     """The change as a unified diff, for the operator to read."""
+    commit: str | None = None
+    """The commit a move of `HEAD` reached, for a hold no agent waits on; none for
+    one an agent waits on."""
+    verdicts: list[Verdict] = []
+    """The verdicts logged on its files, which its answer is logged against."""
     answer: Answer | None = None
     abandoned: bool = False
     """Whether the wait ran out: the change was put back, and the hold stays open."""
     delivered: bool = False
-    """Whether a late answer, given after the wait ran out, reached the agent."""
+    """Whether an answer given while no agent waited reached the session."""
+
+    def waited(self) -> bool:
+        """Say whether an agent waits inside its hook for the answer."""
+        return self.commit is None and not self.abandoned
+
+
+def answered(
+    hold: Hold, outcome: Literal["approved", "declined", "unanswered"]
+) -> list[Verdict]:
+    """Return the verdicts on a hold's files again, with how it was answered."""
+    return [verdict.model_copy(update={"answer": outcome}) for verdict in hold.verdicts]
 
 
 class Holds(Model):
@@ -82,31 +106,19 @@ class Holds(Model):
 
     layout: StoreLayout
 
-    def create(
-        self,
-        worktree: Path,
-        session: str,
-        files: list[HeldFile],
-        diff: str,
-        clock: Clock,
-    ) -> Hold:
-        """Hold a change, under a short key the operator can type."""
+    def unused(self) -> str:
+        """Return a short key no hold here has, which the operator can type."""
         taken = [hold.key for hold in self.all()]
 
         def candidates() -> Iterator[str]:
             while True:
                 yield secrets.token_hex(3)
 
-        key = next(candidate for candidate in candidates() if candidate not in taken)
-        hold = Hold(
-            key=key,
-            worktree=worktree,
-            session=session,
-            created=clock.now(),
-            files=files,
-            diff=diff,
-        )
-        write_model(self.layout.hold(key), hold)
+        return next(candidate for candidate in candidates() if candidate not in taken)
+
+    def put(self, hold: Hold) -> Hold:
+        """Keep a hold, whose key `unused` gave."""
+        write_model(self.layout.hold(hold.key), hold)
         return hold
 
     def get(self, key: str) -> Hold | None:
@@ -163,11 +175,14 @@ class Holds(Model):
         write_model(self.layout.hold(key), marked)
 
     def late(self) -> list[Hold]:
-        """Return the holds answered after their wait ran out, not yet told."""
+        """Return the holds answered while no agent waited, not yet told.
+
+        Those whose wait ran out, and a move's, which nobody waits on.
+        """
         return [
             hold
             for hold in self.all()
-            if hold.abandoned and hold.answer is not None and not hold.delivered
+            if not hold.waited() and hold.answer is not None and not hold.delivered
         ]
 
     def answer(self, key: str, response: Response, clock: Clock) -> Hold:
@@ -229,4 +244,11 @@ def answer(
     if not holding:
         message = f"no hold {key} is waiting"
         raise HoldError(message)
-    return holding[0].answer(key, response, clock)
+    hold = holding[0].answer(key, response, clock)
+    if not hold.waited():
+        common = Git(cwd=hold.worktree).text(
+            "rev-parse", "--path-format=absolute", "--git-common-dir"
+        )
+        log = VerdictLog(path=layout.verdicts(Path(common)))
+        log.append(answered(hold, "approved" if response.approved else "declined"))
+    return hold

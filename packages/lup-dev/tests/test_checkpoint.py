@@ -4,6 +4,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import sh
 from filelock import FileLock
 
 from lup_dev.codescan.contract import FileReport, Finding, Position, Span
@@ -17,14 +18,13 @@ from lup_dev.policy.checkpoint import (
     TurnEnded,
     Worktree,
 )
-from lup_dev.policy.holds import Holds, Response, waiting
+from lup_dev.policy.holds import Holds, Response, answer, waiting
 from lup_dev.policy.importers import ImportersPass
 from lup_dev.policy.store import read_model
+from lup_dev.policy.verdicts import VerdictLog
 
 if TYPE_CHECKING:
-    from conftest import Kit, Shell
-
-    from lup_dev.policy.verdicts import VerdictLog
+    from conftest import FakeRuntime, Kit, Shell
 
 CORE = Path("src/pkg/core.py")
 SESSION = "s1"
@@ -47,14 +47,21 @@ def call(
     ).apply(kit.bench)
 
 
-def finish(kit: Kit, repo: Path, key: str, *, agent: str = "") -> Reply:
-    return CallFinished(session=SESSION, agent=agent, cwd=repo, call=key).apply(
+def call_for(session: str, kit: Kit, repo: Path, key: str) -> None:
+    """A shell call another session makes."""
+    CallStarted(session=session, cwd=repo, call=key, tool="Bash").apply(kit.bench)
+
+
+def finish(
+    kit: Kit, repo: Path, key: str, *, agent: str = "", session: str = SESSION
+) -> Reply:
+    return CallFinished(session=session, agent=agent, cwd=repo, call=key).apply(
         kit.bench
     )
 
 
-def end(kit: Kit, repo: Path) -> Reply:
-    return TurnEnded(session=SESSION, cwd=repo).apply(kit.bench)
+def end(kit: Kit, repo: Path, session: str = SESSION) -> Reply:
+    return TurnEnded(session=session, cwd=repo).apply(kit.bench)
 
 
 def worktree(kit: Kit, repo: Path) -> Worktree:
@@ -86,8 +93,9 @@ def test_a_write_with_a_finding_is_put_back_and_saved(kit: Kit, repo: Path) -> N
     assert reply.context.startswith(
         "lup refused 1 file. It is unchanged; your version is saved."
     )
-    assert "src/pkg/core.py:11:8 - regex: regex fires here" in reply.context
-    assert "mv .lup/saved/1/src/pkg/core.py src/pkg/core.py" in reply.context
+    assert f"{repo}/src/pkg/core.py:11:8 - regex: regex fires here" in reply.context
+    saved = repo / ".lup/saved/1/src/pkg/core.py"
+    assert f"mv {saved} {repo}/src/pkg/core.py" in reply.context
     assert (repo / CORE).read_text() == original
     assert (repo / ".lup" / "saved" / "1" / CORE).read_text() == mine
 
@@ -154,6 +162,30 @@ def test_a_call_that_never_finishes_is_cleared_when_the_turn_ends(
     assert finish(kit, repo, "c2").context == ""
 
 
+def test_a_turns_end_clears_only_its_own_sessions_calls(kit: Kit, repo: Path) -> None:
+    start(kit, repo, "other")
+    start(kit, repo)
+    call_for("other", kit, repo, "o1")
+    end(kit, repo)
+    (repo / CORE).write_text((repo / CORE).read_text() + "y = 2  # BAD regex\n")
+    call(kit, repo, "c1")
+    assert finish(kit, repo, "c1").context == ""
+    assert "# BAD regex" in (repo / CORE).read_text()
+    told = finish(kit, repo, "o1", session="other").context
+    assert told.startswith("lup refused 1 file.")
+
+
+def test_a_session_starting_while_another_writes_leaves_that_write_to_be_judged(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo, "other")
+    call_for("other", kit, repo, "o1")
+    (repo / CORE).write_text((repo / CORE).read_text() + "y = 2  # BAD regex\n")
+    start(kit, repo)
+    told = finish(kit, repo, "o1", session="other").context
+    assert told.startswith("lup refused 1 file.")
+
+
 def test_a_new_file_through_the_shell_comes_back_through_the_file_tools(
     kit: Kit, repo: Path
 ) -> None:
@@ -195,14 +227,170 @@ def test_content_committed_elsewhere_isnt_judged(
     assert (repo / CORE).read_text() == "x = 1  # BAD regex\n"
 
 
-def test_a_write_committed_in_the_same_call_is_judged(
+def test_a_write_committed_in_the_same_call_is_judged_once_as_the_commits(
     kit: Kit, repo: Path, shell: Shell
 ) -> None:
     start(kit, repo)
     call(kit, repo, "c1")
     (repo / CORE).write_text("x = 1  # BAD regex\n")
     shell.commit(repo, "sneak it in")
-    assert finish(kit, repo, "c1").context.startswith("lup refused 1 file.")
+    told = finish(kit, repo, "c1").context
+    head = shell.git(repo, "rev-parse", "HEAD")
+    assert told.startswith(f"HEAD moved to {head} in {repo}, bringing content")
+    assert f"{repo}/src/pkg/core.py:1:8 - regex: regex fires here" in told
+    assert "fail the gate: fix them in a later commit" in told
+    assert (repo / CORE).read_text() == "x = 1  # BAD regex\n"
+    assert shell.git(repo, "status", "--porcelain") == ""
+    [verdict] = log(kit, repo).read()
+    assert (verdict.tool, verdict.session, verdict.outcome) == ("move", None, "refuse")
+    call(kit, repo, "c2")
+    assert finish(kit, repo, "c2").context == ""
+
+
+def test_a_module_committed_through_the_shell_stays_and_asks_the_operator_after(
+    kit: Kit, repo: Path, shell: Shell
+) -> None:
+    start(kit, repo)
+    new = repo / "src" / "pkg" / "new.py"
+    call(kit, repo, "c1")
+    new.write_text('"""New."""\n')
+    shell.commit(repo, "a module through the shell")
+    told = finish(kit, repo, "c1").context
+    assert f"asks: {new} is a new production file" in told
+    [hold] = waiting(kit.layout)
+    assert told.endswith(f"(hold {hold.key}, `lup-dev holds`).")
+    assert hold.commit == shell.git(repo, "rev-parse", "HEAD")
+    assert new.read_text() == '"""New."""\n'
+    call(kit, repo, "c2")
+    shell.git(repo, "restore", "src/pkg/new.py")
+    assert finish(kit, repo, "c2").context == ""
+    assert [each.key for each in waiting(kit.layout)] == [hold.key]
+
+
+def test_a_moves_hold_is_answered_after_the_fact(
+    kit: Kit, repo: Path, shell: Shell, runtimes: list[FakeRuntime]
+) -> None:
+    start(kit, repo)
+    call(kit, repo, "c1")
+    (repo / "src" / "pkg" / "new.py").write_text('"""New."""\n')
+    shell.commit(repo, "a module through the shell")
+    finish(kit, repo, "c1")
+    [hold] = waiting(kit.layout)
+    answer(
+        kit.layout,
+        hold.key,
+        Response(approved=False, comment="not this module"),
+        list(runtimes),
+        kit.clock,
+    )
+    [verdict] = [each for each in log(kit, repo).read() if each.tool == "move"]
+    assert (verdict.outcome, verdict.answer, verdict.session) == (
+        "hold",
+        "declined",
+        None,
+    )
+    call(kit, repo, "c2")
+    told = finish(kit, repo, "c2").context
+    assert told.startswith(
+        f"The operator declined what commit {hold.commit} brought to "
+        f"{repo}/src/pkg/new.py: not this module. Nothing was changed"
+    )
+    assert (repo / "src" / "pkg" / "new.py").exists()
+    call(kit, repo, "c3")
+    assert finish(kit, repo, "c3").context == ""
+
+
+def test_a_file_changed_after_its_commit_is_judged_against_heads_content(
+    kit: Kit, repo: Path, shell: Shell
+) -> None:
+    start(kit, repo)
+    call(kit, repo, "c1")
+    committed = (repo / CORE).read_text().replace("return x", "return x + 1")
+    (repo / CORE).write_text(committed)
+    shell.commit(repo, "a commit")
+    mine = committed + "y = 2  # BAD regex\n"
+    (repo / CORE).write_text(mine)
+    told = finish(kit, repo, "c1").context
+    assert told.startswith("lup refused 1 file.")
+    assert "HEAD moved" not in told
+    assert (repo / CORE).read_text() == committed
+    assert (repo / ".lup" / "saved" / "1" / CORE).read_text() == mine
+    store = worktree(kit, repo).store
+    assert store.content(store.accepted(), CORE) == committed.encode()
+
+
+def test_a_clean_merge_of_a_file_both_sides_changed_is_set_aside(
+    kit: Kit, repo: Path, shell: Shell
+) -> None:
+    shell.git(repo, "switch", "-q", "-c", "feature")
+    (repo / CORE).write_text(
+        (repo / CORE).read_text() + "\n\nclass Adapter:\n    pass\n"
+    )
+    shell.commit(repo, "feature: a class")
+    shell.git(repo, "switch", "-q", "main")
+    (repo / CORE).write_text(
+        (repo / CORE).read_text().replace('"""Core."""', '"""Core, on main."""')
+    )
+    shell.commit(repo, "main: its docstring")
+    start(kit, repo)
+    call(kit, repo, "c1")
+    shell.git(repo, "merge", "-q", "--no-edit", "feature")
+    assert finish(kit, repo, "c1").context == ""
+    assert shell.git(repo, "status", "--porcelain") == ""
+    assert log(kit, repo).read() == []
+
+
+def test_a_merge_in_progress_sets_aside_what_git_merged_cleanly(
+    kit: Kit, repo: Path, shell: Shell
+) -> None:
+    shell.git(repo, "switch", "-q", "-c", "feature")
+    (repo / CORE).write_text(
+        (repo / CORE).read_text() + "\n\nclass Adapter:\n    pass\n"
+    )
+    (repo / "README.md").write_text("# Feature\n")
+    shell.commit(repo, "feature")
+    shell.git(repo, "switch", "-q", "main")
+    (repo / CORE).write_text(
+        (repo / CORE).read_text().replace('"""Core."""', '"""Core, on main."""')
+    )
+    (repo / "README.md").write_text("# Main\n")
+    shell.commit(repo, "main")
+    start(kit, repo)
+    call(kit, repo, "c1")
+    sh.git("merge", "-q", "--no-edit", "feature", _cwd=str(repo), _ok_code=[1])
+    assert finish(kit, repo, "c1").context == ""
+    [verdict] = log(kit, repo).read()
+    assert (verdict.path, verdict.role) == (Path("README.md"), "docs")
+
+
+def test_a_branch_judged_in_another_worktree_merges_unjudged(
+    kit: Kit, repo: Path, linked: Path, shell: Shell
+) -> None:
+    start(kit, repo)
+    edit = Replacement(
+        call="e1",
+        tool="Edit",
+        path=linked / CORE,
+        old="    return x\n",
+        new="    return x\n\n\nclass Adapter:\n    pass\n",
+    )
+    assert before(kit.bench, edit, SESSION, repo).outcome == "ask"
+    call(kit, repo, "e1", tool="Edit")
+    (linked / CORE).write_text(edit.content((linked / CORE).read_text()) or "")
+    finish(kit, repo, "e1")
+    call(kit, linked, "c1")
+    shell.commit(linked, "feature: a class")
+    assert finish(kit, linked, "c1").context == ""
+    call(kit, repo, "c2")
+    (repo / CORE).write_text(
+        (repo / CORE).read_text().replace('"""Core."""', '"""Core, on main."""')
+    )
+    shell.commit(repo, "main: its docstring")
+    assert finish(kit, repo, "c2").context == ""
+    call(kit, repo, "c3")
+    shell.git(repo, "merge", "-q", "--no-edit", "feat")
+    assert finish(kit, repo, "c3").context == ""
+    assert shell.git(repo, "status", "--porcelain") == ""
 
 
 def test_work_between_sessions_is_accepted_unjudged(kit: Kit, repo: Path) -> None:
@@ -228,7 +416,7 @@ def test_an_edit_judged_before_it_lands_is_accepted_as_judged(
     )
     decision = before(kit.bench, edit, SESSION, repo)
     assert decision.outcome == "ask"
-    assert decision.reason == "lup asks: src/pkg/core.py adds the class `Room`"
+    assert decision.reason == f"lup asks: {repo}/src/pkg/core.py adds the class `Room`"
     call(kit, repo, "e1", tool="Edit")
     (repo / CORE).write_text(edit.content((repo / CORE).read_text()) or "")
     assert finish(kit, repo, "e1").context == ""
@@ -412,7 +600,7 @@ def test_an_ask_is_held_until_the_operator_approves(
     answer_on_sleep(holding_kit, Response(approved=True, comment="good name"))
     reply = finish(holding_kit, repo, "p1")
     assert (
-        "The operator approved the held change to src/pkg/new.py: good name"
+        f"The operator approved the held change to {repo}/src/pkg/new.py: good name"
         in reply.context
     )
     assert new.read_text() == '"""New."""\n'
@@ -453,14 +641,14 @@ def test_an_unanswered_hold_is_put_back_and_stays_open(
     assert not new.exists()
     [hold] = waiting(holding_kit.layout)
     assert hold.abandoned
-    Holds(layout=holding_kit.layout.store(repo)).answer(
-        hold.key, Response(approved=True), holding_kit.clock
-    )
+    answer(holding_kit.layout, hold.key, Response(approved=True), [], holding_kit.clock)
+    [verdict] = log(holding_kit, repo).read()
+    assert (verdict.outcome, verdict.answer) == ("hold", "approved")
     call(holding_kit, repo, "p2")
     late = finish(holding_kit, repo, "p2").context
     assert (
-        "After the hold timed out, the operator approved the change to src/pkg/new.py"
-        in late
+        "After the hold timed out, the operator approved the change to "
+        f"{repo}/src/pkg/new.py. Your version was saved" in late
     )
     assert session(holding_kit, repo).approved == [Path("src/pkg/new.py")]
 
@@ -522,4 +710,158 @@ def test_the_turns_end_waits_for_the_pass_and_reports_its_errors(
     assert kit.spawner.spawned == [repo]
     block = end(kit, repo).block
     assert kit.engine.importers_asked == [[CORE]]
-    assert "src/pkg/user.py:1:1 - reportCallIssue: wrong arguments" in block
+    assert f"{repo}/src/pkg/user.py:1:1 - reportCallIssue: wrong arguments" in block
+
+
+def bad(root: Path) -> None:
+    (root / CORE).write_text((root / CORE).read_text() + "y = 2  # BAD regex\n")
+
+
+def test_a_worktree_the_session_moves_into_is_judged(
+    kit: Kit, repo: Path, linked: Path
+) -> None:
+    start(kit, repo)
+    call(kit, linked, "c1")
+    bad(linked)
+    told = finish(kit, linked, "c1").context
+    assert told.startswith("lup refused 1 file.")
+    assert f"{linked}/src/pkg/core.py:11:8 - regex" in told
+    assert "# BAD" not in (linked / CORE).read_text()
+    assert (linked / ".lup" / "saved" / "1" / CORE).exists()
+
+
+def test_a_call_counts_in_every_worktree_its_session_holds(
+    kit: Kit, repo: Path, linked: Path
+) -> None:
+    start(kit, repo)
+    call(kit, linked, "c1")
+    finish(kit, linked, "c1")
+    call(kit, repo, "c2")
+    bad(linked)
+    call(kit, linked, "c3")
+    assert finish(kit, linked, "c3").context == ""
+    assert finish(kit, repo, "c2").context.startswith("lup refused 1 file.")
+
+
+def test_a_shell_write_where_the_session_never_went_isnt_judged(
+    kit: Kit, repo: Path, linked: Path
+) -> None:
+    start(kit, repo)
+    call(kit, repo, "c1")
+    bad(linked)
+    assert finish(kit, repo, "c1").context == ""
+    assert "# BAD regex" in (linked / CORE).read_text()
+
+
+def test_the_turns_end_runs_in_every_worktree_the_session_holds(
+    kit: Kit, repo: Path, linked: Path
+) -> None:
+    start(kit, repo)
+    call(kit, linked, "c1")
+    finish(kit, linked, "c1")
+    call(kit, repo, "lost")
+    bad(linked)
+    bad(repo)
+    block = end(kit, repo).block
+    assert block.startswith("lup refused 2 files.")
+    assert f"{repo}/src/pkg/core.py (saved at" in block
+    assert f"{linked}/src/pkg/core.py (saved at" in block
+
+
+def test_each_worktree_is_judged_by_its_own_declaration(
+    kit: Kit, repo: Path, linked: Path
+) -> None:
+    (linked / "pyproject.toml").write_text(
+        '[tool.lup]\nproject = "lup_project:project"\n'
+        '[tool.pytest]\ntestpaths = ["tests", "src"]\n'
+    )
+    (linked / "lup_project.py").write_text(
+        "from lup_dev.project import Project, Protected\n"
+        'project = Project(protected=Protected.default().add("src/pkg/core.py"))\n'
+    )
+    start(kit, repo)
+
+    def edit(root: Path) -> Replacement:
+        return Replacement(
+            call="e1",
+            tool="Edit",
+            path=root / CORE,
+            old="return x\n",
+            new="return x + 1\n",
+        )
+
+    assert before(kit.bench, edit(repo), SESSION, repo).outcome == "allow"
+    asked = before(kit.bench, edit(linked), SESSION, repo)
+    assert asked.outcome == "ask"
+    assert asked.reason == (
+        f"lup asks: {linked}/src/pkg/core.py is a protected path (src/pkg/core.py)"
+    )
+
+
+def test_an_approval_covers_a_path_in_its_worktree_only(
+    kit: Kit, repo: Path, linked: Path
+) -> None:
+    start(kit, repo)
+
+    def write(root: Path, key: str) -> Overwrite:
+        return Overwrite(
+            call=key, tool="Write", path=root / "src/pkg/new.py", text='"""New."""\n'
+        )
+
+    assert before(kit.bench, write(repo, "w1"), SESSION, repo).outcome == "ask"
+    call(kit, repo, "w1", tool="Write")
+    (repo / "src" / "pkg" / "new.py").write_text('"""New."""\n')
+    finish(kit, repo, "w1")
+    assert before(kit.bench, write(repo, "w2"), SESSION, repo).outcome == "allow"
+    assert before(kit.bench, write(linked, "w3"), SESSION, repo).outcome == "ask"
+
+
+def test_a_session_started_in_a_bare_repositorys_directory_is_judged(
+    kit: Kit, bare: Path
+) -> None:
+    main = bare / "tree" / "main"
+    start(kit, bare / "tree")
+    edit = Replacement(
+        call="e1",
+        tool="Edit",
+        path=main / CORE,
+        old="return x\n",
+        new="return x  # BAD regex\n",
+    )
+    assert before(kit.bench, edit, SESSION, bare / "tree").outcome == "refuse"
+    call(kit, bare, "c1")
+    bad(main)
+    assert finish(kit, bare, "c1").context.startswith("lup refused 1 file.")
+
+
+def test_a_write_in_the_repositorys_git_directory_asks(kit: Kit, bare: Path) -> None:
+    main = bare / "tree" / "main"
+    start(kit, main)
+    hook = Overwrite(
+        call="w1", tool="Write", path=bare / "hooks" / "pre-commit", text="#!/bin/sh\n"
+    )
+    decision = before(kit.bench, hook, SESSION, main)
+    assert decision.outcome == "ask"
+    assert decision.reason == (
+        f"lup asks: {bare}/hooks/pre-commit is in the repository's git directory, "
+        "which runs outside the agent's reach"
+    )
+    [verdict] = VerdictLog(path=kit.layout.verdicts(bare)).read()
+    assert (verdict.worktree, verdict.path) == (bare, Path("hooks/pre-commit"))
+
+
+def test_a_repository_nested_in_a_worktree_is_another_repository(
+    kit: Kit, repo: Path, shell: Shell
+) -> None:
+    nested = repo / "vendor" / "lib"
+    nested.mkdir(parents=True)
+    shell.git(nested, "init", "-q", "-b", "main")
+    shell.git(nested, "config", "user.email", "test@example.com")
+    shell.git(nested, "config", "user.name", "Test")
+    (nested / "x.py").write_text("x = 1\n")
+    shell.commit(nested, "nested")
+    start(kit, repo)
+    write = Overwrite(
+        call="w1", tool="Write", path=nested / "x.py", text="x = 1  # BAD regex\n"
+    )
+    assert before(kit.bench, write, SESSION, repo).outcome is None

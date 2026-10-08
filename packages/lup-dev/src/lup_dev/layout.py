@@ -84,8 +84,8 @@ class StoreLayout(Model):
 
     @property
     def calls(self) -> Path:
-        """The calls in flight, read and written under `calls_lock`."""
-        return self.home / "calls.json"
+        """The calls in flight, each with its session, kept under `calls_lock`."""
+        return self.home / "running.json"
 
     @property
     def calls_lock(self) -> Path:
@@ -230,19 +230,27 @@ class Layout(Model):
 
     @property
     def session_index(self) -> Path:
-        """Which worktree each session runs in, by session id."""
-        return self.state / "sessions"
+        """Each session's repository and the worktrees it holds, by session id."""
+        return self.state / "session-index"
 
     def store(self, worktree: Path) -> StoreLayout:
         """Say where the store of the worktree at `worktree` lives."""
         return StoreLayout(home=self.worktrees / digest(worktree))
 
+    def repository(self, repository: Path) -> Path:
+        """Say where what lup keeps about a repository lives, by its git directory."""
+        return self.state / "repositories" / digest(repository)
+
     def verdicts(self, repository: Path) -> Path:
         """Say where the verdict log of a repository lives, by its git directory."""
-        return self.state / "repositories" / digest(repository) / "verdicts.jsonl"
+        return self.repository(repository) / "verdicts.jsonl"
 
-    def session_worktree(self, session: str) -> Path:
-        """Say where the worktree a session started in is recorded."""
+    def heads(self, repository: Path) -> Path:
+        """Say where each worktree's `HEAD` at its last checkpoint is kept."""
+        return self.repository(repository) / "heads.json"
+
+    def session(self, session: str) -> Path:
+        """Say where a session's repository and the worktrees it holds are kept."""
         return self.session_index / f"{session}.json"
 
     @property

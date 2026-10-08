@@ -90,7 +90,7 @@ def test_a_protected_path_asks(judge: Judging) -> None:
     assert judgement.outcome == "ask"
     assert (
         judgement.asks[0].reason
-        == "pyproject.toml is a protected path (**/pyproject.toml)"
+        == f"{judge.root}/pyproject.toml is a protected path (**/pyproject.toml)"
     )
 
 
@@ -222,7 +222,10 @@ def test_a_new_class_asks(judge: Judging) -> None:
     after = CORE + "\n\nclass Room:\n    pass\n"
     judgement = judge(edit("src/pkg/core.py", CORE, after))
     assert judgement.outcome == "ask"
-    assert judgement.asks[0].reason == "src/pkg/core.py adds the class `Room`"
+    assert (
+        judgement.asks[0].reason
+        == f"{judge.root}/src/pkg/core.py adds the class `Room`"
+    )
 
 
 def test_a_changed_signature_of_a_definition_from_the_sessions_start_asks(
@@ -233,7 +236,7 @@ def test_a_changed_signature_of_a_definition_from_the_sessions_start_asks(
     )
     judgement = judge(edit("src/pkg/core.py", CORE, after))
     assert [ask.reason for ask in judgement.asks] == [
-        "src/pkg/core.py changes the signature of `helper`"
+        f"{judge.root}/src/pkg/core.py changes the signature of `helper`"
     ]
 
 
@@ -255,11 +258,11 @@ def test_names_added_to_or_removed_from_a_package_root_ask(judge: Judging) -> No
         )
     )
     assert [ask.reason for ask in added.asks] == [
-        "src/pkg/__init__.py adds `Room` to the package's root"
+        f"{judge.root}/src/pkg/__init__.py adds `Room` to the package's root"
     ]
     removed = judge(edit("src/pkg/__init__.py", init, init.replace('["Client"]', "[]")))
     assert [ask.reason for ask in removed.asks] == [
-        "src/pkg/__init__.py removes `Client` from the package's root"
+        f"{judge.root}/src/pkg/__init__.py removes `Client` from the package's root"
     ]
 
 
@@ -272,7 +275,8 @@ def test_an_added_ignore_asks_naming_its_rule_and_reason(judge: Judging) -> None
     judgement = judge(edit("src/pkg/core.py", CORE, after))
     assert judgement.outcome == "ask"
     assert judgement.asks[0].reason == (
-        'adds `# lup: ignore("tuple-shape", why="sh takes tuples")` to src/pkg/core.py'
+        'adds `# lup: ignore("tuple-shape", why="sh takes tuples")` to '
+        f"{judge.root}/src/pkg/core.py"
     )
     assert judgement.refusing == []
 

@@ -323,6 +323,27 @@ def repo(tmp_path: Path) -> Path:
     return root
 
 
+@pytest.fixture
+def linked(repo: Path, tmp_path: Path) -> Path:
+    """A second worktree of `repo`, on its own branch `feat`."""
+    root = tmp_path / "feat"
+    git(repo, "worktree", "add", "-q", "-b", "feat", str(root))
+    return root
+
+
+@pytest.fixture
+def bare(repo: Path, tmp_path: Path) -> Path:
+    """A bare clone of `repo`, its worktrees under `tree/`, as lup's own layout is."""
+    root = tmp_path / "proj.git"
+    git(tmp_path, "clone", "-q", "--bare", str(repo), str(root))
+    git(root, "config", "user.email", "test@example.com")
+    git(root, "config", "user.name", "Test")
+    git(root, "config", "commit.gpgsign", "false")
+    (root / "tree").mkdir()
+    git(root, "worktree", "add", "-q", "tree/main", "main")
+    return root
+
+
 class Kit:
     """A bench with its fakes, for one test."""
 

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from lup_dev.layout import Layout
-from lup_dev.policy.store import Changed, Store
+from lup_dev.policy.store import Changed, Elsewhere, Store
 
 if TYPE_CHECKING:
     from conftest import Shell
@@ -70,18 +70,46 @@ def test_unstage_keeps_paths_as_the_accepted_tree_has_them(
     (repo / CORE).write_text("changed\n")
     (repo / "README.md").write_text("# Changed\n")
     store.snapshot()
-    tree = store.unstage(accepted, [CORE])
+    tree = store.unstage(accepted, [CORE], [])
     assert store.changed(accepted, tree) == [
         Changed(path=Path("README.md"), kind="modified")
     ]
+
+
+def test_unstage_puts_a_path_as_a_commit_has_it(
+    repo: Path, store: Store, shell: Shell
+) -> None:
+    accepted = store.snapshot()
+    (repo / CORE).write_text("committed\n")
+    shell.commit(repo, "a commit")
+    (repo / CORE).write_text("changed after\n")
+    (repo / "README.md").unlink()
+    store.snapshot()
+    head = store.head()
+    tree = store.unstage(
+        accepted, [], [store.entry(head, CORE), store.entry(head, Path("gone.py"))]
+    )
+    assert store.content(tree, CORE) == b"committed\n"
+    assert store.content(tree, Path("README.md")) is None
+
+
+def test_the_files_a_move_of_head_changed(
+    repo: Path, store: Store, shell: Shell
+) -> None:
+    before = store.head()
+    (repo / CORE).write_text("changed\n")
+    (repo / "src" / "pkg" / "new.py").write_text("new\n")
+    shell.commit(repo, "a commit")
+    assert store.moved(before, store.head()) == [CORE, Path("src/pkg/new.py")]
+    assert Path("README.md") in store.moved(None, store.head())
 
 
 def test_saved_versions_go_under_the_worktrees_lup_directory(
     repo: Path, store: Store
 ) -> None:
     saved = store.save(3, CORE, b"mine\n")
-    assert saved == Path(".lup/saved/3/src/pkg/core.py")
-    assert (repo / saved).read_text() == "mine\n"
+    assert saved == repo / ".lup/saved/3/src/pkg/core.py"
+    assert saved.read_text() == "mine\n"
 
 
 def test_stored_objects_can_be_read_back(store: Store) -> None:
@@ -97,7 +125,7 @@ def test_content_of_a_commit_from_the_last_checkpoint_is_set_aside(
     (repo / CORE).write_text("x = 1  # BAD regex\n")
     shell.commit(repo, "other")
     shell.git(repo, "checkout", "-q", "main")
-    tips = store.tips()
+    tips = store.tips(store.head())
     shell.git(repo, "checkout", "-q", "other")
     taken = store.snapshot()
     assert store.committed(CORE, store.blob(taken, CORE), tips)
@@ -109,7 +137,7 @@ def test_an_old_commits_content_is_set_aside_too(
     original = (repo / CORE).read_text()
     (repo / CORE).write_text("later\n")
     shell.commit(repo, "later")
-    tips = store.tips()
+    tips = store.tips(store.head())
     (repo / CORE).write_text(original)
     assert store.committed(CORE, store.blob(store.snapshot(), CORE), tips)
 
@@ -117,7 +145,7 @@ def test_an_old_commits_content_is_set_aside_too(
 def test_a_commit_made_since_the_last_checkpoint_doesnt_launder_its_files(
     repo: Path, store: Store, shell: Shell
 ) -> None:
-    tips = store.tips()
+    tips = store.tips(store.head())
     (repo / CORE).write_text("x = 1  # BAD regex\n")
     shell.commit(repo, "write and commit in one call")
     assert not store.committed(CORE, store.blob(store.snapshot(), CORE), tips)
@@ -136,14 +164,14 @@ def test_content_arrived_from_a_remote_is_set_aside(
     shell.commit(other, "theirs")
     shell.git(other, "push", "-q", "origin", "main")
     shell.git(repo, "remote", "add", "origin", str(remote))
-    tips = store.tips()
+    tips = store.tips(store.head())
     shell.git(repo, "pull", "-q", "--ff-only", "origin", "main")
     taken = store.snapshot()
     assert store.committed(CORE, store.blob(taken, CORE), [*tips, *store.remote_tips()])
 
 
 def test_conflict_markers_match_no_commit(repo: Path, store: Store) -> None:
-    tips = store.tips()
+    tips = store.tips(store.head())
     (repo / CORE).write_text("<<<<<<< ours\na\n=======\nb\n>>>>>>> theirs\n")
     assert not store.committed(CORE, store.blob(store.snapshot(), CORE), tips)
 
@@ -155,12 +183,49 @@ def test_a_file_a_branch_switch_removes_is_set_aside(
     extra = Path("src/pkg/extra.py")
     (repo / extra).write_text("extra\n")
     shell.commit(repo, "extra")
-    tips = store.tips()
+    tips = store.tips(store.head())
     shell.git(repo, "checkout", "-q", "bare")
     assert store.committed(extra, None, tips)
 
 
 def test_a_file_removed_by_hand_isnt_set_aside(repo: Path, store: Store) -> None:
-    tips = store.tips()
+    tips = store.tips(store.head())
     (repo / CORE).unlink()
     assert not store.committed(CORE, None, tips)
+
+
+def diverge(repo: Path, shell: Shell) -> None:
+    """Change `CORE` on a branch `feature` and on `main`, in different places."""
+    shell.git(repo, "switch", "-q", "-c", "feature")
+    (repo / CORE).write_text(
+        (repo / CORE).read_text() + "\n\nclass Adapter:\n    pass\n"
+    )
+    shell.commit(repo, "feature: a class")
+    shell.git(repo, "switch", "-q", "main")
+    (repo / CORE).write_text(
+        (repo / CORE).read_text().replace('"""Core."""', '"""Core, on main."""')
+    )
+    shell.commit(repo, "main: its docstring")
+
+
+def test_gits_merge_of_judged_commits_is_set_aside(
+    repo: Path, store: Store, shell: Shell
+) -> None:
+    diverge(repo, shell)
+    tips = store.tips(store.head())
+    shell.git(repo, "merge", "-q", "--no-edit", "feature")
+    merged = store.blob(store.snapshot(), CORE)
+    assert not store.committed(CORE, merged, tips)
+    assert Elsewhere(store=store, commits=tips).holds(CORE, merged)
+
+
+def test_a_merge_with_a_parent_made_since_isnt_set_aside(
+    repo: Path, store: Store, shell: Shell
+) -> None:
+    diverge(repo, shell)
+    tips = store.tips(store.head())
+    (repo / "README.md").write_text("# Later\n")
+    shell.commit(repo, "main: made since")
+    shell.git(repo, "merge", "-q", "--no-edit", "feature")
+    merged = store.blob(store.snapshot(), CORE)
+    assert not Elsewhere(store=store, commits=tips).holds(CORE, merged)
