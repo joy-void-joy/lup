@@ -180,7 +180,7 @@ The parsers to reach for: `json`, `tomllib` (`tomlkit` to edit), `csv`, `urllib.
 
 **Decision.**
 - **Exception names end in `Error`** (ruff's `N818`).
-- **One root exception per package:** `LupError` in `lup`, `LupDevError` in `lup_dev`, with a tree per area below it (`TurnError`, then `OutputMissingError`). A caller can catch everything a package raises.
+- **One root exception per package:** `LupError` in `lup`, `LupDevError` in `lup_dev`, with a tree per area below it (`TurnError`, then `OutputMissingError`). A caller can catch everything a package raises. The root is named for its package, the package's name in CamelCase plus `Error`, which is how `error-root` finds it; a file declares as many exceptions as it needs, each below the root.
 - **Errors are classified from structured data**, never from message text.
 - **Never swallow an error:** no `contextlib.suppress`, no bare `except:`, no `except BaseException` (catch `Exception` or something narrower). Raise on what can't be recovered; retry what's transient, with `tenacity`.
 
