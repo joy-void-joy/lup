@@ -35,10 +35,11 @@ class Judging:
         *,
         approved: list[Path] | None = None,
         conditions: list[str] | None = None,
+        project: Project | None = None,
     ) -> Judgement:
         judging = Judge(
             root=self.root,
-            roles=Roles(root=self.root, project=Project()),
+            roles=Roles(root=self.root, project=project or Project()),
             checker=self.kit.engine,
             linter=self.kit.linter,
             conditions=conditions,
@@ -129,6 +130,29 @@ def test_a_protected_module_asks_every_time_and_with_its_design_asks(
     assert [ask.kind for ask in fresh.asks] == ["protected", "public-api"]
     created = judge(edit(PROTECTED, None, '"""New."""\n', baseline=None))
     assert [ask.kind for ask in created.asks] == ["protected", "new-file"]
+
+
+def test_an_excluded_module_is_allowed_with_nothing_reported(judge: Judging) -> None:
+    project = Project(excluded=["vendor/**"])
+    after = "x = 1  # BAD regex\ny: int = 'a'  # TYPE\nimport os  # RUFF F401\n"
+    judgement = judge(
+        edit("vendor/lib.py", None, after, baseline=None), project=project
+    )
+    assert judgement.outcome == "allow"
+    assert judgement.reasons() == ["excluded"]
+    assert judgement.refusing == judgement.information == judgement.untouched == []
+
+
+def test_an_excluded_protected_module_asks_without_its_findings(
+    judge: Judging,
+) -> None:
+    project = Project(excluded=[".claude/hooks/**"])
+    judgement = judge(
+        edit(PROTECTED, CORE, CORE + "y = 2  # BAD regex\n"), project=project
+    )
+    assert judgement.outcome == "ask"
+    assert [ask.kind for ask in judgement.asks] == ["protected"]
+    assert judgement.refusing == []
 
 
 def test_protected_files_that_arent_python_only_ask(judge: Judging) -> None:

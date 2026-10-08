@@ -3,16 +3,18 @@
 1. **protected:** the project's declaration and the protected paths
    (`Protected.default()` and the project's additions);
 2. **operator:** the operator's documents, `DESIGN.md` and `AGENTS.md`;
-3. **test:** a module pytest collects as a test, under a root it reads and matching
+3. **excluded:** what the project's declaration holds to nothing (`excluded`);
+4. **test:** a module pytest collects as a test, under a root it reads and matching
    its `python_files` patterns, or a `conftest.py` under such a root;
-4. **scratch:** `tmp/` at any depth, and the saved versions under `.lup/`;
-5. **docs:** Markdown files and `docs/`;
-6. **data:** data formats outside a source tree;
-7. **production:** everything else, so a file nobody classified is gated.
+5. **scratch:** `tmp/` at any depth, and the saved versions under `.lup/`;
+6. **docs:** Markdown files and `docs/`;
+7. **data:** data formats outside a source tree;
+8. **production:** everything else, so a file nobody classified is gated.
 
 A protected Python module gets lup's rules as production code does: protection
-adds the operator's review, it doesn't take the rules away. The table of what each
-role gets is in `docs/judging-writes.md`, *What each change gets*.
+adds the operator's review, it doesn't take the rules away. A protected path the
+declaration also excludes still asks, but gets no rules and no findings. The table
+of what each role gets is in `docs/judging-writes.md`, *What each change gets*.
 """
 
 import tomllib
@@ -25,7 +27,7 @@ from lup_dev.layout import CheckoutLayout
 from lup_dev.project import Declared, Project, Pytest
 
 type Role = Literal[
-    "protected", "operator", "test", "scratch", "docs", "data", "production"
+    "protected", "operator", "excluded", "test", "scratch", "docs", "data", "production"
 ]
 """A path's role, which decides what a change to it gets."""
 
@@ -61,6 +63,8 @@ class Roles(Model):
             return "protected"
         if matches(path, self.paths.operator_documents):
             return "operator"
+        if self.is_excluded(path):
+            return "excluded"
         if self.is_test(path):
             return "test"
         if matches(path, self.paths.scratch):
@@ -76,14 +80,22 @@ class Roles(Model):
         """Say whether `path` is a Python module, which the rules read."""
         return matches(PurePath(path.name), self.paths.python)
 
+    def is_excluded(self, path: Path) -> bool:
+        """Say whether the project's declaration holds `path` to nothing."""
+        return matches(path, self.project.excluded)
+
     def ruled(self, path: Path) -> bool:
         """Say whether lup's rules read `path`: a production or protected module.
 
-        >>> roles = Roles(root=Path("/nowhere"), project=Project())
-        >>> [roles.ruled(Path(p)) for p in ["a.py", ".claude/h.py", "tests/test_a.py"]]
+        Never one the declaration excludes, even where it's protected.
+
+        >>> project = Project(excluded=[".claude/x/**"])
+        >>> roles = Roles(root=Path("/nowhere"), project=project)
+        >>> [roles.ruled(Path(p)) for p in ["a.py", ".claude/h.py", ".claude/x/h.py"]]
         [True, True, False]
         """
-        return self.is_python(path) and self.role(path) in ["production", "protected"]
+        ruled = self.role(path) in ["production", "protected"]
+        return self.is_python(path) and ruled and not self.is_excluded(path)
 
     def checked(self, path: Path) -> bool:
         """Say whether pyright's and ruff's findings in `path` are reported.

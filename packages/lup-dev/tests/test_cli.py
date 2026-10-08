@@ -206,6 +206,27 @@ def test_rules_check_reads_protected_modules_with_lups_rules(
     assert ".claude/hooks/check.py:1:8 - regex: regex fires here" in result.output
 
 
+def test_rules_check_leaves_excluded_paths_out(
+    fakes: Kit, repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (repo / "src" / "decl_ex").mkdir()
+    (repo / "src" / "decl_ex" / "__init__.py").write_text("")
+    (repo / "src" / "decl_ex" / "lup_project.py").write_text(
+        "from lup_dev.project import Project\n"
+        'project = Project(excluded=["vendor/**"])\n'
+    )
+    (repo / "pyproject.toml").write_text(
+        '[tool.lup]\nproject = "decl_ex.lup_project:project"\n'
+        '[tool.pytest]\ntestpaths = ["tests", "src"]\n'
+    )
+    (repo / "vendor").mkdir()
+    (repo / "vendor" / "lib.py").write_text("x = 1  # BAD regex\n")
+    monkeypatch.chdir(repo)
+    result = runner.invoke(cli.app, ["rules", "check", "vendor/lib.py"])
+    assert result.exit_code == 0
+    assert result.output.strip() == "lup checked no files."
+
+
 class Closed(Issues):
     def state(self, issue: IssueRef) -> Literal["open", "closed"]:
         return "closed"
