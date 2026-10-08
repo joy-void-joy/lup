@@ -12,7 +12,9 @@ import { isClassInstance, isInstantiableClass } from 'pyright/analyzer/types';
 import { TextRange } from 'pyright/common/textRange';
 import {
     ArgCategory,
+    ArgumentNode,
     CallNode,
+    ClassNode,
     ExceptNode,
     ExpressionNode,
     ImportAsNode,
@@ -23,6 +25,7 @@ import {
     ParseNode,
     ParseNodeType,
     SetNode,
+    StatementNode,
 } from 'pyright/parser/parseNodes';
 import { ParseFileResults } from 'pyright/parser/parser';
 import { StringTokenFlags } from 'pyright/parser/tokenizerTypes';
@@ -48,6 +51,47 @@ export interface MethodCall {
     receiver: ExpressionNode;
     // The argument given for a parameter, by keyword or by its position.
     argument(name: string, position: number): ExpressionNode | undefined;
+}
+
+export interface Call {
+    node: CallNode;
+    // The fully qualified name of what's called: `pydantic.fields.Field`.
+    callee: string;
+    // The argument given for a parameter, by keyword or, given one, by its position.
+    argument(name: string, position?: number): ExpressionNode | undefined;
+}
+
+export interface Base {
+    // The base as written: `BaseModel`, `Generic[T]`.
+    node: ExpressionNode;
+    // The fully qualified names it resolves to; for `Generic[T]`, those of `Generic`.
+    names: string[];
+}
+
+export interface Keyword {
+    node: ArgumentNode;
+    name: string;
+    value: ExpressionNode;
+}
+
+export interface Assigned {
+    // The name assigned.
+    node: NameNode;
+    name: string;
+    // What it's assigned, where it is: `x: int` declares without assigning.
+    value: ExpressionNode | undefined;
+}
+
+export interface DeclaredClass {
+    node: ClassNode;
+    // Its fully qualified name: `lup.types.Model`.
+    fullName: string;
+    // The bases its header lists, in order.
+    bases: Base[];
+    // The keywords its header gives: `frozen=True`, `metaclass=…`.
+    keywords: Keyword[];
+    // The names its body assigns directly, outside its methods.
+    assigned: Assigned[];
 }
 
 export interface WrittenType {
@@ -92,6 +136,7 @@ class Gathered extends ParseTreeWalker {
     readonly sets: SetNode[] = [];
     readonly imports: (ImportAsNode | ImportFromNode)[] = [];
     readonly excepts: ExceptNode[] = [];
+    readonly classes: ClassNode[] = [];
 
     override visitCall(node: CallNode) {
         this.calls.push(node);
@@ -128,6 +173,10 @@ class Gathered extends ParseTreeWalker {
         this.excepts.push(node);
         return true;
     }
+    override visitClass(node: ClassNode) {
+        this.classes.push(node);
+        return true;
+    }
 }
 
 export class File {
@@ -160,6 +209,17 @@ export class File {
         return this.gathered;
     }
 
+    // Whether the file is a package's root, its `__init__.py`.
+    get isPackageRoot(): boolean {
+        return this.info.fileUri.stripAllExtensions().fileName === '__init__';
+    }
+
+    // The fully qualified names an expression resolves to, through imports and
+    // aliases: `typing.Any` for `Any`.
+    namesOf(node: ExpressionNode): string[] {
+        return resolve(this.program, this.evaluator, node);
+    }
+
     // The source text a node spans, as written.
     text(node: TextRange): string {
         return this.parse.text.substr(node.start, node.length);
@@ -167,11 +227,10 @@ export class File {
 
     // Every module the file's imports bring in, by its full name.
     importedModules(): ImportedModule[] {
-        const isPackageRoot = this.info.fileUri.stripAllExtensions().fileName === '__init__';
         return this.nodes.imports.flatMap((node) =>
             node.nodeType === ParseNodeType.ImportAs
                 ? importedByImportAs(node)
-                : importedByImportFrom(node, this.info.moduleName, isPackageRoot, this.reader)
+                : importedByImportFrom(node, this.info.moduleName, this.isPackageRoot, this.reader)
         );
     }
 
@@ -189,6 +248,63 @@ export class File {
             (node): node is ImportFromNode => node.nodeType === ParseNodeType.ImportFrom
         );
         return usesOf(this.program, this.evaluator, this.nodes.references, fromImports, names);
+    }
+
+    // The calls of one of `names`, by what's called, through any import or alias:
+    // `Field(default_factory=list)` for `pydantic.fields.Field`.
+    callsTo(names: string[]): Call[] {
+        return this.nodes.calls.flatMap((node) => {
+            const callee = this.namesOf(node.d.leftExpr).find((name) => names.includes(name));
+            if (!callee) {
+                return [];
+            }
+            return [{ node, callee, argument: (name: string, position?: number) => argumentOf(node, name, position) }];
+        });
+    }
+
+    // Every class the file defines, at any depth.
+    classes(): DeclaredClass[] {
+        return this.nodes.classes.map((node) => {
+            const fullName = this.evaluator.getTypeOfClass(node)?.classType.shared.fullName ?? node.d.name.d.value;
+            const bases = node.d.arguments
+                .filter((arg) => !arg.d.name && arg.d.argCategory === ArgCategory.Simple)
+                .map((arg) => {
+                    const written = arg.d.valueExpr;
+                    const named = written.nodeType === ParseNodeType.Index ? written.d.leftExpr : written;
+                    return { node: written, names: this.namesOf(named) };
+                });
+            const keywords = node.d.arguments.flatMap((arg) =>
+                arg.d.name ? [{ node: arg, name: arg.d.name.d.value, value: arg.d.valueExpr }] : []
+            );
+            return { node, fullName, bases, keywords, assigned: assignedIn(node.d.suite.d.statements) };
+        });
+    }
+
+    // The names the module assigns at its top level.
+    moduleAssignments(): Assigned[] {
+        return assignedIn(this.parse.parserOutput.parseTree.d.statements);
+    }
+
+    // What a `lambda` returns; none for anything else.
+    lambdaBody(node: ExpressionNode): ExpressionNode | undefined {
+        return node.nodeType === ParseNodeType.Lambda ? node.d.expr : undefined;
+    }
+
+    // Whether an expression builds an empty list, dict or set: `[]`, `{}`, `list()`.
+    isEmptyCollection(node: ExpressionNode): boolean {
+        switch (node.nodeType) {
+            case ParseNodeType.List:
+                return node.d.items.length === 0;
+            case ParseNodeType.Dictionary:
+                return node.d.items.length === 0;
+            case ParseNodeType.Call:
+                return (
+                    node.d.args.length === 0 &&
+                    this.namesOf(node.d.leftExpr).some((name) => emptyBuilders.includes(name))
+                );
+            default:
+                return false;
+        }
     }
 
     // Every `except` clause.
@@ -248,16 +364,7 @@ export class File {
                     node,
                     method: callee.d.member.d.value,
                     receiver: callee.d.leftExpr,
-                    argument(name: string, position: number) {
-                        const keyword = node.d.args.find((arg) => arg.d.name?.d.value === name);
-                        if (keyword) {
-                            return keyword.d.valueExpr;
-                        }
-                        const positional = node.d.args.filter(
-                            (arg) => !arg.d.name && arg.d.argCategory === ArgCategory.Simple
-                        );
-                        return positional[position]?.d.valueExpr;
-                    },
+                    argument: (name: string, position: number) => argumentOf(node, name, position),
                 },
             ];
         });
@@ -400,6 +507,53 @@ export class File {
         }
         return false;
     }
+}
+
+const emptyBuilders = ['builtins.list', 'builtins.dict', 'builtins.set'];
+
+// The argument a call gives for a parameter, by keyword or, given one, by its position.
+function argumentOf(node: CallNode, name: string, position?: number): ExpressionNode | undefined {
+    const keyword = node.d.args.find((arg) => arg.d.name?.d.value === name);
+    if (keyword || position === undefined) {
+        return keyword?.d.valueExpr;
+    }
+    const positional = node.d.args.filter((arg) => !arg.d.name && arg.d.argCategory === ArgCategory.Simple);
+    return positional[position]?.d.valueExpr;
+}
+
+// The names a block's statements assign directly, not inside nested blocks:
+// `x = 1`, `x: int = 1`, `x += 1`, and `x: int`, which declares without assigning.
+function assignedIn(statements: StatementNode[]): Assigned[] {
+    return statements.flatMap((statement) => {
+        if (statement.nodeType !== ParseNodeType.StatementList) {
+            return [];
+        }
+        return statement.d.statements.flatMap((simple): Assigned[] => {
+            switch (simple.nodeType) {
+                case ParseNodeType.Assignment: {
+                    const target = simple.d.leftExpr;
+                    const named = target.nodeType === ParseNodeType.TypeAnnotation ? target.d.valueExpr : target;
+                    return named.nodeType === ParseNodeType.Name
+                        ? [{ node: named, name: named.d.value, value: simple.d.rightExpr }]
+                        : [];
+                }
+                case ParseNodeType.AugmentedAssignment: {
+                    const target = simple.d.leftExpr;
+                    return target.nodeType === ParseNodeType.Name
+                        ? [{ node: target, name: target.d.value, value: simple.d.rightExpr }]
+                        : [];
+                }
+                case ParseNodeType.TypeAnnotation: {
+                    const target = simple.d.valueExpr;
+                    return target.nodeType === ParseNodeType.Name
+                        ? [{ node: target, name: target.d.value, value: undefined }]
+                        : [];
+                }
+                default:
+                    return [];
+            }
+        });
+    });
 }
 
 // Whether a subscript is assigned or deleted, alone or inside a destructuring
