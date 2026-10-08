@@ -16,7 +16,7 @@ This is the first piece of `DESIGN.md`'s build order, built alongside the librar
 - the hooks for Claude Code and Codex, and installing them in this repository.
 
 Later:
-- answering in the dashboard (until then, Claude Code's prompt, the terminal, and the interim review hook built on its own branch);
+- answering in the dashboard (until then, Claude Code's prompt, the terminal, and the interim review hook, which queues prompts in the first lup's dashboard);
 - keeping the store out of the agent's reach, and refusing reads of secrets, which come with launch and containers;
 - edits a session makes in another repository, which come with launch and spawn.
 
@@ -155,7 +155,7 @@ The accepted tree starts as a snapshot when a session starts. If a stored accept
 **On Claude Code, through its own prompt.** The `PreToolUse` hook answers `ask`, with a reason naming what's asked: the new path, the protected path, the public name or signature, or the rule and the reason given for an `ignore`.
 - A hook's `ask` forces a prompt in auto mode too (hooks docs; tested on this repository for the bare `Write` rule).
 - Settings' `ask` and `deny` rules are evaluated whatever the hook answers, so the blanket `permissions.ask` on `Write` in `.claude/settings.json` goes when this lands; otherwise every `Write` still prompts.
-- In the bridge, the interim review hook (built on its own branch) can carry these asks to the first lup's review dashboard instead of the terminal prompt. This piece decides what is asked; that hook or the prompt carries it.
+- In the bridge, the interim review hook (`.claude/hooks/interim_review.py`) carries these asks to the first lup's review dashboard instead of the terminal prompt: it queues the call and refuses it at once, the agent hears the answer through the hook's `wait` subcommand run in the background, and repeats the exact call once it's approved. This piece decides what is asked; that hook carries it.
 
 **On Codex, through a hold.** Codex's `PreToolUse` can't answer "ask", and `apply_patch` is judged at the checkpoint. So an ask on Codex is held at the checkpoint: the agent waits inside the hook, and the operator answers with `lup-dev holds approve <id>` or `lup-dev holds decline <id> --comment …`.
 - `lup-dev holds` lists what's waiting, with the diff.
