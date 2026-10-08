@@ -109,7 +109,7 @@ The parts that cut across everything (the one hook, the dashboard's protocol, th
 
 ### How lup reaches a project
 
-- **A project holds its own code, a dependency on lup, and one declaration.** It lives in a module of the project's package, named in `pyproject.toml` (`[tool.lup] project = "audiobook.lup_project:project"`).
+- **A project holds its own code, a dependency on lup, and one declaration.** Where it lives is open (Open questions, 8): a fixed `lup_project.py` at the project's root (leaning), or a module named in `pyproject.toml` (`[tool.lup] project = "audiobook.lup_project:project"`), as lup's own declaration is today.
   ```python
   project = Project(
       package="audiobook",
@@ -122,6 +122,7 @@ The parts that cut across everything (the one hook, the dashboard's protocol, th
       tests=[Pytest("tests"), Pytest("studio/tests", environment="studio")],
   )
   ```
+- **The declaration says which paths are what, and every tool's settings are compiled from it.** It declares the paths that are code (held to lup's rules, ruff and pyright), tests (ruff and pyright only) and excluded (held to nothing), beside the protected ones. ruff's, pyright's, pytest's and import-linter's settings are compiled from lup's defaults plus the declaration, with a gate test failing when they drift, so no project copies lup's tool settings, and an update to lup reaches them by recompiling. Where the declaration lives, where the compiled settings go, and who owns dependencies are open (Open questions).
 - **Nothing of lup is copied into a project.** There's no copied half and no lup tests in projects. Changes to lup go upstream; whoever wants a different lup forks it.
 - **Runtime trees (`.claude/`, `.codex/`) are built at launch and never committed.** Wherever the launch places them they're read-only, and an attempt to edit one is refused with a pointer to the source to change. lup's own docs stay committed in lup and are served to projects from the installed version (`lup docs <topic>`).
 - **One CLI, from the library.** It builds its command tree at startup from the declaration: lup's groups for the selected modules, plus the project's own commands, replacements and removals. It loads only the command invoked, and stays fast under load; today each call costs about 10 seconds.
@@ -462,6 +463,10 @@ The operator's to decide:
 5. **Carrying the operator's preferences across containers,** or seeding from the personal config only.
 6. **Native `Agent` for short jobs, beside lup's spawn:** leaning deny. To settle by measuring the new spawn, not today's lagging one: its start time and first request for a short worker, and whether a fork reads its parent's cache.
 7. **A maintaining session as a room lup declares:** leaning yes, if nothing in maintaining falls outside what a room can declare.
+8. **One overseeable place for a project, and who owns what in `pyproject.toml`** (for the declaration piece). The operator wants everything about a project in one place that's easy to oversee. Settled: the declaration declares the paths that are code, tests and excluded, and every tool's settings are compiled from it. Open:
+   - **Dependencies.** (i) Declared in the declaration, which becomes the only source: `pyproject.toml` is compiled from it whole, `lup-dev add` resolves with uv and writes the result into the declaration, and plain `uv add` or a hand edit is refused by the drift test. Costs: a tool editing Python source, a changed habit, tools that edit `pyproject.toml` themselves (dependency bots) stop working, and a fresh project's first `pyproject.toml` comes from `lup new`. (ii) Left in `[project]`, uv's and the packaging standard's, with one overview (`lup-dev project`, then the dashboard) rendering everything about the project on one page: dependencies, paths, rule selection, protected paths, compiled settings. Costs: two sources behind one view. Leaning (ii), lightly.
+   - **Where compiled tool settings go.** `pyproject.toml`'s `[tool.*]` sections (one file, where tools and editors already look, but compiled keys beside uv's), or each tool's own file (`ruff.toml`, `pyrightconfig.json`, …: compiled files apart from what uv edits, but several generated files at the root).
+   - **Where the declaration lives.** A fixed `lup_project.py` at the project's root, found without a pointer (leaning), or a module named in `pyproject.toml` (`[tool.lup] project = …`).
 
 **Still to discuss:**
 - **The dashboard's design:** readability, lag, filtering auto-allowed files, keys and buttons, spawning, budget controls, and how the inbox's messages-as-reviews look and are answered (see *The dashboard*).
