@@ -1304,6 +1304,31 @@ def unit(seconds: int) -> str:
     return "h"
 ```
 
+```python
+def unit(seconds: int) -> str:
+    """Return the unit a duration shows in."""
+    if seconds < 60:
+        unit = "s"
+    else:
+        if seconds < 3600:
+            unit = "m"
+        else:
+            unit = "h"
+    return unit
+```
+
+Done the steer's way:
+
+```python
+def unit(seconds: int) -> str:
+    """Return the unit a duration shows in."""
+    if seconds < 60:
+        return "s"
+    if seconds < 3600:
+        return "m"
+    return "h"
+```
+
 **Leaves alone:**
 
 ```python
@@ -1619,4 +1644,462 @@ def asks_first(runtime: Runtime) -> bool:
 def settings_home(name: str) -> str:
     """Return where a runtime keeps its settings, by the name its adapter gives."""
     return f".{name}"
+```
+
+
+## `collection-loop`
+
+A collection created empty and filled in a loop spreads one value over several statements.
+
+**Steer:** Build it with a comprehension, or, where the loop has control flow a comprehension can't hold, a nested function that `yield`s.
+
+**Flags:**
+
+```python
+def squares(numbers: list[int]) -> list[int]:
+    """Return the square of each number."""
+    squared: list[int] = []
+    for number in numbers:
+        squared.append(number * number)
+    return squared
+```
+
+Done the steer's way:
+
+```python
+def squares(numbers: list[int]) -> list[int]:
+    """Return the square of each number."""
+    return [number * number for number in numbers]
+```
+
+**Leaves alone:**
+
+```python
+def merged(counts: dict[str, int], extra: dict[str, int]) -> dict[str, int]:
+    """Add the extra counts to a copy of the counts."""
+    total = dict(counts)
+    for key, value in extra.items():
+        total[key] = total.get(key, 0) + value
+    return total
+```
+
+
+## `constant-home`
+
+A constant outside its home is frozen where a caller can't change it, or spread where nobody can find it.
+
+**Steer:** A number or duration becomes an overridable default (a parameter default or a model field default); a path goes in the package's `layout.py`, an environment variable's name in its `settings.py`, a runtime's wire spelling in its adapter's `Spellings`.
+
+**Flags:**
+
+```python
+import time
+
+RETRIES = 3
+
+
+def fetch() -> None:
+    """Try a few times."""
+    for _ in range(RETRIES):
+        time.sleep(0)
+```
+
+Done the steer's way:
+
+```python
+import time
+
+
+def fetch(retries: int = 3) -> None:
+    """Try a few times."""
+    for _ in range(retries):
+        time.sleep(0)
+```
+
+**Leaves alone:**
+
+```python
+GREETING = "hello"
+
+
+def greet() -> str:
+    """Return the greeting."""
+    return GREETING
+```
+
+
+## `interface-shape`
+
+An interface whose shape drifts, abstract without saying so, large, carrying behaviour or implemented twice in one class, stops being one seam an implementation fills.
+
+**Steer:** Name `ABC` in the bases of a class with abstract methods; keep an ABC to one to three abstract methods and no concrete behaviour, which lives in a plain class or function composed over it; implement one of our ABCs per class.
+
+**Flags:**
+
+```python
+from abc import abstractmethod
+
+from lup.types import Model
+
+
+class Shape(Model):
+    """A shape that knows its area."""
+
+    @abstractmethod
+    def area(self) -> float:
+        """Return the shape's area."""
+```
+
+Done the steer's way:
+
+```python
+from abc import ABC, abstractmethod
+
+from lup.types import Model
+
+
+class Shape(Model, ABC):
+    """A shape that knows its area."""
+
+    @abstractmethod
+    def area(self) -> float:
+        """Return the shape's area."""
+```
+
+```python
+from abc import ABC, abstractmethod
+
+
+class Shape(ABC):
+    """A shape that knows its area."""
+
+    @abstractmethod
+    def area(self) -> float:
+        """Return the shape's area."""
+
+    def described(self) -> str:
+        """Describe the shape by its area."""
+        return f"area {self.area()}"
+```
+
+Done the steer's way:
+
+```python
+from abc import ABC, abstractmethod
+
+
+class Shape(ABC):
+    """A shape that knows its area."""
+
+    @abstractmethod
+    def area(self) -> float:
+        """Return the shape's area."""
+
+
+def described(shape: Shape) -> str:
+    """Describe a shape by its area."""
+    return f"area {shape.area()}"
+```
+
+```python
+from abc import ABC, abstractmethod
+
+
+class Reader(ABC):
+    """Something that reads."""
+
+    @abstractmethod
+    def read(self) -> str:
+        """Return what was read."""
+
+
+class Writer(ABC):
+    """Something that writes."""
+
+    @abstractmethod
+    def write(self, text: str) -> int:
+        """Write `text`, returning how much was written."""
+
+
+class Store(Reader, Writer):
+    """A store, read and written."""
+
+    def read(self) -> str:
+        """Return the store's text."""
+        return ""
+
+    def write(self, text: str) -> int:
+        """Write `text` to the store."""
+        return len(text)
+```
+
+Done the steer's way:
+
+```python
+from abc import ABC, abstractmethod
+
+
+class Reader(ABC):
+    """Something that reads."""
+
+    @abstractmethod
+    def read(self) -> str:
+        """Return what was read."""
+
+
+class Writer(ABC):
+    """Something that writes."""
+
+    @abstractmethod
+    def write(self, text: str) -> int:
+        """Write `text`, returning how much was written."""
+
+
+class StoreReader(Reader):
+    """A store, read."""
+
+    def read(self) -> str:
+        """Return the store's text."""
+        return ""
+
+
+class StoreWriter(Writer):
+    """A store, written."""
+
+    def write(self, text: str) -> int:
+        """Write `text` to the store."""
+        return len(text)
+```
+
+**Leaves alone:**
+
+```python
+from abc import ABC, abstractmethod
+
+
+class Shape(ABC):
+    """A shape that knows its area."""
+
+    @abstractmethod
+    def area(self) -> float:
+        """Return the shape's area."""
+
+
+class Square(Shape):
+    """A square, by its side."""
+
+    def __init__(self, side: float) -> None:
+        """Make a square of `side`."""
+        self.side = side
+
+    def area(self) -> float:
+        """Return the square's area."""
+        return self.side * self.side
+```
+
+
+## `own-model-dispatch`
+
+Choosing by which implementation of one of our ABCs you hold bypasses the seam the ABC is, and leaves the others to drift.
+
+**Steer:** Add a method to the ABC, which each implementation answers, and call it.
+
+**Flags:**
+
+```python
+from abc import ABC, abstractmethod
+
+
+class Runtime(ABC):
+    """An agent runtime."""
+
+    @abstractmethod
+    def name(self) -> str:
+        """Return the runtime's name."""
+
+
+class Local(Runtime):
+    """A runtime on this machine."""
+
+    def name(self) -> str:
+        """Return the runtime's name."""
+        return "local"
+
+
+def asks_first(runtime: Runtime) -> bool:
+    """Say whether a runtime asks before a call runs."""
+    return isinstance(runtime, Local)
+```
+
+Done the steer's way:
+
+```python
+from abc import ABC, abstractmethod
+
+
+class Runtime(ABC):
+    """An agent runtime."""
+
+    @abstractmethod
+    def name(self) -> str:
+        """Return the runtime's name."""
+
+    @abstractmethod
+    def asks_before(self) -> bool:
+        """Say whether the runtime asks before a call runs."""
+
+
+class Local(Runtime):
+    """A runtime on this machine."""
+
+    def name(self) -> str:
+        """Return the runtime's name."""
+        return "local"
+
+    def asks_before(self) -> bool:
+        """Say whether the runtime asks before a call runs: it does."""
+        return True
+
+
+def asks_first(runtime: Runtime) -> bool:
+    """Say whether a runtime asks before a call runs."""
+    return runtime.asks_before()
+```
+
+**Leaves alone:**
+
+```python
+from abc import ABC, abstractmethod
+
+
+class Runtime(ABC):
+    """An agent runtime."""
+
+    @abstractmethod
+    def name(self) -> str:
+        """Return the runtime's name."""
+
+
+def named(value: Runtime | str) -> str:
+    """Return a runtime's name, or a name given as it is."""
+    return value.name() if isinstance(value, Runtime) else value
+```
+
+
+## `error-root`
+
+An exception outside its package's root error escapes a caller catching everything the package raises.
+
+**Steer:** Derive it from the package's root error, named for the package (`LupDevError` in `lup_dev`), or from an error below it.
+
+**Flags:**
+
+```python
+class ParseError(ValueError):
+    """The text isn't in the format."""
+```
+
+Done the steer's way:
+
+```python
+class ExampleError(Exception):
+    """Anything this package raises."""
+
+
+class ParseError(ExampleError):
+    """The text isn't in the format."""
+```
+
+**Leaves alone:**
+
+```python
+from lup.types import Model
+
+
+class ErrorReport(Model):
+    """What went wrong, as a person reads it."""
+
+    summary: str
+```
+
+
+## `error-text`
+
+Deciding on an exception's message breaks quietly when the message is reworded.
+
+**Steer:** Decide on the exception's type, or on its structured fields (`errno`, `status_code`).
+
+**Flags:**
+
+```python
+from pathlib import Path
+
+
+def removed(path: str) -> bool:
+    """Remove a file, saying whether it was there."""
+    try:
+        Path(path).unlink()
+    except OSError as error:
+        if "No such file" in str(error):
+            return False
+        raise
+    return True
+```
+
+Done the steer's way:
+
+```python
+from pathlib import Path
+
+
+def removed(path: str) -> bool:
+    """Remove a file, saying whether it was there."""
+    try:
+        Path(path).unlink()
+    except FileNotFoundError:
+        return False
+    return True
+```
+
+**Leaves alone:**
+
+```python
+def described(error: Exception) -> str:
+    """Describe an error for a person to read."""
+    return f"failed: {error}"
+```
+
+
+## `private-name`
+
+A leading underscore is a second kind of visibility, beside public, that a reviewer has to second-guess.
+
+**Steer:** Make the name public, or nest a helper inside its only caller; inline a wrapper around one call. An unused parameter keeps its underscore.
+
+**Flags:**
+
+```python
+def _cleaned(text: str) -> str:
+    return text.strip()
+
+
+def words(text: str) -> list[str]:
+    """Split text into its words."""
+    return _cleaned(text).split()
+```
+
+Done the steer's way:
+
+```python
+def words(text: str) -> list[str]:
+    """Split text into its words."""
+    return text.strip().split()
+```
+
+**Leaves alone:**
+
+```python
+def count(values: list[int], _reason: str = "") -> int:
+    """Count the values; the reason is for the caller's records."""
+    return sum(1 for _ in values)
 ```

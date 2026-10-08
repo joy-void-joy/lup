@@ -1533,6 +1533,9 @@ export const rules = {
             for (const keyword of file.elifs()) {
                 file.report(keyword, 'this is an `elif`');
             }
+            for (const keyword of file.elseIfs()) {
+                file.report(keyword, 'this `if` is all its `else` holds, an `elif` written out');
+            }
         },
         examples: {
             flags: [
@@ -1545,6 +1548,29 @@ export const rules = {
                             elif seconds < 3600:
                                 return "m"
                             return "h"
+                    `,
+                    rewritten: python`
+                        def unit(seconds: int) -> str:
+                            """Return the unit a duration shows in."""
+                            if seconds < 60:
+                                return "s"
+                            if seconds < 3600:
+                                return "m"
+                            return "h"
+                    `,
+                },
+                {
+                    code: python`
+                        def unit(seconds: int) -> str:
+                            """Return the unit a duration shows in."""
+                            if seconds < 60:
+                                unit = "s"
+                            else:
+                                if seconds < 3600:
+                                    unit = "m"
+                                else:
+                                    unit = "h"
+                            return unit
                     `,
                     rewritten: python`
                         def unit(seconds: int) -> str:
@@ -1953,6 +1979,542 @@ export const rules = {
                     def settings_home(name: str) -> str:
                         """Return where a runtime keeps its settings, by the name its adapter gives."""
                         return f".{name}"
+                `,
+            ],
+        },
+    },
+
+    // Collections and loops (`docs/conventions.md`, *Collections and loops*), continued.
+
+    'collection-loop': {
+        mistake: 'A collection created empty and filled in a loop spreads one value over several statements.',
+        steer:
+            'Build it with a comprehension, or, where the loop has control flow a comprehension can\'t hold, a ' +
+            'nested function that `yield`s.',
+        check(file) {
+            for (const loop of file.collectionLoops()) {
+                file.report(loop.header, `this loop fills \`${loop.name}\`, created empty before it`);
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        def squares(numbers: list[int]) -> list[int]:
+                            """Return the square of each number."""
+                            squared: list[int] = []
+                            for number in numbers:
+                                squared.append(number * number)
+                            return squared
+                    `,
+                    rewritten: python`
+                        def squares(numbers: list[int]) -> list[int]:
+                            """Return the square of each number."""
+                            return [number * number for number in numbers]
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    def merged(counts: dict[str, int], extra: dict[str, int]) -> dict[str, int]:
+                        """Add the extra counts to a copy of the counts."""
+                        total = dict(counts)
+                        for key, value in extra.items():
+                            total[key] = total.get(key, 0) + value
+                        return total
+                `,
+            ],
+        },
+    },
+
+    // Constants (`docs/conventions.md`, *Constants*).
+
+    'constant-home': {
+        mistake:
+            'A constant outside its home is frozen where a caller can\'t change it, or spread where nobody can ' +
+            'find it.',
+        steer:
+            'A number or duration becomes an overridable default (a parameter default or a model field default); ' +
+            "a path goes in the package's `layout.py`, an environment variable's name in its `settings.py`, a " +
+            "runtime's wire spelling in its adapter's `Spellings`.",
+        check(file) {
+            for (const constant of file.moduleConstants()) {
+                if (constant.kind === 'number' || constant.kind === 'duration') {
+                    file.report(constant.node, `\`${constant.name}\` holds a ${constant.kind} at module level`);
+                }
+                if (constant.kind === 'path' && !`.${file.moduleName}`.endsWith('.layout')) {
+                    file.report(constant.node, `\`${constant.name}\` holds a path outside the package's \`layout.py\``);
+                }
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        import time
+
+                        RETRIES = 3
+
+
+                        def fetch() -> None:
+                            """Try a few times."""
+                            for _ in range(RETRIES):
+                                time.sleep(0)
+                    `,
+                    rewritten: python`
+                        import time
+
+
+                        def fetch(retries: int = 3) -> None:
+                            """Try a few times."""
+                            for _ in range(retries):
+                                time.sleep(0)
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    GREETING = "hello"
+
+
+                    def greet() -> str:
+                        """Return the greeting."""
+                        return GREETING
+                `,
+            ],
+        },
+    },
+
+    // Interfaces (`docs/conventions.md`, *Interfaces*), continued.
+
+    'interface-shape': {
+        mistake:
+            'An interface whose shape drifts, abstract without saying so, large, carrying behaviour or ' +
+            'implemented twice in one class, stops being one seam an implementation fills.',
+        steer:
+            'Name `ABC` in the bases of a class with abstract methods; keep an ABC to one to three abstract ' +
+            'methods and no concrete behaviour, which lives in a plain class or function composed over it; ' +
+            'implement one of our ABCs per class.',
+        check(file) {
+            for (const declared of file.classes()) {
+                const name = declared.node.d.name.d.value;
+                if (declared.abstract.length > 0 && !declared.listsABC) {
+                    file.report(declared.node.d.name, `\`${name}\` declares abstract methods without \`ABC\` in its bases`);
+                }
+                if (declared.ourABCBases.length > 1) {
+                    const listed = declared.ourABCBases.map((base) => `\`${base}\``).join(' and ');
+                    file.report(declared.node.d.name, `\`${name}\` inherits two of our ABCs, ${listed}`);
+                }
+                if (!declared.listsABC) {
+                    continue;
+                }
+                const count = declared.abstract.length;
+                if (count === 0 || count > 3) {
+                    file.report(declared.node.d.name, `\`${name}\` is an ABC with ${count} abstract methods`);
+                }
+                for (const method of declared.concrete) {
+                    file.report(method.d.name, `\`${name}.${method.d.name.d.value}\` is concrete behaviour in an ABC`);
+                }
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        from abc import abstractmethod
+
+                        from lup.types import Model
+
+
+                        class Shape(Model):
+                            """A shape that knows its area."""
+
+                            @abstractmethod
+                            def area(self) -> float:
+                                """Return the shape's area."""
+                    `,
+                    rewritten: python`
+                        from abc import ABC, abstractmethod
+
+                        from lup.types import Model
+
+
+                        class Shape(Model, ABC):
+                            """A shape that knows its area."""
+
+                            @abstractmethod
+                            def area(self) -> float:
+                                """Return the shape's area."""
+                    `,
+                },
+                {
+                    code: python`
+                        from abc import ABC, abstractmethod
+
+
+                        class Shape(ABC):
+                            """A shape that knows its area."""
+
+                            @abstractmethod
+                            def area(self) -> float:
+                                """Return the shape's area."""
+
+                            def described(self) -> str:
+                                """Describe the shape by its area."""
+                                return f"area {self.area()}"
+                    `,
+                    rewritten: python`
+                        from abc import ABC, abstractmethod
+
+
+                        class Shape(ABC):
+                            """A shape that knows its area."""
+
+                            @abstractmethod
+                            def area(self) -> float:
+                                """Return the shape's area."""
+
+
+                        def described(shape: Shape) -> str:
+                            """Describe a shape by its area."""
+                            return f"area {shape.area()}"
+                    `,
+                },
+                {
+                    code: python`
+                        from abc import ABC, abstractmethod
+
+
+                        class Reader(ABC):
+                            """Something that reads."""
+
+                            @abstractmethod
+                            def read(self) -> str:
+                                """Return what was read."""
+
+
+                        class Writer(ABC):
+                            """Something that writes."""
+
+                            @abstractmethod
+                            def write(self, text: str) -> int:
+                                """Write \`text\`, returning how much was written."""
+
+
+                        class Store(Reader, Writer):
+                            """A store, read and written."""
+
+                            def read(self) -> str:
+                                """Return the store's text."""
+                                return ""
+
+                            def write(self, text: str) -> int:
+                                """Write \`text\` to the store."""
+                                return len(text)
+                    `,
+                    rewritten: python`
+                        from abc import ABC, abstractmethod
+
+
+                        class Reader(ABC):
+                            """Something that reads."""
+
+                            @abstractmethod
+                            def read(self) -> str:
+                                """Return what was read."""
+
+
+                        class Writer(ABC):
+                            """Something that writes."""
+
+                            @abstractmethod
+                            def write(self, text: str) -> int:
+                                """Write \`text\`, returning how much was written."""
+
+
+                        class StoreReader(Reader):
+                            """A store, read."""
+
+                            def read(self) -> str:
+                                """Return the store's text."""
+                                return ""
+
+
+                        class StoreWriter(Writer):
+                            """A store, written."""
+
+                            def write(self, text: str) -> int:
+                                """Write \`text\` to the store."""
+                                return len(text)
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    from abc import ABC, abstractmethod
+
+
+                    class Shape(ABC):
+                        """A shape that knows its area."""
+
+                        @abstractmethod
+                        def area(self) -> float:
+                            """Return the shape's area."""
+
+
+                    class Square(Shape):
+                        """A square, by its side."""
+
+                        def __init__(self, side: float) -> None:
+                            """Make a square of \`side\`."""
+                            self.side = side
+
+                        def area(self) -> float:
+                            """Return the square's area."""
+                            return self.side * self.side
+                `,
+            ],
+        },
+    },
+
+    // Dispatch (`docs/conventions.md`, *Dispatch*), continued.
+
+    'own-model-dispatch': {
+        mistake:
+            'Choosing by which implementation of one of our ABCs you hold bypasses the seam the ABC is, and ' +
+            'leaves the others to drift.',
+        steer: 'Add a method to the ABC, which each implementation answers, and call it.',
+        check(file) {
+            for (const named of [...file.isinstanceClasses(), ...file.classPatterns()]) {
+                const [implemented] = named.implements;
+                if (implemented) {
+                    file.report(named.node, `\`${file.text(named.node)}\` implements our ABC \`${implemented}\``);
+                }
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        from abc import ABC, abstractmethod
+
+
+                        class Runtime(ABC):
+                            """An agent runtime."""
+
+                            @abstractmethod
+                            def name(self) -> str:
+                                """Return the runtime's name."""
+
+
+                        class Local(Runtime):
+                            """A runtime on this machine."""
+
+                            def name(self) -> str:
+                                """Return the runtime's name."""
+                                return "local"
+
+
+                        def asks_first(runtime: Runtime) -> bool:
+                            """Say whether a runtime asks before a call runs."""
+                            return isinstance(runtime, Local)
+                    `,
+                    rewritten: python`
+                        from abc import ABC, abstractmethod
+
+
+                        class Runtime(ABC):
+                            """An agent runtime."""
+
+                            @abstractmethod
+                            def name(self) -> str:
+                                """Return the runtime's name."""
+
+                            @abstractmethod
+                            def asks_before(self) -> bool:
+                                """Say whether the runtime asks before a call runs."""
+
+
+                        class Local(Runtime):
+                            """A runtime on this machine."""
+
+                            def name(self) -> str:
+                                """Return the runtime's name."""
+                                return "local"
+
+                            def asks_before(self) -> bool:
+                                """Say whether the runtime asks before a call runs: it does."""
+                                return True
+
+
+                        def asks_first(runtime: Runtime) -> bool:
+                            """Say whether a runtime asks before a call runs."""
+                            return runtime.asks_before()
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    from abc import ABC, abstractmethod
+
+
+                    class Runtime(ABC):
+                        """An agent runtime."""
+
+                        @abstractmethod
+                        def name(self) -> str:
+                            """Return the runtime's name."""
+
+
+                    def named(value: Runtime | str) -> str:
+                        """Return a runtime's name, or a name given as it is."""
+                        return value.name() if isinstance(value, Runtime) else value
+                `,
+            ],
+        },
+    },
+
+    // Errors (`docs/conventions.md`, *Errors*), continued.
+
+    'error-root': {
+        mistake: 'An exception outside its package\'s root error escapes a caller catching everything the package raises.',
+        steer:
+            "Derive it from the package's root error, named for the package (`LupDevError` in `lup_dev`), or from " +
+            'an error below it.',
+        check(file) {
+            const root = file.packageRootError;
+            for (const declared of file.classes()) {
+                const name = declared.node.d.name.d.value;
+                if (!declared.ancestors.includes('builtins.BaseException') || name === root) {
+                    continue;
+                }
+                const rooted = declared.ancestors.some(
+                    (ancestor) => ancestor.startsWith(`${file.packageName}.`) && ancestor.endsWith(`.${root}`)
+                );
+                if (!rooted) {
+                    file.report(declared.node.d.name, `\`${name}\` doesn't descend from \`${root}\``);
+                }
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        class ParseError(ValueError):
+                            """The text isn't in the format."""
+                    `,
+                    rewritten: python`
+                        class ExampleError(Exception):
+                            """Anything this package raises."""
+
+
+                        class ParseError(ExampleError):
+                            """The text isn't in the format."""
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    from lup.types import Model
+
+
+                    class ErrorReport(Model):
+                        """What went wrong, as a person reads it."""
+
+                        summary: str
+                `,
+            ],
+        },
+    },
+
+    'error-text': {
+        mistake: "Deciding on an exception's message breaks quietly when the message is reworded.",
+        steer: "Decide on the exception's type, or on its structured fields (`errno`, `status_code`).",
+        check(file) {
+            for (const used of file.exceptionTexts()) {
+                file.report(used.node, `\`${used.text}\` decides on an exception's message`);
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        from pathlib import Path
+
+
+                        def removed(path: str) -> bool:
+                            """Remove a file, saying whether it was there."""
+                            try:
+                                Path(path).unlink()
+                            except OSError as error:
+                                if "No such file" in str(error):
+                                    return False
+                                raise
+                            return True
+                    `,
+                    rewritten: python`
+                        from pathlib import Path
+
+
+                        def removed(path: str) -> bool:
+                            """Remove a file, saying whether it was there."""
+                            try:
+                                Path(path).unlink()
+                            except FileNotFoundError:
+                                return False
+                            return True
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    def described(error: Exception) -> str:
+                        """Describe an error for a person to read."""
+                        return f"failed: {error}"
+                `,
+            ],
+        },
+    },
+
+    // Names (`docs/conventions.md`, *Names*), continued.
+
+    'private-name': {
+        mistake: 'A leading underscore is a second kind of visibility, beside public, that a reviewer has to second-guess.',
+        steer:
+            'Make the name public, or nest a helper inside its only caller; inline a wrapper around one call. An ' +
+            'unused parameter keeps its underscore.',
+        check(file) {
+            if (file.isPrivateModule) {
+                file.report({ start: 0, length: 0 }, "the module's own name is private");
+            }
+            for (const binding of file.privateNames()) {
+                file.report(binding.node, `\`${binding.name}\` is private`);
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        def _cleaned(text: str) -> str:
+                            return text.strip()
+
+
+                        def words(text: str) -> list[str]:
+                            """Split text into its words."""
+                            return _cleaned(text).split()
+                    `,
+                    rewritten: python`
+                        def words(text: str) -> list[str]:
+                            """Split text into its words."""
+                            return text.strip().split()
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    def count(values: list[int], _reason: str = "") -> int:
+                        """Count the values; the reason is for the caller's records."""
+                        return sum(1 for _ in values)
                 `,
             ],
         },

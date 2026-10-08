@@ -9,6 +9,7 @@ import { ParseTreeWalker } from 'pyright/analyzer/parseTreeWalker';
 import { Program } from 'pyright/analyzer/program';
 import { TypeEvaluator } from 'pyright/analyzer/typeEvaluatorTypes';
 import { isClassInstance, isInstantiableClass } from 'pyright/analyzer/types';
+import { doForEachSubtype } from 'pyright/analyzer/typeUtils';
 import { TextRange } from 'pyright/common/textRange';
 import {
     ArgCategory,
@@ -16,21 +17,27 @@ import {
     CallNode,
     CaseNode,
     ClassNode,
+    ComprehensionNode,
     ExceptNode,
     ExpressionNode,
+    FunctionNode,
     IfNode,
     ImportAsNode,
     ImportFromNode,
     IndexNode,
+    LambdaNode,
     MemberAccessNode,
     NameNode,
     ParseNode,
     ParseNodeType,
+    PatternClassNode,
     SetNode,
     SliceNode,
     StatementListNode,
     StatementNode,
     StringNode,
+    SuiteNode,
+    TypeParameterListNode,
 } from 'pyright/parser/parseNodes';
 import { ParseFileResults } from 'pyright/parser/parser';
 import { OperatorType, StringTokenFlags } from 'pyright/parser/tokenizerTypes';
@@ -40,6 +47,16 @@ import { codeMarks, comments, Mark, Mention, mentions, Prose, Word, wordsOf, wri
 import { ImportedModule, importedByImportAs, importedByImportFrom } from './imports';
 import { Used, usesOf } from './references';
 import { denotes, describeType, Meaning, resolve } from './semantics';
+import {
+    ancestorsOf,
+    Binding,
+    FilledLoop,
+    filledLoops,
+    isOurABC,
+    isPrivate,
+    ourABCsImplemented,
+    privateBindings,
+} from './structure';
 import { spanOf } from './spans';
 import { Span } from './protocol';
 
@@ -113,6 +130,35 @@ export interface DeclaredClass {
     keywords: Keyword[];
     // The names its body assigns directly, outside its methods.
     assigned: Assigned[];
+    // The full names of its ancestors, nearest first.
+    ancestors: string[];
+    // Whether it lists `abc.ABC` among its own bases.
+    listsABC: boolean;
+    // The bases that are ABCs of the project, by their full names.
+    ourABCBases: string[];
+    // The methods its body defines, abstract and concrete.
+    abstract: FunctionNode[];
+    concrete: FunctionNode[];
+}
+
+export interface NamedClass {
+    // Where the class is named: an `isinstance` argument, a class pattern.
+    node: ExpressionNode;
+    // The project's ABCs it implements, by their full names.
+    implements: string[];
+}
+
+export interface Constant {
+    node: NameNode;
+    name: string;
+    // What the constant holds, as its type says, where the rule reads that kind.
+    kind: 'number' | 'duration' | 'path' | null;
+}
+
+export interface ExceptionText {
+    // Where an exception's message decides something: `"x" in str(exc)`.
+    node: ExpressionNode;
+    text: string;
 }
 
 export interface WrittenType {
@@ -165,6 +211,11 @@ class Gathered extends ParseTreeWalker {
     readonly ifs: IfNode[] = [];
     readonly cases: CaseNode[] = [];
     readonly docstrings: StringNode[] = [];
+    // The nodes that own a scope or a block: functions, lambdas, comprehensions,
+    // type parameter lists, and every suite.
+    readonly scopes: ParseNode[] = [];
+    readonly suites: SuiteNode[] = [];
+    readonly patterns: PatternClassNode[] = [];
 
     override visitCall(node: CallNode) {
         this.calls.push(node);
@@ -203,6 +254,31 @@ class Gathered extends ParseTreeWalker {
     }
     override visitClass(node: ClassNode) {
         this.classes.push(node);
+        this.scopes.push(node);
+        return true;
+    }
+    override visitFunction(node: FunctionNode) {
+        this.scopes.push(node);
+        return true;
+    }
+    override visitLambda(node: LambdaNode) {
+        this.scopes.push(node);
+        return true;
+    }
+    override visitComprehension(node: ComprehensionNode) {
+        this.scopes.push(node);
+        return true;
+    }
+    override visitTypeParameterList(node: TypeParameterListNode) {
+        this.scopes.push(node);
+        return true;
+    }
+    override visitSuite(node: SuiteNode) {
+        this.suites.push(node);
+        return true;
+    }
+    override visitPatternClass(node: PatternClassNode) {
+        this.patterns.push(node);
         return true;
     }
     override visitIf(node: IfNode) {
@@ -319,7 +395,8 @@ export class File {
     // Every class the file defines, at any depth.
     classes(): DeclaredClass[] {
         return this.nodes.classes.map((node) => {
-            const fullName = this.evaluator.getTypeOfClass(node)?.classType.shared.fullName ?? node.d.name.d.value;
+            const type = this.evaluator.getTypeOfClass(node)?.classType;
+            const fullName = type?.shared.fullName ?? node.d.name.d.value;
             const bases = node.d.arguments
                 .filter((arg) => !arg.d.name && arg.d.argCategory === ArgCategory.Simple)
                 .map((arg) => {
@@ -330,8 +407,162 @@ export class File {
             const keywords = node.d.arguments.flatMap((arg) =>
                 arg.d.name ? [{ node: arg, name: arg.d.name.d.value, value: arg.d.valueExpr }] : []
             );
-            return { node, fullName, bases, keywords, assigned: assignedIn(node.d.suite.d.statements) };
+            const ourABCBases = (type?.shared.baseClasses ?? []).flatMap((base) =>
+                isInstantiableClass(base) && isOurABC(this.program, base) ? [base.shared.fullName] : []
+            );
+            const methods = node.d.suite.d.statements.filter(
+                (statement): statement is FunctionNode => statement.nodeType === ParseNodeType.Function
+            );
+            return {
+                node,
+                fullName,
+                bases,
+                keywords,
+                assigned: assignedIn(node.d.suite.d.statements),
+                ancestors: type ? ancestorsOf(type) : [],
+                listsABC: bases.some((base) => base.names.includes('abc.ABC')),
+                ourABCBases,
+                abstract: methods.filter((method) => this.isAbstract(method)),
+                concrete: methods.filter((method) => !this.isAbstract(method)),
+            };
         });
+    }
+
+    // Whether a method is decorated `@abstractmethod`.
+    private isAbstract(method: FunctionNode): boolean {
+        return method.d.decorators.some((decorator) => this.namesOf(decorator.d.expr).includes('abc.abstractmethod'));
+    }
+
+    // The project's ABCs the class an expression names implements; none where it
+    // names no class, or one that implements none.
+    implementing(node: ExpressionNode): NamedClass {
+        const type = this.evaluator.getType(node);
+        const implemented = type && isInstantiableClass(type) ? ourABCsImplemented(this.program, type) : [];
+        return { node, implements: implemented };
+    }
+
+    // The classes `isinstance` calls test against, one by one where they name a tuple.
+    isinstanceClasses(): NamedClass[] {
+        return this.callsTo(['builtins.isinstance']).flatMap((call) => {
+            const tested = call.argument('class_or_tuple', 1);
+            if (!tested) {
+                return [];
+            }
+            const named = tested.nodeType === ParseNodeType.Tuple ? tested.d.items : [tested];
+            return named.map((each) => this.implementing(each));
+        });
+    }
+
+    // The classes `case` patterns match against: `case Claude():`.
+    classPatterns(): NamedClass[] {
+        return this.nodes.patterns.map((pattern) => this.implementing(pattern.d.className));
+    }
+
+    // The private names the file binds, at any scope, each where it's first bound.
+    privateNames(): Binding[] {
+        const scopes = [this.parse.parserOutput.parseTree, ...this.nodes.scopes];
+        return privateBindings(scopes, this.reader, this.parse.parserOutput.parseTree);
+    }
+
+    // Whether the module's own name is private: `_helpers.py`.
+    get isPrivateModule(): boolean {
+        return isPrivate(this.info.fileUri.stripAllExtensions().fileName);
+    }
+
+    // The loops filling a collection their block created empty before them.
+    collectionLoops(): FilledLoop[] {
+        const blocks = [this.parse.parserOutput.parseTree.d.statements, ...this.nodes.suites.map((suite) => suite.d.statements)];
+        return blocks.flatMap((statements) => filledLoops(statements, (node) => this.isEmptyCollection(node)));
+    }
+
+    // The module's constants: what it assigns at its top level, each with the kind
+    // its type says it holds.
+    moduleConstants(): Constant[] {
+        return this.moduleAssignments().flatMap((assigned) => {
+            if (!assigned.value) {
+                return [];
+            }
+            return [{ node: assigned.node, name: assigned.name, kind: this.constantKind(assigned.node) }];
+        });
+    }
+
+    private constantKind(node: NameNode): Constant['kind'] {
+        const lineages = this.lineages(node);
+        if (lineages.length === 0) {
+            return null;
+        }
+        const all = (test: (lineage: string[]) => boolean) => lineages.every(test);
+        if (all((lineage) => lineage.includes('datetime.timedelta'))) {
+            return 'duration';
+        }
+        const numeric = (lineage: string[]) =>
+            !lineage.includes('builtins.bool') && (lineage.includes('builtins.int') || lineage.includes('builtins.float'));
+        if (all(numeric)) {
+            return 'number';
+        }
+        if (all((lineage) => lineage.includes('pathlib.PurePath'))) {
+            return 'path';
+        }
+        return null;
+    }
+
+    // For each member of an expression's type that's an instance of a class, the
+    // class and its ancestors, by their full names.
+    private lineages(node: ExpressionNode): string[][] {
+        const type = this.evaluator.getType(node);
+        if (!type) {
+            return [];
+        }
+        const found: string[][] = [];
+        let other = false;
+        doForEachSubtype(type, (subtype) => {
+            if (!isClassInstance(subtype)) {
+                other = true;
+                return;
+            }
+            found.push([subtype.shared.fullName, ...ancestorsOf(subtype)]);
+        });
+        return other ? [] : found;
+    }
+
+    // Whether pyright finds the expression to be an exception.
+    isException(node: ExpressionNode): boolean {
+        const lineages = this.lineages(node);
+        return lineages.length > 0 && lineages.every((lineage) => lineage.includes('builtins.BaseException'));
+    }
+
+    // The places an exception's message decides something: its text (`str(exc)`,
+    // `repr(exc)`, `exc.args`), as it is or through a method that keeps it text,
+    // compared, tested for a part, or matched on.
+    exceptionTexts(): ExceptionText[] {
+        const texts = this.callsTo(['builtins.str', 'builtins.repr']).flatMap((call) => {
+            const only = call.node.d.args.length === 1 ? call.node.d.args[0].d.valueExpr : undefined;
+            return only && this.isException(only) ? [call.node as ExpressionNode] : [];
+        });
+        const args = this.nodes.references.filter(
+            (node): node is MemberAccessNode =>
+                node.nodeType === ParseNodeType.MemberAccess && node.d.member.d.value === 'args' && this.isException(node.d.leftExpr)
+        );
+        return [...texts, ...args].flatMap((text) => {
+            const used = textUse(text);
+            return deciding(used) ? [{ node: used, text: this.text(used) }] : [];
+        });
+    }
+
+    // The root error of the file's package, by the name the conventions give it:
+    // `LupDevError` for `lup_dev`.
+    get packageRootError(): string {
+        const [top] = this.moduleName.split('.');
+        return `${top
+            .split('_')
+            .map((part) => part.charAt(0).toUpperCase() + part.substring(1))
+            .join('')}Error`;
+    }
+
+    // The file's top-level package: `lup_dev` for `lup_dev.policy.judge`.
+    get packageName(): string {
+        const [top] = this.moduleName.split('.');
+        return top;
     }
 
     // The names the module assigns at its top level.
@@ -364,6 +595,12 @@ export class File {
     // The `elif` keyword of every `elif`.
     elifs(): TextRange[] {
         return this.nodes.ifs.filter(isElif).map((node) => node.d.firstToken);
+    }
+
+    // The `if` keyword of every `if` that's all an `else` holds: an `elif` written
+    // out.
+    elseIfs(): TextRange[] {
+        return this.nodes.ifs.filter(isElseIf).map((node) => node.d.firstToken);
     }
 
     // Every `case` with a guard: `case _ if seconds < 60:`.
@@ -663,6 +900,48 @@ export class File {
 }
 
 const emptyBuilders = ['builtins.list', 'builtins.dict', 'builtins.set'];
+
+// Methods that keep text text, and methods that test it for a part.
+const keepsText = ['lower', 'upper', 'casefold', 'strip', 'lstrip', 'rstrip'];
+const testsText = ['startswith', 'endswith', 'find', 'rfind', 'index', 'rindex', 'count', '__contains__'];
+
+// What an exception's text is used as: itself, an item of it, or what a method
+// keeping it text makes of it, `str(exc).lower()`.
+function textUse(node: ExpressionNode): ExpressionNode {
+    let current: ExpressionNode = node;
+    for (;;) {
+        const parent = current.parent;
+        if (parent?.nodeType === ParseNodeType.Index && parent.d.leftExpr === current) {
+            current = parent;
+            continue;
+        }
+        const call = parent?.parent;
+        const kept =
+            parent?.nodeType === ParseNodeType.MemberAccess &&
+            keepsText.includes(parent.d.member.d.value) &&
+            call?.nodeType === ParseNodeType.Call &&
+            call.d.leftExpr === parent;
+        if (kept && call?.nodeType === ParseNodeType.Call) {
+            current = call;
+            continue;
+        }
+        return current;
+    }
+}
+
+// Whether a piece of text decides something: compared, tested for a part, or
+// matched on.
+function deciding(node: ExpressionNode): boolean {
+    const parent = node.parent;
+    if (parent?.nodeType === ParseNodeType.BinaryOperation) {
+        const comparing = [OperatorType.In, OperatorType.NotIn, OperatorType.Equals, OperatorType.NotEquals];
+        return comparing.includes(parent.d.operator);
+    }
+    if (parent?.nodeType === ParseNodeType.MemberAccess && testsText.includes(parent.d.member.d.value)) {
+        return parent.parent?.nodeType === ParseNodeType.Call;
+    }
+    return parent?.nodeType === ParseNodeType.Match && parent.d.expr === node;
+}
 
 function boundsOf(slice: SliceNode) {
     return { start: slice.d.startValue, end: slice.d.endValue, step: slice.d.stepValue };

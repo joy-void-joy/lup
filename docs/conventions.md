@@ -307,40 +307,7 @@ Tests are exempt from lup's rules. A file is a test if pytest collects it as a t
 
 ## The rules
 
-| Rule | Fires on | Steers to |
-|---|---|---|
-| `protocol` | a `Protocol` definition | an ABC; `ignore` with its reason for a shape we don't own |
-| `interface-shape` | abstract members without `ABC` in the bases; a class inheriting two of our ABCs | `ABC` in the bases; one ABC per implementation |
-| `dataclass`, `namedtuple` | `dataclasses`, `collections.namedtuple`, `typing.NamedTuple` | a pydantic model |
-| `model-config` | `model_config = …` in a class body, except `lup.types.Settings` | class keywords |
-| `default-factory` | `Field(default_factory=list)` and the like | a literal default |
-| `private-name` | a leading underscore on a module, class, function or variable name | nested inside its only caller, or public |
-| `all-export` | `__all__` outside a package's root | import from the defining module |
-| `elif` | `elif` | `match`, or guard clauses that return |
-| `wildcard-guard` | `case _ if …`, `case name if …` | a pattern binding what the guard reads, or guard clauses |
-| `isinstance-chain` | the same subject narrowed by `isinstance` in two or more arms | `match` on its class |
-| `constant-home` | a module-level constant outside its home | its home (*Constants*) |
-| `model-mutability` | a model deriving straight from `BaseModel` or `BaseSettings`, or writing `frozen` in its header | `lup.types.Model`, `MutableModel` or `Settings` |
-| `typed-dict` | a `TypedDict` class we define | a pydantic model |
-| `own-model-dispatch` | a `match` or `isinstance` over the subclasses of one of our ABCs | a method on the ABC, which each implementation answers |
-| `tuple-shape` | a tuple type, aliases included | `list[X]`, or a model naming each field |
-| `set-shape` | `set`, `frozenset` and aliases, declared or built | a dict keyed by the members, or a list of models |
-| `collection-loop` | a collection created empty and filled in a loop | a comprehension, or a nested function that `yield`s |
-| `dict-literal-key` | a dict or mapping read by a literal key | a model validated once |
-| `regex` | `import re`, `import regex` | the format's parser |
-| `string-split` | `.split(sep)`, `.rsplit(sep)`, `.partition`, `.rpartition` on `str` or `bytes` | the format's parser |
-| `string-slice` | a slice of a `str` or `bytes` | the format's parser |
-| `string-strip`, `string-replace` | `.strip(chars)`, `.lstrip(chars)`, `.rstrip(chars)`, `.replace(…)` on `str` or `bytes` | the format's parser |
-| `silent-truncation` | a sequence cut at a literal bound | the whole value; a saved full copy where a format forces a limit |
-| `historical-voice` | "new", "now", "fixed", "previously", "no longer" and the like in comments and docstrings, outside backticks and quotes | what is, not how it got there |
-| `docstring-code` | double backticks or a Sphinx role in a docstring | single backticks |
-| `any-type`, `cast`, `bare-object` | `typing.Any`, `cast(…)`, an `object` annotation | the real type, `JsonValue`/`JsonObject`, a type parameter |
-| `error-root` | an exception class outside its package's root | the package's root error |
-| `error-text` | deciding on an exception's message (`"x" in str(exc)`) | the exception's type or its structured fields |
-| `suppress`, `bare-except`, `except-baseexception` | `contextlib.suppress`, `except:`, `except BaseException` | handle, log or re-raise; catch `Exception` or narrower |
-| `subprocess`, `os-shell`, `argparse`, `os-path`, `os-file-ops`, `os-environ`, `rich-progress`, `pdf-extraction` | the library a job doesn't use | the one it does (*Libraries per job*) |
-| `suppression-comment` | `# noqa`, `# type: ignore`, `# pyright: ignore` | `# lup: ignore(…)` |
-| `runtime-mention` | a runtime's name (`claude`, `codex`, in any case) in a name, string, comment or docstring outside its adapter | lup's own words, with the runtime's spelling in its adapter |
+Each rule, with the mistake it prevents, where it steers, and the code it flags and leaves alone, is in [`docs/rules.md`](rules.md). That file is generated from the engine's table (`packages/lup-dev/src/lup_dev/catalog/rules.ts`) by `lup-dev rules docs`, and a test keeps it in step. Every rule named under *Enforced by:* above is in that table, which a test checks too.
 
 Dropped from the first lup's catalog, with why:
 - `constant-declaration`, `library-default`: replaced by `constant-home`;

@@ -8,7 +8,9 @@ defaults apply, with these additions:
   outside the conventions, which go with the bridge. They stay protected, as
   everything in a runtime's own directory is, so a change to one still asks;
 - the library's front door is exempt from `runtime-mention`: it names the
-  runtimes, as the clients a caller chooses between.
+  runtimes, as the clients a caller chooses between;
+- the catalog is exempt from `constant-home`: it's where lup's policy data lives,
+  the home of the constants it holds.
 """
 
 from lup_dev.project import Exemption, Project, Protected
@@ -22,6 +24,11 @@ project = Project(
             rule="runtime-mention",
             paths=["packages/lup/src/lup/__init__.py"],
             why="the front door, where callers choose a runtime by its client's name",
+        ),
+        Exemption(
+            rule="constant-home",
+            paths=["packages/lup-dev/src/lup_dev/catalog/**"],
+            why="the catalog is where lup's policy data lives: its constants' home",
         ),
     ],
 )
