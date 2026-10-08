@@ -25,3 +25,11 @@ class LupDevSettings(Settings):
     As ISO 8601 (`PT30M`) or `HH:MM:SS`. A stopped engine starts again when asked,
     reloading the project; a running one holds pyright's whole program in memory.
     """
+    lup_integration_branch: str = "dev"
+    """`LUP_INTEGRATION_BRANCH`: the branch whose tip holds the declaration judged by.
+
+    Every worktree of a repository is judged by the declaration committed at that
+    branch's tip, so a branch's edits to it take effect when they land there. A
+    repository without the branch is judged by the declaration each worktree's
+    `HEAD` commit holds.
+    """

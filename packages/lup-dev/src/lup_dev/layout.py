@@ -253,6 +253,10 @@ class Layout(Model):
         """Say where the last of a repository's declarations that loaded is kept."""
         return self.repository(repository) / "declaration.json"
 
+    def exported(self, repository: Path, commit: str) -> Path:
+        """Say where a commit's modules are exported, to import its declaration."""
+        return self.repository(repository) / "declarations" / commit
+
     def session(self, session: str) -> Path:
         """Say where a session's repository and the worktrees it holds are kept."""
         return self.session_index / f"{session}.json"

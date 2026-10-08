@@ -770,34 +770,70 @@ def test_the_turns_end_runs_in_every_worktree_the_session_holds(
     assert f"{linked}/src/pkg/core.py (saved at" in block
 
 
-def test_each_worktree_is_judged_by_its_own_declaration(
-    kit: Kit, repo: Path, linked: Path
+def test_every_worktree_is_judged_by_the_integration_branchs_declaration(
+    kit: Kit, repo: Path, linked: Path, shell: Shell
 ) -> None:
-    (linked / "pyproject.toml").write_text(
-        '[tool.lup]\nproject = "lup_project:project"\n'
-        '[tool.pytest]\ntestpaths = ["tests", "src"]\n'
-    )
-    (linked / "lup_project.py").write_text(
-        "from lup_dev.project import Project, Protected\n"
-        'project = Project(protected=Protected.default().add("src/pkg/core.py"))\n'
-    )
+    shell.git(repo, "switch", "-q", "-c", "dev")
+    declare(repo, PROTECTING_CORE)
+    shell.commit(repo, "dev: protect the core")
+    declare(linked, "from lup_dev.project import Project\nproject = Project()\n")
+    shell.commit(linked, "feat: protect nothing")
     start(kit, repo)
-
-    def edit(root: Path) -> Replacement:
-        return Replacement(
-            call="e1",
-            tool="Edit",
-            path=root / CORE,
-            old="return x\n",
-            new="return x + 1\n",
-        )
-
-    assert before(kit.bench, edit(repo), SESSION, repo).outcome == "allow"
-    asked = before(kit.bench, edit(linked), SESSION, repo)
+    asked = before(kit.bench, core_edit(linked), SESSION, repo)
     assert asked.outcome == "ask"
     assert asked.reason == (
         f"lup asks: {linked}/src/pkg/core.py is a protected path (src/pkg/core.py)"
     )
+    assert (
+        Worktree.at(linked, kit.layout).declared.project.protected.matching(CORE)
+        is None
+    )
+
+
+def test_the_integration_branchs_declaration_changes_when_committed(
+    kit: Kit, repo: Path, linked: Path, shell: Shell
+) -> None:
+    shell.git(repo, "switch", "-q", "-c", "dev")
+    declare(repo, PROTECTING_CORE)
+    shell.commit(repo, "dev: protect the core")
+    start(kit, repo)
+    (repo / "lup_project.py").write_text(
+        "from lup_dev.project import Project\nproject = Project()\n"
+    )
+    assert before(kit.bench, core_edit(linked), SESSION, repo).outcome == "ask"
+    shell.commit(repo, "dev: protect nothing")
+    assert before(kit.bench, core_edit(linked), SESSION, repo).outcome == "allow"
+
+
+def test_without_the_integration_branch_a_worktree_is_judged_by_its_head(
+    kit: Kit, repo: Path, shell: Shell
+) -> None:
+    declare(repo, PROTECTING_CORE)
+    shell.commit(repo, "main: protect the core")
+    (repo / "lup_project.py").write_text(
+        "from lup_dev.project import Project\nproject = Project()\n"
+    )
+    start(kit, repo)
+    assert before(kit.bench, core_edit(repo), SESSION, repo).outcome == "ask"
+
+
+def test_only_the_latest_commits_declaration_stays_exported(
+    kit: Kit, repo: Path, shell: Shell
+) -> None:
+    shell.git(repo, "switch", "-q", "-c", "dev")
+    declare(repo, PROTECTING_CORE)
+    shell.commit(repo, "dev: protect the core")
+    start(kit, repo)
+    before(kit.bench, core_edit(repo), SESSION, repo)
+    (repo / "lup_project.py").write_text(
+        "from lup_dev.project import Project\nproject = Project()\n"
+    )
+    shell.commit(repo, "dev: protect nothing")
+    before(kit.bench, core_edit(repo), SESSION, repo)
+    head = shell.git(repo, "rev-parse", "HEAD")
+    exports = kit.layout.exported(repo / ".git", head).parent
+    assert [each.name for each in exports.iterdir()] == [head]
+    assert not (repo / "__pycache__").exists()
 
 
 def test_an_approval_covers_a_path_in_its_worktree_only(
@@ -890,40 +926,50 @@ def core_edit(root: Path) -> Replacement:
 
 
 def test_the_last_declaration_that_loaded_stands_in_for_one_that_cant(
-    kit: Kit, repo: Path, linked: Path
+    kit: Kit, repo: Path, linked: Path, shell: Shell
 ) -> None:
-    declare(linked, PROTECTING_CORE)
-    declare(repo, "from lup_dev.project import Unheard\n" + PROTECTING_CORE)
+    shell.git(repo, "switch", "-q", "-c", "dev")
+    declare(repo, PROTECTING_CORE)
+    shell.commit(repo, "dev: protect the core")
+    loaded = shell.git(repo, "rev-parse", "HEAD")
     start(kit, repo)
     assert before(kit.bench, core_edit(linked), SESSION, repo).outcome == "ask"
-    stood_in = before(kit.bench, core_edit(repo), SESSION, repo)
+    (repo / "lup_project.py").write_text(
+        "from lup_dev.project import Unheard\n" + PROTECTING_CORE
+    )
+    shell.commit(repo, "dev: a name the judge lacks")
+    broken = shell.git(repo, "rev-parse", "HEAD")
+    stood_in = before(kit.bench, core_edit(linked), SESSION, repo)
     assert stood_in.outcome == "ask"
     assert "is a protected path (src/pkg/core.py)" in stood_in.reason
-    call(kit, repo, "c1")
-    (repo / "README.md").write_text("# Changed\n")
-    told = finish(kit, repo, "c1").context
-    assert f"lup can't load the project's declaration in {repo}" in told
-    assert f"from {linked}, until this one loads" in told
-    call(kit, repo, "c2")
-    (repo / "README.md").write_text("# Changed again\n")
-    assert finish(kit, repo, "c2").context == ""
+    call(kit, linked, "c1")
+    (linked / "README.md").write_text("# Changed\n")
+    told = finish(kit, linked, "c1").context
+    assert f"lup can't load the project's declaration at {broken}: " in told
+    assert f"from commit {loaded}, until one loads" in told
+    call(kit, linked, "c2")
+    (linked / "README.md").write_text("# Changed again\n")
+    assert "can't load" not in finish(kit, linked, "c2").context
 
 
 def test_with_no_declaration_kept_one_that_cant_load_fails(
-    kit: Kit, repo: Path
+    kit: Kit, repo: Path, shell: Shell
 ) -> None:
     declare(repo, "from lup_dev.project import Unheard\n")
+    shell.commit(repo, "a name the judge lacks")
     start(kit, repo)
     with pytest.raises(ProjectError, match="Unheard"):
         before(kit.bench, core_edit(repo), SESSION, repo)
 
 
-def test_the_gate_lets_no_declaration_stand_in(
-    kit: Kit, repo: Path, linked: Path
+def test_the_gate_reads_the_worktree_as_it_stands_with_no_stand_in(
+    kit: Kit, repo: Path, linked: Path, shell: Shell
 ) -> None:
-    declare(linked, PROTECTING_CORE)
-    declare(repo, "from lup_dev.project import Unheard\n")
+    shell.git(repo, "switch", "-q", "-c", "dev")
+    declare(repo, PROTECTING_CORE)
+    shell.commit(repo, "dev: protect the core")
     start(kit, repo)
     before(kit.bench, core_edit(linked), SESSION, repo)
+    declare(linked, "from lup_dev.project import Unheard\n")
     with pytest.raises(ProjectError):
-        _ = Worktree.at(repo, kit.layout).declared
+        _ = Worktree.at(linked, kit.layout).declared

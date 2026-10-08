@@ -78,12 +78,14 @@ def runtimes() -> list[Runtime]:
 
 def services() -> Services:
     """Return what judging reaches, as configured on this machine."""
+    settings = LupDevSettings()
     return Services(
         checker=engine(),
         linter=Ruff(),
         clock=SystemClock(),
-        layout=Layout.of(LupDevSettings()),
+        layout=Layout.of(settings),
         spawner=BackgroundSpawner(),
+        integration=settings.lup_integration_branch,
     )
 
 

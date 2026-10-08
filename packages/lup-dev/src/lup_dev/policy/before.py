@@ -144,7 +144,7 @@ def before(bench: Bench, proposal: Proposal, session: str, cwd: Path) -> Decisio
             [verdict(bench, to, judgement)]
         )
         return Decision(outcome="ask", reason=asked(judgement.asks))
-    worktree = Worktree.of(here.worktree, held.repository, services.layout)
+    worktree = Worktree.of(here.worktree, held.repository, services)
     path = here.path
     store = worktree.store
     with worktree.lock():

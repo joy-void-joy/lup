@@ -104,6 +104,25 @@ def test_the_files_a_move_of_head_changed(
     assert Path("README.md") in store.moved(None, store.head())
 
 
+def test_a_commits_modules_and_project_files_are_exported(
+    repo: Path, store: Store, tmp_path: Path
+) -> None:
+    (repo / "uncommitted.py").write_text("x = 1\n")
+    into = tmp_path / "export"
+    head = store.head()
+    assert head is not None
+    store.export(head, into)
+    exported = sorted(
+        each.relative_to(into).as_posix() for each in into.rglob("*") if each.is_file()
+    )
+    assert exported == [
+        "pyproject.toml",
+        "src/pkg/__init__.py",
+        "src/pkg/core.py",
+        "tests/test_core.py",
+    ]
+
+
 def test_saved_versions_go_under_the_worktrees_lup_directory(
     repo: Path, store: Store
 ) -> None:

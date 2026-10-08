@@ -29,6 +29,7 @@ one background pass per worktree (`importers.py`), which the turn's end waits fo
 
 import difflib
 import secrets
+import shutil
 from abc import ABC, abstractmethod
 from functools import cached_property
 from pathlib import Path
@@ -71,7 +72,7 @@ from lup_dev.policy.store import (
 )
 from lup_dev.policy.verdicts import Verdict, VerdictLog
 from lup_dev.policy.worktrees import Holding, Place, SessionIndex, place
-from lup_dev.project import Declared, ProjectError, load
+from lup_dev.project import Declared, Project, ProjectError, load
 
 
 class Services(Model, arbitrary_types_allowed=True):
@@ -82,6 +83,8 @@ class Services(Model, arbitrary_types_allowed=True):
     clock: Clock
     layout: Layout
     spawner: Spawner
+    integration: str
+    """The branch whose tip holds the declaration every worktree is judged by."""
 
 
 class Bench(Model, arbitrary_types_allowed=True):
@@ -180,20 +183,31 @@ class LastDeclaration(Model):
     """The last of a repository's declarations that loaded, kept for when one can't."""
 
     declared: Declared
-    worktree: Path
-    """The worktree it was loaded from."""
+    commit: str
+    """The commit it was read from."""
     told: str = ""
     """The failure to load a declaration that the agent was last told of."""
 
 
 class Loaded(Model):
-    """A worktree's declaration, as the judge uses it."""
+    """The declaration a worktree is judged by, and where it came from."""
 
     declared: Declared
+    root: Path
+    """Where it was imported from: a commit's export, or the worktree's own files.
+    The conditions module it names is read there too."""
+    commit: str | None = None
+    """The commit it was read from; none for the worktree's own files."""
     failure: str = ""
-    """Why the worktree's own couldn't load, where the repository's last stands in."""
-    standing: Path | None = None
-    """The worktree the declaration standing in was loaded from."""
+    """Why the declaration due couldn't load, where the repository's last stands in."""
+
+
+class Judging(Model):
+    """Where the declaration a worktree is judged by is read from."""
+
+    integration: str
+    """The branch whose tip holds it; without one, the worktree's `HEAD` commit."""
+    layout: Layout
 
 
 class Worktree(Model):
@@ -203,16 +217,17 @@ class Worktree(Model):
     repository: Path
     """Its repository's shared git directory, which keys the verdict log."""
     store: Store
-    kept: Path | None = None
-    """Where the repository's last declaration that loaded is kept, which judges
-    when this worktree's can't load; none lets that failure stand, as the gate
-    does."""
+    judging: Judging | None = None
+    """Where the declaration it's judged by comes from: a commit, with the
+    repository's last that loaded standing in where it can't load. None reads the
+    worktree's own files, and lets a failure stand, as the gate does."""
 
     @classmethod
     def at(cls, root: Path, layout: Layout) -> Worktree:
-        """Open the worktree at `root`, asking git for its repository.
+        """Open the worktree at `root` as it stands, asking git for its repository.
 
-        Its declaration must load: nothing stands in for it.
+        Its own declaration, uncommitted edits included, is the one it's read by,
+        as the gate checks a branch, and it must load: nothing stands in for it.
         """
         common = Git(cwd=root).text(
             "rev-parse", "--path-format=absolute", "--git-common-dir"
@@ -221,71 +236,111 @@ class Worktree(Model):
         return cls(root=root, repository=Path(common), store=store)
 
     @classmethod
-    def of(cls, root: Path, repository: Path, layout: Layout) -> Worktree:
+    def of(cls, root: Path, repository: Path, services: Services) -> Worktree:
         """Open the worktree at `root` of the repository at `repository`, to judge.
 
-        Where its declaration can't load, the repository's last that loaded
-        judges instead (#21).
+        It's judged by the declaration at the integration branch's tip, not its
+        own, so a branch can't change what judges it (#21).
         """
-        store = Store(layout=layout.store(root), worktree=root)
-        kept = layout.declaration(repository)
-        return cls(root=root, repository=repository, store=store, kept=kept)
+        store = Store(layout=services.layout.store(root), worktree=root)
+        judging = Judging(integration=services.integration, layout=services.layout)
+        return cls(root=root, repository=repository, store=store, judging=judging)
 
     @cached_property
     def loaded(self) -> Loaded:
-        """Its project's declaration, loaded when first read, and kept.
+        """The declaration it's judged by, loaded when first read.
 
-        Where it can't load, the repository's last declaration that loaded stands
-        in, if one is kept; a branch adding a field to the declaration otherwise
-        breaks the judge in its own worktree until the judge is reinstalled.
+        Read from the integration branch's tip, or where the repository has no
+        such branch, from the worktree's `HEAD` commit; the defaults before any
+        commit. Each that loads is kept for the repository, and where one can't
+        load, the last kept stands in.
         """
+        judging = self.judging
+        if judging is None:
+            return Loaded(declared=load(self.root), root=self.root)
+        commit = self.store.tip(judging.integration) or self.store.head()
+        if commit is None:
+            return Loaded(declared=Declared(project=Project()), root=self.root)
+        kept = judging.layout.declaration(self.repository)
         try:
-            found = load(self.root)
+            source = self.exported(judging.layout, commit)
+            found = load(source)
         except ProjectError as failure:
-            last = read_model(self.kept, LastDeclaration) if self.kept else None
+            last = read_model(kept, LastDeclaration)
             if last is None:
                 raise
             return Loaded(
-                declared=last.declared, failure=str(failure), standing=last.worktree
+                declared=last.declared,
+                root=self.exported(judging.layout, last.commit),
+                commit=last.commit,
+                failure=f"{commit}: {failure}",
             )
-        if self.kept is not None:
-            with FileLock(self.kept.with_name(f"{self.kept.name}.lock")):
-                last = read_model(self.kept, LastDeclaration)
-                if last is None or last.declared != found:
-                    told = last.told if last else ""
-                    keep = LastDeclaration(
-                        declared=found, worktree=self.root, told=told
-                    )
-                    write_model(self.kept, keep)
-        return Loaded(declared=found)
+        with FileLock(kept.with_name(f"{kept.name}.lock")):
+            last = read_model(kept, LastDeclaration)
+            if last is None or last.commit != commit:
+                told = last.told if last else ""
+                write_model(
+                    kept, LastDeclaration(declared=found, commit=commit, told=told)
+                )
+        return Loaded(declared=found, root=source, commit=commit)
+
+    def exported(self, layout: Layout, commit: str) -> Path:
+        """Return where `commit`'s Python modules are exported, exporting them once.
+
+        A commit's export is written whole before it's moved into place, and the
+        repository's earlier exports are removed: only the latest is read.
+        """
+        target = layout.exported(self.repository, commit)
+        if target.is_dir():
+            return target
+        partial = target.with_name(f"{commit}.{secrets.token_hex(4)}.partial")
+        self.store.export(commit, partial)
+        try:
+            partial.rename(target)
+        except OSError:
+            if not target.is_dir():
+                raise
+            shutil.rmtree(partial)
+        earlier = [
+            each
+            for each in target.parent.iterdir()
+            if each != target and not each.name.endswith(".partial")
+        ]
+        for each in earlier:
+            try:
+                shutil.rmtree(each)
+            except FileNotFoundError:
+                continue  # another hook removed it first
+        return target
 
     @property
     def declared(self) -> Declared:
-        """Its project's declaration, or the one standing in for it."""
+        """The declaration it's judged by, or the one standing in for it."""
         return self.loaded.declared
 
     def told(self) -> str:
         """Say, once for each failure, that a stand-in declaration judges here."""
         loaded = self.loaded
-        if not loaded.failure or self.kept is None:
+        if not loaded.failure or self.judging is None:
             return ""
-        with FileLock(self.kept.with_name(f"{self.kept.name}.lock")):
-            last = read_model(self.kept, LastDeclaration)
+        kept = self.judging.layout.declaration(self.repository)
+        with FileLock(kept.with_name(f"{kept.name}.lock")):
+            last = read_model(kept, LastDeclaration)
             if last is None or last.told == loaded.failure:
                 return ""
-            write_model(self.kept, last.model_copy(update={"told": loaded.failure}))
+            write_model(kept, last.model_copy(update={"told": loaded.failure}))
         return (
-            f"lup can't load the project's declaration in {self.root}: "
-            f"{loaded.failure}. It judges there with the last of this repository's "
-            f"declarations that loaded, from {loaded.standing}, until this one "
-            "loads. Tell the operator: if the declaration uses something the "
-            "installed judge predates, reinstalling it from `dev` "
-            "(`lup-dev install`) fixes this; otherwise the declaration needs fixing."
+            f"lup can't load the project's declaration at {loaded.failure}. It "
+            "judges with the last of this repository's declarations that loaded, "
+            f"from commit {loaded.commit}, until one loads. Tell the operator: if "
+            "the declaration uses something the installed judge predates, "
+            "reinstalling it from `dev` (`lup-dev install`) fixes this; otherwise "
+            "the declaration needs fixing."
         )
 
     @cached_property
     def roles(self) -> Roles:
-        """The role of each path in it, from its declaration."""
+        """The role of each path in it, from the declaration it's judged by."""
         return Roles.of(self.root, self.declared)
 
     def lock(self) -> FileLock:
@@ -322,7 +377,7 @@ class Worktree(Model):
             roles=self.roles,
             checker=services.checker,
             linter=services.linter,
-            conditions=declared(self.root, self.declared.project),
+            conditions=declared(self.loaded.root, self.declared.project),
             approved=approved,
         )
 
@@ -435,7 +490,7 @@ def holding(
         for root in held.worktrees if starts else reached:
             begin(
                 bench,
-                Worktree.of(root, held.repository, bench.services.layout),
+                Worktree.of(root, held.repository, bench.services),
                 session,
             )
     return held
@@ -443,8 +498,8 @@ def holding(
 
 def worktrees(bench: Bench, held: Holding) -> list[Worktree]:
     """Open each worktree a session holds."""
-    layout = bench.services.layout
-    return [Worktree.of(root, held.repository, layout) for root in held.worktrees]
+    services = bench.services
+    return [Worktree.of(root, held.repository, services) for root in held.worktrees]
 
 
 class Planned(Model):

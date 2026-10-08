@@ -362,6 +362,7 @@ class Kit:
                 clock=self.clock,
                 layout=self.layout,
                 spawner=self.spawner,
+                integration="dev",
             ),
         )
 

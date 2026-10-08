@@ -16,9 +16,11 @@ worktree's own repository alike: the effects probe saw a planted `core.fsmonitor
 run inside a call.
 """
 
+import io
 import os
+import tarfile
 from functools import cached_property
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Literal
 
 import sh
@@ -327,6 +329,40 @@ class Store(Model):
             "rev-parse", "--verify", "--quiet", "HEAD", ok=[0, 1]
         )
         return found.stdout.decode().strip() if found.exit_code == 0 else None
+
+    def tip(self, branch: str) -> str | None:
+        """Return the commit the repository's branch `branch` names; none without it."""
+        found = self.repository().run(
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            f"refs/heads/{branch}^{{commit}}",
+            ok=[0, 1],
+        )
+        return found.stdout.decode().strip() if found.exit_code == 0 else None
+
+    def export(self, commit: str, into: Path) -> None:
+        """Write the Python modules and project files `commit` holds into `into`.
+
+        What importing the commit's declaration reads: its `.py` and `.pyi`
+        modules, and each `pyproject.toml`, which says where its packages are.
+        """
+        repository = self.repository()
+        listed = repository.run("ls-tree", "-r", "-z", "--name-only", commit)
+        wanted = [
+            path
+            for path in nul_separated(listed.stdout)
+            if PurePath(path).suffix in [".py", ".pyi"]
+            or PurePath(path).name == "pyproject.toml"
+        ]
+        into.mkdir(parents=True, exist_ok=True)
+        if not wanted:
+            return
+        archived = repository.run(
+            "--literal-pathspecs", "archive", "--format=tar", commit, "--", *wanted
+        )
+        with tarfile.open(fileobj=io.BytesIO(archived.stdout)) as archive:
+            archive.extractall(into, filter="data")
 
     def tips(self, head: str | None) -> list[str]:
         """List every commit the worktree's repository names: its refs, and `head`.
