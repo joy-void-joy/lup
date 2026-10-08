@@ -1,0 +1,63 @@
+{
+  "description": "lup's judge: every write in this worktree allowed, asked of the operator, or refused (docs/judging-writes.md).",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$(uv tool dir --bin)/lup-dev\" hook codex",
+            "timeout": 600
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$(uv tool dir --bin)/lup-dev\" hook codex",
+            "timeout": 600
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$(uv tool dir --bin)/lup-dev\" hook codex",
+            "timeout": 90000,
+            "additionalContextLimit": 20000,
+            "statusMessage": "lup is judging what this call changed"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$(uv tool dir --bin)/lup-dev\" hook codex",
+            "timeout": 90000,
+            "statusMessage": "lup is checking the files this session touched"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$(uv tool dir --bin)/lup-dev\" hook codex",
+            "timeout": 90000
+          }
+        ]
+      }
+    ]
+  }
+}
