@@ -1,0 +1,24 @@
+{
+    // `pyright` links to pyright's source at the release the gate pins, kept in a
+    // cache outside the repository (`build.py`). The rule table lives with lup's
+    // other policy data, in `lup_dev/catalog/`; it reaches the engine's helpers as
+    // `checker/…`, and the engine reaches it as `catalog/…`. The build hands this file
+    // to the bundler explicitly: the bundler otherwise looks for the one nearest each
+    // file, and there's none above the table.
+    "extends": "./pyright/tsconfig.json",
+    "compilerOptions": {
+        "noEmit": true,
+        // `packages/lup-dev/`, which holds both the engine and the table.
+        "rootDir": "..",
+        "paths": {
+            "pyright/*": ["./pyright/packages/pyright-internal/src/*"],
+            "checker/*": ["./src/*"],
+            "catalog/*": ["../src/lup_dev/catalog/*"]
+        },
+        "typeRoots": [
+            "./pyright/packages/pyright-internal/node_modules/@types",
+            "./pyright/packages/pyright-internal/typings"
+        ]
+    },
+    "include": ["src/**/*.ts", "../src/lup_dev/catalog/*.ts"]
+}

@@ -23,10 +23,6 @@ exclude = ["*.md"]
 
 [tool.ruff.lint]
 select = ["ALL"]
-# A rule's flagged example is deliberately wrong; its fixed one is checked like any
-# code (`docs/judging-writes.md`, *How a rule is declared*). The formatter still
-# formats both.
-exclude = ["packages/lup-dev/src/lup_dev/catalog/examples/*/flagged.py"]
 # Each rule here overlaps or contradicts the owner its comment names: a lup rule
 # (`docs/conventions.md`), pyright, or ruff's formatter. "Fires only on" means every
 # finding lands on a construct the owner refuses outright, so it can only repeat it.
@@ -96,9 +92,9 @@ runtime-evaluated-base-classes = [
 [tool.ruff.lint.per-file-ignores]
 # Tests are exempt from lup's rules; ruff keeps these test-only exemptions.
 "packages/*/tests/**" = ["S101", "D", "ARG", "INP001"]
-# Each rule's example is a module on its own, which the engine's tests place in a
-# small package of their own.
-"packages/lup-dev/src/lup_dev/catalog/examples/**" = ["INP001"]
+# The engine's build script runs on its own (`uv run`), beside the TypeScript it
+# builds, rather than as a module of a package.
+"packages/lup-dev/checker/build.py" = ["INP001"]
 
 [tool.pyright]
 typeCheckingMode = "strict"
@@ -106,20 +102,26 @@ pythonVersion = "3.14"
 enableTypeIgnoreComments = false
 # The workspace packages; scratch work under `tmp/` stays out of the gate.
 include = ["packages"]
-# A rule's flagged example is deliberately wrong; its fixed one is checked like any
-# code (`docs/judging-writes.md`, *How a rule is declared*).
-ignore = ["packages/lup-dev/src/lup_dev/catalog/examples/*/flagged.py"]
+# pyright's own defaults, and what the engine's build puts in the tree: the link to
+# pyright's source, whose Python samples are its tests, and the standard-library
+# stubs shipped beside the built engine.
+exclude = [
+    "**/node_modules",
+    "**/__pycache__",
+    "**/.*",
+    "packages/lup-dev/checker/pyright",
+    "packages/lup-dev/src/lup_dev/codescan/bundle",
+]
 
 [tool.pytest]
 # The package sources are collected too, so `--doctest-modules` runs their
-# docstring examples as tests. The rules' examples are modules for the engine's
-# tests to read, never imported here.
+# docstring examples as tests. The built engine beside them holds no Python.
 testpaths = ["packages/*/tests", "packages/*/src"]
 # `importlib` lets two packages' test modules share a name.
 addopts = [
     "--doctest-modules",
     "--import-mode=importlib",
-    "--ignore=packages/lup-dev/src/lup_dev/catalog/examples",
+    "--ignore=packages/lup-dev/src/lup_dev/codescan/bundle",
 ]
 
 [tool.importlinter]
