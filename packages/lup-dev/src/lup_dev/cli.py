@@ -15,14 +15,16 @@ import sh
 import typer
 
 from lup_dev.adapters import claude, codex
+from lup_dev.catalog.gate import Gate
 from lup_dev.clock import SystemClock
 from lup_dev.codescan.conditions import loaded
 from lup_dev.codescan.contract import Checker, Finding, Source
-from lup_dev.codescan.directives import Checking, Fired, Gate, GitHubIssues
+from lup_dev.codescan.directives import Checking, Fired, GitHubIssues, Trackers
 from lup_dev.codescan.engine import EngineChecker
 from lup_dev.codescan.reference import reference
 from lup_dev.codescan.ruff import Ruff
 from lup_dev.errors import LupDevError
+from lup_dev.gate import Check, Shell, failed, report
 from lup_dev.install import Installer, Terminal, Uv
 from lup_dev.layout import CheckoutLayout, Layout
 from lup_dev.policy.checkpoint import Bench, Services, Worktree
@@ -140,7 +142,7 @@ def rules_check(
     reports = engine().check(root, sources)
     ruff = Ruff().findings(root, sources)
     conditions = loaded(root, worktree.declared.project)
-    gate = Gate(issues=GitHubIssues(root=root), conditions=conditions)
+    gate = Trackers(issues=GitHubIssues(root=root), conditions=conditions)
 
     def found(path: Path) -> list[Finding]:
         report = next(each for each in reports if each.path == path)
@@ -222,6 +224,20 @@ def holds_decline(
         SystemClock(),
     )
     typer.echo(f"Declined {key}.")
+
+
+@app.command("check")
+def check() -> None:
+    """Run the gate, every step even after one fails, and fail if any did.
+
+    A stale engine is rebuilt, then ruff, the formatter, pyright, pytest and the
+    import contracts run. Each step's outcome is reported, then each failure's
+    output in full; the exit code is non-zero when any step failed.
+    """
+    outcomes = Check(root=toplevel(Path.cwd()), runner=Shell(), gate=Gate()).run()
+    typer.echo(report(outcomes))
+    if failed(outcomes):
+        raise typer.Exit(code=1)
 
 
 @app.command("install")
