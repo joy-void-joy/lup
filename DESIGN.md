@@ -157,7 +157,9 @@ The parts that cut across everything (the one hook, the dashboard's protocol, th
   - Kept native: Edit, Read, Bash, `apply_patch`, search, web, background processes, the agent's own task list, `Skill`.
   - Denied by default: `Agent`, `SendMessage`, `ListAgents`, `EnterWorktree`/`ExitWorktree`, and Codex's own spawn.
   - `AskUserQuestion` is denied once lup's inbox exists, and the agent is pointed at lup's own ask tool, which reaches the inbox. Until then it stays in the terminal, in sessions the operator is attached to.
-- **Waiting is one mechanism.** A wait is a hold inside the tool call, released by the operator's answer, so the agent doesn't have to manage it.
+- **A review queues; the agent carries on.** A change waiting for the operator's review is parked in the queue and the call is refused at once, saying so. The agent carries on with other work, hears the answer through a wait it runs in the background, and repeats the exact call once approved. Reviews pile up while the agent works, and the operator answers them as a batch, as in the first lup, rather than one at a time at the agent's pace (the bridge held each call until answered, and the operator found it slow).
+  - **Bundling (wanted, for the judge):** several files the operator must see are proposed as one review, approved or declined together, as the first lup's `review propose` did (its `devtools/review/propose.py` is the evidence).
+- **A wait for an answer only the operator or a worker can give is a hold inside the tool call,** released by that answer, so the agent doesn't have to manage it: asking the operator a question, waiting on a worker. It is lup's own tools that hold.
   - Holds are wanted: they pause the agent so the operator can catch up.
   - When a held call returns, its result says it was held and carries the operator's comment, so the agent knows it was seen and whether to change course.
   - A hold answered within the hour keeps the agent's cache. One that runs past the hour costs a rebuild, which is accepted: the agent is never put in an automatic loop re-entering a wait to keep its cache warm.
