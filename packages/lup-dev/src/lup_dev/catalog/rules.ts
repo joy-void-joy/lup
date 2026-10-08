@@ -1083,4 +1083,442 @@ export const rules = {
             ],
         },
     },
+
+    // Data shapes (`docs/conventions.md`, *Data shapes*).
+
+    dataclass: {
+        mistake: 'A dataclass is a second way to declare a shape, beside pydantic models, and validates nothing.',
+        steer: 'Declare the shape as a model deriving from `lup.types.Model`.',
+        check(file) {
+            const makers = ['dataclasses.dataclass', 'dataclasses.make_dataclass', 'pydantic.dataclasses.dataclass'];
+            for (const used of file.uses(makers)) {
+                file.report(used.node, `this uses \`${used.name}\``);
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        from dataclasses import dataclass
+
+
+                        @dataclass(frozen=True)
+                        class Point:
+                            """A point on the plane."""
+
+                            x: int
+                            y: int
+                    `,
+                    rewritten: python`
+                        from lup.types import Model
+
+
+                        class Point(Model):
+                            """A point on the plane."""
+
+                            x: int
+                            y: int
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    from dataclasses import is_dataclass
+
+
+                    def described(value: type) -> bool:
+                        """Say whether a class from elsewhere is a dataclass."""
+                        return is_dataclass(value)
+                `,
+            ],
+        },
+    },
+
+    namedtuple: {
+        mistake:
+            'A named tuple is a second way to declare a shape, beside pydantic models, and still reads by ' +
+            'position.',
+        steer: 'Declare the shape as a model deriving from `lup.types.Model`.',
+        check(file) {
+            const makers = ['collections.namedtuple', 'typing.NamedTuple', 'typing_extensions.NamedTuple'];
+            for (const used of file.uses(makers)) {
+                file.report(used.node, `this uses \`${used.name}\``);
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        from typing import NamedTuple
+
+
+                        class Point(NamedTuple):
+                            """A point on the plane."""
+
+                            x: int
+                            y: int
+                    `,
+                    rewritten: python`
+                        from lup.types import Model
+
+
+                        class Point(Model):
+                            """A point on the plane."""
+
+                            x: int
+                            y: int
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    from typing import NewType
+
+                    UserId = NewType("UserId", int)
+                `,
+            ],
+        },
+    },
+
+    'model-config': {
+        mistake: 'A `model_config` assignment reads like a field, though it configures the class.',
+        steer: 'Configure the model with class keywords: `class Turn(Model, extra="forbid")`.',
+        check(file) {
+            for (const declared of file.classes()) {
+                if (declared.fullName === 'lup.types.Settings') {
+                    continue;
+                }
+                for (const assigned of declared.assigned) {
+                    if (assigned.name === 'model_config') {
+                        file.report(assigned.node, `\`${declared.node.d.name.d.value}\` assigns \`model_config\``);
+                    }
+                }
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        from pydantic import ConfigDict
+
+                        from lup.types import Model
+
+
+                        class Turn(Model):
+                            """One turn of a conversation."""
+
+                            model_config = ConfigDict(extra="forbid")
+
+                            text: str
+                    `,
+                    rewritten: python`
+                        from lup.types import Model
+
+
+                        class Turn(Model, extra="forbid"):
+                            """One turn of a conversation."""
+
+                            text: str
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    from lup.types import Model
+
+
+                    class Turn(Model, extra="forbid"):
+                        """One turn of a conversation, and the model that took it."""
+
+                        text: str
+                        model: str = "small"
+                `,
+            ],
+        },
+    },
+
+    'default-factory': {
+        mistake: 'A factory for an empty collection says in a call what a literal default says plainly.',
+        steer: 'Default to the literal, `steps: list[Step] = []`, which pydantic copies for each instance.',
+        check(file) {
+            const empties = ['builtins.list', 'builtins.dict', 'builtins.set'];
+            for (const call of file.callsTo(['pydantic.fields.Field'])) {
+                const factory = call.argument('default_factory');
+                if (!factory) {
+                    continue;
+                }
+                const made = file.lambdaBody(factory);
+                if (file.namesOf(factory).some((name) => empties.includes(name)) || (made && file.isEmptyCollection(made))) {
+                    file.report(factory, `\`${file.text(factory)}\` builds an empty collection`);
+                }
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        from pydantic import Field
+
+                        from lup.types import Model
+
+
+                        class Plan(Model):
+                            """The steps a run takes."""
+
+                            steps: list[str] = Field(default_factory=list)
+                    `,
+                    rewritten: python`
+                        from lup.types import Model
+
+
+                        class Plan(Model):
+                            """The steps a run takes."""
+
+                            steps: list[str] = []
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    from datetime import UTC, datetime
+
+                    from pydantic import Field
+
+                    from lup.types import Model
+
+
+                    class Stamp(Model):
+                        """When something happened."""
+
+                        at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+                `,
+            ],
+        },
+    },
+
+    'model-mutability': {
+        mistake:
+            "A model deriving straight from pydantic's base, or writing `frozen` itself, leaves whether it can " +
+            'change to each model.',
+        steer:
+            'Derive from `lup.types.Model`, which is frozen, or from `lup.types.MutableModel` where values must ' +
+            'change, or `lup.types.Settings`; never write `frozen`.',
+        check(file) {
+            const pydantic = ['pydantic.main.BaseModel', 'pydantic_settings.main.BaseSettings'];
+            const lups = ['lup.types.Model', 'lup.types.MutableModel', 'lup.types.Settings'];
+            for (const declared of file.classes()) {
+                if (lups.includes(declared.fullName)) {
+                    continue;
+                }
+                const name = declared.node.d.name.d.value;
+                for (const base of declared.bases) {
+                    const straight = base.names.find((each) => pydantic.includes(each));
+                    if (straight) {
+                        file.report(base.node, `\`${name}\` derives straight from \`${straight}\``);
+                    }
+                }
+                for (const keyword of declared.keywords) {
+                    if (keyword.name === 'frozen') {
+                        file.report(keyword.node, `\`${name}\` writes \`frozen\` in its header`);
+                    }
+                }
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        from pydantic import BaseModel
+
+
+                        class Point(BaseModel, frozen=True):
+                            """A point on the plane."""
+
+                            x: int
+                    `,
+                    rewritten: python`
+                        from lup.types import Model
+
+
+                        class Point(Model):
+                            """A point on the plane."""
+
+                            x: int
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    from lup.types import MutableModel
+
+
+                    class Tally(MutableModel):
+                        """A count that goes up as things happen."""
+
+                        seen: int = 0
+                `,
+            ],
+        },
+    },
+
+    'typed-dict': {
+        mistake: 'A `TypedDict` of our own is a second way to declare a shape, beside pydantic models, and validates nothing.',
+        steer:
+            'Declare the shape as a model deriving from `lup.types.Model`; a `TypedDict` appears only where a ' +
+            "library's API is typed with one, and then it's the library's.",
+        check(file) {
+            const typedDicts = ['typing.TypedDict', 'typing_extensions.TypedDict'];
+            for (const declared of file.classes()) {
+                for (const base of declared.bases) {
+                    if (base.names.some((each) => typedDicts.includes(each))) {
+                        file.report(base.node, `\`${declared.node.d.name.d.value}\` is a \`TypedDict\``);
+                    }
+                }
+            }
+            for (const call of file.callsTo(typedDicts)) {
+                file.report(call.node, 'this call declares a `TypedDict`');
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        from typing import TypedDict
+
+
+                        class Turn(TypedDict):
+                            """One turn of a conversation."""
+
+                            text: str
+                    `,
+                    rewritten: python`
+                        from lup.types import Model
+
+
+                        class Turn(Model):
+                            """One turn of a conversation."""
+
+                            text: str
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    from collections.abc import Mapping
+
+
+                    def total(counts: Mapping[str, int]) -> int:
+                        """Add up the counts in a mapping, whatever its keys."""
+                        return sum(counts.values())
+                `,
+            ],
+        },
+    },
+
+    // Names (`docs/conventions.md`, *Names*).
+
+    'all-export': {
+        mistake:
+            "`__all__` outside a package's root makes a second public list, beside the one the package's root " +
+            'declares.',
+        steer: "Leave `__all__` to the package's root; elsewhere, import each name from the module that defines it.",
+        check(file) {
+            if (file.isPackageRoot) {
+                return;
+            }
+            for (const assigned of file.moduleAssignments()) {
+                if (assigned.name === '__all__') {
+                    file.report(assigned.node, "this module isn't a package's root");
+                }
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        __all__ = ["greet"]
+
+
+                        def greet() -> str:
+                            """Return a greeting."""
+                            return "hello"
+                    `,
+                    rewritten: python`
+                        def greet() -> str:
+                            """Return a greeting."""
+                            return "hello"
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    import json
+
+
+                    def exported() -> list[str]:
+                        """List what \`json\` exports."""
+                        return list(json.__all__)
+                `,
+            ],
+        },
+    },
+
+    // Interfaces (`docs/conventions.md`, *Interfaces*).
+
+    protocol: {
+        mistake:
+            'A `Protocol` is a second way to declare an interface, beside an ABC, matched by shape and checked ' +
+            'only by pyright.',
+        steer:
+            "Declare the interface as an ABC its implementations inherit; for a shape we don't own, keep the " +
+            '`Protocol` with an `ignore` saying so.',
+        check(file) {
+            const protocols = ['typing.Protocol', 'typing_extensions.Protocol'];
+            for (const declared of file.classes()) {
+                for (const base of declared.bases) {
+                    if (base.names.some((each) => protocols.includes(each))) {
+                        file.report(base.node, `\`${declared.node.d.name.d.value}\` is a \`Protocol\``);
+                    }
+                }
+            }
+        },
+        examples: {
+            flags: [
+                {
+                    code: python`
+                        from typing import Protocol
+
+
+                        class Greeter(Protocol):
+                            """Something that greets."""
+
+                            def greet(self) -> str:
+                                """Return a greeting."""
+                                ...
+                    `,
+                    rewritten: python`
+                        from abc import ABC, abstractmethod
+
+
+                        class Greeter(ABC):
+                            """Something that greets."""
+
+                            @abstractmethod
+                            def greet(self) -> str:
+                                """Return a greeting."""
+                    `,
+                },
+            ],
+            passes: [
+                python`
+                    from collections.abc import Iterable
+
+
+                    def total(values: Iterable[int]) -> int:
+                        """Add up \`values\`."""
+                        return sum(values)
+                `,
+            ],
+        },
+    },
 } satisfies Catalog;

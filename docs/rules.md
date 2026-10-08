@@ -921,3 +921,354 @@ class Point:
         """Hash the point by its place."""
         return hash(self.x)
 ```
+
+
+## `dataclass`
+
+A dataclass is a second way to declare a shape, beside pydantic models, and validates nothing.
+
+**Steer:** Declare the shape as a model deriving from `lup.types.Model`.
+
+**Flags:**
+
+```python
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class Point:
+    """A point on the plane."""
+
+    x: int
+    y: int
+```
+
+Done the steer's way:
+
+```python
+from lup.types import Model
+
+
+class Point(Model):
+    """A point on the plane."""
+
+    x: int
+    y: int
+```
+
+**Leaves alone:**
+
+```python
+from dataclasses import is_dataclass
+
+
+def described(value: type) -> bool:
+    """Say whether a class from elsewhere is a dataclass."""
+    return is_dataclass(value)
+```
+
+
+## `namedtuple`
+
+A named tuple is a second way to declare a shape, beside pydantic models, and still reads by position.
+
+**Steer:** Declare the shape as a model deriving from `lup.types.Model`.
+
+**Flags:**
+
+```python
+from typing import NamedTuple
+
+
+class Point(NamedTuple):
+    """A point on the plane."""
+
+    x: int
+    y: int
+```
+
+Done the steer's way:
+
+```python
+from lup.types import Model
+
+
+class Point(Model):
+    """A point on the plane."""
+
+    x: int
+    y: int
+```
+
+**Leaves alone:**
+
+```python
+from typing import NewType
+
+UserId = NewType("UserId", int)
+```
+
+
+## `model-config`
+
+A `model_config` assignment reads like a field, though it configures the class.
+
+**Steer:** Configure the model with class keywords: `class Turn(Model, extra="forbid")`.
+
+**Flags:**
+
+```python
+from pydantic import ConfigDict
+
+from lup.types import Model
+
+
+class Turn(Model):
+    """One turn of a conversation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: str
+```
+
+Done the steer's way:
+
+```python
+from lup.types import Model
+
+
+class Turn(Model, extra="forbid"):
+    """One turn of a conversation."""
+
+    text: str
+```
+
+**Leaves alone:**
+
+```python
+from lup.types import Model
+
+
+class Turn(Model, extra="forbid"):
+    """One turn of a conversation, and the model that took it."""
+
+    text: str
+    model: str = "small"
+```
+
+
+## `default-factory`
+
+A factory for an empty collection says in a call what a literal default says plainly.
+
+**Steer:** Default to the literal, `steps: list[Step] = []`, which pydantic copies for each instance.
+
+**Flags:**
+
+```python
+from pydantic import Field
+
+from lup.types import Model
+
+
+class Plan(Model):
+    """The steps a run takes."""
+
+    steps: list[str] = Field(default_factory=list)
+```
+
+Done the steer's way:
+
+```python
+from lup.types import Model
+
+
+class Plan(Model):
+    """The steps a run takes."""
+
+    steps: list[str] = []
+```
+
+**Leaves alone:**
+
+```python
+from datetime import UTC, datetime
+
+from pydantic import Field
+
+from lup.types import Model
+
+
+class Stamp(Model):
+    """When something happened."""
+
+    at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+```
+
+
+## `model-mutability`
+
+A model deriving straight from pydantic's base, or writing `frozen` itself, leaves whether it can change to each model.
+
+**Steer:** Derive from `lup.types.Model`, which is frozen, or from `lup.types.MutableModel` where values must change, or `lup.types.Settings`; never write `frozen`.
+
+**Flags:**
+
+```python
+from pydantic import BaseModel
+
+
+class Point(BaseModel, frozen=True):
+    """A point on the plane."""
+
+    x: int
+```
+
+Done the steer's way:
+
+```python
+from lup.types import Model
+
+
+class Point(Model):
+    """A point on the plane."""
+
+    x: int
+```
+
+**Leaves alone:**
+
+```python
+from lup.types import MutableModel
+
+
+class Tally(MutableModel):
+    """A count that goes up as things happen."""
+
+    seen: int = 0
+```
+
+
+## `typed-dict`
+
+A `TypedDict` of our own is a second way to declare a shape, beside pydantic models, and validates nothing.
+
+**Steer:** Declare the shape as a model deriving from `lup.types.Model`; a `TypedDict` appears only where a library's API is typed with one, and then it's the library's.
+
+**Flags:**
+
+```python
+from typing import TypedDict
+
+
+class Turn(TypedDict):
+    """One turn of a conversation."""
+
+    text: str
+```
+
+Done the steer's way:
+
+```python
+from lup.types import Model
+
+
+class Turn(Model):
+    """One turn of a conversation."""
+
+    text: str
+```
+
+**Leaves alone:**
+
+```python
+from collections.abc import Mapping
+
+
+def total(counts: Mapping[str, int]) -> int:
+    """Add up the counts in a mapping, whatever its keys."""
+    return sum(counts.values())
+```
+
+
+## `all-export`
+
+`__all__` outside a package's root makes a second public list, beside the one the package's root declares.
+
+**Steer:** Leave `__all__` to the package's root; elsewhere, import each name from the module that defines it.
+
+**Flags:**
+
+```python
+__all__ = ["greet"]
+
+
+def greet() -> str:
+    """Return a greeting."""
+    return "hello"
+```
+
+Done the steer's way:
+
+```python
+def greet() -> str:
+    """Return a greeting."""
+    return "hello"
+```
+
+**Leaves alone:**
+
+```python
+import json
+
+
+def exported() -> list[str]:
+    """List what `json` exports."""
+    return list(json.__all__)
+```
+
+
+## `protocol`
+
+A `Protocol` is a second way to declare an interface, beside an ABC, matched by shape and checked only by pyright.
+
+**Steer:** Declare the interface as an ABC its implementations inherit; for a shape we don't own, keep the `Protocol` with an `ignore` saying so.
+
+**Flags:**
+
+```python
+from typing import Protocol
+
+
+class Greeter(Protocol):
+    """Something that greets."""
+
+    def greet(self) -> str:
+        """Return a greeting."""
+        ...
+```
+
+Done the steer's way:
+
+```python
+from abc import ABC, abstractmethod
+
+
+class Greeter(ABC):
+    """Something that greets."""
+
+    @abstractmethod
+    def greet(self) -> str:
+        """Return a greeting."""
+```
+
+**Leaves alone:**
+
+```python
+from collections.abc import Iterable
+
+
+def total(values: Iterable[int]) -> int:
+    """Add up `values`."""
+    return sum(values)
+```
