@@ -14,9 +14,11 @@ import {
     ArgCategory,
     ArgumentNode,
     CallNode,
+    CaseNode,
     ClassNode,
     ExceptNode,
     ExpressionNode,
+    IfNode,
     ImportAsNode,
     ImportFromNode,
     IndexNode,
@@ -28,7 +30,7 @@ import {
     StatementNode,
 } from 'pyright/parser/parseNodes';
 import { ParseFileResults } from 'pyright/parser/parser';
-import { StringTokenFlags } from 'pyright/parser/tokenizerTypes';
+import { OperatorType, StringTokenFlags } from 'pyright/parser/tokenizerTypes';
 
 import { CommentPart, commentParts } from './comments';
 import { ImportedModule, importedByImportAs, importedByImportFrom } from './imports';
@@ -80,6 +82,21 @@ export interface Assigned {
     name: string;
     // What it's assigned, where it is: `x: int` declares without assigning.
     value: ExpressionNode | undefined;
+}
+
+export interface GuardedCase {
+    node: CaseNode;
+    // The pattern and its guard, as written: `case _ if seconds < 60` spans `_ if seconds < 60`.
+    range: TextRange;
+    // Whether the pattern matches anything, as a wildcard or a bare name does.
+    irrefutable: boolean;
+}
+
+export interface Narrowing {
+    // The `isinstance` call.
+    node: CallNode;
+    // What it narrows, as written.
+    subject: string;
 }
 
 export interface DeclaredClass {
@@ -137,6 +154,8 @@ class Gathered extends ParseTreeWalker {
     readonly imports: (ImportAsNode | ImportFromNode)[] = [];
     readonly excepts: ExceptNode[] = [];
     readonly classes: ClassNode[] = [];
+    readonly ifs: IfNode[] = [];
+    readonly cases: CaseNode[] = [];
 
     override visitCall(node: CallNode) {
         this.calls.push(node);
@@ -175,6 +194,14 @@ class Gathered extends ParseTreeWalker {
     }
     override visitClass(node: ClassNode) {
         this.classes.push(node);
+        return true;
+    }
+    override visitIf(node: IfNode) {
+        this.ifs.push(node);
+        return true;
+    }
+    override visitCase(node: CaseNode) {
+        this.cases.push(node);
         return true;
     }
 }
@@ -305,6 +332,65 @@ export class File {
             default:
                 return false;
         }
+    }
+
+    // The `elif` keyword of every `elif`.
+    elifs(): TextRange[] {
+        return this.nodes.ifs.filter(isElif).map((node) => node.d.firstToken);
+    }
+
+    // Every `case` with a guard: `case _ if seconds < 60:`.
+    guardedCases(): GuardedCase[] {
+        return this.nodes.cases.flatMap((node) => {
+            const guard = node.d.guardExpr;
+            if (!guard) {
+                return [];
+            }
+            const range = TextRange.combine([node.d.pattern, guard])!;
+            return [{ node, range, irrefutable: node.d.isIrrefutable }];
+        });
+    }
+
+    // The `isinstance` tests narrowing one subject across the arms of one decision:
+    // the `if` statements of one block and the `elif`s chained to them, each test a
+    // bare `isinstance(subject, …)` or its negation. Each list holds two or more, in
+    // the order written.
+    isinstanceChains(): Narrowing[][] {
+        const blocks = new Map<ParseNode, IfNode[]>();
+        for (const node of this.nodes.ifs) {
+            if (isElif(node) || isElseIf(node) || !node.parent) {
+                continue;
+            }
+            blocks.set(node.parent, [...(blocks.get(node.parent) ?? []), node]);
+        }
+        return [...blocks.values()].flatMap((statements) => {
+            const tests = statements.flatMap((statement) => armsOf(statement)).flatMap((test) => {
+                const call = this.isinstanceCall(test);
+                return call ? [call] : [];
+            });
+            const chains: { subject: ExpressionNode; arms: Narrowing[] }[] = [];
+            for (const test of tests) {
+                const subject = test.d.args[0].d.valueExpr;
+                const arm = { node: test, subject: this.text(subject) };
+                const chain = chains.find((each) => ParseTreeUtils.isMatchingExpression(each.subject, subject));
+                if (chain) {
+                    chain.arms.push(arm);
+                    continue;
+                }
+                chains.push({ subject, arms: [arm] });
+            }
+            return chains.filter((chain) => chain.arms.length > 1).map((chain) => chain.arms);
+        });
+    }
+
+    // The `isinstance(subject, …)` call a test is, alone or negated.
+    private isinstanceCall(test: ExpressionNode): CallNode | undefined {
+        const tested =
+            test.nodeType === ParseNodeType.UnaryOperation && test.d.operator === OperatorType.Not ? test.d.expr : test;
+        if (tested.nodeType !== ParseNodeType.Call || tested.d.args.length !== 2 || tested.d.args.some((arg) => arg.d.name)) {
+            return undefined;
+        }
+        return this.namesOf(tested.d.leftExpr).includes('builtins.isinstance') ? tested : undefined;
     }
 
     // Every `except` clause.
@@ -510,6 +596,37 @@ export class File {
 }
 
 const emptyBuilders = ['builtins.list', 'builtins.dict', 'builtins.set'];
+
+// Whether an `if` is an `elif`: the `else` of the `if` before it.
+function isElif(node: IfNode): boolean {
+    return node.parent?.nodeType === ParseNodeType.If && node.parent.d.elseSuite === node;
+}
+
+// Whether an `if` is all an `else` holds, an `elif` written out.
+function isElseIf(node: IfNode): boolean {
+    const suite = node.parent;
+    const owner = suite?.parent;
+    return (
+        suite?.nodeType === ParseNodeType.Suite &&
+        owner?.nodeType === ParseNodeType.If &&
+        owner.d.elseSuite === suite &&
+        suite.d.statements.length === 1
+    );
+}
+
+// The tests of an `if` and of the `elif`s chained to it, an `else` holding only an
+// `if` counting as one.
+function armsOf(node: IfNode): ExpressionNode[] {
+    const next = node.d.elseSuite;
+    if (next?.nodeType === ParseNodeType.If) {
+        return [node.d.testExpr, ...armsOf(next)];
+    }
+    const [only, ...more] = next?.d.statements ?? [];
+    if (only?.nodeType === ParseNodeType.If && more.length === 0) {
+        return [node.d.testExpr, ...armsOf(only)];
+    }
+    return [node.d.testExpr];
+}
 
 // The argument a call gives for a parameter, by keyword or, given one, by its position.
 function argumentOf(node: CallNode, name: string, position?: number): ExpressionNode | undefined {

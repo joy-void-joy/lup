@@ -1272,3 +1272,135 @@ def total(values: Iterable[int]) -> int:
     """Add up `values`."""
     return sum(values)
 ```
+
+
+## `elif`
+
+An `elif` chain hides which value decides, arm after arm.
+
+**Steer:** Decide on a value's structure with `match`; compare with guard clauses that return, one `if` after another.
+
+**Flags:**
+
+```python
+def unit(seconds: int) -> str:
+    """Return the unit a duration shows in."""
+    if seconds < 60:
+        return "s"
+    elif seconds < 3600:
+        return "m"
+    return "h"
+```
+
+Done the steer's way:
+
+```python
+def unit(seconds: int) -> str:
+    """Return the unit a duration shows in."""
+    if seconds < 60:
+        return "s"
+    if seconds < 3600:
+        return "m"
+    return "h"
+```
+
+**Leaves alone:**
+
+```python
+def sign(number: int) -> int:
+    """Return the sign of a number."""
+    if number < 0:
+        return -1
+    return 1 if number > 0 else 0
+```
+
+
+## `wildcard-guard`
+
+A guard on a pattern that matches anything is an `if` chain dressed as a `match`.
+
+**Steer:** Write a pattern that binds what the guard reads (`case Lease(reason=str() as reason) if reason:`), or compare with guard clauses.
+
+**Flags:**
+
+```python
+def unit(seconds: int) -> str:
+    """Return the unit a duration shows in."""
+    match seconds:
+        case _ if seconds < 60:
+            return "s"
+        case _:
+            return "m"
+```
+
+Done the steer's way:
+
+```python
+def unit(seconds: int) -> str:
+    """Return the unit a duration shows in."""
+    if seconds < 60:
+        return "s"
+    return "m"
+```
+
+**Leaves alone:**
+
+```python
+from lup.types import Model
+
+
+class Lease(Model):
+    """A hold on a resource, and why it's held."""
+
+    reason: str
+
+
+def why(lease: Lease | None) -> str:
+    """Say why a lease is held, if it is."""
+    match lease:
+        case Lease(reason=str() as reason) if reason:
+            return reason
+        case _:
+            return "unheld"
+```
+
+
+## `isinstance-chain`
+
+A chain of `isinstance` tests on one value hides that it decides on its class, arm after arm.
+
+**Steer:** Decide with a `match` on the value, a class pattern each arm: `case int():`.
+
+**Flags:**
+
+```python
+def size(value: int | str | list[int]) -> int:
+    """Return how big a value is."""
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        return len(value)
+    return len(value)
+```
+
+Done the steer's way:
+
+```python
+def size(value: int | str | list[int]) -> int:
+    """Return how big a value is."""
+    match value:
+        case int():
+            return value
+        case _:
+            return len(value)
+```
+
+**Leaves alone:**
+
+```python
+def size(value: int | str) -> int:
+    """Return how big a value is."""
+    if isinstance(value, int):
+        return value
+    return len(value)
+```
