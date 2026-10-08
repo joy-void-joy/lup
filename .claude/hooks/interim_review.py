@@ -2,45 +2,60 @@
 # requires-python = ">=3.14"
 # dependencies = ["pydantic>=2.12", "pydantic-settings>=2.11", "sh>=2"]
 # ///
-"""Ask the operator in the first lup's dashboard: before writes that show design, and wherever Claude Code prompts.
+"""Queue what needs the operator in the first lup's review dashboard: every prompt, and writes that show design.
 
-An interim review for the bridge, until lup's own review flow and dashboard land
+An interim carrier for the bridge, until lup's own review flow and dashboard land
 (`docs/judging-writes.md`); then this file and its hooks go. Claude Code runs it
-for three events, named by the payload's `hook_event_name`:
-- `PreToolUse`, before each Write or Edit. Most writes pass untouched, left to
-  Claude Code's own permission mode. A write the operator wants to see first is
-  parked as a review:
-  - a new production file, or a Write over a whole existing one;
-  - a protected path: manifests, lockfiles, runtime settings and hooks, CI, editor configs;
-  - one of the operator's documents, `DESIGN.md` and `AGENTS.md` at a worktree's root;
-  - an edit that adds a `# lup: ignore` suppression to a Python file.
+for these events, named by the payload's `hook_event_name`:
 - `PermissionRequest`, whenever Claude Code is about to show a permission prompt,
-  for any tool. The prompt is parked as a review instead, saying what Claude Code
-  asks permission for. A tool whose prompt is a question rather than a permission
-  (`AskUserQuestion`) stays in the terminal: the dashboard can only approve or decline.
+  for any tool, the judge's asks included. The prompt is queued for review
+  instead, saying what Claude Code asks permission for; nothing it asks is
+  allowed without the operator. A tool whose prompt is a question rather than a
+  permission (`AskUserQuestion`) stays in the terminal: the dashboard can only
+  approve or decline.
 - `PostToolBatch`, after each batch of tool calls, to pass on what the operator
   wrote when approving a prompt (below).
+- `PreToolUse`, before each Write or Edit, only in a session started before the
+  judge (`lup-dev hook claude`) took this event over in `.claude/settings.json`:
+  such a session still sends it here, and a hook that stopped answering would
+  block every write there. It goes once none runs. It judges by the agreed table
+  (*What each change gets*): tests, scratch, docs, data and ordinary production
+  edits are allowed, and these are queued for the operator's review:
+  - a new production file, or a Write over a whole existing one;
+  - a protected path: manifests, lockfiles, git's and the runtimes' own
+    directories, CI, editor configs, secrets, the project declaration, lup's catalog;
+  - one of the operator's documents, `DESIGN.md` and `AGENTS.md` at a worktree's root;
+  - an edit that adds a `# lup: ignore` suppression to a Python file.
+  A write outside the session's repository isn't judged here: Claude Code's own
+  mode decides it, and a prompt it shows is queued like any other.
 
-Either way the call waits here until the review is answered in the first lup's
-dashboard. An approval lets the call through. For a write, the operator's note
-and line comments reach the agent's context at once. A PermissionRequest's answer
-can't carry context, so they wait under `.lup/approval-notes/` and reach the agent
-when the batch holding the call ends. A decline refuses the call and passes the
-note and comments on; a refused Write or Edit leaves the agent's version under
-`.lup/saved/<review>/`. A call nobody answers within `patience` is refused the
-same way, with the review left waiting: retrying the same call waits on the same
-review. An approval covers that one call: it never adds a permission rule.
+A call that needs review is parked in the first lup's queue and refused at once,
+saying how to hear the answer, so the agent carries on with other work while the
+operator reviews at their own pace. `wait <id>`, a subcommand of this script,
+polls until the review is answered and prints the answer, so a run in the
+background wakes the agent; it never carries out the call. Repeating the exact
+call then reaches the same review through its fingerprint:
+- approved: the call goes through. For a write, the operator's note and line
+  comments reach the agent's context at once. A PermissionRequest's answer can't
+  carry context, so they wait under `.lup/approval-notes/` and reach the agent
+  when the batch holding the call ends. An approval covers that one call: it
+  never adds a permission rule.
+- declined: refused, with the note and comments; a refused Write or Edit leaves
+  the agent's version under `.lup/saved/<review>/`.
+- still waiting: refused again, with the same message.
 
 The review is parked and read back by the first lup's own host half
 (`policy/assets/host.py`), which uses only the standard library, so the dashboard
-sees exactly the records it writes itself. Serve the dashboard with:
+sees exactly the records it writes itself. Each queued call is also kept under
+`.lup/interim-queue/` in the session's checkout, which is how `wait` finds it.
+Serve the dashboard with:
 
     uv run --directory <lup-legacy checkout> lup-devtools dashboard serve --root <this checkout>
 
-The first lup's dashboard expires a review after an hour when its requester isn't
-on the first lup's roster, which these sessions never are. The waiting call then
-parks the same review again under a new id, so the dashboard's history shows the
-expired one beside the one still waiting.
+The first lup's dashboard expires a review an hour after it's parked when its
+requester isn't on the first lup's roster, which these sessions never are. `wait`
+parks an expired review again under a new id and waits on that one, so the queue
+still holds it; a repeat of the call reaches the newest.
 """
 
 import importlib.util
@@ -59,7 +74,7 @@ from typing import Literal
 import sh
 from pydantic import BaseModel, JsonValue, RootModel, TypeAdapter, ValidationError
 from pydantic.alias_generators import to_camel
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, CliApp, CliPositionalArg, CliSubCommand
 
 
 class Settings(BaseSettings, env_prefix="LUP_INTERIM_REVIEW_"):
@@ -67,30 +82,41 @@ class Settings(BaseSettings, env_prefix="LUP_INTERIM_REVIEW_"):
 
     legacy_checkout: Path = Path("lup-legacy.git/tree/dev")
     """The first lup's checkout, relative to the directory holding `lup.git`."""
-    production: list[str] = ["packages/*/src/**"]
-    """Where production code lives, as patterns relative to the worktree."""
+    production: list[str] = ["packages/**/src/**"]
+    """Where production code lives, as patterns relative to the worktree: the source trees under the packages."""
     protected: list[str] = [
         "**/pyproject.toml",
         "**/uv.lock",
         "**/package.json",
         "**/bun.lock",
-        ".claude/**",
-        ".codex/**",
         ".github/**",
+        ".git/**",
+        ".githooks/**",
+        ".husky/**",
         ".pre-commit-config.yaml",
         ".vscode/**",
         ".devcontainer/**",
-        ".gitignore",
-        ".env*",
+        ".claude/**",
+        ".codex/**",
+        "**/sync.json",
+        "**/sync.json.local",
+        "**/.env*",
+        "**/.gitignore",
+        "lup_project.py",
         "**/lup_dev/catalog/**",
     ]
     """Paths every write to asks, as patterns relative to the worktree.
 
-    Manifests and lockfiles choose what runs; runtime settings and hooks, CI,
-    pre-commit and editor configs run outside the agent's own calls;
-    `.gitignore` decides what review can see; `.env*` holds secrets;
-    `lup_dev/catalog/` is the data that sets lup's policy (its rules, its path
-    roles), which the operator reviews before it changes.
+    The defaults in `lup_dev/catalog/paths.py`, and what lup's declaration adds:
+    - manifests and lockfiles, which choose what runs;
+    - what runs outside the agent's own calls: CI, git's own directory and
+      hooks, pre-commit, editor and container configs, the runtimes' settings and hooks;
+    - what widens a later launch, `sync.json` and `sync.json.local`;
+    - secrets, `.env*`;
+    - `.gitignore`, which decides what review can see;
+    - the project declaration, `lup_project.py`;
+    - `lup_dev/catalog/`, the data that sets lup's policy (its rules, its path
+      roles), which the operator reviews before it changes.
     """
     operator_documents: list[str] = ["DESIGN.md", "AGENTS.md"]
     """The operator's documents, as patterns relative to the worktree.
@@ -106,18 +132,9 @@ class Settings(BaseSettings, env_prefix="LUP_INTERIM_REVIEW_"):
     answers_variable: str = "LUP_REVIEW_ANSWERS"
     """The variable a first-lup launch names the answers store with; unset here, so the host's default applies."""
     poll: timedelta = timedelta(seconds=2)
-    """How often a waiting call looks for the operator's answer."""
-    patience: timedelta = timedelta(days=20)
-    """How long a call waits before it's refused: effectively as long as it takes, since waiting never re-prompts the agent.
-
-    It's bounded only because Claude Code lets a call continue through the normal
-    permission flow when a hook times out ("don't count on a stalled hook to act as
-    a gate", its hooks docs), so the hook must decide before its timeout, which
-    `.claude/settings.json` sets just above this. Twenty days stays under the
-    longest timer Node, which runs Claude Code, can hold: about 24.8 days.
-    """
+    """How often `wait` looks for the operator's answer."""
     notify: bool = True
-    """Whether a review that starts waiting raises a desktop notice through `notify-send`, where it's installed."""
+    """Whether a review newly queued raises a desktop notice through `notify-send`, where it's installed."""
 
 
 class ToolInput(BaseModel):
@@ -189,7 +206,7 @@ class Review(BaseModel, frozen=True):
 
 
 class Verdict(BaseModel, frozen=True):
-    """What this hook makes of one write: a review to wait on, if any, and anything the agent should hear."""
+    """What this hook makes of one write: a review to queue, if any, and anything the agent should hear."""
 
     review: Review | None = None
     note: str = ""
@@ -234,6 +251,18 @@ class Change(BaseModel, frozen=True):
         return Draft(home=home, relative=relative, content=self.after)
 
 
+def wait_command(review_id: str, checkout: Path) -> str:
+    """The command that waits for one queued review's answer, as the agent runs it from the session's checkout."""
+    script = Path(__file__).resolve()
+    shown = script.relative_to(checkout) if script.is_relative_to(checkout) else script
+    return f"uv run --script {shown} wait {review_id}"
+
+
+def queue_file(checkout: Path, review_id: str) -> Path:
+    """Where a queued call is kept under its review's id, in the session's checkout, for `wait` to find."""
+    return checkout / ".lup/interim-queue" / f"{review_id}.json"
+
+
 class Request(BaseModel, frozen=True):
     """One call to put before the operator, as either event hands it over."""
 
@@ -241,6 +270,8 @@ class Request(BaseModel, frozen=True):
     """The repository's shared git directory; the first lup's checkout sits beside the directory holding it."""
     root: Path
     """Where the call runs, which the review records and binds."""
+    checkout: Path
+    """The session's checkout, where the queued call is kept and its wait command runs."""
     session: str
     agent: str
     """The subagent that asked, blank for the session's own conversation."""
@@ -261,6 +292,15 @@ class Request(BaseModel, frozen=True):
             return ""
         kept = self.draft.save(review_id)
         return f"Your version is saved at {kept}. Revise it there and write it back, which asks again."
+
+    def waiting(self, review_id: str) -> str:
+        """What the agent hears while the call waits for review: where it is, how to hear the answer, and what then."""
+        return (
+            f"Queued for the operator's review in the dashboard ({review_id}): {self.review.reason}. "
+            "Carry on with other work, or end your turn. "
+            f"To hear when it's answered, run `{wait_command(review_id, self.checkout)}` in the background; "
+            "once it's approved, repeat this exact call."
+        )
 
 
 class ParkedState(BaseModel, frozen=True):
@@ -309,6 +349,10 @@ class RecordedAnswer(BaseModel, frozen=True):
         """What the operator wrote with the decision."""
         return self.answer
 
+    def decision(self) -> Answer | None:
+        """The operator's decision."""
+        return self.answer
+
 
 class RecordedRemark(BaseModel, frozen=True):
     """A remark the operator sent without deciding, as the host keeps it beside the answers."""
@@ -320,9 +364,22 @@ class RecordedRemark(BaseModel, frozen=True):
         """What the operator wrote."""
         return self.remark
 
+    def decision(self) -> Answer | None:
+        """None: a remark decides nothing."""
+        return None
+
+
+class RelayEntry(BaseModel, frozen=True):
+    """A review as the first lup's relay keeps it: the part a wait reads."""
+
+    id: str
+    fingerprint: str
+    """The digest of the call it reviews, which a repeat of the call hashes to again."""
+    state: str
+
 
 class Outcome(BaseModel, frozen=True):
-    """How a call put before the operator ended, in the words the agent hears, before either event spells it."""
+    """What a call put before the operator comes to, in the words the agent hears, before either event spells it."""
 
     allowed: bool
     headline: str
@@ -413,7 +470,11 @@ class ParkedCall(BaseModel, frozen=True):
     """The host's file of the operator's answers to the relay the call is parked in."""
 
     def park(self, host: ModuleType) -> ParkedState:
-        """Park this call, or read back the state of the review it already waits on."""
+        """Park this call, or read back the state of the review it already waits on.
+
+        An approval read back here is spent: the host claims it, so it lets the
+        call through once. Only a call about to run may park.
+        """
         request = self.request
         return ParkedState.model_validate(
             host.review_hook_call(
@@ -430,6 +491,32 @@ class ParkedCall(BaseModel, frozen=True):
                 agent=request.agent,
             )
         )
+
+    def queue(self, review_id: str) -> bool:
+        """Keep this call where `wait` finds it under this review, and say whether it's newly queued."""
+        record = queue_file(self.request.checkout, review_id)
+        if record.is_file():
+            return False
+        record.parent.mkdir(parents=True, exist_ok=True)
+        record.write_text(self.model_dump_json())
+        return True
+
+
+class Look(BaseModel, frozen=True):
+    """One look at a queued review that leaves it as it is: the newest review of the call, its state, and its answer."""
+
+    review: str
+    state: str
+    """Its state in the relay, or why there is none to look at."""
+    answer: Answer | None = None
+
+
+class Heard(BaseModel, frozen=True):
+    """What a wait on a queued review ends with: what it prints, and its exit status."""
+
+    message: str
+    status: int
+    """0 approved; 1 declined, or gone from the queue unanswered; 2 nothing to wait on."""
 
 
 def git(directory: Path, *arguments: str) -> str | None:
@@ -544,42 +631,20 @@ def legacy_host(checkout: Path) -> ModuleType:
 
 
 class Outside(BaseModel, frozen=True):
-    """What the hook reaches beyond its payload: the first lup's host half, and the clock a waiting call keeps."""
+    """What the hook reaches beyond its payload: the first lup's host half, and the clock `wait` polls by."""
 
     load: Callable[[Path], ModuleType] = legacy_host
     sleep: Callable[[float], None] = time.sleep
-    monotonic: Callable[[], float] = time.monotonic
 
 
 def notify(review: Review, settings: Settings) -> None:
-    """Tell the operator a review is waiting, where the desktop can show it."""
+    """Tell the operator a review is queued, where the desktop can show it."""
     if not settings.notify or shutil.which("notify-send") is None:
         return
     try:
         sh.Command("notify-send")("--app-name=lup", "A call waits for your review", review.reason)
     except sh.ErrorReturnCode as failed:
         print(f"interim review: notify-send failed: {failed.stderr.decode()}", file=sys.stderr)
-
-
-def looks(host: ModuleType, call: ParkedCall, settings: Settings, outside: Outside) -> Iterator[ParkedState]:
-    """Each look at the call's review, one per poll, until it's settled or the patience runs out.
-
-    The first look parks it. A review the dashboard expired is parked again by
-    the next look, under a new id, and the operator is told once more. A
-    settled review is the last look: looking again would park the call anew.
-    The last look is taken when the patience runs out, so there is always one.
-    """
-    deadline = outside.monotonic() + settings.patience.total_seconds()
-    announced = ""
-    while True:
-        state = call.park(host)
-        if state.state == "pending" and state.id != announced:
-            notify(call.request.review, settings)
-            announced = state.id
-        yield state
-        if state.state != "pending" or outside.monotonic() >= deadline:
-            return
-        outside.sleep(settings.poll.total_seconds())
 
 
 def said(host: ModuleType, call: ParkedCall, review_id: str) -> str:
@@ -601,26 +666,11 @@ def said(host: ModuleType, call: ParkedCall, review_id: str) -> str:
     return "\n".join(parts)
 
 
-def ask(request: Request, settings: Settings, outside: Outside) -> Outcome:
-    """Put one call before the operator in the first lup's dashboard and wait for the answer.
-
-    The one waiting path both events share; each spells the outcome its own way.
-    """
+def answered(host: ModuleType, call: ParkedCall, state: ParkedState) -> Outcome:
+    """What a review's state means for its call, in the words the agent hears."""
+    request = call.request
     reason = request.review.reason
-    try:
-        host = outside.load(request.repository.parent / settings.legacy_checkout)
-    except FileNotFoundError as missing:
-        headline = (
-            f"{reason}, so the operator reviews it first, but the review can't be asked: {missing}. Tell the operator."
-        )
-        return Outcome(allowed=False, headline=headline)
-    relay = host.review_home(request.root) / ".lup/questions.jsonl"
-    call = ParkedCall(
-        request=request,
-        answers=host.review_answers(relay, host.review_answers_home(settings.answers_variable)),
-    )
-    *_, last = looks(host, call, settings, outside)
-    match last:
+    match state:
         case ParkedState(state="approved", id=review_id):
             headline = f"The operator approved this {request.tool} call in the review dashboard ({reason})."
             return Outcome(allowed=True, headline=headline, said=said(host, call, review_id))
@@ -631,32 +681,68 @@ def ask(request: Request, settings: Settings, outside: Outside) -> Outcome:
         case ParkedState(state="unavailable", reason=why):
             return Outcome(allowed=False, headline=f"{reason}, but the review can't be asked: {why}.")
         case ParkedState(id=review_id):
-            headline = (
-                f"No answer within {settings.patience} ({reason}). The review is still waiting in the dashboard, "
-                "and retrying the same call waits on the same review."
-            )
-            return Outcome(allowed=False, headline=headline, after=request.kept(review_id))
+            return Outcome(allowed=False, headline=request.waiting(review_id))
+
+
+def ask(request: Request, settings: Settings, outside: Outside) -> Outcome:
+    """Queue one call for the operator's review in the first lup's dashboard, or read back the answer it already has.
+
+    The one path both events share. It never waits: a call the relay already
+    holds reaches the same review through its fingerprint, and is let through
+    once approved, refused with what the operator wrote once declined, and
+    refused with the same message while the review waits.
+    """
+    try:
+        host = outside.load(request.repository.parent / settings.legacy_checkout)
+    except FileNotFoundError as missing:
+        headline = (
+            f"{request.review.reason}, so the operator reviews it first, but the review can't be asked: {missing}. "
+            "Tell the operator."
+        )
+        return Outcome(allowed=False, headline=headline)
+    relay = host.review_home(request.root) / ".lup/questions.jsonl"
+    call = ParkedCall(
+        request=request,
+        answers=host.review_answers(relay, host.review_answers_home(settings.answers_variable)),
+    )
+    state = call.park(host)
+    match state.state:
+        case "pending":
+            if call.queue(state.id):
+                notify(request.review, settings)
+        case "approved" | "rejected":
+            queue_file(request.checkout, state.id).unlink(missing_ok=True)
+        case "unavailable":
+            pass
+    return answered(host, call, state)
 
 
 def reviewed_write(payload: WritePayload, settings: Settings, outside: Outside) -> PreToolUseAnswer | None:
-    """Decide one Write or Edit: no decision for most, a held review for the rest."""
+    """Judge one Write or Edit by the agreed table: allow most, queue the rest for the operator's review.
+
+    A write outside the session's repository gets no answer, leaving it to
+    Claude Code's own mode. An Edit the tool would refuse is allowed, and fails
+    on its own.
+    """
     file = payload.cwd / payload.tool_input.file_path
     start = next(directory for directory in file.parents if directory.is_dir())
     worktree_text = git(start, "rev-parse", "--show-toplevel")
     common = git(start, "rev-parse", "--path-format=absolute", "--git-common-dir")
     session_common = git(payload.cwd, "rev-parse", "--path-format=absolute", "--git-common-dir")
-    if worktree_text is None or common is None or common != session_common:
+    checkout_text = git(payload.cwd, "rev-parse", "--show-toplevel")
+    if worktree_text is None or common is None or common != session_common or checkout_text is None:
         return None
     worktree = Path(worktree_text)
     change = changed(file, payload.tool_name, payload.tool_input)
     if change is None:
-        return None
+        return PreToolUseAnswer(permission_decision="allow")
     judged = verdict(file.relative_to(worktree), payload.tool_name, change.before, change.after, settings)
     if judged.review is None:
-        return PreToolUseAnswer(additional_context=judged.note) if judged.note else None
+        return PreToolUseAnswer(permission_decision="allow", additional_context=judged.note or None)
     request = Request(
         repository=Path(common),
         root=worktree,
+        checkout=Path(checkout_text),
         session=payload.session_id,
         agent=payload.agent_id,
         tool=payload.tool_name,
@@ -674,7 +760,7 @@ def notes_file(checkout: Path, session: str, agent: str) -> Path:
 
 
 def permission(payload: PermissionPayload, settings: Settings, outside: Outside) -> PermissionAnswer | None:
-    """Carry one permission prompt to the dashboard instead of the terminal, and answer it from there.
+    """Queue one permission prompt in the dashboard instead of the terminal, and answer it from there.
 
     An approval allows this call only. What the operator wrote with it waits
     in the notes file until the batch holding the call ends (`delivered`),
@@ -694,6 +780,7 @@ def permission(payload: PermissionPayload, settings: Settings, outside: Outside)
     request = Request(
         repository=Path(common),
         root=payload.cwd,
+        checkout=checkout,
         session=payload.session_id,
         agent=payload.agent_id,
         tool=payload.tool_name,
@@ -722,6 +809,86 @@ def delivered(payload: BatchPayload) -> BatchAnswer | None:
     waiting = [Note.model_validate_json(line) for line in notes.read_text().splitlines() if line]
     notes.unlink()
     return BatchAnswer(additional_context="\n\n".join(note.message for note in waiting))
+
+
+def looked(host: ModuleType, call: ParkedCall, review_id: str) -> Look:
+    """The newest review of this call in the relay, its state and its answer, read without touching any of them.
+
+    The newest, since a repeat of the call or an earlier wait may have parked
+    it again under a new id once the dashboard expired it: they share its
+    fingerprint.
+    """
+    relay = host.review_home(call.request.root) / ".lup/questions.jsonl"
+    entries = TypeAdapter(dict[str, RelayEntry]).validate_python(host.native_review_records(relay))
+    if review_id not in entries:
+        return Look(review=review_id, state=f"not in {relay}")
+    fingerprint = entries[review_id].fingerprint
+    newest = [entry for entry in entries.values() if entry.fingerprint == fingerprint][-1]
+    records = TypeAdapter(list[RecordedAnswer | RecordedRemark]).validate_python(host.review_records(call.answers))
+    decisions = [record.decision() for record in records if record.question == newest.id]
+    answer = next((decision for decision in decisions if decision is not None), None)
+    return Look(review=newest.id, state=newest.state, answer=answer)
+
+
+def watched(host: ModuleType, call: ParkedCall, review_id: str, settings: Settings, outside: Outside) -> Iterator[Look]:
+    """Each look at a queued review, one per poll, until the operator answers it or it leaves the queue unanswered.
+
+    A look never claims an approval: only a repeat of the call does. A review
+    the dashboard expired unanswered is parked again under a new id, which can't
+    spend an answer since nothing newer stands for the call, and the operator
+    is told once more.
+    """
+    current = review_id
+    while True:
+        look = looked(host, call, current)
+        yield look
+        current = look.review
+        if look.answer is not None:
+            return
+        match look.state:
+            case "pending":
+                outside.sleep(settings.poll.total_seconds())
+            case "expired":
+                parked = call.park(host)
+                if parked.state != "pending":
+                    yield Look(review=current, state=f"expired, and parking it again failed: {parked.reason}")
+                    return
+                if call.queue(parked.id):
+                    notify(call.request.review, settings)
+                current = parked.id
+            case _:
+                return
+
+
+def waited(review_id: str, cwd: Path, settings: Settings, outside: Outside) -> Heard:
+    """Wait until the operator answers one queued review, and say what came of it."""
+    checkout_text = git(cwd, "rev-parse", "--show-toplevel")
+    if checkout_text is None:
+        return Heard(message=f"{cwd} is in no git checkout, so no queued review can be found from here.", status=2)
+    record = queue_file(Path(checkout_text), review_id)
+    if not record.is_file():
+        message = (
+            f"No review {review_id} is queued from {checkout_text}: "
+            "a repeat of its call settled it already, or it was queued from another checkout."
+        )
+        return Heard(message=message, status=2)
+    call = ParkedCall.model_validate_json(record.read_text())
+    host = outside.load(call.request.repository.parent / settings.legacy_checkout)
+    *_, last = watched(host, call, review_id, settings, outside)
+    match last:
+        case Look(review=review, answer=Answer(approved=True)):
+            outcome = answered(host, call, ParkedState(state="approved", id=review, reason=""))
+            repeat = "Repeat this exact call to carry it out; the approval covers that one call."
+            return Heard(message=f"{outcome.message()}\n{repeat}", status=0)
+        case Look(review=review, answer=Answer()):
+            outcome = answered(host, call, ParkedState(state="rejected", id=review, reason=""))
+            return Heard(message=outcome.message(), status=1)
+        case Look(review=review, state=state):
+            message = (
+                f"Review {review} left the queue unanswered: {state}. "
+                "Repeat the exact call to queue it again if it's still needed."
+            )
+            return Heard(message=message, status=1)
 
 
 class HookEvent(BaseModel):
@@ -759,7 +926,7 @@ class HookEvent(BaseModel):
                 return BatchAnswer(additional_context=f"{context} Tell the operator.")
 
 
-def main() -> None:
+def hook() -> None:
     """Read the hook's payload, answer it, and print the answer where there is one.
 
     Any failure refuses the call, naming the failure. A payload naming no event
@@ -781,5 +948,36 @@ def main() -> None:
         print(HookOutput(hook_specific_output=answer).model_dump_json(by_alias=True, exclude_none=True))
 
 
+class Wait(BaseModel):
+    """Wait until the operator answers a queued review, print the answer, and exit: run it in the background.
+
+    Exits 0 once approved, 1 once declined or gone from the queue unanswered,
+    and 2 where there's nothing to wait on. It never carries out the call:
+    repeat the call once it's approved.
+    """
+
+    review: CliPositionalArg[str]
+    """The review's id, as the refusal that queued it gives it."""
+
+    def cli_cmd(self) -> None:
+        """Wait from the current directory, which is in the session's checkout."""
+        heard = waited(self.review, Path.cwd(), Settings(), Outside())
+        print(heard.message)
+        sys.exit(heard.status)
+
+
+class Command(BaseModel):
+    """The interim review: with no arguments, answer the Claude Code hook whose payload is on stdin."""
+
+    wait: CliSubCommand[Wait]
+
+    def cli_cmd(self) -> None:
+        """Answer the hook, or run the subcommand given."""
+        if self.wait is None:
+            hook()
+            return
+        CliApp.run_subcommand(self)
+
+
 if __name__ == "__main__":
-    main()
+    CliApp.run(Command)

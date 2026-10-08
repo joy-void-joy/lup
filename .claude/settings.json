@@ -5,12 +5,18 @@
     "allow": [
       "Bash(uv run pytest:*)",
       "Bash(uv run pyright:*)",
-      "Bash(uv run ruff check:*)",
-      "Bash(uv run ruff format --check:*)",
+      "Bash(uv run ruff:*)",
       "Bash(uv run lint-imports:*)",
+      "Bash(uv run python packages/lup-dev/checker/build.py:*)",
+      "Bash(uv run packages/lup-dev/checker/build.py:*)",
       "Bash(git status:*)",
       "Bash(git diff:*)",
-      "Bash(git log:*)"
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git worktree list:*)",
+      "Bash(uv run --script .claude/hooks/interim_review.py wait:*)"
     ],
     "ask": ["Bash(gh pr merge:*)"],
     "deny": ["Artifact", "SendFeedback", "Workflow", "ScheduleWakeup", "ReportFindings"]
@@ -94,8 +100,8 @@
           {
             "type": "command",
             "command": "uv run --script \"$CLAUDE_PROJECT_DIR/.claude/hooks/interim_review.py\"",
-            "timeout": 1728300,
-            "statusMessage": "Waiting for your answer in the review dashboard"
+            "timeout": 120,
+            "statusMessage": "Queueing this prompt for your review in the dashboard"
           }
         ]
       }
