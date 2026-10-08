@@ -7,13 +7,17 @@ place that lists the runtimes' adapters.
 """
 
 import sys
+from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 import sh
 import typer
 
+from lup.types import Model
+
+# lup: ignore("runtime-mention", why="the one place listing the adapters")
 from lup_dev.adapters import claude, codex
 from lup_dev.clock import SystemClock
 from lup_dev.codescan.conditions import loaded
@@ -30,20 +34,24 @@ from lup_dev.policy.holds import Response, answer, waiting
 from lup_dev.policy.importers import BackgroundSpawner
 from lup_dev.policy.judge import finding
 from lup_dev.policy.report import finding_lines
+from lup_dev.policy.runtime import Runtime
 from lup_dev.policy.store import Git
 from lup_dev.policy.verdicts import VerdictLog
 from lup_dev.settings import LupDevSettings
 
-if TYPE_CHECKING:
-    from lup_dev.policy.runtime import Runtime
-
 app = typer.Typer(no_args_is_help=True, help="Develop a project with agents.")
-hook = typer.Typer(no_args_is_help=True, help="Answer a runtime's hook.")
 rules = typer.Typer(no_args_is_help=True, help="lup's code rules.")
 holds = typer.Typer(help="Changes waiting for your answer.")
-app.add_typer(hook, name="hook")
 app.add_typer(rules, name="rules")
 app.add_typer(holds, name="holds")
+
+
+class Adapter(Model, arbitrary_types_allowed=True):
+    """A runtime lup knows, with how its adapter answers one of its hooks."""
+
+    runtime: Runtime
+    hook: Callable[[str, Bench], str]
+    """The adapter's `hook`: a payload in, what the hook prints out."""
 
 
 def engine() -> Checker:
@@ -51,9 +59,19 @@ def engine() -> Checker:
     return EngineChecker.configured(LupDevSettings())
 
 
+def adapters() -> list[Adapter]:
+    """List every runtime lup knows, each with how its adapter answers a hook."""
+    return [
+        # lup: ignore("runtime-mention", why="the one place listing the adapters")
+        Adapter(runtime=claude.Claude(), hook=claude.hook),
+        # lup: ignore("runtime-mention", why="the one place listing the adapters")
+        Adapter(runtime=codex.Codex(), hook=codex.hook),
+    ]
+
+
 def runtimes() -> list[Runtime]:
     """List every runtime lup knows."""
-    return [claude.Claude(), codex.Codex()]
+    return [adapter.runtime for adapter in adapters()]
 
 
 def services() -> Services:
@@ -72,22 +90,22 @@ def toplevel(directory: Path) -> Path:
     return Path(Git(cwd=directory).text("rev-parse", "--show-toplevel"))
 
 
-@hook.command("claude")
-def hook_claude() -> None:
-    """Answer one Claude Code hook, its payload on stdin."""
-    output = claude.hook(
-        sys.stdin.read(), Bench(runtime=claude.Claude(), services=services())
-    )
-    if output:
-        typer.echo(output)
-
-
-@hook.command("codex")
-def hook_codex() -> None:
-    """Answer one Codex hook, its payload on stdin."""
-    output = codex.hook(
-        sys.stdin.read(), Bench(runtime=codex.Codex(), services=services())
-    )
+@app.command("hook")
+def hook(
+    runtime: Annotated[
+        str, typer.Argument(help="The runtime whose hook this is, by its name.")
+    ],
+) -> None:
+    """Answer one of a runtime's hooks, its payload on stdin."""
+    known = adapters()
+    chosen = [adapter for adapter in known if adapter.runtime.name() == runtime]
+    if not chosen:
+        names = ", ".join(adapter.runtime.name() for adapter in known)
+        message = f"no runtime named `{runtime}`; lup knows {names}"
+        raise typer.BadParameter(message)
+    [adapter] = chosen
+    bench = Bench(runtime=adapter.runtime, services=services())
+    output = adapter.hook(sys.stdin.read(), bench)
     if output:
         typer.echo(output)
 
@@ -150,6 +168,7 @@ def rules_check(
             each
             for each in every
             if (ruled or each.owner != "lup")
+            and not worktree.roles.exempt(path, each.rule)
             and not any(
                 directive.keeps(each.rule, each.span.start.line)
                 for directive in report.directives

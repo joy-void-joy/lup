@@ -27,12 +27,16 @@ import {
     ParseNode,
     ParseNodeType,
     SetNode,
+    SliceNode,
+    StatementListNode,
     StatementNode,
+    StringNode,
 } from 'pyright/parser/parseNodes';
 import { ParseFileResults } from 'pyright/parser/parser';
 import { OperatorType, StringTokenFlags } from 'pyright/parser/tokenizerTypes';
 
 import { CommentPart, commentParts } from './comments';
+import { codeMarks, comments, Mark, Mention, mentions, Prose, Word, wordsOf, written } from './prose';
 import { ImportedModule, importedByImportAs, importedByImportFrom } from './imports';
 import { Used, usesOf } from './references';
 import { denotes, describeType, Meaning, resolve } from './semantics';
@@ -128,6 +132,10 @@ export interface Sliced {
     node: IndexNode;
     receiver: ExpressionNode;
     text: string;
+    // The slice's bounds and step, as written; none where left out.
+    start: ExpressionNode | undefined;
+    end: ExpressionNode | undefined;
+    step: ExpressionNode | undefined;
 }
 
 export interface Caught {
@@ -156,6 +164,7 @@ class Gathered extends ParseTreeWalker {
     readonly classes: ClassNode[] = [];
     readonly ifs: IfNode[] = [];
     readonly cases: CaseNode[] = [];
+    readonly docstrings: StringNode[] = [];
 
     override visitCall(node: CallNode) {
         this.calls.push(node);
@@ -204,6 +213,19 @@ class Gathered extends ParseTreeWalker {
         this.cases.push(node);
         return true;
     }
+    // A string standing alone as a statement is a docstring: a module's, a class's,
+    // a function's, or an attribute's after its assignment.
+    override visitStatementList(node: StatementListNode) {
+        const [only, ...more] = node.d.statements;
+        if (only?.nodeType === ParseNodeType.StringList && more.length === 0) {
+            for (const part of only.d.strings) {
+                if (part.nodeType === ParseNodeType.String) {
+                    this.docstrings.push(part);
+                }
+            }
+        }
+        return true;
+    }
 }
 
 export class File {
@@ -245,6 +267,11 @@ export class File {
     // aliases: `typing.Any` for `Any`.
     namesOf(node: ExpressionNode): string[] {
         return resolve(this.program, this.evaluator, node);
+    }
+
+    // The file's module, by its dotted name.
+    get moduleName(): string {
+        return this.info.moduleName;
     }
 
     // The source text a node spans, as written.
@@ -393,6 +420,45 @@ export class File {
         return this.namesOf(tested.d.leftExpr).includes('builtins.isinstance') ? tested : undefined;
     }
 
+    // Every docstring, as written between its quotes.
+    docstrings(): Prose[] {
+        return this.nodes.docstrings.map(written);
+    }
+
+    // The file's prose: its comments and its docstrings.
+    prose(): Prose[] {
+        return [...comments(this.parse), ...this.docstrings()];
+    }
+
+    // The words of a piece of prose, leaving out code in backticks, text in double
+    // quotes, and doctest examples.
+    words(prose: Prose): Word[] {
+        return wordsOf(prose);
+    }
+
+    // The reStructuredText marks in a piece of prose: double backticks, Sphinx roles.
+    codeMarks(prose: Prose): Mark[] {
+        return codeMarks(prose);
+    }
+
+    // Each name, string and comment holding one of `names`, in any case.
+    mentionsOf(names: string[]): Mention[] {
+        return mentions(this.parse, names);
+    }
+
+    // The integer an expression is written as, a negative one included; none for
+    // anything else.
+    integerLiteral(node: ExpressionNode | undefined): number | undefined {
+        if (node?.nodeType === ParseNodeType.Number && node.d.isInteger && !node.d.isImaginary) {
+            return Number(node.d.value);
+        }
+        if (node?.nodeType === ParseNodeType.UnaryOperation && node.d.operator === OperatorType.Subtract) {
+            const magnitude = this.integerLiteral(node.d.expr);
+            return magnitude === undefined ? undefined : -magnitude;
+        }
+        return undefined;
+    }
+
     // Every `except` clause.
     exceptClauses(): ExceptNode[] {
         return this.nodes.excepts;
@@ -528,10 +594,11 @@ export class File {
     slices(): Sliced[] {
         return this.nodes.subscripts.flatMap((node) => {
             const only = node.d.items.length === 1 && !node.d.trailingComma ? node.d.items[0] : undefined;
-            if (only?.d.valueExpr.nodeType !== ParseNodeType.Slice) {
+            const slice = only?.d.valueExpr;
+            if (slice?.nodeType !== ParseNodeType.Slice) {
                 return [];
             }
-            return [{ node, receiver: node.d.leftExpr, text: this.text(node) }];
+            return [{ node, receiver: node.d.leftExpr, text: this.text(node), ...boundsOf(slice) }];
         });
     }
 
@@ -596,6 +663,10 @@ export class File {
 }
 
 const emptyBuilders = ['builtins.list', 'builtins.dict', 'builtins.set'];
+
+function boundsOf(slice: SliceNode) {
+    return { start: slice.d.startValue, end: slice.d.endValue, step: slice.d.stepValue };
+}
 
 // Whether an `if` is an `elif`: the `else` of the `if` before it.
 function isElif(node: IfNode): boolean {

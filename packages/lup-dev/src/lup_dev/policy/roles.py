@@ -13,8 +13,9 @@
 
 A protected Python module gets lup's rules as production code does: protection
 adds the operator's review, it doesn't take the rules away. A protected path the
-declaration also excludes still asks, but gets no rules and no findings. The table
-of what each role gets is in `docs/judging-writes.md`, *What each change gets*.
+declaration also excludes still asks, but gets no rules and no findings. A rule the
+declaration exempts a path from (`exempt`) is lifted there alone. The table of what
+each role gets is in `docs/judging-writes.md`, *What each change gets*.
 """
 
 import tomllib
@@ -84,14 +85,28 @@ class Roles(Model):
         """Say whether the project's declaration holds `path` to nothing."""
         return matches(path, self.project.excluded)
 
+    def exempt(self, path: Path, rule: str) -> bool:
+        """Say whether the project's declaration lifts `rule` from `path`.
+
+        >>> from lup_dev.project import Exemption
+        >>> lifted = Exemption(rule="regex", paths=["parsers/**"], why="a grammar")
+        >>> roles = Roles(root=Path("/nowhere"), project=Project(exempt=[lifted]))
+        >>> [roles.exempt(Path("parsers/a.py"), r) for r in ["regex", "elif"]]
+        [True, False]
+        """
+        return any(
+            lifted.rule == rule and matches(path, lifted.paths)
+            for lifted in self.project.exempt
+        )
+
     def ruled(self, path: Path) -> bool:
         """Say whether lup's rules read `path`: a production or protected module.
 
         Never one the declaration excludes, even where it's protected.
 
-        >>> project = Project(excluded=[".claude/x/**"])
+        >>> project = Project(excluded=[".github/x/**"])
         >>> roles = Roles(root=Path("/nowhere"), project=project)
-        >>> [roles.ruled(Path(p)) for p in ["a.py", ".claude/h.py", ".claude/x/h.py"]]
+        >>> [roles.ruled(Path(p)) for p in ["a.py", ".github/h.py", ".github/x/h.py"]]
         [True, True, False]
         """
         ruled = self.role(path) in ["production", "protected"]

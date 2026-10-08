@@ -27,7 +27,8 @@ export function positionOf(parse: ParseFileResults, offset: number): Position {
     return { line: position.line + 1, column: Array.from(before).length + 1 };
 }
 
-// The range without the pairs of parentheses wrapping it whole.
+// The range without the pairs of parentheses wrapping it whole. A range that starts
+// or ends inside a token (a word in a docstring, a comment) is kept as it is.
 function withoutParentheses(parse: ParseFileResults, range: TextRange): TextRange {
     const tokens = parse.tokenizerOutput.tokens;
     if (range.length === 0) {
@@ -35,6 +36,12 @@ function withoutParentheses(parse: ParseFileResults, range: TextRange): TextRang
     }
     let first = tokens.getItemAtPosition(range.start);
     let last = tokens.getItemAtPosition(TextRange.getEnd(range) - 1);
+    const whole =
+        tokens.getItemAt(first).start === range.start &&
+        TextRange.getEnd(tokens.getItemAt(last)) === TextRange.getEnd(range);
+    if (!whole) {
+        return range;
+    }
     while (
         first < last &&
         tokens.getItemAt(first).type === TokenType.OpenParenthesis &&

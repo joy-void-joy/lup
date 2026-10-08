@@ -88,7 +88,7 @@ class ImportersPass(Model):
         return read_model(self.layout.importers, ImportersState) or ImportersState()
 
     def running(self) -> bool:
-        """Say whether a pass runs now: whether its lock is held."""
+        """Say whether a pass is running: whether its lock is held."""
         probe = self.runner()
         try:
             probe.acquire()

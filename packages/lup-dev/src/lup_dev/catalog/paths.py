@@ -23,7 +23,9 @@ class Paths(Model):
         ".pre-commit-config.yaml",
         ".vscode/**",
         ".devcontainer/**",
+        # lup: ignore("runtime-mention", why="data naming a runtime's own files")
         ".claude/**",
+        # lup: ignore("runtime-mention", why="data naming a runtime's own files")
         ".codex/**",
         "**/sync.json",
         "**/sync.json.local",

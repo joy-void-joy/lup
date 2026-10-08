@@ -276,7 +276,7 @@ class Store(Model):
         return saved.relative_to(self.worktree)
 
     def tips(self) -> list[str]:
-        """List every commit the worktree's repository names now: refs and `HEAD`."""
+        """List every commit the worktree's repository names: its refs and `HEAD`."""
         repository = self.repository()
         refs = repository.text("for-each-ref", "--format=%(objectname)").splitlines()
         head = repository.run("rev-parse", "--verify", "--quiet", "HEAD", ok=[0, 1])
@@ -284,7 +284,7 @@ class Store(Model):
         return list(dict.fromkeys([*refs, *current]))
 
     def remote_tips(self) -> list[str]:
-        """List the commits the worktree's remote-tracking refs name now."""
+        """List the commits the worktree's remote-tracking refs name."""
         listed = self.repository().text(
             "for-each-ref", "--format=%(objectname)", "refs/remotes"
         )
