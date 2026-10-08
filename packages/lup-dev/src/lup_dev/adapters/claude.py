@@ -11,7 +11,9 @@
 Claude Code asks the operator in its own prompt: `PreToolUse` answers `allow`, `ask`
 or `deny`, and a hook's `ask` prompts in auto mode too. The agent hears a
 checkpoint's report as `additionalContext` beside the call's result, and the turn
-can't end while a `Stop` hook answers `decision: block`.
+can't end while a `Stop` hook answers `decision: block`. When judging itself fails
+at a turn's end, the turn ends, and the operator is warned once in
+`systemMessage`.
 
 What this relies on, from Claude Code's hooks reference
 (code.claude.com/docs/en/hooks):
@@ -41,7 +43,9 @@ from lup_dev.policy.checkpoint import (
     ConversationEnded,
     SessionStarted,
     TurnEnded,
+    first_warning,
 )
+from lup_dev.policy.report import judge_failed
 from lup_dev.policy.runtime import Runtime
 
 
@@ -107,6 +111,17 @@ class Blocked(Output):
     reason: str
 
 
+class OperatorWarning(Output):
+    """A warning shown to the operator, not the agent, which lets the turn end.
+
+    The hooks reference: `systemMessage` is a "Warning message shown to the user",
+    and `Stop`'s own section neither discards nor redirects it. Anything `Stop`
+    tells the agent, `reason` or `additionalContext`, keeps the turn going.
+    """
+
+    system_message: str
+
+
 def failure_note(failure: Exception) -> str:
     """Say that judging failed, for the agent to pass on."""
     return f"lup's judge failed, so this wasn't judged: {failure!r}. Tell the operator."
@@ -125,7 +140,7 @@ class Payload(Model, ABC):
         """Act on the hook, and return what to print; none to print nothing."""
 
     @abstractmethod
-    def failed(self, failure: Exception) -> Output | None:
+    def failed(self, bench: Bench, failure: Exception) -> Output | None:
         """Return what to print when judging itself failed."""
 
 
@@ -142,7 +157,7 @@ class SessionStart(Payload):
         return None
 
     @override
-    def failed(self, failure: Exception) -> Output | None:
+    def failed(self, bench: Bench, failure: Exception) -> Output | None:
         return None
 
 
@@ -239,7 +254,7 @@ class PreToolUse(Payload):
                 return Specific(hook_specific_output=answer)
 
     @override
-    def failed(self, failure: Exception) -> Output | None:
+    def failed(self, bench: Bench, failure: Exception) -> Output | None:
         """Refuse a file tool's write; let other calls go on, told why.
 
         A crashing hook is a non-blocking error to Claude Code, which would let a
@@ -280,7 +295,7 @@ class PostToolUse(Payload):
         return Specific(hook_specific_output=said)
 
     @override
-    def failed(self, failure: Exception) -> Output | None:
+    def failed(self, bench: Bench, failure: Exception) -> Output | None:
         said = PostToolUseAnswer(
             hook_event_name=self.hook_event_name,
             additional_context=failure_note(failure),
@@ -302,9 +317,12 @@ class Stop(Payload):
         return Blocked(reason=reply.block) if reply.block else None
 
     @override
-    def failed(self, failure: Exception) -> Output | None:
-        """Say so once; a judge that keeps failing mustn't keep the turn from ending."""
-        return None if self.stop_hook_active else Blocked(reason=failure_note(failure))
+    def failed(self, bench: Bench, failure: Exception) -> Output | None:
+        """Let the turn end, and warn the operator once: the agent can't fix it."""
+        warning = judge_failed(failure)
+        if not first_warning(bench.services.layout, self.session_id, warning):
+            return None
+        return OperatorWarning(system_message=warning)
 
 
 class SubagentStop(Payload):
@@ -321,7 +339,7 @@ class SubagentStop(Payload):
         return Blocked(reason=reply.block) if reply.block else None
 
     @override
-    def failed(self, failure: Exception) -> Output | None:
+    def failed(self, bench: Bench, failure: Exception) -> Output | None:
         return None
 
 
@@ -342,7 +360,7 @@ def hook(raw: str, bench: Bench) -> str:
     try:
         output = received.answer(bench)
     except Exception as failure:
-        output = received.failed(failure)
+        output = received.failed(bench, failure)
     if output is None:
         return ""
     return output.model_dump_json(by_alias=True, exclude_none=True)

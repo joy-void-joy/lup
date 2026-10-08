@@ -249,9 +249,17 @@ class Layout(Model):
         """Say where each worktree's `HEAD` at its last checkpoint is kept."""
         return self.repository(repository) / "heads.json"
 
+    def declaration(self, repository: Path) -> Path:
+        """Say where the last of a repository's declarations that loaded is kept."""
+        return self.repository(repository) / "declaration.json"
+
     def session(self, session: str) -> Path:
         """Say where a session's repository and the worktrees it holds are kept."""
         return self.session_index / f"{session}.json"
+
+    def warned(self, session: str) -> Path:
+        """Say where the failures a session's operator was warned of are kept."""
+        return self.session_index / f"{session}.warned.json"
 
     @property
     def approval(self) -> Path:

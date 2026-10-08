@@ -217,7 +217,8 @@ def load(root: Path) -> Declared:
 
     Raise `ProjectError` where `[tool.lup] project` names something that can't be
     imported or isn't a `Project`: a declaration that silently fell back to the
-    defaults would judge with the wrong roles.
+    defaults would judge with the wrong roles. Whatever importing it raises (a
+    name the installed `lup_dev` lacks, conflict markers, a failing call) is that.
     """
     pyproject = Pyproject.read(CheckoutLayout(root=root).pyproject)
     reference = pyproject.tool.lup.project
@@ -227,9 +228,9 @@ def load(root: Path) -> Declared:
     with importable(import_roots(root, pyproject), root):
         try:
             declared = entry.load()
-        except (ImportError, AttributeError) as missing:
-            message = f"`[tool.lup] project = {reference!r}` can't be loaded: {missing}"
-            raise ProjectError(message) from missing
+        except Exception as failure:
+            message = f"`[tool.lup] project = {reference!r}` can't be loaded: {failure}"
+            raise ProjectError(message) from failure
         module = importlib.import_module(entry.module)
     if not isinstance(declared, Project):
         message = f"`{reference}` is a {type(declared).__name__}, not a `Project`"

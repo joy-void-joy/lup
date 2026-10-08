@@ -71,7 +71,7 @@ from lup_dev.policy.store import (
 )
 from lup_dev.policy.verdicts import Verdict, VerdictLog
 from lup_dev.policy.worktrees import Holding, Place, SessionIndex, place
-from lup_dev.project import Declared, load
+from lup_dev.project import Declared, ProjectError, load
 
 
 class Services(Model, arbitrary_types_allowed=True):
@@ -176,6 +176,26 @@ def decoded(content: bytes | None) -> str | None:
     return None if content is None else content.decode(errors="replace")
 
 
+class LastDeclaration(Model):
+    """The last of a repository's declarations that loaded, kept for when one can't."""
+
+    declared: Declared
+    worktree: Path
+    """The worktree it was loaded from."""
+    told: str = ""
+    """The failure to load a declaration that the agent was last told of."""
+
+
+class Loaded(Model):
+    """A worktree's declaration, as the judge uses it."""
+
+    declared: Declared
+    failure: str = ""
+    """Why the worktree's own couldn't load, where the repository's last stands in."""
+    standing: Path | None = None
+    """The worktree the declaration standing in was loaded from."""
+
+
 class Worktree(Model):
     """One worktree as the judge sees it: its store, its roles, its repository."""
 
@@ -183,25 +203,85 @@ class Worktree(Model):
     repository: Path
     """Its repository's shared git directory, which keys the verdict log."""
     store: Store
+    kept: Path | None = None
+    """Where the repository's last declaration that loaded is kept, which judges
+    when this worktree's can't load; none lets that failure stand, as the gate
+    does."""
 
     @classmethod
     def at(cls, root: Path, layout: Layout) -> Worktree:
-        """Open the worktree at `root`, asking git for its repository."""
+        """Open the worktree at `root`, asking git for its repository.
+
+        Its declaration must load: nothing stands in for it.
+        """
         common = Git(cwd=root).text(
             "rev-parse", "--path-format=absolute", "--git-common-dir"
         )
-        return cls.of(root, Path(common), layout)
+        store = Store(layout=layout.store(root), worktree=root)
+        return cls(root=root, repository=Path(common), store=store)
 
     @classmethod
     def of(cls, root: Path, repository: Path, layout: Layout) -> Worktree:
-        """Open the worktree at `root` of the repository at `repository`."""
+        """Open the worktree at `root` of the repository at `repository`, to judge.
+
+        Where its declaration can't load, the repository's last that loaded
+        judges instead (#21).
+        """
         store = Store(layout=layout.store(root), worktree=root)
-        return cls(root=root, repository=repository, store=store)
+        kept = layout.declaration(repository)
+        return cls(root=root, repository=repository, store=store, kept=kept)
 
     @cached_property
+    def loaded(self) -> Loaded:
+        """Its project's declaration, loaded when first read, and kept.
+
+        Where it can't load, the repository's last declaration that loaded stands
+        in, if one is kept; a branch adding a field to the declaration otherwise
+        breaks the judge in its own worktree until the judge is reinstalled.
+        """
+        try:
+            found = load(self.root)
+        except ProjectError as failure:
+            last = read_model(self.kept, LastDeclaration) if self.kept else None
+            if last is None:
+                raise
+            return Loaded(
+                declared=last.declared, failure=str(failure), standing=last.worktree
+            )
+        if self.kept is not None:
+            with FileLock(self.kept.with_name(f"{self.kept.name}.lock")):
+                last = read_model(self.kept, LastDeclaration)
+                if last is None or last.declared != found:
+                    told = last.told if last else ""
+                    keep = LastDeclaration(
+                        declared=found, worktree=self.root, told=told
+                    )
+                    write_model(self.kept, keep)
+        return Loaded(declared=found)
+
+    @property
     def declared(self) -> Declared:
-        """Its project's declaration, loaded when first read."""
-        return load(self.root)
+        """Its project's declaration, or the one standing in for it."""
+        return self.loaded.declared
+
+    def told(self) -> str:
+        """Say, once for each failure, that a stand-in declaration judges here."""
+        loaded = self.loaded
+        if not loaded.failure or self.kept is None:
+            return ""
+        with FileLock(self.kept.with_name(f"{self.kept.name}.lock")):
+            last = read_model(self.kept, LastDeclaration)
+            if last is None or last.told == loaded.failure:
+                return ""
+            write_model(self.kept, last.model_copy(update={"told": loaded.failure}))
+        return (
+            f"lup can't load the project's declaration in {self.root}: "
+            f"{loaded.failure}. It judges there with the last of this repository's "
+            f"declarations that loaded, from {loaded.standing}, until this one "
+            "loads. Tell the operator: if the declaration uses something the "
+            "installed judge predates, reinstalling it from `dev` "
+            "(`lup-dev install`) fixes this; otherwise the declaration needs fixing."
+        )
 
     @cached_property
     def roles(self) -> Roles:
@@ -865,7 +945,9 @@ def checkpoint(bench: Bench, worktree: Worktree, key: str, agent: str) -> Checke
         commits = brought(bench, worktree, snapshot, plans)
         if root not in heads.worktrees or heads.worktrees[root] != head:
             worktree.record(services.layout, head)
-        checked = remember(worktree, session, agent, acted, commits.told)
+        notice = worktree.told() if plans else ""
+        told = commits.told.then(Checked(notices=[notice] if notice else []))
+        checked = remember(worktree, session, agent, acted, told)
     python = [
         judgement.path
         for judgement in [*acted.landed, *commits.landed]
@@ -1014,6 +1096,30 @@ def settle(
         notices=[f"The operator approved the held change to {named}{comment}"]
     )
     return notice.then(checkpoint(bench, worktree, key, agent))
+
+
+class Warned(MutableModel):
+    """The failures of the judge a session's operator was warned of, each once."""
+
+    failures: list[str] = []
+
+
+def first_warning(layout: Layout, session: str, failure: str) -> bool:
+    """Note that the operator is warned of `failure`; say whether it's the first time.
+
+    A failure of the judge at a turn's end is the operator's to fix, not the
+    agent's, so the turn ends, and the operator hears of it once per session
+    rather than at every turn (#21).
+    """
+    path = layout.warned(session)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with FileLock(path.with_name(f"{path.name}.lock")):
+        warned = read_model(path, Warned) or Warned()
+        if failure in warned.failures:
+            return False
+        warned.failures = [*warned.failures, failure]
+        write_model(path, warned)
+    return True
 
 
 def mail_for(worktree: Worktree, key: str, agent: str, runtime: Runtime) -> str:

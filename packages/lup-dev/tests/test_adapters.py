@@ -212,11 +212,17 @@ def test_claude_tells_the_agent_when_a_checkpoint_fails(
     assert "lup's judge failed" in output["hookSpecificOutput"]["additionalContext"]
 
 
-def test_claude_lets_a_turn_end_once_when_judging_keeps_failing() -> None:
-    stop = claude.Stop(
-        session_id="s1", cwd=Path(), hook_event_name="Stop", stop_hook_active=True
-    )
-    assert stop.failed(RuntimeError("x")) is None
+def test_claude_lets_a_turn_end_when_judging_fails_warning_the_operator_once(
+    broken: Services, repo: Path
+) -> None:
+    bench = Bench(runtime=claude.Claude(), services=broken)
+    claude.hook(pre_tool_use(repo, "Bash", {"command": "sed"}), bench)
+    (repo / CORE).write_text((repo / CORE).read_text() + "z = 1\n")
+    stop = payload(repo, "Stop", stop_hook_active=False)
+    output = json.loads(claude.hook(stop, bench))
+    assert output["systemMessage"].startswith("lup's judge failed at a turn's end")
+    assert "decision" not in output
+    assert claude.hook(stop, bench) == ""
 
 
 def test_claude_knows_its_own_sessions(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -368,6 +374,29 @@ def test_codex_tells_the_agent_when_a_checkpoint_fails(
     (repo / CORE).write_text((repo / CORE).read_text() + "z = 1\n")
     output = json.loads(codex.hook(post(repo, "", call="b1"), bench))
     assert "lup's judge failed" in output["hookSpecificOutput"]["additionalContext"]
+
+
+def test_codex_lets_a_turn_end_when_judging_fails_warning_the_operator_once(
+    broken: Services, repo: Path
+) -> None:
+    bench = Bench(runtime=codex.Codex(), services=broken)
+    codex.hook(
+        payload(
+            repo,
+            "PreToolUse",
+            turn_id="u1",
+            tool_name="Bash",
+            tool_input={},
+            tool_use_id="b1",
+        ),
+        bench,
+    )
+    (repo / CORE).write_text((repo / CORE).read_text() + "z = 1\n")
+    stop = payload(repo, "Stop", turn_id="u1", stop_hook_active=False)
+    output = json.loads(codex.hook(stop, bench))
+    assert output["systemMessage"].startswith("lup's judge failed at a turn's end")
+    assert "decision" not in output
+    assert codex.hook(stop, bench) == ""
 
 
 def test_codex_knows_its_own_sessions(monkeypatch: pytest.MonkeyPatch) -> None:

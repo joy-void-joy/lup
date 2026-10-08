@@ -4,6 +4,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
 import sh
 from filelock import FileLock
 
@@ -22,6 +23,7 @@ from lup_dev.policy.holds import Holds, Response, answer, waiting
 from lup_dev.policy.importers import ImportersPass
 from lup_dev.policy.store import read_model
 from lup_dev.policy.verdicts import VerdictLog
+from lup_dev.project import ProjectError
 
 if TYPE_CHECKING:
     from conftest import FakeRuntime, Kit, Shell
@@ -865,3 +867,63 @@ def test_a_repository_nested_in_a_worktree_is_another_repository(
         call="w1", tool="Write", path=nested / "x.py", text="x = 1  # BAD regex\n"
     )
     assert before(kit.bench, write, SESSION, repo).outcome is None
+
+
+PROTECTING_CORE = (
+    "from lup_dev.project import Project, Protected\n"
+    'project = Project(protected=Protected.default().add("src/pkg/core.py"))\n'
+)
+
+
+def declare(root: Path, declaration: str) -> None:
+    (root / "pyproject.toml").write_text(
+        '[tool.lup]\nproject = "lup_project:project"\n'
+        '[tool.pytest]\ntestpaths = ["tests", "src"]\n'
+    )
+    (root / "lup_project.py").write_text(declaration)
+
+
+def core_edit(root: Path) -> Replacement:
+    return Replacement(
+        call="e1", tool="Edit", path=root / CORE, old="return x\n", new="return x + 1\n"
+    )
+
+
+def test_the_last_declaration_that_loaded_stands_in_for_one_that_cant(
+    kit: Kit, repo: Path, linked: Path
+) -> None:
+    declare(linked, PROTECTING_CORE)
+    declare(repo, "from lup_dev.project import Unheard\n" + PROTECTING_CORE)
+    start(kit, repo)
+    assert before(kit.bench, core_edit(linked), SESSION, repo).outcome == "ask"
+    stood_in = before(kit.bench, core_edit(repo), SESSION, repo)
+    assert stood_in.outcome == "ask"
+    assert "is a protected path (src/pkg/core.py)" in stood_in.reason
+    call(kit, repo, "c1")
+    (repo / "README.md").write_text("# Changed\n")
+    told = finish(kit, repo, "c1").context
+    assert f"lup can't load the project's declaration in {repo}" in told
+    assert f"from {linked}, until this one loads" in told
+    call(kit, repo, "c2")
+    (repo / "README.md").write_text("# Changed again\n")
+    assert finish(kit, repo, "c2").context == ""
+
+
+def test_with_no_declaration_kept_one_that_cant_load_fails(
+    kit: Kit, repo: Path
+) -> None:
+    declare(repo, "from lup_dev.project import Unheard\n")
+    start(kit, repo)
+    with pytest.raises(ProjectError, match="Unheard"):
+        before(kit.bench, core_edit(repo), SESSION, repo)
+
+
+def test_the_gate_lets_no_declaration_stand_in(
+    kit: Kit, repo: Path, linked: Path
+) -> None:
+    declare(linked, PROTECTING_CORE)
+    declare(repo, "from lup_dev.project import Unheard\n")
+    start(kit, repo)
+    before(kit.bench, core_edit(linked), SESSION, repo)
+    with pytest.raises(ProjectError):
+        _ = Worktree.at(repo, kit.layout).declared
