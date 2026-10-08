@@ -1,13 +1,18 @@
 """Where `lup_dev` keeps what it stores, as models whose fields are the places.
 
-Two homes (`docs/judging-writes.md`, *Where things live*):
+The homes (`docs/judging-writes.md`, *Where things live*):
 - lup's own state, under `$XDG_STATE_HOME/lup/`: each worktree's store, outside the
   worktree so the restore source is out of the agent's reach, and each
   repository's verdict log;
-- inside a worktree, `.lup/saved/`, where a refused version waits for the agent.
+- each worktree engine's socket, under `$XDG_RUNTIME_DIR/lup/`, since a socket's
+  path is limited in length;
+- inside a worktree, `.lup/saved/`, where a refused version waits for the agent;
+- inside `lup_dev`, the built engine (`Bundle`).
 """
 
+import getpass
 import hashlib
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -24,6 +29,37 @@ def digest(path: Path) -> str:
     64
     """
     return hashlib.sha256(str(path).encode()).hexdigest()
+
+
+def short_digest(path: Path) -> str:
+    """Name a directory by its absolute path, short enough for a socket's path.
+
+    A Unix socket's path holds at most 107 bytes on Linux, 103 on macOS.
+
+    >>> len(short_digest(Path("/work/lup")))
+    32
+    """
+    return hashlib.blake2b(str(path).encode(), digest_size=16).hexdigest()
+
+
+class Bundle(Model):
+    """The built engine, shipped inside `lup_dev`: its script and the stubs beside it.
+
+    The engine's build (`packages/lup-dev/checker/build.py`) writes it; git ignores
+    it, and the package carries it when installed from a built checkout.
+    """
+
+    directory: Path = Path(__file__).parent / "codescan" / "bundle"
+
+    @property
+    def script(self) -> Path:
+        """The engine itself, one JavaScript file run by Node."""
+        return self.directory / "engine.js"
+
+    @property
+    def stubs(self) -> Path:
+        """The standard library's stubs at pyright's pinned release, which it reads."""
+        return self.directory / "typeshed-fallback"
 
 
 class StoreLayout(Model):
@@ -86,6 +122,16 @@ class StoreLayout(Model):
         """What the background pass prints, kept for when it fails."""
         return self.home / "importers.log"
 
+    @property
+    def engine_lock(self) -> Path:
+        """The lock a client holds while it starts the worktree's engine."""
+        return self.home / "engine.lock"
+
+    @property
+    def engine_log(self) -> Path:
+        """What the worktree's engine prints, kept for when it fails."""
+        return self.home / "engine.log"
+
     def session(self, session: str) -> Path:
         """Say where one session's state is kept."""
         return self.sessions / f"{session}.json"
@@ -125,21 +171,34 @@ class CheckoutLayout(Model):
         """The project's own ruff, so findings match what its gate runs."""
         return self.root / ".venv" / "bin" / "ruff"
 
+    @property
+    def rules_reference(self) -> Path:
+        """The reference to lup's rules, compiled from the engine's table: lup's own."""
+        return self.root / "docs" / "rules.md"
+
     def saved_copy(self, number: int, path: Path) -> Path:
         """Say where the version refused in refusal `number` is saved, by its path."""
         return self.saved / str(number) / path
 
 
 class Layout(Model):
-    """Where lup's state lives for one user: `$XDG_STATE_HOME/lup`."""
+    """Where lup's state lives for one user: `$XDG_STATE_HOME/lup`, and its sockets."""
 
     state: Path
+    runtime: Path = Path(tempfile.gettempdir()) / f"lup-{getpass.getuser()}"
+    """lup's sockets: `$XDG_RUNTIME_DIR/lup`, or the user's own temporary directory."""
 
     @classmethod
     def of(cls, settings: LupDevSettings) -> Layout:
-        """Place lup's state where the settings say, or XDG's default."""
+        """Place lup's state and sockets where the settings say, or XDG's defaults."""
         home = settings.xdg_state_home or Path.home() / ".local" / "state"
-        return cls(state=home / "lup")
+        if settings.xdg_runtime_dir is None:
+            return cls(state=home / "lup")
+        return cls(state=home / "lup", runtime=settings.xdg_runtime_dir / "lup")
+
+    def engine_socket(self, worktree: Path) -> Path:
+        """Say where the engine of the worktree at `worktree` listens."""
+        return self.runtime / f"{short_digest(worktree)}.sock"
 
     @property
     def worktrees(self) -> Path:

@@ -1,0 +1,9 @@
+{
+    "name": "lup-engine",
+    "description": "lup's typed engine: pyright's own tree with lup's rules on it.",
+    "private": true,
+    "license": "MIT",
+    "devDependencies": {
+        "esbuild": "0.28.2"
+    }
+}

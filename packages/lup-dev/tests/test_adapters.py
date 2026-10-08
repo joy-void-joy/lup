@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from lup_dev.adapters import claude, codex
-from lup_dev.codescan.contract import Checker, FileReport, Source
+from lup_dev.codescan.contract import Checker, FileReport, Rule, Source
 from lup_dev.policy.checkpoint import Bench, Running, Services
 from lup_dev.policy.holds import Holds, Response, waiting
 from lup_dev.policy.store import read_model
@@ -161,6 +161,10 @@ def test_claude_subagent_stop(on_claude: Bench, repo: Path) -> None:
 
 
 class Broken(Checker):
+    def rules(self) -> list[Rule]:
+        crashed = "the engine crashed"
+        raise RuntimeError(crashed)
+
     def check(self, root: Path, sources: list[Source]) -> list[FileReport]:
         crashed = "the engine crashed"
         raise RuntimeError(crashed)

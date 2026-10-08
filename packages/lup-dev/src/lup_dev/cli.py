@@ -19,9 +19,11 @@ from lup_dev.clock import SystemClock
 from lup_dev.codescan.conditions import loaded
 from lup_dev.codescan.contract import Checker, Finding, Source
 from lup_dev.codescan.directives import Checking, Fired, Gate, GitHubIssues
+from lup_dev.codescan.engine import EngineChecker
+from lup_dev.codescan.reference import reference
 from lup_dev.codescan.ruff import Ruff
 from lup_dev.errors import LupDevError
-from lup_dev.layout import Layout
+from lup_dev.layout import CheckoutLayout, Layout
 from lup_dev.policy.checkpoint import Bench, Services, Worktree
 from lup_dev.policy.holds import Response, answer, waiting
 from lup_dev.policy.importers import BackgroundSpawner
@@ -43,17 +45,9 @@ app.add_typer(rules, name="rules")
 app.add_typer(holds, name="holds")
 
 
-class EngineMissingError(LupDevError):
-    """The typed engine isn't installed beside the judge."""
-
-
 def engine() -> Checker:
-    """Return the typed engine the judge asks about files."""
-    message = (
-        "the typed engine (`lup_dev.codescan.engine`) isn't installed yet: "
-        "it lands with the engine's own branch"
-    )
-    raise EngineMissingError(message)
+    """Return the typed engine the judge asks about files, as this machine sets it."""
+    return EngineChecker.configured(LupDevSettings())
 
 
 def runtimes() -> list[Runtime]:
@@ -95,6 +89,21 @@ def hook_codex() -> None:
     )
     if output:
         typer.echo(output)
+
+
+@rules.command("list")
+def rules_list() -> None:
+    """List the engine's rules: the mistake each prevents, and its steer."""
+    for rule in engine().rules():
+        typer.echo(f"{rule.id}: {rule.mistake}\n    steer: {rule.steer}")
+
+
+@rules.command("docs")
+def rules_docs() -> None:
+    """Write `docs/rules.md`, compiled from the engine's rule table."""
+    target = CheckoutLayout(root=toplevel(Path.cwd())).rules_reference
+    target.write_text(reference(engine().rules()))
+    typer.echo(f"wrote {target}")
 
 
 @rules.command("check")

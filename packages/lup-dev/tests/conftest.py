@@ -24,6 +24,7 @@ from lup_dev.codescan.contract import (
     Finding,
     Parameter,
     Position,
+    Rule,
     Signature,
     Source,
     Span,
@@ -190,6 +191,9 @@ class FakeEngine(Checker):
             directives=directives(content),
             surface=surface(source.path, content),
         )
+
+    def rules(self) -> list[Rule]:
+        return []
 
     def check(self, root: Path, sources: list[Source]) -> list[FileReport]:
         self.checked.append(sources)

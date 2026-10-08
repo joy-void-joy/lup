@@ -211,9 +211,10 @@ Every lup rule reads one typed tree: each file parsed once and type-checked once
 
 **Pyright's own tree, built against its source at a pinned release.**
 - **What it is:** a small TypeScript program built against `packages/pyright-internal` from pyright's repository, shipped prebuilt inside `lup-dev`.
-- **How it runs:** one long-lived process per worktree with a session, loading the project the way pyright does and keeping it warm. It stops when no session has used it for a while (an overridable default).
+- **How it runs:** one long-lived process per worktree with a session, loading the project the way pyright does and keeping it warm, on a Unix socket under `$XDG_RUNTIME_DIR/lup/`. A hook that finds none starts it, under a lock so hooks running at once start one. It stops when nothing has asked it for `LUP_ENGINE_IDLE` (15 minutes by default), and at once for a client that expects another build, so a rebuilt engine replaces the old one at the next request.
+- **Keeping in step without a file watcher:** a file checked with would-be content holds it until the next request, which puts the disk's back unless the edit landed, so a landed edit costs no second check. A file read from disk is checked by its `stat`, with pyright's own fingerprint deciding; a changed directory re-enumerates the project's files; a changed import search path or configuration reloads.
 - **For each judgement:** it checks the given files, on disk or as would-be content. Each rule's check (*How a rule is declared*, below) reads pyright's parse tree, asking pyright's type evaluator for any expression's type. It also reports each file's public surface, the `# lup:` directives, and each file's own imports against the import-linter contracts.
-- **What comes back:** one list, pyright's type errors and lup's findings in the same shape, as JSON lines the Python side reads into pydantic models.
+- **What comes back:** one list, pyright's errors and warnings and lup's findings in the same shape, as JSON lines the Python side reads into pydantic models. Spans count lines and columns from 1, columns in characters as Python counts them, and leave out the parentheses around an expression.
 
 Pyright has no plugin API, and its published package is one bundled file whose internals can't be imported. Nothing existing does this: Zzzen/pyright-lint has been dead since February 2023; basedpyright, ty, Pyrefly and Zuban offer no extension API; pyright's type server answers one query per expression, which is the oracle approach. mypy's tree in Python stays the fallback if building on pyright's internals turns out too costly to keep up; it would be a second type checker that can disagree with pyright at the edges.
 
@@ -239,7 +240,8 @@ Pyright has no plugin API, and its published package is one bundled file whose i
 **One table:** `lup_dev/catalog/rules.ts`, a plain object literal with one entry per rule, keyed by the rule's id. Each entry holds the rule whole:
 - **`mistake`:** the mistake it prevents, as a sentence that stands alone;
 - **`steer`:** where it steers instead, as a sentence that stands alone;
-- **`check(file)`:** how it recognises its case, reading pyright's tree and asking pyright's type evaluator, through the engine's helpers.
+- **`check(file)`:** how it recognises its case, reading pyright's tree and asking pyright's type evaluator, through the engine's helpers;
+- **`examples`:** its specification, as code (below).
 
 ```ts
 'string-split': {
@@ -258,29 +260,30 @@ Pyright has no plugin API, and its published package is one bundled file whose i
             }
         }
     },
+    examples: {
+        flags: [{ code: python`…url.split("/")[2]…`, rewritten: python`…urlsplit(url).hostname…` }],
+        passes: [python`…shlex.split(line), line.split()…`],
+    },
 },
 ```
 
 - **Where it lives:** in `lup_dev/catalog/`, with lup's other policy data, which `lup_project.py` protects: the operator reviews every change to a rule before it lands. It's TypeScript in a Python package's directory. The engine's build (`packages/lup-dev/checker/`) compiles the table into its bundle, and the table imports the engine's helpers through a path alias (`checker/…`) rather than relative paths across the tree. The build hands its `tsconfig.json` to the bundler explicitly: the bundler otherwise looks for the one nearest each file, and finds none above the table (checked with esbuild and tsc).
 - **Each check stays short,** reading like the rule's sentence. What checks share is a helper in the engine (`checker/src/`), outside the table: finding the calls of a method, whether pyright finds an expression to be text, what a written type denotes with its aliases. A check that grows long is a helper waiting to be written.
 - **The engine makes each finding whole.** A check reports where and what it saw ("`tuple[str, int]` is a tuple type"); the engine adds the rule's mistake to the message, and its steer. The judge receives complete findings, so `codescan/contract.py` doesn't change.
-- **Python learns about rules only from the engine.** The engine lists its rules (id, mistake, steer) when it starts. The judge checks a project's selection and each `ignore`'s rule against that list, `lup-dev rules list` prints it, and a request naming a rule the engine doesn't have is refused. Python never declares a rule.
+- **Python learns about rules only from the engine.** The engine lists its rules (id, mistake, steer, examples) straight from its table, without loading a project (`Checker.rules()`, `lup-dev rules list`). A check names the project's selection, or none for every rule, and the engine refuses one naming a rule it doesn't have. An `ignore` naming no rule never keeps a finding, so the judge reports it as `unused-ignore`. Python never declares a rule.
 
 **Why a table of code:** recognising a case takes pyright's own tree and types. A vocabulary of declared matchers kept recognition reviewable, but spread a rule over the vocabulary and the engine. A spike (`tmp/spikes/rule-shape/`) then compared this table with Python rules over `ast` asking the warm engine by position. Both gave the same findings on 739 files. The Python version needed two trees to agree, though, and silently missed types pyright reads in strings outside annotations (`cast("tuple[int, str]", value)`) until the engine listed them; its checks also cost 10 to 20 times more. The table reads the one typed tree directly.
 
-**Examples are the specification:** `lup_dev/catalog/examples/<rule-id>/flagged.py` and `fixed.py`, found by the rule's id.
-- The flagged module gets a finding from that rule and from no other, so each example shows one rule.
-- The fixed module passes the whole catalog, ruff and pyright: a rule's steer never trips another rule (`docs/conventions.md`, *Keeping the rules cohesive*).
-- Each is the module `example/module.py` of a small package the engine's tests assemble, which run every rule's pair. A rule without both files fails a test.
+**Examples are the specification,** held in the entry as code (`examples`), short enough to read with the rule:
+- **`flags`:** code the rule flags, each with its `rewritten`, the same code done the steer's way. A rule needs several kinds of case, which a pair of files couldn't hold.
+- **`passes`:** near misses the rule must not flag: `.split()` with no separator, `shlex.split(…)`.
+- **What the engine's tests check,** placing each snippet as a module of a small package: each of `flags` gets a finding from its rule and no other, so each example shows one rule; each `rewritten` passes every rule, ruff and pyright, so a rule's steer never trips another (`docs/conventions.md`, *Keeping the rules cohesive*); each of `passes` gets no finding from its rule; and every rule has at least one of `flags`.
+- **Kept short:** a rule needing a long example has a check or a steer that's too broad.
+- Being strings in the table, they're no Python file of the tree, so no tool needs telling to leave them out.
 
-**How each tool treats the examples,** since the flagged ones are deliberately wrong and sit in the package's source:
-- **The judge:** a write to an example asks the operator, and gets lup's rules like any protected module (#14): a flagged example's own finding would refuse it, at the edit and in `lup-dev rules check`. Nothing exempts them, since the examples are moving into the rule table as strings; until they have, the flagged modules don't pass the judge.
-- **The gate's ruff and pyright:** the flagged modules are left out by pattern (ruff's `lint.exclude`, pyright's `ignore`); the formatter still formats them. The fixed modules are checked like any code, and again by the engine's tests, with every rule, as a package of their own. ruff's `INP001` is off for the examples, each being a module on its own.
-- **pytest:** `catalog/examples/` is ignored, so no example is imported for its doctests or collected as a test.
-- *Alternatives:* the examples under a test root, which the tests' exemptions would cover but which sits outside the protected catalog; or files the tools don't read as Python, which would lose the gate's check of the fixed modules.
-- **Every module under `catalog/`,** `catalog/paths.py` included, gets lup's rules at the edit, at the turn's end and at `lup-dev rules check`, and the operator's review besides (*What each change gets*).
+**`docs/rules.md` is compiled from the table** (`lup-dev rules docs`, which asks the engine) and committed: the one generated file. It opens by saying it's generated from `lup_dev/catalog/rules.ts`, and that the table is what to edit. A gate test compiles it again and fails when the committed copy is stale. Once every rule is in the table, `docs/conventions.md`'s table of rules becomes a pointer to it, with a test that every rule id it names under *Enforced by:* is one the engine has. The engine's bundle is built, never committed.
 
-**`docs/rules.md` is compiled from the table** (`lup-dev rules docs`, which asks the engine) and committed: the one generated file. It opens by saying it's generated from `lup_dev/catalog/rules.ts`, and that the table is what to edit. A gate test compiles it again and fails when the committed copy is stale. `docs/conventions.md`'s table of rules becomes a pointer to it, and a test checks that every rule id it names under *Enforced by:* is one the engine has. The engine's bundle is built, never committed.
+**Every module under `catalog/` is protected,** the table included: changing one asks the operator, and a Python module there gets lup's rules as well, at the edit, at the turn's end and at `lup-dev rules check` (#14).
 
 **Selection and exemptions are the project's declaration's:** which rules run (`DESIGN.md`: `rules=Rules.all() - {"tuple-shape"}`), and where a rule doesn't apply (`lup.types` derives lup's own bases from pydantic's `BaseModel`, which `model-mutability` refuses elsewhere). The table describes rules and holds no project's exemptions. Until the declaration piece brings selection, every rule runs on every file the judge sends the engine, which is production code only.
 
@@ -360,6 +363,8 @@ Both runtimes hear a report the same way. Codex's docs say a `PostToolUse` hook'
 | The verdict log | `$XDG_STATE_HOME/lup/repositories/<id>/verdicts.jsonl` | One place to measure a repository's verdicts across its worktrees |
 | Which worktree each session started in | `$XDG_STATE_HOME/lup/sessions/<session>.json` | A session's later events find their worktree even after a `cd` elsewhere |
 | Saved versions | `<worktree>/.lup/saved/` | The agent has to edit and move them |
+| A worktree's engine: its socket, and its lock and log | `$XDG_RUNTIME_DIR/lup/<id>.sock` (or `lup-<user>` in the system's temporary directory); the lock and log in the store | A socket's path holds about a hundred bytes, which the store's path can exceed |
+| The built engine and its stubs | `lup_dev/codescan/bundle/`, built by `packages/lup-dev/checker/build.py`, ignored by git | The installed package carries it, so the judge finds its engine beside it |
 | The judge itself | A local copy installed from `dev` (`uv tool install` from the `dev` checkout), refreshed when `dev` moves | An agent editing the rules in its worktree isn't judged by its own edit, and a broken judge in a worktree can't refuse every write including its own fix (in the first lup, conflict markers in the compiled hook refused every command). A branch changing the rules runs them in its own tests until it lands |
 
 In lup itself, the judge's own source isn't asked about at each edit: the judge that runs is the installed copy, so an edit in a worktree can't change what judges it. It's protected after the edit and before it runs, the way the art studio's trust on launch worked. Refreshing the installed judge from `dev` shows the operator the diff of its source since the copy they last approved, and the approved copy keeps judging until they approve the new one. The operator sees exactly what will run before it runs. `DESIGN.md`'s protection of lup's policy and launch code is this same review, applied to every launch once trust on launch is ported.
@@ -385,14 +390,15 @@ In `packages/lup-dev/src/lup_dev/`, by subsystem (`docs/conventions.md`, *Packag
 | `policy/report.py` | The reports, in pyright's shape |
 | `policy/runtime.py` | The `Runtime` ABC: what the core needs to know about a runtime, which each adapter implements |
 | **`codescan/`** | **Reading code** |
-| `codescan/contract.py` | The engine's contract: findings, type errors, surfaces, directives for a set of files; the engine's client lands beside it as `codescan/engine.py` |
+| `codescan/contract.py` | The engine's contract: findings, type errors, surfaces, directives for a set of files, and the rules the engine lists |
+| `codescan/engine.py` | `EngineChecker`, the engine's client: finds or starts a worktree's engine on its socket, asks it, and replaces one from another build |
+| `codescan/reference.py` | `docs/rules.md`, compiled from the rules the engine lists |
 | `codescan/directives.py` | The `# lup:` directive models, and checking them |
 | `codescan/conditions.py` | The `Condition` ABC, the stock `PythonAvailable` and `PackageReleased`, and reading a project's conditions |
 | `codescan/ruff.py` | ruff's findings on the changed files, in the engine's `Finding` shape |
 | **`catalog/`** | **The data that sets lup's policy, protected** |
 | `catalog/paths.py` | The default path patterns each role starts from |
-| `catalog/rules.ts` | lup's rules, one entry each: its mistake, its steer and its check, compiled into the engine |
-| `catalog/examples/` | Each rule's examples, by its id: a module it flags, and the module fixed |
+| `catalog/rules.ts` | lup's rules, one entry each: its mistake, its steer, its check and its examples, compiled into the engine |
 | **root** | **Package-wide** |
 | `project.py` | The minimal `Project` declaration (`Protected`, `Pytest`), and loading it from `[tool.lup]` |
 | `settings.py`, `layout.py` | The environment variables `lup_dev` reads; where it keeps what it stores |
@@ -409,12 +415,12 @@ The `lup-dev` command is this piece's stand-in until the declaration and CLI pie
 - `.claude/settings.json` gets the hooks (`SessionStart`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, `SubagentStop`, each `lup-dev hook claude`, matching every tool) and the narrow `Bash` allow rules, and loses the `permissions.ask` on `Write` and the interim checker hook (`.claude/hooks/interim_rules.py`, removed).
 - `.codex/hooks.json` gets the same hooks (`lup-dev hook codex`; no `PostToolUseFailure`, no `PermissionRequest`), with `PostToolUse` and `Stop` given a `timeout` above a day for holds, and `PostToolUse` an `additionalContextLimit` high enough for a whole report.
 - `.gitignore` gets `.lup/` (already there).
-- The typed engine is wired in one place, `cli.engine()`, which raises until the engine lands.
+- The typed engine is wired in one place, `cli.engine()`. It's built before installing (`uv run packages/lup-dev/checker/build.py`), and the installed package carries the bundle.
 
 ## Checks owed
 
 - **Auto mode:** whether a `PreToolUse` hook's `allow` skips the classifier. Still open: Claude Code's permission docs say a mod's approval skips it, and nothing about a hook's.
-- **The engine:** that it checks content not yet on disk, as pyright's language server does an open buffer. The engine's to settle.
+- **The engine:** that it checks content not yet on disk, as pyright's language server does an open buffer. Settled: it opens the file with that content, as an editor's buffer, and puts the disk's back at the next request unless the edit landed (`tests/test_engine.py`, *would-be content*).
 - **Holds, settled:** which variables each runtime sets in the commands it runs.
   - Claude Code's environment-variable reference: `CLAUDE_CODE_CHILD_SESSION` is "set to `1` in subprocesses Claude Code spawns via the Bash, PowerShell, and Monitor tools, hook commands, and status line commands", and, unlike `CLAUDECODE`, "only set by Claude Code itself when it launches a subprocess and not by IDE extensions", whose terminals the operator may answer from. Observed in this session's commands.
   - Codex sets `CODEX_THREAD_ID` in every command its agent runs (`codex-rs/core/src/unified_exec/process_manager.rs` at `rust-v0.156.1`, inserted after the shell environment policy, so a profile can't strip it), with `CODEX_CI=1`. Its hooks run with Codex's own environment, without them.
@@ -484,9 +490,12 @@ Taken while building it:
 49. **(yours, agreed)** `lup_dev` is grouped by subsystem: `codescan/`, `policy/`, `adapters/`, `catalog/`, with package-wide modules at the root (`docs/conventions.md`, *Package layout*). An import contract keeps `adapters` > `policy` > `codescan` > `catalog`. *Alternative:* the flat package of 21 modules. *Where:* `packages/lup-dev/src/lup_dev/`, `pyproject.toml`.
 50. **(yours, agreed)** A rule is one entry in one TypeScript table, holding its mistake, its steer and its check, which reads pyright's tree through the engine's helpers. *Alternatives:* a vocabulary of matchers declared in a Python catalog, which spread a rule across the vocabulary and the engine; Python rules over `ast` asking the engine by position, which a spike found needs two trees to agree and missed types pyright reads in strings. *Where:* `catalog/rules.ts`, `checker/src/`.
 51. **(yours, agreed)** The table lives in `catalog/`, protected with lup's other policy data, and imports the engine's helpers through a path alias. *Alternative:* the table beside the engine in `checker/src/`, outside the protected catalog. *Where:* `catalog/rules.ts`, `checker/tsconfig.json`.
-52. **(yours, agreed)** Python learns about rules only from the engine: complete findings, and the list of rules the engine gives when it starts. *Alternative:* a `rules.json` compiled from the table for Python, dropped as one more generated file Python doesn't need. *Where:* the engine, `codescan/engine.py`.
+52. **(yours, agreed)** Python learns about rules only from the engine: complete findings, and the list of rules the engine reads from its table. *Alternative:* a `rules.json` compiled from the table for Python, dropped as one more generated file Python doesn't need. *Where:* the engine, `codescan/engine.py`.
 53. **(yours, agreed)** `docs/rules.md` is the one generated, committed file, compiled from the table, with a gate test failing when it's stale; the engine's bundle is never committed. *Alternative:* a hand-kept table in `docs/conventions.md`. *Where:* `docs/rules.md`, `codescan/`.
-54. A rule's examples are files, by its id: the flagged module fires only that rule, the fixed one passes every rule, ruff and pyright, and a rule without both fails a test. *Alternative:* examples as strings in the catalog, which the gate's ruff and pyright couldn't read. *Where:* `catalog/examples/`, the engine's tests.
+54. **(yours, agreed)** A rule's examples are code in its entry: `flags`, each with its `rewritten`, and `passes`, its near misses. The engine's tests run them all: each of `flags` fires its rule and no other, each `rewritten` passes every rule, ruff and pyright, each of `passes` gets no finding from its rule, and every rule has one of `flags`. *Alternative:* example files by rule id (`catalog/examples/<id>/flagged.py`, `fixed.py`), which held one case per rule and needed ruff, pyright and pytest told to leave them out. *Where:* `catalog/rules.ts`, `tests/test_engine.py`.
 55. **(yours, agreed)** Selection and exemptions are the project's declaration's; the table holds no project's exemptions. *Alternative:* exempt modules on each rule's entry. *Where:* the declaration piece; `lup_project.py` until then.
-56. The examples live in the package's source, under the protected catalog: the judge asks about them, and since #14 runs lup's rules on them like any protected module, so a flagged one would be refused; the gate's ruff and pyright leave out the flagged modules by pattern and check the fixed ones; pytest ignores them. *Alternatives:* examples under a test root, outside the protected catalog; files the tools don't read as Python, which loses the gate's check of the fixed ones. *Where:* `pyproject.toml`, `catalog/examples/`.
-57. **(yours, agreed)** A protected Python module gets lup's rules as production code does, and still asks: a finding refuses it, a clean change asks (#14). Nothing is exempted, since the rules' examples are moving into the table as strings. *Alternative:* protected wins and the rules don't apply, which left `catalog/` checked by review and the gate's ruff and pyright alone. *Where:* `policy/roles.py` (`ruled`, `checked`), `policy/judge.py`, `policy/checkpoint.py`, `cli.py`.
+56. **(yours, agreed)** A protected Python module gets lup's rules as production code does, and still asks: a finding refuses it, a clean change asks (#14). Nothing is exempted, since the rules' examples are moving into the table as strings. *Alternative:* protected wins and the rules don't apply, which left `catalog/` checked by review and the gate's ruff and pyright alone. *Where:* `policy/roles.py` (`ruled`, `checked`), `policy/judge.py`, `policy/checkpoint.py`, `cli.py`.
+57. The engine is built, never committed: `packages/lup-dev/checker/build.py` reads the pinned pyright from `uv.lock`, fetches its source once into `$XDG_CACHE_HOME/lup/pyright/`, type-checks and bundles the engine with esbuild (the engine's one npm dependency), and copies the stubs beside it into `lup_dev/codescan/bundle/`, which git ignores and the wheel carries. *Alternative:* commit the bundle and its 31 MB of stubs, so a fresh checkout needs no build, at the cost of every pyright upgrade landing as a large binary diff. *Where:* `checker/build.py`, `layout.py` (`Bundle`).
+58. **(yours, agreed)** pyright's warnings are reported like its errors: information at each checkpoint, clean at the turn's end, and the gate runs `pyright --warnings`. *Alternative:* errors only, the pyright CLI's exit status. *Where:* the engine (`report.ts`).
+59. One engine per worktree on a Unix socket, started by the hook that finds none under a lock, stopping after `LUP_ENGINE_IDLE` (15 minutes by default) or for a client expecting another build, which is told apart by the bundle's size and modification time. *Alternatives:* a TCP port, which any local user could reach; an engine per hook, which reloads the project each time (1.4 s on this repository). *Where:* `codescan/engine.py`, `checker/src/server.ts`, `settings.py`.
+60. The importers pass runs a file at a time, and a check waiting behind it runs between two files; a check that changed the disk makes the pass look again. *Alternative:* the pass whole, which on the first lup's library held a check behind 27 seconds of re-checking. *Where:* `checker/src/engine.ts`, `checker/src/server.ts`.

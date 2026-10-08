@@ -1,7 +1,7 @@
 """The `lup-dev` command: hooks, the rule check, holds and verdicts."""
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 
 from lup_dev import cli
 from lup_dev.codescan.directives import IssueRef, Issues
+from lup_dev.codescan.engine import EngineChecker
 from lup_dev.layout import Layout
 from lup_dev.policy.holds import HeldFile, HoldError, Holds, waiting
 from lup_dev.policy.verdicts import Verdict, VerdictLog
@@ -227,6 +228,12 @@ def test_rules_check_fails_on_a_deferral_whose_issue_closed(
     assert "src/pkg/core.py:1:1 - defer-closed: issue #12 is closed" in result.output
 
 
-def test_the_engine_is_missing_until_it_lands() -> None:
-    with pytest.raises(cli.EngineMissingError):
-        cli.engine()
+def test_the_engine_is_the_worktree_engine_as_settings_place_it(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("LUP_ENGINE_IDLE", "PT90S")
+    engine = cli.engine()
+    assert isinstance(engine, EngineChecker)
+    assert engine.layout.runtime == tmp_path / "run" / "lup"
+    assert engine.idle == timedelta(seconds=90)
