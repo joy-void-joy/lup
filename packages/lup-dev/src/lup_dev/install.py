@@ -15,7 +15,6 @@ and until they approve, the copy installed before keeps judging (decision 26):
 5. record the approved commit in lup's state.
 """
 
-import sys
 import tempfile
 from abc import ABC, abstractmethod
 from datetime import datetime
@@ -24,9 +23,11 @@ from typing import override
 
 import sh
 import typer
+from pydantic import Field
 from rich.console import Console
 
 from lup.types import Model
+from lup_dev.catalog.gate import Gate, Step
 from lup_dev.clock import Clock
 from lup_dev.errors import LupDevError
 from lup_dev.layout import CheckoutLayout, Layout
@@ -84,17 +85,22 @@ class Toolchain(Model, ABC):
         """Install the judge from the checkout at `checkout`, replacing any copy."""
 
 
+def engine() -> Step:
+    """Return the gate's step that builds the engine, which the installer runs too."""
+    return next(step for step in Gate().steps if step.builds is not None)
+
+
 class Uv(Toolchain):
-    """uv, building with the checkout's Python and installing as a uv tool."""
+    """uv, building the engine as the gate does and installing as a uv tool."""
 
     executable: str = "uv"
-    python: Path = Path(sys.executable)
-    """The Python that runs the engine's build: the one running this installer."""
+    engine: Step = Field(default_factory=engine)
+    """How the engine is built: the gate's own step, so the two never differ."""
 
     @override
     def build(self, checkout: Path) -> None:
-        build = CheckoutLayout(root=checkout).build_script
-        sh.Command(str(self.python))(str(build), _cwd=str(checkout), _fg=True)
+        program, *arguments = self.engine.command
+        sh.Command(program)(*arguments, _cwd=str(checkout), _fg=True)
 
     @override
     def install(self, checkout: Path) -> None:

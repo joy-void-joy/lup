@@ -186,11 +186,6 @@ class CheckoutLayout(Model):
         return self.root / "packages" / "lup-dev"
 
     @property
-    def build_script(self) -> Path:
-        """The engine's build, which writes the bundle the installed judge carries."""
-        return self.tool / "checker" / "build.py"
-
-    @property
     def judge_source(self) -> list[Path]:
         """Everything the installed judge carries, from a checkout of lup's root.
 

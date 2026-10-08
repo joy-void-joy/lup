@@ -8,6 +8,7 @@ import pytest
 from typer.testing import CliRunner
 
 from lup_dev import cli
+from lup_dev.catalog.gate import Step
 from lup_dev.install import (
     Approval,
     Installer,
@@ -66,8 +67,9 @@ class Answering(Reviewer):
 def checkout(tmp_path: Path, shell: Shell) -> Path:
     root = tmp_path / "lup"
     for name, content in SOURCE.items():
-        (root / name).parent.mkdir(parents=True, exist_ok=True)
-        (root / name).write_text(content)
+        file = root / Path(name)
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text(content)
     shell.git(root, "init", "-q", "-b", "dev")
     shell.git(root, "config", "user.email", "test@example.com")
     shell.git(root, "config", "user.name", "Test")
@@ -238,8 +240,14 @@ def test_uv_installs_a_copy_with_the_locks_versions(
     assert constraints == "pydantic==2.13.5"
 
 
-def test_uv_builds_the_engine_with_the_running_python(checkout: Path) -> None:
-    Uv(python=Path(sys.executable)).build(checkout)
+def test_the_installer_builds_the_engine_as_the_gate_does() -> None:
+    assert Uv().engine.name == "engine"
+    assert Uv().engine.command[-1] == "packages/lup-dev/checker/build.py"
+
+
+def test_uv_runs_the_engines_build_step(checkout: Path) -> None:
+    build = [sys.executable, "packages/lup-dev/checker/build.py"]
+    Uv(engine=Step(name="engine", command=build)).build(checkout)
     assert (checkout / "built").read_text() == "yes"
 
 
