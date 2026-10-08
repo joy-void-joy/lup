@@ -20,12 +20,12 @@ from lup_dev.codescan.directives import (
     Defer,
     Directive,
     Fired,
-    Gate,
     Ignore,
     IssueRef,
     Issues,
     Malformed,
     Note,
+    Trackers,
     added_suppressions,
     missing,
 )
@@ -101,14 +101,14 @@ def test_a_defer_names_a_declared_condition() -> None:
 
 
 def test_at_the_gate_a_closed_issue_is_reported() -> None:
-    gate = Gate(issues=FakeIssues(closed=[12]), conditions={})
+    gate = Trackers(issues=FakeIssues(closed=[12]), conditions={})
     [problem] = Defer(line=1, issue=12, why="x").problems(Checking(gate=gate))
     assert problem.rule == "defer-closed"
     assert Defer(line=1, issue=13, why="x").problems(Checking(gate=gate)) == []
 
 
 def test_at_the_gate_a_condition_that_holds_makes_the_defer_due() -> None:
-    gate = Gate(
+    gate = Trackers(
         issues=FakeIssues(),
         conditions={"ready": Always(answer=True), "later": Always(answer=False)},
     )

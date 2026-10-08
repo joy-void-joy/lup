@@ -1,0 +1,43 @@
+# The gate on GitHub: `lup-dev check` on every push to `dev` and on every pull
+# request into `main`, so a red `dev` shows within minutes, off any one machine,
+# without blocking anyone. It's a backstop, not a required check: requiring it
+# would force pull requests, which the `dev` flow avoids. It also sees what a
+# push made without the gate run locally would hide.
+name: check
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The engine's build and its tests run on Node; the version this repository is
+      # developed with.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "26"
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.23"
+      # The engine's build fetches pyright's source at the release `uv.lock` pins
+      # into `~/.cache/lup/pyright/`, and installs its dependencies there.
+      - name: Keep pyright's source between runs
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/lup/pyright
+          key: pyright-${{ hashFiles('uv.lock') }}
+      - name: The gate
+        run: uv run lup-dev check

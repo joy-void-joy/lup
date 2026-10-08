@@ -115,8 +115,8 @@ class GitHubIssues(Issues):
                 return "closed"
 
 
-class Gate(Model, arbitrary_types_allowed=True):
-    """What the gate adds to a directive's checks: the issues, and the conditions."""
+class Trackers(Model, arbitrary_types_allowed=True):
+    """What a deferral is tracked by, which the gate asks: issues and conditions."""
 
     issues: Issues
     conditions: dict[str, Condition]
@@ -137,7 +137,7 @@ class Checking(Model):
     """Every finding in the file, of every owner, before any `ignore` applies."""
     conditions: list[str] | None = None
     """The names the project's conditions module binds; none if it declares none."""
-    gate: Gate | None = None
+    gate: Trackers | None = None
     """At the gate, the issues' states and the conditions themselves."""
 
 
