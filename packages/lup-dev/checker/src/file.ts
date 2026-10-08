@@ -13,6 +13,7 @@ import { TextRange } from 'pyright/common/textRange';
 import {
     ArgCategory,
     CallNode,
+    ExceptNode,
     ExpressionNode,
     ImportAsNode,
     ImportFromNode,
@@ -26,7 +27,9 @@ import {
 import { ParseFileResults } from 'pyright/parser/parser';
 import { StringTokenFlags } from 'pyright/parser/tokenizerTypes';
 
+import { CommentPart, commentParts } from './comments';
 import { ImportedModule, importedByImportAs, importedByImportFrom } from './imports';
+import { Used, usesOf } from './references';
 import { denotes, describeType, Meaning, resolve } from './semantics';
 import { spanOf } from './spans';
 import { Span } from './protocol';
@@ -66,6 +69,13 @@ export interface Sliced {
     text: string;
 }
 
+export interface Caught {
+    // The class as written in the clause.
+    node: ExpressionNode;
+    // The class's fully qualified name, or none where it isn't a class.
+    class: string | null;
+}
+
 export interface ItemRead {
     node: IndexNode;
     receiver: ExpressionNode;
@@ -81,6 +91,7 @@ class Gathered extends ParseTreeWalker {
     readonly references: (NameNode | MemberAccessNode)[] = [];
     readonly sets: SetNode[] = [];
     readonly imports: (ImportAsNode | ImportFromNode)[] = [];
+    readonly excepts: ExceptNode[] = [];
 
     override visitCall(node: CallNode) {
         this.calls.push(node);
@@ -111,6 +122,10 @@ class Gathered extends ParseTreeWalker {
     }
     override visitImportFrom(node: ImportFromNode) {
         this.imports.push(node);
+        return true;
+    }
+    override visitExcept(node: ExceptNode) {
+        this.excepts.push(node);
         return true;
     }
 }
@@ -164,6 +179,60 @@ export class File {
     importsOf(modules: string[]): ImportedModule[] {
         return this.importedModules().filter(({ module }) =>
             modules.some((wanted) => module === wanted || module.startsWith(`${wanted}.`))
+        );
+    }
+
+    // The uses of the names in `names`, fully qualified, through any import or alias:
+    // each reference resolving to one, and each import renaming one.
+    uses(names: string[]): Used[] {
+        const fromImports = this.nodes.imports.filter(
+            (node): node is ImportFromNode => node.nodeType === ParseNodeType.ImportFrom
+        );
+        return usesOf(this.program, this.evaluator, this.nodes.references, fromImports, names);
+    }
+
+    // Every `except` clause.
+    exceptClauses(): ExceptNode[] {
+        return this.nodes.excepts;
+    }
+
+    // The classes an `except` clause names, one by one where it names a tuple.
+    caught(clause: ExceptNode): Caught[] {
+        const written = clause.d.typeExpr;
+        if (!written) {
+            return [];
+        }
+        const named = written.nodeType === ParseNodeType.Tuple ? written.d.items : [written];
+        return named.map((node) => {
+            const type = this.evaluator.getType(node);
+            return { node, class: type && isInstantiableClass(type) ? type.shared.fullName : null };
+        });
+    }
+
+    // Whether a node sits in the annotation of a dunder method's parameter, where
+    // Python's own protocols fix the type: `__eq__(self, other: object)`.
+    inDunderParameter(node: ParseNode): boolean {
+        const parameter = ParseTreeUtils.getParentNodeOfType(node, ParseNodeType.Parameter);
+        if (!parameter || parameter.nodeType !== ParseNodeType.Parameter || !parameter.d.annotation) {
+            return false;
+        }
+        if (!TextRange.containsRange(parameter.d.annotation, node)) {
+            return false;
+        }
+        const method = parameter.parent;
+        if (method?.nodeType !== ParseNodeType.Function) {
+            return false;
+        }
+        const name = method.d.name.d.value;
+        return name.startsWith('__') && name.endsWith('__');
+    }
+
+    // The comments, or the parts of one after another `#`, starting with one of
+    // `markers` in any case: `noqa`, `type: ignore`.
+    commentsStartingWith(markers: string[]): CommentPart[] {
+        const lowered = markers.map((marker) => marker.toLowerCase());
+        return commentParts(this.parse).filter((part) =>
+            lowered.some((marker) => part.text.toLowerCase().startsWith(marker))
         );
     }
 
@@ -324,7 +393,7 @@ export class File {
                 parent.nodeType === ParseNodeType.Assignment &&
                 parent.d.rightExpr === current &&
                 parent.d.leftExpr.nodeType === ParseNodeType.TypeAnnotation &&
-                resolve(this.evaluator, parent.d.leftExpr.d.annotation).includes('typing.TypeAlias')
+                resolve(this.program, this.evaluator, parent.d.leftExpr.d.annotation).includes('typing.TypeAlias')
             ) {
                 return true;
             }

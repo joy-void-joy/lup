@@ -145,7 +145,11 @@ def test_a_rewritten_example_passes_every_rule_ruff_and_pyright(
         name, on_disk=DOCSTRING + chosen.examples.flags[index].rewritten
     )
     assert lup(report) == []
-    assert pyright(report) == []
+    # A steer may name a library lup doesn't install, whose stubs pyright has.
+    typed = [
+        f for f in pyright(report) if not f.startswith("reportMissingModuleSource")
+    ]
+    assert typed == []
     ruff = sh.Command(str(Path(sys.executable).parent / "ruff"))
     ruff(
         "check",

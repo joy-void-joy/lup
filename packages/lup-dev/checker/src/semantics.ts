@@ -105,11 +105,13 @@ export function denotes(program: Program, evaluator: TypeEvaluator, node: Expres
 }
 
 // The fully qualified names a reference resolves to, following imports; a module
-// resolves to its own name.
-export function resolve(evaluator: TypeEvaluator, node: ExpressionNode): string[] {
+// resolves to its own name, from its file, since pyright names a module by how it
+// was imported (`os` brings in `path` as `..path`).
+export function resolve(program: Program, evaluator: TypeEvaluator, node: ExpressionNode): string[] {
     const type = evaluator.getType(node);
     if (type && isModule(type)) {
-        return [type.priv.moduleName];
+        const module = program.getSourceFile(type.priv.fileUri)?.getModuleName();
+        return [module || type.priv.moduleName];
     }
     const name =
         node.nodeType === ParseNodeType.Name

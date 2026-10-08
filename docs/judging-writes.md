@@ -277,7 +277,7 @@ Pyright has no plugin API, and its published package is one bundled file whose i
 **Examples are the specification,** held in the entry as code (`examples`), short enough to read with the rule:
 - **`flags`:** code the rule flags, each with its `rewritten`, the same code done the steer's way. A rule needs several kinds of case, which a pair of files couldn't hold.
 - **`passes`:** near misses the rule must not flag: `.split()` with no separator, `shlex.split(…)`.
-- **What the engine's tests check,** placing each snippet as a module of a small package: each of `flags` gets a finding from its rule and no other, so each example shows one rule; each `rewritten` passes every rule, ruff and pyright, so a rule's steer never trips another (`docs/conventions.md`, *Keeping the rules cohesive*); each of `passes` gets no finding from its rule; and every rule has at least one of `flags`.
+- **What the engine's tests check,** placing each snippet as a module of a small package: each of `flags` gets a finding from its rule and no other, so each example shows one rule; each `rewritten` passes every rule, ruff and pyright, so a rule's steer never trips another (`docs/conventions.md`, *Keeping the rules cohesive*), but for pyright's missing-source warning where a steer names a library lup doesn't install and pyright has its stubs (`tqdm`); each of `passes` gets no finding from its rule; and every rule has at least one of `flags`.
 - **Kept short:** a rule needing a long example has a check or a steer that's too broad.
 - Being strings in the table, they're no Python file of the tree, so no tool needs telling to leave them out.
 
