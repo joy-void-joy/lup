@@ -755,6 +755,19 @@ def test_a_shell_write_where_the_session_never_went_isnt_judged(
     assert "# BAD regex" in (linked / CORE).read_text()
 
 
+def test_a_worktree_removed_since_is_no_longer_held(
+    kit: Kit, repo: Path, linked: Path, shell: Shell
+) -> None:
+    start(kit, repo)
+    call(kit, linked, "c1")
+    finish(kit, linked, "c1")
+    shell.git(repo, "worktree", "remove", str(linked))
+    call(kit, repo, "c2")
+    bad(repo)
+    assert finish(kit, repo, "c2").context.startswith("lup refused 1 file.")
+    assert end(kit, repo).block == ""
+
+
 def test_the_turns_end_runs_in_every_worktree_the_session_holds(
     kit: Kit, repo: Path, linked: Path
 ) -> None:
