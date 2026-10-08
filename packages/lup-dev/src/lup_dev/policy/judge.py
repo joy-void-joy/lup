@@ -205,18 +205,13 @@ class Judge(Model, arbitrary_types_allowed=True):
         With `inform`, test files are checked too, for their type errors and
         ruff's findings; without, only what decides an outcome is checked.
         """
-        rules = [
-            change
-            for change in changes
-            if self.roles.is_python(change.path)
-            and self.roles.role(change.path) == "production"
-        ]
+        rules = [change for change in changes if self.roles.ruled(change.path)]
         informed = [
             change
             for change in changes
             if inform
-            and self.roles.is_python(change.path)
-            and self.roles.role(change.path) == "test"
+            and self.roles.checked(change.path)
+            and not self.roles.ruled(change.path)
         ]
         checked = [change for change in [*rules, *informed] if change.after is not None]
         after = self.reports([Source(path=c.path, content=c.after) for c in checked])
@@ -273,23 +268,32 @@ class Judge(Model, arbitrary_types_allowed=True):
                 versions.baseline.directives if versions.baseline else [],
             )
         ]
-        if role == "production" and change.after is None:
-            return Judgement(
-                path=change.path, role=role, outcome="allow", removed=removed
-            )
         match role:
             case "protected":
                 pattern = self.roles.project.protected.matching(change.path)
                 why = f" ({pattern})" if pattern else ", the project's declaration"
                 reason = f"{change.path} is a protected path{why}"
                 ask = Ask(kind="protected", reason=reason)
-                return Judgement(path=change.path, role=role, outcome="ask", asks=[ask])
+                if change.after is None or not self.roles.ruled(change.path):
+                    asks = [ask]
+                    return Judgement(
+                        path=change.path,
+                        role=role,
+                        outcome="ask",
+                        asks=asks,
+                        removed=removed,
+                    )
+                return self.ruled(change, versions, removed, [ask])
             case "operator":
                 reason = f"{change.path} is one of the operator's documents"
                 ask = Ask(kind="operator-document", reason=reason)
                 return Judgement(path=change.path, role=role, outcome="ask", asks=[ask])
             case "production":
-                return self.production(change, versions, removed)
+                if change.after is None:
+                    return Judgement(
+                        path=change.path, role=role, outcome="allow", removed=removed
+                    )
+                return self.ruled(change, versions, removed, [])
             case _:
                 kept = self.kept(versions)
                 information = [found for found in kept if found.owner != "lup"]
@@ -314,17 +318,25 @@ class Judge(Model, arbitrary_types_allowed=True):
             )
         ]
 
-    def production(
-        self, change: Change, versions: Versions, removed: list[RemovedNote]
+    def ruled(
+        self,
+        change: Change,
+        versions: Versions,
+        removed: list[RemovedNote],
+        always: list[Ask],
     ) -> Judgement:
-        """Judge a change to production code: rules first, then what it asks."""
+        """Judge a change lup's rules read: rules first, then what it asks.
+
+        Production code and protected modules alike; `always` is what the path
+        asks whatever the change, which no approval covers.
+        """
         after = change.after or ""
-        asks = [
+        design = [
             *self.design(change, versions),
             *self.suppressions(change.path, versions),
         ]
-        if change.path in self.approved:
-            asks = [ask for ask in asks if not ask.covered()]
+        covered = change.path in self.approved
+        asks = [*always, *(ask for ask in design if not (covered and ask.covered()))]
         lup = self.lup_findings(change.path, versions)
         touched = touched_lines(change.before, after)
         refusing = [found for found in lup if touches(found, touched)]
@@ -338,7 +350,7 @@ class Judge(Model, arbitrary_types_allowed=True):
 
         return Judgement(
             path=change.path,
-            role="production",
+            role=self.roles.role(change.path),
             outcome=outcome(),
             asks=asks,
             refusing=refusing,

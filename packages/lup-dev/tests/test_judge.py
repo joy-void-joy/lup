@@ -93,6 +93,50 @@ def test_a_protected_path_asks(judge: Judging) -> None:
     )
 
 
+PROTECTED = ".claude/hooks/check.py"
+
+
+def test_a_clean_change_to_a_protected_module_is_ruled_and_still_asks(
+    judge: Judging,
+) -> None:
+    after = CORE + "y: int = 'a'  # TYPE\n"
+    judgement = judge(edit(PROTECTED, CORE, after))
+    assert judgement.outcome == "ask"
+    assert [ask.kind for ask in judgement.asks] == ["protected"]
+    assert judgement.role == "protected"
+    assert [finding.owner for finding in judgement.information] == ["pyright"]
+
+
+def test_a_finding_in_a_protected_module_refuses_before_it_asks(
+    judge: Judging,
+) -> None:
+    after = CORE + "y = 2  # BAD regex\n"
+    judgement = judge(edit(PROTECTED, CORE, after))
+    assert judgement.outcome == "refuse"
+    assert [finding.rule for finding in judgement.refusing] == ["regex"]
+    assert [ask.kind for ask in judgement.asks] == ["protected"]
+    assert judgement.reasons() == ["regex"]
+
+
+def test_a_protected_module_asks_every_time_and_with_its_design_asks(
+    judge: Judging,
+) -> None:
+    path = Path(PROTECTED)
+    after = CORE + "\n\nclass Room:\n    pass\n"
+    approved = judge(edit(PROTECTED, CORE, after), approved=[path])
+    assert [ask.kind for ask in approved.asks] == ["protected"]
+    fresh = judge(edit(PROTECTED, CORE, after))
+    assert [ask.kind for ask in fresh.asks] == ["protected", "public-api"]
+    created = judge(edit(PROTECTED, None, '"""New."""\n', baseline=None))
+    assert [ask.kind for ask in created.asks] == ["protected", "new-file"]
+
+
+def test_protected_files_that_arent_python_only_ask(judge: Judging) -> None:
+    judgement = judge(edit(".claude/settings.json", "{}\n", "{} # BAD regex\n"))
+    assert judgement.outcome == "ask"
+    assert judgement.refusing == []
+
+
 def test_deleting_a_protected_path_asks_and_deleting_code_is_allowed(
     judge: Judging,
 ) -> None:

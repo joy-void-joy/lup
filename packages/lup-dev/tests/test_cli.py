@@ -193,6 +193,18 @@ def test_rules_check_reports_every_owner_through_lups_ignore(
     assert lines[-1] == "lup checked 3 files: 3 findings."
 
 
+def test_rules_check_reads_protected_modules_with_lups_rules(
+    fakes: Kit, repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hook = repo / ".claude" / "hooks" / "check.py"
+    hook.parent.mkdir(parents=True)
+    hook.write_text("x = 1  # BAD regex\n")
+    monkeypatch.chdir(repo)
+    result = runner.invoke(cli.app, ["rules", "check", ".claude/hooks/check.py"])
+    assert result.exit_code == 1
+    assert ".claude/hooks/check.py:1:8 - regex: regex fires here" in result.output
+
+
 class Closed(Issues):
     def state(self, issue: IssueRef) -> Literal["open", "closed"]:
         return "closed"

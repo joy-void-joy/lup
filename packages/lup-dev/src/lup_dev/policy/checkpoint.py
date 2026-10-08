@@ -580,8 +580,7 @@ def checkpoint(bench: Bench, worktree: Worktree, key: str, agent: str) -> Checke
     python = [
         judgement.path
         for judgement in acted.landed
-        if worktree.roles.is_python(judgement.path)
-        and judgement.role in ["production", "test"]
+        if worktree.roles.checked(judgement.path)
     ]
     worktree.importers().request(python, services.spawner)
     if acted.hold is None:
@@ -619,7 +618,7 @@ def remember(worktree: Worktree, session: Session, agent: str, acted: Acted) -> 
     )
     session.removed = {
         **session.removed,
-        **{j.path: j.removed for j in landed if j.role == "production"},
+        **{j.path: j.removed for j in landed if worktree.roles.ruled(j.path)},
     }
     session.judged = []
     session.participants = []
@@ -785,9 +784,7 @@ def unclean(bench: Bench, worktree: Worktree, session: Session) -> list[Finding]
     paths = [
         path
         for path in dict.fromkeys([*session.touched, *session.watched])
-        if (worktree.root / path).is_file()
-        and worktree.roles.is_python(path)
-        and worktree.roles.role(path) in ["production", "test"]
+        if (worktree.root / path).is_file() and worktree.roles.checked(path)
     ]
     importing = worktree.importers().collect()
     sources = [Source(path=path) for path in paths]

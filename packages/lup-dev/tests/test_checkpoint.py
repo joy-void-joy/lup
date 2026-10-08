@@ -288,6 +288,55 @@ def test_a_report_waits_for_the_other_conversations_that_ran_calls(
     assert finish(kit, repo, "a2", agent="a").context == told
 
 
+HOOK = Path(".claude/hooks/check.py")
+
+
+def protected_module(repo: Path, shell: Shell) -> None:
+    (repo / HOOK).parent.mkdir(parents=True)
+    (repo / HOOK).write_text((repo / CORE).read_text())
+    shell.commit(repo, "a protected module")
+
+
+def test_a_protected_modules_finding_is_refused_through_the_shell(
+    kit: Kit, repo: Path, shell: Shell
+) -> None:
+    protected_module(repo, shell)
+    start(kit, repo)
+    original = (repo / HOOK).read_text()
+    reply = shell_write(kit, repo, "c1", HOOK, original + "y = 2  # BAD regex\n")
+    assert reply.context.startswith("lup refused 1 file.")
+    assert ".claude/hooks/check.py:11:8 - regex: regex fires here" in reply.context
+    assert "Made through the shell" not in reply.context
+    assert (repo / HOOK).read_text() == original
+
+
+def test_a_clean_change_to_a_protected_module_asks_through_the_file_tools(
+    kit: Kit, repo: Path, shell: Shell
+) -> None:
+    protected_module(repo, shell)
+    start(kit, repo)
+    changed = (repo / HOOK).read_text().replace("return x", "return x + 1")
+    reply = shell_write(kit, repo, "c1", HOOK, changed)
+    assert "Made through the shell, so it comes back through your file tools" in (
+        reply.context
+    )
+    assert ".claude/hooks/check.py is a protected path" in reply.context
+
+
+def test_a_protected_modules_type_errors_keep_the_turn_from_ending(
+    kit: Kit, repo: Path, shell: Shell
+) -> None:
+    protected_module(repo, shell)
+    start(kit, repo)
+    broken = (repo / HOOK).read_text() + "y: int = 'a'  # TYPE\n"
+    edit = Overwrite(call="w1", tool="Write", path=repo / HOOK, text=broken)
+    assert before(kit.bench, edit, SESSION, repo).outcome == "ask"
+    call(kit, repo, "w1", tool="Write")
+    (repo / HOOK).write_text(broken)
+    finish(kit, repo, "w1")
+    assert end(kit, repo).block.startswith("lup won't end the turn yet")
+
+
 def test_type_errors_are_information_and_keep_the_turn_from_ending(
     kit: Kit, repo: Path
 ) -> None:
