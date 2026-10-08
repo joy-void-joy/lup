@@ -65,6 +65,7 @@ The first lup ran ruff's defaults and pyright's standard mode; its strictness ca
 
 **Decision.**
 - **Nothing is private.** No leading underscore at any scope. A helper that shouldn't reach the module namespace is nested inside its only caller. A wrapper around one call is inlined where it's used. An unused parameter keeps its underscore: that's a linting convention, not privacy.
+  - **The rule of thumb:** a function called from a single other function folds into it, as long as the caller stays a reasonable size. It's tested through its caller.
 - **`__all__` only at a package's root**, where it declares that package's public API. Everywhere else a name is imported from the module that defines it.
 - **Exception names end in `Error`.**
 
@@ -85,7 +86,7 @@ The first lup ran ruff's defaults and pyright's standard mode; its strictness ca
   ```
 - **A `match` decides through its patterns.** A guard on a wildcard (`case _ if seconds < 60:`) is an `if` chain dressed as a `match`. A guard on a real pattern that binds what it reads is fine: `case Lease(reason=str() as reason) if reason:`.
 - **No chain of `isinstance` narrowing the same subject:** a `match` on the subject's class.
-- **Our own model variants answer for themselves.** Dispatching from outside on the members of a union we define (a `match` on their classes, an `isinstance` on one) steers to a method on the base, which each variant implements. Scoped to unions we define, since the first lup's `own-model-dispatch` needed narrowing twice.
+- **An implementation of one of our ABCs is called through the ABC, never switched on.** The shape this stops is the first lup's `match runtime: case Claude: call_claude(…) case Codex: call_codex(…)`: choosing by which implementation of a seam you hold, where calling the ABC's method was the point of having it. A `match` or `isinstance` over the subclasses of one of our ABCs steers to a method on the ABC, which each implementation answers. Plain data told apart by a field (the four `# lup:` comment kinds, by `kind`) isn't an implementation of a seam, and is matched on like any data. Scoping it to ABCs keeps it from the first lup's misfires (it was narrowed twice) and from steering a lower layer to call a higher one: an ABC's method is answered by each implementation by definition.
 
 **Why.** A `match` names the subject once and makes each arm a pattern of it; a chain hides which value decides. Guard clauses keep comparisons flat.
 
@@ -158,7 +159,7 @@ The parsers to reach for: `json`, `tomllib` (`tomlkit` to edit), `csv`, `urllib.
 
 **Decision.**
 - **Don't truncate.** Cutting a sequence at a literal bound (`rows[:200]`) to make it fit is refused. Where a format forces a limit, keep the full copy and point at it, and say so in an `ignore`. (Slicing a `str` falls under `string-slice` above, so the two rules never fire on the same slice.)
-- **Code reads as if it was always this way.** No "new", "now", "fixed", "previously" or "no longer" in comments and docstrings; history belongs in commit messages.
+- **Code reads as if it was always this way.** No "new", "now", "fixed", "previously" or "no longer" in comments and docstrings; history belongs in commit messages. "The call now waits" means something only against how it used to be, so it says "the call waits"; "a new production file" says "a production file being created". Code in backticks (the `Edit` tool's `new_string`) and quoted text are skipped.
 
 **The first lup.** `silent-truncation`: 6 suppressions. `historical-voice` is a heuristic over comments; expect misfires, and rewrite it when one shows up.
 
@@ -251,7 +252,7 @@ The parsers to reach for: `json`, `tomllib` (`tomlkit` to edit), `csv`, `urllib.
 
 import-linter checks the whole graph at the gate. The engine reads the same contracts and checks each edited file's own imports at the edit, so a wrong import is refused when it's written. These contracts are lup's; a project declares its own.
 
-**A runtime is named only in its adapter.** Everything a runtime spells its own way (its hook events and payload fields, its tool names, how it hears a report, the variables it sets in the commands it runs) lives in its adapter; the rest of lup speaks its own words and sees a runtime through an interface (`lup_dev.policy.runtime.Runtime`). That's how features stay on both runtimes by construction: Codex rotted in the first lup because features were built per runtime above the adapter (`AGENTS.md`, *Both runtimes*). An import contract can't see a name in a string or a comment, so a rule does: a runtime's name outside its adapter is a finding. Data that names a runtime's own files (`.claude/`, `.codex/` among the protected paths) and the one place listing the adapters carry an `ignore` saying so.
+**A runtime is named only in its adapter.** Everything a runtime spells its own way (its hook events and payload fields, its tool names, how it hears a report, the variables it sets in the commands it runs) lives in its adapter; the rest of lup speaks its own words and sees a runtime through an interface (`lup_dev.policy.runtime.Runtime`). That's how features stay on both runtimes by construction: Codex rotted in the first lup because features were built per runtime above the adapter (`AGENTS.md`, *Both runtimes*). An import contract can't see a name in a string or a comment, so a rule does: a runtime's name outside its adapter is a finding, in prose too. lup lives on beyond these two runtimes; they're the two good ones for now. So the core speaks in capabilities ("a runtime that can't ask before a call holds at the checkpoint"), and the evidence behind a capability (the vendor's docs, a measurement) sits in the adapter that declares it. Data that names a runtime's own files (`.claude/`, `.codex/` among the protected paths) and the one place listing the adapters carry an `ignore` saying so; the library's front door, where `Claude` and `Codex` are the public names a caller chooses between, is exempted in lup's declaration.
 
 **The first lup.** `front-door`, `seam-boundary` and `kernel-imports` were custom rules over an AST scanner. Its tool layer still reached into environment packages (`tools/toolsets.py:38-43` imported coordination, ledger and orchestration).
 
@@ -321,7 +322,7 @@ Tests are exempt from lup's rules. A file is a test if pytest collects it as a t
 | `constant-home` | a module-level constant outside its home | its home (*Constants*) |
 | `model-mutability` | a model deriving straight from `BaseModel` or `BaseSettings`, or writing `frozen` in its header | `lup.types.Model`, `MutableModel` or `Settings` |
 | `typed-dict` | a `TypedDict` class we define | a pydantic model |
-| `own-model-dispatch` | dispatching from outside on the members of a union we define | a method on the base that each variant implements |
+| `own-model-dispatch` | a `match` or `isinstance` over the subclasses of one of our ABCs | a method on the ABC, which each implementation answers |
 | `tuple-shape` | a tuple type, aliases included | `list[X]`, or a model naming each field |
 | `set-shape` | `set`, `frozenset` and aliases, declared or built | a dict keyed by the members, or a list of models |
 | `collection-loop` | a collection created empty and filled in a loop | a comprehension, or a nested function that `yield`s |
@@ -331,7 +332,7 @@ Tests are exempt from lup's rules. A file is a test if pytest collects it as a t
 | `string-slice` | a slice of a `str` or `bytes` | the format's parser |
 | `string-strip`, `string-replace` | `.strip(chars)`, `.lstrip(chars)`, `.rstrip(chars)`, `.replace(…)` on `str` or `bytes` | the format's parser |
 | `silent-truncation` | a sequence cut at a literal bound | the whole value; a saved full copy where a format forces a limit |
-| `historical-voice` | history words in comments and docstrings | what is, not how it got there |
+| `historical-voice` | "new", "now", "fixed", "previously", "no longer" and the like in comments and docstrings, outside backticks and quotes | what is, not how it got there |
 | `docstring-code` | double backticks or a Sphinx role in a docstring | single backticks |
 | `any-type`, `cast`, `bare-object` | `typing.Any`, `cast(…)`, an `object` annotation | the real type, `JsonValue`/`JsonObject`, a type parameter |
 | `error-root` | an exception class outside its package's root | the package's root error |
