@@ -180,11 +180,16 @@ def importable(roots: list[Path], root: Path) -> Generator[None]:
     The modules imported meanwhile from the worktree at `root` are dropped from
     `sys.modules` afterwards. Every worktree's declaration is the module
     `lup_project`, and Python keeps a module once it's imported, so a second
-    worktree's load in the same process would otherwise get the first's.
+    worktree's load in the same process would otherwise get the first's. No
+    bytecode is written meanwhile: a `__pycache__/` the judge left in a worktree
+    that doesn't ignore it would be judged at the next checkpoint as a file the
+    session wrote.
     """
     before = list(sys.path)
     known = dict(sys.modules)
+    writes = sys.dont_write_bytecode
     sys.path[:0] = [str(each) for each in roots]
+    sys.dont_write_bytecode = True
 
     def within(module: ModuleType) -> bool:
         spec = module.__spec__
@@ -197,6 +202,7 @@ def importable(roots: list[Path], root: Path) -> Generator[None]:
         yield
     finally:
         sys.path[:] = before
+        sys.dont_write_bytecode = writes
         imported = [
             name
             for name, module in sys.modules.items()

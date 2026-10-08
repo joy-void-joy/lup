@@ -168,6 +168,21 @@ def test_each_worktree_loads_its_own_declaration_in_one_process(
     assert "lup_dev.project" in sys.modules
 
 
+def test_loading_a_declaration_leaves_no_bytecode_in_the_worktree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sys, "dont_write_bytecode", False)
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.lup]\nproject = "lup_project:project"\n'
+    )
+    (tmp_path / "lup_project.py").write_text(
+        "from lup_dev.project import Project\nproject = Project()\n"
+    )
+    load(tmp_path)
+    assert not (tmp_path / "__pycache__").exists()
+    assert sys.dont_write_bytecode is False
+
+
 def test_a_declaration_that_isnt_a_project_is_refused(repo: Path) -> None:
     (repo / "src" / "decl_two.py").write_text("project = 3\n")
     (repo / "pyproject.toml").write_text('[tool.lup]\nproject = "decl_two:project"\n')
