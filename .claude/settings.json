@@ -16,7 +16,9 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git worktree list:*)",
-      "Bash(uv run --script .claude/hooks/interim_review.py wait:*)"
+      "Bash(uv run --script .claude/hooks/interim_review.py wait:*)",
+      "Bash(git -C /home/pfftz/job/onit/lup.git/tree/dev merge --no-ff:*)",
+      "Bash(git -C /home/pfftz/job/onit/lup.git/tree/dev push origin dev)"
     ],
     "ask": ["Bash(gh pr merge:*)"],
     "deny": ["Artifact", "SendFeedback", "Workflow", "ScheduleWakeup", "ReportFindings"]

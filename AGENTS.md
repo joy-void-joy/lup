@@ -13,8 +13,9 @@ This repository is the second lup. The first (`joy-void-joy/lup-legacy`, archive
 ## How work goes
 
 1. **A design note first.** For each piece, open a draft pull request into `dev` holding only `docs/<piece>.md`: its modules, what each is for, its public API, and the choices it makes with their alternatives. Implement once the operator approves it. The note stays as that piece's documentation, kept true as the code changes.
-2. **One concern per branch, landed on `dev` by you.**
+2. **One concern per branch, landed on `dev` by the session that started the work.**
    - Branch from `dev`. When the gate passes (ruff, pyright and the tests), merge the branch into `dev` with a merge commit, and push.
+   - **A worker doesn't land its own branch.** It commits on its branch, leaves it unpushed, and hands it back. The session that delegated it reviews it, runs the gate again on the merged result, and lands it, one merge at a time, so the shared `dev` checkout never takes two merges at once and every branch is looked at before it lands.
    - The merge commit's message is the branch's record: every design decision taken, with its alternative and the file it lives in; then what changed and why, how it was tested, and a short note on how the work felt (see *Delegating*).
    - A simple doc change skips the branch and lands on `dev` directly.
 3. **A release is a pull request from `dev` to `main`,** which the operator reviews and merges. Its description gathers the decisions landed since the last release. Never merge into `main` or push to it yourself.
