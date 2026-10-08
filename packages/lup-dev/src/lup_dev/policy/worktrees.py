@@ -80,6 +80,17 @@ class Holding(MutableModel):
         self.worktrees = [*self.worktrees, root]
         return True
 
+    def release_removed(self) -> bool:
+        """Stop holding each worktree whose root is gone; say whether one was.
+
+        `git worktree remove`, as landing a branch does, deletes the root, and a
+        worktree that's gone has nothing left to judge.
+        """
+        present = [root for root in self.worktrees if root.is_dir()]
+        released = present != self.worktrees
+        self.worktrees = present
+        return released
+
 
 class SessionIndex(Model):
     """Where each session's repository and the worktrees it holds are kept."""

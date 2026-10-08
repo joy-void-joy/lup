@@ -465,8 +465,9 @@ def holding(
     The worktree its working directory is in is reached, since a hook's working
     directory follows the session, and so is `written`'s, where a file tool
     writes. Reaching a worktree begins the session there; a session that
-    `starts`, or resumes, begins again in every worktree it holds. A session
-    first seen outside every repository isn't judged.
+    `starts`, or resumes, begins again in every worktree it holds. A worktree
+    whose root is gone isn't held. A session first seen outside every
+    repository isn't judged.
     """
     index = SessionIndex(layout=bench.services.layout)
     here = place(cwd) if cwd.is_dir() else None
@@ -477,6 +478,7 @@ def holding(
             if here is None:
                 return None
             held = Holding(repository=here.repository)
+        released = held.release_removed()
         reaching = [
             each.worktree
             for each in [here, written]
@@ -485,7 +487,7 @@ def holding(
             and each.repository == held.repository
         ]
         reached = [root for root in reaching if held.reach(root)]
-        if recorded is None or reached:
+        if recorded is None or reached or released:
             index.write(session, held)
         for root in held.worktrees if starts else reached:
             begin(
