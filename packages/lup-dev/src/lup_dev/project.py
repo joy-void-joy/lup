@@ -24,6 +24,7 @@ from lup_dev.layout import CheckoutLayout
 
 if TYPE_CHECKING:
     from collections.abc import Generator
+    from types import ModuleType
 
 
 class ProjectError(LupDevError):
@@ -173,14 +174,42 @@ def import_roots(root: Path, pyproject: Pyproject) -> list[Path]:
 
 
 @contextmanager
-def importable(roots: list[Path]) -> Generator[None]:
-    """Put `roots` first on the import path for the duration, then restore it."""
+def importable(roots: list[Path], root: Path) -> Generator[None]:
+    """Put `roots` first on the import path for the duration, then restore it.
+
+    The modules imported meanwhile from the worktree at `root` are dropped from
+    `sys.modules` afterwards. Every worktree's declaration is the module
+    `lup_project`, and Python keeps a module once it's imported, so a second
+    worktree's load in the same process would otherwise get the first's. No
+    bytecode is written meanwhile: a `__pycache__/` the judge left in a worktree
+    that doesn't ignore it would be judged at the next checkpoint as a file the
+    session wrote.
+    """
     before = list(sys.path)
-    sys.path[:0] = [str(root) for root in roots]
+    known = dict(sys.modules)
+    writes = sys.dont_write_bytecode
+    sys.path[:0] = [str(each) for each in roots]
+    sys.dont_write_bytecode = True
+
+    def within(module: ModuleType) -> bool:
+        spec = module.__spec__
+        if spec is None:
+            return False
+        places = [spec.origin, *(spec.submodule_search_locations or [])]
+        return any(Path(place).is_relative_to(root) for place in places if place)
+
     try:
         yield
     finally:
         sys.path[:] = before
+        sys.dont_write_bytecode = writes
+        imported = [
+            name
+            for name, module in sys.modules.items()
+            if name not in known and within(module)
+        ]
+        for name in imported:
+            del sys.modules[name]
 
 
 def load(root: Path) -> Declared:
@@ -188,23 +217,24 @@ def load(root: Path) -> Declared:
 
     Raise `ProjectError` where `[tool.lup] project` names something that can't be
     imported or isn't a `Project`: a declaration that silently fell back to the
-    defaults would judge with the wrong roles.
+    defaults would judge with the wrong roles. Whatever importing it raises (a
+    name the installed `lup_dev` lacks, conflict markers, a failing call) is that.
     """
     pyproject = Pyproject.read(CheckoutLayout(root=root).pyproject)
     reference = pyproject.tool.lup.project
     if reference is None:
         return Declared(project=Project())
     entry = EntryPoint(name="project", value=reference, group="lup")
-    with importable(import_roots(root, pyproject)):
+    with importable(import_roots(root, pyproject), root):
         try:
             declared = entry.load()
-        except (ImportError, AttributeError) as missing:
-            message = f"`[tool.lup] project = {reference!r}` can't be loaded: {missing}"
-            raise ProjectError(message) from missing
+        except Exception as failure:
+            message = f"`[tool.lup] project = {reference!r}` can't be loaded: {failure}"
+            raise ProjectError(message) from failure
+        module = importlib.import_module(entry.module)
     if not isinstance(declared, Project):
         message = f"`{reference}` is a {type(declared).__name__}, not a `Project`"
         raise ProjectError(message)
-    module = importlib.import_module(entry.module)
     source = Path(module.__file__) if module.__file__ else None
     if source is None or not source.is_relative_to(root):
         return Declared(project=declared)

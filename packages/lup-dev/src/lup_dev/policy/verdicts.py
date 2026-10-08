@@ -29,11 +29,17 @@ class Verdict(Model):
     key: str
     """Names the verdict, so a later answer is recorded against it."""
     time: datetime
-    session: str
+    session: str | None
+    """The session whose write it judged; none for a move of `HEAD`, whose commits
+    the checkpoint can't attribute to any."""
     runtime: str
     tool: str
-    """The runtime's tool the judgement was about, or `checkpoint`."""
+    """The runtime's tool the judgement was about, `checkpoint`, or `move`."""
+    worktree: Path | None = None
+    """The worktree `path` is in, or the repository's git directory for a write
+    there; none in a line that doesn't name it."""
     path: Path
+    """The file, relative to `worktree`."""
     role: Role
     outcome: VerdictOutcome
     reasons: list[str]

@@ -32,7 +32,7 @@ from lup_dev.gate import Check, Shell, failed, report
 from lup_dev.install import Installer, Terminal, Uv
 from lup_dev.layout import CheckoutLayout, Layout
 from lup_dev.policy.checkpoint import Bench, Services, Worktree
-from lup_dev.policy.holds import Response, answer, waiting
+from lup_dev.policy.holds import Hold, Response, answer, waiting
 from lup_dev.policy.importers import BackgroundSpawner
 from lup_dev.policy.judge import finding
 from lup_dev.policy.report import finding_lines
@@ -78,12 +78,14 @@ def runtimes() -> list[Runtime]:
 
 def services() -> Services:
     """Return what judging reaches, as configured on this machine."""
+    settings = LupDevSettings()
     return Services(
         checker=engine(),
         linter=Ruff(),
         clock=SystemClock(),
-        layout=Layout.of(LupDevSettings()),
+        layout=Layout.of(settings),
         spawner=BackgroundSpawner(),
+        integration=settings.lup_integration_branch,
     )
 
 
@@ -198,19 +200,33 @@ def rules_check(
 
 @holds.callback(invoke_without_command=True)
 def holds_list(context: typer.Context) -> None:
-    """List the changes waiting for your answer, with their diffs."""
+    """List the changes waiting for your answer, with their diffs.
+
+    What a move of `HEAD` asks is listed apart: it's committed already, no agent
+    waits on it, and a decline changes no file.
+    """
     if context.invoked_subcommand is not None:
         return
     held = waiting(Layout.of(LupDevSettings()))
     if not held:
         typer.echo("Nothing is waiting.")
         return
-    for hold in held:
-        typer.echo(f"{hold.key}  {hold.worktree}  (session {hold.session})")
+
+    def shown(hold: Hold, where: str) -> None:
+        typer.echo(f"{hold.key}  {hold.worktree}  ({where})")
         for each in hold.files:
             for asked in each.asks:
                 typer.echo(f"  {each.path}: {asked}")
         typer.echo(hold.diff)
+
+    for hold in held:
+        if hold.commit is None:
+            shown(hold, f"session {hold.session}")
+    moved = [hold for hold in held if hold.commit is not None]
+    if moved:
+        typer.echo("Asked after the fact, about commits already made (no agent waits):")
+    for hold in moved:
+        shown(hold, f"commit {hold.commit}")
 
 
 @holds.command("approve")

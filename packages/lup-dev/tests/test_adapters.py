@@ -68,7 +68,7 @@ def test_claude_asks_before_a_new_production_file(
             "hookEventName": "PreToolUse",
             "permissionDecision": "ask",
             "permissionDecisionReason": (
-                "lup asks: src/pkg/new.py is a new production file"
+                f"lup asks: {repo}/src/pkg/new.py is a new production file"
             ),
         }
     }
@@ -212,11 +212,17 @@ def test_claude_tells_the_agent_when_a_checkpoint_fails(
     assert "lup's judge failed" in output["hookSpecificOutput"]["additionalContext"]
 
 
-def test_claude_lets_a_turn_end_once_when_judging_keeps_failing() -> None:
-    stop = claude.Stop(
-        session_id="s1", cwd=Path(), hook_event_name="Stop", stop_hook_active=True
-    )
-    assert stop.failed(RuntimeError("x")) is None
+def test_claude_lets_a_turn_end_when_judging_fails_warning_the_operator_once(
+    broken: Services, repo: Path
+) -> None:
+    bench = Bench(runtime=claude.Claude(), services=broken)
+    claude.hook(pre_tool_use(repo, "Bash", {"command": "sed"}), bench)
+    (repo / CORE).write_text((repo / CORE).read_text() + "z = 1\n")
+    stop = payload(repo, "Stop", stop_hook_active=False)
+    output = json.loads(claude.hook(stop, bench))
+    assert output["systemMessage"].startswith("lup's judge failed at a turn's end")
+    assert "decision" not in output
+    assert claude.hook(stop, bench) == ""
 
 
 def test_claude_knows_its_own_sessions(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -304,7 +310,7 @@ def test_codex_holds_an_ask_until_the_operator_answers(
     kit.clock.on_sleep.append(approve)
     output = json.loads(codex.hook(post(repo, {"output": "done"}), on_codex))
     assert output["hookSpecificOutput"]["additionalContext"].startswith(
-        "The operator approved the held change to src/pkg/new.py."
+        f"The operator approved the held change to {repo}/src/pkg/new.py."
     )
     assert (repo / "src" / "pkg" / "new.py").exists()
 
@@ -370,9 +376,66 @@ def test_codex_tells_the_agent_when_a_checkpoint_fails(
     assert "lup's judge failed" in output["hookSpecificOutput"]["additionalContext"]
 
 
+def test_codex_lets_a_turn_end_when_judging_fails_warning_the_operator_once(
+    broken: Services, repo: Path
+) -> None:
+    bench = Bench(runtime=codex.Codex(), services=broken)
+    codex.hook(
+        payload(
+            repo,
+            "PreToolUse",
+            turn_id="u1",
+            tool_name="Bash",
+            tool_input={},
+            tool_use_id="b1",
+        ),
+        bench,
+    )
+    (repo / CORE).write_text((repo / CORE).read_text() + "z = 1\n")
+    stop = payload(repo, "Stop", turn_id="u1", stop_hook_active=False)
+    output = json.loads(codex.hook(stop, bench))
+    assert output["systemMessage"].startswith("lup's judge failed at a turn's end")
+    assert "decision" not in output
+    assert codex.hook(stop, bench) == ""
+
+
 def test_codex_knows_its_own_sessions(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("CODEX_THREAD_ID", "019a")
     assert codex.Codex().inside()
     monkeypatch.delenv("CODEX_THREAD_ID")
     assert not codex.Codex().inside()
     assert not codex.Codex().asks_before()
+
+
+def test_claude_judges_a_worktree_its_working_directory_moves_to(
+    on_claude: Bench, repo: Path, linked: Path
+) -> None:
+    claude.hook(payload(repo, "SessionStart", source="startup"), on_claude)
+    claude.hook(
+        pre_tool_use(linked, "Bash", {"command": "cd ../feat && sed"}), on_claude
+    )
+    (linked / CORE).write_text((linked / CORE).read_text() + "y = 2  # BAD regex\n")
+    raw = payload(linked, "PostToolUse", tool_name="Bash", tool_use_id="t1")
+    output = json.loads(claude.hook(raw, on_claude))["hookSpecificOutput"]
+    assert output["additionalContext"].startswith("lup refused 1 file.")
+    assert "# BAD" not in (linked / CORE).read_text()
+
+
+def test_codex_holds_only_the_worktree_it_started_in(
+    on_codex: Bench, repo: Path, linked: Path
+) -> None:
+    codex.hook(payload(repo, "SessionStart", source="startup"), on_codex)
+    codex.hook(
+        payload(
+            repo,
+            "PreToolUse",
+            turn_id="u1",
+            tool_name="apply_patch",
+            tool_input={"command": "*** Begin Patch"},
+            tool_use_id="p1",
+        ),
+        on_codex,
+    )
+    (linked / CORE).write_text((linked / CORE).read_text() + "y = 2  # BAD regex\n")
+    assert codex.hook(post(repo, "done"), on_codex) == ""
+    assert "# BAD regex" in (linked / CORE).read_text()

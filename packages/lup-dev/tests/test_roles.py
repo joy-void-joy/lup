@@ -1,5 +1,6 @@
 """Path roles, and the project declaration they read."""
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -144,6 +145,42 @@ def test_a_declaration_is_loaded_from_tool_lup(repo: Path) -> None:
         Roles.of(repo, declared).role(Path("src/decl_one/lup_project.py"))
         == "protected"
     )
+
+
+def test_each_worktree_loads_its_own_declaration_in_one_process(
+    tmp_path: Path,
+) -> None:
+    roots = [tmp_path / "one", tmp_path / "two"]
+    for root in roots:
+        (root / "helpers").mkdir(parents=True)
+        (root / "helpers" / "__init__.py").write_text(f"NAME = {root.name!r}\n")
+        (root / "pyproject.toml").write_text(
+            '[tool.lup]\nproject = "lup_project:project"\n'
+        )
+        (root / "lup_project.py").write_text(
+            "from helpers import NAME\n"
+            "from lup_dev.project import Project\n"
+            "project = Project(excluded=[NAME])\n"
+        )
+    assert [load(root).project.excluded for root in roots] == [["one"], ["two"]]
+    assert "lup_project" not in sys.modules
+    assert "helpers" not in sys.modules
+    assert "lup_dev.project" in sys.modules
+
+
+def test_loading_a_declaration_leaves_no_bytecode_in_the_worktree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sys, "dont_write_bytecode", False)
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.lup]\nproject = "lup_project:project"\n'
+    )
+    (tmp_path / "lup_project.py").write_text(
+        "from lup_dev.project import Project\nproject = Project()\n"
+    )
+    load(tmp_path)
+    assert not (tmp_path / "__pycache__").exists()
+    assert sys.dont_write_bytecode is False
 
 
 def test_a_declaration_that_isnt_a_project_is_refused(repo: Path) -> None:

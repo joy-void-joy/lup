@@ -15,6 +15,13 @@ the operator answers from a terminal (`lup-dev holds`). The agent hears a
 checkpoint's report as `additionalContext` beside the call's result, and the result
 reaches it untouched.
 
+A Codex session holds only the worktree it started in, a declared gap until rooms
+(`docs/judging-writes.md`, *Every worktree of the repository*): its hooks' `cwd` is
+the "Working directory for the session", and `Bash` and `apply_patch` carry only
+`tool_input.command` (its hooks docs), which lup doesn't parse. Under its
+`workspace-write` sandbox a write elsewhere lies outside the writable roots, so
+Codex's own approval decides it.
+
 What this relies on, from Codex's hooks documentation and its source at
 `rust-v0.156.1` (`codex-rs/hooks/schema/generated/`):
 - the inputs: `PreToolUse` and `PostToolUse` carry `tool_use_id`, `PostToolUse` its
@@ -52,7 +59,9 @@ from lup_dev.policy.checkpoint import (
     ConversationEnded,
     SessionStarted,
     TurnEnded,
+    first_warning,
 )
+from lup_dev.policy.report import judge_failed
 from lup_dev.policy.runtime import Runtime
 
 
@@ -108,6 +117,18 @@ class Blocked(Output):
     reason: str
 
 
+class OperatorWarning(Output):
+    """A warning shown to the operator, not the agent, which lets the turn end.
+
+    Codex's hooks docs: `Stop` "expects JSON on `stdout` when it exits `0`" and
+    takes the common output fields, among them `systemMessage`, "Surfaced as a
+    warning in the UI or event stream"; only `decision: "block"` continues the
+    turn.
+    """
+
+    system_message: str
+
+
 def failure_note(failure: Exception) -> str:
     """Say that judging failed, for the agent to pass on."""
     return f"lup's judge failed, so this wasn't judged: {failure!r}. Tell the operator."
@@ -126,7 +147,7 @@ class Payload(Model, ABC):
         """Act on the hook, and return what to print; none to print nothing."""
 
     @abstractmethod
-    def failed(self, failure: Exception) -> Output | None:
+    def failed(self, bench: Bench, failure: Exception) -> Output | None:
         """Return what to print when judging itself failed."""
 
 
@@ -143,7 +164,7 @@ class SessionStart(Payload):
         return None
 
     @override
-    def failed(self, failure: Exception) -> Output | None:
+    def failed(self, bench: Bench, failure: Exception) -> Output | None:
         return None
 
 
@@ -168,7 +189,7 @@ class PreToolUse(Payload):
         return None
 
     @override
-    def failed(self, failure: Exception) -> Output | None:
+    def failed(self, bench: Bench, failure: Exception) -> Output | None:
         return None
 
 
@@ -194,7 +215,7 @@ class PostToolUse(Payload):
         return Specific(hook_specific_output=said)
 
     @override
-    def failed(self, failure: Exception) -> Output | None:
+    def failed(self, bench: Bench, failure: Exception) -> Output | None:
         said = PostToolUseAnswer(additional_context=failure_note(failure))
         return Specific(hook_specific_output=said)
 
@@ -213,9 +234,12 @@ class Stop(Payload):
         return Blocked(reason=reply.block) if reply.block else None
 
     @override
-    def failed(self, failure: Exception) -> Output | None:
-        """Say so once; a judge that keeps failing mustn't keep the turn from ending."""
-        return None if self.stop_hook_active else Blocked(reason=failure_note(failure))
+    def failed(self, bench: Bench, failure: Exception) -> Output | None:
+        """Let the turn end, and warn the operator once: the agent can't fix it."""
+        warning = judge_failed(failure)
+        if not first_warning(bench.services.layout, self.session_id, warning):
+            return None
+        return OperatorWarning(system_message=warning)
 
 
 class SubagentStop(Payload):
@@ -232,7 +256,7 @@ class SubagentStop(Payload):
         return Blocked(reason=reply.block) if reply.block else None
 
     @override
-    def failed(self, failure: Exception) -> Output | None:
+    def failed(self, bench: Bench, failure: Exception) -> Output | None:
         return None
 
 
@@ -253,7 +277,7 @@ def hook(raw: str, bench: Bench) -> str:
     try:
         output = received.answer(bench)
     except Exception as failure:
-        output = received.failed(failure)
+        output = received.failed(bench, failure)
     if output is None:
         return ""
     return output.model_dump_json(by_alias=True, exclude_none=True)

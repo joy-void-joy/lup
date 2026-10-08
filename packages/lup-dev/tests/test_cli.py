@@ -12,7 +12,7 @@ from lup_dev import cli
 from lup_dev.codescan.directives import IssueRef, Issues
 from lup_dev.codescan.engine import EngineChecker
 from lup_dev.layout import Layout
-from lup_dev.policy.holds import HeldFile, HoldError, Holds, waiting
+from lup_dev.policy.holds import HeldFile, Hold, HoldError, Holds, waiting
 from lup_dev.policy.verdicts import Verdict, VerdictLog
 
 if TYPE_CHECKING:
@@ -52,7 +52,7 @@ def fakes(kit: Kit, state: Layout, monkeypatch: pytest.MonkeyPatch) -> Kit:
     return kit
 
 
-def hold(state: Layout, kit: Kit, worktree: Path) -> str:
+def hold(state: Layout, kit: Kit, worktree: Path, commit: str | None = None) -> str:
     files = [
         HeldFile(
             path=Path("src/new.py"),
@@ -62,11 +62,17 @@ def hold(state: Layout, kit: Kit, worktree: Path) -> str:
             asks=["src/new.py is a new production file"],
         )
     ]
-    return (
-        Holds(layout=state.store(worktree))
-        .create(worktree, "s1", files, "+new\n", kit.clock)
-        .key
+    holds = Holds(layout=state.store(worktree))
+    held = Hold(
+        key=holds.unused(),
+        worktree=worktree,
+        session="s1",
+        created=kit.clock.now(),
+        files=files,
+        diff="+new\n",
+        commit=commit,
     )
+    return holds.put(held).key
 
 
 def test_holds_lists_whats_waiting_with_its_diff(
@@ -78,6 +84,19 @@ def test_holds_lists_whats_waiting_with_its_diff(
     assert key in result.output
     assert "src/new.py: src/new.py is a new production file" in result.output
     assert "+new" in result.output
+
+
+def test_holds_lists_a_moves_asks_apart(
+    state: Layout, kit: Kit, tmp_path: Path
+) -> None:
+    waited = hold(state, kit, tmp_path / "a")
+    moved = hold(state, kit, tmp_path / "b", commit="1a2b3c")
+    result = runner.invoke(cli.app, ["holds"])
+    assert result.exit_code == 0
+    agents, commits = result.output.split("Asked after the fact")
+    assert waited in agents
+    assert moved not in agents
+    assert f"{moved}  {tmp_path / 'b'}  (commit 1a2b3c)" in commits
 
 
 def test_holds_approve_and_decline(state: Layout, kit: Kit, tmp_path: Path) -> None:

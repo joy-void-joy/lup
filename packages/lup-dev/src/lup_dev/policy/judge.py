@@ -272,7 +272,7 @@ class Judge(Model, arbitrary_types_allowed=True):
             case "protected":
                 pattern = self.roles.project.protected.matching(change.path)
                 why = f" ({pattern})" if pattern else ", the project's declaration"
-                reason = f"{change.path} is a protected path{why}"
+                reason = f"{self.root / change.path} is a protected path{why}"
                 ask = Ask(kind="protected", reason=reason)
                 if change.after is None or not self.roles.ruled(change.path):
                     asks = [ask]
@@ -285,7 +285,7 @@ class Judge(Model, arbitrary_types_allowed=True):
                     )
                 return self.ruled(change, versions, removed, [ask])
             case "operator":
-                reason = f"{change.path} is one of the operator's documents"
+                reason = f"{self.root / change.path} is one of the operator's documents"
                 ask = Ask(kind="operator-document", reason=reason)
                 return Judgement(path=change.path, role=role, outcome="ask", asks=[ask])
             case "production":
@@ -385,10 +385,10 @@ class Judge(Model, arbitrary_types_allowed=True):
 
     def design(self, change: Change, versions: Versions) -> list[Ask]:
         """List the design asks of a production change: created, whole, public API."""
-        new_file = f"{change.path} is a new production file"
+        new_file = f"{self.root / change.path} is a new production file"
         new = [Ask(kind="new-file", reason=new_file)] if change.before is None else []
         replaced = change.whole and change.before is not None
-        whole_file = f"the write replaces the whole of {change.path}"
+        whole_file = f"the write replaces the whole of {self.root / change.path}"
         whole = [Ask(kind="whole-file", reason=whole_file)] if replaced else []
         if versions.after is None:
             return [*new, *whole]
@@ -398,7 +398,9 @@ class Judge(Model, arbitrary_types_allowed=True):
             versions.after.surface,
         )
         public = [
-            Ask(kind="public-api", reason=f"{change.path} {each.describe()}")
+            Ask(
+                kind="public-api", reason=f"{self.root / change.path} {each.describe()}"
+            )
             for each in api
         ]
         return [*new, *whole, *public]
@@ -410,7 +412,8 @@ class Judge(Model, arbitrary_types_allowed=True):
         before = versions.before.directives if versions.before else []
         return [
             Ask(
-                kind="ignore", reason=f"adds `# lup: {added.identity().text}` to {path}"
+                kind="ignore",
+                reason=f"adds `# lup: {added.identity().text}` to {self.root / path}",
             )
             for added in added_suppressions(before, versions.after.directives)
         ]

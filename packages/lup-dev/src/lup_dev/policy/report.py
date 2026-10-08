@@ -4,6 +4,10 @@ A refusal lists every finding in each refused file at once, so one pass fixes th
 all, then says where the agent's version is saved and how to bring it back
 (`docs/judging-writes.md`, *Refusals*). Information (type errors, ruff's findings,
 lup's findings on untouched lines) comes in its own sections and never refuses.
+A move of `HEAD` is told as its commits', never put back.
+
+A session hears about several worktrees, from any working directory, so every
+report names each file by its absolute path, as pyright's command line does.
 The texts name no runtime: each adapter carries them as its runtime hears them.
 """
 
@@ -14,12 +18,26 @@ from lup_dev.codescan.contract import Finding
 from lup_dev.policy.judge import Ask, RemovedNote
 
 
+def placed(root: Path, findings: list[Finding]) -> list[Finding]:
+    """Name each finding's file by its absolute path, from the worktree at `root`.
+
+    >>> from lup_dev.codescan.contract import Position, Span
+    >>> at = Position(line=1, column=1)
+    >>> found = Finding(path=Path("a.py"), span=Span(start=at, end=at), owner="ruff",
+    ...     rule="E501", message="too long")
+    >>> [each.path for each in placed(Path("/work"), [found])]
+    [PosixPath('/work/a.py')]
+    """
+    return [found.model_copy(update={"path": root / found.path}) for found in findings]
+
+
 class Refused(Model):
     """One file a judgement refused: put back, or never written, its version saved."""
 
     path: Path
+    """The file, by its absolute path."""
     saved: Path
-    """Where the agent's version is saved, relative to the worktree."""
+    """Where the agent's version is saved, by its absolute path."""
     new: bool
     """Whether the file didn't exist before the change."""
     refusing: list[Finding] = []
@@ -203,6 +221,73 @@ def removed_notes(notes: list[RemovedNote]) -> str:
     )
 
 
+class MovedFile(Model):
+    """One file a move of `HEAD` brought, judged once as its commits'."""
+
+    path: Path
+    """The file, by its absolute path."""
+    findings: list[Finding] = []
+    """lup's findings on the lines its commits touched."""
+    asks: list[Ask] = []
+    removed: list[RemovedNote] = []
+    """Notes it had before the move that its commits removed."""
+
+
+class Moved(Model):
+    """A move of `HEAD` whose commits brought content no checkpoint had judged."""
+
+    worktree: Path
+    head: str | None
+    """The commit `HEAD` moved to; none where it names no commit."""
+    files: list[MovedFile]
+    hold: str | None = None
+    """The hold asking the operator about it after the fact, if it asks."""
+
+
+def moved(moves: list[Moved]) -> str:
+    """Tell what moves of `HEAD` brought: judged once, and left as committed."""
+
+    def one(move: Moved) -> str:
+        told = [
+            each for each in move.files if each.findings or each.asks or each.removed
+        ]
+        if not told:
+            return ""
+        files = [
+            line
+            for each in told
+            for line in [
+                str(each.path),
+                *(line for found in each.findings for line in finding_lines(found)),
+                *(f"  asks: {ask.reason}" for ask in each.asks),
+                *(f"  removes the note: # lup: {note.text}" for note in each.removed),
+            ]
+        ]
+        gate = (
+            ["lup's findings in them fail the gate: fix them in a later commit."]
+            if any(each.findings for each in told)
+            else []
+        )
+        asked = (
+            [
+                (
+                    "The operator is asked about the rest after the fact "
+                    f"(hold {move.hold}, `lup-dev holds`)."
+                )
+            ]
+            if move.hold
+            else []
+        )
+        header = (
+            f"HEAD moved to {move.head or 'no commit'} in {move.worktree}, bringing "
+            "content no checkpoint judged. It was judged once, as its commits', "
+            "and stays as committed:"
+        )
+        return "\n".join([header, *files, *gate, *asked])
+
+    return sections([one(move) for move in moves])
+
+
 def turn_end(findings: list[Finding]) -> str:
     """Say why the turn can't end: what's still wrong in the files touched."""
     if not findings:
@@ -230,3 +315,17 @@ def asked(asks: list[Ask]) -> str:
     'lup asks: src/a.py is a new production file'
     """
     return f"lup asks: {'; '.join(ask.reason for ask in asks)}"
+
+
+def judge_failed(failure: Exception) -> str:
+    """Warn the operator that the judge failed at a turn's end, which ended anyway.
+
+    >>> judge_failed(RuntimeError("the engine crashed")).startswith("lup's judge")
+    True
+    """
+    return (
+        f"lup's judge failed at a turn's end, so that end wasn't judged: {failure!r}. "
+        "The turn ended, since the agent can't fix the judge: reinstalling it from "
+        "`dev` (`lup-dev install`), or fixing what the error names, is yours. "
+        "You're told once for each failure in a session."
+    )
