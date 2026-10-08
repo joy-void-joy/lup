@@ -1,11 +1,12 @@
 # Judging every write: allow, ask or refuse
 
-**One sentence:** lup judges every write in an agent's worktree. An `Edit` or `Write` is judged before it lands, on the content it would produce. Anything else (a command, a script, a background process, Codex's `apply_patch`) is judged at the next checkpoint, by comparing the worktree with the last state lup accepted. Each change is allowed, asked of the operator, or refused.
+**One sentence:** lup judges every write in the worktrees of an agent's repository. An `Edit` or `Write` is judged before it lands, on the content it would produce. Anything else (a command, a script, a background process, Codex's `apply_patch`) is judged at the next checkpoint, by comparing each worktree with the last state lup accepted for it. Each change is allowed, asked of the operator, or refused.
 
 This is the first piece of `DESIGN.md`'s build order, built alongside the library. It's the review workflow, and every call goes through it. It covers:
 - the three outcomes, and what each kind of change gets;
 - judging `Edit` and `Write` before they land;
 - the checkpoint and its snapshot store, for everything else;
+- which worktrees of the repository a session's writes are judged in, and a move of `HEAD` (a commit, a merge, a checkout) judged once, as a commit's;
 - asking the operator: in Claude Code's own prompt, and through holds where a runtime can't ask;
 - refusals, which report every finding at once and save the agent's version;
 - the typed engine and the code rules (the conventions they enforce are in `docs/conventions.md`);
@@ -18,7 +19,8 @@ This is the first piece of `DESIGN.md`'s build order, built alongside the librar
 Later:
 - answering in the dashboard (until then, Claude Code's prompt, the terminal, and the interim review hook, which queues prompts in the first lup's dashboard);
 - keeping the store out of the agent's reach, and refusing reads of secrets, which come with launch and containers;
-- edits a session makes in another repository, which come with launch and spawn.
+- edits a session makes in another repository, which come with launch and spawn;
+- a shell write into a worktree of the repository the session never reached, and on Codex every write outside the worktree the session started in, which close with rooms, whose mount is the worktree (*Every worktree of the repository*).
 
 ## What the first lup did
 
@@ -76,7 +78,7 @@ Production is the default, so a file nobody classified is gated rather than wave
 
 **A protected Python module gets lup's rules as production code does** (#14): protection adds the operator's review, it doesn't take the rules away. A finding on the lines a change touches refuses it, since refuse wins over ask; a clean change asks, with any design ask beside the protected one, and no approval covers the protected ask. Its type errors and ruff's findings are information like any module's, and must be clean at the turn's end; `lup-dev rules check` reads it too. `policy/roles.py` says which modules the rules read (`ruled`: production and protected) and whose pyright and ruff findings are reported (`checked`: those, and tests). The default patterns are data in `lup_dev/catalog/paths.py`, which the operator reviews; `policy/roles.py` holds the matching.
 
-A deleted file asks where it's protected or one of the operator's documents, and is otherwise allowed: the public-API ask covers what other code loses. A write outside the session's worktree isn't judged here; edits in another repository come with launch and spawn.
+A deleted file asks where it's protected or one of the operator's documents, and is otherwise allowed: the public-API ask covers what other code loses. A write is judged in the worktree of the session's repository that holds it, by that worktree's roles (*Every worktree of the repository*); a write outside the session's repository isn't judged here, and edits in another repository come with launch and spawn.
 
 **Where a project declares its roles:** a minimal `Project` starts in this piece (`lup_dev/project.py`), with only the fields it reads: its test roots, its additions to the protected paths, the paths it excludes, the rules it lifts from some paths, and the module declaring its conditions, shaped as `DESIGN.md`'s example (`Project(tests=[Pytest(root=…)], protected=Protected.default().add(…), excluded=[…], exempt=[Exemption(rule=…, paths=[…], why=…)], conditions="pkg.conditions")`). An exemption lifts one rule from every file its patterns match, with the operator's reason, where an `ignore` keeps one finding out on its line; the judge and `lup-dev rules check` leave out an exempt rule's findings, and every other rule still holds there. `excluded` is the settled part of `DESIGN.md`'s open question 8; compiling the declaration into the tools' own settings (ruff's and pyright's exclusions among them) is the declaration piece's. It's loaded from `[tool.lup] project = "pkg.module:project"`, importing from the worktree's root, its `src/`, and each uv workspace member and its `src/`, since the judge runs from its own installed copy; without one, the defaults apply, and one that can't be loaded is an error rather than a silent fallback. The declaration piece grows it.
 
@@ -99,7 +101,7 @@ For `Edit` and `Write`, lup knows the file's content after the call before anyth
 - **a whole write (`Write`):** the content it carries.
 - **a replacement (`Edit`):** the current file with `old_string` replaced by `new_string`, once, or everywhere with `replace_all`. If `old_string` isn't there exactly as the tool requires, lup allows the call, and the tool fails on its own.
 
-The hook (`PreToolUse`) runs the judgement on that content: the path's role, the code rules through the engine, the public-API comparison, the directives added or removed. It answers allow, ask or refuse. A refused edit never touches the file. The engine checks content that isn't on disk the way pyright's language server checks an unsaved buffer (a check owed below).
+The file's worktree is the one its path is in, which git names (*Every worktree of the repository*). The hook (`PreToolUse`) runs the judgement on that content: the path's role, the code rules through the engine, the public-API comparison, the directives added or removed. It answers allow, ask or refuse. A refused edit never touches the file. The engine checks content that isn't on disk the way pyright's language server checks an unsaved buffer (a check owed below).
 
 **What it's compared with** is the accepted content, not the file on disk, so a command's write not yet judged is judged with the edit: an edit to a file a command just created asks as a new file. A write allowed or asked is remembered with its call; when the call finishes, the checkpoint accepts that content as judged, and an asked call that ran means the operator approved it.
 
@@ -121,34 +123,95 @@ The judging core never sees a runtime. Each runtime's adapter turns its hooks in
 
 The events live in `policy/checkpoint.py`; the adapters in `lup_dev/adapters/`, the only modules that name a runtime (an import contract keeps them behind `lup_dev.cli`, and `docs/conventions.md` has the rule).
 
-**A checkpoint runs whenever a call finishes and no other call is running,** and again when the turn ends. Parallel calls are judged together once the last one finishes; a late background write is judged at the next checkpoint. The checkpoint is before the agent's next model request, so a refusal reaches the agent before it writes its next line.
+**A checkpoint runs whenever a call finishes and no other call is running,** and again when the turn ends. It runs in each worktree the session holds, once no call counted there is running (*Every worktree of the repository*). Parallel calls are judged together once the last one finishes; a late background write is judged at the next checkpoint. The checkpoint is before the agent's next model request, so a refusal reaches the agent before it writes its next line.
 
 **Subagents.** A call that runs a subagent (Claude Code's `Agent`, Codex's `spawn_agent`) isn't counted as running: its subagent's own calls are, so a subagent's writes are judged as it makes them, and the report goes to the subagent whose call finished. The checkpoint sees files, not authors, so its report also waits, as mail, for every other conversation whose calls finished since the last checkpoint, and reaches each at its next finished call or the end of its conversation. A subagent's end clears its own calls and runs a checkpoint if none is left running; the turn-end checks are the session's.
 
 **It degrades gracefully:**
 - a "finished" with no matching "started" leaves the running calls as they are (Codex's `write_stdin` can deliver the original command's `PostToolUse` without a `PreToolUse` of its own), and still runs a checkpoint if no call is running;
 - a call that never reports finishing is cleared when its conversation's turn ends, and the turn-end checkpoint judges everything anyway. Claude Code reports no event for a call the operator declined at its prompt, so a declined call stays counted until the turn ends: harmless, but it holds back the checkpoints of that turn;
-- the in-flight calls are a set of ids under a file lock, since hooks for parallel calls run concurrently.
+- the in-flight calls are kept per worktree under a file lock, since hooks for parallel calls run concurrently, each call with its session and its conversation, so a turn's end clears its own session's calls and no other's. (Built, a call records only its conversation, which is empty for every session's own, so a turn's end clears the calls of every session running in that worktree.)
 
-**How a checkpoint goes:**
+**How a checkpoint goes,** in each worktree it runs in:
 1. **Snapshot.** The worktree is written into lup's own store as a git tree (a private index, `git add -A`, `write-tree`). Ignored files are left out, as `.gitignore` says. The store is a bare repository outside the worktree, and git runs with `core.fsmonitor` and hooks turned off: the effects probe saw a planted `core.fsmonitor` run inside a call.
 2. **Compare** with the accepted tree (`git diff-tree`). Nothing changed is the common case after a read.
-3. **Set aside what was committed elsewhere.** A changed file whose new content equals its content in a commit that existed at the previous checkpoint, or that arrived from a remote since, isn't judged: that's what a checkout, a pull, a merge, a stash or a `git restore` produce, and that content was judged where it was written. A commit made locally since the previous checkpoint doesn't launder its own files: one shell call that writes a new file and commits it is judged like any write. A file with conflict markers matches no commit, so it's judged.
-   - **How:** the commits are those the worktree's refs and `HEAD` named at the previous checkpoint, plus its remote-tracking refs now, and `git log --find-object=<blob> <those commits> -- <path>` says whether any of their history holds that content at that path. A deletion is set aside when `HEAD` lacks the path and was one of those commits (a branch switch).
+3. **Set aside what was committed elsewhere.** A changed file whose new content equals its content in a commit that existed at the previous checkpoint, or that arrived from a remote since, isn't judged: that's what a checkout, a pull, a merge, a stash or a `git restore` produce, and that content was judged where it was written. The content git's merge makes from such commits isn't judged either: a merge whose two sides both changed a file writes content no commit held, made from content judged on each side. A file with conflict markers matches no commit, so it's judged, and so is a resolution written by hand.
+   - **How:** the commits are those the repository's refs and the worktree's `HEAD` named at its previous checkpoint, the `HEAD` each other worktree of the repository had at its own last checkpoint, and the remote-tracking refs now; `git log --find-object=<blob> <those commits> -- <path>` says whether any of their history holds that content at that path. For a merge (a `HEAD` reached since the last checkpoint with more than one parent, or a merge in progress), `git merge-tree --write-tree` of its parents remakes git's clean merge, and a file equal to its result is set aside when every parent is among those commits. A deletion is set aside when `HEAD` lacks the path and was one of those commits (a branch switch).
+   - **Built, a merge isn't recognized** (#22): replayed against the built judge with the tests' stub engine, a branch adding a class to a file both sides had changed was merged with `git merge`, and the checkpoint after it refused the merged file as a public-API change made through the shell, leaving the working tree different from `HEAD`. That's #22's harm with no checkpoint missed.
    - **A gap:** a remote-tracking ref also moves when the agent pushes, so one call that writes a file, commits it and pushes it is set aside like a pull. Telling a fetch from a push needs the reflog's messages; the hole is narrow while pushes run on the host, and closes with containers, where pushes go through a host service.
-4. **Judge** every remaining change exactly as an edit is judged before it lands: role, rules, public API, directives. Content judged before it landed (a file tool's write whose call finished, a hold the operator approved) is accepted as it is; changed since, it's judged from that content.
-5. **Refuse** what the table refuses, and what bypassed an ask: on a runtime that asks before a call, a new production file, a public-API change, a suppression, a protected path or an operator's document changed through the shell is refused with a pointer to the file tools, so it comes back through the prompt. That enforces `AGENTS.md`'s "create files with your file tool". On a runtime that can't ask before a call, it's held instead (*Asking the operator*).
-6. **Act:** a refused file goes back to its accepted content, or is removed if it was new, and the agent's version is saved. What's left becomes the new accepted tree.
-7. **Report** to the agent, once: everything refused, then type errors and ruff's findings as information.
+4. **Judge a move of `HEAD` once, as a commit's** (#22, not built yet). The worktree's `HEAD` is recorded at each checkpoint. When it has moved (a commit, a merge, a pull, a checkout, a reset), the files the move changed whose content on disk is the new `HEAD`'s were put there by git, not typed: they're the move's, not the session's. What step 3 didn't set aside of them is content first written in a commit made since the last checkpoint: shell writes committed in the same call, a resolution committed through the shell, commits made while the judge couldn't run (#21). That is judged once, against the accepted content, and it's:
+   - **never put back:** putting it back leaves the working tree different from `HEAD` (#22), and protects nothing, since the next `git restore` brings the content back unjudged, the commit being among the tips by then. Replayed against the built judge: a new module written and committed in one call was refused and removed, and the `git restore` that followed was accepted silently;
+   - **attributed to no session:** its verdicts are logged without one, with `move` for their tool, since the checkpoint can't tell who committed;
+   - **told as a commit's** to the conversations whose calls finished since the last checkpoint. Its findings fail the gate before the branch lands; its asks are kept for the operator as holds no agent waits on (*Asking the operator*).
 
-The accepted tree starts as a snapshot when a session starts. If a stored accepted tree already exists for the worktree, the difference happened while no session ran there: the operator's work or a pull. It's accepted without judging.
+   A file changed again after the move is judged in two steps, the move and then the rest against `HEAD`'s content, so the session isn't asked about what the commit brought.
+5. **Judge** every remaining change exactly as an edit is judged before it lands: role, rules, public API, directives. Content judged before it landed (a file tool's write whose call finished, a hold the operator approved) is accepted as it is; changed since, it's judged from that content.
+6. **Refuse** what the table refuses, and what bypassed an ask: on a runtime that asks before a call, a new production file, a public-API change, a suppression, a protected path or an operator's document changed through the shell and not committed (committed, it's the move's: step 4) is refused with a pointer to the file tools, so it comes back through the prompt. That enforces `AGENTS.md`'s "create files with your file tool". On a runtime that can't ask before a call, it's held instead (*Asking the operator*).
+7. **Act:** a refused file goes back to its accepted content, or is removed if it was new, and the agent's version is saved. What's left becomes the new accepted tree.
+8. **Report** to the agent, once: everything refused, then type errors and ruff's findings as information.
 
-**Someone else's edit during a session** can't be told apart from the agent's: the checkpoint sees files, not authors. An edit the operator makes in a worktree while an agent's session runs there is judged as the agent's, and if refused it's put back with the version saved, so nothing is lost. The operator works in their own worktree, or between sessions.
+The accepted tree starts as a snapshot when a session starts, or first reaches a worktree, and the worktree's `HEAD` is recorded with it. If a stored accepted tree already exists for the worktree, the difference happened while no session ran there: the operator's work or a pull. It's accepted without judging, unless a call is running there: then another session is at work in it, so the accepted tree stays and that call's checkpoint judges what it writes. (Built, a session's start accepts the worktree as it stands even while another session's call runs there.)
 
-**Cost:**
-- one snapshot per checkpoint, about 50 ms at lup's size (the effects probe); the existing projects have 161 to 3,721 tracked files;
+**Someone else's edit during a session** can't be told apart from the agent's: the checkpoint sees files, not authors. An edit the operator makes in a worktree a session holds is judged as the agent's, and if refused it's put back with the version saved, so nothing is lost. The operator works in a worktree no session reaches, or between sessions.
+
+**Cost**, for each worktree the session holds:
+- one snapshot per checkpoint. Measured for #20 through the store's own code: 70 to 100 ms where nothing changed, about nine git processes, of which the snapshot is 5 ms at lup's size and 10 to 15 ms at nori's 4,000 files; a worktree's first snapshot takes 40 to 50 ms at lup's size and 2.5 to 3.6 s at nori's. The effects probe's figure was about 50 ms; the existing projects have 161 to 3,721 tracked files;
 - plus the engine's incremental re-check of the changed files;
-- target: under 300 ms per checkpoint on this repository, type check included.
+- target: under 300 ms per checkpoint on this repository, type check included, for a session holding one or two worktrees.
+
+## Every worktree of the repository
+
+Not built yet: designed for #20. A session starts in one worktree and often works in others. In this repository each branch is its own worktree (`tree/<branch>`), so a session started in `tree/dev` writes in `tree/feat-…`, and its workers write in theirs. The built judge looks only at the worktree a session started in, so most of that work went unjudged: a protected module, the whole rule table and a `.claude/` hook all reached `dev` without the operator's review. The store, the roles and the verdict log are already per worktree or per repository, so what changes is how the worktree is found, not how a write is judged.
+
+**The session's repository.** When a session starts, lup reads its repository from its working directory: git's common directory (`git rev-parse --git-common-dir`). A worktree names it, and so does a bare repository's own directory (checked at `lup.git/` and `lup.git/tree/`), so a session started there is judged too, holding no worktree until it reaches one. A session started outside any repository isn't judged, as now. The session index keeps the repository and the worktrees the session holds.
+
+**A write's worktree, from its path.** For an `Edit` or a `Write`, lup asks git from the file's nearest directory that exists: `--show-toplevel` names its worktree, `--git-common-dir` its repository.
+- In a worktree of the session's repository, it's judged there, by that worktree's accepted content, roles and declaration.
+- In another repository, or in none, it isn't judged, and the runtime decides, as now. A repository nested inside a worktree is another repository: git says so, and the checkpoint's snapshot doesn't see inside it either.
+- In the repository's own git directory, which in a layout like this one sits outside every worktree (`lup.git/config`, `lup.git/hooks/`, `lup.git/worktrees/`), it asks, as `.git/` does inside a worktree: those files run outside the agent's reach. No snapshot covers that directory, so only the file tools' writes there are judged.
+
+**The worktrees a session holds:**
+- the worktree it started in;
+- each worktree one of its file tools writes in;
+- each worktree a hook reports as its working directory. Claude Code's hooks reference: "`cwd` follows Claude: the `cwd` field in the hook's input JSON is the worktree root after Claude enters a worktree, and the new directory after Claude runs `cd`." So after a `cd ../feat-x` in the session's own conversation, the next hook holds `feat-x`.
+
+A subagent's hooks carry its session's id, so a worker's worktree is held by the session that started the worker. Reaching a worktree begins the session there as a start does: the accepted tree becomes the worktree as it stands (unless a call is running there), and the session's starting tree there is recorded, which the public-API ask and removed notes compare with.
+
+**Which worktrees a checkpoint looks at.** Three options, costed with the figures above (*Cost*). This repository has 3 worktrees, nori 36 and the first lup 79.
+
+| Option | Cost per checkpoint | What it judges |
+|---|---|---|
+| Every worktree of the repository | ~80 ms for each worktree: 0.25 s here, ~3.5 s on nori; and the first checkpoint that sees a worktree pays its first snapshot, 2.5 s each at nori's size | Everything, but also the operator's own worktree and other sessions' worktrees, as this session's writes. And the calls counted must span the repository, so one session's long call holds back every other session's checkpoints |
+| The worktrees the session holds | ~80 ms for each held worktree, usually one to three: today's cost for a session in one worktree | Every file tool's write, and every shell write into a worktree the session reached; not a shell write into a worktree it never reached |
+| Those changed since their record | The same as every worktree: knowing that a worktree changed takes the snapshot's pass over its files, and once that pass is done the snapshot costs almost nothing more | The same as every worktree |
+
+**Lean: the worktrees the session holds.** It costs a session in one worktree what it costs now, never judges the operator's worktree or another session's, and covers what went unjudged in #20: file tools' writes in other worktrees, and shell writes where the session works.
+- **The gap:** a shell write into a worktree the session never reached (no file tool there, never its working directory) isn't judged, and is accepted when a session next reaches that worktree. `AGENTS.md`'s "create files with your file tool" makes a session's first write in a worktree a file tool's. Rooms close the gap: a room's mount is its worktree.
+- **On Codex** a session holds only the worktree it started in. Its hooks' `cwd` is the "Working directory for the session", and its `Bash` and `apply_patch` carry only `tool_input.command` (its hooks docs), which lup doesn't parse. Under its `workspace-write` sandbox a write elsewhere lies outside the writable roots, so Codex's own approval decides it, and lup doesn't judge it. That's the declared gap on Codex until rooms. A project that adds its other worktrees to the writable roots widens it, and so does running Codex without its sandbox (`danger-full-access`), where such a write lands unasked and unjudged.
+- **The alternative worth weighing:** add a sweep of every worktree at the turn's end to the held ones. It catches shell-only writes on both runtimes, once per turn, where the turn's end already waits for the importers pass. Its price is the first one's: the operator's uncommitted work in any worktree is judged as the agent's.
+
+**One checkpoint per worktree.** A call counts in every worktree its session holds when it starts. When a call finishes, a checkpoint runs in each worktree the session holds where no counted call is still running, one after another, and the agent hears their reports together. The turn's end runs over every worktree the session holds: the checkpoint, the importers pass, the type errors and ruff's findings left in what it touched, and the notes removed, each listed under its worktree.
+
+**What's kept where:**
+
+| What | Kept | What changes |
+|---|---|---|
+| The store: snapshots, the accepted tree, the state (commits seen, saved versions, files held) | per worktree | The state keeps the worktree's `HEAD` at its last checkpoint (step 4) |
+| A session's record: approvals, files touched, writes pending, content judged, notes removed, mail | per worktree, per session | A session has one in each worktree it holds; an approval covers the path in its worktree only |
+| The calls running | per worktree | Each call records its session; it counts in every worktree its session holds |
+| Saved versions | `<worktree>/.lup/saved/` | Nothing |
+| Holds | per worktree's store | A checkpoint over several worktrees can make a hold in each, waited on one after another; `lup-dev holds` already lists every store's |
+| The importers pass | per worktree | The turn's end waits for the pass of every worktree the session holds |
+| The engine | per worktree | A session writing Python in several worktrees runs an engine in each, each 1.5 to 2.7 GB on a 700-file project (the spike), until it's idle |
+| The declaration | each worktree's own | Below |
+| The verdict log | per repository | Each verdict names its worktree |
+| The session index | per session | The repository and the worktrees held, where it kept one worktree |
+
+**Each worktree's declaration.** A worktree is judged by its own declaration, so a branch changing `lup_project.py` is judged by its own. One hook process now loads several, and every worktree's declaration is the module `lup_project`. Python keeps a module once it's imported: loading two worktrees' declarations in one process with the built `load` returned the first worktree's for both. So loading a declaration drops from `sys.modules`, once it's loaded, the modules it imported from that worktree.
+
+**This makes #21 common.** Once this is built, a branch that adds a field to the declaration breaks the installed judge in its own worktree as soon as its `lup_project.py` uses the field, and not only on `dev` after landing. While a declaration that can't be loaded denies every file tool's write (#21's behaviour now), that branch can't finish the field it's adding. #21's settlement decides this. An option for it: judge with the last declaration of the repository that loaded, kept in the store, and tell the operator once.
+
+**Reports name each file in full.** A session hears about several worktrees, from any working directory, so reports name each file by its absolute path, as pyright's command line does, and the `mv` that puts a saved copy in place names both ends in full.
 
 ## Asking the operator
 
@@ -163,6 +226,8 @@ The accepted tree starts as a snapshot when a session starts. If a stored accept
 - The hook waits up to 24 hours (the first lup held calls for 4 hours without trouble), polling the hold every 2 seconds. Unanswered by then, the change is put back and saved, and the hold stays open: an answer given later reaches the agent at its next checkpoint, and an approval then covers the path, so the saved version can go back into place. Codex's hook timeout has no maximum, so its `PostToolUse` and `Stop` hooks are configured with more than a day.
 - While a hold waits, the store is released: other calls' checkpoints leave the held files alone.
 - This is a declared gap: on Codex the operator answers from a terminal until the dashboard exists.
+
+**A move's asks, after the fact** (#22, not built yet). What a move of `HEAD` asks (step 4 of the checkpoint) is already committed, and it isn't put back, so on both runtimes it's kept as a hold that no agent waits on. `lup-dev holds` lists these apart from the holds an agent is waiting on, with the commit and the diff. An answer is logged, and reaches the session that found the move at its next checkpoint, as a late answer does. A decline changes no file: reverting the commit is the operator's, or an agent's at their word.
 
 **Nobody answers their own hold.** `lup-dev holds approve` and `decline` refuse to run when their environment shows they run inside an agent's session: Claude Code's `CLAUDE_CODE_CHILD_SESSION`, Codex's `CODEX_THREAD_ID` (*Checks owed*, settled). Each adapter reads its own runtime's variable. That stops a mistake, not a determined agent: in the bridge the agent runs as the operator's user and could write the answer itself. The real separation comes with containers, where the hold store sits outside the container and answering runs only on the host.
 
@@ -186,6 +251,8 @@ Fix these lines in the saved copy, then move it into place:
 To keep a finding, add on its line or the line above (the operator is asked):
   # lup: ignore("<rule>", why="<reason>")
 ```
+
+Once a session's writes are judged in several worktrees (#20, not built yet), each path in the report is absolute, the `mv` naming both ends in full, since the agent's working directory may be any of them (*Every worktree of the repository*). The example changes with the code: `tests/test_report.py` checks the two agree.
 
 **Which findings refuse.** Findings on the lines the change touched; for a new file, every line. The refusal lists every finding in the file, so one pass fixes them all: the art studio's agent resent a 550-line file four times, once per rule. Findings on untouched lines are listed under their own heading and don't refuse; they exist only where a rule is newer than the code.
 
@@ -331,9 +398,9 @@ The first lup had an "acceptance guard" for it, an opt-in path role it never tur
 ## The verdict log
 
 Every judgement is logged from day one, so how often lup asks, refuses and allows can be measured and tuned instead of guessed. One JSON line per verdict, a pydantic `Verdict`:
-- time, session, runtime;
-- the tool, or `checkpoint`;
-- the path and its role;
+- time, session, runtime; a move of `HEAD` is logged with no session (checkpoint, step 4);
+- the tool, `checkpoint`, or `move`;
+- the worktree, and the path in it with its role (#20, not built yet: the built log has no worktree, so the same path in two worktrees can't be told apart);
 - the outcome (allow, ask, refuse, hold) and its reasons (the rules that refused, the kinds of ask, or the role that allowed: `rules-pass` for production);
 - the operator's answer, when there is one.
 
@@ -344,6 +411,7 @@ It's kept per repository, beside the store. An answer comes after its verdict (w
 | | Claude Code | Codex |
 |---|---|---|
 | `Edit`/`Write` judged | before they land (`PreToolUse`) | no such tools: `apply_patch` judged at the checkpoint |
+| Worktrees a session holds | where it started, where its file tools write, where its hooks report its working directory, which follows `cd` | where it started; under its `workspace-write` sandbox a write elsewhere is outside the writable roots, and Codex's own approval decides it |
 | Checkpoint events | `PreToolUse`, `PostToolUse` (and `PostToolUseFailure`), `Stop`, `SubagentStop` | `PreToolUse`, `PostToolUse`, `Stop`, `SubagentStop` |
 | allow | `PreToolUse` answers `allow` | nothing to answer: Codex doesn't ask for `apply_patch` inside the workspace |
 | ask | `PreToolUse` answers `ask` | held at the checkpoint, answered from the terminal |
@@ -361,9 +429,9 @@ Both runtimes hear a report the same way. Codex's docs say a `PostToolUse` hook'
 
 | What | Where | Why there |
 |---|---|---|
-| The store: snapshots, the accepted tree, in-flight calls, holds, refusals | `$XDG_STATE_HOME/lup/worktrees/<id>/`, outside the worktree | The restore source must be out of the agent's reach. In the bridge it isn't, since the agent runs as the operator's user; launch puts it out of the container |
+| The store: snapshots, the accepted tree, in-flight calls, holds, refusals, each session's record there | `$XDG_STATE_HOME/lup/worktrees/<id>/`, one per worktree, outside it | The restore source must be out of the agent's reach. In the bridge it isn't, since the agent runs as the operator's user; launch puts it out of the container |
 | The verdict log | `$XDG_STATE_HOME/lup/repositories/<id>/verdicts.jsonl` | One place to measure a repository's verdicts across its worktrees |
-| Which worktree each session started in | `$XDG_STATE_HOME/lup/sessions/<session>.json` | A session's later events find their worktree even after a `cd` elsewhere |
+| Each session's repository and the worktrees it holds (built: the one worktree it started in) | `$XDG_STATE_HOME/lup/sessions/<session>.json` | A session's later events find its worktrees wherever its working directory is |
 | Saved versions | `<worktree>/.lup/saved/` | The agent has to edit and move them |
 | A worktree's engine: its socket, and its lock and log | `$XDG_RUNTIME_DIR/lup/<id>.sock` (or `lup-<user>` in the system's temporary directory); the lock and log in the store | A socket's path holds about a hundred bytes, which the store's path can exceed |
 | The built engine and its stubs | `lup_dev/codescan/bundle/`, built by `packages/lup-dev/checker/build.py`, ignored by git | The installed package carries it, so the judge finds its engine beside it |
@@ -392,9 +460,10 @@ In `packages/lup-dev/src/lup_dev/`, by subsystem (`docs/conventions.md`, *Packag
 | `policy/judge.py` | One judgement over a set of changed files, shared by `policy/before.py` and the checkpoint: role, rules, public API, directives, outcome |
 | `policy/surface.py` | Comparing a file's public surface before and after |
 | `policy/before.py` | A file tool's replacement or whole write before it lands: the would-be content, then the judgement |
-| `policy/checkpoint.py` | The runtime-neutral events, the in-flight set, deciding when to judge, the checkpoint, holds at the checkpoint |
+| `policy/worktrees.py` | Proposed for #20, not built: the session's repository, the worktree a path is in, and the worktrees a session holds |
+| `policy/checkpoint.py` | The runtime-neutral events, the in-flight set, deciding when to judge, the checkpoint in each worktree the session holds, a move of `HEAD`, holds at the checkpoint |
 | `policy/importers.py` | The background pass re-checking the files that import what changed |
-| `policy/store.py` | The store: snapshot, compare, set aside what was committed elsewhere, restore, save, move the accepted tree forward |
+| `policy/store.py` | The store: snapshot, compare, set aside what was committed elsewhere or merged from it, restore, save, move the accepted tree forward |
 | `policy/holds.py` | Holds: waiting for an answer, and answering |
 | `policy/verdicts.py` | The verdict log and its summary |
 | `policy/report.py` | The reports, in pyright's shape |
@@ -450,11 +519,13 @@ The `lup-dev` command is this piece's stand-in until the declaration and CLI pie
   - Claude Code's environment-variable reference: `CLAUDE_CODE_CHILD_SESSION` is "set to `1` in subprocesses Claude Code spawns via the Bash, PowerShell, and Monitor tools, hook commands, and status line commands", and, unlike `CLAUDECODE`, "only set by Claude Code itself when it launches a subprocess and not by IDE extensions", whose terminals the operator may answer from. Observed in this session's commands.
   - Codex sets `CODEX_THREAD_ID` in every command its agent runs (`codex-rs/core/src/unified_exec/process_manager.rs` at `rust-v0.156.1`, inserted after the shell environment policy, so a profile can't strip it), with `CODEX_CI=1`. Its hooks run with Codex's own environment, without them.
 - **Codex, settled:**
-  - Its `PermissionRequest` for `apply_patch` carries `tool_input: {"command": <the patch>}` and no file list (`core/src/tools/approvals.rs`). It fires only when the patch needs approval: under `on-request`, a patch writing outside the writable roots, or retried after a sandbox denial; under `never`, never. Inside the workspace Codex doesn't ask, so lup answers nothing and judges at the checkpoint; a patch reaching outside is left to Codex's approval, since lup doesn't judge writes outside the worktree yet. The design's "answered `allow`" would have let those through unjudged.
+  - Its `PermissionRequest` for `apply_patch` carries `tool_input: {"command": <the patch>}` and no file list (`core/src/tools/approvals.rs`). It fires only when the patch needs approval: under `on-request`, a patch writing outside the writable roots, or retried after a sandbox denial; under `never`, never. Inside the workspace Codex doesn't ask, so lup answers nothing and judges at the checkpoint; a patch reaching outside is left to Codex's approval, since on Codex lup judges only the worktree a session started in (*Every worktree of the repository*). The design's "answered `allow`" would have let those through unjudged.
+  - Its hooks' `cwd` is the "Working directory for the session", and "`Bash` and `apply_patch` use `tool_input.command`" (its hooks docs, read for #20): nothing in a payload says where a command or a patch writes, short of parsing them.
   - Its hook `timeout` defaults to 600 seconds with no maximum: `timeout_sec.unwrap_or(600).max(1)` (`hooks/src/engine/discovery.rs`); its docs: "If timeout is omitted, Codex uses 600 seconds for most hooks". A timed-out hook fails open.
   - Its payloads (`hooks/schema/generated/*.input.schema.json`): every hook has `session_id`, `cwd`, `hook_event_name`; `PreToolUse` and `PostToolUse` add `tool_name`, `tool_input`, `tool_use_id` and, for a subagent, `agent_id`; `PostToolUse` adds `tool_response`; `Stop` adds `stop_hook_active`. Its shell tool is reported as `Bash`, `apply_patch` as `apply_patch`, a subagent's start as `spawn_agent`.
   - Its `PreToolUse` can't ask: "`permissionDecision: "ask"` … [is] parsed but not supported yet" (its hooks docs), and a plain `allow` fails open (`hooks/src/engine/output_parser.rs`). lup never answers it.
 - **Claude Code, settled:** its hooks reference says `PreToolUse` "runs before a tool call executes" and `PostToolUse` "after a tool call succeeds" (`PostToolUseFailure` "after a tool call fails"), each with the call's `tool_use_id`, and that matching hooks "run in parallel". A call's finish never comes before its start, so the in-flight set stays right; parallel calls' hooks overlap, which the file lock covers.
+- **A subagent's working directory in its hooks:** whether Claude Code's `cwd` follows a `cd` in a subagent's calls as it does in the session's own conversation. Here a subagent's shell starts each call in the project's directory, so its hooks may never report another worktree; its file tools hold its worktree either way (*Every worktree of the repository*).
 - **Not used:** Claude Code's own record of a command's edits (`bashEditDiff`), which missed files in the probe, a protected one among them.
 
 ## Decisions
@@ -480,7 +551,7 @@ Each with its alternative and where it lives. **(yours, agreed)** marks what the
 17. **(yours, agreed)** The judge runs from a local copy installed from `dev`. *Alternative:* the worktree's own copy. *Where:* the hook commands.
 18. **(yours, agreed)** No acceptance guard of its own: tests written as a specification are protected paths a project adds, and read-only mounts in a room. *Alternative:* the first lup's opt-in `acceptance` path role. *Where:* `policy/roles.py` (protected-path additions).
 19. **(yours, agreed for now)** Shell commands on the host through narrow allow rules in Claude Code's settings; the prompts the rest causes reach the review dashboard as soon as possible (in the bridge, through the interim hook's `PermissionRequest`). *Alternative:* a lup vocabulary, which needs the shell parser `DESIGN.md` drops. *Where:* `.claude/settings.json`.
-20. Content committed elsewhere isn't judged; commits made locally since the previous checkpoint are. *Alternatives:* judge it all, which replays history as new writes; set aside anything equal to `HEAD`, which let a write-and-commit through. *Where:* `policy/store.py`.
+20. Content committed elsewhere isn't judged; commits made locally since the previous checkpoint are. *Alternatives:* judge it all, which replays history as new writes; set aside anything equal to `HEAD`, which let a write-and-commit through. *Where:* `policy/store.py`. Reshaped by 77 and 78 (#22, not built): neither is what git merges from content committed elsewhere, and a commit made since the previous checkpoint is judged once, as a move of `HEAD`, rather than put back.
 21. Findings on touched lines refuse; the refusal lists every finding in the file. *Alternative:* any finding in a touched file refuses. *Where:* `policy/judge.py`, `policy/report.py`.
 22. Type errors and ruff's findings are information at each checkpoint and refuse only at turn end. *Alternative:* refuse at the checkpoint, which `DESIGN.md` rules out. *Where:* `policy/judge.py`.
 23. A refused new file comes back through `Write`; a refused edit through its saved copy. *Alternative:* hold the moved copy at the checkpoint for the operator, which Claude Code can't prompt for there. *Where:* `policy/before.py`, `policy/report.py`.
@@ -499,7 +570,7 @@ Taken while building it:
 33. Deleting a protected path or an operator's document asks; deleting anything else is allowed. *Alternative:* every production deletion asks. *Where:* `policy/judge.py`.
 34. An approval covers the path's design asks (a new file, a whole write, a public-API change) for the session; a protected path, an operator's document and each `ignore` ask every time. *Alternative:* it covers every ask on the path. *Where:* `policy/judge.py` (`Ask.covered`).
 35. Removing a definition or class that existed when the session started doesn't ask; removing a name from a package's root does, as written above. *Alternative:* any removal of a session-start definition asks. *Where:* `policy/surface.py`.
-36. A write outside the session's worktree isn't judged; the runtime decides. *Alternative:* refuse it. *Where:* `policy/before.py`.
+36. A write outside the session's worktree isn't judged; the runtime decides. *Alternative:* refuse it. *Where:* `policy/before.py`. Reshaped by 69 (#20, not built): outside the session's repository.
 37. A file tool's write is judged against the accepted content, not the file on disk. *Alternative:* the disk, which would let a command's unjudged write ride in with an edit. *Where:* `policy/before.py`.
 38. A call that runs a subagent isn't counted as running; a checkpoint's report waits as mail for every other conversation whose calls finished since the last one; a subagent's end clears its calls. *Alternative:* count the spawn, which would judge a subagent's writes only when it ends, and tell only its parent. *Where:* `policy/checkpoint.py`, `adapters/`.
 39. Codex's `PermissionRequest` isn't answered: the design's "answered `allow`" was based on it firing for every patch, and it fires only for patches that need approval (*Checks owed*). *Alternative:* answer `allow`, which would let patches outside the worktree through unjudged. *Where:* `adapters/codex.py`.
@@ -532,3 +603,21 @@ Taken while building it:
 66. The interim review hook carries prompts to the dashboard, on `PermissionRequest` and `PostToolBatch`, and its own write review is no longer registered; its code for it stays while sessions started with the old settings run. *Alternative:* removing that code now, which would block every write in those sessions. *Where:* `.claude/settings.json`, `.claude/hooks/interim_review.py`.
 67. The narrow `Bash` allow rules are the gate's commands and read-only git. *Alternative:* the note's four examples only. *Where:* `.claude/settings.json`.
 68. `Project.exempt` lifts one rule from the paths its patterns match, each with its reason, applied where findings are kept: the judge's `kept` and `lup-dev rules check`. The turn's end reports only pyright's and ruff's findings, so it has nothing to lift. *Alternatives:* a selection sent to the engine per file, which would make the engine read the declaration; the declaration piece's full selection grammar, which is that piece's to design. *Where:* `project.py`, `policy/roles.py`, `policy/judge.py`, `cli.py`; `lup_project.py` exempts the library's front door from `runtime-mention`.
+
+Taken for #20 and #22, not built yet:
+
+69. **(yours)** The judge covers every worktree of the session's repository. The repository is read from the session's working directory as git's common directory, so a session started in a bare repository's own directory is judged too. *Alternatives:* pin a session to the worktree it starts in, and make one session per worktree the way of working (#20's option 2); leave it until rooms (#20's option 3). *Where:* `policy/worktrees.py`, `layout.py` (the session index).
+70. **(yours)** A file tool's write is judged in the worktree its path is in, which git names from the file's nearest existing directory and which must belong to the session's repository. A repository nested in a worktree is another repository. *Alternative:* match the path by prefix against `git worktree list`, one call per session, which would judge a nested repository's files as the outer worktree's though no snapshot sees them. *Where:* `policy/worktrees.py`, `policy/before.py`.
+71. **(yours)** A checkpoint looks at the worktrees the session holds: where it started, where its file tools wrote, where its hooks report its working directory. A shell write into a worktree it never reached is a declared gap, closed by rooms. *Alternatives:* every worktree of the repository, at about 80 ms each per checkpoint (0.25 s here, about 3.5 s on nori's 36) plus a first snapshot of seconds each at nori's size, judging the operator's and other sessions' worktrees as this session's; the worktrees changed since their record, which costs the same, since finding a change takes a snapshot; the held worktrees plus a sweep of every worktree at the turn's end, which catches shell-only writes on both runtimes once per turn and judges the operator's uncommitted work in any worktree as the agent's. *Where:* `policy/worktrees.py`, `policy/checkpoint.py`.
+72. **(yours)** On Codex a session holds only the worktree it started in, a declared gap: its hooks' `cwd` stays the session's, its tools carry only a `command`, and under its `workspace-write` sandbox a write elsewhere is outside the writable roots, where Codex's own approval decides. *Alternative:* read the files an `apply_patch` names from its headers, which hand-parses an agent's output. *Where:* `adapters/codex.py`.
+73. Reaching a worktree mid-session begins the session there as a start does, accepting the worktree as it stands unless a call is running there. That also fixes the built start, which accepts a worktree while another session's call writes in it. *Alternatives:* judge what changed since the worktree's stored accepted tree as this session's, which blames it for the operator's work between sessions; start a worktree without a store from its `HEAD`, which judges the operator's uncommitted work as the agent's. *Where:* `policy/checkpoint.py` (`begin`).
+74. The calls running stay per worktree. A call records its session and counts in every worktree its session holds, and a turn's end clears only its own session's calls (built, a turn's end clears every session's own-conversation calls in the worktree). *Alternatives:* one set per repository, where any session's long call holds back every other session's checkpoints; one set per session, where a checkpoint judges another session's write in progress in a shared worktree. *Where:* `policy/checkpoint.py` (`Call`, `Running`).
+75. **(yours)** A file tool's write into the repository's own git directory asks, as `.git/` does inside a worktree. *Alternative:* leave it to the runtime as a path outside the repository, which in this repository's layout lets an edit to `lup.git/config` or `lup.git/hooks/` through unasked. *Where:* `policy/before.py`.
+76. Loading a worktree's declaration drops, once it's loaded, the modules it imported from that worktree, so the next worktree's load imports its own. Built, a second worktree's `lup_project` comes back as the first's. *Alternative:* an interpreter per declaration, a Python start per worktree per hook. *Where:* `project.py` (`load`).
+77. **(yours)** Content git's merge makes from commits whose content was judged is set aside, as content committed elsewhere is; the commits judged include the `HEAD` each worktree of the repository had at its last checkpoint. *Alternatives:* as built, which refuses a clean merge's file when both sides changed it (replayed against the built judge) and leaves the working tree different from `HEAD`; judge every merge result again, which asks the operator a second time about what they reviewed on the branch. *Where:* `policy/store.py` (`committed`).
+78. **(yours)** A move of `HEAD` is judged once, as a commit's: what wasn't set aside is judged against the accepted content, never put back, logged with no session, and told as a commit's to the conversations whose calls finished. *Alternatives:* treat content committed on the branch as accepted (#22's option b), which lets anything committed through the shell skip the judge; as built, putting it back, which leaves the working tree different from `HEAD` and is undone by the next `git restore`, since the commit is among the tips by then (replayed against the built judge). *Where:* `policy/checkpoint.py`, `policy/store.py` (`WorktreeState.head`).
+79. **(yours)** A move's asks are kept for the operator as holds no agent waits on, answered after the fact, the answer reaching the session that found the move at its next checkpoint. *Alternatives:* told and logged only, which reaches the operator only through the agent's report; a hold the agent waits on, on both runtimes, which needs Claude Code's `PostToolUse` timeout raised to a day in `.claude/settings.json` and blocks a session that may not have made the commit. *Where:* `policy/holds.py` (`Hold`), `cli.py` (`lup-dev holds`).
+80. Reports name each file by its absolute path, and the `mv` that puts a saved copy back names both ends in full. *Alternative:* paths relative to each worktree under a heading naming it, which an agent working elsewhere has to join by hand. *Where:* `policy/report.py`.
+81. **(yours)** A verdict names its worktree; a move's verdicts carry no session and `move` for their tool. *Alternative:* a log per worktree, which loses the one place measuring a repository. *Where:* `policy/verdicts.py` (`Verdict`).
+82. An approval covers a path in its worktree only. *Alternative:* a path across the repository's worktrees, which would let an approval on one branch cover different content on another. *Where:* `policy/checkpoint.py` (`Session`, one per worktree).
+83. **(yours)** A new module, `policy/worktrees.py`: the session's repository, the worktree a path is in, and the worktrees a session holds. *Alternative:* in `policy/checkpoint.py`, where `locate` and `Worktree` live now, already 940 lines. *Where:* `policy/worktrees.py`.
