@@ -54,6 +54,12 @@ class Finding(Model):
     """
     steer: str = ""
     """Where a lup rule steers instead; empty for pyright's and ruff's findings."""
+    fixable: bool = False
+    """Whether `ruff check --fix` fixes it, ruff's fix for it being safe.
+
+    The agent never hears of such a finding: the session landing the work applies
+    the fix (`lup-dev check --fix`).
+    """
 
 
 class Parameter(Model):

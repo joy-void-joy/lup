@@ -13,6 +13,7 @@ from lup_dev.policy.before import Overwrite, Replacement, before
 from lup_dev.policy.checkpoint import (
     CallFinished,
     CallStarted,
+    ConversationEnded,
     Reply,
     Session,
     SessionStarted,
@@ -62,8 +63,16 @@ def finish(
     )
 
 
-def end(kit: Kit, repo: Path, session: str = SESSION) -> Reply:
-    return TurnEnded(session=session, cwd=repo).apply(kit.bench)
+def end(
+    kit: Kit, repo: Path, session: str = SESSION, *, after_block: bool = False
+) -> Reply:
+    return TurnEnded(session=session, cwd=repo, after_block=after_block).apply(
+        kit.bench
+    )
+
+
+def subagent_ends(kit: Kit, repo: Path, agent: str) -> Reply:
+    return ConversationEnded(session=SESSION, agent=agent, cwd=repo).apply(kit.bench)
 
 
 def worktree(kit: Kit, repo: Path) -> Worktree:
@@ -538,6 +547,118 @@ def test_type_errors_are_information_and_keep_the_turn_from_ending(
     assert end(kit, repo).block.startswith("lup won't end the turn yet")
     shell_write(kit, repo, "c2", CORE, broken.replace("  # TYPE", ""))
     assert end(kit, repo).block == ""
+
+
+def subagent_breaks_core(kit: Kit, repo: Path, agent: str = "worker") -> None:
+    """A subagent's shell call leaves a type error in `CORE`, judged as it finishes."""
+    call(kit, repo, f"{agent}-1", agent=agent)
+    (repo / CORE).write_text((repo / CORE).read_text() + "y: int = 'a'  # TYPE\n")
+    finish(kit, repo, f"{agent}-1", agent=agent)
+
+
+def test_a_subagent_at_work_doesnt_hold_the_turns_end(kit: Kit, repo: Path) -> None:
+    start(kit, repo)
+    subagent_breaks_core(kit, repo)
+    reply = end(kit, repo)
+    assert reply.block == ""
+    assert reply.note.startswith("A subagent of this session is at work")
+    assert f"{repo}/src/pkg/core.py:11:" in reply.note
+    assert subagent_ends(kit, repo, "worker") == Reply()
+    assert end(kit, repo).block.startswith("lup won't end the turn yet")
+
+
+def test_a_subagent_is_at_work_until_its_end_lets_it_go(kit: Kit, repo: Path) -> None:
+    start(kit, repo)
+    subagent_breaks_core(kit, repo)
+    call(kit, repo, "worker-lost", agent="worker")
+    (repo / "src" / "pkg" / "new.py").write_text('"""New."""\n')
+    assert subagent_ends(kit, repo, "worker").block.startswith("lup refused 1 file.")
+    assert end(kit, repo).block == ""
+    assert subagent_ends(kit, repo, "worker") == Reply()
+    assert end(kit, repo).block.startswith("lup won't end the turn yet")
+
+
+def test_a_turns_end_leaves_a_subagents_call_in_flight_to_its_finish(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    call(kit, repo, "w1", agent="worker")
+    new = repo / "src" / "pkg" / "new.py"
+    new.write_text('"""New."""\n')
+    assert end(kit, repo) == Reply()
+    assert new.exists()
+    told = finish(kit, repo, "w1", agent="worker").context
+    assert told.startswith("lup refused 1 file.")
+    assert "Made through the shell" in told
+
+
+def test_a_subagents_file_tool_write_landed_before_its_call_finished_stays(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    new = repo / "src" / "pkg" / "new.py"
+    write = Overwrite(call="w1", tool="Write", path=new, text='"""New."""\n')
+    assert before(kit.bench, write, SESSION, repo).outcome == "ask"
+    call(kit, repo, "w1", tool="Write", agent="worker")
+    new.write_text('"""New."""\n')
+    assert end(kit, repo) == Reply()
+    assert finish(kit, repo, "w1", agent="worker").context == ""
+    assert new.read_text() == '"""New."""\n'
+
+
+def test_what_the_turns_end_must_tell_still_blocks_while_a_subagent_works(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    subagent_breaks_core(kit, repo)
+    call(kit, repo, "lost")
+    (repo / "src" / "pkg" / "new.py").write_text('"""New."""\n')
+    block = end(kit, repo).block
+    assert block.startswith("lup refused 1 file.")
+    assert "A subagent of this session is at work" in block
+    assert "lup won't end the turn yet" not in block
+
+
+def test_the_same_findings_after_a_block_let_the_turn_end_saying_so(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    broken = (repo / CORE).read_text() + "y: int = 'a'  # TYPE\n"
+    shell_write(kit, repo, "c1", CORE, broken)
+    first = end(kit, repo).block
+    assert first.startswith("lup won't end the turn yet")
+    let = end(kit, repo, after_block=True)
+    assert let.block == ""
+    assert let.note.startswith("lup held the turn's end on these just before")
+    assert f"{repo}/src/pkg/core.py:11:" in let.note
+    assert end(kit, repo).block == first
+
+
+def test_different_findings_after_a_block_block_again(kit: Kit, repo: Path) -> None:
+    start(kit, repo)
+    broken = (repo / CORE).read_text() + "y: int = 'a'  # TYPE\n"
+    shell_write(kit, repo, "c1", CORE, broken)
+    end(kit, repo)
+    shell_write(kit, repo, "c2", CORE, broken + "z: str = 1  # TYPE\n")
+    again = end(kit, repo, after_block=True).block
+    assert again.startswith("lup won't end the turn yet")
+    assert end(kit, repo, after_block=True).note.startswith("lup held the turn's end")
+
+
+def test_a_session_starting_again_forgets_its_subagents(kit: Kit, repo: Path) -> None:
+    start(kit, repo)
+    subagent_breaks_core(kit, repo)
+    start(kit, repo)
+    assert end(kit, repo).block.startswith("lup won't end the turn yet")
+
+
+def test_a_finding_ruff_fixes_safely_neither_informs_nor_holds_the_turn(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    fixable = (repo / CORE).read_text() + "import os  # FIXABLE F401\n"
+    assert shell_write(kit, repo, "c1", CORE, fixable).context == ""
+    assert end(kit, repo) == Reply()
 
 
 def test_removed_committed_notes_are_listed_once_at_turn_end(

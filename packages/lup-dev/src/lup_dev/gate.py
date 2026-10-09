@@ -7,7 +7,8 @@ its sources: the engine's bundle is rebuilt when its table or source changed, si
 tests asking a stale engine fail for reasons the change didn't cause. The report
 gives each step's outcome, then each failure's output in full, then which steps
 failed; the command exits non-zero when any did, so the gate's verdict is its exit
-code rather than something read off its output.
+code rather than something read off its output. With `--fix`, ruff's safe fixes
+and the formatter rewrite the worktree first (`Fixes`); without, it only checks.
 
 This is the gate's first shape (`DESIGN.md`, *The gate*): comparing against a
 branch's base (`--changed`), nested projects' own environments and bounds in time
@@ -62,6 +63,25 @@ class Shell(Runner):
         return Ran(code=ran.exit_code, output=ran.stdout.decode(errors="replace"))
 
 
+class Fixes(Model):
+    """What `lup-dev check --fix` runs before the gate's steps, rewriting files.
+
+    ruff's safe fixes, then the formatter: what the agent is never told of
+    (`docs/judging-writes.md`, *Type errors and ruff's findings*), applied by the
+    session landing the work on the merged result (`AGENTS.md`). `--fix-only`
+    applies them without reporting what's left, which the gate's own ruff step
+    reports. Without `--fix`, as in CI, the gate only checks.
+    """
+
+    steps: list[Step] = [
+        Step(
+            name="fix",
+            command=["uv", "run", "ruff", "check", "--fix-only", "--ignore-noqa"],
+        ),
+        Step(name="reformat", command=["uv", "run", "ruff", "format"]),
+    ]
+
+
 class Outcome(Model):
     """How one step of the gate went."""
 
@@ -80,6 +100,8 @@ class Check(Model, arbitrary_types_allowed=True):
     root: Path
     runner: Runner
     gate: Gate = Gate()
+    fixes: list[Step] = []
+    """Steps that rewrite files, run before the gate's: `Fixes`, with `--fix`."""
 
     def stale(self, step: Step) -> bool:
         """Say whether a step that builds a file must run: it is missing or older."""
@@ -105,8 +127,8 @@ class Check(Model, arbitrary_types_allowed=True):
         return Outcome(step=step.name, result=result, code=ran.code, output=ran.output)
 
     def run(self) -> list[Outcome]:
-        """Run every step, in order, whatever the ones before gave."""
-        return [self.one(step) for step in self.gate.steps]
+        """Run the fixes, then every step, in order, whatever the ones before gave."""
+        return [self.one(step) for step in [*self.fixes, *self.gate.steps]]
 
 
 def failed(outcomes: list[Outcome]) -> list[str]:

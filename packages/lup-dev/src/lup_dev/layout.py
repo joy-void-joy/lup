@@ -167,11 +167,6 @@ class CheckoutLayout(Model):
         return self.home / "saved"
 
     @property
-    def ruff(self) -> Path:
-        """The project's own ruff, so findings match what its gate runs."""
-        return self.root / ".venv" / "bin" / "ruff"
-
-    @property
     def rules_reference(self) -> Path:
         """The reference to lup's rules, compiled from the engine's table: lup's own."""
         return self.root / "docs" / "rules.md"
@@ -273,6 +268,10 @@ class Layout(Model):
     def warned(self, session: str) -> Path:
         """Say where the failures a session's operator was warned of are kept."""
         return self.session_index / f"{session}.warned.json"
+
+    def conversations(self, session: str) -> Path:
+        """Say where a session's subagents at work, and its last block, are kept."""
+        return self.session_index / f"{session}.conversations.json"
 
     @property
     def approval(self) -> Path:

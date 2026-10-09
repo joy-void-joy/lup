@@ -24,8 +24,9 @@ exclude = ["*.md"]
 [tool.ruff.lint]
 select = ["ALL"]
 # Each rule here overlaps or contradicts the owner its comment names: a lup rule
-# (`docs/conventions.md`), pyright, or ruff's formatter. "Fires only on" means every
-# finding lands on a construct the owner refuses outright, so it can only repeat it.
+# (`docs/conventions.md`), pyright, or ruff's formatter; or it's a threshold that
+# review owns. "Fires only on" means every finding lands on a construct the owner
+# refuses outright, so it can only repeat it.
 ignore = [
     # Data shapes
     "PYI024", "UP014", "SLOT002",            # fire only on named tuples: `namedtuple`
@@ -72,6 +73,9 @@ ignore = [
     "TD",  # shapes TODO comments, where deferred work is `# lup: defer(…)`: `defer`
     # Formatting
     "COM812", "COM819",  # the formatter decides trailing commas: ruff's formatter
+    "E501",              # flags long lines, which are layout: ruff's formatter
+    # Size
+    "C901", "PLR0912", "PLR0913", "PLR0915", "PLR1702",  # thresholds on size, not mistakes: review, until #33
     # No convention decides it
     "CPY001",  # no copyright header has been chosen: the operator's call
 ]

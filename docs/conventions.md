@@ -23,10 +23,10 @@ So each entry below names what enforces it. "Convention only" is the exception a
 Every concern has exactly one owner, so two tools never report the same thing in two ways or steer in opposite directions.
 
 - **lup's rules** own the conventions in this document. They live only in lup's typed engine (`docs/judging-writes.md`, *The engine*), read one typed tree, and **refuse at the edit**: a finding on the lines an edit touches stops it. Each rule names the mistake it prevents and where it steers.
-- **ruff** owns generic Python hygiene: its own catalog, `select = ["ALL"]`, minus every rule that overlaps or contradicts a lup rule (listed in *ruff's selection*). Its findings arrive as information at each checkpoint, like type errors, and must be clean when the turn ends and at the gate.
+- **ruff** owns generic Python hygiene: its own catalog, `select = ["ALL"]`, minus every rule that overlaps or contradicts a lup rule (listed in *ruff's selection*). Its findings arrive as information at each checkpoint, like type errors, and must be clean when the turn ends and at the gate. A finding it fixes safely isn't reported to the agent: the session landing the work applies the fix (`lup-dev check --fix`), and the gate fails on it until then.
 - **pyright**, in strict mode, owns types. Same channel as ruff.
 - **import-linter** owns the import boundaries, over the whole import graph at the gate; the engine reads the same contracts to check each file's own imports at the edit.
-- **The formatter** (ruff's) runs at commit.
+- **The formatter** (ruff's) runs when work lands, with ruff's safe fixes (`lup-dev check --fix`); the gate checks it.
 
 The first lup ran ruff's defaults and pyright's standard mode; its strictness came from its own catalog, which collided with ruff in places (below).
 
@@ -292,6 +292,10 @@ What the pass settled beyond the rules this document names:
 - **Configured rather than off:** `ERA001` takes `lint.task-tags = ["lup"]`; `TC003` takes `runtime-evaluated-base-classes = ["pydantic.BaseModel", "pydantic_settings.BaseSettings"]`, so a field's type isn't moved into a `TYPE_CHECKING` block, which would break the model at runtime.
 - **The gate runs `ruff check --ignore-noqa`:** ruff has no setting for it.
 
+Turned off since, by the operator (decisions 23 and 24):
+- **`E501`** (line too long): line length is layout, which the formatter owns. What it can't wrap (a long string or comment) goes unflagged.
+- **`C901`, `PLR0912`, `PLR0913`, `PLR0915`, `PLR1702`** (complexity, branches, arguments, statements, nesting): thresholds on size, not mistakes. #33 counts them among the findings an agent spends turns on that change nothing a reader cares about. Whether a function is too big is review's, until #33 settles what's worth an agent's attention.
+
 A rule added later says which ruff rules it turns off, in `pyproject.toml`.
 
 ## Tests
@@ -346,3 +350,5 @@ Each with its alternative and where it lives. **(yours, agreed)** marks what the
 20. **(yours, agreed)** A subpackage per subsystem, named as in the first lup where the subsystem is the same, with a library word meaning the same in the environment; a one-line `__init__.py` docstring each; package-wide modules at the root; subsystems importing downwards only. *Alternative:* a flat package. *Where:* `pyproject.toml` (the `layers` contract), each package.
 21. **(yours, agreed)** XML is read with `defusedxml`, a dependency only where a project reads XML, and ruff's `S313`–`S319` stay on. *Alternative:* the standard library's parsers with those rules off, trusting the bundled Expat. *Where:* `pyproject.toml` (the rules stay selected).
 22. **(yours, agreed)** A function's first line is in the imperative, ruff's `D401`. *Alternative:* noun phrases ("The saved path."), which read as well but have no check to keep them uniform. *Where:* `pyproject.toml` (the rule stays selected).
+23. **(yours, agreed)** ruff's `E501` is off: line length is the formatter's. *Alternative:* keep it, which flags the long strings and comments the formatter leaves alone, one finding at a time. *Where:* `pyproject.toml`.
+24. **(yours, agreed)** ruff's size thresholds are off (`C901`, `PLR0912`, `PLR0913`, `PLR0915`, `PLR1702`): size is review's until #33. *Alternatives:* keep them; raise their limits in `pyproject.toml`, which still spends an agent's turns at the new limit. *Where:* `pyproject.toml`.
