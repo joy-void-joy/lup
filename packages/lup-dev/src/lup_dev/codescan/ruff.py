@@ -44,8 +44,9 @@ class Ruff(Linter):
     """ruff as `uv run ruff` finds it in the worktree.
 
     That's the project's own where its environment has one, else the one on the
-    path, as for the gate's `uv run ruff`. Files on disk are checked in one run; would-be content one file at a time,
-    through stdin, under the file's own name so its configuration applies.
+    path, as for the gate's `uv run ruff`. Files on disk are checked in one run;
+    would-be content one file at a time, through stdin, under the file's own name so
+    its configuration applies.
     """
 
     @override
