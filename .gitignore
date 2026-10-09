@@ -1,3 +1,9 @@
 tmp/
 .venv/
 __pycache__/
+.lup/
+# The engine's build: the link to pyright's source in a cache outside the
+# repository, the bundler, and the built engine with its stubs.
+packages/lup-dev/checker/pyright
+packages/lup-dev/checker/node_modules/
+packages/lup-dev/src/lup_dev/codescan/bundle/

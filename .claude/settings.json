@@ -2,20 +2,119 @@
   "autoMemoryEnabled": false,
   "subagentPromptCacheTtl": "1h",
   "permissions": {
-    "ask": ["Write", "Bash(gh pr merge:*)"],
+    "allow": [
+      "Bash(uv run pytest:*)",
+      "Bash(uv run pyright:*)",
+      "Bash(uv run ruff:*)",
+      "Bash(uv run lint-imports:*)",
+      "Bash(uv run python packages/lup-dev/checker/build.py:*)",
+      "Bash(uv run packages/lup-dev/checker/build.py:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git worktree list:*)",
+      "Bash(uv run --script .claude/hooks/interim_review.py wait:*)",
+      "Bash(git -C /home/pfftz/job/onit/lup.git/tree/dev merge --no-ff:*)",
+      "Bash(git -C /home/pfftz/job/onit/lup.git/tree/dev push origin dev)"
+    ],
+    "ask": ["Bash(gh pr merge:*)"],
     "deny": ["Artifact", "SendFeedback", "Workflow", "ScheduleWakeup", "ReportFindings"]
   },
   "hooks": {
-    "PostToolUse": [
+    "SessionStart": [
       {
-        "matcher": "Write|Edit",
         "hooks": [
           {
             "type": "command",
-            "command": "uv run --script \"$CLAUDE_PROJECT_DIR/.claude/hooks/interim_rules.py\"",
-            "async": true,
-            "asyncRewake": true,
-            "timeout": 300
+            "command": "\"$(uv tool dir --bin)/lup-dev\" hook claude",
+            "timeout": 600
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$(uv tool dir --bin)/lup-dev\" hook claude",
+            "timeout": 600,
+            "statusMessage": "lup is judging this call"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$(uv tool dir --bin)/lup-dev\" hook claude",
+            "timeout": 600
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$(uv tool dir --bin)/lup-dev\" hook claude",
+            "timeout": 600
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$(uv tool dir --bin)/lup-dev\" hook claude",
+            "timeout": 1200,
+            "statusMessage": "lup is checking the files this session touched"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$(uv tool dir --bin)/lup-dev\" hook claude",
+            "timeout": 1200
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --script \"$CLAUDE_PROJECT_DIR/.claude/hooks/interim_review.py\"",
+            "timeout": 120,
+            "statusMessage": "Queueing this prompt for your review in the dashboard"
+          }
+        ]
+      }
+    ],
+    "PostToolBatch": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --script \"$CLAUDE_PROJECT_DIR/.claude/hooks/interim_review.py\"",
+            "timeout": 60
           }
         ]
       }
