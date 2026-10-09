@@ -160,6 +160,58 @@ def test_claude_subagent_stop(on_claude: Bench, repo: Path) -> None:
     assert claude.hook(payload(repo, "SubagentStop", agent_id="sub"), on_claude) == ""
 
 
+def claude_breaks_core(bench: Bench, repo: Path, **subagent: str) -> None:
+    """A shell call leaves a type error in `CORE`; `agent_id` makes it a subagent's."""
+    claude.hook(
+        payload(
+            repo,
+            "PreToolUse",
+            tool_name="Bash",
+            tool_input={"command": "sed"},
+            tool_use_id="t1",
+            **subagent,
+        ),
+        bench,
+    )
+    (repo / CORE).write_text((repo / CORE).read_text() + "y: int = 'a'  # TYPE\n")
+    claude.hook(
+        payload(repo, "PostToolUse", tool_name="Bash", tool_use_id="t1", **subagent),
+        bench,
+    )
+
+
+def test_claude_stop_tells_the_operator_while_a_subagent_works(
+    on_claude: Bench, repo: Path
+) -> None:
+    claude_breaks_core(on_claude, repo, agent_id="sub")
+    stop = payload(repo, "Stop", stop_hook_active=False)
+    output = json.loads(claude.hook(stop, on_claude))
+    assert "decision" not in output
+    assert output["systemMessage"].startswith("A subagent of this session is at work")
+    subagent_stop = payload(
+        repo, "SubagentStop", agent_id="sub", stop_hook_active=False
+    )
+    assert claude.hook(subagent_stop, on_claude) == ""
+    assert json.loads(claude.hook(stop, on_claude))["decision"] == "block"
+
+
+def test_claude_stop_after_a_block_on_the_same_findings_lets_the_turn_end(
+    on_claude: Bench, repo: Path
+) -> None:
+    claude_breaks_core(on_claude, repo)
+    first = json.loads(
+        claude.hook(payload(repo, "Stop", stop_hook_active=False), on_claude)
+    )
+    assert first["decision"] == "block"
+    again = json.loads(
+        claude.hook(payload(repo, "Stop", stop_hook_active=True), on_claude)
+    )
+    assert "decision" not in again
+    assert again["systemMessage"].startswith(
+        "lup held the turn's end on these just before"
+    )
+
+
 class Broken(Checker):
     def rules(self) -> list[Rule]:
         crashed = "the engine crashed"
@@ -354,6 +406,79 @@ def test_codex_stop_blocks_while_touched_files_have_type_errors(
     output = json.loads(codex.hook(raw, on_codex))
     assert output["decision"] == "block"
     assert output["reason"].startswith("lup won't end the turn yet")
+
+
+def codex_breaks_core(bench: Bench, repo: Path, **subagent: str) -> None:
+    """A shell call leaves a type error in `CORE`; `agent_id` makes it a subagent's."""
+    codex.hook(
+        payload(
+            repo,
+            "PreToolUse",
+            turn_id="u1",
+            tool_name="Bash",
+            tool_input={"command": "sed"},
+            tool_use_id="b1",
+            **subagent,
+        ),
+        bench,
+    )
+    (repo / CORE).write_text((repo / CORE).read_text() + "y: int = 'a'  # TYPE\n")
+    codex.hook(
+        payload(
+            repo,
+            "PostToolUse",
+            turn_id="u1",
+            tool_name="Bash",
+            tool_input={"command": "sed"},
+            tool_use_id="b1",
+            tool_response="",
+            **subagent,
+        ),
+        bench,
+    )
+
+
+def codex_stop(repo: Path, *, after_block: bool) -> str:
+    return payload(
+        repo,
+        "Stop",
+        turn_id="u1",
+        stop_hook_active=after_block,
+        last_assistant_message=None,
+    )
+
+
+def test_codex_stop_tells_the_operator_while_a_subagent_works(
+    on_codex: Bench, repo: Path
+) -> None:
+    codex_breaks_core(on_codex, repo, agent_id="019b")
+    output = json.loads(codex.hook(codex_stop(repo, after_block=False), on_codex))
+    assert "decision" not in output
+    assert output["systemMessage"].startswith("A subagent of this session is at work")
+    subagent_stop = payload(
+        repo,
+        "SubagentStop",
+        turn_id="u2",
+        agent_id="019b",
+        agent_type="default",
+        stop_hook_active=False,
+    )
+    assert codex.hook(subagent_stop, on_codex) == ""
+    stop = json.loads(codex.hook(codex_stop(repo, after_block=False), on_codex))
+    assert stop["decision"] == "block"
+
+
+def test_codex_stop_after_a_block_on_the_same_findings_lets_the_turn_end(
+    on_codex: Bench, repo: Path
+) -> None:
+    codex_breaks_core(on_codex, repo)
+    first = json.loads(codex.hook(codex_stop(repo, after_block=False), on_codex))
+    assert first["decision"] == "block"
+    again = json.loads(codex.hook(codex_stop(repo, after_block=True), on_codex))
+    assert "decision" not in again
+    assert again["systemMessage"].startswith(
+        "lup held the turn's end on these just before"
+    )
 
 
 def test_codex_tells_the_agent_when_a_checkpoint_fails(

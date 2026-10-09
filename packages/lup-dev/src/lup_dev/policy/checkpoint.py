@@ -25,6 +25,9 @@ A call that runs a subagent isn't counted as running: the subagent's own calls
 are, so its writes are judged as it makes them rather than when it ends. The
 files changed are re-checked for the type errors of the files importing them, in
 one background pass per worktree (`importers.py`), which the turn's end waits for.
+A subagent is at work from its first call to the end of its conversation, and
+while one is, the session's turn's end doesn't hold on what's left in the files
+the session touched, which may be the subagent's in progress (#32).
 """
 
 import difflib
@@ -57,6 +60,7 @@ from lup_dev.policy.report import (
     removed_notes,
     sections,
     turn_end,
+    unheld,
 )
 from lup_dev.policy.roles import Roles
 from lup_dev.policy.runtime import Runtime
@@ -101,6 +105,9 @@ class Reply(Model):
     """Told beside the call's result."""
     block: str = ""
     """Why the conversation can't end yet; empty lets it end."""
+    note: str = ""
+    """Told to the operator as the conversation ends: anything a conversation's end
+    tells the agent keeps it going, so information that mustn't goes here."""
 
 
 class Call(Model):
@@ -423,6 +430,14 @@ class Worktree(Model):
             ]
             self.ran(running)
             return not running.calls
+
+    def busy(self, session: str, agent: str) -> bool:
+        """Say whether a call of another conversation of `session` runs here."""
+        with self.calls_lock():
+            return any(
+                each.session == session and not each.of(session, agent)
+                for each in self.running().calls
+            )
 
 
 def begin(bench: Bench, worktree: Worktree, key: str) -> None:
@@ -1179,6 +1194,78 @@ def first_warning(layout: Layout, session: str, failure: str) -> bool:
     return True
 
 
+class Conversations(MutableModel):
+    """What a session's turn's end needs to know of its conversations (#32)."""
+
+    working: list[str] = []
+    """The subagents at work, each from its first call to its conversation's end."""
+    blocked: list[Finding] = []
+    """What held the session's turn's end when it last blocked, until a turn ends."""
+
+
+def same(findings: list[Finding], others: list[Finding]) -> bool:
+    """Say whether two lists hold the same findings, in any order."""
+    return (
+        len(findings) == len(others)
+        and all(each in others for each in findings)
+        and all(each in findings for each in others)
+    )
+
+
+class ConversationRecord(Model):
+    """Where a session keeps its `Conversations`, under a lock its hooks share.
+
+    A subagent shares its session's id, so the session's turn's end sees the
+    files it touched (#32). It's known to be at work from its first call to the
+    end of its conversation, on every runtime: a runtime that reported no end for
+    it leaves it at work until the session starts again.
+    """
+
+    layout: Layout
+    session: str
+
+    def lock(self) -> FileLock:
+        """Return the lock over the record."""
+        path = self.layout.conversations(self.session)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return FileLock(path.with_name(f"{path.name}.lock"))
+
+    def read(self) -> Conversations:
+        """Read the record; hold the lock."""
+        path = self.layout.conversations(self.session)
+        return read_model(path, Conversations) or Conversations()
+
+    def keep(self, conversations: Conversations) -> None:
+        """Store the record; hold the lock."""
+        write_model(self.layout.conversations(self.session), conversations)
+
+    def opened(self, agent: str) -> None:
+        """Note that subagent `agent` is at work, since it made a call."""
+        with self.lock():
+            kept = self.read()
+            if agent in kept.working:
+                return
+            kept.working = [*kept.working, agent]
+            self.keep(kept)
+
+    def closed(self, agent: str) -> None:
+        """Note that subagent `agent`'s conversation ended."""
+        with self.lock():
+            kept = self.read()
+            if agent not in kept.working:
+                return
+            kept.working = [each for each in kept.working if each != agent]
+            self.keep(kept)
+
+    def restarted(self) -> None:
+        """Forget the record: the session starts, or starts again.
+
+        A subagent still at work is noted again at its next call.
+        """
+        with self.lock():
+            self.layout.conversations(self.session).unlink(missing_ok=True)
+
+
 def mail_for(worktree: Worktree, key: str, agent: str, runtime: Runtime) -> str:
     """Take the reports waiting for conversation `agent`."""
     with worktree.lock():
@@ -1262,15 +1349,19 @@ class Ended(Model):
     """Notes present at the session's start, removed since, not listed before."""
 
 
-def ended(bench: Bench, worktree: Worktree, key: str, agent: str) -> Ended:
+def ended(
+    bench: Bench, worktree: Worktree, key: str, agent: str, *, judging: bool = True
+) -> Ended:
     """Run a turn's end in one worktree the session holds.
 
     The checkpoint, the importers pass waited on, what's left in the files the
     session touched, and the notes present at its start and removed since,
-    listed once.
+    listed once. Without `judging`, no checkpoint: a subagent's call is running
+    there, whose finish runs it, so its writes in progress aren't judged as the
+    session's, put back under it, or told to a conversation that didn't make them.
     """
     services = bench.services
-    checked = checkpoint(bench, worktree, key, agent)
+    checked = checkpoint(bench, worktree, key, agent) if judging else Checked()
     worktree.importers().wait(services.checker, services.clock)
     with worktree.lock():
         session = worktree.session(key, bench.runtime)
@@ -1299,16 +1390,27 @@ class Event(Model, ABC):
 
 
 class SessionStarted(Event):
-    """A session started, or resumed: it begins again in each worktree it holds."""
+    """A session started, or resumed: it begins again in each worktree it holds.
+
+    Its record of the subagents at work starts again too.
+    """
 
     @override
     def apply(self, bench: Bench) -> Reply:
-        holding(bench, self.session, self.cwd, starts=True)
+        held = holding(bench, self.session, self.cwd, starts=True)
+        if held is not None and not self.agent:
+            record = ConversationRecord(
+                layout=bench.services.layout, session=self.session
+            )
+            record.restarted()
         return Reply()
 
 
 class CallStarted(Event):
-    """A tool call is about to run: it counts in every worktree its session holds."""
+    """A tool call is about to run: it counts in every worktree its session holds.
+
+    A subagent's call notes that the subagent is at work.
+    """
 
     call: str
     tool: str
@@ -1318,7 +1420,14 @@ class CallStarted(Event):
     @override
     def apply(self, bench: Bench) -> Reply:
         held = holding(bench, self.session, self.cwd)
-        if held is None or self.spawns:
+        if held is None:
+            return Reply()
+        if self.agent:
+            record = ConversationRecord(
+                layout=bench.services.layout, session=self.session
+            )
+            record.opened(self.agent)
+        if self.spawns:
             return Reply()
         call = Call(
             key=self.call, session=self.session, agent=self.agent, tool=self.tool
@@ -1370,7 +1479,17 @@ class TurnEnded(Event):
     waited on, and the turn can't end while the files it touched have type
     errors or ruff's findings. The notes present at the session's start and
     removed since are listed once.
+
+    While a subagent of the session is at work, what's left in those files
+    doesn't hold the turn's end: they may be the subagent's, in progress (#32).
+    Nor does what held the turn's end just before, unchanged: the agent didn't
+    fix it. Either is information, told to the operator where nothing else keeps
+    the turn going. A worktree where a subagent's call is running gets no
+    checkpoint: that call's finish runs it.
     """
+
+    after_block: bool = False
+    """Whether the turn went on because its end blocked just before."""
 
     @override
     def apply(self, bench: Bench) -> Reply:
@@ -1380,30 +1499,63 @@ class TurnEnded(Event):
         opened = worktrees(bench, held)
         for worktree in opened:
             worktree.clear(self.session, self.agent)
-        ends = [ended(bench, worktree, self.session, self.agent) for worktree in opened]
+        ends = [
+            ended(
+                bench,
+                worktree,
+                self.session,
+                self.agent,
+                judging=not worktree.busy(self.session, self.agent),
+            )
+            for worktree in opened
+        ]
         waiting = [
             mail_for(worktree, self.session, self.agent, bench.runtime)
             for worktree in opened
         ]
-        return Reply(
-            block=sections(
-                [
-                    refusal([found for end in ends for found in end.checked.refused]),
-                    moved([move for end in ends for move in end.checked.moves]),
-                    *(notice for end in ends for notice in end.checked.notices),
-                    turn_end([found for end in ends for found in end.remaining]),
-                    removed_notes([note for end in ends for note in end.unlisted]),
-                    *waiting,
-                ]
-            )
+        left = [found for end in ends for found in end.remaining]
+        told = [
+            refusal([found for end in ends for found in end.checked.refused]),
+            moved([move for end in ends for move in end.checked.moves]),
+            *(notice for end in ends for notice in end.checked.notices),
+        ]
+        listed = [
+            removed_notes([note for end in ends for note in end.unlisted]),
+            *waiting,
+        ]
+        telling = bool(sections([*told, *listed]))
+        record = ConversationRecord(layout=bench.services.layout, session=self.session)
+        with record.lock():
+            kept = record.read()
+            working = [agent for agent in kept.working if agent != self.agent]
+            repeated = self.after_block and same(left, kept.blocked)
+            holds = bool(left) and not working and not repeated
+
+            def blocked() -> list[Finding]:
+                if holds:
+                    return left
+                if repeated and telling:
+                    return kept.blocked
+                return []
+
+            kept.blocked = blocked()
+            record.keep(kept)
+        said = (
+            turn_end(left)
+            if holds
+            else unheld(left, "working" if working else "repeated")
         )
+        if holds or telling:
+            return Reply(block=sections([*told, said, *listed]))
+        return Reply(note=said)
 
 
 class ConversationEnded(Event):
     """A subagent's conversation ended; the session's own turn goes on.
 
     Its calls are cleared in each worktree the session holds, and a checkpoint
-    runs in each where none is left running.
+    runs in each where none is left running. Its end ends its time at work,
+    unless it's blocked, which keeps the subagent going.
     """
 
     @override
@@ -1422,7 +1574,7 @@ class ConversationEnded(Event):
             mail_for(worktree, self.session, self.agent, bench.runtime)
             for worktree in opened
         ]
-        return Reply(
+        reply = Reply(
             block=sections(
                 [
                     refusal([found for each in checked for found in each.refused]),
@@ -1431,3 +1583,9 @@ class ConversationEnded(Event):
                 ]
             )
         )
+        if self.agent and not reply.block:
+            record = ConversationRecord(
+                layout=bench.services.layout, session=self.session
+            )
+            record.closed(self.agent)
+        return reply

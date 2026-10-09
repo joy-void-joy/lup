@@ -41,7 +41,15 @@ What this relies on, from Codex's hooks documentation and its source at
 - `write_stdin` can deliver a command's `PostToolUse` with no `PreToolUse` of its
   own, under the original command's `tool_use_id`;
 - a hook's `timeout` defaults to 600 seconds and has no maximum, so the hook
-  configuration gives `PostToolUse` and `Stop` a day and more, for holds.
+  configuration gives `PostToolUse` and `Stop` a day and more, for holds;
+- "Subagent hooks use the parent session id" (its docs), a thread-spawned
+  subagent's tool hooks carry its `agent_id`, and each of its turns ends with
+  `SubagentStop` under the same `agent_id`, where a root turn runs `Stop`
+  (`core/src/hook_runtime.rs`, `run_turn_stop_hooks`). `spawn_agent` "Returns the
+  spawned agent id", and a parent waits only through `wait_agent`, so its turn can
+  end while a subagent works;
+- `Stop`'s `stop_hook_active` says "Whether this turn was already continued by
+  `Stop`".
 """
 
 from abc import ABC, abstractmethod
@@ -221,7 +229,12 @@ class PostToolUse(Payload):
 
 
 class Stop(Payload):
-    """`Stop`: the session's own conversation ends its turn."""
+    """`Stop`: the session's own conversation ends its turn.
+
+    What the turn's end tells without holding it goes to the operator, in
+    `systemMessage`: its docs list no `additionalContext` for `Stop`, and a
+    `reason` with `decision: "block"` becomes "a new continuation prompt".
+    """
 
     hook_event_name: Literal["Stop"]
     stop_hook_active: bool = False
@@ -229,9 +242,18 @@ class Stop(Payload):
 
     @override
     def answer(self, bench: Bench) -> Output | None:
-        ended = TurnEnded(session=self.session_id, agent="", cwd=self.cwd)
+        ended = TurnEnded(
+            session=self.session_id,
+            agent="",
+            cwd=self.cwd,
+            after_block=self.stop_hook_active,
+        )
         reply = ended.apply(bench)
-        return Blocked(reason=reply.block) if reply.block else None
+        if reply.block:
+            return Blocked(reason=reply.block)
+        if reply.note:
+            return OperatorWarning(system_message=reply.note)
+        return None
 
     @override
     def failed(self, bench: Bench, failure: Exception) -> Output | None:

@@ -274,6 +274,10 @@ class Layout(Model):
         """Say where the failures a session's operator was warned of are kept."""
         return self.session_index / f"{session}.warned.json"
 
+    def conversations(self, session: str) -> Path:
+        """Say where a session's subagents at work, and its last block, are kept."""
+        return self.session_index / f"{session}.conversations.json"
+
     @property
     def approval(self) -> Path:
         """The commit of lup the operator last approved as the judge that runs."""
