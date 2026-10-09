@@ -279,13 +279,14 @@ def test_an_installed_report_carries_the_note_and_comments(
     comment = LineComment(
         path=Path("a.py"), first=3, last=5, side="after", note="tidy\nthis"
     )
-    answer = Answer(approved=True, note="fine\nby me", comments=[comment])
+    answer = Answer(approved=True, note="fine\n\nby me", comments=[comment])
     outcome = installer(checkout, kit, answer=answer).install()
     head = shell.git(checkout, "rev-parse", "HEAD")
     assert outcome.report().splitlines() == [
         f"Installed the judge at {head}; it judges from here on.",
         "Your note:",
         "    fine",
+        "",
         "    by me",
         "Your line comments:",
         "  a.py:3-5 (after): tidy",

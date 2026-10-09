@@ -128,7 +128,10 @@ class Answer(Model):
     def said(self, since: str | None) -> list[str]:
         """Return the note and the line comments as the terminal prints them."""
         note = (
-            ["Your note:", *(f"    {line}" for line in self.note.splitlines())]
+            [
+                "Your note:",
+                *(f"    {line}" if line else "" for line in self.note.splitlines()),
+            ]
             if self.note
             else []
         )
