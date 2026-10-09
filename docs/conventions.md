@@ -23,10 +23,10 @@ So each entry below names what enforces it. "Convention only" is the exception a
 Every concern has exactly one owner, so two tools never report the same thing in two ways or steer in opposite directions.
 
 - **lup's rules** own the conventions in this document. They live only in lup's typed engine (`docs/judging-writes.md`, *The engine*), read one typed tree, and **refuse at the edit**: a finding on the lines an edit touches stops it. Each rule names the mistake it prevents and where it steers.
-- **ruff** owns generic Python hygiene: its own catalog, `select = ["ALL"]`, minus every rule that overlaps or contradicts a lup rule (listed in *ruff's selection*). Its findings arrive as information at each checkpoint, like type errors, and must be clean when the turn ends and at the gate.
+- **ruff** owns generic Python hygiene: its own catalog, `select = ["ALL"]`, minus every rule that overlaps or contradicts a lup rule (listed in *ruff's selection*). Its findings arrive as information at each checkpoint, like type errors, and must be clean when the turn ends and at the gate. A finding it fixes safely isn't reported to the agent: the session landing the work applies the fix (`lup-dev check --fix`), and the gate fails on it until then.
 - **pyright**, in strict mode, owns types. Same channel as ruff.
 - **import-linter** owns the import boundaries, over the whole import graph at the gate; the engine reads the same contracts to check each file's own imports at the edit.
-- **The formatter** (ruff's) runs at commit.
+- **The formatter** (ruff's) runs when work lands, with ruff's safe fixes (`lup-dev check --fix`); the gate checks it.
 
 The first lup ran ruff's defaults and pyright's standard mode; its strictness came from its own catalog, which collided with ruff in places (below).
 

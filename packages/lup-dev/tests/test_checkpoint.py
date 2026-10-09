@@ -540,6 +540,15 @@ def test_type_errors_are_information_and_keep_the_turn_from_ending(
     assert end(kit, repo).block == ""
 
 
+def test_a_finding_ruff_fixes_safely_neither_informs_nor_holds_the_turn(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    fixable = (repo / CORE).read_text() + "import os  # FIXABLE F401\n"
+    assert shell_write(kit, repo, "c1", CORE, fixable).context == ""
+    assert end(kit, repo) == Reply()
+
+
 def test_removed_committed_notes_are_listed_once_at_turn_end(
     kit: Kit, repo: Path, shell: Shell
 ) -> None:

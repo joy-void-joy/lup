@@ -1227,7 +1227,8 @@ def unclean(bench: Bench, worktree: Worktree, session: Session) -> list[Finding]
 
     The files it changed, and the files importing them where the background pass
     found errors, as they stand on disk, once `ignore`s apply, each named by its
-    absolute path.
+    absolute path. A finding ruff fixes safely isn't one: the session landing the
+    work applies the fix.
     """
     services = bench.services
     paths = [
@@ -1246,7 +1247,7 @@ def unclean(bench: Bench, worktree: Worktree, session: Session) -> list[Finding]
             report,
             [*report.findings, *(each for each in ruff if each.path == report.path)],
         )
-        if found.owner != "lup"
+        if found.owner != "lup" and not found.fixable
     ]
     return placed(worktree.root, found)
 

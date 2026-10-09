@@ -16,8 +16,9 @@ so a change gets the same outcome whichever way it was made (`docs/judging-write
 | Any other production change | allow, once the rules pass it |
 
 Refuse wins over ask: the operator never reviews a version that would be refused.
-Type errors and ruff's findings are information, never a refusal. Removing a note
-present when the session started is allowed and reported.
+Type errors and ruff's findings are information, never a refusal, and a finding
+ruff fixes safely isn't reported at all. Removing a note present when the session
+started is allowed and reported.
 """
 
 from difflib import SequenceMatcher
@@ -110,7 +111,8 @@ class Judgement(Model):
     untouched: list[Finding] = []
     """lup's findings on lines the change didn't touch, listed but not refusing."""
     information: list[Finding] = []
-    """pyright's and ruff's findings in the file, once `ignore`s apply."""
+    """pyright's and ruff's findings in the file, once `ignore`s apply, but for
+    those ruff fixes safely."""
     removed: list[RemovedNote] = []
     """Comments present when the session started that are gone from the file."""
 
@@ -295,13 +297,11 @@ class Judge(Model, arbitrary_types_allowed=True):
                     )
                 return self.ruled(change, versions, removed, [])
             case _:
-                kept = self.kept(versions)
-                information = [found for found in kept if found.owner != "lup"]
                 return Judgement(
                     path=change.path,
                     role=role,
                     outcome="allow",
-                    information=information,
+                    information=self.information(versions),
                 )
 
     def kept(self, versions: Versions) -> list[Finding]:
@@ -320,6 +320,18 @@ class Judge(Model, arbitrary_types_allowed=True):
                 directive.keeps(found.rule, found.span.start.line)
                 for directive in directives
             )
+        ]
+
+    def information(self, versions: Versions) -> list[Finding]:
+        """Return the type errors and ruff's findings the agent hears as information.
+
+        A finding ruff fixes safely isn't among them: the session landing the work
+        applies the fix. It still counts for the `ignore` that names it.
+        """
+        return [
+            found
+            for found in self.kept(versions)
+            if found.owner != "lup" and not found.fixable
         ]
 
     def ruled(
@@ -345,7 +357,7 @@ class Judge(Model, arbitrary_types_allowed=True):
         touched = touched_lines(change.before, after)
         refusing = [found for found in lup if touches(found, touched)]
         untouched = [found for found in lup if not touches(found, touched)]
-        information = [found for found in self.kept(versions) if found.owner != "lup"]
+        information = self.information(versions)
 
         def outcome() -> Outcome:
             if refusing:
