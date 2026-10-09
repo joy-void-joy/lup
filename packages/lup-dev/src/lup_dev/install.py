@@ -3,28 +3,33 @@
 The judge that runs is a copy installed from a checkout of lup (`uv tool install`),
 never a worktree's own source, so an agent's edit can't change what judges it
 (`docs/judging-writes.md`, *Where things live*). Refreshing the copy shows the
-operator the diff of everything it carries since the commit they last approved,
+operator every file it carries that changed since the commit they last approved,
 and until they approve, the copy installed before keeps judging (decision 26):
 1. refuse inside an agent's session, and refuse a checkout whose judge source has
    changes not committed, since the copy would carry what the review didn't show;
-2. build the engine (`packages/lup-dev/checker/build.py`);
-3. show the diff of the judge's source from the approved commit (from nothing, the
-   first time) to `HEAD`, and ask;
-4. install `packages/lup-dev` with `uv tool install`, its dependencies held to the
-   versions `uv.lock` pins;
-5. record the approved commit in lup's state.
+2. list the files the judge carries that changed since the commit approved last,
+   or all of them the first time; where none did, stop;
+3. build the engine (`packages/lup-dev/checker/build.py`);
+4. show each changed file whole on both sides to a `Reviewer`, and wait for its
+   answer: the first lup's dashboard in the bridge (`lup_dev.legacy_dashboard`),
+   or the terminal;
+5. approved, check again that `HEAD` is the commit reviewed and that the judge's
+   source is committed, install `packages/lup-dev` with `uv tool install`, its
+   dependencies held to the versions `uv.lock` pins, and record the commit.
 """
 
+import difflib
 import tempfile
 from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
-from typing import override
+from typing import TYPE_CHECKING, Literal, override
 
 import sh
 import typer
 from pydantic import Field
 from rich.console import Console
+from rich.text import Text
 
 from lup.types import Model
 from lup_dev.catalog.gate import Gate, Step
@@ -32,7 +37,10 @@ from lup_dev.clock import Clock
 from lup_dev.errors import LupDevError
 from lup_dev.layout import CheckoutLayout, Layout
 from lup_dev.policy.runtime import Runtime
-from lup_dev.policy.store import Git, read_model, write_model
+from lup_dev.policy.store import Git, nul_separated, read_model, write_model
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 class InstallError(LupDevError):
@@ -48,29 +56,153 @@ class Approval(Model):
     """The checkout it was installed from."""
 
 
+class ChangedFile(Model):
+    """One file the judge carries, changed since the commit approved last."""
+
+    path: Path
+    """Its path in the checkout."""
+    before: str | None
+    """Its text at the commit approved last; none where it wasn't there."""
+    after: str | None
+    """Its text at `HEAD`; none where it's deleted."""
+
+    def kind(self) -> Literal["created", "deleted", "modified"]:
+        """Say whether the change creates the file, deletes it or modifies it."""
+        if self.before is None:
+            return "created"
+        if self.after is None:
+            return "deleted"
+        return "modified"
+
+
 class Review(Model):
-    """What the operator reads before approving: the judge's source, changed."""
+    """What the operator reads before approving: the judge's files that changed."""
 
     since: str | None
     """The commit approved last; none for the first install."""
     commit: str
     """The commit the copy would be installed from."""
-    stat: str
-    """`git diff --stat` of the judge's source between the two."""
-    diff: str
-    """The diff itself."""
+    files: list[ChangedFile]
+    shortstat: str
+    """git's one-line count of the change (`git diff --shortstat`)."""
 
-    def text(self) -> str:
-        """Say what the review shows, its summary first."""
+    def heading(self) -> str:
+        """Say which commit is reviewed, since which, and how much changed."""
         since = (
             f"since {self.since}, the commit you approved last"
             if self.since
             else "whole, since no copy was approved yet"
         )
-        header = f"The judge at {self.commit}: its source {since}."
-        if not self.stat:
-            return f"{header}\n\nIts source hasn't changed.\n"
-        return f"{header}\n\n{self.stat}\n\n{self.diff}\n"
+        return f"The judge at {self.commit}: its source {since}: {self.shortstat}."
+
+
+class LineComment(Model):
+    """One comment the operator anchored to lines of a file the review showed."""
+
+    path: Path
+    """The file's path in the checkout."""
+    first: int
+    last: int
+    side: Literal["before", "after"]
+    """Which text the lines number: `before`, the file at the commit approved last;
+    `after`, the file at `HEAD`."""
+    note: str
+
+    def text(self, since: str | None) -> str:
+        """Say where the comment points, then what it says, naming the commit before."""
+        lines = (
+            str(self.first) if self.first == self.last else f"{self.first}-{self.last}"
+        )
+        side = f"before, at {since}" if self.side == "before" and since else self.side
+        body = "\n    ".join(self.note.splitlines())
+        return f"{self.path}:{lines} ({side}): {body}"
+
+
+class Answer(Model):
+    """The operator's answer to the judge's review, with what they wrote on it."""
+
+    approved: bool
+    note: str = ""
+    comments: list[LineComment] = []
+
+    def said(self, since: str | None) -> list[str]:
+        """Return the note and the line comments as the terminal prints them."""
+        note = (
+            ["Your note:", *(f"    {line}" for line in self.note.splitlines())]
+            if self.note
+            else []
+        )
+        comments = (
+            [
+                "Your line comments:",
+                *(f"  {comment.text(since)}" for comment in self.comments),
+            ]
+            if self.comments
+            else []
+        )
+        return [*note, *comments]
+
+
+class Unchanged(Model):
+    """Nothing the judge carries changed since the commit approved last.
+
+    Nothing was built, asked, installed or recorded, so the commit approved last
+    stays one the operator reviewed.
+    """
+
+    commit: str
+    since: str | None
+
+    def report(self) -> str:
+        """Say what came of the install, in one line."""
+        return (
+            f"Nothing the judge carries changed between {self.since}, the commit you "
+            f"approved last, and {self.commit}: nothing to review or install."
+        )
+
+
+class Declined(Model):
+    """The operator declined the judge's review: the copy installed before stays."""
+
+    commit: str
+    since: str | None
+    answer: Answer
+
+    def report(self) -> str:
+        """Say what came of the install, with what the operator wrote."""
+        return "\n".join(
+            [
+                (
+                    f"Declined: the judge at {self.commit} isn't installed, and the "
+                    "copy installed before keeps judging."
+                ),
+                *self.answer.said(self.since),
+            ]
+        )
+
+
+class Installed(Model):
+    """The operator approved the judge's review, and its copy is installed."""
+
+    approval: Approval
+    since: str | None
+    answer: Answer
+
+    def report(self) -> str:
+        """Say what came of the install, with what the operator wrote."""
+        return "\n".join(
+            [
+                (
+                    f"Installed the judge at {self.approval.commit}; it judges from "
+                    "here on."
+                ),
+                *self.answer.said(self.since),
+            ]
+        )
+
+
+type Outcome = Unchanged | Declined | Installed
+"""What `Installer.install` came to: nothing to review, declined, or installed."""
 
 
 class Toolchain(Model, ABC):
@@ -142,23 +274,65 @@ class Uv(Toolchain):
 
 
 class Reviewer(ABC):
-    """Who approves a copy of the judge: the operator, in their terminal."""
+    """Who answers the judge's review: the operator, in a dashboard or the terminal."""
 
     @abstractmethod
-    def approves(self, review: Review) -> bool:
-        """Show `review`, and say whether it's approved."""
+    def answer(self, review: Review) -> Answer:
+        """Show `review` to the operator, and return their answer."""
 
 
 class Terminal(Reviewer):
-    """The operator's terminal: the review in a pager, then a question."""
+    """The terminal: each file coloured under its own header, then a question.
+
+    The review goes through a pager, a header for each file naming whether it's
+    created, deleted or modified and how many lines it adds and removes, then its
+    hunks with three lines of context, removed lines red and added lines green.
+    """
 
     @override
-    def approves(self, review: Review) -> bool:
+    def answer(self, review: Review) -> Answer:
+        def shown(changed: ChangedFile) -> Iterator[Text]:
+            before = (changed.before or "").splitlines()
+            after = (changed.after or "").splitlines()
+            matcher = difflib.SequenceMatcher(a=before, b=after, autojunk=False)
+            changes = [
+                opcode for opcode in matcher.get_opcodes() if opcode[0] != "equal"
+            ]
+            added = sum(end - start for _, _, _, start, end in changes)
+            removed = sum(end - start for _, start, end, _, _ in changes)
+            header = f"{changed.path}  {changed.kind()}  +{added} -{removed}"
+            yield Text(header, style="bold")
+            if not changes:
+                yield Text("Its text is unchanged.", style="dim")
+            for group in matcher.get_grouped_opcodes(3):
+                _, first, _, start, _ = group[0]
+                _, _, last, _, end = group[-1]
+                yield Text(
+                    f"@@ -{first + 1},{last - first} +{start + 1},{end - start} @@",
+                    style="cyan",
+                )
+                for tag, low, high, begin, finish in group:
+                    if tag == "equal":
+                        yield from (Text(f" {line}") for line in before[low:high])
+                        continue
+                    yield from (
+                        Text(f"-{line}", style="red") for line in before[low:high]
+                    )
+                    yield from (
+                        Text(f"+{line}", style="green") for line in after[begin:finish]
+                    )
+
         console = Console()
-        with console.pager():
-            console.print(review.text(), markup=False, highlight=False)
+        with console.pager(styles=True):
+            console.print(review.heading(), markup=False, highlight=False)
+            for changed in review.files:
+                lines = list(shown(changed))
+                console.print()
+                console.rule(lines[0], align="left")
+                for line in lines[1:]:
+                    console.print(line, markup=False, highlight=False)
         question = f"Install the judge at {review.commit} as the one that runs?"
-        return typer.confirm(question, default=False)
+        return Answer(approved=typer.confirm(question, default=False))
 
 
 class Installer(Model, arbitrary_types_allowed=True):
@@ -176,9 +350,11 @@ class Installer(Model, arbitrary_types_allowed=True):
         return read_model(self.layout.approval, Approval)
 
     def review(self, since: str | None, commit: str) -> Review:
-        """Show the judge's source as it changed from `since` to `commit`.
+        """List each file the judge carries that changed from `since` to `commit`.
 
-        From nothing when `since` is none, or missing from the repository.
+        Each is read whole on both sides; a rename is a deletion and a creation.
+        From nothing when `since` is none, or gone from the repository. A file that
+        isn't UTF-8 text refuses the review, since no review here can show it.
         """
         git = Git(cwd=self.checkout)
         empty = git.run("hash-object", "-t", "tree", "--stdin", stdin=b"").stdout
@@ -187,17 +363,58 @@ class Installer(Model, arbitrary_types_allowed=True):
             == 0
         )
         start = since if known and since is not None else empty.decode().strip()
-        paths = [str(path) for path in CheckoutLayout(root=self.checkout).judge_source]
-        stat = git.text("diff", "--stat", start, commit, "--", *paths)
-        diff = git.text("diff", start, commit, "--", *paths)
+        carried = [
+            str(path) for path in CheckoutLayout(root=self.checkout).judge_source
+        ]
+        listed = git.run(
+            *["diff-tree", "-r", "-z", "--no-renames", "--name-only", start, commit],
+            *["--", *carried],
+        )
+        paths = nul_separated(listed.stdout)
+
+        def standing(revision: str) -> list[str]:
+            if not paths:
+                return []
+            found = git.run(
+                "ls-tree", "-r", "-z", "--name-only", revision, "--", *paths
+            )
+            return nul_separated(found.stdout)
+
+        def text(revision: str, path: str, there: list[str]) -> str | None:
+            if path not in there:
+                return None
+            content = git.run("cat-file", "blob", f"{revision}:{path}").stdout
+            try:
+                return content.decode()
+            except UnicodeDecodeError as failure:
+                message = (
+                    f"{path} isn't UTF-8 text at {revision}, so no review here can "
+                    f"show it: {failure}"
+                )
+                raise InstallError(message) from failure
+
+        before = standing(start)
+        after = standing(commit)
         return Review(
-            since=since if known else None, commit=commit, stat=stat, diff=diff
+            since=since if known else None,
+            commit=commit,
+            files=[
+                ChangedFile(
+                    path=Path(path),
+                    before=text(start, path, before),
+                    after=text(commit, path, after),
+                )
+                for path in paths
+            ],
+            shortstat=git.text("diff", "--shortstat", start, commit, "--", *carried),
         )
 
-    def install(self) -> Approval | None:
-        """Build, show, ask, install and record; return none where it's declined.
+    def install(self) -> Outcome:
+        """List, build, ask, install and record, and say what came of it.
 
-        Declined, nothing changes: the copy installed before keeps judging.
+        Where nothing the judge carries changed, it stops before building. Declined,
+        nothing changes: the copy installed before keeps judging. Approved while
+        `HEAD` moved, it refuses, since what would install isn't what was reviewed.
         """
         inside = [runtime.name() for runtime in self.runtimes if runtime.inside()]
         if inside:
@@ -207,23 +424,42 @@ class Installer(Model, arbitrary_types_allowed=True):
             )
             raise InstallError(message)
         git = Git(cwd=self.checkout)
-        paths = [str(path) for path in CheckoutLayout(root=self.checkout).judge_source]
-        changed = git.text("status", "--porcelain", "--", *paths)
-        if changed:
-            message = (
-                "the judge's source has changes not committed, which the copy would "
-                f"carry unreviewed; commit or set them aside first:\n{changed}"
-            )
-            raise InstallError(message)
+        carried = [
+            str(path) for path in CheckoutLayout(root=self.checkout).judge_source
+        ]
+
+        def refuse_uncommitted() -> None:
+            changed = git.text("status", "--porcelain", "--", *carried)
+            if changed:
+                message = (
+                    "the judge's source has changes not committed, which the copy "
+                    "would carry unreviewed; commit or set them aside first:\n"
+                    f"{changed}"
+                )
+                raise InstallError(message)
+
+        refuse_uncommitted()
         commit = git.text("rev-parse", "HEAD")
-        self.toolchain.build(self.checkout)
         previous = self.approved()
         review = self.review(previous.commit if previous else None, commit)
-        if not self.reviewer.approves(review):
-            return None
+        if not review.files:
+            return Unchanged(commit=commit, since=review.since)
+        self.toolchain.build(self.checkout)
+        answer = self.reviewer.answer(review)
+        if not answer.approved:
+            return Declined(commit=commit, since=review.since, answer=answer)
+        head = git.text("rev-parse", "HEAD")
+        if head != commit:
+            message = (
+                f"`HEAD` moved from {commit} to {head} during the review, so what "
+                "would install isn't what you approved; run `lup-dev install` again "
+                f"to review {head}"
+            )
+            raise InstallError(message)
+        refuse_uncommitted()
         self.toolchain.install(self.checkout)
         approval = Approval(
             commit=commit, time=self.clock.now(), checkout=self.checkout
         )
         write_model(self.layout.approval, approval)
-        return approval
+        return Installed(approval=approval, since=review.since, answer=answer)
