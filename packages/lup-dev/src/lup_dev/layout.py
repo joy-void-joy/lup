@@ -167,11 +167,6 @@ class CheckoutLayout(Model):
         return self.home / "saved"
 
     @property
-    def ruff(self) -> Path:
-        """The project's own ruff, so findings match what its gate runs."""
-        return self.root / ".venv" / "bin" / "ruff"
-
-    @property
     def rules_reference(self) -> Path:
         """The reference to lup's rules, compiled from the engine's table: lup's own."""
         return self.root / "docs" / "rules.md"
