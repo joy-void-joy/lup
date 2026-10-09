@@ -19,7 +19,7 @@ This repository is the second lup. The first (`joy-void-joy/lup-legacy`, archive
    - The merge commit's message is the branch's record: every design decision taken, with its alternative and the file it lives in; then what changed and why, how it was tested, and a short note on how the work felt (see *Delegating*).
    - A simple doc change skips the branch and lands on `dev` directly.
 3. **A release is a pull request from `dev` to `main`,** which the operator reviews and merges. Its description gathers the decisions landed since the last release. Never merge into `main` or push to it yourself.
-4. **Create files with your file tool, never through the shell.** On Claude Code, every `Write` reaches the operator as a prompt, which is how they see the design forming; a file made by a heredoc or a script skips that. Codex has no such prompt yet, so on Codex, name every new file in the merge commit's message.
+4. **Create files with your file tool, never through the shell.** The judge sees a file tool's write before it lands, and a new or whole-file production write, a public-API change, a suppression, a protected path or the operator's documents reach the operator through it, which is how they see the design forming. A file a heredoc or a script makes is judged only after the call, and refused if it needed the operator. Codex has no such prompt yet, so on Codex, name every new file in the merge commit's message.
 5. **Commit early and atomically**, before you report: `type(scope): what changed and why`.
 
 ## Code
