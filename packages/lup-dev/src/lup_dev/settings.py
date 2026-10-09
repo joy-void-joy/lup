@@ -25,6 +25,14 @@ class LupDevSettings(Settings):
     As ISO 8601 (`PT30M`) or `HH:MM:SS`. A stopped engine starts again when asked,
     reloading the project; a running one holds pyright's whole program in memory.
     """
+    lup_interim_review_legacy_checkout: Path = Path("lup-legacy.git/tree/dev")
+    """`LUP_INTERIM_REVIEW_LEGACY_CHECKOUT`: the first lup's checkout, whose dashboard
+    reviews the judge before `lup-dev install` installs it.
+
+    Relative to the directory holding the repository's git directory, or absolute.
+    The interim review hook reads the same variable the same way, so one setting
+    points both at the first lup. It goes with the bridge.
+    """
     lup_integration_branch: str = "dev"
     """`LUP_INTEGRATION_BRANCH`: the branch whose tip holds the declaration judged by.
 

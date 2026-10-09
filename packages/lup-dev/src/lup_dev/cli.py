@@ -31,6 +31,7 @@ from lup_dev.errors import LupDevError
 from lup_dev.gate import Check, Shell, failed, report
 from lup_dev.install import Installer, Terminal, Uv
 from lup_dev.layout import CheckoutLayout, Layout
+from lup_dev.legacy_dashboard import LegacyDashboard
 from lup_dev.policy.checkpoint import Bench, Services, Worktree
 from lup_dev.policy.holds import Hold, Response, answer, waiting
 from lup_dev.policy.importers import BackgroundSpawner
@@ -276,26 +277,40 @@ def check() -> None:
 
 
 @app.command("install")
-def install() -> None:
+def install(
+    *,
+    in_terminal: Annotated[
+        bool,
+        typer.Option(
+            "--in-terminal",
+            help="Review in this terminal instead of the first lup's dashboard.",
+        ),
+    ] = False,
+) -> None:
     """Install this checkout's judge as the one that runs, once you approve its source.
 
-    Run it yourself from the `dev` checkout: it builds the engine, shows the diff of
-    everything the judge carries since the commit you approved last, and installs
-    only if you approve. Declined, the copy installed before keeps judging.
+    Run it yourself from the `dev` checkout: it builds the engine, parks every file
+    the judge carries that changed since the commit you approved last as one review
+    in the first lup's dashboard, and installs only if you approve. Declined, the
+    copy installed before keeps judging. Where nothing changed, it says so and stops.
     """
+    checkout = toplevel(Path.cwd())
+    settings = LupDevSettings()
+    clock = SystemClock()
+    reviewer = (
+        Terminal()
+        if in_terminal
+        else LegacyDashboard.configured(checkout, settings, clock)
+    )
     installer = Installer(
-        checkout=toplevel(Path.cwd()),
-        layout=Layout.of(LupDevSettings()),
+        checkout=checkout,
+        layout=Layout.of(settings),
         toolchain=Uv(),
-        reviewer=Terminal(),
-        clock=SystemClock(),
+        reviewer=reviewer,
+        clock=clock,
         runtimes=runtimes(),
     )
-    approval = installer.install()
-    if approval is None:
-        typer.echo("Declined: the judge installed before keeps judging.")
-        return
-    typer.echo(f"Installed the judge at {approval.commit}; it judges from now on.")
+    typer.echo(installer.install().report())
 
 
 @app.command("verdicts")

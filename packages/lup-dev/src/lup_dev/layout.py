@@ -180,6 +180,15 @@ class CheckoutLayout(Model):
         """Say where the version refused in refusal `number` is saved, by its path."""
         return self.saved / str(number) / path
 
+    def install_review(self, since: str | None) -> Path:
+        """Say where the judge's review keeps its files' before side while it waits.
+
+        Each changed file as it stood at `since`, the commit approved last, at its
+        path in the checkout below this directory; `whole/` where no approved
+        commit is known, and the review shows the source whole.
+        """
+        return self.home / "install-review" / (since or "whole")
+
     @property
     def tool(self) -> Path:
         """The package installed as the judge, `lup-dev`, in a checkout of lup."""
