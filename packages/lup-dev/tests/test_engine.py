@@ -5,6 +5,7 @@ they fail, saying so. No test reaches the network or waits on a clock: an engine
 stops when told, and a test that needs another build gives it another bundle.
 """
 
+import os
 import shutil
 import sys
 import tempfile
@@ -283,6 +284,97 @@ def test_a_new_module_is_found_by_the_files_that_import_it(project: Project) -> 
     )
     project.write("later.py", DOCSTRING + "value = 1\n")
     assert pyright(project.check("importer.py")) == []
+
+
+def test_an_edit_judged_then_landed_is_what_the_next_edit_reads(
+    project: Project,
+) -> None:
+    sized = DOCSTRING + "def size() -> int:\n    return 1\n"
+    counted = sized + "\n\ndef count() -> int:\n    return 2\n"
+    path = project.write("judged.py", sized)
+    sizing = DOCSTRING + "from example.judged import size\n\nTOTAL = size()\n"
+    assert pyright(project.check("caller.py", on_disk=sizing)) == []
+    # As the judge asks before an edit lands: the content after, before and at the
+    # session's start, each as would-be content.
+    for content in [counted, sized, sized]:
+        project.check("judged.py", content)
+    (project.root / path).write_text(counted)
+    counting = DOCSTRING + "from example.judged import count\n\nTOTAL = count()\n"
+    assert pyright(project.check("caller.py", counting)) == []
+
+
+# The worktree's environment.
+
+WORKSPACE = """\
+[tool.pyright]
+typeCheckingMode = "strict"
+pythonVersion = "3.14"
+include = ["packages"]
+"""
+HOLDING = (
+    DOCSTRING
+    + "class Holding:\n"
+    + '    """Held."""\n\n'
+    + "    def reach(self) -> bool:\n"
+    + '        """Reach."""\n'
+    + "        return True\n"
+)
+RELEASING = (
+    HOLDING
+    + "\n    def release(self) -> bool:\n"
+    + '        """Release."""\n'
+    + "        return False\n"
+)
+CALLER = (
+    DOCSTRING
+    + "from pkg.held import Holding\n\n\n"
+    + "def use(held: Holding) -> bool:\n"
+    + '    """Use."""\n'
+    + "    return held.release()\n"
+)
+
+
+def workspace(root: Path, held: str) -> Path:
+    """A workspace laid out like lup's, its package under `packages/pkg/src`."""
+    source = root / "packages" / "pkg" / "src"
+    (source / "pkg").mkdir(parents=True)
+    (root / "pyproject.toml").write_text(WORKSPACE)
+    (source / "pkg" / "__init__.py").write_text('"""A package."""\n')
+    (source / "pkg" / "py.typed").write_text("")
+    (source / "pkg" / "held.py").write_text(held)
+    return source
+
+
+def environment(at: Path, source: Path) -> Path:
+    """Make a virtual environment with `source` installed editable, as uv does."""
+    sh.Command(sys.executable)("-m", "venv", "--without-pip", str(at))
+    [site] = (at / "lib").glob("python*/site-packages")
+    (site / "_pkg.pth").write_text(str(source))
+    return at / "bin"
+
+
+def test_an_environment_made_after_the_engine_started_is_the_one_it_reads(
+    tmp_path: Path, short: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The session runs in another checkout's environment, which a hook inherits, and
+    # there the package lacks the method this worktree adds.
+    other = tmp_path / "dev"
+    session = environment(other / ".venv", workspace(other, HOLDING))
+    monkeypatch.setenv("PATH", f"{session}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("VIRTUAL_ENV", str(session.parent))
+    root = tmp_path / "branch"
+    source = workspace(root, HOLDING)
+    engine = engine_for(short / "environment", tmp_path / "state")
+    try:
+        # The engine starts before the worktree has an environment of its own.
+        engine.check(root, [Source(path=Path("packages/pkg/src/pkg/held.py"))])
+        environment(root / ".venv", source)
+        (source / "pkg" / "held.py").write_text(RELEASING)
+        caller = Source(path=Path("packages/pkg/src/pkg/caller.py"), content=CALLER)
+        [report] = engine.check(root, [caller])
+        assert pyright(report) == []
+    finally:
+        engine.stop(root)
 
 
 # Importers.

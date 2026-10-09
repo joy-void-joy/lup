@@ -28,10 +28,11 @@ export class Engine {
         return this.warm;
     }
 
-    // Bring the program in line with the disk, with a new one if the configuration
-    // changed, but for the files about to be given would-be content.
+    // Bring the program in line with the disk, with a new one if the configuration or
+    // the worktree's interpreter changed, but for the files about to be given would-be
+    // content.
     fresh(keep: Set<string> = new Set()) {
-        if (this.warm.configurationChanged()) {
+        if (this.warm.setupChanged()) {
             this.warm.service.dispose();
             this.warm = new WarmProgram(this.root);
         }

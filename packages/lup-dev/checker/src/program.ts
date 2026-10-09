@@ -11,7 +11,8 @@
 //   which re-enumerates the tracked files;
 // - a changed directory on the import search path means packages were installed or
 //   removed, which drops pyright's import cache;
-// - a changed configuration (`pyproject.toml`, `pyrightconfig.json`) needs a new
+// - a changed configuration (`pyproject.toml`, `pyrightconfig.json`), or the worktree's
+//   own interpreter (`.venv/bin/python`) appearing, going or replaced, needs a new
 //   program, which the engine builds.
 
 import * as fs from 'fs';
@@ -33,7 +34,13 @@ import { Uri } from 'pyright/common/uri/uri';
 import { ParseFileResults } from 'pyright/parser/parser';
 import { PyrightFileSystem } from 'pyright/pyrightFileSystem';
 
+// What a program is set up from besides the project's files, so that a change to any
+// of them needs a new program: the configuration, and the interpreter of the
+// worktree's own environment, which decides where imports resolve, the project's own
+// packages among them when they're installed editable.
 const configurations = ['pyproject.toml', 'pyrightconfig.json'];
+const interpreter = path.join('.venv', 'bin', 'python');
+const setup = [...configurations, interpreter];
 
 interface Opened {
     uri: Uri;
@@ -57,7 +64,7 @@ export class WarmProgram {
     readonly root: string;
     readonly service: AnalyzerService;
     readonly program: Program;
-    private readonly configStamps: Map<string, string | undefined>;
+    private readonly setupStamps: Map<string, string | undefined>;
     private searchPathStamps = new Map<string, string | undefined>();
     private directoryStamps = new Map<string, string | undefined>();
     private readonly fileStamps = new Map<string, string | undefined>();
@@ -67,17 +74,18 @@ export class WarmProgram {
 
     constructor(root: string) {
         this.root = path.resolve(root);
-        this.configStamps = new Map(configurations.map((name) => [name, stampOf(path.join(this.root, name))]));
+        this.setupStamps = new Map(setup.map((name) => [name, stampOf(path.join(this.root, name))]));
         const output = new StderrConsole(LogLevel.Error);
         const tempFile = new RealTempFile();
         const fileSystem = new PyrightFileSystem(createFromRealFileSystem(tempFile, output));
         const serviceProvider = createServiceProvider(fileSystem, output, tempFile);
         // As if `pyright` ran from the worktree. The judge runs from its own installed
         // copy, so the worktree's environment is named rather than found on the path.
+        // Without one, pyright runs the `python3` on the path the engine inherited from
+        // the hook that started it, which may be another worktree's environment.
         const commandLine = new CommandLineOptions(this.root, /* fromLanguageServer */ false);
-        const python = path.join(this.root, '.venv', 'bin', 'python');
-        if (fs.existsSync(python)) {
-            commandLine.configSettings.pythonPath = python;
+        if (this.setupStamps.get(interpreter) !== undefined) {
+            commandLine.configSettings.pythonPath = path.join(this.root, interpreter);
         }
         // Analysis runs when asked, never on pyright's own timers.
         commandLine.languageServerSettings.enableAmbientAnalysis = false;
@@ -99,9 +107,11 @@ export class WarmProgram {
         return Uri.file(path.resolve(this.root, file), this.service.serviceProvider);
     }
 
-    // Whether the project's configuration changed since this program loaded it.
-    configurationChanged(): boolean {
-        return configurations.some((name) => stampOf(path.join(this.root, name)) !== this.configStamps.get(name));
+    // Whether the project's configuration or the worktree's interpreter changed since
+    // this program was set up: a worktree's `.venv` is often made after the engine
+    // started there, by the first `uv run` or `uv sync`.
+    setupChanged(): boolean {
+        return setup.some((name) => stampOf(path.join(this.root, name)) !== this.setupStamps.get(name));
     }
 
     trackedFiles(): Uri[] {
