@@ -318,6 +318,24 @@ def test_type_errors_and_ruffs_findings_are_information(judge: Judging) -> None:
     ]
 
 
+def test_a_finding_ruff_fixes_safely_isnt_reported(judge: Judging) -> None:
+    after = CORE + "import os  # FIXABLE F401\nimport sys  # RUFF E711\n"
+    for path in ["src/pkg/core.py", "tests/test_a.py"]:
+        judgement = judge(edit(path, CORE, after))
+        assert judgement.outcome == "allow", path
+        assert [finding.rule for finding in judgement.information] == ["E711"], path
+
+
+def test_an_ignore_naming_a_fixable_finding_is_still_used(judge: Judging) -> None:
+    before = (
+        CORE + 'import os  # FIXABLE F401  # lup: ignore("F401", why="re-exported")\n'
+    )
+    judgement = judge(edit("src/pkg/core.py", before, before + "z = 1\n"))
+    assert judgement.outcome == "allow"
+    assert judgement.untouched == []
+    assert judgement.information == []
+
+
 def test_ignore_applies_to_ruffs_findings_too(judge: Judging) -> None:
     before = CORE + 'import os  # RUFF F401  # lup: ignore("F401", why="re-exported")\n'
     after = before + "z = 1\n"

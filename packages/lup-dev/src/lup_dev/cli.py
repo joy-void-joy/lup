@@ -28,7 +28,7 @@ from lup_dev.codescan.engine import EngineChecker
 from lup_dev.codescan.reference import reference
 from lup_dev.codescan.ruff import Ruff
 from lup_dev.errors import LupDevError
-from lup_dev.gate import Check, Shell, failed, report
+from lup_dev.gate import Check, Fixes, Shell, failed, report
 from lup_dev.install import Installer, Terminal, Uv
 from lup_dev.layout import CheckoutLayout, Layout
 from lup_dev.legacy_dashboard import LegacyDashboard
@@ -263,14 +263,30 @@ def holds_decline(
 
 
 @app.command("check")
-def check() -> None:
+def check(
+    *,
+    fix: Annotated[
+        bool,
+        typer.Option(
+            "--fix",
+            help="First apply ruff's safe fixes and the formatter, rewriting files.",
+        ),
+    ] = False,
+) -> None:
     """Run the gate, every step even after one fails, and fail if any did.
 
     A stale engine is rebuilt, then ruff, the formatter, pyright, pytest and the
     import contracts run. Each step's outcome is reported, then each failure's
-    output in full; the exit code is non-zero when any step failed.
+    output in full; the exit code is non-zero when any step failed. With `--fix`,
+    which the session landing work runs on the merged result, ruff's safe fixes
+    and the formatter rewrite the worktree first.
     """
-    outcomes = Check(root=toplevel(Path.cwd()), runner=Shell(), gate=Gate()).run()
+    outcomes = Check(
+        root=toplevel(Path.cwd()),
+        runner=Shell(),
+        gate=Gate(),
+        fixes=Fixes().steps if fix else [],
+    ).run()
     typer.echo(report(outcomes))
     if failed(outcomes):
         raise typer.Exit(code=1)

@@ -5,7 +5,8 @@ The fake engine reads a file the way the real one reports it, from markers:
 - `# TYPE` on a line is one of pyright's type errors there;
 - `# lup: …` comments are parsed into directives with Python's own parser;
 - classes, functions and a package root's `__all__` make the public surface.
-The fake linter reads `# RUFF <code>` as one of ruff's findings.
+The fake linter reads `# RUFF <code>` as one of ruff's findings, and `# FIXABLE
+<code>` as one ruff fixes safely.
 """
 
 import ast
@@ -205,7 +206,10 @@ class FakeEngine(Checker):
 
 
 class FakeLinter(Linter):
-    """ruff, scripted from `# RUFF <code>` markers."""
+    """ruff, scripted from `# RUFF <code>` markers.
+
+    `# FIXABLE <code>` is one of ruff's findings with a safe fix.
+    """
 
     def findings(self, root: Path, sources: list[Source]) -> list[Finding]:
         def content(source: Source) -> str:
@@ -215,10 +219,19 @@ class FakeLinter(Linter):
                 else (root / source.path).read_text()
             )
 
+        def fixable(source: Source) -> list[Finding]:
+            return [
+                each.model_copy(update={"fixable": True})
+                for each in marked(source.path, content(source), "# FIXABLE ", "ruff")
+            ]
+
         return [
             finding
             for source in sources
-            for finding in marked(source.path, content(source), "# RUFF ", "ruff")
+            for finding in [
+                *marked(source.path, content(source), "# RUFF ", "ruff"),
+                *fixable(source),
+            ]
         ]
 
 

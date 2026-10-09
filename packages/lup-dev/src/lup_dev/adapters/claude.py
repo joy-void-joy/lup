@@ -11,9 +11,10 @@
 Claude Code asks the operator in its own prompt: `PreToolUse` answers `allow`, `ask`
 or `deny`, and a hook's `ask` prompts in auto mode too. The agent hears a
 checkpoint's report as `additionalContext` beside the call's result, and the turn
-can't end while a `Stop` hook answers `decision: block`. When judging itself fails
-at a turn's end, the turn ends, and the operator is warned once in
-`systemMessage`.
+can't end while a `Stop` hook answers `decision: block`; `stop_hook_active` says a
+turn's end follows such a block. When judging itself fails at a turn's end, the
+turn ends, and the operator is warned once in `systemMessage`, which also carries
+what a turn's end tells without holding it.
 
 What this relies on, from Claude Code's hooks reference
 (code.claude.com/docs/en/hooks):
@@ -24,7 +25,12 @@ What this relies on, from Claude Code's hooks reference
   succeeds": a call never finishes before it starts, so the calls running stay
   right when calls run in parallel, whose hooks "run in parallel";
 - a `command` hook's timeout defaults to 600 seconds, and "a timed-out command
-  ... hook doesn't block the tool call", so a judgement must answer within it.
+  ... hook doesn't block the tool call", so a judgement must answer within it;
+- a subagent's hooks carry `agent_id`, "Present only when the hook fires inside a
+  subagent call", beside its session's `session_id` (seen in #32), and
+  `SubagentStop` "Runs when a Claude Code subagent has finished responding";
+- `Stop`'s `stop_hook_active` "is `true` when Claude Code is already continuing as
+  a result of a stop hook".
 """
 
 from abc import ABC, abstractmethod
@@ -304,7 +310,12 @@ class PostToolUse(Payload):
 
 
 class Stop(Payload):
-    """`Stop`: the session's own conversation ends its turn."""
+    """`Stop`: the session's own conversation ends its turn.
+
+    What the turn's end tells without holding it goes to the operator, in
+    `systemMessage`: the hooks reference says `Stop`'s `additionalContext`, like
+    `reason`, means "The conversation continues so Claude can act on it".
+    """
 
     hook_event_name: Literal["Stop"]
     stop_hook_active: bool = False
@@ -312,9 +323,18 @@ class Stop(Payload):
 
     @override
     def answer(self, bench: Bench) -> Output | None:
-        ended = TurnEnded(session=self.session_id, agent=self.agent_id, cwd=self.cwd)
+        ended = TurnEnded(
+            session=self.session_id,
+            agent=self.agent_id,
+            cwd=self.cwd,
+            after_block=self.stop_hook_active,
+        )
         reply = ended.apply(bench)
-        return Blocked(reason=reply.block) if reply.block else None
+        if reply.block:
+            return Blocked(reason=reply.block)
+        if reply.note:
+            return OperatorWarning(system_message=reply.note)
+        return None
 
     @override
     def failed(self, bench: Bench, failure: Exception) -> Output | None:

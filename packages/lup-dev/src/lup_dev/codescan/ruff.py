@@ -2,13 +2,15 @@
 
 ruff owns generic Python hygiene (`docs/conventions.md`, *Who owns each concern*).
 Its findings are information at each checkpoint and must be clean when the turn
-ends; they never refuse an edit. It runs with `--ignore-noqa`, so lup's own `#
-lup: ignore` is the one suppression, applied by the judge to every owner alike.
+ends; they never refuse an edit. A finding ruff fixes safely is marked `fixable`,
+and the agent never hears of it: the session landing the work applies the fix. It
+runs with `--ignore-noqa`, so lup's own `# lup: ignore` is the one suppression,
+applied by the judge to every owner alike.
 """
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import override
+from typing import Literal, override
 
 import sh
 from pydantic import TypeAdapter
@@ -45,6 +47,12 @@ class Ruff(Linter):
                 """Return this place as a `Position`."""
                 return Position(line=self.row, column=self.column)
 
+        class Fix(Model):
+            """The fix ruff offers for a finding, as far as the judge reads it."""
+
+            applicability: Literal["safe", "unsafe", "display-only"]
+            """Only a `safe` fix is applied by `ruff check --fix`."""
+
         class Message(Model):
             """One finding in `ruff check --output-format json`."""
 
@@ -53,6 +61,8 @@ class Ruff(Linter):
             filename: Path
             location: Location
             end_location: Location
+            fix: Fix | None = None
+            """None where ruff has no fix, or the configuration makes it unfixable."""
 
             def finding(self) -> Finding:
                 """Return this message as a ruff `Finding`, its path from the root."""
@@ -66,6 +76,7 @@ class Ruff(Linter):
                     owner="ruff",
                     rule=self.code or "invalid-syntax",
                     message=self.message,
+                    fixable=self.fix is not None and self.fix.applicability == "safe",
                 )
 
         local = CheckoutLayout(root=root).ruff

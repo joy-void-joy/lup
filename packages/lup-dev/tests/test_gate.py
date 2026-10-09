@@ -9,7 +9,7 @@ from typer.testing import CliRunner
 
 from lup_dev import cli
 from lup_dev.catalog.gate import Gate, Step
-from lup_dev.gate import Check, Outcome, Ran, Runner, Shell, failed, report
+from lup_dev.gate import Check, Fixes, Outcome, Ran, Runner, Shell, failed, report
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -144,11 +144,36 @@ def test_the_catalogs_gate_runs_the_engine_then_the_tools() -> None:
     assert Gate().steps[1].command == ["uv", "run", "ruff", "check", "--ignore-noqa"]
 
 
-@pytest.mark.parametrize(("code", "exit_code"), [(0, 0), (1, 1)])
-def test_lup_dev_check_exits_non_zero_when_a_step_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: int, exit_code: int
+def test_the_fixes_run_before_the_gate_and_count_like_its_steps(
+    tmp_path: Path,
 ) -> None:
-    runner = Scripted({"types": Ran(code=code, output="types said so\n")})
+    runner = Scripted({"format": Ran(code=2, output="a.py: invalid syntax\n")})
+    fixes = [
+        Step(name="fix", command=["fix"]),
+        Step(name="reformat", command=["format"]),
+    ]
+    outcomes = Check(root=tmp_path, runner=runner, gate=GATE, fixes=fixes).run()
+    assert runner.ran == [
+        ["fix"],
+        ["format"],
+        ["lint", "--strict"],
+        ["types"],
+        ["tests", "-q"],
+    ]
+    assert failed(outcomes) == ["reformat"]
+
+
+def test_the_fixes_are_ruffs_safe_fixes_then_the_formatter() -> None:
+    assert [step.command for step in Fixes().steps] == [
+        ["uv", "run", "ruff", "check", "--fix-only", "--ignore-noqa"],
+        ["uv", "run", "ruff", "format"],
+    ]
+
+
+@pytest.fixture
+def scripted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Scripted:
+    """`lup-dev check` run over `GATE` in `tmp_path`, by a scripted runner."""
+    runner = Scripted({"types": Ran(code=0, output="types said so\n")})
 
     def shell() -> Runner:
         return runner
@@ -160,8 +185,27 @@ def test_lup_dev_check_exits_non_zero_when_a_step_fails(
         return tmp_path
 
     monkeypatch.setattr(cli, "toplevel", toplevel)
+    return runner
+
+
+@pytest.mark.parametrize(("code", "exit_code"), [(0, 0), (1, 1)])
+def test_lup_dev_check_exits_non_zero_when_a_step_fails(
+    scripted: Scripted, code: int, exit_code: int
+) -> None:
+    scripted.answers = {"types": Ran(code=code, output="types said so\n")}
     result = CliRunner().invoke(cli.app, ["check"])
     assert result.exit_code == exit_code
-    assert [command[0] for command in runner.ran] == ["lint", "types", "tests"]
+    assert [command[0] for command in scripted.ran] == ["lint", "types", "tests"]
     last = result.output.strip().splitlines()[-1]
     assert last == ("The gate passed." if code == 0 else "The gate failed: types.")
+
+
+def test_lup_dev_check_fix_rewrites_first(scripted: Scripted) -> None:
+    result = CliRunner().invoke(cli.app, ["check", "--fix"])
+    assert result.exit_code == 0
+    assert [command[3:5] for command in scripted.ran[:2]] == [
+        ["check", "--fix-only"],
+        ["format"],
+    ]
+    assert [command[0] for command in scripted.ran[2:]] == ["lint", "types", "tests"]
+    assert result.output.startswith("passed   fix\npassed   reformat\npassed   lint\n")

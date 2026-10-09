@@ -12,6 +12,7 @@ The texts name no runtime: each adapter carries them as its runtime hears them.
 """
 
 from pathlib import Path
+from typing import Literal
 
 from lup.types import Model
 from lup_dev.codescan.contract import Finding
@@ -305,6 +306,33 @@ def turn_end(findings: list[Finding]) -> str:
                 "on its line or the line above (the operator is asked)."
             ),
         ]
+    )
+
+
+def unheld(findings: list[Finding], why: Literal["working", "repeated"]) -> str:
+    """Tell what's left in the files touched where it doesn't hold the turn's end.
+
+    It doesn't while a subagent of the session is `working`, whose files may be in
+    progress, nor when the turn's end held on the same findings just before
+    (`repeated`), which the agent didn't fix.
+    """
+    if not findings:
+        return ""
+    match why:
+        case "working":
+            header = (
+                "A subagent of this session is at work, so lup doesn't hold the "
+                "turn's end on what's left in files touched this session "
+                "(information; it holds the turn's end once no subagent is at work):"
+            )
+        case "repeated":
+            header = (
+                "lup held the turn's end on these just before, and doesn't again. "
+                "Left in files touched this session (information; they fail the "
+                "gate until fixed):"
+            )
+    return "\n".join(
+        [header, *(line for found in findings for line in finding_lines(found))]
     )
 
 
