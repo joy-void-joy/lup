@@ -29,8 +29,9 @@ export class Engine {
     }
 
     // Bring the program in line with the disk, with a new one if the configuration or
-    // the worktree's interpreter changed, but for the files about to be given would-be
-    // content.
+    // the interpreter uv gave the worktree changed, but for the files about to be given
+    // would-be content. A new program that fails (uv gives no environment) leaves the
+    // old stamps in place, so each request tries again, failing with uv's message.
     fresh(keep: Set<string> = new Set()) {
         if (this.warm.setupChanged()) {
             this.warm.service.dispose();

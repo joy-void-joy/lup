@@ -11,10 +11,11 @@
 //   which re-enumerates the tracked files;
 // - a changed directory on the import search path means packages were installed or
 //   removed, which drops pyright's import cache;
-// - a changed configuration (`pyproject.toml`, `pyrightconfig.json`), or the worktree's
-//   own interpreter (`.venv/bin/python`) appearing, going or replaced, needs a new
-//   program, which the engine builds.
+// - a changed configuration (pyright's, or what decides uv's environment), or the
+//   interpreter uv gave the worktree going or replaced, needs a new program, which
+//   the engine builds, asking uv again.
 
+import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -35,12 +36,49 @@ import { ParseFileResults } from 'pyright/parser/parser';
 import { PyrightFileSystem } from 'pyright/pyrightFileSystem';
 
 // What a program is set up from besides the project's files, so that a change to any
-// of them needs a new program: the configuration, and the interpreter of the
-// worktree's own environment, which decides where imports resolve, the project's own
-// packages among them when they're installed editable.
-const configurations = ['pyproject.toml', 'pyrightconfig.json'];
-const interpreter = path.join('.venv', 'bin', 'python');
-const setup = [...configurations, interpreter];
+// of them needs a new program: pyright's configuration, what decides the environment
+// uv gives the worktree (`pyproject.toml` again, `uv.toml`, `uv.lock`,
+// `.python-version`), and that environment's interpreter, which decides where imports
+// resolve, the project's own packages among them when they're installed editable.
+const configurations = ['pyproject.toml', 'pyrightconfig.json', 'uv.toml', 'uv.lock', '.python-version'];
+
+// Run in the worktree's environment, it names that environment's interpreter, as JSON.
+const nameInterpreter = 'import json, sys; print(json.dumps(sys.executable))';
+
+// The interpreter of the environment uv gives the worktree, as the gate's `uv run`
+// finds it (`UV_PROJECT_ENVIRONMENT`, else `.venv`), made if it's missing and synced
+// to `uv.lock`. `--frozen` reads the lock without relocking, so the judge never
+// writes the worktree's `uv.lock`, and a project without one fails here. The session's
+// `VIRTUAL_ENV` is left out: the judge inherits it from the hook that started it, it
+// may be another worktree's, and uv warns about it.
+function environmentOf(root: string): string {
+    const inherited = { ...process.env };
+    delete inherited.VIRTUAL_ENV;
+    const asked = spawnSync('uv', ['run', '--frozen', '--quiet', 'python', '-c', nameInterpreter], {
+        cwd: root,
+        env: inherited,
+        encoding: 'utf8',
+    });
+    if (asked.error) {
+        throw new Error(`uv couldn't be run to find ${root}'s environment: ${asked.error.message}`);
+    }
+    if (asked.status !== 0) {
+        const ended = asked.status === null ? `was killed by ${asked.signal}` : `exited with ${asked.status}`;
+        throw new Error(`uv gave ${root} no environment: \`uv run\` ${ended}: ${asked.stderr.trim()}`);
+    }
+    const unnamed = () =>
+        new Error(`${root}'s environment printed ${JSON.stringify(asked.stdout)}, not its interpreter's path as JSON`);
+    let named: unknown;
+    try {
+        named = JSON.parse(asked.stdout);
+    } catch {
+        throw unnamed();
+    }
+    if (typeof named !== 'string') {
+        throw unnamed();
+    }
+    return named;
+}
 
 interface Opened {
     uri: Uri;
@@ -74,24 +112,25 @@ export class WarmProgram {
 
     constructor(root: string) {
         this.root = path.resolve(root);
-        this.setupStamps = new Map(setup.map((name) => [name, stampOf(path.join(this.root, name))]));
+        // The configuration is stamped before uv is asked, so a change while uv runs
+        // builds another program at the next request.
+        const configured = configurations.map((name) => path.join(this.root, name));
+        const stamps = configured.map((file): [string, string | undefined] => [file, stampOf(file)]);
+        const interpreter = environmentOf(this.root);
+        this.setupStamps = new Map([...stamps, [interpreter, stampOf(interpreter)]]);
         const output = new StderrConsole(LogLevel.Error);
         const tempFile = new RealTempFile();
         const fileSystem = new PyrightFileSystem(createFromRealFileSystem(tempFile, output));
         const serviceProvider = createServiceProvider(fileSystem, output, tempFile);
-        // As if `pyright` ran from the worktree. The judge runs from its own installed
-        // copy, so the worktree's environment is named rather than found on the path.
-        // Without one, pyright runs the `python3` on the path the engine inherited from
-        // the hook that started it, which may be another worktree's environment.
+        // As if `uv run pyright` ran from the worktree, as the gate runs it. The judge
+        // runs from its own installed copy, so the worktree's environment is named
+        // rather than found on the path, which the engine inherited from the hook that
+        // started it and may lead to another worktree's environment.
         const commandLine = new CommandLineOptions(this.root, /* fromLanguageServer */ false);
-        if (this.setupStamps.get(interpreter) !== undefined) {
-            commandLine.configSettings.pythonPath = path.join(this.root, interpreter);
-        }
+        commandLine.configSettings.pythonPath = interpreter;
         // Which environment this program reads goes to the engine's log, since it decides
         // where the project's own imports resolve and nothing else shows it.
-        const reads = commandLine.configSettings.pythonPath
-            ?? `pyright's default python3 on PATH (VIRTUAL_ENV=${process.env.VIRTUAL_ENV ?? 'unset'})`;
-        process.stderr.write(`program for ${this.root} reads ${reads}\n`);
+        process.stderr.write(`program for ${this.root} reads ${interpreter}, the environment uv gives it\n`);
         // Analysis runs when asked, never on pyright's own timers.
         commandLine.languageServerSettings.enableAmbientAnalysis = false;
         this.service = new AnalyzerService('lup-engine', serviceProvider, {
@@ -112,11 +151,12 @@ export class WarmProgram {
         return Uri.file(path.resolve(this.root, file), this.service.serviceProvider);
     }
 
-    // Whether the project's configuration or the worktree's interpreter changed since
-    // this program was set up: a worktree's `.venv` is often made after the engine
-    // started there, by the first `uv run` or `uv sync`.
+    // Whether the configuration, or the interpreter uv gave the worktree, changed since
+    // this program was set up: a new `uv.lock` to sync to, say, the environment
+    // removed, or its Python replaced. An environment made again on the same Python is
+    // the import search path changing, which `sync` sees.
     setupChanged(): boolean {
-        return setup.some((name) => stampOf(path.join(this.root, name)) !== this.setupStamps.get(name));
+        return [...this.setupStamps].some(([file, stamp]) => stampOf(file) !== stamp);
     }
 
     trackedFiles(): Uri[] {

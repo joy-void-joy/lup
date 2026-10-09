@@ -6,11 +6,14 @@ The fake engine reads a file the way the real one reports it, from markers:
 - `# lup: …` comments are parsed into directives with Python's own parser;
 - classes, functions and a package root's `__all__` make the public surface.
 The fake linter reads `# RUFF <code>` as one of ruff's findings, and `# FIXABLE
-<code>` as one ruff fixes safely.
+<code>` as one ruff fixes safely. The real engine and ruff run through uv, which
+`offline_uv` keeps off the network and out of the operator's uv state.
 """
 
 import ast
 import io
+import os
+import sys
 import tokenize
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Literal
@@ -39,7 +42,7 @@ from lup_dev.policy.importers import Spawner
 from lup_dev.policy.runtime import Runtime
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
     from pathlib import Path
 
 
@@ -303,6 +306,38 @@ class Shell:
 @pytest.fixture
 def shell() -> Shell:
     return Shell()
+
+
+class Uv:
+    """uv in a test's scratch projects, as `offline_uv` keeps it."""
+
+    def lock(self, root: Path) -> None:
+        """Lock a scratch project, as a worktree's `uv.lock` is committed."""
+        sh.uv("lock", "--quiet", _cwd=str(root))
+
+    def sync(self, root: Path) -> None:
+        """Make a scratch project's environment, as `uv sync` does."""
+        sh.uv("sync", "--frozen", "--quiet", _cwd=str(root))
+
+
+@pytest.fixture(scope="module")
+def offline_uv(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Uv]:
+    """uv kept offline, on the running Python, with a cache of its own.
+
+    The operator's `UV_*` variables, `uv.toml`, cache and Pythons stay out of it. A
+    scratch project with no dependencies locks and installs offline, uv's own build
+    backend included. For a whole module, since an engine started in one test serves
+    the next with the environment it started with.
+    """
+    with pytest.MonkeyPatch.context() as patch:
+        for name in [name for name in os.environ if name.startswith("UV_")]:
+            patch.delenv(name)
+        patch.setenv("UV_OFFLINE", "1")
+        patch.setenv("UV_NO_CONFIG", "1")
+        patch.setenv("UV_PYTHON_DOWNLOADS", "never")
+        patch.setenv("UV_PYTHON", sys.executable)
+        patch.setenv("UV_CACHE_DIR", str(tmp_path_factory.mktemp("uv-cache")))
+        yield Uv()
 
 
 @pytest.fixture

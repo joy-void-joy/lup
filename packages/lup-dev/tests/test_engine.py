@@ -2,12 +2,14 @@
 
 These need the engine built (`uv run packages/lup-dev/checker/build.py`); without it
 they fail, saying so. No test reaches the network or waits on a clock: an engine
-stops when told, and a test that needs another build gives it another bundle.
+stops when told, a test that needs another build gives it another bundle, and uv,
+which gives each project its environment, runs offline (`offline_uv`).
 """
 
 import os
 import shutil
 import sys
+import sysconfig
 import tempfile
 import threading
 from datetime import timedelta
@@ -24,6 +26,8 @@ from lup_dev.layout import Bundle, Layout
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+    from conftest import Uv
 
 REPOSITORY = Path(__file__).resolve().parents[3]
 DOCSTRING = '"""An example."""\n\n'
@@ -76,17 +80,28 @@ def short() -> Iterator[Path]:
     shutil.rmtree(directory, ignore_errors=True)
 
 
-def make_project(base: Path, runtime: Path, bundle: Bundle | None = None) -> Project:
+def make_project(
+    base: Path, runtime: Path, uv: Uv, bundle: Bundle | None = None
+) -> Project:
     root = base / "project"
     (root / "example").mkdir(parents=True)
     (root / "pyproject.toml").write_text(PYPROJECT)
     (root / "example" / "__init__.py").write_text('"""Examples."""\n')
+    uv.lock(root)
+    uv.sync(root)
+    # The examples import what the tests run with (lup's packages, pydantic, sh), so
+    # the project's environment reads the running one's packages too.
+    [site] = (root / ".venv" / "lib").glob("python*/site-packages")
+    running = sysconfig.get_paths()["purelib"]
+    (site / "_running.pth").write_text(f"import site; site.addsitedir({running!r})\n")
     return Project(root, engine_for(runtime, base / "state", bundle))
 
 
 @pytest.fixture(scope="module")
-def project(tmp_path_factory: pytest.TempPathFactory, short: Path) -> Iterator[Project]:
-    made = make_project(tmp_path_factory.mktemp("engine"), short / "run")
+def project(
+    tmp_path_factory: pytest.TempPathFactory, short: Path, offline_uv: Uv
+) -> Iterator[Project]:
+    made = make_project(tmp_path_factory.mktemp("engine"), short / "run", offline_uv)
     yield made
     made.engine.stop(made.root)
 
@@ -345,6 +360,21 @@ def workspace(root: Path, held: str) -> Path:
     return source
 
 
+UV_WORKSPACE = WORKSPACE + '\n[tool.uv.workspace]\nmembers = ["packages/*"]\n'
+# uv builds with its own backend when it's `uv_build`, so the member installs offline.
+MEMBER = """\
+[project]
+name = "{name}"
+version = "0.1.0"
+requires-python = ">=3.14"
+
+[build-system]
+requires = ["uv_build"]
+build-backend = "uv_build"
+"""
+CALLING = Source(path=Path("packages/pkg/src/pkg/caller.py"), content=CALLER)
+
+
 def environment(at: Path, source: Path) -> Path:
     """Make a virtual environment with `source` installed editable, as uv does."""
     sh.Command(sys.executable)("-m", "venv", "--without-pip", str(at))
@@ -353,26 +383,101 @@ def environment(at: Path, source: Path) -> Path:
     return at / "bin"
 
 
-def test_an_environment_made_after_the_engine_started_is_the_one_it_reads(
-    tmp_path: Path, short: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # The session runs in another checkout's environment, which a hook inherits, and
-    # there the package lacks the method this worktree adds.
-    other = tmp_path / "dev"
+def in_session(other: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run the session in another checkout's environment, which a hook inherits.
+
+    There the package lacks the method the worktree adds.
+    """
     session = environment(other / ".venv", workspace(other, HOLDING))
     monkeypatch.setenv("PATH", f"{session}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("VIRTUAL_ENV", str(session.parent))
+
+
+def member(package: Path) -> None:
+    """Make `package` a member of its uv workspace."""
+    (package / "pyproject.toml").write_text(MEMBER.format(name=package.name))
+
+
+def uv_workspace(root: Path, held: str, uv: Uv) -> None:
+    """`workspace`, as a uv workspace with its lock and no environment yet."""
+    workspace(root, held)
+    (root / "pyproject.toml").write_text(UV_WORKSPACE)
+    member(root / "packages" / "pkg")
+    uv.lock(root)
+
+
+def test_the_engine_reads_the_environment_uv_gives_the_worktree(
+    tmp_path: Path, short: Path, offline_uv: Uv, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    in_session(tmp_path / "dev", monkeypatch)
     root = tmp_path / "branch"
-    source = workspace(root, HOLDING)
-    engine = engine_for(short / "environment", tmp_path / "state")
+    uv_workspace(root, RELEASING, offline_uv)
+    # Where the worktree's environment lives is uv's to say: here, not `.venv`.
+    monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", str(tmp_path / "environment"))
+    offline_uv.sync(root)
+    engine = engine_for(short / "elsewhere", tmp_path / "state")
     try:
-        # The engine starts before the worktree has an environment of its own.
-        engine.check(root, [Source(path=Path("packages/pkg/src/pkg/held.py"))])
-        environment(root / ".venv", source)
-        (source / "pkg" / "held.py").write_text(RELEASING)
-        caller = Source(path=Path("packages/pkg/src/pkg/caller.py"), content=CALLER)
-        [report] = engine.check(root, [caller])
+        [report] = engine.check(root, [CALLING])
         assert pyright(report) == []
+    finally:
+        engine.stop(root)
+
+
+def test_a_missing_environment_is_made_rather_than_borrowed(
+    tmp_path: Path, short: Path, offline_uv: Uv, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    in_session(tmp_path / "dev", monkeypatch)
+    root = tmp_path / "branch"
+    uv_workspace(root, RELEASING, offline_uv)
+    engine = engine_for(short / "missing", tmp_path / "state")
+    try:
+        [report] = engine.check(root, [CALLING])
+        assert pyright(report) == []
+        assert (root / ".venv" / "pyvenv.cfg").is_file()
+        # Removed under a running engine, it's made again at the next check.
+        shutil.rmtree(root / ".venv")
+        [report] = engine.check(root, [CALLING])
+        assert pyright(report) == []
+        assert (root / ".venv" / "pyvenv.cfg").is_file()
+    finally:
+        engine.stop(root)
+
+
+def test_a_new_lock_is_synced_before_the_next_check(
+    tmp_path: Path, short: Path, offline_uv: Uv
+) -> None:
+    root = tmp_path / "branch"
+    uv_workspace(root, RELEASING, offline_uv)
+    engine = engine_for(short / "relocked", tmp_path / "state")
+    try:
+        engine.check(root, [CALLING])
+        # A package arrives with the lock naming it, as a merge brings them, and
+        # nothing syncs the environment.
+        extra = root / "packages" / "extra"
+        (extra / "src" / "extra").mkdir(parents=True)
+        (extra / "src" / "extra" / "__init__.py").write_text(DOCSTRING + "EXTRA = 1\n")
+        (extra / "src" / "extra" / "py.typed").write_text("")
+        member(extra)
+        offline_uv.lock(root)
+        using = DOCSTRING + "from extra import EXTRA\n\nVALUE = EXTRA\n"
+        source = Source(path=Path("packages/pkg/src/pkg/using.py"), content=using)
+        [report] = engine.check(root, [source])
+        assert pyright(report) == []
+    finally:
+        engine.stop(root)
+
+
+def test_where_uv_gives_no_environment_the_engine_says_why(
+    tmp_path: Path, short: Path, offline_uv: Uv
+) -> None:
+    root = tmp_path / "unlocked"
+    workspace(root, HOLDING)
+    engine = engine_for(short / "unlocked", tmp_path / "state")
+    try:
+        with pytest.raises(
+            EngineError, match=r"(?s)uv gave .* no environment.*`uv\.lock`"
+        ):
+            engine.check(root, [Source(path=Path("packages/pkg/src/pkg/held.py"))])
     finally:
         engine.stop(root)
 
@@ -569,8 +674,10 @@ def test_the_engine_starts_when_asked_and_stops_when_told(project: Project) -> N
     assert second.pid != first.pid
 
 
-def test_hooks_asking_at_once_start_one_engine(tmp_path: Path, short: Path) -> None:
-    fresh = make_project(tmp_path, short / "together")
+def test_hooks_asking_at_once_start_one_engine(
+    tmp_path: Path, short: Path, offline_uv: Uv
+) -> None:
+    fresh = make_project(tmp_path, short / "together", offline_uv)
     fresh.write("one.py", DOCSTRING)
     pids: list[int] = []
 
@@ -589,13 +696,15 @@ def test_hooks_asking_at_once_start_one_engine(tmp_path: Path, short: Path) -> N
         fresh.engine.stop(fresh.root)
 
 
-def test_an_engine_from_another_build_is_replaced(tmp_path: Path, short: Path) -> None:
+def test_an_engine_from_another_build_is_replaced(
+    tmp_path: Path, short: Path, offline_uv: Uv
+) -> None:
     built = Bundle()
     copy = Bundle(directory=tmp_path / "bundle")
     copy.directory.mkdir()
     shutil.copy2(built.script, copy.script)
     copy.stubs.symlink_to(built.stubs, target_is_directory=True)
-    fresh = make_project(tmp_path, short / "rebuilt", copy)
+    fresh = make_project(tmp_path, short / "rebuilt", offline_uv, copy)
     fresh.write("one.py", DOCSTRING)
     try:
         before = fresh.engine.status(fresh.root)
