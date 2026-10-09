@@ -234,6 +234,8 @@ A subagent's hooks carry its session's id, so a worker's worktree is held by the
 
 ## Asking the operator
 
+How an ask is carried to the operator and back is `docs/review-flow.md`'s, proposed in its own piece: a write that asks goes into a draft and the call succeeds, the agent submits its drafts in bulk with context, and an approval is carried out for it, on both runtimes. Until it lands, an ask is carried as below.
+
 **On Claude Code, through its own prompt.** The `PreToolUse` hook answers `ask`, with a reason naming what's asked: the new path, the protected path, the public name or signature, or the rule and the reason given for an `ignore`.
 - A hook's `ask` forces a prompt in auto mode too (hooks docs; tested on this repository for the bare `Write` rule).
 - Settings' `ask` and `deny` rules are evaluated whatever the hook answers, so the blanket `permissions.ask` on `Write` in `.claude/settings.json` goes when this lands; otherwise every `Write` still prompts.
