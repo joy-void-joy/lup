@@ -87,6 +87,11 @@ export class WarmProgram {
         if (this.setupStamps.get(interpreter) !== undefined) {
             commandLine.configSettings.pythonPath = path.join(this.root, interpreter);
         }
+        // Which environment this program reads goes to the engine's log, since it decides
+        // where the project's own imports resolve and nothing else shows it.
+        const reads = commandLine.configSettings.pythonPath
+            ?? `pyright's default python3 on PATH (VIRTUAL_ENV=${process.env.VIRTUAL_ENV ?? 'unset'})`;
+        process.stderr.write(`program for ${this.root} reads ${reads}\n`);
         // Analysis runs when asked, never on pyright's own timers.
         commandLine.languageServerSettings.enableAmbientAnalysis = false;
         this.service = new AnalyzerService('lup-engine', serviceProvider, {
