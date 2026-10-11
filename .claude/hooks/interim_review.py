@@ -864,8 +864,10 @@ def watched(host: ModuleType, call: ParkedCall, review_id: str, settings: Settin
 
     A look never claims an approval: only a repeat of the call does. A review
     the dashboard expired unanswered is parked again under a new id, which can't
-    spend an answer since nothing newer stands for the call, and the operator
-    is told once more.
+    spend an answer since nothing newer stands for the call. It's parked again
+    silently: the operator was told when it was first queued, and the first
+    lup's dashboard expires a review every hour, so a notice at each parking
+    would repeat for as long as the review waits.
     """
     current = review_id
     while True:
@@ -882,8 +884,7 @@ def watched(host: ModuleType, call: ParkedCall, review_id: str, settings: Settin
                 if parked.state != "pending":
                     yield Look(review=current, state=f"expired, and parking it again failed: {parked.reason}")
                     return
-                if call.queue(parked.id):
-                    notify(call.request.review, settings)
+                call.queue(parked.id)
                 current = parked.id
             case _:
                 return
