@@ -31,10 +31,24 @@ class Paths(Model):
         "**/sync.json.local",
         "**/.env*.local",
         "**/.gitignore",
+        "**/ruff.toml",
+        "**/.ruff.toml",
+        "**/pyrightconfig.json",
+        "**/pytest.toml",
+        "**/.pytest.toml",
+        "**/pytest.ini",
+        "**/setup.cfg",
+        "**/tox.ini",
+        "**/.importlinter",
+        "**/uv.toml",
+        "**/.python-version",
     ]
     """Every write to these asks the operator.
 
     - dependency manifests and lockfiles, which choose what runs;
+    - the tools' own configuration files, each read before its table in
+      `pyproject.toml`, so one written unasked would override what the gate checks
+      (pyright's strictness, ruff's selection, uv's age gate) or which Python runs;
     - what runs outside the agent's reach: CI, git's own directory and hooks,
       pre-commit, editor and container configurations, the runtimes' settings;
     - what widens a later launch, `sync.json` and `sync.json.local`;
