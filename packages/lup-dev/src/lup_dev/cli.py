@@ -160,11 +160,13 @@ def rules_check(
 ) -> None:
     """Check files as the gate does: lup's rules, pyright, ruff and the deferrals.
 
-    `# lup: ignore` applies to every owner's findings. A deferral whose issue is
-    closed, or whose condition holds, fails the check. lup's rules read production
-    and protected modules; tests are checked by pyright and ruff only; what the
-    declaration excludes isn't checked. With no paths, it checks every such file
-    in the worktree, as the gate's `rules` step runs it.
+    lup's rules are those the worktree's declaration selects, sent to the engine
+    as the judge sends them. `# lup: ignore` applies to every owner's findings. A
+    deferral whose issue is closed, or whose condition holds, fails the check.
+    lup's rules read production and protected modules; tests are checked by
+    pyright and ruff only; what the declaration excludes isn't checked. With no
+    paths, it checks every such file in the worktree, as the gate's `rules` step
+    runs it.
     """
     root = toplevel(Path.cwd())
     layout = Layout.of(LupDevSettings())
@@ -187,7 +189,7 @@ def rules_check(
         typer.echo("lup checked no files.")
         return
     sources = [Source(path=path) for path in checked]
-    reports = engine().check(root, sources)
+    reports = engine().check(root, sources, worktree.selected)
     ruff = Ruff().findings(root, sources)
     conditions = loaded(root, worktree.declared.project)
     gate = Trackers(issues=GitHubIssues(root=root), conditions=conditions)

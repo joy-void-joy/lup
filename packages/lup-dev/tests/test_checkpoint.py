@@ -9,7 +9,10 @@ import pytest
 import sh
 from filelock import FileLock
 
+from lup_dev import Project as Declaration
 from lup_dev.codescan.contract import FileReport, Finding, Position, Span
+from lup_dev.declaration.grammar import Drop
+from lup_dev.declaration.resolve import Selected, resolve
 from lup_dev.policy.before import Overwrite, Replacement, before
 from lup_dev.policy.checkpoint import (
     CallFinished,
@@ -1238,3 +1241,57 @@ def test_the_gate_reads_the_worktree_as_it_stands_with_no_stand_in(
     declare(linked, "from lup_dev.project import Unheard\n")
     with pytest.raises(ProjectError):
         _ = Worktree.at(linked, kit.layout).declared
+
+
+def dropping(rule: str) -> str:
+    """Return a declaration whose `CodeRules` drops `rule` from lup's default."""
+    return (
+        "from lup_dev import CodeRules, Modules, Project, Rules\n"
+        "project = Project(\n"
+        f"    modules=Modules.default().edit(CodeRules(rules=Rules().drop({rule!r}))),\n"
+        ")\n"
+    )
+
+
+def dropped(selected: list[Selected]) -> list[str]:
+    [code_rules] = selected
+    return [
+        name
+        for operation in code_rules.rules.operations
+        if isinstance(operation, Drop)
+        for name in operation.names
+    ]
+
+
+def test_every_check_sends_the_integration_branchs_rule_selection(
+    kit: Kit, repo: Path, linked: Path, shell: Shell
+) -> None:
+    shell.git(repo, "switch", "-q", "-c", "dev")
+    (repo / "lup_project.py").write_text(dropping("regex"))
+    shell.commit(repo, "dev: drop regex")
+    (linked / "lup_project.py").write_text(dropping("tuple-shape"))
+    start(kit, repo)
+    before(kit.bench, core_edit(linked), SESSION, repo)
+    call(kit, linked, "c1")
+    (linked / CORE).write_text((linked / CORE).read_text() + "# TYPE\n")
+    finish(kit, linked, "c1")
+    end(kit, repo)
+    assert kit.engine.selections
+    for selected in kit.engine.selections:
+        assert dropped(selected) == ["runtime-mention", "regex"]
+    assert dropped(Worktree.at(linked, kit.layout).selected) == [
+        "runtime-mention",
+        "tuple-shape",
+    ]
+
+
+def test_before_the_first_commit_the_defaults_rule_selection_judges(
+    kit: Kit, tmp_path: Path, shell: Shell
+) -> None:
+    root = tmp_path / "fresh"
+    (root / "src" / "pkg").mkdir(parents=True)
+    shell.git(root, "init", "-q", "-b", "main")
+    (root / "lup_project.py").write_text(dropping("regex"))
+    assert Worktree.of(root, root / ".git", kit.bench.services).selected == (
+        resolve(Declaration()).rules
+    )

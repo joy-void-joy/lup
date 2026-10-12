@@ -44,6 +44,7 @@ from lup_dev.codescan.directives import (
     missing,
 )
 from lup_dev.codescan.ruff import Linter
+from lup_dev.declaration.resolve import Selected
 from lup_dev.errors import LupDevError
 from lup_dev.policy.roles import Role, Roles
 from lup_dev.policy.surface import api_changes
@@ -197,6 +198,9 @@ class Judge(Model, arbitrary_types_allowed=True):
     roles: Roles
     checker: Checker
     linter: Linter
+    selected: list[Selected]
+    """Each module's rule selection, as the declaration records it, sent with every
+    check for the engine to resolve."""
     conditions: list[str] | None = None
     """The names the project's conditions module binds; none if it declares none."""
     approved: list[Path] = []
@@ -253,7 +257,8 @@ class Judge(Model, arbitrary_types_allowed=True):
         if not sources:
             return {}
         reports = {
-            report.path: report for report in self.checker.check(self.root, sources)
+            report.path: report
+            for report in self.checker.check(self.root, sources, self.selected)
         }
         unreported = [source.path for source in sources if source.path not in reports]
         if unreported:

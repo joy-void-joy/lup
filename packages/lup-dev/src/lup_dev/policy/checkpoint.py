@@ -54,6 +54,9 @@ from lup_dev.clock import Clock
 from lup_dev.codescan.conditions import declared
 from lup_dev.codescan.contract import Checker, FileReport, Finding, Source
 from lup_dev.codescan.ruff import Linter
+from lup_dev.declaration.load import load as declaration_at
+from lup_dev.declaration.project import Project as Declaration
+from lup_dev.declaration.resolve import Selected, resolve
 from lup_dev.layout import Layout
 from lup_dev.policy.holds import HeldFile, Hold, Holds, answered
 from lup_dev.policy.importers import Conversation, Found, ImportersPass, Spawner
@@ -393,6 +396,18 @@ class Worktree(Model):
         """The role of each path in it, from the declaration it's judged by."""
         return Roles.of(self.root, self.declared)
 
+    @cached_property
+    def selected(self) -> list[Selected]:
+        """Each module's rule selection, from the declaration it's judged by.
+
+        Read and resolved where that declaration was loaded from; the defaults'
+        where the defaults judge it, before the repository's first commit.
+        """
+        loaded = self.loaded
+        if self.judging is not None and loaded.commit is None:
+            return resolve(Declaration()).rules
+        return resolve(declaration_at(loaded.root).project).rules
+
     def lock(self) -> FileLock:
         """Return the lock a checkpoint holds over the store."""
         self.store.layout.home.mkdir(parents=True, exist_ok=True)
@@ -431,6 +446,7 @@ class Worktree(Model):
             roles=self.roles,
             checker=services.checker,
             linter=services.linter,
+            selected=self.selected,
             conditions=declared(self.loaded.root, self.declared.project),
             approved=approved,
         )
@@ -1439,7 +1455,7 @@ def unclean(bench: Bench, worktree: Worktree, paths: list[Path]) -> list[Finding
     ]
     if not sources:
         return []
-    reports = services.checker.check(worktree.root, sources)
+    reports = services.checker.check(worktree.root, sources, worktree.selected)
     ruff = services.linter.findings(worktree.root, sources)
     found = [
         found

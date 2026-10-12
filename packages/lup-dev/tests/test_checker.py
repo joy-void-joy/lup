@@ -1,4 +1,5 @@
-"""The contract with the engine: a file report as the engine sends it, as JSON."""
+"""The contract with the engine, as JSON: a check request as the client sends it, and
+a file report as the engine sends it."""
 
 import json
 from pathlib import Path
@@ -6,8 +7,12 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from lup_dev import CodeRules, Modules, Project, Rules
+from lup_dev.catalog.rules import DefaultRules
 from lup_dev.codescan.contract import FileReport
 from lup_dev.codescan.directives import Defer, Ignore, Malformed, Note
+from lup_dev.codescan.engine import CheckRequest
+from lup_dev.declaration.resolve import resolve
 
 PATH = "packages/lup/src/lup/claude.py"
 REPORT = {
@@ -122,3 +127,32 @@ def test_a_defer_needs_its_reason() -> None:
 def test_an_unknown_directive_kind_is_refused() -> None:
     with pytest.raises(ValidationError):
         FileReport.model_validate_json(directives({"kind": "todo", "line": 1}))
+
+
+def test_a_check_request_carries_each_modules_selection_as_recorded() -> None:
+    project = Project(
+        modules=Modules.default().edit(
+            CodeRules(rules=Rules().drop("regex", why="a grammar").add("elif"))
+        )
+    )
+    request = CheckRequest(
+        build="1-2", root="/work", rules=resolve(project).rules, sources=[]
+    )
+    [selected] = json.loads(request.model_dump_json())["rules"]
+    left_out = {
+        "verb": "drop",
+        "names": ["runtime-mention"],
+        "why": DefaultRules().left_out[0].why,
+    }
+    assert selected == {
+        "module": "code-rules",
+        "rules": {
+            "start": {"kind": "all"},
+            "operations": [
+                left_out,
+                {"verb": "drop", "names": ["regex"], "why": "a grammar"},
+                {"verb": "add", "entries": ["elif"], "before": None, "after": None},
+            ],
+        },
+        "default": {"start": {"kind": "all"}, "operations": [left_out]},
+    }

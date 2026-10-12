@@ -7,9 +7,10 @@ from typing import TYPE_CHECKING, Literal
 
 from typer.testing import CliRunner
 
-from lup_dev import cli
+from lup_dev import Rules, cli
 from lup_dev.codescan.directives import IssueRef, Issues
 from lup_dev.codescan.engine import EngineChecker
+from lup_dev.declaration.modules.code_rules import lup_default
 from lup_dev.policy.holds import HeldFile, Hold, HoldError, Holds, waiting
 from lup_dev.policy.verdicts import Verdict, VerdictLog
 
@@ -251,6 +252,23 @@ def test_rules_check_lifts_an_exempt_rule_from_its_paths(
     assert result.exit_code == 1
     assert "tuple-shape" in result.output
     assert "regex" not in result.output
+
+
+def test_rules_check_sends_the_worktrees_rule_selection(
+    fakes: Kit, repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (repo / "lup_project.py").write_text(
+        "from lup_dev import CodeRules, Modules, Project, Rules\n"
+        "project = Project(\n"
+        '    modules=Modules.default().edit(CodeRules(rules=Rules.only("regex"))),\n'
+        ")\n"
+    )
+    monkeypatch.chdir(repo)
+    result = runner.invoke(cli.app, ["rules", "check", "src/pkg/core.py"])
+    assert result.exit_code == 0
+    [[code_rules]] = fakes.engine.selections
+    assert (code_rules.module, code_rules.rules) == ("code-rules", Rules.only("regex"))
+    assert code_rules.default == lup_default()
 
 
 class Closed(Issues):

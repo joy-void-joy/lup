@@ -19,6 +19,7 @@ from tenacity import Retrying, retry_if_exception_type, stop_after_attempt
 
 from lup.types import Model
 from lup_dev.codescan.contract import Checker, FileReport, Rule, Source
+from lup_dev.declaration.resolve import Selected
 from lup_dev.errors import LupDevError
 from lup_dev.layout import Bundle, Layout
 
@@ -53,8 +54,10 @@ class CheckRequest(Model):
     op: Literal["check"] = "check"
     build: str
     root: str
-    rules: list[str] | None
-    """The rules to run, by id; none runs every rule the engine has."""
+    rules: list[Selected]
+    """Each module's rule selection, as the declaration records it: the engine
+    resolves each against its table, refusing a name it doesn't hold, and runs
+    their union."""
     sources: list[EngineSource]
 
 
@@ -105,8 +108,6 @@ class EngineChecker(Model, Checker):
     layout: Layout
     idle: timedelta
     """How long an engine this client starts waits unasked before it stops."""
-    selected: list[str] | None = None
-    """The rules to run, by id; none runs every rule the engine has."""
     bundle: Bundle = Bundle()
     node: str = "node"
     """The Node executable that runs the engine."""
@@ -144,12 +145,18 @@ class EngineChecker(Model, Checker):
         listed = self.run_engine("rules")
         return [Rule.model_validate(rule) for rule in json.loads(listed)]
 
-    def check(self, root: Path, sources: list[Source]) -> list[FileReport]:
-        """Check files with the selected rules; the engine refuses one it lacks."""
+    def check(
+        self, root: Path, sources: list[Source], selected: list[Selected]
+    ) -> list[FileReport]:
+        """Check files with the rules `selected` chooses, which the engine resolves.
+
+        The engine refuses a selection naming a rule it doesn't hold, or dropping
+        one that isn't there, naming those that are.
+        """
         request = CheckRequest(
             build=self.build,
             root=str(root),
-            rules=self.selected,
+            rules=selected,
             sources=[
                 EngineSource(path=str(source.path), content=source.content)
                 for source in sources
