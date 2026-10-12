@@ -8,13 +8,13 @@ A convention a rule enforces is followed; one written only in prose splits, each
 
 **Scope.** These apply to production code, in lup and in every project that takes lup's rules. Tests are exempt (see *Tests*). The import boundaries apply to lup itself.
 
-**How each entry reads:** the decision; why; what enforces it.
+**How each entry reads:** the decision, with the alternative it turns down where a reader might otherwise propose it; why; what enforces it.
 
 ## Who owns each concern
 
 Every concern has exactly one owner, so two tools never report the same thing in two ways or steer in opposite directions.
 
-- **lup's rules** own the conventions in this document. They live only in lup's typed engine (`docs/judging-writes.md`, *The engine*) and read one typed tree. Each rule names the mistake it prevents and where it steers, and has a timing (`DESIGN.md`, *Code rules and the gate*):
+- **lup's rules** own the conventions in this document. They live only in lup's typed engine (`docs/judging-writes.md`, *The engine*) and read one typed tree, not as ruff `banned-api` entries beside a syntax checker, which would split where they live and grow into a patchwork. Each rule names the mistake it prevents and where it steers, and has a timing (`DESIGN.md`, *Code rules and the gate*):
   - **at the edit,** the rules that pick an approach other code gets built on (parsers over regex and splitting, named fields over tuples and sets, the library for each job, errors and types, suppressions, truncation, historical voice): a finding on the lines an edit touches refuses it before it lands;
   - **at the gate,** the rules about how a correct thing is spelled (`elif`, `collection-loop`, `private-name`, `docstring-code`, `constant-home`): reported once before landing, and fixed silently where ruff has a fixer. A gate rule still blocks landing.
 
@@ -31,7 +31,7 @@ Every concern has exactly one owner, so two tools never report the same thing in
 - No class inherits two of our ABCs.
 - **An ABC is small:** one to three abstract methods and no concrete behaviour. Behaviour shared by its users lives in a plain class composed over it.
 
-**Why.** Python has two ways to declare an interface. An ABC is inherited: forget a method and the class can't be created. A `Protocol` is matched by shape and checked only by pyright. Two ways means each session picks one. With ABCs only, "how do I declare an interface?" has one answer. Nothing in lup needs matching by shape: `Claude`, `Codex` and the test fake are all ours and can inherit. A small ABC keeps its seam small, and a small seam holds while the code filling it changes.
+**Why.** Python has two ways to declare an interface. An ABC is inherited: forget a method and the class can't be created. A `Protocol` is matched by shape and checked only by pyright. Two ways means each session picks one. With ABCs only, "how do I declare an interface?" has one answer. Nothing in lup needs matching by shape: `Claude`, `Codex` and the test fake are all ours and can inherit, so a `Protocol` for what callers hold, to let test doubles fit by shape, would bring back the second way and gain nothing. A small ABC keeps its seam small, and a small seam holds while the code filling it changes.
 
 **Enforced by:** `protocol` (a `Protocol` definition is a finding; one for a shape we don't own carries an `ignore` with its reason, which asks the operator), `interface-shape` (`ABC` named in the bases of any class with abstract members; no class inheriting two of our ABCs; one to three abstract methods and no concrete behaviour). pyright's `reportAbstractUsage` covers instantiating an abstract class.
 
@@ -44,7 +44,7 @@ Every concern has exactly one owner, so two tools never report the same thing in
 - **Frozen by default, without saying so.** Every model derives from `lup.types.Model`, which is frozen. A model that must change derives from `lup.types.MutableModel` instead, so mutability is a choice written in the header. Settings derive from `lup.types.Settings`, also frozen. No model writes `frozen` itself.
   - **Why the bases are built this way.** pyright reads a model's frozenness from its own header, defaulting to not frozen, and refuses a not-frozen class inheriting a frozen one, so without help every model would have to write `frozen=True`. `Model`'s metaclass tells pyright that its subclasses are frozen by default (PEP 681's `frozen_default`), so silence means frozen and pyright still refuses `point.x = 2`. The metaclass extends pydantic's own, from a private module: the lockfile pins pydantic, and `lup`'s tests fail at once if an upgrade moves it.
   - **Why `Settings` differs.** pyright also refuses a frozen class over pydantic-settings' base, so `Settings` freezes through `model_config`, the one place it's set. pyright doesn't see that freeze; pydantic enforces it.
-- **`BaseModel` everywhere; no `TypedDict` of our own.** A `TypedDict` appears only where a third-party API is typed with one, and then it's theirs: Anthropic's SDK, for one, takes its request parameters as `TypedDict`s (`MessageParam`) and returns pydantic models.
+- **`BaseModel` everywhere; no `TypedDict` of our own,** not even where pydantic feels too heavy. A `TypedDict` appears only where a third-party API is typed with one, and then it's theirs: Anthropic's SDK, for one, takes its request parameters as `TypedDict`s (`MessageParam`) and returns pydantic models.
 
 **Why.** One way to declare a shape, validated where it's declared. Configuration in the class header reads with the class.
 
@@ -65,7 +65,7 @@ Every concern has exactly one owner, so two tools never report the same thing in
 ## Dispatch
 
 **Decision.**
-- **No `elif`.** A decision on a value's structure is a `match`. A comparison with no pattern to write is a guard clause that returns:
+- **No `elif`,** however short the chain. A decision on a value's structure is a `match`. A comparison with no pattern to write is a guard clause that returns:
   ```python
   if seconds < 60:
       return "s"
@@ -96,7 +96,7 @@ In its home, a constant needs no suppression. The rule reads the constant's type
 
 **Tables of choices** (an allowlist, a set of subcommands) aren't checked; they're added if review shows misses.
 
-**Why.** A number like `AGENT_RETRIES = 2` is a judgement a caller may want to change; frozen as a constant, they'd have to edit lup. Names and paths are a different problem: spread across files, nobody can find where things are stored or which variables are read. One home per kind answers both.
+**Why.** A number like `AGENT_RETRIES = 2` is a judgement a caller may want to change; frozen as a constant, they'd have to edit lup. Names and paths are a different problem: spread across files, nobody can find where things are stored or which variables are read. One home per kind answers both. Steering every module-level constant and table to an overridable default, whatever it holds, would leave each canonical value (a variable's name, a wire spelling) carrying a suppression.
 
 **Enforced by:** `constant-home` (typed: the constant's type decides its home). ruff's `PLR2004` (magic values pushed into module constants) is off: it steers the opposite way.
 
@@ -105,8 +105,8 @@ In its home, a constant needs no suppression. The rule reads the constant's type
 **Decision.**
 - **No tuple types; `list[X]` is the one spelling of a sequence.** `tuple[str, int]` becomes a model naming each field, and `tuple[X, ...]` becomes `list[X]`. Two spellings of "a sequence" would be one more fork for each session to pick. Where a third-party API takes a tuple (`sh`'s positional keywords) or hashing needs one, an `ignore` says so. A frozen model's list field can still be appended to; that's left to review. Aliases are caught where they're defined.
 - **No sets as records.** `set`, `frozenset` and their aliases, declared or built, steer to a dict keyed by the members or a list of models. A set that truly has nothing to record (things already seen) takes an `ignore` with its reason.
-- **No collection filled in a loop.** A collection created empty and then filled by `append`, `add`, `extend`, `update` or item assignment in a loop steers to a comprehension, or to a nested function that `yield`s when the loop has control flow a comprehension can't hold.
-- **Dicts are for tables, not records.** Reading a dict or mapping by a literal key (`payload.get("name")`, `payload["name"]`) is refused: the keys are known, so it's a record; validate it once into a model and read its fields. A dict read by a computed key is a real lookup table and is fine. Declaring dicts is fine. A `TypedDict` read by its keys is fine, since it's already the typed shape.
+- **No collection filled in a loop.** A collection created empty and then filled by `append`, `add`, `extend`, `update` or item assignment in a loop steers to a comprehension, or to a nested function that `yield`s when the loop has control flow a comprehension can't hold. The rule fires on the loop, not on the empty literal, which can't tell a seed from an object's state or a model default.
+- **Dicts are for tables, not records.** Reading a dict or mapping by a literal key (`payload.get("name")`, `payload["name"]`) is refused: the keys are known, so it's a record; validate it once into a model and read its fields. The rule tells a mapping by its type, rather than spotting `.get("literal")` by syntax alone. A dict read by a computed key is a real lookup table and is fine. Declaring dicts is fine, `dict[str, object]` and `dict[str, <scalar>]` included: how a dict is read, not how it's typed, says whether it's a record. A `TypedDict` read by its keys is fine, since it's already the typed shape.
 - `frozendict` (Python 3.15) is deferred to issue #7.
 
 **Why.** Positional data makes review a puzzle ("what is field 5?"). A set throws away what a dict keeps. A loop mutating several variables is harder to follow than a comprehension. A dict read by literal keys hides its schema in the call sites.
@@ -152,7 +152,7 @@ The parsers to reach for: `json`, `tomllib` (`tomlkit` to edit), `csv`, `urllib.
 ## Errors
 
 **Decision.**
-- **Exception names end in `Error`** (ruff's `N818`).
+- **Exception names end in `Error`** (ruff's `N818`), never an event's name (`LaunchRefused`).
 - **One root exception per package:** `LupError` in `lup`, `LupDevError` in `lup_dev`, with a tree per area below it (`TurnError`, then `OutputMissingError`). A caller can catch everything a package raises. The root is named for its package, the package's name in CamelCase plus `Error`, which is how `error-root` finds it; a file declares as many exceptions as it needs, each below the root.
 - **Errors are classified from structured data**, never from message text.
 - **Never swallow an error:** no `contextlib.suppress`, no bare `except:`, no `except BaseException` (catch `Exception` or something narrower). Raise on what can't be recovered; retry what's transient, with `tenacity`.
@@ -183,7 +183,7 @@ The parsers to reach for: `json`, `tomllib` (`tomlkit` to edit), `csv`, `urllib.
 ## Docstrings and comments
 
 **Decision.**
-- **Prose,** not `Args:`/`Returns:` sections, which repeat what the signature says.
+- **Prose,** not Google-style `Args:`/`Returns:` sections, which repeat what the signature says.
 - **A function's first line is in the imperative** ("Return the saved path.", not "The saved path."), as ruff's `D401` checks: a checked, uniform answer, and PEP 257's own convention.
 - **Required on modules, classes, and module-level functions and methods.** Nested helpers are exempt (ruff's `D1` rules don't reach them).
 - **Inline code in single backticks,** as in Markdown and these docs. Not double backticks (reStructuredText) and not Sphinx roles.
@@ -209,7 +209,7 @@ The parsers to reach for: `json`, `tomllib` (`tomlkit` to edit), `csv`, `urllib.
 - `# noqa`, ruff's own `# ruff: noqa` and `# ruff: disable`, `# type: ignore`, `# pyright: ignore`, and pyright's file-level comments that set its checks (`# pyright: basic`, `# pyright: standard`, `# pyright: report…`) are refused. ruff runs with `--ignore-noqa`, pyright with `enableTypeIgnoreComments = false`, and lup filters their findings through its own `ignore`.
 - The rest of the `# lup:` grammar (`defer`, notes, removing a note) is in `docs/judging-writes.md`, *The `# lup:` directives*.
 
-**Why.** Several suppression syntaxes, read in several places, disagree on what's suppressed, and a misplaced one sits silently inert.
+**Why.** Several suppression syntaxes, read in several places, disagree on what's suppressed, and a misplaced one sits silently inert. `# noqa` kept for ruff's codes alone would already be a second.
 
 **Enforced by:** `suppression-comment`; ruff's `ERA001` (commented-out code) takes `lint.task-tags = ["lup"]` so it doesn't flag directives.
 
@@ -225,7 +225,7 @@ import-linter checks the whole graph at the gate. The engine reads the same cont
 
 **A runtime is named only in its adapter.** Everything a runtime spells its own way (its hook events and payload fields, its tool names, how it hears a report, the variables it sets in the commands it runs) lives in its adapter; the rest of lup speaks its own words and sees a runtime through an interface (`lup_dev.policy.runtime.Runtime`). That's how features stay on both runtimes by construction: a feature built per runtime above the adapter rots on the other runtime (`AGENTS.md`, *Both runtimes*). An import contract can't see a name in a string or a comment, so a rule does: a runtime's name outside its adapter is a finding, in prose too. lup isn't tied to these two runtimes, so the core speaks in capabilities ("a runtime that can't ask before a call holds at the checkpoint"), and the evidence behind a capability (the vendor's docs, a measurement) sits in the adapter that declares it. Data that names a runtime's own files (`.claude/`, `.codex/` among the protected paths) and the one place listing the adapters carry an `ignore` saying so; the library's front door, where `Claude` and `Codex` are the public names a caller chooses between, is exempted in lup's declaration.
 
-**Why.** Import rules hand-written over a syntax scanner let a library layer reach into the environment unnoticed; import-linter checks the whole graph.
+**Why.** Import rules hand-written over a syntax scanner let a library layer reach into the environment unnoticed; import-linter checks the whole graph, so the engine reads its contracts rather than carrying import rules of its own.
 
 **Enforced by:** import-linter, and the engine at the edit (#39); `runtime-mention` for names.
 
@@ -259,7 +259,7 @@ Beyond the rules this document names:
 - **Layout is the formatter's.** `ISC001` stays on: ruff's formatter doesn't conflict with it. `COM812` and `COM819` are off for the formatter. `E501` (line too long) is off: line length is layout, which the formatter owns, and what it can't wrap (a long string or comment) goes unflagged.
 - **Rules that fire only on what a lup rule refuses are off,** so a finding comes once, from its owner: the named-tuple, dataclass, private-name, `re`, string-slice, `Any`, `cast`, `contextlib.suppress`, subprocess and `os.environ` rules among them.
 - **Rules that steer against a convention are off:** `PLR5501` (steers to `elif`), `PLR1714` (to a set literal), `ASYNC109` (flags a `timeout` parameter, the home of a duration), `TD` (TODO comments, where deferred work is `defer`).
-- **Size thresholds are off:** `C901`, `PLR0912`, `PLR0913`, `PLR0915`, `PLR1702` (complexity, branches, arguments, statements, nesting) measure size, not mistakes, and #33 counts them among the findings an agent spends turns on that change nothing a reader cares about. Whether a function is too big is review's, until #33 settles what's worth an agent's attention.
+- **Size thresholds are off:** `C901`, `PLR0912`, `PLR0913`, `PLR0915`, `PLR1702` (complexity, branches, arguments, statements, nesting) measure size, not mistakes, and #33 counts them among the findings an agent spends turns on that change nothing a reader cares about. Whether a function is too big is review's, until #33 settles what's worth an agent's attention. Raising their limits instead would still spend an agent's turns at the raised limit.
 - **`CPY001` is off** until a copyright header is chosen.
 - **Configured rather than off:** `ERA001` takes `lint.task-tags = ["lup"]`; `TC003` takes `lint.flake8-type-checking.runtime-evaluated-base-classes`, listing pydantic's `BaseModel` and `BaseSettings` and lup's `Model`, `MutableModel` and `Settings`, so a field's type isn't moved into a `TYPE_CHECKING` block, which would break the model at runtime.
 - **The gate runs `ruff check --ignore-noqa`:** ruff has no setting for it.
@@ -291,32 +291,3 @@ Rules of the first lup's catalog (`docs/rules.md` in `lup-legacy`), by what cove
 - `import-re`, `re-call`: `regex`, one finding per module;
 - `front-door`, `seam-boundary`, `kernel-imports`: import-linter's contracts;
 - `generic-base`, `typing-generics`, `typing-union`, `utcnow`, `global-statement`, `eval-exec`: ruff's own rules (`UP`, `DTZ003`, `PLW0603`, `S307`, `S102`).
-
-## Decisions
-
-Each with its alternative and where it lives.
-
-1. lup's rules live only in its typed engine; ruff keeps its generic checks with every overlapping or contradicting rule off. *Alternative:* lup's bans as ruff `banned-api` entries and a syntax checker first, which splits where rules live and grows into a patchwork. *Where:* the engine; `pyproject.toml`.
-2. ABCs for every interface we own; `Protocol` avoided. *Alternative:* ABCs for the seams an adapter fills and `Protocol` for what callers hold, so test doubles fit by shape. *Where:* `protocol`, `interface-shape`.
-3. An ABC keeps the one-to-three-abstract-methods limit and no concrete behaviour. *Alternative:* no size limit. *Where:* `interface-shape`.
-4. Models frozen by default without saying so: `lup.types.Model` is frozen, `MutableModel` isn't, `Settings` is; no model writes `frozen`. *Alternatives:* `frozen=True` on every model, which pyright demands without the metaclass; freezing through `model_config`, which reads like a field. *Where:* `lup/types.py`, `model-mutability`.
-5. `BaseModel` everywhere; a `TypedDict` only where a third-party API is typed with one, and then theirs. *Alternative:* `TypedDict` anywhere pydantic is too heavy. *Where:* `typed-dict`.
-6. No `elif`; `match` for structure; guard clauses for comparisons; no wildcard guards. *Alternative:* `elif` allowed up to two arms. *Where:* `elif`, `wildcard-guard`.
-7. `own-model-dispatch`, scoped to the implementations of our own ABCs. *Alternative:* convention only. *Where:* the engine.
-8. Constants by home: numbers and durations become overridable defaults; variable names go to the package's `settings.py`, paths to its `layout.py`, wire spellings to each adapter's `Spellings`, an ABC mapping lup's own words. Tables of choices wait until review shows misses. *Alternatives:* every module-level constant and every library table steered to an overridable default whatever it holds, canonical values suppressed; leaving strings alone; a dict per adapter, which can miss a word silently. *Where:* `constant-home`.
-9. The loop rule fires on the loop, not the empty literal. *Alternative:* a rule on the empty literal, which can't tell a seed from an object's state or a model default; or ruff's `PERF` rules. *Where:* `collection-loop`.
-10. Reading a dict by a literal key is refused; declaring dicts is fine; `frozendict` waits for Python 3.15 (#7). *Alternative:* rules on `.get("literal")` read from syntax alone, and on declarations typed `dict[str, object]` or `dict[str, <scalar>]`. *Where:* `dict-literal-key`.
-11. `.strip(chars)` and `.replace` on a `str` fall under the parsing rules. *Alternative:* left out. *Where:* `string-strip`, `string-replace`.
-12. `…Error` names (ruff `N818`) and one root exception per package. *Alternative:* names as events (`LaunchRefused`), independent roots. *Where:* `error-root`, `pyproject.toml`.
-13. `error-text`, refusing decisions on an exception's message. *Alternative:* convention only. *Where:* the engine.
-14. Prose docstrings, required on modules, classes and module-level definitions; nested helpers exempt. *Alternative:* Google sections. *Where:* `pyproject.toml` (ruff `D`).
-15. Inline code in single backticks, and examples as doctests run by the gate. *Alternatives:* reStructuredText's double backticks or Sphinx roles; examples as prose only. *Where:* `docstring-code`; the gate's pytest configuration.
-16. One suppression syntax, `# lup: ignore(…)`, for lup, ruff and pyright findings alike. *Alternative:* `noqa` back for ruff codes. *Where:* the engine; `pyproject.toml`.
-17. import-linter for the boundaries, read by the engine at the edit too (#39 until built). *Alternative:* custom import rules in the engine alone. *Where:* `pyproject.toml`.
-18. Each rule's suggested fix passes every other rule, as a test over the catalog. *Alternative:* review catching contradictions. *Where:* the engine's tests.
-19. A runtime is named only in its adapter: an import contract keeps the adapters behind the one place listing them, and `runtime-mention` refuses a runtime's name elsewhere. *Alternative:* convention only, under which features get built per runtime above the adapter. *Where:* `pyproject.toml`, the engine.
-20. A subpackage per subsystem, named as in the first lup where the subsystem is the same, with a library word meaning the same in the environment; a one-line `__init__.py` docstring each; package-wide modules at the root; subsystems importing downwards only. *Alternative:* a flat package. *Where:* `pyproject.toml` (the `layers` contract), each package.
-21. XML is read with `defusedxml`, a dependency only where a project reads XML, and ruff's `S313`–`S319` stay on. *Alternative:* the standard library's parsers with those rules off, trusting the bundled Expat. *Where:* `pyproject.toml` (the rules stay selected).
-22. A function's first line is in the imperative, ruff's `D401`. *Alternative:* noun phrases ("The saved path."), which read as well but have no check to keep them uniform. *Where:* `pyproject.toml` (the rule stays selected).
-23. ruff's `E501` is off: line length is the formatter's. *Alternative:* keep it, which flags the long strings and comments the formatter leaves alone, one finding at a time. *Where:* `pyproject.toml`.
-24. ruff's size thresholds are off (`C901`, `PLR0912`, `PLR0913`, `PLR0915`, `PLR1702`): size is review's until #33. *Alternatives:* keep them; raise their limits in `pyproject.toml`, which still spends an agent's turns at the raised limit. *Where:* `pyproject.toml`.
