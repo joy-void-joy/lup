@@ -28,8 +28,9 @@ def write(path: Path, text: str) -> None:
 
 
 def why(root: Path) -> str | None:
+    """Return the reason the declaration's own drop gives, after its default's."""
     [selected] = resolve(load(root).project).rules
-    [operation] = selected.rules.operations
+    [operation] = selected.rules.operations[len(selected.default.operations) :]
     assert operation.verb == "drop"
     return operation.why
 
