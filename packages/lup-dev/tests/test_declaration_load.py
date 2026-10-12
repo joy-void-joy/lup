@@ -123,7 +123,17 @@ def test_a_package_without_its_init_fails_the_load(tmp_path: Path) -> None:
             "`.replace",
         ),
         ("x = 1\n", "`lup_project.py` binds no `project`"),
-        ("project = 3\n", "`project` in `lup_project.py` is a `int`, not a `Project`"),
+        (
+            "project = 3\n",
+            (
+                "`project` in `lup_project.py` is a `builtins.int`, "
+                "not a `lup_dev.declaration.project.Project`"
+            ),
+        ),
+        (
+            "class Project:\n    pass\nproject = Project()\n",
+            "is a `lup_project.Project`, not a `lup_dev.declaration.project.Project`",
+        ),
         ("from lup_dev import Project\nproject = Project(modlues=[])\n", "modlues"),
     ],
 )

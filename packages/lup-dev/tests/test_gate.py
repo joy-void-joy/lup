@@ -537,5 +537,7 @@ def test_lup_dev_check_fails_on_a_declaration_that_doesnt_load(
 ) -> None:
     (tmp_path / "lup_project.py").write_text("project = 3\n")
     result = CliRunner().invoke(cli.app, ["check"])
-    assert "is a `int`, not a `Project`" in str(result.exception)
+    assert "is a `builtins.int`, not a `lup_dev.declaration.project.Project`" in str(
+        result.exception
+    )
     assert scripted.ran == []

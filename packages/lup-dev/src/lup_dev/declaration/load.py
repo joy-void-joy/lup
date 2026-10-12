@@ -167,8 +167,12 @@ def load(root: Path) -> Declared:
         message = f"`{shown}` binds no `project`"
         raise ProjectError(message)
     if not isinstance(declared, Project):
+        # Each class by its module and qualified name, so a `Project` of the
+        # declaration's own, or from another copy of `lup_dev`, is told apart.
         message = (
-            f"`project` in `{shown}` is a `{type(declared).__name__}`, not a `Project`"
+            f"`project` in `{shown}` is a "
+            f"`{type(declared).__module__}.{type(declared).__qualname__}`, "
+            f"not a `{Project.__module__}.{Project.__qualname__}`"
         )
         raise ProjectError(message)
     return Declared(project=declared, source=shown)
