@@ -21,7 +21,7 @@ The letters name the slices, not their order (*Building it*).
 
 ### Where it lives
 
-A file named `lup_project.py` at the worktree's root, binding `project`. Nothing points at it: the loader looks there. No `[tool.lup] project` pointer is read; lup's own `pyproject.toml` keeps one only until the operator has installed a judge that finds the file without it (*Building it*). Without the file, the defaults apply; a file that can't be imported, or binds no `Project`, is an error, never the defaults.
+A file named `lup_project.py` at the worktree's root, binding `project`. Nothing points at it: the loader looks there. No `[tool.lup]` pointer is read. Without the file, the defaults apply; a file that can't be imported, or binds no `Project`, is an error, never the defaults.
 
 The fixed file is chosen over a module named in `pyproject.toml` on three counts:
 - the operator finds every project's declaration in the same place;
