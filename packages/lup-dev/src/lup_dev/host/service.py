@@ -167,8 +167,9 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         """Answer one hook heard on a launch's socket, and close the connection.
 
         The payload is read to the end and answered in the pool. A failed answer is
-        said, with its traceback, and the hook hears nothing, as it hears nothing
-        when the service is down.
+        said, with its traceback, and the connection closes unanswered: the room's
+        socat prints nothing and ends with status 0, which the runtime takes as no
+        decision.
         """
         payload = (await reader.read()).decode()
         loop = asyncio.get_running_loop()
