@@ -308,6 +308,51 @@ def test_an_approval_covers_the_paths_design_asks_but_not_its_suppressions(
     assert judge(edit(str(path), CORE, ignored), approved=[path]).outcome == "ask"
 
 
+ONLY_PROTECTED = Project(asks="protected")
+
+
+def test_asking_only_about_protected_paths_allows_every_other_ask(
+    judge: Judging,
+) -> None:
+    ignored = (
+        CORE + 'y = (1, 2)  # BAD tuple-shape  # lup: ignore("tuple-shape", why="sh")\n'
+    )
+    changes = [
+        edit("src/pkg/new.py", None, '"""New."""\n', baseline=None),
+        edit("src/pkg/core.py", CORE, CORE + "\n", whole=True),
+        edit("src/pkg/core.py", CORE, CORE + "\n\nclass Room:\n    pass\n"),
+        edit("src/pkg/core.py", CORE, ignored),
+        edit("DESIGN.md", "a\n", "b\n"),
+    ]
+    for change in changes:
+        judgement = judge(change, project=ONLY_PROTECTED)
+        assert judgement.outcome == "allow", change.path
+        assert judgement.asks == []
+
+
+def test_asking_only_about_protected_paths_still_asks_about_them(
+    judge: Judging,
+) -> None:
+    config = judge(edit("pyproject.toml", "a\n", "b\n"), project=ONLY_PROTECTED)
+    assert [ask.kind for ask in config.asks] == ["protected"]
+    created = judge(
+        edit(PROTECTED, None, '"""New."""\n', baseline=None), project=ONLY_PROTECTED
+    )
+    assert created.outcome == "ask"
+    assert [ask.kind for ask in created.asks] == ["protected"]
+
+
+def test_asking_only_about_protected_paths_still_refuses_a_finding(
+    judge: Judging,
+) -> None:
+    judgement = judge(
+        edit("src/pkg/new.py", None, "x = 1  # BAD regex\n", baseline=None),
+        project=ONLY_PROTECTED,
+    )
+    assert judgement.outcome == "refuse"
+    assert [finding.rule for finding in judgement.refusing] == ["regex"]
+
+
 def test_type_errors_and_ruffs_findings_are_information(judge: Judging) -> None:
     after = CORE + "y: int = 'a'  # TYPE\nimport os  # RUFF F401\n"
     judgement = judge(edit("src/pkg/core.py", CORE, after))

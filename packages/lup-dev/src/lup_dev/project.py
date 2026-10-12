@@ -3,8 +3,8 @@
 A project names its declaration in `pyproject.toml` (`[tool.lup] project =
 "audiobook.lup_project:project"`); without one, the defaults apply. This minimal
 `Project` holds only what the judge reads: the test roots, the protected paths,
-and the module declaring the project's conditions. The declaration piece grows it
-(`DESIGN.md`, *How lup reaches a project*).
+the module declaring the project's conditions, and which asks reach the operator.
+The declaration piece grows it (`DESIGN.md`, *How lup reaches a project*).
 """
 
 import importlib
@@ -13,7 +13,7 @@ import tomllib
 from contextlib import contextmanager
 from importlib.metadata import EntryPoint
 from pathlib import Path, PurePath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import Field
 
@@ -111,6 +111,14 @@ class Project(Model):
     """The module declaring the project's conditions, by its dotted name.
 
     A `# lup: defer(when=…)` names one of the `Condition` instances it binds.
+    """
+    asks: Literal["every", "protected"] = "every"
+    """Which of the judge's asks reach the operator.
+
+    `every` asks each one. `protected` asks only a protected path's, whose change
+    takes effect outside the agent's reach before anything lands, and allows the
+    rest, the design reviewed in notes before the code and at landing instead.
+    lup's rules refuse either way.
     """
 
 

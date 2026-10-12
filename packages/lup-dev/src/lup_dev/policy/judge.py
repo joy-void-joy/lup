@@ -16,7 +16,8 @@ so a change gets the same outcome whichever way it was made (`docs/judging-write
 | Any other production change | allow, once the rules pass it |
 
 Refuse wins over ask: the operator never reviews a version that would be refused.
-Type errors and ruff's findings are information, never a refusal, and a finding
+A project declaring `asks="protected"` has only a protected path's asks reach the
+operator, and allows the rest. Type errors and ruff's findings are information, never a refusal, and a finding
 ruff fixes safely isn't reported at all. Removing a note present when the session
 started is allowed and reported.
 """
@@ -288,8 +289,11 @@ class Judge(Model, arbitrary_types_allowed=True):
                 return self.ruled(change, versions, removed, [ask])
             case "operator":
                 reason = f"{self.root / change.path} is one of the operator's documents"
-                ask = Ask(kind="operator-document", reason=reason)
-                return Judgement(path=change.path, role=role, outcome="ask", asks=[ask])
+                asks = self.asking([Ask(kind="operator-document", reason=reason)])
+                outcome = "ask" if asks else "allow"
+                return Judgement(
+                    path=change.path, role=role, outcome=outcome, asks=asks
+                )
             case "production":
                 if change.after is None:
                     return Judgement(
@@ -303,6 +307,17 @@ class Judge(Model, arbitrary_types_allowed=True):
                     outcome="allow",
                     information=self.information(versions),
                 )
+
+    def asking(self, asks: list[Ask]) -> list[Ask]:
+        """Return the asks that reach the operator, as the declaration's `asks` says.
+
+        A project asking only about protected paths has every other ask allowed.
+        """
+        match self.roles.project.asks:
+            case "every":
+                return asks
+            case "protected":
+                return [ask for ask in asks if ask.kind == "protected"]
 
     def kept(self, versions: Versions) -> list[Finding]:
         """Return every owner's findings in the after version, once `ignore`s apply.
@@ -352,7 +367,9 @@ class Judge(Model, arbitrary_types_allowed=True):
             *self.suppressions(change.path, versions),
         ]
         covered = change.path in self.approved
-        asks = [*always, *(ask for ask in design if not (covered and ask.covered()))]
+        asks = self.asking(
+            [*always, *(ask for ask in design if not (covered and ask.covered()))]
+        )
         lup = self.lup_findings(change.path, versions)
         touched = touched_lines(change.before, after)
         refusing = [found for found in lup if touches(found, touched)]
