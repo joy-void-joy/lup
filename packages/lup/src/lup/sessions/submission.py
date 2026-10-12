@@ -71,7 +71,10 @@ class Toolbox(MutableModel, arbitrary_types_allowed=True):
         found = {tool.spec().name: tool for tool in self.tools}.get(name)
         if found is None:
             known = ", ".join(tool.spec().name for tool in self.tools)
-            return Answer(text=f"There's no tool named {name}; the tools are: {known}.", error=True)
+            return Answer(
+                text=f"There's no tool named {name}; the tools are: {known}.",
+                error=True,
+            )
         outcome = await found.call(arguments)
         self.calls = [*self.calls, Call(tool=name, outcome=outcome)]
         match outcome:
@@ -104,13 +107,17 @@ class Toolbox(MutableModel, arbitrary_types_allowed=True):
     def reported(self) -> str | None:
         """Return the problem the agent reported instead of answering, if it did."""
         problems = [
-            taken.problem for taken in self.taken(report.name) if isinstance(taken, Problem)
+            taken.problem
+            for taken in self.taken(report.name)
+            if isinstance(taken, Problem)
         ]
         return problems[-1] if problems else None
 
     def notes(self) -> list[str]:
         """Return the remarks the agent attached to its answer, oldest first."""
-        return [taken.remark for taken in self.taken(note.name) if isinstance(taken, Remark)]
+        return [
+            taken.remark for taken in self.taken(note.name) if isinstance(taken, Remark)
+        ]
 
     def end(self) -> End | KeepGoing | GiveUp:
         """Say whether the turn may end, counting a refused ending against the attempts.

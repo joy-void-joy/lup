@@ -66,7 +66,9 @@ class Answered(Model):
         """Read the answer half off `result`."""
         output = result.output
         return cls(
-            output=output if isinstance(output, str) else output.model_dump(mode="json"),
+            output=output
+            if isinstance(output, str)
+            else output.model_dump(mode="json"),
             usage=result.usage,
             duration=result.duration,
             rejected=result.rejected,

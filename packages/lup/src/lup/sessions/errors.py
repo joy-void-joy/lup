@@ -58,7 +58,9 @@ class ProblemReportedError(TurnError):
 
     def __init__(self, problem: str, *, notes: list[str]) -> None:
         """Record the agent's report and its notes."""
-        super().__init__(f"the agent reported a problem instead of answering: {problem}")
+        super().__init__(
+            f"the agent reported a problem instead of answering: {problem}"
+        )
         self.problem = problem
         self.notes = notes
 

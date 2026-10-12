@@ -25,7 +25,9 @@ class Problem(Model):
 class Remark(Model):
     """A remark the agent attaches to its answer."""
 
-    remark: str = Field(description="The assumption, doubt or counterargument, in full.")
+    remark: str = Field(
+        description="The assumption, doubt or counterargument, in full."
+    )
 
 
 class Heard(Model):

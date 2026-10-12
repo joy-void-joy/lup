@@ -109,7 +109,9 @@ class Tool[I: BaseModel, O: BaseModel](Model, AgentTool, arbitrary_types_allowed
         try:
             value = self.input.model_validate(arguments)
         except ValidationError as invalid:
-            return Refused(rejection=Rejection(submitted=arguments, reason=str(invalid)))
+            return Refused(
+                rejection=Rejection(submitted=arguments, reason=str(invalid))
+            )
         for hook in self.before:
             match await hook(value):
                 case Deny(reason=reason):
@@ -144,9 +146,7 @@ def lup_tool[I: BaseModel, O: BaseModel](
             )
             raise ToolError(message)
     if not (is_model(annotation) and is_model(signature.return_annotation)):
-        message = (
-            f"the tool `{function.__name__}` must take one pydantic model and return another"
-        )
+        message = f"the tool `{function.__name__}` must take one pydantic model and return another"
         raise ToolError(message)
     return Tool[I, O](
         name=function.__name__,

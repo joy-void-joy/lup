@@ -91,7 +91,9 @@ def test_an_untyped_answer_is_the_final_text(fake_agents: FakeAgents) -> None:
 def test_a_rejected_submission_is_kept_beside_the_accepted_one(
     fake_agents: FakeAgents,
 ) -> None:
-    fake_agents.reject_then(Forecast, {"probability": "high"}, Forecast(probability=0.9))
+    fake_agents.reject_then(
+        Forecast, {"probability": "high"}, Forecast(probability=0.9)
+    )
     result = asyncio.run(probe().ask("Will it rain?", Forecast))
     assert result.output.probability == 0.9
     [rejection] = result.rejected
@@ -107,7 +109,9 @@ def test_a_hook_on_the_output_tool_reviews_the_answer(fake_agents: FakeAgents) -
 
     reviewed = Submit(Forecast, before=[cites_sources])
     fake_agents.reject_then(
-        Forecast, {"probability": 0.5}, Forecast(probability=0.5, sources=["met office"])
+        Forecast,
+        {"probability": 0.5},
+        Forecast(probability=0.5, sources=["met office"]),
     )
     result = asyncio.run(probe().ask("Will it rain?", reviewed))
     assert result.output.sources == ["met office"]
@@ -125,7 +129,9 @@ def test_no_accepted_answer_within_the_attempts_raises_with_every_rejection(
 
 def test_notes_come_back_beside_the_answer(fake_agents: FakeAgents) -> None:
     fake_agents.answer(
-        Forecast, Forecast(probability=0.6), notes=["Assumes the forecast means London."]
+        Forecast,
+        Forecast(probability=0.6),
+        notes=["Assumes the forecast means London."],
     )
     result = asyncio.run(probe().ask("Will it rain?", Forecast))
     assert result.notes == ["Assumes the forecast means London."]
@@ -199,7 +205,9 @@ def test_the_timeout_interrupts_the_turn() -> None:
         seam.reset(token)
 
 
-def test_the_trace_keeps_each_ask_whole(fake_agents: FakeAgents, tmp_path: Path) -> None:
+def test_the_trace_keeps_each_ask_whole(
+    fake_agents: FakeAgents, tmp_path: Path
+) -> None:
     trace = tmp_path / "traces" / "calls.jsonl"
     layers = FAST.model_copy(update={"trace": trace})
     fake_agents.reject_then(Forecast, {"probability": "x"}, Forecast(probability=0.4))
