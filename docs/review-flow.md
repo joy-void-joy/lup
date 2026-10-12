@@ -160,7 +160,7 @@ Why there:
   It's said once per file, never again for later writes into the draft or for reads of the file (*Told once, never re-told*).
 - **When Claude Code refuses an Edit addressed to a drafted file:** this happens when the file exists only as a draft, or when the text is one only the draft holds. The agent gets Claude Code's own error. That error is new information, not a re-telling, so a `PostToolBatch` hook may add a line naming the draft (a check owed).
 - **Grep and Glob don't see drafts,** since they're ignored; `reviews` lists them.
-- **The judge must be the only `PreToolUse` hook that rewrites a call.** aib found that a later hook's answer discards an earlier `updatedInput` (`DESIGN.md`, *Field Notes*). In this repository it is the only one.
+- **The judge must be the only `PreToolUse` hook that rewrites a call.** aib found that a later hook's answer discards an earlier `updatedInput` (`docs/field-notes.md`). In this repository it is the only one.
 
 ### Asking anyway
 
@@ -226,7 +226,7 @@ Spawn, message, ask and handoff come with build order 4; the dashboard's own rev
   - `"lup": {"command": "sh", "args": ["-c", "exec \"$(uv tool dir --bin)/lup-dev\" mcp serve"], "timeout": 86400000, "alwaysLoad": true}`.
   - The command runs the installed copy as the hooks do (`docs/judging-writes.md`, decision 65).
   - `timeout` is a day: it sets each call's wall-clock limit and floors the idle limit.
-  - `alwaysLoad` puts the four tools in context from the start, rather than behind tool search. aib found deferred schemas made the agent guess search terms (`DESIGN.md`, *Field Notes*).
+  - `alwaysLoad` puts the four tools in context from the start, rather than behind tool search. aib found deferred schemas made the agent guess search terms (`docs/field-notes.md`).
 - **Configured for Codex in `.codex/config.toml`:** `[mcp_servers.lup]`, the same command, `tool_timeout_sec = 86400`, and an approval mode that lets lup's tools run unprompted.
 - **Both files are protected.** `.codex/` is already protected; `.mcp.json` joins the protected defaults in `lup_dev/catalog/paths.py`, since it names what runs. Launch compiles both from the declaration later, as it does every runtime tree (`DESIGN.md`, *How lup reaches a project*).
 - **How a session gets it:**
