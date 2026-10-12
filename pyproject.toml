@@ -162,10 +162,37 @@ type = "layers"
 containers = ["lup_dev"]
 layers = ["adapters", "policy", "codescan", "catalog"]
 
+# A runtime's SDK is imported only in its adapter, so a project installing one
+# extra never reaches the other (`docs/conventions.md`, *Imports and boundaries*).
+[[tool.importlinter.contracts]]
+name = "claude_agent_sdk is imported only by lup.adapters.claude"
+type = "protected"
+protected_modules = ["claude_agent_sdk"]
+allowed_importers = ["lup.adapters.claude"]
+
+[[tool.importlinter.contracts]]
+name = "openai_codex is imported only by lup.adapters.codex"
+type = "protected"
+protected_modules = ["openai_codex"]
+allowed_importers = ["lup.adapters.codex"]
+
+# Nothing inside lup imports its front door, which loads the adapters on first use.
+[[tool.importlinter.contracts]]
+name = "nothing inside lup imports lup's front door"
+type = "protected"
+protected_modules = ["lup"]
+allowed_importers = ["lup_dev.**"]
+as_packages = false
+
 [dependency-groups]
 dev = [
     "import-linter>=2.15",
+    # lup's own tests cover both runtimes, and run under its own guard.
+    "lup[claude,codex,testing]",
     "pyright>=1.1.414",
     "pytest>=9.1.1",
     "ruff>=0.16.10",
 ]
+
+[tool.uv.sources]
+lup = { workspace = true }
