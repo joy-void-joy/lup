@@ -1,7 +1,9 @@
 # /// script
 # requires-python = ">=3.14"
-# dependencies = ["pydantic>=2.12", "pydantic-settings>=2.11", "sh>=2"]
+# dependencies = ["pydantic>=2.12,<2.14", "pydantic-settings>=2.11", "sh>=2"]
 # ///
+# pydantic 2.14 breaks pydantic-settings 2.15's command line (`CliApp.run` raises
+# "_field_name_for_signature() missing … 'validate_by_alias'"), which a fresh environment resolves.
 """Queue what needs the operator in the first lup's review dashboard: every prompt, and writes that show design.
 
 An interim carrier for the bridge, until lup's own review flow and dashboard land
