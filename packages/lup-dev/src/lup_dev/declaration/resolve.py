@@ -12,7 +12,8 @@ hold it, by the kind's type (`docs/declaration.md`, *What a module is*):
   it, and the rest keep the order of their modules;
 - the runner comes from the one module holding one, `Plain()` where none does.
 
-Rule selections are kept as recorded, one per module, for the engine to resolve.
+Rule selections are kept as recorded, one per module beside the module's own
+default, for the engine to resolve.
 """
 
 from typing import TYPE_CHECKING, Literal
@@ -55,11 +56,22 @@ class PathRoles(Model, extra="forbid"):
 
 
 class Selected(Model):
-    """One module's rule selection, as it's recorded, for the engine to resolve."""
+    """One module's rule selection, as it's recorded, for the engine to resolve.
+
+    The engine resolves `default` from nothing beneath it, then `rules` from that:
+    `Rules.default()` there starts from the module's own default, and `Rules()`
+    from nothing beneath it, since its operations begin with the default's
+    (`docs/declaration.md`, *Selecting them*).
+    """
 
     module: str
     """The module's name."""
     rules: Rules
+    """Its selection with every layer applied over its own default, as `Modules`
+    places it."""
+    default: Rules
+    """The module's own default for its rules: what `Rules.default()` starts from
+    there. `Rules()` is none."""
 
 
 class Part[K](Model):
@@ -238,7 +250,11 @@ def resolve(project: Project) -> Resolved:
         paths=PathRoles.model_validate({name: role(name) for name in Paths.roles()}),
         gate=held(Gate(), parts(modules, Gate), "The gate's steps"),
         rules=[
-            Selected(module=part.module, rules=part.value)
+            Selected(
+                module=part.module,
+                rules=part.value,
+                default=part.default if part.default is not None else Rules(),
+            )
             for part in parts(modules, Rules)
         ],
         exempt=held(

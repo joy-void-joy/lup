@@ -31,19 +31,27 @@ from lup_dev import (
     Uv,
 )
 from lup_dev.catalog.paths import CorePaths, PythonPaths
+from lup_dev.catalog.rules import DefaultRules
 from lup_dev.declaration.errors import ProjectError
+from lup_dev.declaration.grammar import Drop
 from lup_dev.declaration.module import Origin
+from lup_dev.declaration.modules.code_rules import lup_default
 from lup_dev.declaration.resolve import Resolved, resolve
 
 
-def drops(resolved: Resolved, module: str) -> list[str]:
+def layered(resolved: Resolved, module: str) -> list[Drop]:
+    """Return the drops a module's layers make, after its own default's."""
     [selected] = [each for each in resolved.rules if each.module == module]
+    own = len(selected.default.operations)
     return [
-        name
-        for operation in selected.rules.operations
-        if operation.verb == "drop"
-        for name in operation.names
+        operation
+        for operation in selected.rules.operations[own:]
+        if isinstance(operation, Drop)
     ]
+
+
+def drops(resolved: Resolved, module: str) -> list[str]:
+    return [name for operation in layered(resolved, module) for name in operation.names]
 
 
 def module(resolved: Resolved, name: str) -> Module:
@@ -259,7 +267,11 @@ def test_the_defaults_resolve_to_lup_s_modules_and_parts() -> None:
     ]
     assert resolved.tests == [Pytest(root=Path("tests"))]
     assert resolved.runner == Uv()
-    assert resolved.rules[0].rules == Rules.default()
+    [code_rules] = resolved.rules
+    assert code_rules.rules == code_rules.default == lup_default()
+    assert lup_default() == Rules.all().drop(
+        "runtime-mention", why=DefaultRules().left_out[0].why
+    )
     assert resolved.exempt == []
     assert resolved.conditions == []
     assert resolved.asks == "every"
@@ -301,7 +313,7 @@ def test_the_note_s_layers_resolve_to_both_drops_and_both_exemptions() -> None:
     )
     resolved = resolve(project)
     assert drops(resolved, "code-rules") == ["collection-loop", "tuple-shape"]
-    assert resolved.rules[0].rules.start.kind == "default"
+    assert resolved.rules[0].rules.start.kind == "all"
     assert [each.rule for each in resolved.exempt] == ["set-shape", "tuple-shape"]
     assert module(resolved, "code-rules").origins.each == [
         Origin(field="rules", position=2, why="the legacy code"),
@@ -323,10 +335,10 @@ def test_a_shared_base_and_a_project_stack_with_each_value_s_layer() -> None:
     )
     resolved = resolve(project)
     assert drops(resolved, "code-rules") == ["collection-loop", "tuple-shape"]
-    rules = resolved.rules[0].rules
-    assert [
-        operation.why for operation in rules.operations if operation.verb == "drop"
-    ] == ["pipelines loop", None]
+    assert [operation.why for operation in layered(resolved, "code-rules")] == [
+        "pipelines loop",
+        None,
+    ]
     assert module(resolved, "code-rules").origins.of("rules") == Origin(
         field="rules", position=4
     )
