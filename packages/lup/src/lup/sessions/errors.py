@@ -81,3 +81,7 @@ class TurnTimeoutError(TurnError, TimeoutError):
 
 class RuntimeMissingError(LupError):
     """A declaration names a runtime whose extra isn't installed."""
+
+
+class RealCallInTestError(LupError):
+    """A test reached a real agent, where it should have scripted the fake (`lup.testing`)."""

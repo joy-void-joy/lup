@@ -16,8 +16,8 @@ from typing import TYPE_CHECKING, override
 
 import pytest
 
-from lup.errors import LupError
 from lup.sessions.contract import Adapter, RawTurn, Seam, TurnRequest, guarded, seam
+from lup.sessions.errors import RealCallInTestError
 from lup.testing.fake import FakeAgents
 from lup.types import Model
 
@@ -25,10 +25,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from lup.sessions.declaration import Declaration
-
-
-class RealCallInTestError(LupError):
-    """A test asked a real agent, where it should have scripted the fake."""
 
 
 class Refused(Model, Adapter):
