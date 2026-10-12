@@ -56,11 +56,10 @@ Every concern has exactly one owner, so two tools never report the same thing in
 - **Nothing is private.** No leading underscore at any scope. A helper that shouldn't reach the module namespace is nested inside its only caller. A wrapper around one call is inlined where it's used. An unused parameter keeps its underscore: that's a linting convention, not privacy.
   - **The rule of thumb:** a function called from a single other function folds into it, as long as the caller stays a reasonable size. It's tested through its caller.
 - **`__all__` only at a package's root**, where it declares that package's public API. Everywhere else a name is imported from the module that defines it.
-- **Exception names end in `Error`.**
 
 **Why.** One rule for visibility: public, or nested. A reviewer never wonders whether `_x` is "really" private.
 
-**Enforced by:** `private-name` (classes, functions and variables alike), `all-export`; exception names by ruff's `N818`.
+**Enforced by:** `private-name` (classes, functions and variables alike), `all-export`.
 
 ## Dispatch
 
