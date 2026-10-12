@@ -110,7 +110,7 @@ async def test_translates_a_segment(fake_agents: FakeAgents) -> None:
 | Errors | Typed: `ProviderTurnError`, `StructuredOutputError`, `TurnTimeoutError`, `BudgetExceededError` | **Kept**, each classified from what the runtime reports in structured form | Callers branch on the type, never on message text |
 | Trace and cost | `observability/trace.py`, and `observability/cost.py` with its own pricing tables | **Reshaped:** one `CallRecord` derived from the `TurnResult`, and cost as the runtime reports it | Pricing tables go stale; Claude reports cost itself |
 | Out of the operator's history | Sessions from code ran in the operator's config home by default. Derived homes copied the credentials file, because Claude Code replaces it on refresh | **Reshaped:** no session persistence and no user settings (see below) | Same result, no second login to keep fresh |
-| Driving Codex | lup's own JSON-RPC client for `codex app-server` | **Reshaped:** the official `openai-codex` SDK, whose raw `request` reaches anything it doesn't wrap | The SDK exists now |
+| Driving Codex | lup's own JSON-RPC client for `codex app-server` | **Reshaped:** the official `openai-codex` SDK's lower `CodexClient`, whose raw `request` reaches anything it doesn't wrap. Its documented `Codex` and `AsyncCodex` take no handler for Codex's requests to the client, which lup's tools need | The SDK exists now |
 | Fake and guard | Test doubles in lup's own tests only (`tests/unit/doubles.py`); no guard against real calls | **New:** both ship in the library | live-translator's 60-line stub |
 
 ## Where the first lup's fields go
@@ -149,7 +149,7 @@ A plain ask can carry tools without becoming a room. `DESIGN.md` draws the line 
 
 A lup tool is a Python function with a typed input model and a typed output model, declared with `@lup_tool`. It can carry `before` hooks, typed on its input, which run in lup's process before the handler. It is delivered in each runtime's own way:
 - **Claude:** through the SDK's in-process server, so the tool runs in the caller's process. The agent sees it as `mcp__lup__submit`.
-- **Codex:** as a dynamic tool on the thread, answered in-process through the SDK client's server-request callback.
+- **Codex:** as a dynamic tool on the thread, answered in-process through the SDK client's server-request callback. On a code-mode model the agent calls it from JavaScript inside `exec`, and the call arrives the same way.
 
 The tool construct is public, but in this slice the only tool is `lup_submit`. The tools slice adds:
 - project tools, groups and toolsets;
@@ -177,8 +177,10 @@ None of them needs a container: a function tool runs in the caller's process, no
   - **No `@path` expansion.** Prompts are delivered verbatim (`verbatim_prompts`), so text from data can't make Claude Code read a local file.
   - **Checked on every call.** The CLI's first message lists the tools the session loaded. Anything beyond lup's own stops the call with `ToolsPresent` before the model can use it. Tool calls are also refused by the permission mode (`dontAsk`, nothing pre-approved but lup's tools).
 - **Codex:**
-  - **Configuration.** Environment tools off per thread (`environments: []`, documented in the app-server protocol, sent through the SDK's raw `request`), web search disabled, its own subagents disabled (`agents.enabled=false`), and the other built-in features disabled.
-  - **Isolation.** It runs in lup's own Codex home, so the user's MCP servers and hooks don't load.
+  - **Configuration.** Each ask's thread is ephemeral and has no environment (`environments: []`, documented in the app-server protocol, sent through the SDK's raw `request`), so no shell and no file tools. Codex's own subagents are off (`agents.enabled=false`), approvals are never asked, and the sandbox is read-only. The app-server starts with web search, skills, every built-in feature that brings a tool, and the instructions describing them turned off (`--config` overrides, `LAUNCH` in `adapters/codex/runtime.py`). `system_prompt` replaces Codex's own coding agent's prompt; with none, no system prompt is sent at all.
+  - **Code mode.** On models whose catalog entry says `tool_mode: code_mode_only` (the default `gpt-6.1-sol` among them), every tool, lup's included, is reached through a JavaScript `exec` tool, beside `wait` and `request_user_input_async`, and no setting removes them. The guarantee is about what can happen, and code mode can't reach a shell, files, the network or another agent. An `exec` call trying each way out, against a local mock of the Responses endpoint, found a V8 isolate with no `fetch`, `require`, `process` or `WebAssembly`, every import refused, and for nested tools only lup's, a clock, and MCP's resource readers, which read nothing without an MCP server; `request_user_input_async` only queues a question. So code-mode models are accepted, and the code-mode host stays on: turned off, it leaves lup's tools out of reach on them.
+  - **Isolation.** It runs in lup's own Codex home, so the user's configuration, MCP servers, hooks and skills don't load. Nor does a project's `AGENTS.md`: checked from a checkout holding one.
+  - **Nothing else answered.** A request from Codex to the client other than a call to lup's tools (an approval, an elicitation) fails the ask. A question for the user is answered that no one can answer.
   - **Declared gap.** Codex has no API that lists a session's tools. A live check, run by hand whenever the pinned Codex version changes, confirms the request carries only lup's tool; Codex's rollout trace records the raw request. It becomes part of the capability check when that lands.
 
 ## Out of the operator's history
@@ -188,21 +190,22 @@ None of them needs a container: a function tool runs in the caller's process, no
   - The login is the operator's own CLI login.
 - **Codex:**
   - `ephemeral` threads, which persist nothing.
-  - They run under a lup-owned Codex home whose `auth.json` is a symlink to the operator's. Codex rewrites that file in place, so a refresh writes through the link to the one real copy.
-  - A login kept in the keyring instead of a file raises `AuthMissing`, saying so.
+  - They run under a lup-owned Codex home, `$XDG_STATE_HOME/lup/codex`, whose `auth.json` is a symlink to the operator's (`$CODEX_HOME/auth.json`, or `~/.codex/auth.json`). Codex rewrites that file in place, so a refresh writes through the link to the one real copy, and a logout from lup's home removes only the link. Credentials are pinned to the file store: under `keyring` or `auto`, a refresh deletes `auth.json`, the link.
+  - The login is checked before the thread starts (`account/read`). A login kept in the keyring instead of a file raises `AuthMissing`, saying so: the keyring's key derives from the Codex home's path, so lup's home can't see it.
 - **Where an own config home becomes necessary:** `DESIGN.md` says sessions started from code run under their own config home. That arrives with rooms and long sessions, when transcripts must be kept. For a quick call, `DESIGN.md` says only the cost is recorded, and the trace keeps it.
 
 ## Errors
 
 | Error | When | Retried by recovery |
 |---|---|---|
-| `AgentUnavailable` | Overload, rate limit, a dropped connection, a 5xx. Classified from `ResultError.api_error_status` (Claude) or `codexErrorInfo` (Codex) | Yes |
-| `UsageLimitReached` | The subscription's window is spent: Claude's `RateLimitEvent` with status `rejected`, or Codex's `usageLimitExceeded`. Carries the reset time when reported | No |
-| `AuthMissing` | No usable login | No |
+| `AgentUnavailable` | Overload, rate limit, a dropped connection, a 5xx. Classified from `ResultError.api_error_status` (Claude) or `codexErrorInfo` (Codex: `serverOverloaded`, `internalServerError`, `rateLimitExceeded`, and a connection that failed or dropped with no status, a 408, a 429 or a 5xx; only the last error Codex didn't retry itself counts) | Yes |
+| `UsageLimitReached` | The subscription's window is spent: Claude's `RateLimitEvent` with status `rejected`, or Codex's `usageLimitExceeded`. Carries the reset time when reported (Codex: the spent window's, from the last `account/rateLimits/updated`) | No |
+| `AuthMissing` | No usable login (Codex: none found before the thread starts, or `unauthorized`, or a 401) | No |
 | `OutputMissing` | No accepted answer within `submission.attempts` | No |
 | `ToolsPresent` | The tool check failed | No |
 | `RuntimeMissing` | The runtime's extra isn't installed: `install lup[codex]` | No |
 | `TimeoutError` (built-in) | `timeout` passed | No |
+| `TurnError` itself | Any other failure the runtime reports (Codex: a full context window, a bad request, a policy, a kind lup doesn't know, a request lup never answers, the app-server failing) | No |
 
 ## The call record
 
@@ -215,7 +218,7 @@ Every ask, successful or not, appends one `CallRecord` to `layers.trace` when it
 - token usage;
 - cost where the runtime reports it.
 
-It's derived from the `TurnResult` (or the error) and the request, so the two can't disagree. Claude reports cost; Codex reports tokens only, taken per turn. The dashboard reads the same records once events exist.
+It's derived from the `TurnResult` (or the error) and the request, so the two can't disagree. Claude reports cost; Codex reports tokens only, taken from the thread's running total, since its per-request count is sent again on turns that made no request. The dashboard reads the same records once events exist.
 
 ## Testing: the fake and the guard
 
@@ -252,7 +255,9 @@ packages/lup/src/lup/
     claude/__init__.py     the Claude declaration
     claude/runtime.py      the Agent SDK session: options, in-process tools, the Stop guard, the tool check
     codex/__init__.py      the Codex declaration
-    codex/runtime.py       the app-server session: thread settings, dynamic tools, the continuation guard, lup's Codex home
+    codex/runtime.py       the app-server session: its launch, thread settings, dynamic tools, the continuation guard, its errors
+    codex/layout.py        lup's own Codex home, and the operator's login it links to
+    codex/settings.py      the variables the adapter reads: `CODEX_HOME`, `XDG_STATE_HOME`
   observability/
     trace.py               CallRecord, and appending it to the trace
   testing/
@@ -308,7 +313,9 @@ Each with the alternative and where it lives. **(yours)** marks the operator's.
 
 ## Checks owed
 
-- **Codex's dynamic tool:** that a dynamic `lup_submit` call reaches the SDK client's server-request callback, and that its answer reaches the model. Checked in the implementation's tests against recorded protocol messages, and in the live check.
+- **Codex's dynamic tool:** that a dynamic `lup_submit` call reaches the SDK client's server-request callback, and that its answer reaches the model. Checked on the pinned app-server against a local mock of the Responses endpoint, called directly and from code mode's `exec`, with the answer in the model's next request; the implementation's tests drive the adapter on a scripted client. The live check confirms it on a real model.
+- **Codex's usage-limit reset** arrives on a thread of its own, before the error and outside the turn's stream (`adapters/codex/runtime.py`). The mock run caught it; nothing synchronises the two threads, so a real run could in principle miss it and report no reset.
+- **Parallel asks on Codex** each start an app-server on lup's one Codex home: the live check must show that simultaneous startups don't conflict over its state.
 - **Claude's `Stop` hook:** that it can refuse the end of a turn in an SDK session with no persistence, and how its refusals count against Claude Code's cap of 8 consecutive refusals.
 - **Parallel startups.** The first lup gave parallel Claude sessions their own config homes because simultaneous startups corrupted `~/.claude.json`. This slice uses the default home, so the live check must show whether CLI 2.1.29x still does that.
 - **Codex's tool-free configuration**, confirmed by the live check on each pinned version.
