@@ -14,17 +14,17 @@ This repository is the second lup. The first (`joy-void-joy/lup-legacy`, archive
 
 1. **A design note first.** For each piece, open a draft pull request into `dev` holding only `docs/<piece>.md`: its modules, what each is for, its public API, and the choices it makes with their alternatives. Implement once the operator approves it. The note stays as that piece's documentation, kept true as the code changes.
 2. **One concern per branch, landed on `dev` by the session that started the work.**
-   - Branch from `dev`. When the gate passes (`uv run lup-dev check`: the engine rebuilt if stale, ruff, the formatter, pyright, the tests and the import contracts, judged by its exit code), merge the branch into `dev` with a merge commit, and push.
+   - Branch from `dev`. When the gate passes (`uv run lup-dev check`: the engine rebuilt if stale, lup's rules, ruff, the formatter, pyright, the tests and the import contracts, judged by its exit code), merge the branch into `dev` with a merge commit, and push.
    - **A worker doesn't land its own branch.** It commits on its branch, leaves it unpushed, and hands it back. The session that delegated it reviews it, runs `uv run lup-dev check --fix` on the merged result (ruff's safe fixes and the formatter, which the judge never reports to an agent, then the gate), and lands it with what the fixes changed in the merge commit, one merge at a time, so the shared `dev` checkout never takes two merges at once and every branch is looked at before it lands.
-   - The merge commit's message is the branch's record: every design decision taken, with its alternative and the file it lives in; then what changed and why, how it was tested, and a short note on how the work felt (see *Delegating*).
+   - The merge commit's message is the branch's record: every design decision taken, with its alternative and the file it lives in; every new file and public-API change; then what changed and why, how it was tested, and a short note on how the work felt (see *Delegating*).
    - A simple doc change skips the branch and lands on `dev` directly.
 3. **A release is a pull request from `dev` to `main`,** which the operator reviews and merges. Its description gathers the decisions landed since the last release. Never merge into `main` or push to it yourself.
-4. **Create files with your file tool, never through the shell.** The judge sees a file tool's write before it lands, and a new or whole-file production write, a public-API change, a suppression, a protected path or the operator's documents reach the operator through it, which is how they see the design forming. A file a heredoc or a script makes is judged only after the call, and refused if it needed the operator. Codex has no such prompt yet, so on Codex, name every new file in the merge commit's message.
+4. **Write with your file tools.** While lup is being built, the judge runs only before an Edit or Write lands: it refuses a write with a finding of lup's code rules, before the file changes, and asks the operator only about a protected path, as a prompt in their terminal (`asks` in `lup_project.py`). On Codex, whose hooks can't see a patch before it lands, the same judgement runs just after each call. What the shell writes meets the rules only in the gate, later than an Edit would have. The design reaches the operator through the design note before the code and the merge commit after it. A piece of the environment goes live in lup's own sessions once it's finished, never while it's being built.
 5. **Commit early and atomically**, before you report: `type(scope): what changed and why`.
 
 ## Code
 
-The code rules will enforce these once the checker lands; until then review does, so each comes with its reason.
+lup's code rules enforce most of these, at the edit and in the gate (`docs/rules.md`); review covers the rest, so each comes with its reason.
 
 - **Parse structured data with a parser or a pydantic model,** never `re`, `split` or slicing, and never hand-parse an agent's output. Quick regex patches often silently didn't work, and the bugs were hard to find.
 - **Name the fields.** No tuple or set carrying several meanings by position: a reviewer shouldn't have to work out what field 5 is.

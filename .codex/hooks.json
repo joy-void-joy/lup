@@ -35,29 +35,6 @@
           }
         ]
       }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$(uv tool dir --bin)/lup-dev\" hook codex",
-            "timeout": 90000,
-            "statusMessage": "lup is checking the files this session touched"
-          }
-        ]
-      }
-    ],
-    "SubagentStop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$(uv tool dir --bin)/lup-dev\" hook codex",
-            "timeout": 90000
-          }
-        ]
-      }
     ]
   }
 }

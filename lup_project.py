@@ -2,6 +2,9 @@
 
 lup is developed with itself (`DESIGN.md`, *How lup reaches a project*). The
 defaults apply, with these additions:
+- while lup is being built, only a protected path's change asks the operator
+  (`asks`): the design is reviewed in notes before the code and at landing
+  (`AGENTS.md`, *How work goes*);
 - the data that sets lup's policy (`lup_dev.catalog`) is a protected path, so the
   operator reviews every change to it before it lands;
 - the bridge's interim hooks are excluded: uv scripts with their own dependencies,
@@ -16,6 +19,7 @@ defaults apply, with these additions:
 from lup_dev.project import Exemption, Project, Protected
 
 project = Project(
+    asks="protected",
     protected=Protected.default().add("packages/lup-dev/src/lup_dev/catalog/**"),
     # lup: ignore("runtime-mention", why="data naming a runtime's own files")
     excluded=[".claude/hooks/**"],
