@@ -9,7 +9,8 @@ import pytest
 from typer.testing import CliRunner
 
 from lup_dev import cli
-from lup_dev.catalog.gate import Step
+from lup_dev.declaration.load import load
+from lup_dev.declaration.resolve import resolve
 from lup_dev.install import (
     Approval,
     ChangedFile,
@@ -23,6 +24,7 @@ from lup_dev.install import (
     Toolchain,
     Unchanged,
     Uv,
+    engine,
 )
 from lup_dev.layout import CheckoutLayout, Layout
 from lup_dev.policy.store import read_model, write_model
@@ -434,15 +436,50 @@ def test_uv_installs_a_copy_with_the_locks_versions(
     assert constraints == "pydantic==2.13.5"
 
 
-def test_the_installer_builds_the_engine_as_the_gate_does() -> None:
-    assert Uv().engine.name == "engine"
-    assert Uv().engine.command[-1] == "packages/lup-dev/checker/build.py"
+LUP = Path(__file__).resolve().parents[3]
+"""lup's own checkout, whose declaration gives the step building the engine."""
 
 
-def test_uv_runs_the_engines_build_step(checkout: Path) -> None:
-    build = [sys.executable, "packages/lup-dev/checker/build.py"]
-    Uv(engine=Step(name="engine", command=build)).build(checkout)
+def test_the_installer_builds_the_engine_with_lups_own_gate_step() -> None:
+    resolved = resolve(load(LUP).project)
+    step = engine(resolved)
+    assert step.name == "engine"
+    assert step.command[-1] == "packages/lup-dev/checker/build.py"
+    assert resolved.gate[0] == step
+
+
+BUILDING = '''
+from lup_dev import Gate, Module, Modules, Project, Step
+
+
+class Building(Module):
+    """Building the engine, as lup's own declaration does."""
+
+    name = "building"
+
+    gate: Gate = Gate.of(
+        Step(name="engine", command={command!r}, builds="bundle.js"),
+        before="rules",
+    )
+
+
+project = Project(modules=Modules.default().add(Building()))
+'''
+
+
+def test_uv_runs_the_checkouts_own_build_step(checkout: Path) -> None:
+    command = [sys.executable, "packages/lup-dev/checker/build.py"]
+    (checkout / "lup_project.py").write_text(BUILDING.format(command=command))
+    Uv().build(checkout)
     assert (checkout / "built").read_text() == "yes"
+
+
+def test_a_checkout_whose_declaration_builds_no_engine_is_refused(
+    checkout: Path,
+) -> None:
+    with pytest.raises(InstallError, match="no step building the engine"):
+        Uv().build(checkout)
+    assert not (checkout / "built").exists()
 
 
 def test_the_review_waits_in_the_checkout_under_the_approved_commit() -> None:

@@ -168,6 +168,31 @@ def test_an_exported_commit_loads_as_a_root_does(tmp_path: Path) -> None:
     assert load(exported).source == Path("lup_project.py")
 
 
+def test_lups_own_declaration_is_its_modules_with_its_changes() -> None:
+    root = Path(__file__).resolve().parents[3]
+    resolved = resolve(load(root).project)
+    assert [each.name for each in resolved.modules] == [
+        "core",
+        "python",
+        "code-rules",
+        "lup-development",
+    ]
+    assert resolved.asks == "protected"
+    assert [each.name for each in resolved.gate][:2] == ["engine", "rules"]
+    assert "packages/lup-dev/src/lup_dev/catalog/**" in resolved.paths.protected
+    assert resolved.paths.excluded == [".claude/hooks/**"]
+    assert [each.root for each in resolved.tests] == [Path("packages/*/tests")]
+    assert [(each.rule, each.paths) for each in resolved.exempt] == [
+        ("runtime-mention", ["packages/lup/src/lup/__init__.py"]),
+        ("constant-home", ["packages/lup-dev/src/lup_dev/catalog/**"]),
+    ]
+    [selected] = resolved.rules
+    assert [operation.verb for operation in selected.rules.operations] == ["add"]
+    assert ("lup-development", "npm") in [
+        (each.module, each.requirement.tool) for each in resolved.requirements
+    ]
+
+
 def test_loading_a_declaration_leaves_no_bytecode_at_the_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

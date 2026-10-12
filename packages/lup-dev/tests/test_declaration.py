@@ -249,7 +249,6 @@ def test_the_defaults_resolve_to_lup_s_modules_and_parts() -> None:
     assert resolved.paths.conftest == ["conftest.py"]
     assert resolved.paths.excluded == []
     assert [each.name for each in resolved.gate] == [
-        "engine",
         "rules",
         "ruff",
         "format",

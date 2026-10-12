@@ -33,6 +33,8 @@ from lup_dev.codescan.directives import Checking, Fired, GitHubIssues, Trackers
 from lup_dev.codescan.engine import EngineChecker
 from lup_dev.codescan.reference import reference
 from lup_dev.codescan.ruff import Ruff
+from lup_dev.declaration.load import load
+from lup_dev.declaration.resolve import resolve
 from lup_dev.errors import LupDevError
 from lup_dev.gate import Check, Fixes, Shell, failed, report
 from lup_dev.install import Installer, Terminal, Uv
@@ -302,17 +304,19 @@ def check(
 ) -> None:
     """Run the gate, every step even after one fails, and fail if any did.
 
-    A stale engine is rebuilt, then lup's rules (`rules check`), ruff, the
-    formatter, pyright, pytest and the import contracts run. Each step's outcome
-    is reported, then each failure's output in full; the exit code is non-zero
-    when any step failed. With `--fix`, which the session landing work runs on
-    the merged result, ruff's safe fixes and the formatter rewrite the worktree
-    first.
+    The steps are the worktree's declaration's: lup's rules (`rules check`), ruff,
+    the formatter, pyright, pytest and the import contracts by default, with what
+    its modules add, such as lup's own engine, rebuilt when stale. Each step's
+    outcome is reported, then each failure's output in full; the exit code is
+    non-zero when any step failed. With `--fix`, which the session landing work
+    runs on the merged result, ruff's safe fixes and the formatter rewrite the
+    worktree first.
     """
+    root = toplevel(Path.cwd())
     outcomes = Check(
-        root=toplevel(Path.cwd()),
+        root=root,
         runner=Shell(),
-        gate=Gate(),
+        gate=Gate(steps=resolve(load(root).project).gate),
         fixes=Fixes().steps if fix else [],
     ).run()
     typer.echo(report(outcomes))

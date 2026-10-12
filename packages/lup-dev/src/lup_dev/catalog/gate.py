@@ -24,20 +24,6 @@ class Gate(Model):
     """The gate's steps, in the order they run."""
 
     steps: list[Step] = [
-        Step(
-            name="engine",
-            command=["uv", "run", "python", "packages/lup-dev/checker/build.py"],
-            builds="packages/lup-dev/src/lup_dev/codescan/bundle/engine.js",
-            sources=[
-                "packages/lup-dev/checker/src/**/*",
-                "packages/lup-dev/checker/build.py",
-                "packages/lup-dev/checker/package.json",
-                "packages/lup-dev/checker/package-lock.json",
-                "packages/lup-dev/checker/tsconfig.json",
-                "packages/lup-dev/src/lup_dev/catalog/rules.ts",
-                "uv.lock",
-            ],
-        ),
         Step(name="rules", command=["uv", "run", "lup-dev", "rules", "check"]),
         Step(name="ruff", command=["uv", "run", "ruff", "check", "--ignore-noqa"]),
         Step(name="format", command=["uv", "run", "ruff", "format", "--check"]),
@@ -45,10 +31,11 @@ class Gate(Model):
         Step(name="pytest", command=["uv", "run", "pytest"]),
         Step(name="lint-imports", command=["uv", "run", "lint-imports"]),
     ]
-    """The engine first, rebuilt when its bundle is older than its sources, since
-    tests that ask a stale engine fail for reasons the change didn't cause.
+    """lup's rules first: `lup-dev rules check` with no paths checks every file its
+    declaration's roles say is checked, lup's rules on the production and protected
+    modules, as the judge does at each write, so the gate holds them wherever it
+    runs, the judge running or not.
 
-    Then lup's rules, which read that engine: `lup-dev rules check` with no paths
-    checks every file its declaration's roles say is checked, lup's rules on the
-    production and protected modules, as the judge does at each write, so the
-    gate holds them wherever it runs, the judge running or not."""
+    Building lup's own engine isn't among them: only lup's repository has one to
+    build, so its step is that repository's own (`LupDevelopment`, in its
+    `lup_project.py`), placed before these."""
