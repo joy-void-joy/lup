@@ -50,7 +50,7 @@ project = Project(
 
 - **`lup new` writes `Project(modules=Modules.default())`,** so nothing is retyped; `Project()` means the same.
 - **`Modules.only(Core(), Python(), CodeRules())`** gives an exact list, for a project that wants one: a module a later release adds to the default doesn't come in.
-- **`Project` holds `modules`, and what isn't a module's (leaning).** Every part lives in a module, so reading one module says what it does; cross-cutting parts at the top (`paths`, `runner`) would each be changeable in two places. `Project` stays a model rather than the bare `Modules` so that what isn't a module's has a place. `asks`, which of the judge's asks reach the operator (`"every"` by default, or `"protected"`; `lup_dev/project.py`), is one; it's a temporary switch for lup's own build, and goes when the judge's asks become proposals (`DESIGN.md`, *Sessions*). Upstream candidates (`DESIGN.md`, open question 6) may follow.
+- **`Project` holds `modules`, and what isn't a module's (leaning).** Every part lives in a module, so reading one module says what it does; cross-cutting parts at the top (`paths`, `runner`) would each be changeable in two places. `Project` stays a model rather than the bare `Modules` so that what isn't a module's has a place. `asks`, which of the judge's asks reach the operator (`"every"` by default, or `"protected"`; `declaration/project.py`), is one; it's a temporary switch for lup's own build, and goes when the judge's asks become proposals (`DESIGN.md`, *Sessions*). Upstream candidates (`DESIGN.md`, open question 6) may follow.
 - **`lup project`** (`lup-dev project` until C) shows the resolved list: every module that's on, its parts, and the project's changes with their reasons (*One page for the whole project*).
 
 ### The verbs on modules
@@ -109,7 +109,7 @@ project = Project(
 )
 ```
 
-One constraint, checked in the loader (`import_roots` in `lup_dev/project.py`): the judge imports the declaration with its own environment, adding only the worktree's root and `src/`, and each uv workspace member and its `src/`. So a base in a package of its own is found only as a workspace member. **(leaning)** The loader also adds the project's environment's packages, after the judge's own, so the base comes from the project's lock (protected, so a change to it asks), and `lup_dev` and pydantic still come from the judge. The alternative is a base installed beside the judge (`uv tool install lup-dev --with joy-lup`), which every project then shares at one version. This is listed under *Checks owed*.
+One constraint, checked in the loader (`import_roots` in `declaration/load.py`): the judge imports the declaration with its own environment, adding only the worktree's root and `src/`, and each uv workspace member and its `src/`. So a base in a package of its own is found only as a workspace member. **(leaning)** The loader also adds the project's environment's packages, after the judge's own, so the base comes from the project's lock (protected, so a change to it asks), and `lup_dev` and pydantic still come from the judge. The alternative is a base installed beside the judge (`uv tool install lup-dev --with joy-lup`), which every project then shares at one version. This is listed under *Checks owed*.
 
 What layering costs:
 - a small selection type per collection;
