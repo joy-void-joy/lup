@@ -6,7 +6,19 @@ requires-python = ">=3.14"
 dependencies = [
     "pydantic>=2.12",
     "pydantic-settings>=2.11",
+    "tenacity>=9",
 ]
+
+# Each runtime ships its binary inside its SDK's wheel, so a project installs only
+# the side it uses (`docs/library.md`, *Repository layout and packages*).
+[project.optional-dependencies]
+claude = ["claude-agent-sdk>=0.2.165"]
+codex = ["openai-codex>=0.160.1"]
+testing = ["pytest>=9.1.1", "pytest-socket>=0.8.1"]
+
+# The fake's fixture and the guard, on in every test session that installs lup.
+[project.entry-points.pytest11]
+lup = "lup.testing.plugin"
 
 [build-system]
 requires = ["uv_build>=0.12.23,<0.13.0"]
