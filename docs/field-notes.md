@@ -140,6 +140,8 @@ From the docs (code.claude.com, `cli-reference`, `settings-reference`, `env-vars
   - `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` (30 minutes for stdio) is reset by a progress notification.
   - `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0` keeps a main conversation's long call in the foreground; a backgrounded call is lost when the session exits.
 - **Hooks.** A command hook's `timeout` is in seconds, default 600, with no documented maximum.
+- **PDFs.** Read renders a PDF's pages with poppler's `pdftoppm`; without it: "pdftoppm is not installed. Install poppler-utils … to enable PDF page rendering" (in the binary).
+- **The native build** (`~/.local/share/claude/versions/<version>`) links only glibc.
 - **Variables:**
   - `CLAUDE_CODE_DISABLE_AUTO_MEMORY`;
   - `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`, which outranks the setting;
@@ -227,6 +229,10 @@ From the source at `rust-v0.162.1` (paths under `codex-rs/`), probed with `codex
 
 Read in its code and history (`lup-legacy`), with each commit there:
 - **Its image** was 4.5 GB: a 2 GB package layer (five editors, a virtual display, tooling) and a 1 GB layer of CLIs from npm, re-resolved at every launch and rebuilt whenever one released, most days. 46 tags of 4.5 to 5.5 GB were left on this machine.
+  - Its baseline: ca-certificates, curl, git, jq, less, openssh, socat, procps-ng, ripgrep, fd, python, uv, nodejs, bun, util-linux, ttf-liberation;
+  - editors for `$EDITOR`: vim, neovim, nano, emacs-nox, helix, with tzdata; a virtual display for the clipboard (xorg-server-xvfb, xorg-xauth, python-xlib);
+  - lup's own: github-cli, diffutils, which, tree, lsof, inetutils, go-yq, and poppler in every project's template;
+  - adlib's own: ffmpeg, the Noto fonts (CJK and emoji among them), and the libraries headless Chromium links (alsa-lib, at-spi2-core, libglvnd, libx11 and its kin, libxkbcommon).
 - **Its environments** were one per project root, outside the checkout (`.venv-contained`), synced at each start: 25 GB across 31 directories. Their scripts went stale when a repository moved, and a uv-managed interpreter was downloaded again at every start.
 - **Logins** were copied into a volume per repository and kept in step by a companion every 30 s: a read-only mount at the login's own path broke renewal, and Claude Code 2.1.285 renames over its credentials file, which broke symbolic links.
 - **Its sessions' terminals** lost colour, their locale and their time zone until `TERM`, `COLORTERM`, `LANG` and `TZ` were passed. Without `--init`, 4,045 zombies piled up against the pids limit, which counts threads.
