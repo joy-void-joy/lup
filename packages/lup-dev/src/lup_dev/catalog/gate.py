@@ -38,6 +38,7 @@ class Gate(Model):
                 "uv.lock",
             ],
         ),
+        Step(name="rules", command=["uv", "run", "lup-dev", "rules", "check"]),
         Step(name="ruff", command=["uv", "run", "ruff", "check", "--ignore-noqa"]),
         Step(name="format", command=["uv", "run", "ruff", "format", "--check"]),
         Step(name="pyright", command=["uv", "run", "pyright", "--warnings"]),
@@ -45,4 +46,9 @@ class Gate(Model):
         Step(name="lint-imports", command=["uv", "run", "lint-imports"]),
     ]
     """The engine first, rebuilt when its bundle is older than its sources, since
-    tests that ask a stale engine fail for reasons the change didn't cause."""
+    tests that ask a stale engine fail for reasons the change didn't cause.
+
+    Then lup's rules, which read that engine: `lup-dev rules check` with no paths
+    checks every file its declaration's roles say is checked, lup's rules on the
+    production and protected modules, as the judge does at each write, so the
+    gate holds them wherever it runs, the judge running or not."""

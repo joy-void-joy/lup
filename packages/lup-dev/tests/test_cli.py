@@ -5,51 +5,21 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-import pytest
 from typer.testing import CliRunner
 
 from lup_dev import cli
 from lup_dev.codescan.directives import IssueRef, Issues
 from lup_dev.codescan.engine import EngineChecker
-from lup_dev.layout import Layout
 from lup_dev.policy.holds import HeldFile, Hold, HoldError, Holds, waiting
 from lup_dev.policy.verdicts import Verdict, VerdictLog
 
 if TYPE_CHECKING:
+    import pytest
     from conftest import Kit, Shell
 
-    from lup_dev.codescan.contract import Checker
-    from lup_dev.codescan.ruff import Linter
-    from lup_dev.policy.checkpoint import Services
+    from lup_dev.layout import Layout
 
 runner = CliRunner()
-
-
-@pytest.fixture
-def state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Layout:
-    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg"))
-    monkeypatch.delenv("CLAUDE_CODE_CHILD_SESSION", raising=False)
-    monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
-    return Layout(state=tmp_path / "xdg" / "lup")
-
-
-@pytest.fixture
-def fakes(kit: Kit, state: Layout, monkeypatch: pytest.MonkeyPatch) -> Kit:
-    services = kit.bench.services.model_copy(update={"layout": state})
-
-    def engine() -> Checker:
-        return kit.engine
-
-    def linter() -> Linter:
-        return kit.linter
-
-    def configured() -> Services:
-        return services
-
-    monkeypatch.setattr(cli, "engine", engine)
-    monkeypatch.setattr(cli, "Ruff", linter)
-    monkeypatch.setattr(cli, "services", configured)
-    return kit
 
 
 def hold(state: Layout, kit: Kit, worktree: Path, commit: str | None = None) -> str:
@@ -244,6 +214,18 @@ def test_rules_check_leaves_excluded_paths_out(
     result = runner.invoke(cli.app, ["rules", "check", "vendor/lib.py"])
     assert result.exit_code == 0
     assert result.output.strip() == "lup checked no files."
+
+
+def test_rules_check_lists_every_file_on_disk_its_names_kept_whole(
+    fakes: Kit, repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (repo / "tests" / "test_core.py").unlink()
+    (repo / "src" / "pkg" / 'odd "name".py').write_text("x = 1  # BAD regex\n")
+    monkeypatch.chdir(repo)
+    result = runner.invoke(cli.app, ["rules", "check"])
+    assert result.exit_code == 1
+    assert 'src/pkg/odd "name".py:1:8 - regex: regex fires here' in result.output
+    assert result.output.splitlines()[-1] == "lup checked 3 files: 1 findings."
 
 
 def test_rules_check_lifts_an_exempt_rule_from_its_paths(
