@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, JsonValue
 
+from lup.sessions.errors import OutputMissingError, ProblemReportedError
 from lup.sessions.results import Rejection, TurnResult, Usage
 from lup.types import Model
 
@@ -31,6 +32,8 @@ class CallRecord(Model):
     error: str | None = None
     """The error's type and message, where the ask failed."""
     rejected: list[Rejection] = []
+    notes: list[str] = []
+    """The remarks the agent attached, answering or reporting a problem."""
     usage: Usage | None = None
     """None where the ask failed before the runtime reported any."""
 
@@ -41,6 +44,13 @@ class CallRecord(Model):
             trace.write(self.model_dump_json() + "\n")
 
 
+class Kept(Model):
+    """What a failed ask's record keeps beside its error."""
+
+    rejected: list[Rejection] = []
+    notes: list[str] = []
+
+
 class Answered(Model):
     """The answer half of a record, read off the ask's result."""
 
@@ -49,6 +59,7 @@ class Answered(Model):
     usage: Usage
     duration: timedelta
     rejected: list[Rejection]
+    notes: list[str]
 
     @classmethod
     def of[T: BaseModel | str](cls, result: TurnResult[T]) -> Answered:
@@ -59,6 +70,7 @@ class Answered(Model):
             usage=result.usage,
             duration=result.duration,
             rejected=result.rejected,
+            notes=result.notes,
         )
 
 
@@ -82,11 +94,23 @@ class Asked(Model):
             system_prompt=self.system_prompt,
             output=answer.output,
             rejected=answer.rejected,
+            notes=answer.notes,
             usage=answer.usage,
         )
 
     def failed(self, error: Exception, duration: timedelta) -> CallRecord:
-        """Return the record of this ask failing with `error` after `duration`."""
+        """Return the record of this ask failing with `error` after `duration`.
+
+        A reported problem keeps the notes the agent attached before reporting, and
+        a missing answer every rejected attempt.
+        """
+        match error:
+            case ProblemReportedError(notes=notes):
+                kept = Kept(notes=notes)
+            case OutputMissingError(rejected=rejected):
+                kept = Kept(rejected=rejected)
+            case _:
+                kept = Kept()
         return CallRecord(
             runtime=self.runtime,
             model=self.model,
@@ -95,4 +119,6 @@ class Asked(Model):
             prompt=self.prompt,
             system_prompt=self.system_prompt,
             error=f"{type(error).__name__}: {error}",
+            rejected=kept.rejected,
+            notes=kept.notes,
         )

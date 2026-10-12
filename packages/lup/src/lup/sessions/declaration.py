@@ -23,11 +23,13 @@ from lup.sessions.contract import Adapter, RawTurn, TurnRequest, seam
 from lup.sessions.errors import (
     AgentUnavailableError,
     OutputMissingError,
+    ProblemReportedError,
     TurnTimeoutError,
 )
 from lup.sessions.layers import SessionLayers
 from lup.sessions.results import TurnResult
 from lup.sessions.submission import Toolbox
+from lup.tools.speaking import note, report
 from lup.tools.submit import Submit
 from lup.types import Model
 
@@ -98,7 +100,7 @@ class Asking(Model, arbitrary_types_allowed=True):
     ) -> TurnResult[T]:
         """Ask for an answer of `output`'s model, through its tool and guard."""
         submit = Submit(output) if isinstance(output, type) else output
-        ran = await self.run(prompt, [], submit)
+        ran = await self.run(prompt, submit)
         answer = ran.toolbox.accepted()
         rejected = ran.toolbox.rejected()
         if answers(answer, submit.input):
@@ -108,6 +110,7 @@ class Asking(Model, arbitrary_types_allowed=True):
                 duration=elapsed(began),
                 session_id=ran.raw.session_id,
                 rejected=rejected,
+                notes=ran.toolbox.notes(),
             )
         attempts = len(rejected) + ran.toolbox.refused_endings
         message = f"no answer was accepted after {attempts} attempts"
@@ -115,30 +118,31 @@ class Asking(Model, arbitrary_types_allowed=True):
 
     async def text(self, prompt: str, began: float) -> TurnResult[str]:
         """Ask for an answer as the final message's text."""
-        ran = await self.run(prompt, [], None)
+        ran = await self.run(prompt, None)
         return TurnResult[str](
             output=ran.raw.text,
             usage=ran.raw.usage,
             duration=elapsed(began),
             session_id=ran.raw.session_id,
+            notes=ran.toolbox.notes(),
         )
 
-    async def run[T: BaseModel](
-        self, prompt: str, tools: list[AgentTool], submit: Submit[T] | None
-    ) -> Ran:
+    async def run[T: BaseModel](self, prompt: str, submit: Submit[T] | None) -> Ran:
         """Run one turn inside the timeout and recovery layers, retrying an unavailable runtime.
 
-        A typed turn serves `submit`, the output tool, beside `tools`.
+        Every turn serves `report` and `note`; a typed one serves `submit`, the
+        output tool, too. A turn that ended with a reported problem raises it.
         """
         layers = self.declaration.layers
         chosen = seam.get()
         adapter = (
             self.runtime_adapter if chosen is None else chosen.adapter(self.declaration)
         )
+        speaking: list[AgentTool] = [report, note]
 
         async def once() -> Ran:
             toolbox = Toolbox(
-                tools=tools if submit is None else [*tools, submit],
+                tools=speaking if submit is None else [*speaking, submit],
                 output=None if submit is None else submit.name,
                 attempts=layers.submission.attempts,
             )
@@ -159,10 +163,14 @@ class Asking(Model, arbitrary_types_allowed=True):
         seconds = None if layers.timeout is None else layers.timeout.total_seconds()
         try:
             async with asyncio.timeout(seconds):
-                return await retrying(once)
+                ran: Ran = await retrying(once)
         except TimeoutError as passed:
             message = f"the ask didn't finish within {layers.timeout}"
             raise TurnTimeoutError(message) from passed
+        problem = ran.toolbox.reported()
+        if problem is not None:
+            raise ProblemReportedError(problem, notes=ran.toolbox.notes())
+        return ran
 
 
 def elapsed(began: float) -> timedelta:

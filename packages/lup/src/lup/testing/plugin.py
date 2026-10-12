@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, override
 import pytest
 
 from lup.errors import LupError
-from lup.sessions.contract import Adapter, RawTurn, Seam, TurnRequest, seam
+from lup.sessions.contract import Adapter, RawTurn, Seam, TurnRequest, guarded, seam
 from lup.testing.fake import FakeAgents
 from lup.types import Model
 
@@ -68,6 +68,7 @@ def pytest_configure(config: pytest.Config) -> None:
     config.option.allow_unix_socket = True
     config.option.allow_hosts = config.option.allow_hosts or "127.0.0.1,::1"
     seam.set(Refusing())
+    guarded.set(True)
 
 
 @pytest.fixture

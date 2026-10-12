@@ -61,3 +61,7 @@ class Seam(ABC):
 
 seam: ContextVar[Seam | None] = ContextVar("seam", default=None)
 """The seam in force; none runs each declaration on its runtime's own adapter."""
+
+guarded: ContextVar[bool] = ContextVar("guarded", default=False)
+"""Whether real turns are refused, as in a test session; a real adapter checks it
+before it starts its runtime, so one built directly in a test refuses too."""

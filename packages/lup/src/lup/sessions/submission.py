@@ -2,13 +2,16 @@
 
 An adapter serves the toolbox's specs, routes each call the model makes to
 `Toolbox.call`, and asks `Toolbox.end` when the model tries to end its turn. The
-calls recorded are the one source of the answer: the last accepted call to the
-output tool is it, and the refused ones are the rejections. A typed turn can't end
-until an answer is accepted, which is lup's own guard, the same on every runtime.
+calls recorded are the one source of what the turn said: the last accepted call
+to the output tool is the answer, the refused ones are the rejections, and the
+`report` and `note` calls are the problem and the remarks. A typed turn can't end
+until an answer is accepted or a problem reported, which is lup's own guard, the
+same on every runtime.
 """
 
 from typing import TYPE_CHECKING
 
+from lup.tools.speaking import Problem, Remark, note, report
 from lup.tools.tool import Accepted, AgentTool, Refused, ToolSpec
 from lup.types import Model, MutableModel
 
@@ -77,13 +80,17 @@ class Toolbox(MutableModel, arbitrary_types_allowed=True):
             case Refused(rejection=rejection):
                 return Answer(text=f"Refused: {rejection.reason}", error=True)
 
-    def accepted(self) -> BaseModel | None:
-        """Return the last answer the output tool accepted, if any."""
-        answers = [
+    def taken(self, tool: str | None) -> list[BaseModel]:
+        """Return the inputs the tool named `tool` accepted, oldest first."""
+        return [
             call.outcome.value
             for call in self.calls
-            if call.tool == self.output and isinstance(call.outcome, Accepted)
+            if call.tool == tool and isinstance(call.outcome, Accepted)
         ]
+
+    def accepted(self) -> BaseModel | None:
+        """Return the last answer the output tool accepted, if any."""
+        answers = self.taken(self.output)
         return answers[-1] if answers else None
 
     def rejected(self) -> list[Rejection]:
@@ -94,9 +101,24 @@ class Toolbox(MutableModel, arbitrary_types_allowed=True):
             if call.tool == self.output and isinstance(call.outcome, Refused)
         ]
 
+    def reported(self) -> str | None:
+        """Return the problem the agent reported instead of answering, if it did."""
+        problems = [
+            taken.problem for taken in self.taken(report.name) if isinstance(taken, Problem)
+        ]
+        return problems[-1] if problems else None
+
+    def notes(self) -> list[str]:
+        """Return the remarks the agent attached to its answer, oldest first."""
+        return [taken.remark for taken in self.taken(note.name) if isinstance(taken, Remark)]
+
     def end(self) -> End | KeepGoing | GiveUp:
-        """Say whether the turn may end, counting a refused ending against the attempts."""
-        if self.output is None or self.accepted() is not None:
+        """Say whether the turn may end, counting a refused ending against the attempts.
+
+        A turn may end once it's answered, or once the agent reported a problem.
+        """
+        answered = self.output is None or self.accepted() is not None
+        if answered or self.reported() is not None:
             return End()
         used = len(self.rejected()) + self.refused_endings
         if used >= self.attempts:
@@ -104,7 +126,7 @@ class Toolbox(MutableModel, arbitrary_types_allowed=True):
         self.refused_endings += 1
         return KeepGoing(
             reason=(
-                f"Call the `{self.output}` tool with your final answer: "
-                "your turn can't end until an answer is accepted."
+                f"Call the `{self.output}` tool with your final answer, or `{report.name}` "
+                "if it can't be answered: your turn can't end until one is accepted."
             )
         )

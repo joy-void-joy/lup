@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from lup.sessions.submission import Answer, End, GiveUp, KeepGoing, Toolbox
 from lup.tools import Allow, Deny, Submit, lup_tool
+from lup.tools.speaking import note, report
 from lup.tools.tool import Accepted, Refused, ToolError
 
 
@@ -86,6 +87,16 @@ def test_a_typed_turn_ends_only_once_an_answer_is_accepted() -> None:
     assert not accepted.error
     assert isinstance(toolbox.end(), End)
     assert toolbox.accepted() == Query(city="Rome")
+
+
+def test_a_reported_problem_ends_a_typed_turn() -> None:
+    toolbox = Toolbox(tools=[Submit(Query), report, note], output="submit", attempts=3)
+    asyncio.run(toolbox.call("note", {"remark": "No city was named."}))
+    asyncio.run(toolbox.call("report", {"problem": "Which city?"}))
+    assert isinstance(toolbox.end(), End)
+    assert toolbox.accepted() is None
+    assert toolbox.reported() == "Which city?"
+    assert toolbox.notes() == ["No city was named."]
 
 
 def test_an_untyped_turn_may_always_end() -> None:

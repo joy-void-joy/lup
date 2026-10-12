@@ -1,8 +1,8 @@
 """The fake: it replaces the adapter, not the agent, and answers from a script.
 
 A test's declaration goes through the real `ask`: its layers, the output tool
-and its guard, the record. Only the turn is scripted. A typed answer is submitted
-through the real output tool, so validation and its `before` hooks run as they
+and its guard, the record. Only the turn is scripted. A typed answer, a note and
+a report go through the real tools, so validation and `before` hooks run as they
 would on a real turn.
 
     fake_agents.answer(Translations, Translations(lines=["Bonjour"]))
@@ -16,6 +16,7 @@ from lup.errors import LupError
 from lup.sessions.contract import Adapter, RawTurn, Seam, TurnRequest
 from lup.sessions.declaration import Declaration
 from lup.sessions.results import Usage
+from lup.tools.speaking import note, report
 from lup.types import Model, MutableModel
 
 
@@ -27,12 +28,22 @@ class Submitting(Model):
     """Submit each of these to the output tool in turn, as the agent would."""
 
     submissions: list[JsonValue]
+    notes: list[str] = []
+    """Remarks noted before submitting."""
 
 
 class Texting(Model):
     """Answer an untyped ask with this text."""
 
     text: str
+    notes: list[str] = []
+
+
+class Reporting(Model):
+    """Report this problem instead of answering."""
+
+    problem: str
+    notes: list[str] = []
 
 
 class Failing(Model, arbitrary_types_allowed=True):
@@ -41,11 +52,14 @@ class Failing(Model, arbitrary_types_allowed=True):
     error: Exception
 
 
+type Script = Submitting | Texting | Reporting | Failing
+
+
 class Queued(Model, arbitrary_types_allowed=True):
     """A script waiting for the next ask of its output model, or of text."""
 
     output: type[BaseModel] | None
-    script: Submitting | Texting | Failing
+    script: Script
 
 
 class FakeCall(Model, arbitrary_types_allowed=True):
@@ -63,13 +77,18 @@ class FakeAgents(MutableModel, Seam, arbitrary_types_allowed=True):
     queued: list[Queued] = []
     calls: list[FakeCall] = []
 
-    def answer[T: BaseModel](self, output: type[T], value: T) -> None:
-        """Queue `value` as the accepted answer to the next ask for `output`."""
-        self.queue(output, Submitting(submissions=[value.model_dump(mode="json")]))
+    def answer[T: BaseModel](
+        self, output: type[T], value: T, *, notes: list[str] | None = None
+    ) -> None:
+        """Queue `value` as the accepted answer to the next ask for `output`, after `notes`."""
+        submitting = Submitting(
+            submissions=[value.model_dump(mode="json")], notes=notes or []
+        )
+        self.queue(output, submitting)
 
-    def answer_text(self, text: str) -> None:
-        """Queue `text` as the answer to the next untyped ask."""
-        self.queue(None, Texting(text=text))
+    def answer_text(self, text: str, *, notes: list[str] | None = None) -> None:
+        """Queue `text` as the answer to the next untyped ask, after `notes`."""
+        self.queue(None, Texting(text=text, notes=notes or []))
 
     def reject_then[T: BaseModel](
         self, output: type[T], invalid: JsonValue, value: T
@@ -82,13 +101,21 @@ class FakeAgents(MutableModel, Seam, arbitrary_types_allowed=True):
         submissions: list[JsonValue] = [invalid, value.model_dump(mode="json")]
         self.queue(output, Submitting(submissions=submissions))
 
+    def report(
+        self,
+        output: type[BaseModel] | None,
+        problem: str,
+        *,
+        notes: list[str] | None = None,
+    ) -> None:
+        """Queue a reported problem, instead of an answer, for the next ask of `output`."""
+        self.queue(output, Reporting(problem=problem, notes=notes or []))
+
     def fail(self, output: type[BaseModel] | None, error: Exception) -> None:
         """Make the next ask for `output`, or the next untyped one for none, raise `error`."""
         self.queue(output, Failing(error=error))
 
-    def queue(
-        self, output: type[BaseModel] | None, script: Submitting | Texting | Failing
-    ) -> None:
+    def queue(self, output: type[BaseModel] | None, script: Script) -> None:
         """Queue `script` for the next ask of `output`."""
         self.queued = [*self.queued, Queued(output=output, script=script)]
 
@@ -96,14 +123,15 @@ class FakeAgents(MutableModel, Seam, arbitrary_types_allowed=True):
         """Return the fake adapter `declaration`'s next ask runs on."""
         return FakeAdapter(agents=self, declaration=declaration)
 
-    def take(self, output: type[BaseModel] | None, prompt: str) -> Submitting | Texting | Failing:
+    def take(self, output: type[BaseModel] | None, prompt: str) -> Script:
         """Remove and return the first script queued for `output`, or raise naming the ask."""
         matching = [each for each in self.queued if each.output is output]
         if not matching:
             name = "text" if output is None else output.__name__
             message = (
                 f"nothing is scripted for an ask of {name}; the prompt was: {prompt}\n"
-                "Script one with `fake_agents.answer`, `answer_text`, `reject_then` or `fail`."
+                "Script one with `fake_agents.answer`, `answer_text`, `reject_then`, "
+                "`report` or `fail`."
             )
             raise UnscriptedAskError(message)
         [first, *_] = matching
@@ -125,14 +153,19 @@ class FakeAdapter(Model, Adapter, arbitrary_types_allowed=True):
         )
         agents.calls = [*agents.calls, call]
         session = f"fake-{len(agents.calls)}"
-        match agents.take(request.output, request.prompt):
-            case Failing(error=error):
-                raise error
+        toolbox = request.toolbox
+        script = agents.take(request.output, request.prompt)
+        if isinstance(script, Failing):
+            raise script.error
+        for remark in script.notes:
+            await toolbox.call(note.name, {"remark": remark})
+        match script:
             case Texting(text=text):
                 return RawTurn(text=text, usage=Usage(), session_id=session)
+            case Reporting(problem=problem):
+                await toolbox.call(report.name, {"problem": problem})
             case Submitting(submissions=submissions):
-                toolbox = request.toolbox
                 for submission in submissions:
                     await toolbox.call(toolbox.output or "", submission)
-                toolbox.end()
-                return RawTurn(text="", usage=Usage(), session_id=session)
+        toolbox.end()
+        return RawTurn(text="", usage=Usage(), session_id=session)

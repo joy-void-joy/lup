@@ -49,6 +49,20 @@ class OutputMissingError(TurnError):
         self.rejected = rejected
 
 
+class ProblemReportedError(TurnError):
+    """The agent stopped without an answer and said what's wrong.
+
+    `problem` is its report, in its own words; `notes` the remarks it attached
+    before reporting. It isn't retried: asking again gets the same problem.
+    """
+
+    def __init__(self, problem: str, *, notes: list[str]) -> None:
+        """Record the agent's report and its notes."""
+        super().__init__(f"the agent reported a problem instead of answering: {problem}")
+        self.problem = problem
+        self.notes = notes
+
+
 class ToolsPresentError(TurnError):
     """The session loaded tools beyond lup's own, so the call stopped before the model ran."""
 

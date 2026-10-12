@@ -12,6 +12,7 @@ from tenacity import stop_after_attempt, wait_none
 from lup import (
     AgentUnavailableError,
     OutputMissingError,
+    ProblemReportedError,
     Recovery,
     SessionLayers,
     TurnResult,
@@ -120,6 +121,33 @@ def test_no_accepted_answer_within_the_attempts_raises_with_every_rejection(
     with pytest.raises(OutputMissingError) as raised:
         asyncio.run(probe().ask("Will it rain?", Forecast))
     assert len(raised.value.rejected) == 3
+
+
+def test_notes_come_back_beside_the_answer(fake_agents: FakeAgents) -> None:
+    fake_agents.answer(
+        Forecast, Forecast(probability=0.6), notes=["Assumes the forecast means London."]
+    )
+    result = asyncio.run(probe().ask("Will it rain?", Forecast))
+    assert result.notes == ["Assumes the forecast means London."]
+
+
+def test_a_reported_problem_raises_with_the_agents_words(
+    fake_agents: FakeAgents,
+) -> None:
+    fake_agents.report(
+        Forecast, "The question names no place or date.", notes=["Tried London."]
+    )
+    with pytest.raises(ProblemReportedError) as raised:
+        asyncio.run(probe().ask("Will it rain?", Forecast))
+    assert raised.value.problem == "The question names no place or date."
+    assert raised.value.notes == ["Tried London."]
+    assert len(fake_agents.calls) == 1
+
+
+def test_an_untyped_ask_can_report_a_problem_too(fake_agents: FakeAgents) -> None:
+    fake_agents.report(None, "There's nothing to translate.")
+    with pytest.raises(ProblemReportedError, match="nothing to translate"):
+        asyncio.run(probe().ask(""))
 
 
 def test_an_unscripted_ask_names_its_model_and_prompt(fake_agents: FakeAgents) -> None:
