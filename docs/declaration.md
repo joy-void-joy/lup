@@ -60,6 +60,7 @@ project = Project(
 - **A collection changes by operations on what's below.** `Rules().drop("x")` is the rules below minus `x`, and `Exemptions().add(…)` the exemptions below plus one. `Kind.default()`, `Kind.only(…)` and `Kind.of(…)` start over (*One grammar for every kind*).
 - **Every collection is a selection; there are no plain lists.** `exempt`, `tests` and `doctests` are `Exemptions`, `TestRoots` and `Doctests`, so a layer adds to them without a handle on the base.
 - **A scalar given replaces what's below,** and the later layer wins.
+- **A model of settings is a layer too** (a `Layer`, as `Session` and `Paths` are): given in a layer, only the fields it sets apply, each as a module's would, and the rest stay as below has them. So `Core(session=Session(auto_memory=True))` keeps lup's removed tools, and `Session(removed_tools=RemovedTools().add(…))` adds to them where they stand. One function, `applied` (`declaration/grammar.py`), is the rule for a module and a `Layer` alike. Any other model in a field, a runner say, is a scalar, and replaces below's whole: a model layering field by field whatever its class would merge two runners of one class, where a reader expects the later one to replace the first. The other alternative, the session settings as fields of `Core` itself, layers the same way without `Layer`, but scatters one part over three fields of the core's.
 - **The overview shows, for every value, which layer set it** (*One page for the whole project*), so nothing implicit has to be decoded by hand.
 
 The verbs on `Modules`:
@@ -140,7 +141,9 @@ The core itself is what every module talks through (`DESIGN.md`, *The environmen
 | Which of the judge's asks reach the operator, until they become proposals | `Project` | `asks` | `"every"` | exists |
 | Protected paths, the operator's documents, scratch, docs, data, excluded | `Core` | `paths` | lup's patterns (`catalog/paths.py`) | A |
 | The hook command | `Core` | none: fixed | | C |
-| Runtimes and their spellings, session settings, the policy's choices | `Core` | `runtimes`, `session`, … | lup's | the launch piece |
+| The room's standard machine: the shell, an agent's everyday tools, what the runtimes call on, editors | `Core` | `packages` | lup's (`catalog/room.py`) | the launch piece |
+| Session settings: the subagents' prompt cache, auto memory, the built-in tools removed from context | `Core` | `session` | lup's (`catalog/room.py`) | the launch piece |
+| Runtimes and their spellings, the policy's choices | `Core` | `runtimes`, … | lup's | the launch piece |
 | Source trees, Python files, `conftest.py`, the Python tools' configuration files and manifests (protected), `.lup/settings/**` (compiled) | `Python` | `paths` | lup's patterns | A, B |
 | How the project runs its tools | `Python` | `runner` | `Uv()` | A |
 | Test roots: the test role, and what the gate checks pytest's `testpaths` against | `Python` | `tests` | `TestRoots.of(Pytest(root="tests"))` | A |
@@ -151,9 +154,11 @@ The core itself is what every module talks through (`DESIGN.md`, *The environmen
 | A module's own rule table | any module | `rules` | none | E |
 | The conditions a `defer` waits on | any module | `conditions` | none | exists, moved in A |
 | Commands | any module | `commands` | the module's own | C |
-| Skills, guidance | any module | `skills`, `guidance` | the module's own | the launch piece |
+| Guidance's sections | any module | `guidance` | the module's own: none of lup's modules has one yet, and `Core` holds an empty one where a project's own section can go; lup's own module names `AGENTS.md` | the launch piece |
+| Skills | any module | `skills` | the module's own | the launch piece, once a module ships one |
+| The room's packages beyond the standard machine | any module | `packages` | none | the launch piece |
 | Rooms | any module | `rooms` | none | the rooms slice |
-| Requirements | each module | `requirements` (a class attribute) | the module's own | A |
+| Requirements, each with the package providing it in the room | each module | `requirements` (a class attribute) | the module's own | A; `package` in the launch piece |
 | The modules it depends on | each module | `requires` (a class attribute) | none | with the first module requiring another |
 
 Package dependencies stay in `pyproject.toml` (*Dependencies*), and so do the project's own changes to ruff and pyright (*lup's settings for ruff and pyright*).
@@ -162,7 +167,7 @@ Package dependencies stay in `pyproject.toml` (*Dependencies*), and so do the pr
 
 A module is a `Module` subclass: its name, its one sentence and the modules it requires as class attributes, its parts as fields, and its own settings as further fields (`Python.runner`, `Ledger.directory`, `Budgets.share`).
 
-- **Its parts are the kinds every module can fill (leaning):** `paths`, `rules`, `gate`, `commands`, `skills`, `guidance`, `rooms`, `conditions`, and `requirements`. Each is a selection, but for `conditions`, an address, and `requirements`, a class attribute (*Requirements*). Inside a module, `Kind.default()` means that module's default for the part, recorded and resolved at load like every selection.
+- **Its parts are the kinds every module can fill (leaning):** `paths`, `rules`, `gate`, `commands`, `skills`, `guidance`, `packages`, `rooms`, `conditions`, and `requirements`. Each is a selection, but for `conditions`, an address, and `requirements`, a class attribute (*Requirements*). A module declares the parts it fills as fields of its own (all but `conditions`, which every module has), so a project's layer on one of lup's modules changes only a part that module holds: a project's guidance section goes on `Core`, or on a module of its own. Inside a module, `Kind.default()` means that module's default for the part, recorded and resolved at load like every selection.
 - **Every collection in a module is a selection, and `Module` enforces it:** a field whose type is a plain collection (`list`, `set`, `frozenset`, `tuple`, `dict` or their `collections.abc` forms, optional or not) fails the module's class definition, naming the module and the field, and steering to a selection kind. A layer would replace a plain list whole, so a base couldn't be extended without restating it. The class attributes (`name`, `requires`, `requirements`) aren't fields, so they're exempt. The alternative, a code rule in the engine refusing such a field at the edit, is left for later, if the verdict log shows agents writing them.
 - **The conditions a `defer` waits on are a part any module fills, by address (leaning):** `conditions="audiobook.conditions"`, the Python module declaring them; lup's stock `PythonAvailable` and `PackageReleased` stay classes a project instantiates. As a field of `Core`'s or `Python`'s, a project's conditions would be an edit of lup's module.
 - **The machinery stays lup's core code:** running a gate, running the engine's rules, judging, checking requirements, rendering guidance. Modules only say what to run.
@@ -210,7 +215,7 @@ The dashboard shows the same page (`DESIGN.md`, *The dashboard*).
 
 ## One grammar for every kind
 
-Every kind lup has defaults for (modules, rules, path roles, gate steps, commands, skills, guidance, runtimes) is a set of named entries the project starts from and changes with the same verbs:
+Every kind lup has defaults for (modules, rules, path roles, gate steps, commands, skills, guidance, packages, the removed tools, runtimes) is a set of named entries the project starts from and changes with the same verbs:
 
 | Verb | Means | Example |
 |---|---|---|
@@ -234,7 +239,7 @@ Every kind lup has defaults for (modules, rules, path roles, gate steps, command
 - **References to the project's own code are strings in entry-point form,** as `[project.scripts]` writes them (`"audiobook.cli:app"`). Loading the declaration then imports none of the project's code, which every `lup` call and every hook does; the gate imports each reference and fails on one that doesn't resolve. Objects (`commands=[studio_cli]`) would import the project's command line, and whatever it imports, at every call.
 - **`Project` and every module forbid fields they don't know** (`extra="forbid"`), so a misspelled field fails the load, naming it. `lup.types.Model` keeps pydantic's default and ignores them, so without it a misspelled field is dropped without a word.
 
-`Selection` is generic over the entry; each kind is a subclass binding its entry type: `Modules`, `Rules` (ids), `Paths` (patterns per role), `Gate` (`Step`s), `Commands` (`Command`s), `Rooms` (addresses), later `Skills`, `Guidance`, `Runtimes`.
+`Selection` is generic over the entry; each kind is a subclass binding its entry type: `Modules`, `Rules` (ids), `Patterns` (one role's patterns, which `Paths` holds one of per role), `Gate` (`Step`s), `Packages` (`Package`s), `Guidance` (`Section`s), `RemovedTools` (names), `Commands` (`Command`s), `Rooms` (addresses), later `Skills`, `Runtimes`.
 
 ## lup declares itself the same way
 
@@ -325,8 +330,8 @@ What it doesn't cover: the narrow `Bash` allow rules in `.claude/settings.json` 
 Requirements are a kind, and each module declares its own. They're tools from outside the project's Python environment; the Python tools lup runs are `lup-dev`'s dependencies instead (*Dependencies*).
 
 ```python
-Requirement(tool="node", version=">=22.18", probe=["node", "-p", "process.versions.node"], why="runs the rule engine")  # CodeRules
-Requirement(tool="uv", why="runs the project's tools")                                         # Python, through Uv()
+Requirement(tool="node", version=">=22.18", probe=["node", "-p", "process.versions.node"], why="runs the rule engine", package="nodejs")  # CodeRules
+Requirement(tool="uv", why="runs the project's tools", package="uv")                          # Python, through Uv()
 Requirement(tool="podman", why="runs each session's container")                                # Core, once launch exists
 Requirement(any_of=["wl-copy", "xclip"], optional=True, why="copies a review to the clipboard")
 ```
@@ -337,7 +342,7 @@ Requirement(any_of=["wl-copy", "xclip"], optional=True, why="copies a review to 
 - **Each module declares its own:** `ffmpeg` for `Narration`, `npm` for lup's own module.
 
 The shape **(leaning)**:
-- **Fields:** `tool`, or `any_of` for alternatives; `version`, a specifier; `probe`, the command printing the tool's bare version, required with `version`; `optional`; `why`; `install`, how to install it, shown when it's missing. Without `version`, the check is that the tool is on the `PATH`.
+- **Fields:** `tool`, or `any_of` for alternatives; `version`, a specifier; `probe`, the command printing the tool's bare version, required with `version`; `optional`; `why`; `install`, how to install it, shown when it's missing; `package`, the Arch package providing it in lup's room, which joins the room's image so the module names it once (*What a launch reads*). Without `version`, the check is that the tool is on the `PATH`.
 - **The version is read with `packaging`** (already `lup-dev`'s dependency): the probe prints a bare version, so nothing hand-parses a tool's banner. Checked on this machine: `node -p process.versions.node` prints `26.10.0`, `uv self version --short` prints `0.12.23`, `podman version --format '{{.Client.Version}}'` prints `6.1.3`.
 - **A module's requirements are a class attribute,** not a field, since they're what the module needs to work: a project declares its own module's, and can't blank out lup's with an `.edit`. The runner's requirements come with the runner, so `Python` with `Plain()` needs no uv.
 
@@ -346,6 +351,16 @@ The shape **(leaning)**:
 **Which Node (leaning): `>=22.18`.** A project's rule table is TypeScript loaded by stripping its types (E). Node's own documentation (`api/typescript.html`, checked) gives type stripping as enabled by default in 23.6.0, backported to 22.18.0, without its experimental warning from 24.3.0 and 22.18.0, and stable from 25.2.0 and 24.12.0. The module hooks E uses (`module.registerHooks`) were added in 23.5.0 and 22.15.0 (`api/module.html`). So 22.18 is the oldest Node that runs both without a flag. The alternative is `>=24.12`, where type stripping is marked stable, at the cost of refusing Node 22, which is still maintained.
 
 **The README's list is generated (leaning):** `docs/requirements.md`, generated from lup's modules' requirements and linked from the README, kept in step by a test as `docs/rules.md` is. The alternative is a generated block inside the hand-written README: generated text inside a hand-written document, which *Rules and conventions* turns down as option (iii).
+
+## What a launch reads
+
+A launch builds the room's image from the declaration, compiles each session's settings from it, and renders its guidance (`docs/launch.md`). The resolved declaration gives it each, as plain values (`Resolved`, `declaration/resolve.py`):
+
+- **Packages:** `Package(name="ffmpeg", why="encodes the episodes")`, an Arch package and its reason, in a module's `packages` part. `Core`'s is the standard machine, the same in every room whatever the host (`catalog/room.py`, each group of packages with its reason); a project changes it with `.edit(Core(packages=Packages().drop("emacs-nox", why=…)))`, and adds its own in a module of its own. The image's packages are every module's own, in module order, then each requirement's `package`: one name from two places is one package, the first's, as a path pattern from two modules is one pattern.
+- **Session settings:** `Core`'s `session`, a `Session` holding the subagents' prompt cache (`"1h"` or `"5m"`, the API's two lifetimes), auto memory, and `removed_tools`, a `RemovedTools` selection of the built-in tools removed from context by name; lup's values are in `catalog/room.py`. A `Session` is a `Layer` (*The verbs on modules*), so a project setting one field keeps lup's others. They're in neutral terms, which each runtime's adapter spells. A second module holding a `Session` fails the load, naming both: a project's sessions run one way.
+- **Guidance:** each module's `guidance` part, a `Guidance` selection of `Section`s: `Section(name="pipeline", path=Path("guidance/pipeline.md"))`, a path from the project's root, or `Section(name="ledger", package="lup_dev.ledger", path=Path("guidance.md"))`, a file a Python package ships, as lup's modules' sections will be. Sections are listed in module order, but where one is placed `before=` or `after=` another's name; a name from two modules fails, naming both. lup's own declaration names `AGENTS.md` as its section, on `LupDevelopment`, after lup's modules'. lup's modules bring no text yet: each section is written with the piece that renders guidance.
+
+The package and the file are named apart, rather than in one string in entry-point form (`"lup_dev.ledger:guidance.md"`): read back, that string would need parsing, and entry-point syntax refuses a hyphen in a file name.
 
 ## lup's settings for ruff and pyright
 
@@ -526,8 +541,8 @@ The rejected alternative: rooms declared in `lup_project.py` and used from code.
 
 Each built with the piece that first reads it; its shape is here so the grammar holds for it.
 
-- **Guidance and skills (the launch piece, which renders them):** each module's `guidance` and `skills` parts: `Guidance.of(Section(name="pipeline", path="guidance/pipeline.md"))` in a project's module, `.edit(Core(guidance=Guidance.default().replace("code", Section(…), why=…)))` for one of lup's. Rendered into one template at launch. Rendering checks that no section names a command the project doesn't serve. A path in a module of lup's is a package resource (`"lup_dev.modules.ledger:skill.md"`).
-- **Runtimes and their spellings, session settings (the launch piece):** `Core`'s `runtimes` (the adapters `cli.py` lists becoming lup's defaults, so a project can bring an adapter of its own) and `session` parts.
+- **Rendering guidance, and skills (the launch piece):** the guidance's sections are declared (*What a launch reads*); rendering them into one text at launch comes with the texts themselves, and checks that no section names a command the project doesn't serve. A section of one of lup's modules is changed as any entry is, `.edit(Core(guidance=Guidance().replace("core", Section(…), why=…)))`. Each module's `skills` part takes the same shape, a `Skill` named and found as a `Section` is, once a module ships one.
+- **Runtimes and their spellings (the launch piece):** `Core`'s `runtimes` (the adapters `cli.py` lists becoming lup's defaults, so a project can bring an adapter of its own).
 - **Nested projects (the gate's nested environments):** a test root in a project of its own runs through the runner from that project's directory (`Pytest(root="studio/tests", project="studio")`), and lup's pyright settings get an execution environment for it, as adlib needed for `studio/` on Python 3.13.
 - **pyright per path** (nori's `reportMissingImports = "none"` under one directory): the project's own `[tool.pyright]` in `pyproject.toml`, with a comment for its reason.
 - **Personal config** (`~/.config/lup/config.toml`): accounts, theme, budget shares, the projects on this machine; between lup's defaults and the project in precedence (`DESIGN.md`). Not a project's, and read by launch, the dashboard and budgets.
@@ -541,9 +556,9 @@ In `packages/lup-dev/src/lup_dev/`. The declaration is a subsystem of its own (`
 |---|---|---|
 | `__init__.py` | The front door for a declaration: every name `lup_project.py` imports, lup's modules among them, in `__all__`, rather than imported from `lup_dev.declaration.…`. It imports only the declaration's models, so loading a declaration costs pydantic and nothing more | A |
 | **`declaration/`** | **What a project declares, and reading it** | |
-| `declaration/grammar.py` | `Selection`: a kind's starting point (the value below, or one it starts over from) and its recorded operations, resolved at load | A |
+| `declaration/grammar.py` | `Selection`: a kind's starting point (the value below, or one it starts over from) and its recorded operations, resolved at load; `Layer`, a model of settings a layer changes field by field, and `applied`, the one rule a module and a `Layer` layer by | A; `Layer` in the launch piece |
 | `declaration/module.py` | `Module`, its parts, its `requires`, and `.edit`; `Modules`, the selection of modules | A |
-| `declaration/kinds.py` | Each kind as a `Selection`: `Rules`, `Paths`, `Gate`, `Commands`, `Rooms`, later `Skills`, `Guidance`, `Runtimes` | A |
+| `declaration/kinds.py` | Each kind as a `Selection`, or a `Layer` holding several: `Rules`, `Paths`, `Gate`, `Exemptions`, `TestRoots`; `Packages`, `Session` and its `RemovedTools`, `Guidance`; later `Commands`, `Rooms`, `Skills`, `Runtimes` | A; the launch piece |
 | `declaration/project.py` | `Project`, holding `modules`, and `asks` until the judge's asks become proposals | A |
 | `declaration/runner.py` | `Runner`, `Uv`, `Plain`; `Prefixed`, a runner kept as its commands, as the judge keeps one | A |
 | `declaration/requirements.py` | `Requirement`, and checking a declaration's requirements all at once | A |
@@ -556,6 +571,7 @@ In `packages/lup-dev/src/lup_dev/`. The declaration is a subsystem of its own (`
 | `catalog/paths.py` | The default path patterns, one list per role, `Core`'s and `Python`'s (exists; gains `compiled`) | A, B |
 | `catalog/gate.py` | `Step` (exists), and the default steps without lup's engine build, which moves to lup's own module; gains the `settings` step | A, B |
 | `catalog/rules.py` | The rules lup's default leaves out, each with its reason: `runtime-mention` until E | A |
+| `catalog/room.py` | The standard machine's packages, each group with its reason, and lup's default session settings; with the image, its base and pinned snapshot | the launch piece |
 | `catalog/tools.py` | `RuffRule` (a code, why it's off, and the lup rule owning its concern, if one does), and lup's settings for ruff and pyright | B |
 
 **Where lup's modules live (leaning):** in `declaration/modules/`, data only, importing nothing but the declaration's models and the catalog, so loading a declaration stays cheap; each module's machinery is in its own subsystem, reached by address (`"lup_dev.ledger.cli:app"`). `Modules.default()` is recorded, and `resolve.py` reads the default list, so `module.py` never imports lup's modules. The alternative, each module declared beside its machinery, would import that machinery at every load.

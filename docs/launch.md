@@ -50,8 +50,8 @@ Measured: a container starts in 0.55 to 0.9 s; an image already built and a CLI 
   ```python
   class Studio(Module):
       packages: Packages = Packages.of(
-          Package("ffmpeg", why="encodes the episodes"),
-          Package("noto-fonts-cjk", why="pages set Japanese text"),
+          Package(name="ffmpeg", why="encodes the episodes"),
+          Package(name="noto-fonts-cjk", why="pages set Japanese text"),
       )
   ```
 
