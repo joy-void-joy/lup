@@ -46,7 +46,11 @@ class Declaration(Model):
     """The runtime's name, as records and errors give it."""
     model: str
     system_prompt: str | None = None
-    """Replaces the runtime's own system prompt; none keeps a minimal one."""
+    """Replaces the runtime's own system prompt; none sends no prompt of lup's own.
+
+    Either way the runtime's own prompt is left out, though a runtime may still add
+    a line of its own.
+    """
     layers: SessionLayers = SessionLayers()
 
 
