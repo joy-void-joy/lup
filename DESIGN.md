@@ -1,540 +1,264 @@
-# lup: design brief for the restart
+# lup: the design
 
-This is the distillation of lup's first incarnation (`joy-void-joy/lup-legacy`, archived; about 4,600 commits from February to October 2026) into a brief for rewriting it. The rewrite takes the name `joy-void-joy/lup`. Nothing is carried from the old code; this brief is the only thing that crosses over. The old repository stays readable as evidence. Decisions are the operator's unless marked as the agent's call; anything not settled is listed under **Open questions**. The evidence behind each part, and the running record of decisions (`DECISIONS.md`), stay in the first lup's local checkout and aren't published; the `tmp/` paths below refer to it.
+lup is the operator's environment for developing projects with Claude Code and Codex, built on a library that any project whose code calls agents can use on its own. This document is the design as it stands, and it's the operator's: changing it is a design decision. Items not yet confirmed by the operator are marked **(leaning)**; anything undecided is under *Open questions*. Facts that were expensive to learn are in `docs/field-notes.md`, and what was tried and left behind, with why, in `docs/graveyard.md`. Each piece's detail is in its note under `docs/`.
 
 ## Purpose
 
-lup is the operator's environment for developing projects with Claude Code, and with Codex. One environment is carried across projects and configured per project by a declaration. It's built on a library, its own package, that any project whose code calls agents can use without the environment.
-
-It serves two parties, and is judged by how well it works for both:
+lup serves two parties, and is judged by how well it works for both:
 - **The operator** steers early, sees every agent and everything waiting on them in one place, and reviews what matters before it lands.
-- **The agents** spend their effort on the task, not on the environment. They know what's theirs to decide and where the walls are, and they're asked how the work felt so the environment keeps improving.
+- **The agents** spend their effort on the task, not on the environment. They know what's theirs to decide and where the walls are, they can say when something is wrong, and they're asked how the work felt so the environment keeps improving.
 
-It is not a framework prescribing how agents work. The first lup grew around a single agent with many tools and a scripted workflow. With current models that shape is obsolete: the work that went best gave the agent a room with walls and room to work, not a corridor.
+It isn't a framework prescribing how agents work. An agent gets a room with walls and room to work, not a corridor.
 
-### The three problems the restart must solve
+**What lup must not become:**
+- **Instructions that pull against each other.** Guidance, skills, hooks and the runtime's own prompt say one thing, which every session resolves the same way.
+- **A system no agent can hold.** The whole may be larger than an agent can hold, as long as each part can be held on its own, stated in one sentence.
+- **The work that pulls side work toward itself.** In a project, lup is small, fast and quiet; when lup is in the way, the project fixes it locally and tells lup (*How lup reaches a project*).
 
-Each comes from the exploration's evidence:
-1. **Too many instructions, resolved differently by each session.** Guidance, skills, hooks and the runtime's own prompt pulled against each other, so each session picked differently, and one agent dismissed a problem another later called "pre-existing".
-2. **A system no agent can hold.** About 170k library lines, 71k devtools lines, 176k test lines, 256 commands, 77 rules and 38 skills. Each agent fixed the slice it saw, and the fixes were local and kept coming back.
-3. **lup pulling every task's side work toward itself.** In downstream projects, most sessions ended up maintaining lup: nearly every commit in live-translator, and every session of a research project after its first week.
-
-The answer is a module-first lup that is small, fast and quiet while an agent works in a project, with each part built on one idea that can be stated in a sentence. The whole may be larger than any agent can hold, as long as each part can be held on its own (see *The environment: core and modules*).
-
-### Who uses it, and for what
-
+**Who uses it, and for what:**
 - **Maintaining a project** (two private projects, and lup itself): sessions with gates, branches and reviews.
-- **Doing a project's work in a room**:
-  - an art studio, where the agent makes art with code;
-  - an audiobook pipeline: given a whole chapter or book, the agent produces the audio in its destination, using a few existing tools, with free rein over the codebase;
-  - a research project running parallel investigations.
-- **Calling agents from code**:
-  - live-translator makes a quick typed call with no tools;
-  - aib forecasts, where outcomes come back later and experiments compare versions.
+- **Doing a project's work in a room:** an art studio making art with code; an audiobook pipeline producing a book's audio with a few tools and free rein over its code; a research project running parallel investigations; nori's certificate-search campaigns.
+- **Calling agents from code:** live-translator's quick typed call with no tools; aib's forecasts, whose outcomes come back later to compare versions.
 
 ## Architecture
 
 ### Two packages: the library and the environment
 
-The split is what a project imports in its production code, against what it uses only while being developed. The environment depends on the library and never the reverse: a session the environment launches is a library launch with more attached.
+One repository, a uv workspace, three packages, dependencies running one way:
+- **`lup`, the library:** what a project's production code imports.
+- **`lup-dev` (`lup_dev`), the environment:** what a project uses only while it's being developed. It ships the one command, `lup`. A session it launches is a library launch with more attached.
+- **`lup-dashboard`, the dashboard:** the one part with its own stack, behind a typed protocol.
 
-- **The library** is what live-translator, the audiobook pipeline and aib's forecaster import:
-  - `Claude`/`Codex` clients with `ask` and typed output, sessions and their history;
-  - tools defined from Python functions;
-  - launching a container for a call that needs one, with its mounts;
-  - rooms (see *Calling agents from code*);
-  - `runs`: durable long-running work;
-  - the outcome loop, shipped as it is;
-  - traces and cost;
-  - `SharedBudget`, with `Throttle` merged into it: request rates, local or shared across processes;
-  - the fake agent, and the guard that refuses real agent and network calls during tests.
+The library never imports the environment, and the environment never imports the dashboard. Python 3.14 or later, for its lazily evaluated annotations. Each runtime is an extra (`lup[claude]`, `lup[codex]`), since each SDK ships its runtime's binary; `lup[testing]` brings the fake and the guard.
 
-  The library emits events, and a dashboard that's running picks them up, so the library never imports the dashboard.
-- **The environment** is what the operator launches to develop a project: everything below.
+### The library
 
-**Packages (tentative).** One repository with a uv workspace holds three packages, with dependencies running one way only:
-- `lup`, the library;
-- `lup-dev` (`lup_dev`), the environment, named for the boundary: what a project uses only while it's being developed. It ships the one command, `lup`;
-- `lup-dashboard`, the dashboard, the one part with its own stack. It depends on `lup-dev` through the typed protocol, never the reverse.
+**One construct runs through it: the declaration of an agent.** `Claude(...)` or `Codex(...)` is a frozen model, and compiles two ways: to SDK options for code, and to a command line and environment for a terminal. Every way an agent starts goes through it: `ask` from code, `spawn`, `lup launch`, lup's spawn tool, a maintaining session.
 
-Python 3.14 or later, for its lazily evaluated annotations. The library's runtimes are the optional extras `lup[claude]` and `lup[codex]` (`docs/library.md`).
+```python
+translator = Claude(model="opus", system_prompt=PROMPT)
+result = await translator.ask(segment.model_dump_json(), Translations)   # TurnResult[Translations]
 
-**The library's shape (tentative; detail in `docs/library.md`):**
-- **Split.** Runtime-neutral code under `lup/sessions/` and `lup/tools/`; one adapter per runtime under `lup/adapters/`.
-- **Results.** `ask` returns a `TurnResult[T]` (`output`, `usage`, `duration`, `session_id`, `rejected`); a failure is always an error.
-- **Layers.** One `layers` field on the declaration carries timeout, recovery (on tenacity), submission and trace.
-- **What the declaration doesn't hold:**
-  - tools are `lup_tool` constructs;
-  - the endpoint and API key are given when the client is created;
-  - resume and history belong to the session holder;
-  - transcripts belong to lup's own writer.
+async with translator.open() as session:                                 # a fresh session each time
+    await session.ask("Now in German", Translations)
+
+narrator = Room(agent=Claude(model="opus"), container=Container(image="studio", mounts=[...]))
+episode = await narrator.ask(f"Narrate {chapter}", Episode)              # waits
+job = await narrator.spawn(f"Narrate {book}", Episode)                   # outlives the caller
+narrator.launch()                                                        # a terminal in the same room
+```
+
+- **Asking (`docs/library.md`):**
+  - `ask(prompt, Output)` returns a `TurnResult[T]` (`output`, `usage`, `duration`, `session_id`, `rejected`, `notes`). A failure is always an error, classified from what the runtime reports in structured form, never from message text.
+  - **Typed answers come through `submit`,** an ordinary lup tool whose input is the output model, on both runtimes. Validation and its `before` hooks (`Submit(Forecast, before=[cites_sources])`) refuse an answer with the reason, and the agent corrects it within its turn. A typed turn can't end until an answer is accepted or a problem reported: lup's own guard, a stop hook on one runtime and a continuation on the other.
+  - **Every agent can speak to whoever asked, through lup's speaking tools.** They act on nothing, so they're served even where an agent has no other tool:
+    - `report(problem)` stops without an answer and says what's wrong; `ask` raises `ProblemReportedError` with the agent's words;
+    - `note(remark)` attaches an assumption, doubt or counterargument to the answer, read in `TurnResult.notes`.
+  - **Layers,** one field on the declaration: timeout, recovery (retrying an unavailable runtime, on tenacity), submission (attempts), trace (one `CallRecord` per ask, in full). **(leaning)** A wait for a spent usage window to reset, on by default and bounded by the timeout.
+  - **What an ask can do is a guarantee about what can happen:** an ask from code can't run commands, touch files, reach the network or start agents; it can only call lup's tools. Each adapter configures its runtime for it and checks it on every call where the runtime lets it.
+  - **Out of the operator's history:** calls from code persist no session and load no user settings.
+  - **(leaning)** Model ids are checked types with portable tiers, and an effort a model can't take is refused at declaration.
+- **Sessions (leaning):** `async with agent.open(resume=None)` gives a fresh session. `session.ask()` returns a lazy `Turn[T]`: awaited for its result, iterated for its content, with `live()` and `interrupt()`. An ability only one runtime has is a type (`steer()` exists only on Codex's turn). History comes from the runtime's own record; lup's writer keeps the copy with secrets scrubbed. A refused resume raises. On Codex, a conversation declares its output types when it opens, since a thread's tools are fixed when it starts.
+- **Tools:** `@lup_tool` makes a typed async Python function a tool, with `before` hooks. Where it runs is declared on the tool: `runs="inside"` (the default) is the agent's side of the wall, which with no container is the caller's process; `runs="outside"` is the caller's process on the host, the deliberate openings in the wall (`submit`, publishing, anything needing a credential). lup serves its tools through its own MCP server, so its handler sees and counts every call. **(leaning)** A large result is written to a file and the agent gets its path and a preview; a tool server can be kept out of tool search; a third-party MCP server can be passed through.
+- **Rooms (leaning):** a room wraps an agent with a wall: `Room(agent=…, container=…)`. Both are `Agent`s with the same verbs, so swapping runtimes is one field and `lup launch claude audiobook` picks the runtime at launch. A room's image is built with the project installed. Its own toolkit is the image's CLIs and scripts, which the agent runs and may extend. Publishing stays outside the room, in host code.
+- **Runs (leaning):** durable work in a directory that can't report the wrong run:
+  - one subdirectory per run with a `current` pointer swapped atomically, so a reader never sees another run's files;
+  - `open()` mints the run's id and writes `starting` before any slow pre-work; a refused pre-work records its ending under that id;
+  - one append-only event log per run, from which state, counts and the ending are derived;
+  - every unit ends in a typed record (landed, failed, killed with its deadline and last report, abandoned, reused), and reuse is per unit, by its own fingerprint;
+  - a follower pins the run's id when it attaches;
+  - a unit reports progress, a run can carry its own detail model, and a unit can wait on other units and on an inbox answer.
+- **Also:** typed events for anything long-running, which the dashboard follows; `SharedBudget` for request rates, local or across processes; the outcome loop (a module, below); the fake agent and the guard (`lup.testing`).
+- **Delegation from code** is a nested call through the client, or lup's spawn.
+- **Auth:** the CLI login by default; a product other people use declares an API key.
 
 ### The environment: core and modules
 
-The whole may be larger than any agent can hold, as long as each part can be held on its own:
-- the core is small enough to hold alone;
-- every module uses only the core's public API, never another module or the core's internals;
-- dropping each module is tested, one test per lup module: the declaration dropping it serves none of its parts, and lup's tests pass (in the first lup, removing one module kept breaking another).
+**The core** is what every module talks through, small enough to hold alone:
+- the declaration (`lup_project.py`) and its modules;
+- the one hook, which maps each runtime's events onto a few neutral ones;
+- **one host service,** taking typed requests over a socket mounted into each container, with modules registering handlers: spawn's launcher, credential actions, secrets, host companions, budget control, the dashboard's backend;
+- **the inbox,** one per party (*Sessions*);
+- the dashboard's protocol;
+- **(leaning)** launch, judging writes and worktrees are default modules rather than core (*Open questions*).
 
-The parts that cut across everything (the one hook, the dashboard's protocol, the declaration) sit in the core, so the core's size is the number that matters. lup's parts are modules a project selects in its declaration (`docs/declaration.md`).
+**Modules,** each one line to drop, each with its sentence:
+- `Python`: how a Python project is run, tested and checked: the runner, test roots, the gate's Python steps, lup's settings for ruff and pyright.
+- `CodeRules`: lup's rule selection and exemptions.
+- `coordination` (requires `ledger`): the roster, which fills itself, and handoffs.
+- `ledger`: the one place for open work, a view over what exists (GitHub issues, the inbox, handoffs, the felt notes).
+- `git-workflow`: landing, pull requests, and checking a merge resolution kept both sides.
+- `budgets` (requires `accounts`): shares, pace, pauses and spawn caps.
+- `accounts`: logins, kept in step across containers when one renews; usage windows and their bars on the dashboard; downloading conversations from claude.ai and ChatGPT. The browser and its cookies stay on the host.
+- `setup`: the integrations a project declares, set up from the command line or a dashboard pane, their secrets kept in the host's secret store.
+- `release`: version bumps and the release flow.
+- `resolver` (likely requiring `git-workflow`): open work grouped into concerns, each approved by the operator, worked in its own worktree, merged onto one branch and rechecked: a planner plus a run.
+- `tracked-repositories`, `meta`: *Open questions*.
+- the outcome loop, off by default, for graded projects: attaching outcomes to runs, grouping runs into arms, comparing them; the project decides what success is.
+- reflection, requiring the outcome loop: *Open questions*.
 
-- **`Core`** (required: dropping it fails the load) holds path roles and protected paths, the one hook, the policy, runtimes and session settings, and the core's machinery:
-  - launching sessions, with containers, mounts and accounts;
-  - the wall and holds;
-  - judging writes, running the gate and the engine's code rules;
-  - compiling the harness at launch;
-  - worktrees, commits and merging;
-  - updates and migrations;
-  - the dashboard;
-  - the "how it felt" notes;
-  - lup's tools for spawning, messaging, waiting and asking.
-- **Modules, on by default,** each one line to drop:
-  - `Python`: the runner, test roots and the gate's Python steps, and lup's settings for ruff and pyright;
-  - `CodeRules`: lup's rule selection and exemptions;
-  - `coordination`: roster, messages, handoffs;
-  - `ledger`: the one place for open work;
-  - `git-workflow`: landing and PRs.
-- **Other modules:**
-  - `budgets`: the operator's control over shares, pace, pauses and spawn caps;
-  - `resolver`;
-  - `release`;
-  - `tracked-repositories`: today's `sync`;
-  - `setup`;
-  - `meta`;
-  - `realtime`: wanted;
-  - `conversation`;
-  - **reflection** (open).
-- **What the library holds and the environment serves:** `runs` and the outcome loop are the library's, callable from code; making one a command is the project's own wiring, or `lup-dev`'s job. Rooms are the library's; the free mode is a room a project declares, and a tidy pass follows a free run that changed shared code.
-- **Corpus merges into the ledger** as a kind, for reports that regenerate and stay current, as the research project used it.
+**Modules may depend on modules, declared** (`requires = [Accounts]`). The loader refuses dropping a required module while keeping one that requires it, naming both, and refuses a cycle; dropping each module is tested together with whatever requires it.
 
-**Everything is a selection, never an on/off switch.** At every level (modules, rules and rule families, commands, skills, hooks), a project says "take these" or "everything except these". Overrides are operations on lup's defaults, one grammar of methods for every kind: `Kind.default()`, `.all()`, `.only()` and `.of()` to start from, `.add`, `.drop` and `.replace` to change, and `.edit` on modules. There's no set arithmetic: `set-shape` refuses the literal. A `.drop`, `.edit` or `.replace` may carry its reason, shown on the overview. Modules and selections are plain values a project can bind, import and build on. How a layer (a shared base, the project) builds on what's below it is slightly open (`docs/declaration.md`, decision 51): an edit changing only the fields it sets, with `.current()` to start from the value being edited, or everything a base or a project writes being a layer that names only what it changes.
+**Everything is a selection, never an on/off switch.** At every level (modules, rules, commands, skills, hooks), a project starts from lup's defaults and changes them with one grammar: `Kind.default()`, `.all()`, `.only()`, `.of()`, then `.add`, `.drop`, `.replace`, and `.edit` on modules, each change carrying its reason where given (`docs/declaration.md`). How a shared base and a project layer on lup's defaults is slightly open (`docs/declaration.md`, decision 51).
 
-**A project extends anything lup declares as easily as lup declares it.** Not only selecting and overriding lup's defaults: a project adds its own of every kind, in its declaration or its own code, in the same form lup uses for its own, with no fork and no change upstream. Every kind is filled by the selected modules, lup's and the project's alike, and a project's module is a `Module` subclass written as lup's are. A rule is an entry in a table one of the project's modules names, written as lup's are and loaded when the engine starts; a command, and a catalog's entries (path roles, protected paths, conditions, a runtime's spellings) are the project's own beside lup's. The tables are protected and read from the integration branch's tip, as the declaration is, so what a project adds that the judge runs is reviewed before it runs. To keep it true, lup's defaults are its modules, declared through the same public surface a project uses, so nothing lup declares is out of a project's reach, and lup's repository declares its own specifics in its own `lup_project.py`: lup uses lup.
+**A project extends anything lup declares as easily as lup declares it:** a project's module is a `Module` subclass written as lup's are, filling the same kinds (rules, commands, path roles, protected paths, rooms, panels). lup's defaults are its own modules, declared through the same surface, and lup's repository declares its own specifics in its own `lup_project.py`.
 
 ### How lup reaches a project
 
-- **A project holds its own code, a dependency on lup, and one declaration.** The declaration is `lup_project.py` at the project's root (or the package `lup_project/`, once the project's own modules outgrow one file), found without a pointer. It holds the project's modules: lup's with the project's changes, and its own (`Narration` here).
-  ```python
-  project = Project(
-      modules=Modules.default()
-      .add(Narration(), Budgets(share=0.5))
-      .edit(Ledger(directory="work"))
-      .edit(CodeRules(rules=Rules.default().drop("collection-loop", why="the pipeline's stages are loops by design")))
-      .drop("coordination", why="one agent at a time here"),
-  )
-  ```
-- **The declaration says which paths are what, and lup's settings for ruff and pyright are generated from it.** It declares the paths that are code (held to lup's rules, ruff and pyright), tests (ruff and pyright only) and excluded (held to nothing), beside the protected ones. lup writes only files of its own (`.lup/settings/ruff.toml` and pyright's, committed), generated from its defaults and the declaration. The project's `pyproject.toml` extends them through one pointer per tool and stays the project's: its own settings are layered on top by the tools themselves, and lup never writes it after `lup new`. pytest's settings and import-linter's contracts are the project's own. The gate fails when lup's files are stale or a pointer is missing. Dependencies stay in `[project]`, and `lup project` shows everything about the project on one page. So no project copies lup's tool settings, and an update to lup reaches them by regenerating.
-- **Requirements.** Each module declares the tools it needs from outside the project's environment: Node for `CodeRules`, uv for `Python`, podman for `Core` once launch exists. They're checked strictly and all at once when a session launches and when the gate runs. A missing required one stops the launch or the gate, naming the tool, the module and how to install it; a missing optional one turns its feature off, said once. The README's list is generated from them. Node is installed on the system.
-- **Nothing of lup is copied into a project.** There's no copied half and no lup tests in projects. Changes to lup go upstream; whoever wants a different lup forks it.
-- **Runtime trees (`.claude/`, `.codex/`) are built at launch and never committed.** Wherever the launch places them they're read-only, and an attempt to edit one is refused with a pointer to the source to change. lup's own docs stay committed in lup and are served to projects from the installed version (`lup docs <topic>`).
-- **One CLI, `lup`, shipped by `lup-dev`; the library ships none.** It's built from the selected modules' commands, loads only the command invoked, and stays fast under load; today each call costs about 10 seconds. Only the hook command is fixed. Published commands are the project's `[project.scripts]`, installed with its package under its own name, listed by `lup --help` and never importing `lup_dev`; the declaration's commands are development-only.
-- **A new project starts with `lup new <name>`.** It runs `uv init`, then writes `lup_project.py` with `Modules.default()`, the pointers to lup's settings, pytest's defaults and a first commit, and the project passes the gate as made. lup itself has its own declaration, since it's developed with itself.
-- **Precedence:** lup's default, then the person's config (`~/.config/lup/config.toml`), then the project, then an argument. Personal matters live in the person's config: accounts, theme, budget shares.
-- **An update is a version bump plus automatic migrations.** It stops only for what a person must decide. `Rules.default()` takes the rules a release adds to the default and `Rules.only(…)` doesn't, since a selection is recorded and resolved at load. An update that brings one lists its findings in the project and asks whether to exclude it.
-- **Releases only, never pins to branches.** A project never edits lup in place and never points at a branch of lup. When lup is in its way:
-  - **It fixes the problem locally**, through its declaration's overrides or in its own code, with whatever unblocks its task. The local fix may be ugly: the generic one is lup's job.
-  - **It declares an upstream candidate** beside the fix: the friction, the local fix or a pointer to it, the evidence, and the lup version it was written against. A candidate is the dual of a migration: a migration is lup telling a project what changed, a candidate is a project telling lup what it needed.
-  - **The adopting pass** (`/lup:sync`) runs in lup's repository when the operator starts it, never automatically. An agent reads the registered projects' candidates side by side, groups them by the construct they touch, designs overlapping needs as one construct, consults the operator, and adopts. It gates everything together, checking the registered downstream projects.
-  - **The release that adopts a candidate ships a migration** that removes each project's local fix and its candidate in the same step. A candidate lup declines stays local, with the decline recorded on it so it isn't proposed again.
-  - **Nothing waits on adoption**, since the project already works.
-  - **The declaration's override surface decides how much friction can take this path.** A defect in the core hook or the launcher can't be patched from a project; it becomes a "how it felt" note with no fix attached.
-
-  The candidate's format, and keeping candidates and notes from piling up, are open.
-- **The README is rewritten whole:** how to use lup at all, and what each module does. The template's sample application moves to `examples/`.
+- **A project holds its code, a dependency on lup, and one declaration,** `lup_project.py` at its root (or the package `lup_project/`), found without a pointer (`docs/declaration.md`).
+- **Paths have roles** (code held to lup's rules, ruff and pyright; tests to ruff and pyright; excluded; protected), and lup's settings for ruff and pyright are generated from them into lup's own files (`.lup/settings/`), which the project's `pyproject.toml` extends by one pointer per tool. lup never writes the project's `pyproject.toml` after `lup new`; the gate fails when lup's files are stale.
+- **Requirements:** each module declares the tools it needs from outside the project's environment; they're checked all at once when a session launches and when the gate runs, a missing one named with its module and how to install it.
+- **Nothing of lup is copied into a project.** Runtime trees (`.claude/`, `.codex/`) are built at launch and never committed; lup's docs are served from the installed version (`lup docs <topic>`).
+- **One CLI, `lup`,** built from the selected modules' commands, loading only the command invoked. A project's published commands are its own `[project.scripts]`.
+- **`lup new <name>`** makes a project that passes the gate as made.
+- **Precedence:** lup's default, then the person's config (`~/.config/lup/config.toml`: accounts, theme, budget shares, the projects on this machine), then the project, then an argument.
+- **Releases only, never pins to branches.** An update is a version bump plus migrations, stopping only for what a person must decide.
+- **When lup is in a project's way,** the project fixes it locally, through its declaration or its own code, and declares an upstream candidate beside the fix: the friction, the fix, the evidence, the lup version. The adopting pass, run in lup's repository when the operator starts it, designs overlapping needs as one construct; the release that adopts a candidate ships a migration removing each project's local fix. Nothing waits on adoption. **(leaning)** A defect in a component lup doesn't own (a runtime, a tool) is declared the same way, as a report ready to file with its vendor.
+- **The README says how to use lup and what each module does;** sample applications live in `examples/`.
 
 ### Sessions
 
-- **Two roles.** A session either maintains a project (gates, workflow) or does the project's work in a room (container as the wall, a toolkit the agent may extend, short guidance). Leaning: a maintaining session is itself a room that lup declares, with the gate and git in its toolkit, code rules and holds as its hooks, and a worktree as its mount, so the two roles are two room declarations. To check: whether maintaining needs anything a room can't declare.
-- **lup's spawn replaces the native `Agent` tool, on both runtimes.** Every worker is a top-level session with its own identity, budget share and place on the dashboard, under the agent that spawned it. A spawn can return the worker's result in the same call or leave it detached.
-  - Forks use `--resume <parent> --fork-session`.
-  - Claude Code's built-in types run as top-level sessions with `--agent` (measured: `--agent Explore` narrows the tools to read-only).
-  - lup's own agent types are definitions in its Python API.
-  - Only lup's spawn lets a Claude session hand work to a Codex worker, or the reverse.
-  - **Work in another project is spawned there.** "Fix nori's core bug" from a lup session spawns a worker in nori's worktree, which runs under nori's own declaration, rules and reviews and reports back, so nobody quits and remounts.
-    - A host-side lup service launches it. The asking agent never leaves its container, and can start only sessions, with typed arguments, never arbitrary host commands. So spawning is automatic: the worker shows on the dashboard, and budgets bound it.
-    - A session writes only in its own project. The projects it knows are mounted read-only, so it can read how one works and brief the worker well.
-    - It needs registered projects, so a name like `nori` resolves to a repository.
-  - Why not native subagents: with `subagentPromptCacheTtl: "1h"` they get the 1-hour cache too, so cache rebuilds don't separate the two. What does is seeing, pausing, messaging and budgeting every worker as part of the whole. Keeping native `Agent` for short jobs stays open, to settle by measuring the new spawn (Open questions).
-- **Native tools for the agent's own work; lup's tools for everything between agents, and between an agent and the operator.**
-  - Kept native: Edit, Read, Bash, `apply_patch`, search, web, background processes, the agent's own task list, `Skill`.
-  - Denied by default: `Agent`, `SendMessage`, `ListAgents`, `EnterWorktree`/`ExitWorktree`, and Codex's own spawn.
-  - `AskUserQuestion` is denied once lup's inbox exists, and the agent is pointed at lup's own ask tool, which reaches the inbox. Until then it stays in the terminal, in sessions the operator is attached to.
-- **A review queues; the agent carries on.** A change waiting for the operator's review is parked in the queue and the call is refused at once, saying so. The agent carries on with other work, hears the answer through a wait it runs in the background, and repeats the exact call once approved. Reviews pile up while the agent works, and the operator answers them as a batch, as in the first lup, rather than one at a time at the agent's pace (the bridge held each call until answered, and the operator found it slow).
-  - **Bundling (wanted, for the judge):** several files the operator must see are proposed as one review, approved or declined together, as the first lup's `review propose` did (its `devtools/review/propose.py` is the evidence).
-  - **The approved change is carried out for the agent (wanted, for the judge; slightly open).** The agent's own background waiter, in the agent's environment, applies an approved write with the exact content the operator saw, or runs an approved command where the agent would have, and prints what happened: the agent hears the answer and the result together, and repeats nothing. The judge accepts the applied change in the same step, since it owns both the ask and the accepted state; a bundle's files apply all at once or not at all. The dashboard never runs an agent's call: it runs on the host, outside the wall. Until the judge carries its own asks, the bridge keeps "repeat the exact call", because a write the interim hook's waiter applied would reach the judge as a production file made through the shell, which it refuses.
-    - **Open: a race.** Applying an approval while the agent keeps working can collide with the agent's own later changes to the same files, or run a command whose context has moved on. The first lup applied an approval only where every recorded file still stood as recorded, and let the proposal go stale otherwise; whether that guard is enough, or the agent should apply it itself, is to settle when the judge carries its asks.
-- **A wait for an answer only the operator or a worker can give is a hold inside the tool call,** released by that answer, so the agent doesn't have to manage it: asking the operator a question, waiting on a worker. It is lup's own tools that hold.
-  - Holds are wanted: they pause the agent so the operator can catch up.
-  - When a held call returns, its result says it was held and carries the operator's comment, so the agent knows it was seen and whether to change course.
-  - A hold answered within the hour keeps the agent's cache. One that runs past the hour costs a rebuild, which is accepted: the agent is never put in an automatic loop re-entering a wait to keep its cache warm.
-  - A main session stays free to talk and is woken when the answer comes.
-- **Coordination is light.**
-  - The roster fills itself from what a session is doing (its brief, its branch, the paths it changed), with no describe calls.
-  - Messages are sent with a lup tool and received at the next tool call (through the one hook) or with a blocking wait.
-  - The operator is a peer on the roster. Telling them something is a message to a peer, with a `kind` (question, disagreement, note) that lets the dashboard show disagreements apart from status. The tool's description names the case: if an instruction seems wrong for this case, say so, without stopping.
-  - Handoffs go to the ledger, and a handoff can directly spawn the agent that picks it up.
-  - Conflicts are detected when writes merge back, instead of through path locks.
-- **Session settings:**
-  - subagents and workers get the 1-hour prompt cache (`subagentPromptCacheTtl: "1h"`);
-  - five unused built-in tools are removed from context (`Artifact`, `SendFeedback`, `Workflow`, `ScheduleWakeup`, `ReportFindings`);
-  - auto memory is off on both runtimes;
-  - compaction stays at the runtime's default (leaning): long contexts are kept, and budgets keep their spend in check.
-
-  All are declared defaults a project can change.
-- **Isolation between sessions (open).** Leaning: a worktree per agent, with environments hardlinked from a cache on the same filesystem. The write layer (`open/write-layer.md`) isn't ruled out, but the operator isn't convinced, and it has two problems to check first:
-  - overlayfs leaves changes to its lower layer undefined while the overlay is mounted, so a layer can't sit on the live checkout other agents merge into. It needs a frozen snapshot per base commit, each with its own environment, which is the worktree alternative with an overlay on top.
-  - Showing a layer on the host at `tree/<name>` exposes what the agent wrote there, its own `.git` (with a `core.fsmonitor`) or `.vscode/` settings among it, to the operator's editor before any review. That's the worktree-pointer escape the first lup closed.
-
-  What a layer would add over worktrees: background writers and gitignored files are captured, and a whole layer can be discarded.
+- **Two roles:** maintaining a project, or doing its work in a room. **(leaning)** A maintaining session is itself a room lup declares, with the gate and git in its toolkit, code rules as its hooks, and a worktree as its mount.
+- **lup's spawn replaces the native `Agent` tool, on both runtimes.** Every worker is a top-level session with its own identity, budget share and place on the dashboard, under the agent that spawned it. A spawn returns the worker's hand-back in the same call or leaves it detached. Work in another project is spawned there, under that project's declaration, by the host service. A worker's hand-back is typed: its result and `how_it_felt: str`, which its turn can't end without.
+- **Native tools for an agent's own work** (Edit, Read, Bash, `apply_patch`, search, web, its own task list, skills); **lup's tools for everything between agents, and between an agent and the operator** (spawn, message, wait, ask, propose, and the speaking tools). The native `Agent`, messaging and worktree tools are denied by default. **(leaning)** Code-intelligence tools for an agent's own work: find references, rename a symbol, hover, go to definition.
+- **Approval: the agent proposes, and nothing builds on an unapproved design.**
+  - Writing uses the native tools: a new file lands where it belongs, so its tests can import it.
+  - `propose(paths, why, wait)` puts a coherent design before the operator, with the agent's reasons. With `wait`, the call holds until answered; without, the answer reaches the agent through its inbox at its next call.
+  - What needs a proposal: a new production file, a whole-file overwrite, a public-API change, an added suppression, a protected path. Suppressions and protected paths hold at the edit itself.
+  - **The dependency guard:** an edit that imports or uses an unproposed design is refused ("propose `a.py` first"); one that uses a proposed design still waiting is held until it's answered. The agent chooses when to propose, never whether.
+  - At the end of a turn, unproposed design changes are listed; landing refuses a branch with one, or with one declined.
+  - A held call is invisible to the agent: it returns once answered, with the operator's comment. A hold under an hour keeps the cache; past it, the context rebuilds, and no loop re-enters a wait to keep it warm.
+  - The dashboard shows each agent's unproposed work as it forms, as "in progress, not asking you"; stepping in is the operator's choice. The verdict log records how much code preceded each proposal.
+  - **(leaning)** A declined proposal stays in the worktree for the agent to revise; the guard keeps anything from being built on it.
+- **The inbox:** every party has one, the operator and each agent.
+  - Everything that wakes someone lands in an inbox, with its reason: a message, a proposal's answer, a worker's result, a reminder, a timer. A hold is a wait on one's inbox.
+  - Messages are received at the next tool call, through the one hook, or with a blocking wait. Each answer is told once, never again.
+  - Batching bursts and not talking over the operator are rules of how an inbox delivers, built so they can't starve replies. Reminders and follow-ups are lup tools, cancelled when the operator speaks.
+  - The operator is a peer on the roster: telling them something is a message with a `kind` (question, disagreement, note, problem). Notification channels reach them away from the dashboard.
+- **Coordination is light:** the roster fills itself from what each session does, and conflicts are found when writes merge, not through locks.
+- **Session settings,** declared defaults a project can change: workers get the 1-hour prompt cache; unused built-in tools are removed from context; auto memory is off on both runtimes; compaction stays at the runtime's default.
+- **Isolation between sessions:** a worktree per agent, environments hardlinked from a cache (*Open questions*).
 
 ### Budgets
 
-- **Shares per project or agent over a time window,** torrent-style.
-- **A pace limit for unattended runs,** so usage stays under the 5-hour window instead of hitting it and stopping abruptly.
-- **Pausing low-priority agents through the spawn hierarchy,** so pausing a parent pauses its subtree.
-- **Caps on how much a subtree may spawn.**
-- **An automatic resume when a window resets.**
-
-The control runs as its own small host process. A hold within the hour keeps its cache; past it, the context rebuilds. Throttling trades time, not tokens.
+Shares per project or agent over a time window; a pace limit for unattended runs, so usage stays under the window instead of hitting it; pausing low-priority agents through the spawn hierarchy; caps on how much a subtree may spawn; an automatic resume when a window resets. It runs as handlers of the host service, reading usage windows from `accounts`. Throttling trades time, not tokens.
 
 ### Policy
 
-- **Walls plus protected-path review, and no verdicts on commands** (leaning yes). Inside the container a command simply runs. Effects that can't be undone are stopped by a wall where they pass. Protected paths are reviewed before they land. The shell-spelling analyzer, per-command verdicts and `dev policy` go.
-- **Every write path is judged the same way, by what it produces.** Whatever the tool (Edit, Write, a `sed`, a script, `apply_patch`), code rules and asks apply to the content it produces. No command's spelling is parsed.
-  - **`Edit` and `Write` are judged before they land,** on the content they would produce, so a refused edit never touches the file.
-  - **Everything else is judged at a checkpoint.** lup keeps one accepted state per worktree, compares the worktree with it, and judges whatever changed, whichever call or process made it. This covers parallel calls and writes landing after their call.
-  - **A checkpoint** runs whenever a call finishes and no other call is running, and again at turn end. It's built from four runtime-neutral events (session started, call started, call finished, turn ended), so it works the same on every runtime (`docs/judging-writes.md`).
-- **lup allows, asks, or refuses.**
-  - **allow:** tests, scratch, docs and data at any size, and any production edit the code rules pass. There's no line count: in auto mode, edits inside the working directory skip the classifier anyway, and the first lup's 3-line limit mostly made agents split edits. The allow keeps routine work from interrupting, which is what the operator relied on in the first lup.
-  - **ask:** a change to the design waits for the operator: a new production file or a whole-file overwrite (the one that matters most to them), a protected path, an added suppression, and a public-API change (a package root's names, a new class, a changed signature of a definition that existed when the session started). These show design better than a line count does. On Claude Code it's the runtime's own prompt before the call. Where a runtime can't ask before a call, the change is held at the checkpoint instead.
-  - **refuse:** a code rule's finding, or a design change that bypassed the ask (a new file made through the shell). The change doesn't land, or is put back, with the agent's version saved.
-  - **Every verdict is logged** (tool, path, outcome, reason), so how often lup asks can be measured and tuned.
-
-  The point of an ask is that the operator understands the codebase's overall design and redirects early when an approach looks shaky or differs from what they had in mind. Guidance never teaches splitting a change to slip under a limit.
-- **A container is required whenever an agent can run code or write files.**
-  - **Interactively, without a container engine:** there's no lup policy, only the runtime's own permission mode, and launching that way takes an explicit `--dangerously-…` flag.
-  - **From code:** a call with Bash and `sandbox="none"` raises, unless it sets a `dangerously_…` flag. A call with no tools needs no container.
-  - **Mounts are one declaration.** Inside a container they're bind mounts. With `sandbox="none"` they become the allow-list for the file tools.
-- **Leaving the wall is a request with a typed reason (tentative; the reasons are open).** The first lup's `# lup: escalate[sandbox]: <why>` comment becomes a lup tool call whose reason is a field, so nothing parses a command. Each reason gets its own outcome, a selection like everything else. The reasons below are the ones agents actually gave for `escalate[sandbox]` in the first lup's transcripts:
-  - **work in another project:** lup's spawn there, automatic (see *Sessions*);
-  - **credentials** (push, opening a pull request, publishing): a host service that does that one action, asked per action;
-  - **a protected path** (runtime settings, generated harness files): the ordinary ask;
-  - **a tool or device the container lacks** (a pinned toolchain under the home directory, a GPU, audio, a display): a reviewed command on the host, plus a note that the room's image should carry it;
-  - **repairing the environment** (git pointers after a repository moved): a reviewed command on the host;
-  - **anything else:** a free-text reason, always reviewed. Unknown problems are the case the list can't foresee: once, nobody realized the sandbox hid the GPU, and the agent had to escalate every few commands to debug it.
-
-  Three things keep that case from turning into a prompt per command (tentative):
-  - **Answers can be scoped.** The operator can answer one request "for this session, for this reason" as well as "once".
-  - **Repeats are the signal.** Every escalation is logged with its reason. The same reason coming back means the room's declaration is missing something (a device, a mount, a toolchain), and it surfaces on the dashboard as that, to fix at the source.
-  - **Launch says what the wall hides.** A launch reports what the host has that the container doesn't: GPUs and other devices, toolchains on the host's `PATH`. A hidden GPU is then visible before anyone debugs it.
-
-  Several of the first lup's escalations came from its per-call sandbox (a unix socket refused, a read-only symlink), which the container as the only wall removes.
-- **Network: leaning open egress.** Filtering produced constant friction and reviews that were mostly fine. So nothing secret is mounted, apart from the runtime's own login (below).
-- **Secrets: leaning the art studio's pattern.** No secrets and no GitHub credentials in the container. Project secrets live in host services the container reaches by name, and pushes happen from the host.
-  - **The runtime's own login is the one secret a container has to hold**, since Claude Code and Codex can't run without it, and open egress could send it out. It's hidden from the agent's commands by the runtime's own sandbox, configured only for that and not as the wall (whether it runs nested in the container is a check owed).
-  - **Saved transcripts and traces are scrubbed** on the host of known secret values. Only a name is written in their place (`[redacted: GH_TOKEN]`), with no prefix or length, and the scrubber logs nothing but that name. A command once printed a gh credential that then had to be rotated.
-  - **Filtered egress stays possible**, but it's expected to bring the old friction back.
-- **Privileges: leaning sudo in free (room) modes.** Inherited capabilities are always cleared; a session user held root's capabilities without sudo. Package installs default to a minimum age, for example nothing newer than 3 days.
-- **Protected paths:**
-  - the project declaration (`lup_project.py`, or the `lup_project/` package) and the rule tables its modules name;
-  - lup's settings files (`.lup/settings/`): a write equal to what the integration branch's declaration generates is allowed, any other asks;
-  - dependency manifests and lockfiles;
-  - what runs outside the container: CI, git hooks and `.git/config`, pre-commit, editor and devcontainer configs;
-  - what widens the wall: `sync.json`, `sync.json.local`;
-  - secrets (`.env*.local`, not even readable);
-  - in lup itself, its own policy and launch code, which trust on launch reviews before the next launch runs it.
-- **Reviews happen before, by default.** The operator steers early rather than finding a patchy approach hours later. Examples, docs and guidance are reviewed after: they land, the operator is told, and one step reverts them. Comments and declines on a launch review become the first input of the session that launch starts.
-- **A declined change is restored, never lost.** The agent's version is saved at a path the refusal names, beside the operator's comment. The agent revises the lines in question in the saved copy and moves it into place, and the move is judged like any write. Nothing is resent whole. Restoring matters: a change left in place invites building on a design the operator just turned down.
-- **Trust on launch is ported as it is.** The host-zone fingerprint, the review in the dashboard, and launching from the approved copy.
-  - Until it's ported, the judge gets the same review: refreshing the installed judge from `dev` shows its diff since the copy the operator last approved, and the approved copy keeps judging until they approve. The operator is sure of what runs before it runs (`docs/judging-writes.md`).
+- **Walls, protected paths and proposals; no verdicts on commands.** Inside the container a command simply runs. Effects that can't be undone are stopped by a wall where they pass.
+- **Every write is judged by what it produces,** whichever tool made it: code rules on the native file tools before they land, and on everything at the gate. No command's spelling is parsed.
+- **lup allows, holds for a proposal, or refuses:**
+  - **allow:** tests, scratch, docs and data at any size, and any production edit the rules pass;
+  - **proposals** (*Sessions*): a change to the design waits for the operator, so they understand the codebase's design and redirect early;
+  - **refuse:** a code rule's finding, or an edit built on an unproposed design.
+  - Every verdict is logged (tool, path, outcome, reason), so how often lup intervenes can be measured and tuned.
+- **A container is required whenever an agent can run code or write files.** Interactively without a container engine there's no lup policy, only the runtime's own permission mode, behind an explicit `--dangerously-…` flag; from code, a call with Bash and no container raises unless it sets a `dangerously_…` flag. Mounts are one declaration: bind mounts in a container, the file tools' allow-list without one.
+- **Leaving the wall is a request with a typed reason** (tentative; the reasons are open): work in another project (spawned there); credentials (a host service doing one action, asked per action); a protected path (a proposal); a tool or device the container lacks, or repairing the environment (a reviewed command on the host); anything else (always reviewed). An answer can be scoped to the session and the reason; a reason that keeps recurring surfaces as what the room's declaration lacks; a launch reports what the host has that the container doesn't.
+- **(leaning) Open egress,** with nothing secret mounted but the runtime's own login, hidden from the agent's commands. Project secrets live in host services the container reaches by name; pushes happen from the host. Saved transcripts and traces are scrubbed of known secret values, each replaced by its name.
+- **(leaning) Sudo in room modes;** inherited capabilities always cleared; package installs held to a minimum age.
+- **Protected paths:** the project's declaration and the rule tables its modules name; lup's settings files (a write equal to what the declaration generates is allowed); dependency manifests and lockfiles; what runs outside the container (CI, git hooks and `.git/config`, pre-commit, editor and devcontainer configs); what widens the wall; secrets (not even readable); in lup itself, its policy and launch code.
+- **Reviews happen before, by default.** Examples, docs and guidance are reviewed after: they land, the operator is told, and one step reverts them.
+- **Trust on launch:** the host-zone fingerprint, the review in the dashboard, and launching from the approved copy. The installed judge gets the same: refreshing it shows its diff since the copy the operator last approved.
 
 ### Code rules and the gate
 
-- **Code rules refuse at the edit, early and loud.** A rule exists to stop an approach at the moment it's chosen, before anything is built on it. The anti-regex rule replaced quick regex patches, which often silently didn't work, with proper parsers. A regex refused at the edit costs one rewrite; one refused at commit has had an hour of code built around it. An informational rule would get bypassed.
-  - **A refusal reports every finding in the file at once, like pyright:** path, line and column, the rule, why it exists, and the fix.
-  - **A refused write is restored, and the agent's version saved** at a path the refusal names. The agent fixes the listed lines in the saved copy (with a `sed`, or an Edit after reading just those lines) and moves it into place; the move is judged like any write. Nothing is resent whole.
-  - **Each rule names the design mistake it prevents and where it steers.** The regex rule names silent parsing bugs; `tuple-shape` and `set-shape` name positional data a reviewer has to decode ("what is field 5?"). A rule that can't name one goes.
-  - **A rule that misfires is that rule's bug,** and a noisy rule is rewritten until it fires only where a design choice is at stake.
-  - **Rules read one typed tree, from the first rule.** Each file is parsed once and type-checked once, and every rule reads types straight from that tree: pyright's own tree, built against its source at a pinned release, as a spike measured (`docs/judging-writes.md`). No regex, no separate oracle asked about one position at a time, and no syntax-only first stage, which is how the first lup's catalog grew into a patchwork. The conventions the rules enforce, and which tool owns each, are in `docs/conventions.md`.
-  - **`# lup:` comments are one grammar.** A directive is written as a call (`# lup: ignore("tuple-shape", why="…")`), and anything that isn't a call is a note. A call to an unknown directive is a finding, and so is an `ignore` without its reason. Every rule accepts `ignore`, and adding one asks the operator. `defer` points at a GitHub issue or carries a condition the gate can check; the ledger's to-do items point at GitHub issues too. A note added in the same session can be removed freely; removing a committed one is reported.
-- **Information never travels on a "blocking" channel.** Type errors and ruff's findings arrive as plain context, limited to the files touched, at each checkpoint. What must be fixed before finishing is enforced when the turn ends. The formatter runs at commit.
-- **Tests are exempt from code rules, and the rule docs say so.** A file's test role comes from the declared test roots, nested projects included. In the art studio the exemption existed but never applied, because a pytest root gave its files no test role. lup's own architecture rules (`runtime-mention` and the like) live in the table of lup's own module, in lup's declaration, so they apply only to lup.
-- **A project writes its own code rules** in a table one of its modules names, as lup's are. `lup rules new` writes a skeleton with its examples, which are its tests, and `lup rules check` runs the rules on one file.
-- **No flaky tests.** A test that fails and then passes is a failure to fix. Changed and new tests run repeatedly and under load before they land. Tests depending on the real clock or on wall-clock timing are refused. A unit test over about 10 s fails the gate unless it's declared slow with a reason.
-- **Tests stub every agent and network call.** The library ships a fake agent, and a guard refuses real calls during tests.
-- **The gate:**
-  - `--changed` compares against the branch's own base, and covers markdown too;
-  - a nested project's tests run in its own environment;
-  - the gate stays bounded in time and memory (why today's grew so much is to be found out).
+- **Code rules steer an approach at the moment it's chosen.** Each rule has a timing:
+  - **at the edit,** the rules that pick an approach other code gets built on (parsers over regex and splitting, named fields over tuples and sets, the library for each job, errors and types, suppressions, truncation, historical voice): refused before the write lands, since code gets built on the mistake;
+  - **at the gate,** the rules about how a correct thing is spelled (`elif`, collection loops, private names, docstring code, constants' homes): reported once before landing, fixed silently where ruff has a fixer. A gate rule still blocks landing.
+- **A refusal reports every finding in the file at once,** like pyright: path, line and column, the rule, why it exists, and the fix. The refused version is saved at a path the refusal names; nothing is resent whole.
+- **Each rule names the design mistake it prevents and where it steers.** A rule that can't name one goes; a rule that misfires is that rule's bug, rewritten until it fires only where a design choice is at stake.
+- **Rules read one typed tree:** each file parsed and type-checked once, with pyright's own tree at a pinned release (`docs/judging-writes.md`). The conventions they enforce, and which tool owns each, are in `docs/conventions.md`.
+- **`# lup:` comments are one grammar:** a directive is a call (`# lup: ignore("tuple-shape", why="…")`), anything else a note. Every rule accepts `ignore`; adding one is a suppression the operator reviews. `defer` points at a GitHub issue or a condition the gate can check.
+- **Tests are exempt from code rules,** by the declared test roles. A project writes its own rules in a table one of its modules names, as lup's are (`lup rules new`, `lup rules check`).
+- **Tests stub every agent and network call;** the library ships the fake and the guard. **No flaky tests:** a test that fails and then passes is a failure to fix; tests depending on the real clock or wall-clock timing are refused; a unit test over about 10 s fails the gate unless declared slow with its reason.
+
+### The gate
+
+One command, judged by its exit code: lup's rules, ruff, the formatter, pyright, the tests and the import contracts. `--changed` compares against the branch's own base; a nested project's tests run in its own environment; it stays bounded in time and memory.
 
 ### Runtimes
 
-- **Codex is a peer.** The operator wants Codex agents, and the option to use them, alongside Claude's.
-- **Shared constructs, and an adapter per runtime.** A shared change is done when it works on Claude Code and on Codex, shown by their tests, or when the runtime that can't do it declares the gap with evidence. Leaving one untested is not an option. Everything above the runtime contract below is shared, so it's on both runtimes by construction: Codex rotted in the first lup because features were built per runtime above that line.
-- **What lup needs from a runtime is small:**
-  - launching in a container with lup's tools and guidance;
-  - one hook that holds a call and delivers waiting messages;
-  - a transcript reader for telemetry and cost;
-  - optionally, an interrupt.
-- **Capabilities are declared per runtime.** A short real session checks them on its own whenever either installed CLI's version changes, and the result is cached per version. A feature that needs a missing capability is unavailable on that runtime, and the launch and the docs say so. A stand-in is allowed only when it's declared and covered by that check.
-- **Codex's `apply_patch` parsing is dropped:** the after-call diff shows every file changed.
+- **Codex is a peer.** A shared construct is done when it works on Claude Code and on Codex, shown by their tests, or when the runtime that can't do it declares the gap with evidence. Everything above the runtime contract is shared, so features are on both runtimes by construction.
+- **What lup needs from a runtime is small:** launching in a container with lup's tools and guidance; one hook that holds a call and delivers waiting messages; a transcript reader for telemetry and cost; optionally, an interrupt.
+- **Capabilities are declared per runtime,** and a short real session checks them whenever an installed CLI's version changes, cached per version. A feature needing a missing capability is unavailable on that runtime, and the launch and the docs say so. A guarantee is checked against what the runtime can actually do: Codex's code-mode models keep the no-tools guarantee if their `exec` can reach no shell, files, network or agents.
 
-### Calling agents from code (the library)
+### Calling agents from code
 
-- **The client is the declaration:**
-  ```python
-  translator = Claude(model="opus", system_prompt=PROMPT)            # no tools: no container
-  result = await translator.ask(segment.model_dump_json(), Translations)
-  result.output                                                      # Translations
-  ```
-- **A room has the same shape, and is the library's.** It's declared in the project's own code, which production code imports, and a module of the declaration references it by address (`Rooms.of("audiobook.rooms:narrator")`) so the environment can launch and show it. It's used from code, waiting (`room.ask()`) or detached (`room.spawn()`), or in a terminal (`room.launch()`, or `lup launch claude audiobook`). One declaration compiles two ways: to SDK options for code, and to argv for the terminal. `Claude(...).launch()`, `.command()` and `.prepare()` already work that way on today's dev (merge `008d23ca1`), and `harness claude|codex` is built on them. The parity checklist in `tmp/lup-dx-overhaul.md` maps every harness flag and launch step to a declaration field. The verbs are open (see Open questions).
-- **Publishing stays outside the room.** An audiobook pipeline ("turn this page into an episode and publish it") runs the room to produce the episode, and host code publishes it, with credentials the container never sees.
-- **Typed output through a lup tool on both runtimes (tentative; earlier leaning: native on both).** The answer is submitted through `lup_submit`, an ordinary lup tool whose input is the output model, so it keeps everything a normal tool has, hooks included.
-  - **Corrections happen inside the turn.** Validation, and any `before` hook on the output tool (a review answering `Allow()` or `Deny(reason)`), reject with feedback, and the agent corrects its answer without being re-prompted.
-  - **The turn can't end without an accepted answer.** lup's own stop hook refuses the ending: in-process on Claude, a same-thread continuation on Codex.
-  - **Native structured output is used on neither runtime.** Codex's isn't a tool call, so nothing could reject it inside the turn, and its strict-schema subset forced a carrier (`docs/library.md`).
-- **Supervision.** Rooms and anything long-running appear on the dashboard and fall under budgets; a quick call with no tools records only its cost. Sessions started from code run under their own config home, so they never appear among the operator's own sessions, history or messages.
-- **A persistent REPL (leaning yes).** A tool for agents run from code and in rooms, inside the wall. The agent can freeze, fork and rewind its state, and it must be light.
-- **Delegation from code** is a nested call through the client, or lup's spawn. No third route.
-- **Auth.** The CLI login by default, which fits the operator's own use. A project other people will use declares an API key (Anthropic's terms).
+*The library*, above, is the design; `docs/library.md` holds the first slice's detail. The client is the declaration; a room has the same shape; one declaration compiles to SDK options for code and to a command line for a terminal. Rooms and anything long-running appear on the dashboard and fall under budgets; a quick call with no tools records only its cost. Sessions started from code run under their own config home where they're kept, so they never appear among the operator's own.
 
-### The dashboard (core)
+**(leaning) A persistent REPL** for agents run from code and in rooms, inside the wall, which can freeze, fork and rewind its state, and stays light.
 
-- The main place of interaction, including spawning sessions. It replaces Claude Code's task view for lup's workers. Every ask lup makes of the operator goes through it.
-- **In lup, behind a typed protocol** between the sessions and the dashboard (agents, the inbox, reviews, the ledger, budgets), so the page can be redesigned without touching the rest. It ships prebuilt, so no project builds its stack.
-- **The first screen is the agents**, as a tree: what each is doing, what it waits on, and its spend, with its reviews and questions underneath.
-- **The operator's inbox:** reviews, open questions from agents, and the ledger's open work.
-  - **Messages are reviews, and reviews are messages:** one mechanism. An agent's message is read and answered the way a change is reviewed: the operator sees every waiting message at once, comments on its lines, agrees with a stated lean, replies to several at once with answers that refer to one another, and leaves some unanswered for later.
-  - **It's generic and asynchronous both ways:** agents write to the operator and the operator replies in their own time, beyond deciding things. The plain linear question and answer stays.
-  - Numbered decisions, each with its lean, show as separate items answerable "leaning", "undecided" or "leave open", so a question can't scroll away and an answer to one doesn't wait on another.
-- **Controls:** budgets, pause, pace and spawn caps; runs are shown.
+### The dashboard
+
+- **The main place of interaction,** including spawning sessions, behind a typed protocol so the page can be redesigned without touching the rest. It ships prebuilt, so no project builds its stack.
+- **The first screen is the agents,** as a tree: what each is doing, what it waits on, its spend, with its proposals and questions underneath.
+- **The operator's inbox:** proposals, questions, problems and messages as one mechanism. The operator sees every waiting item at once, comments on lines, agrees with a stated lean, answers several at once, and leaves some for later. Numbered decisions show as separate items answerable "leaning", "undecided" or "leave open".
+- **Modules extend it with code:** a module ships its own panel, loaded at runtime, getting data through the typed protocol (TypeScript types generated from the pydantic models) and lup's exported components; lup's own panels (agents, inbox, runs, setup, usage) use the same API. Declared views (a table, a progress bar) are a shortcut built on panels. A panel runs sandboxed, with a token scoped to its module's data.
+- **Runs** announce themselves and show their identity, plan, ETA, history, each step's progress, and each unit's state, deadline, last report, ending and log.
+- **Controls:** budgets, pause, pace, spawn caps. **(leaning)** Steering beyond pause: interrupt, redirect, stop, and reading an agent's transcript.
 - **Every key is also a button or a menu entry.**
-- **Its readability and navigation need a redesign** (see Still to discuss).
 
 ### Feedback
 
-- **"How it felt": core, on by default.** The point is to gather friction and wellbeing data from the agents and make lup as good as possible to work in.
-  - Every hand-back, and every main session's end-of-task report, ends with a free-text note under three prompted headings: what was smooth, what got in the way (the exact command and message), what you'd change. "Nothing notable" is an acceptable answer, so the note doesn't turn into filler.
-  - Notes are stored in the ledger, and serve as the evidence attached to upstream candidates.
-  - The pooling pass looks hardest at what telemetry can't see, mainly moments when an agent wasn't sure a decision was its to make.
-  - Telemetry is attached automatically: refusals and recurring messages, errors and retries, cache rebuilds, cost.
-  - A pooling pass, run on demand, groups repeats, links or files issues, and ranks by frequency and cost. The dashboard shows what recurs.
-- **The outcome loop: a module, off by default,** for graded projects like aib. lup provides the machinery only: attaching a project-defined outcome to a run, grouping runs into arms, comparing them. The project decides what success is and which experiments to run.
-- **Reflection (open).** The operator's current leaning is a separate module, off by default and requiring the outcome loop, that records data from each run for the outcome loop to use. It's neither self-critique nor the "how it felt" notes.
+- **"How it felt": core, on by default.** Every worker's hand-back carries it, and every main session's end-of-task report ends with it: what was smooth, what got in the way (the exact command and message), what you'd change. "Nothing notable" is a fine answer. Notes go to the ledger and serve as the evidence of upstream candidates.
+- **Telemetry is attached automatically:** refusals and recurring messages, errors and retries, cache rebuilds, cost. A pooling pass, run on demand, groups repeats, links or files issues, and ranks by frequency and cost; it looks hardest at what telemetry can't see, mainly moments when an agent wasn't sure a decision was its to make.
+- **The outcome loop and reflection** are modules (*The environment: core and modules*).
 
 ### Footprint and cleanup
 
-lup cleans up after itself:
-- containers, images (session image tags are retired with their checkout), volumes;
-- environments in idle worktrees;
-- merged worktrees nobody holds;
-- run outputs, bounded;
-- trace archives, deduplicated;
-- git objects, collected.
-
-Environments hardlink from a cache on the same filesystem instead of being copied.
+lup cleans up after itself: containers, images (retired with their checkout) and volumes; environments in idle worktrees; merged worktrees nobody holds; run outputs, bounded; trace archives, deduplicated; git objects, collected. Environments hardlink from a cache on the same filesystem.
 
 ### Guidance and skills
 
-- **Every gate, rule and hold names why it exists and where it's trying to steer,** so an agent can judge the cases it doesn't spell out: one line in each refusal, the full reason in the docs.
-- **Guidance gives each rule with its reason,** so an agent can judge the cases the rule doesn't spell out.
-  - It states what's the agent's to decide, what's the operator's, and where the walls are.
-  - It contradicts neither the runtime's own prompt nor any skill.
-  - It's written last, once the system it describes exists.
-- **The operator likes being asked numbered questions in plain text,** each with a stated lean, that they can answer "leaning", "undecided" or "leave open". Guidance and skills prefer this for decisions. The structured question tool is kept for a quick single choice.
-- **Skills are reference:** what the work is for, what good output looks like, the known traps. Fixed steps only where the order is mechanical, like merge and release.
-- **One template serves lup and the projects using it.** It has the project's own section and lup's sections, rendered with Jinja.
-- **Starting points** in the old repository: `tmp/guidance-rewrite/interim.md`, and `tmp/guidance-rewrite/REVIEW-BRIEF.md` for a fresh-eyes review.
-
-## Graveyard
-
-What the exploration tried and the restart leaves behind, each with its reason:
-
-- **The copied half** (`src/` and `tests/` stamped out at init, updated by merge): every update was a large merge, and projects spent their sessions on it.
-- **Committed runtime trees** (`.claude/`, `.codex/`, about 88k lines each): conflict markers in a compiled hook dispatcher refused every command; the launcher rebuilt them anyway.
-- **Projects declining modules by subtracting from a full copy:** leaky; declined modules' commands were still served, and skills failed before their first step.
-- **Pins to branches:** deleted branches broke installs.
-- **A linear pre-release per project:** projects changing lup at once drift apart.
-- **The shell-spelling analyzer** (about 17k lines) and per-command verdicts: it grew a case per spelling and couldn't see what a script writes.
-- **The "inner" posture** (the runtime's own sandbox as lup's wall): replaced by "container, or no lup policy".
-- **The `execute_code` sandbox module:** the agent runs inside the wall with Bash.
-- **The single-agent template app** (tool policy, system prompt, subagents, reflect gate): every adopter deleted it.
-- **Native subagents as workers, and native messaging between sessions:** subagents share their parent's identity, can't reach it, and can't be stopped after a resume; native messages don't cross containers.
-- **Routing lup through each runtime's own orchestration features:** "mostly a nightmare".
-- **"Equal on both runtimes" with nothing that runs regularly:** Codex rotted between uses.
-- **Turtle mode:** a one-key slowdown, replaced by budget shares and pace.
-- **A proxy replaying requests to keep caches warm:** Anthropic's terms forbid intermediating subscription tokens.
-- **Explicit roster describe calls and path locks:** 251 describe calls in nine days; replaced by a roster that fills itself and conflict detection at merge.
-- **Informational-only code rules:** they'd be bypassed.
-- **The feedback loop's five-skill chain built on the template's agent:** it had no place for outcomes, and the loop never closed.
-- **Guidance grown by patches:** 18 KB of bare imperatives, overriding the runtime's own advice and contradicting skills.
-- **Undo snapshots taken for read-only commands:** writes into a repository the agent was only reading.
-- **A prompt for every decision** (manual review before lup): it wore review down into approving everything, while files that looked fine carried design directions and regexes through. Approving whole new files and code rules pointing at the risky decisions are what made review work.
-- **Refusals that report one violation at a time:** the art studio's agent resent a 550-line file four times, once per rule.
-- **Guidance teaching agents to split a change under the edit-size limit:** it dodged the review the limit exists for, and turned one change into many tiny edits.
-- **Code rules enforced only at landing** (proposed during the exploration, never built): by then an approach the rule exists to stop has had code built around it.
-- **A keepalive loop for held agents** (re-entering a wait about every 50 minutes to keep the cache warm; proposed during the exploration, never built): the operator won't put an agent in an automatic wait loop. A hold past the hour pays a rebuild instead.
-- **Contribution branches in lup's repository** (proposed during the exploration, never built): a project fixes locally and declares a candidate instead, so it never touches lup's repository or points at a branch.
-
-## Field Notes
-
-Facts that were expensive to learn. Versions are as measured in October 2026.
-
-**Claude Code 2.1.291:**
-- **Caching.**
-  - Prompt-cache lifetimes are only 5 minutes or 1 hour (an API limit). The main conversation gets 1 hour on a subscription; everything else gets 5 minutes, unless `subagentPromptCacheTtl: "1h"` is set (or `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`). The setting is ignored while a subscription is in overage.
-  - A cache read resets the timer, and the lifetime counts from the start of a request. Only a request resets it: a blocking hook or tool call makes none, so a hold past the hour rebuilds the context.
-  - Every turn re-reads the whole context, so a long session's cost grows roughly with the square of its length.
-  - Opus 5.5 prices: input $4 per million tokens, 5-minute write $5, 1-hour write $8, read $0.20, output $20.
-  - A built-in cache keepalive exists for the main conversation only, behind a server flag; it did not run in our probe.
-- **Tools.**
-  - A bare tool name in `--disallowedTools` or `permissions.deny` removes the tool from context, subagents included (measured).
-  - Print mode never loads `Artifact`.
-  - An interactive session carries 113 KB of built-in tool schemas, of which `Artifact` is 55 KB. Claude Code's own system prompt is about 7.5 KB.
-  - `autoMemoryEnabled: false` removes the memory section from the system prompt.
-  - Edit refuses a file that wasn't opened with Read first: 894 "File has not been read yet" errors in the measured week, 785 of them after a read through `sed` or `cat`.
-- **Sessions.**
-  - `--agent Explore` runs a top-level session as that built-in type.
-  - `--resume <id> --fork-session` forks a session.
-  - `--bg`, `claude agents --json`, `attach`, `logs`, `stop` and `respawn` manage background sessions. Sessions in other containers aren't visible.
-- **Other flags.**
-  - `--autocompact <tokens>` sets the compaction window (100k to 1M).
-  - `--system-prompt` replaces the whole prompt, tool guidance included.
-  - `--bare` requires an API key.
-  - `--json-schema` gives native structured output in print mode.
-  - `--debug` writes to a log file, not the screen (`--debug-file <path>` names it).
-- **Nested runs.** A nested `claude -p` does not inherit the outer session's `--plugin-dir`, but it does load the parent directory's `CLAUDE.md` and a nested repository's own `.claude/settings.json`.
-- **Hooks.**
-  - `updatedInput` takes effect, and `additionalContext` reaches the model.
-  - A PreToolUse hold of 4 hours ran cleanly.
-  - Each Bash call runs as `bash -c` in its own process group.
-  - aib found that an `updatedInput` is discarded when a later hook overwrites it, so a submission gate must run last.
-  - A PreToolUse hook that returns no decision sends the call through the normal permission flow ("staying silent doesn't approve it"). Its `ask` forces a prompt even in auto mode. Its `defer` pauses a headless run to resume later, and is ignored when several calls run at once (hooks docs).
-  - A bare `permissions.ask` rule on `Write` prompts in auto mode (tested, 2.1.292).
-  - PostToolUse hooks for parallel calls run concurrently. `PostToolBatch` fires once after a batch. `updatedToolOutput` replaces a built-in tool's result before the model sees it (hooks docs).
-  - Command hooks get no terminal. `statusMessage` sets the spinner text while a hook runs.
-- **Subagent writes.** Claude Code may refuse a subagent's write of a report file ("Subagents should return findings as text").
-- **Terms.** OAuth is for ordinary use of Claude Code and Anthropic's own apps. Tokens may not be intermediated. Products used by other people need API keys. Plan limits assume ordinary individual use.
-
-**Codex 0.160.1:**
-- its own memories feature, off by default;
-- no prompt-cache lifetime setting;
-- no way to remove a built-in tool by name;
-- the spawn argument is `task_name`;
-- `turn/interrupt` responds in about 10 ms;
-- `write_stdin` fires no hook;
-- `outputSchema` is the shape of the final message, not a tool call.
-
-**Isolation and effects:**
-- An overlay mounts over 300k files in 13 ms and lists its changes in 12 ms, without root, in lup's container (kernel 7.2).
-- A git snapshot per command costs about 50 ms at lup's size, 0.4–0.8 s at 100k files, and 1.4–2.8 s at 300k.
-- Judging after the fact misses three things:
-  - background writers (a process detached with `setsid` escapes);
-  - files git ignores;
-  - code that runs inside the same call (a planted `core.fsmonitor` ran).
-
-**Package age gates:**
-- uv's `exclude-newer` accepts "3 days" (`UV_EXCLUDE_NEWER`);
-- bun 1.3.14 has `minimumReleaseAge`;
-- pacman needs a dated Arch Linux Archive mirror (not verified).
-
-**Tools:**
-- ruff 0.16.10 and pyright 1.1.414 resolve an extended base's relative paths from the base's own directory, so a base under `.lup/settings/` writes `../../`;
-- in an extending file, ruff's `select` and `per-file-ignores` replace the base's, while `ignore`, `extend-select` and `extend-per-file-ignores` add to it; pyright's settings replace the base's by name, lists included;
-- a workspace member with its own `[tool.ruff]` and no `extend` is cut off from the root's settings;
-- pyright reads a TOML base's `[tool.pyright]`;
-- Node strips TypeScript types by default from 23.6.0 and 22.18.0, never under `node_modules`.
-
-**From the downstream projects:**
-- **aib:**
-  - tool names in prompts must be exact (`mcp__x__y`);
-  - deferred tool schemas made the agent guess search terms;
-  - `allowed_tools` auto-approves but doesn't restrict;
-  - plan mode never submits structured output;
-  - in its worst misses, the agent's own counterargument often held the right answer and was dismissed;
-  - scores never moved attributably after the feedback loop's changes.
-- **live-translator** needed five things: a provider switch, a timeout, a trace, a guarantee of no tools, and a fake for tests (stubbing one call took about 70 lines).
-- **The art studio:**
-  - `DISPLAY` set in the container breaks headless Chromium's WebGL;
-  - the image had no fonts at all, which makes every CSS `@font-face` fail;
-  - uv-managed interpreters weren't kept between containers;
-  - pyright's `venv` name didn't match the contained environment's;
-  - a pytest test root gave its files no test role;
-  - xdist was looked up in the wrong environment.
+- **Every gate, rule and hold names why it exists and where it steers:** one line in each refusal, the full reason in the docs.
+- **Guidance gives each rule with its reason,** says what's the agent's to decide, what's the operator's and where the walls are, contradicts neither the runtime's own prompt nor any skill, and is written once the system it describes exists.
+- **The operator likes numbered questions in plain text,** each with a stated lean; the structured question tool is for a quick single choice.
+- **Skills are reference:** what the work is for, what good output looks like, the known traps; fixed steps only where the order is mechanical.
+- **One template serves lup and the projects using it,** with the project's own section and lup's, rendered with Jinja.
 
 ## Open questions
 
-The operator's to decide:
-1. **Isolation between sessions:** leaning a worktree per agent with hardlinked environments. The write layer stays open, behind its two problems (see *Sessions*).
-2. **Reflection:** the shape of the module.
-3. **Upstream candidates:** their format and where a project declares them, and how often the adopting pass runs. Also keeping candidates and notes from piling up, as lup's issues did. The agent's proposal: reports are evidence attached to themes, so the open list counts distinct problems; a theme whose telemetry signal hasn't recurred since some lup version closes itself, and reopens if it comes back.
-4. **The verbs** (tentatively settled), each named for what comes back, so the call site alone says whether the caller waits:
-   - `ask(prompt, Output)` returns the answer while the caller waits, whether the target is a client with no tools, a turn in a conversation, or a room carrying a task to its end; the declaration decides tools and container, not the verb;
-   - `spawn(prompt, Output)` returns a handle to a top-level session that outlives the caller and shows on the dashboard, the same thing the agents' spawn tool creates;
-   - `launch()` gives a person a terminal session;
-   - `open()` starts a conversation from code.
+The operator's to decide; the agent's lean where it has one.
+1. **Isolation between sessions.** Leaning a worktree per agent with hardlinked environments. A write layer isn't ruled out, behind two problems: overlayfs leaves its lower layer undefined while mounted, so a layer can't sit on the live checkout; and showing a layer on the host exposes what the agent wrote there to the operator's editor before review.
+2. **The core's size.** Lean: launch, judging writes and worktrees as default modules, the core being what every module talks through.
+3. **`tracked-repositories`.** Lean: the registry is the core's, in two layers: the person's config maps names to paths on this machine, the project's declaration names what it reads or mounts; per-machine facts (devices, the difftool) go in the person's config or the room's declaration; the first lup's `sync` commands go.
+4. **`meta`.** Lean: each kind's authoring tool lives with its kind (`lup rules new` in `CodeRules`).
+5. **Reflection:** the shape of the module, which records data from each run for the outcome loop.
+6. **Upstream candidates:** their format, where a project declares them, how often the adopting pass runs, and keeping candidates and notes from piling up. Lean: reports are evidence attached to themes, so the open list counts distinct problems; a theme whose signal hasn't recurred since some version closes itself. The adopting pass needs a name that isn't `sync`.
+7. **Waking a main session whose turn has ended:** a hold past the hour rebuilds the context, keepalive loops are declined, and Codex can't hold a turn open.
+8. **Native `Agent` for short jobs, beside lup's spawn.** Leaning deny; to settle by measuring the new spawn's start time and first request for a short worker, and whether a fork reads its parent's cache.
+9. **Carrying the operator's preferences across containers,** or seeding from the personal config only.
+10. **The verbs** (tentatively settled), each named for what comes back: `ask` returns the answer while the caller waits, whatever the target; `spawn` returns a handle to a session that outlives the caller; `launch` gives a person a terminal; `open` starts a session from code.
 
-   `run` and `start` are dropped: with `launch`, they were three words for "begin". The cost: a call site no longer tells a quick question from a long task, so the target's name has to.
-5. **Carrying the operator's preferences across containers,** or seeding from the personal config only.
-6. **Native `Agent` for short jobs, beside lup's spawn:** leaning deny. To settle by measuring the new spawn, not today's lagging one: its start time and first request for a short worker, and whether a fork reads its parent's cache.
-7. **A maintaining session as a room lup declares:** leaning yes, if nothing in maintaining falls outside what a room can declare.
-8. **One overseeable place for a project, and who owns what in `pyproject.toml`.** Settled (2026-10-12): the declaration is `lup_project.py` at the root; lup writes only its own settings files, which the project's `pyproject.toml` extends; dependencies stay in `[project]`; and `lup project` shows everything on one page (`docs/declaration.md`).
-9. **How the code rules and the conventions link.** The rule table (`catalog/rules.ts`, shown as `docs/rules.md`) is what runs; `docs/conventions.md` holds each decision, its why, the first lup's evidence, its alternatives, and what ruff, pyright or review enforce. Today each convention's *Enforced by:* line lists the lup rules by id, by hand, and a test checks only that each named rule exists, so a rule can run with no written decision behind it. Options: (i) each rule in the table names the conventions section it enforces, `docs/rules.md` is generated grouped by section and linked to its why, and the conventions point to their group instead of listing ids, with a test that every rule's section exists (the agent's lean: the link kept once, in the table); (ii) the hand-written lists, checked both ways (redundant, but policed); (iii) the *Enforced by:* lines generated into the conventions (generated text inside a hand-written document). Either way, a rule can't be added without the decision it serves. **Going with (i), slightly open** (2026-10-12): the operator is mulling it over; the declaration piece builds it, with a section as a family of rules (`docs/declaration.md`, *Rules and conventions*).
-10. **A project's own code rules.** Settled (2026-10-12): a rule table belongs to a module, written as lup's are, loaded when the engine starts, and protected and read from the integration branch's tip, as the declaration is (`docs/declaration.md`).
-11. **Judging writes, or judging branches.** Kept for now (2026-10-12): the judge decides on each write (allow, ask or refuse), the file tools' before they land and everything else after the call, at checkpoints. The alternative: code rules still refuse at the edit, with nothing kept between calls, and the asks move to landing. A branch's design changes (new files, public-API changes, suppressions, protected paths, dependencies) show live on the dashboard, and a branch with any waits for the operator before it lands. Checkpoints, holds, put-backs, the turn-end block, the `compiled` role and most of the drafts flow (`docs/review-flow.md`) would go; both runtimes would be judged alike; the operator would review a branch at a time. Its costs: a direction the operator would have stopped at the first file can cost a branch's work, and landing needs one command the agents can't go around. A half-way keeps the asks at the write for the file tools only, and judges the rest at landing. The evidence so far: the incidents came from judging after the call (#22, #32, a removed worktree crashing every checkpoint, holds on a commit and merge made in one command) and from the installed judge lagging the declaration it reads (#21); a refusal at the edit cost the agent least.
+**Still to discuss:** the dashboard's design (readability, lag, filtering, keys and buttons, spawning, budget controls, how the inbox's items look and are answered); the CLI's naming; one standard for warnings and diagnostics, with the actionable part parseable; guidance on fan-out, and budget defaults keeping a day of work inside a week; Codex specifics; a security review for downstream users (age gates, sudo, mounts, egress, secrets, capabilities); the feedback modules' design; moving the downstream projects onto lup; why the first lup's gate and runs grew so large in time and memory.
 
-**Still to discuss:**
-- **The dashboard's design:** readability, lag, filtering auto-allowed files, keys and buttons, spawning, budget controls, and how the inbox's messages-as-reviews look and are answered (see *The dashboard*).
-- **The CLI's naming:** answering a review is approving a request, not answering a question.
-- **One standard for warnings and diagnostics:** the actionable part in a form that can be parsed, as with `uv run --with package`; code-rule findings take pyright's shape.
-- **The one sentence for each core part and module,** once the library and environment split settles the list.
-- **The guidance on fan-out,** and budget defaults that keep a day of work inside a week (leaning: no earlier compaction).
-- **Codex specifics:** its question prompt, `task_name`, the content of the capability check.
-- **A security review for downstream users:** age gates, sudo, mounts, egress, secrets (the runtime's login included), capabilities.
-- **The design of the feedback modules.**
-- **Moving the downstream projects onto the new lup.**
-- **Why the gate and runs grew so large in time and memory.**
+## Checks owed
 
-## Checks owed during the build
-
-- Does a fork's first request read the parent's cached context?
-- How fast does the new spawn start a short worker, and how large is its first request?
+- Does a fork's first request read the parent's cached context? How fast does lup's spawn start a short worker, and how large is its first request?
 - Does the runtime's own sandbox run nested in the container, configured only to hide its login from the agent's commands?
-- Can a hook rewrite a built-in tool's result before the model sees it, so a secret is scrubbed live and not only in saved transcripts? The docs say yes (`updatedToolOutput`); not yet tried.
+- Can a hook rewrite a built-in tool's result before the model sees it (`updatedToolOutput`), so a secret is scrubbed live?
 - Does a maintaining session need anything a room can't declare?
-- If the write layer is pursued: can it sit on a frozen snapshot with a hardlinked environment, can the host's view of it keep `.git` and editor configs out of reach until review, how does git behave inside it (commits, refs, merging back), and what does merging a layer back cost?
-- Is Claude's native structured output a tool that hooks see? (Codex's isn't.)
-- Does a `PreToolUse` hook's `allow` skip auto mode's classifier? No vendor doc says, and the first lup never measured it.
-- Which of Claude Code's own commands use `Agent` internally, and would break when it's denied?
-- Is the keepalive flag on for a subscription account?
-- Does a dated Arch Linux Archive mirror hold against `pacman -Sy` in the image?
-- How light can a REPL with freeze, fork and rewind be?
+- Does a `PreToolUse` hook's `allow` skip auto mode's classifier? Which of Claude Code's own commands use `Agent` internally, and break when it's denied?
+- Do parallel held calls in one response reach the operator as one proposal?
+- Can a Codex hook hold an `apply_patch` that builds on an unapproved design?
+- Does the CLI run inside a container while the SDK and lup's in-process tools stay on the host, over the container's standard input and output?
+- Does resuming an SDK session work on Claude Code's current version?
+- Can Codex's code-mode `exec` reach a shell, files, the network or agents?
+- Is the cache keepalive flag on for a subscription account? Does a dated Arch Linux Archive mirror hold against `pacman -Sy` in the image? How light can the REPL be?
+- If the write layer is pursued: a frozen snapshot with a hardlinked environment, the host's view keeping `.git` and editor configs out of reach until review, git inside it, and what merging a layer back costs.
 
 ## Build order
 
-The agent's proposal. How work is cut into branches is the agent's to do; this order is for the operator to correct.
+Each step builds on the ones before it **(leaning)**:
+1. **The library's first slice** (`docs/library.md`): asking either runtime from code, typed answers, the speaking tools, the layers, the fake and the guard. live-translator moves onto it.
+2. **Tools and events:** project tools and where they run, large results to a file, tool search control, the events anything long-running emits.
+3. **Rooms,** starting with the spike of the CLI inside a container.
+4. **Runs,** built alongside any step; nori moves onto them.
+5. **Launch on rooms,** with the parts of the declaration it reads (guidance, skills, session settings).
+6. **The host service, the inbox, and lup's tools:** spawn, propose, message, ask, report.
+7. **Worktrees and landing,** with the dependency guard and the landing refusal.
+8. **The dashboard:** agents, the inbox, runs, panels.
 
-**Phase 0, before the restart: only the disk.** Remove merged worktrees, and delete `.venv-contained` in the maintained projects' idle worktrees. The old lup isn't built on any further, so its flaky tests, its review leak and its waiting branches stay as they are; the session settings go in the operator's personal settings (DECISIONS.md, *Where to pick up*).
+lup hosts its own development once steps 5–7 are done. Then: budgets, `accounts`, the feedback modules, the outcome loop, the resolver, setup, the Codex capability check, trust on launch.
 
-**Phase 1, in the new repository, built anew.** Nothing is copied from the old code, which stays readable as evidence.
-
-**The bridge.** Until the new lup hosts itself, sessions run plain Claude Code with no lup plugin, and the operator reviews by hand. What burned the operator in manual review before lup: files that looked fine but carried a large design direction or a flaky decision (a regex in place of a parser), and a prompt for every decision, which wore review down into approving everything. What let them review where it mattered was approving whole new files, and the code rules pointing at the risky decisions. So the bridge (the agent's proposal):
-- a short design note before the code of each piece (its modules, what each is for, its public API), approved in its pull request before implementation starts;
-- a `permissions.ask` rule on `Write`, so every new file reached the operator as a prompt (it does prompt in auto mode, tested), until the judge was installed. The judge asks before a new or whole-file production write, a public-API change, a suppression, a protected path or the operator's documents lands, and the blanket rule went (2026-10-09): it only added asks for tests, docs and data the judge allows, which an Edit made without asking;
-- the code rules as early as possible, typed from the first rule, starting with those that catch a design decision (parsers over regex, `string-split`, `tuple-shape`, `set-shape`), as a hook in the build's own sessions; until they land, the first lup's checker runs as an asynchronous interim hook. Each suppression is asked of the operator as it's added, in place of a pull-request check listing them;
-- one concern per branch. Branches land on `dev` once the gate passes, landed by the agent, with a merge commit whose message lists every design decision taken, its alternative and where it lives in the code, plus what changed and why, and how it was tested. The first lup's `dev` worked the same way. Earlier, each branch was a pull request into `main` that the operator merged;
-- `main` protected on GitHub ("require a pull request before merging"), so no direct push reaches it. A release is a pull request from `dev` to `main` that the operator reviews and merges; `gh pr merge` asks;
-- Codex works in the bridge too, reading the same `AGENTS.md` (`CLAUDE.md` imports it). Its declared gap: it has no per-tool prompt, so on Codex a new file doesn't reach the operator as a prompt, and the pull request names every new file instead;
-- the after-call diff, once built, is installed in the build's own sessions as a plain hook, so the bridge shrinks as it's built.
-
-The starting files (`AGENTS.md`, `CLAUDE.md`, `.claude/settings.json`, `.gitignore`) are staged in the old repository's `tmp/direction-research/day-one/`; this brief goes in as `DESIGN.md`.
-
-1. **First the code rules and the allow policy, then the library's first slice.** The operator relies on the first two most, so they come back first.
-   - Judging every write (`docs/judging-writes.md`), with its three outcomes (allow, ask, refuse), restored declines and saved versions, and the typed engine with the code rules (`docs/conventions.md`). It's the review workflow, every call goes through it, and its cost on a large repository (a git snapshot per command took 1.4–2.8 s at 300k files) is the main technical unknown.
-   - The library: `Claude`/`Codex` with typed output, the fake agent and the test guard. live-translator can move to it at once, and the environment launches through it.
-2. **The declaration.** `Project` as modules, the runner and requirements; a project's own rules; lup's tool settings; the lazy CLI with `lup new` and `lup docs`; rules linked to their conventions.
-3. **Launch.** A container per session, mounts, secrets through host services, the harness compiled at launch, the session settings, native orchestration tools denied.
-4. **lup's own tools.** Spawn, message, wait, ask, handoff; the one hook (hold and delivery); the roster; the ledger as the place for open work.
-5. **Review.** Hardlinked worktrees, protected paths, merging back, and the dashboard with agents first and the inbox. **Milestone: the new lup hosts its own development**, and the bridge ends.
-6. **Gates.** The rest of the code rules (each with its fixes: every finding at once, the refused version saved, each rule naming its reason), the gate's guards, updates and migrations, release, upstream candidates and the adopting pass.
-7. **The rest.** In the library: runs (overhauled), rooms, the REPL and the outcome loop. In the environment: budgets, the feedback modules, the Codex adapter with its capability check, trust on launch.
+**Already built:** the engine and its rules, the gate, and the judge, which is reshaped around proposals before it goes live again. The declaration is built only as large as the steps above need. **While lup is being built,** its own sessions run only the code rules at the edit, and only protected paths ask (`AGENTS.md`, *How work goes*); a piece of the environment goes live in lup's own sessions once it's finished.
