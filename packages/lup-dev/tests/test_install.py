@@ -11,14 +11,12 @@ from typer.testing import CliRunner
 from lup_dev import cli
 from lup_dev.catalog.gate import Step
 from lup_dev.install import (
-    Answer,
     Approval,
     ChangedFile,
     Declined,
     Installed,
     Installer,
     InstallError,
-    LineComment,
     Review,
     Reviewer,
     Terminal,
@@ -28,6 +26,7 @@ from lup_dev.install import (
 )
 from lup_dev.layout import CheckoutLayout, Layout
 from lup_dev.policy.store import read_model, write_model
+from lup_dev.review import Answer, LineComment
 
 if TYPE_CHECKING:
     from collections.abc import Callable

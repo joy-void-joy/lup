@@ -6,7 +6,8 @@ The homes (`docs/judging-writes.md`, *Where things live*):
   repository's verdict log;
 - each worktree engine's socket, under `$XDG_RUNTIME_DIR/lup/`, since a socket's
   path is limited in length;
-- inside a worktree, `.lup/saved/`, where a refused version waits for the agent;
+- inside a worktree, `.lup/saved/`, where a refused version waits for the agent,
+  and `.lup/review/<n>/`, where a review keeps its files while it waits;
 - inside `lup_dev`, the built engine (`Bundle`).
 """
 
@@ -123,6 +124,30 @@ class StoreLayout(Model):
         return self.home / "importers.log"
 
     @property
+    def parked(self) -> Path:
+        """The reviews parked in the first lup's dashboard, kept under `parked_lock`.
+
+        Each with what parks it and every id the dashboard gave it, so the keeper
+        parks it again after it expires. It goes with the bridge.
+        """
+        return self.home / "parked.json"
+
+    @property
+    def parked_lock(self) -> Path:
+        """The lock guarding `parked`."""
+        return self.home / "parked.lock"
+
+    @property
+    def keeper(self) -> Path:
+        """The lock the running keeper holds for its whole life, which the OS frees."""
+        return self.home / "keeper.lock"
+
+    @property
+    def keeper_log(self) -> Path:
+        """What the keeper prints, kept for when it fails."""
+        return self.home / "keeper.log"
+
+    @property
     def engine_lock(self) -> Path:
         """The lock a client holds while it starts the worktree's engine."""
         return self.home / "engine.lock"
@@ -139,6 +164,22 @@ class StoreLayout(Model):
     def hold(self, hold: str) -> Path:
         """Say where one hold is kept."""
         return self.holds / f"{hold}.json"
+
+
+class ReviewLayout(Model):
+    """Where one review keeps its files in the worktree: `.lup/review/<n>/`."""
+
+    home: Path
+
+    @property
+    def before(self) -> Path:
+        """Each file's text before the change, at its path below, while it's parked.
+
+        The first lup's dashboard retires a waiting review whose recorded files
+        don't stand on disk as recorded, so the review records each file here. It
+        goes with the bridge.
+        """
+        return self.home / "before"
 
 
 class CheckoutLayout(Model):
@@ -183,6 +224,10 @@ class CheckoutLayout(Model):
         commit is known, and the review shows the source whole.
         """
         return self.home / "install-review" / (since or "whole")
+
+    def review(self, number: int) -> ReviewLayout:
+        """Say where review `number` keeps its files in the worktree."""
+        return ReviewLayout(home=self.home / "review" / str(number))
 
     @property
     def tool(self) -> Path:

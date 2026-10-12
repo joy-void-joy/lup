@@ -38,6 +38,7 @@ from lup_dev.errors import LupDevError
 from lup_dev.layout import CheckoutLayout, Layout
 from lup_dev.policy.runtime import Runtime
 from lup_dev.policy.store import Git, nul_separated, read_model, write_model
+from lup_dev.review import Answer
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -94,56 +95,6 @@ class Review(Model):
             else "whole, since no copy was approved yet"
         )
         return f"The judge at {self.commit}: its source {since}: {self.shortstat}."
-
-
-class LineComment(Model):
-    """One comment the operator anchored to lines of a file the review showed."""
-
-    path: Path
-    """The file's path in the checkout."""
-    first: int
-    last: int
-    side: Literal["before", "after"]
-    """Which text the lines number: `before`, the file at the commit approved last;
-    `after`, the file at `HEAD`."""
-    note: str
-
-    def text(self, since: str | None) -> str:
-        """Say where the comment points, then what it says, naming the commit before."""
-        lines = (
-            str(self.first) if self.first == self.last else f"{self.first}-{self.last}"
-        )
-        side = f"before, at {since}" if self.side == "before" and since else self.side
-        body = "\n    ".join(self.note.splitlines())
-        return f"{self.path}:{lines} ({side}): {body}"
-
-
-class Answer(Model):
-    """The operator's answer to the judge's review, with what they wrote on it."""
-
-    approved: bool
-    note: str = ""
-    comments: list[LineComment] = []
-
-    def said(self, since: str | None) -> list[str]:
-        """Return the note and the line comments as the terminal prints them."""
-        note = (
-            [
-                "Your note:",
-                *(f"    {line}" if line else "" for line in self.note.splitlines()),
-            ]
-            if self.note
-            else []
-        )
-        comments = (
-            [
-                "Your line comments:",
-                *(f"  {comment.text(since)}" for comment in self.comments),
-            ]
-            if self.comments
-            else []
-        )
-        return [*note, *comments]
 
 
 class Unchanged(Model):

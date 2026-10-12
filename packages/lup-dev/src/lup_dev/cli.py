@@ -31,7 +31,7 @@ from lup_dev.errors import LupDevError
 from lup_dev.gate import Check, Fixes, Shell, failed, report
 from lup_dev.install import Installer, Terminal, Uv
 from lup_dev.layout import CheckoutLayout, Layout
-from lup_dev.legacy_dashboard import LegacyDashboard
+from lup_dev.legacy_dashboard import LegacyDashboard, LegacyQueue
 from lup_dev.policy.checkpoint import Bench, Services, Worktree
 from lup_dev.policy.holds import Hold, Response, answer, waiting
 from lup_dev.policy.importers import BackgroundSpawner
@@ -45,8 +45,10 @@ from lup_dev.settings import LupDevSettings
 app = typer.Typer(no_args_is_help=True, help="Develop a project with agents.")
 rules = typer.Typer(no_args_is_help=True, help="lup's code rules.")
 holds = typer.Typer(help="Changes waiting for your answer.")
+review = typer.Typer(no_args_is_help=True, help="Reviews parked for your answer.")
 app.add_typer(rules, name="rules")
 app.add_typer(holds, name="holds")
+app.add_typer(review, name="review", hidden=True)
 
 
 class Adapter(Model, arbitrary_types_allowed=True):
@@ -359,6 +361,12 @@ def importers(worktree: Path) -> None:
     """Run a worktree's background importers pass; the checkpoint starts it."""
     layout = Layout.of(LupDevSettings())
     Worktree.at(worktree, layout).importers().run(engine())
+
+
+@review.command("keep", hidden=True)
+def review_keep(worktree: Path) -> None:
+    """Keep a worktree's reviews in the first lup's dashboard; parking starts it."""
+    LegacyQueue.configured(worktree, LupDevSettings(), SystemClock()).keep()
 
 
 def main() -> None:
