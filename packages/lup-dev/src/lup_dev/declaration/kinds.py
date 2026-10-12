@@ -1,10 +1,11 @@
-"""The kinds a module fills, each a selection of its own entries.
+"""The kinds a module fills, each a selection of its own entries, or a `Layer` of them.
 
 Every collection in a module is one of these, so a layer changes it by operations
 on what's below rather than restating it (`docs/declaration.md`, *The verbs on
-modules*). `Modules`, the selection of modules, is with `Module`. The rest of the
-kinds (commands, rooms, skills, guidance, doctests) arrive with the pieces that
-read them.
+modules*). A model holding several, `Paths` or `Session`, is a `Layer`, which a
+layer changes field by field. `Modules`, the selection of modules, is with
+`Module`. The rest of the kinds (commands, rooms, skills, doctests) arrive with
+the pieces that read them.
 """
 
 from pathlib import Path
@@ -12,6 +13,7 @@ from typing import Self, override
 
 from lup.types import Model
 from lup_dev.catalog.gate import Step
+from lup_dev.catalog.room import CacheLifetime, SessionDefaults
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.grammar import Layer, Named, listed
 
@@ -190,3 +192,81 @@ class TestRoots(Named[Pytest]):
     @override
     def named(self, entry: Pytest) -> str:
         return entry.root.as_posix()
+
+
+class Package(Model, extra="forbid"):
+    """A package of the room's image, and why it's there."""
+
+    name: str
+    """Its name in Arch Linux's repositories, the room's image being Arch's."""
+    why: str
+    """What it's there for."""
+
+
+class Packages(Named[Package]):
+    """The packages a module puts in the room's image, each named by its name.
+
+    The same package from two modules, or from a module and a requirement naming
+    it, is one package.
+    """
+
+    @override
+    def named(self, entry: Package) -> str:
+        return entry.name
+
+
+class RemovedTools(Named[str]):
+    """A runtime's built-in tools removed from a session's context, by name."""
+
+
+class Session(Layer, extra="forbid"):
+    """How every session of the project runs, in neutral terms each adapter spells.
+
+    A layer on it changes only the fields it sets: a project turning auto memory
+    on keeps lup's removed tools, and `RemovedTools().add(…)` or `.drop(…)` changes
+    them where they stand.
+
+    >>> mine = Session(auto_memory=True).over(Session())
+    >>> mine.auto_memory, mine.removed_tools == Session().removed_tools
+    (True, True)
+    """
+
+    subagent_cache: CacheLifetime = SessionDefaults().subagent_cache
+    """How long the prompt cache of a session's subagents lasts: `"1h"`, or the
+    API's other lifetime, `"5m"`."""
+    auto_memory: bool = SessionDefaults().auto_memory
+    """Whether a runtime keeps its own memory across sessions."""
+    removed_tools: RemovedTools = RemovedTools.of(*SessionDefaults().removed_tools)
+    """A runtime's built-in tools removed from a session's context, by name:
+    lup's (`lup_dev.catalog.room`), unless the project says."""
+
+
+class Section(Model, extra="forbid"):
+    """One section of the guidance every session reads, and where its text is.
+
+    >>> Section(name="lup", path=Path("AGENTS.md")).package is None
+    True
+    """
+
+    name: str
+    """How `Guidance`'s verbs name it: `.replace("core", …)`."""
+    path: Path
+    """The file holding its text: from the project's root, or inside `package`
+    where one is given."""
+    package: str | None = None
+    """The Python package shipping the file, by its dotted name, for a section a
+    package brings (lup's modules', or a shared base's); none for a file of the
+    project's own."""
+
+
+class Guidance(Named[Section]):
+    """The sections of guidance a module brings, each named by its name.
+
+    Rendered into one text at launch. Sections go in the order of their modules,
+    but where one is placed `before=` or `after=` another's name, whichever
+    module holds it.
+    """
+
+    @override
+    def named(self, entry: Section) -> str:
+        return entry.name
