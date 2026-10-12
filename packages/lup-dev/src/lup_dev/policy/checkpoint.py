@@ -24,16 +24,19 @@ a call, and moves the accepted tree on.
 A call that runs a subagent isn't counted as running: the subagent's own calls
 are, so its writes are judged as it makes them rather than when it ends. The
 files changed are re-checked for the type errors of the files importing them, in
-one background pass per worktree (`importers.py`), which the turn's end waits for.
+one background pass per worktree (`importers.py`), which the session's turn's end
+waits for.
 
-Each conversation's turn's end, the session's own or a subagent's, holds only on
-what's left in the files that conversation touched, and in the files importing
-them where the pass found errors (#41). A file tool's write is the conversation's
-that made it; anything else a checkpoint lands is every conversation's whose calls
-finished since the last one, since the checkpoint sees files, not who wrote them.
-A subagent is at work from its first call to the end of its conversation, and
-while one is, another conversation's end doesn't hold on a file they both
-touched, which may be the subagent's in progress (#32).
+The session's turn's end holds only on what's left in the files its own
+conversation touched, and in the files importing them where the pass found errors
+(#41). A subagent's end never holds on what's left in its files: every worker
+passes the gate before it hands back, and one waiting on a review has files
+importing what hasn't landed, errors it can't fix. A file tool's write is the
+conversation's that made it; anything else a checkpoint lands is every
+conversation's whose calls finished since the last one, since the checkpoint sees
+files, not who wrote them. A subagent is at work from its first call to the end
+of its conversation, and while one is, the session's end doesn't hold on a file
+they both touched, which may be the subagent's in progress (#32).
 """
 
 import difflib
@@ -1472,7 +1475,7 @@ class Ended(Model):
     checked: Checked
     remaining: list[Finding]
     """Type errors and ruff's findings left in the files the conversation touched,
-    and in those importing them, which hold its end."""
+    and in those importing them, which hold its end; none at a subagent's end."""
     working: list[Finding]
     """Those left in files a subagent at work touched too, which may be its in
     progress (#32): information."""
@@ -1489,15 +1492,21 @@ def ended(
 ) -> Ended:
     """Run conversation `agent`'s turn's end in one worktree the session holds.
 
-    The checkpoint, the importers pass waited on, and what's left in the files the
-    conversation touched and in those importing them. What's left in a file a
-    subagent in `working` touched too doesn't hold the end. Without `judging`, no
+    The checkpoint; then, at the session's own end, the importers pass waited on,
+    and what's left in the files its conversation touched and in those importing
+    them. What's left in a file a subagent in `working` touched too doesn't hold
+    the end. A subagent's end finds nothing, so runs no check and doesn't wait for
+    the pass, which the next checkpoint or the session's end collects: every
+    worker passes the gate before it hands back, and one waiting on a review has
+    files importing what hasn't landed, errors it can't fix. Without `judging`, no
     checkpoint: another conversation's call is running there, whose finish runs
     it, so its writes in progress aren't judged as this one's, put back under it,
     or told to a conversation that didn't make them.
     """
     services = bench.services
     checked = checkpoint(bench, worktree, key, agent) if judging else Checked()
+    if agent:
+        return Ended(checked=checked, remaining=[], working=[])
     worktree.importers().wait(services.checker, services.clock)
     with worktree.lock():
         session = worktree.session(key, bench.runtime)
@@ -1539,14 +1548,16 @@ def end_turn(
 ) -> Reply:
     """End conversation `event.agent`'s turn in each worktree its session holds.
 
-    In each, a checkpoint where `judging` names its root, the importers pass
-    waited on, and what's left in the files the conversation touched. Those hold
-    the turn's end, except in a file a subagent at work touched too, which may be
-    its in progress (#32), and except the same findings that held it just before
-    (`after_block`), which the agent didn't fix: those are information, told to
-    the operator where nothing else keeps the turn going. What a turn's end must
-    tell still blocks: each is told once. With `listing`, the notes present at the
-    session's start and removed since are listed, once.
+    In each, a checkpoint where `judging` names its root; at the session's own
+    end, the importers pass waited on, and what's left in the files its
+    conversation touched (`ended`), which a subagent's end never holds on. Those
+    hold the session's end, except in a file a subagent at work touched too,
+    which may be its in progress (#32), and except the same findings that held it
+    just before (`after_block`), which the agent didn't fix: those are
+    information, told to the operator where nothing else keeps the turn going.
+    What a turn's end must tell still blocks, at either end: each is told once.
+    With `listing`, the notes present at the session's start and removed since
+    are listed, once.
     """
     session, agent = event.session, event.agent
     record = ConversationRecord(layout=bench.services.layout, session=session)
@@ -1734,15 +1745,14 @@ class TurnEnded(Event):
 class ConversationEnded(Event):
     """A subagent's conversation ended its turn; the session's own goes on.
 
-    Its calls are cleared in each worktree the session holds, a checkpoint runs
-    in each where none is left running, the importers pass is waited on, and its
-    turn can't end while the files it touched have type errors or ruff's findings
-    (`end_turn`). Its end ends its time at work, unless it's blocked, which keeps
-    the subagent going.
+    Its calls are cleared in each worktree the session holds, and a checkpoint
+    runs in each where none is left running. Its end holds on what it must be
+    told, each told once (`end_turn`): a refusal, a move, a checkpoint's notice,
+    mail. It never holds on the type errors and ruff's findings left in its
+    files: every worker passes the gate before it hands back, and one waiting on
+    a review has files importing what hasn't landed, errors it can't fix. Its end
+    ends its time at work, unless it's blocked, which keeps the subagent going.
     """
-
-    after_block: bool = False
-    """Whether its turn went on because its end blocked just before."""
 
     @override
     def apply(self, bench: Bench) -> Reply:
@@ -1755,9 +1765,7 @@ class ConversationEnded(Event):
             for worktree in opened
             if worktree.clear(self.session, self.agent)
         ]
-        reply = end_turn(
-            bench, self, opened, idle, after_block=self.after_block, listing=False
-        )
+        reply = end_turn(bench, self, opened, idle, after_block=False, listing=False)
         if self.agent and not reply.block:
             record = ConversationRecord(
                 layout=bench.services.layout, session=self.session
