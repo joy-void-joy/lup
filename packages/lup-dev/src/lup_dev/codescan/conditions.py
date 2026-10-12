@@ -1,14 +1,15 @@
 """Conditions a deferral waits on, written in Python.
 
 `# lup: defer(when=sdk_reports_ttl, why="…")` names a condition the project
-declares in the module its declaration names for them (`Project.conditions`). The
-comment holds only the name, so nothing in a comment is ever run, and the
-condition is typed and tested like any code. lup ships two stock conditions; a
-project subclasses `Condition` for its own.
+declares in a Python module one of its declaration's modules names for them (a
+module's `conditions`, `"audiobook.conditions"`). The comment holds only the name,
+so nothing in a comment is ever run, and the condition is typed and tested like
+any code. lup ships two stock conditions; a project subclasses `Condition` for its
+own.
 
-At the edit, the judge checks the name is declared, reading the module without
-running it. At the gate, the module is imported and each named condition asked
-whether it holds; one that does makes its deferral due.
+At the edit, the judge checks the name is declared, reading the modules without
+running them. At the gate, they're imported and each named condition asked whether
+it holds; one that does makes its deferral due.
 """
 
 import ast
@@ -31,9 +32,9 @@ from tenacity import (
 )
 
 from lup.types import Model
+from lup_dev.declaration.load import Pyproject, import_roots, importable
 from lup_dev.errors import LupDevError
 from lup_dev.layout import CheckoutLayout
-from lup_dev.project import Project, Pyproject, import_roots, importable
 
 
 class ConditionError(LupDevError):
@@ -181,7 +182,7 @@ def module_file(root: Path, module: str) -> Path:
     Its parent packages are imported to find it, as Python's import system does.
     """
     roots = import_roots(root, Pyproject.read(CheckoutLayout(root=root).pyproject))
-    with importable(roots, root):
+    with importable(roots, root, module):
         try:
             spec = importlib.util.find_spec(module)
         except ImportError as missing:
@@ -193,16 +194,16 @@ def module_file(root: Path, module: str) -> Path:
     return Path(spec.origin)
 
 
-def declared(root: Path, project: Project) -> list[str] | None:
-    """List the names the project's conditions module binds, without running it.
+def declared(root: Path, modules: list[str]) -> list[str] | None:
+    """List the names the project's conditions modules bind, without running them.
 
-    None where the project declares no conditions module, so every `when` is
-    unknown. Each name bound at the module's top level counts; the gate checks
-    that it's a `Condition`.
+    `modules` names each Python module declaring conditions, one for each module
+    of the declaration that fills `conditions`. None where there's none, so every
+    `when` is unknown. Each name bound at a module's top level counts; the gate
+    checks that it's a `Condition`, and that no two modules bind it.
     """
-    if project.conditions is None:
+    if not modules:
         return None
-    tree = ast.parse(module_file(root, project.conditions).read_text())
 
     def bound(statement: ast.stmt) -> list[str]:
         match statement:
@@ -213,21 +214,52 @@ def declared(root: Path, project: Project) -> list[str] | None:
             case _:
                 return []
 
-    return [name for statement in tree.body for name in bound(statement)]
+    names = [
+        name
+        for module in modules
+        for statement in ast.parse(module_file(root, module).read_text()).body
+        for name in bound(statement)
+    ]
+    return list(dict.fromkeys(names))
 
 
-def loaded(root: Path, project: Project) -> dict[str, Condition]:
-    """Import the project's conditions module, and return its conditions by name.
+def loaded(root: Path, modules: list[str]) -> dict[str, Condition]:
+    """Import the project's conditions modules, and return their conditions by name.
 
-    Empty where the project declares no conditions module.
+    Empty where there's none. Raise `ConditionError` where two modules bind a
+    condition of one name: a `when` names one condition, and names are shared
+    across a declaration's modules.
     """
-    if project.conditions is None:
+    if not modules:
         return {}
     roots = import_roots(root, Pyproject.read(CheckoutLayout(root=root).pyproject))
-    with importable(roots, root):
-        module = importlib.import_module(project.conditions)
+
+    def conditions(module: str) -> dict[str, Condition]:
+        with importable(roots, root, module):
+            imported = importlib.import_module(module)
+        return {
+            name: value
+            for name, value in vars(imported).items()
+            if isinstance(value, Condition)
+        }
+
+    named = list(dict.fromkeys(modules))
+    by_module = {module: conditions(module) for module in named}
+    clashes = [
+        f"`{name}` from `{one}` and `{other}`"
+        for at, one in enumerate(named)
+        for other in named[at + 1 :]
+        for name in by_module[one]
+        if name in by_module[other]
+    ]
+    if clashes:
+        message = (
+            f"Two conditions modules bind a condition alike, {'; '.join(clashes)}: "
+            "a `defer` names one condition, so rename one"
+        )
+        raise ConditionError(message)
     return {
-        name: value
-        for name, value in vars(module).items()
-        if isinstance(value, Condition)
+        name: condition
+        for module in named
+        for name, condition in by_module[module].items()
     }

@@ -207,15 +207,10 @@ def test_the_gate_passes_a_worktree_without_findings(fakes: Kit, repo: Path) -> 
 def test_the_gates_rules_leave_tests_scratch_and_excluded_paths_out(
     fakes: Kit, repo: Path
 ) -> None:
-    (repo / "src" / "decl_gate").mkdir()
-    (repo / "src" / "decl_gate" / "__init__.py").write_text("")
-    (repo / "src" / "decl_gate" / "lup_project.py").write_text(
-        "from lup_dev.project import Project\n"
-        'project = Project(excluded=["vendor/**"])\n'
-    )
-    (repo / "pyproject.toml").write_text(
-        '[tool.lup]\nproject = "decl_gate.lup_project:project"\n'
-        '[tool.pytest]\ntestpaths = ["tests", "src"]\n'
+    (repo / "lup_project.py").write_text(
+        "from lup_dev import Core, Modules, Paths, Project\n"
+        "excluding = Core(paths=Paths().add(excluded=['vendor/**']))\n"
+        "project = Project(modules=Modules.default().edit(excluding))\n"
     )
     for written in ["vendor/lib.py", "tmp/try.py", "tests/test_core.py"]:
         (repo / written).parent.mkdir(exist_ok=True)

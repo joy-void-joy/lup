@@ -198,15 +198,10 @@ def test_rules_check_reads_protected_modules_with_lups_rules(
 def test_rules_check_leaves_excluded_paths_out(
     fakes: Kit, repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (repo / "src" / "decl_ex").mkdir()
-    (repo / "src" / "decl_ex" / "__init__.py").write_text("")
-    (repo / "src" / "decl_ex" / "lup_project.py").write_text(
-        "from lup_dev.project import Project\n"
-        'project = Project(excluded=["vendor/**"])\n'
-    )
-    (repo / "pyproject.toml").write_text(
-        '[tool.lup]\nproject = "decl_ex.lup_project:project"\n'
-        '[tool.pytest]\ntestpaths = ["tests", "src"]\n'
+    (repo / "lup_project.py").write_text(
+        "from lup_dev import Core, Modules, Paths, Project\n"
+        "excluding = Core(paths=Paths().add(excluded=['vendor/**']))\n"
+        "project = Project(modules=Modules.default().edit(excluding))\n"
     )
     (repo / "vendor").mkdir()
     (repo / "vendor" / "lib.py").write_text("x = 1  # BAD regex\n")
@@ -231,17 +226,11 @@ def test_rules_check_lists_every_file_on_disk_its_names_kept_whole(
 def test_rules_check_lifts_an_exempt_rule_from_its_paths(
     fakes: Kit, repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (repo / "src" / "decl_lift").mkdir()
-    (repo / "src" / "decl_lift" / "__init__.py").write_text("")
-    (repo / "src" / "decl_lift" / "lup_project.py").write_text(
-        "from lup_dev.project import Exemption, Project\n"
-        "project = Project(exempt=[Exemption(\n"
-        '    rule="regex", paths=["src/pkg/**"], why="a grammar"\n'
-        ")])\n"
-    )
-    (repo / "pyproject.toml").write_text(
-        '[tool.lup]\nproject = "decl_lift.lup_project:project"\n'
-        '[tool.pytest]\ntestpaths = ["tests", "src"]\n'
+    (repo / "lup_project.py").write_text(
+        "from lup_dev import CodeRules, Exemption, Exemptions, Modules, Project\n"
+        "lifted = Exemption(rule='regex', paths=['src/pkg/**'], why='a grammar')\n"
+        "lifting = CodeRules(exempt=Exemptions().add(lifted))\n"
+        "project = Project(modules=Modules.default().edit(lifting))\n"
     )
     (repo / "src" / "pkg" / "core.py").write_text(
         "x = 1  # BAD regex\ny = (1, 2)  # BAD tuple-shape\n"

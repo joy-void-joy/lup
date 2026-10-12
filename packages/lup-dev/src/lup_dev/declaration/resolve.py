@@ -13,9 +13,15 @@ hold it, by the kind's type (`docs/declaration.md`, *What a module is*):
 - the runner comes from the one module holding one, `Plain()` where none does.
 
 Rule selections are kept as recorded, one per module, for the engine to resolve.
+
+What judging a write reads of it is kept apart, as a `Declaration` of plain values,
+since the modules and the runner may be a project's own classes, which JSON can't
+bring back: the judge keeps the last declaration that loaded, to stand in for one
+that can't.
 """
 
-from typing import TYPE_CHECKING, Literal
+from pathlib import Path
+from typing import Literal
 
 from lup.types import Model
 from lup_dev.catalog.gate import Step
@@ -30,14 +36,13 @@ from lup_dev.declaration.kinds import (
     Rules,
     TestRoots,
 )
+from lup_dev.declaration.load import load
 from lup_dev.declaration.module import Module
 from lup_dev.declaration.modules.core import Core
 from lup_dev.declaration.modules.shipped import default, shipped
+from lup_dev.declaration.project import Project
 from lup_dev.declaration.requirements import Needed
 from lup_dev.declaration.runner import Plain, Runner
-
-if TYPE_CHECKING:
-    from lup_dev.declaration.project import Project
 
 
 class PathRoles(Model, extra="forbid"):
@@ -252,3 +257,55 @@ def resolve(project: Project) -> Resolved:
         requirements=[*needed, *brought],
         asks=project.asks,
     )
+
+
+class Declaration(Model):
+    """A declaration as judging reads it: its file, and plain values resolved from it.
+
+    `Resolved` holds the selected modules and the runner, which may be a project's
+    own subclasses, so it can't be read back from JSON. This holds only what the
+    roles, the judge and `lup-dev rules check` read, all of it plain data, so the
+    last declaration that loaded is kept as JSON and stands in for one that can't
+    (`docs/judging-writes.md`, *A declaration that can't load has a stand-in*).
+    """
+
+    source: Path | None = None
+    """The declaration's file, relative to the root, which is always protected;
+    none for the defaults."""
+    paths: PathRoles
+    tests: list[Pytest] | None
+    """The test roots the declaration names; none where they're lup's default,
+    and pytest's configuration says where tests are."""
+    exempt: list[Exemption]
+    conditions: list[str]
+    """The Python modules declaring the conditions a `defer` waits on, by name."""
+    rules: list[Selected]
+    """Each module's rule selection, as recorded, for the engine to resolve."""
+    asks: Literal["every", "protected"]
+
+    @classmethod
+    def of(cls, project: Project, source: Path | None = None) -> Declaration:
+        """Resolve `project`, read from `source`, and keep what judging reads.
+
+        Raise `ProjectError` where it doesn't resolve.
+
+        >>> Declaration.of(Project()).tests is None
+        True
+        """
+        resolved = resolve(project)
+        named = resolved.tests != resolve(Project()).tests
+        return cls(
+            source=source,
+            paths=resolved.paths,
+            tests=resolved.tests if named else None,
+            exempt=resolved.exempt,
+            conditions=resolved.conditions,
+            rules=resolved.rules,
+            asks=resolved.asks,
+        )
+
+    @classmethod
+    def read(cls, root: Path) -> Declaration:
+        """Load the declaration at `root` and resolve it, or raise `ProjectError`."""
+        declared = load(root)
+        return cls.of(declared.project, declared.source)

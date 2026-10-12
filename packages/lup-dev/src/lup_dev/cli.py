@@ -189,7 +189,7 @@ def rules_check(
     sources = [Source(path=path) for path in checked]
     reports = engine().check(root, sources)
     ruff = Ruff().findings(root, sources)
-    conditions = loaded(root, worktree.declared.project)
+    conditions = loaded(root, worktree.declaration.conditions)
     gate = Trackers(issues=GitHubIssues(root=root), conditions=conditions)
 
     def found(path: Path) -> list[Finding]:
