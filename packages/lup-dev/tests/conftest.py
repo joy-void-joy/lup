@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from lup_dev.declaration.resolve import Selected
+    from lup_dev.declaration.runner import Runner
 
 
 def marked(
@@ -184,6 +185,8 @@ class FakeEngine(Checker):
         self.checked: list[list[Source]] = []
         self.selections: list[list[Selected]] = []
         """The rule selections each check was sent, in order."""
+        self.runners: list[Runner] = []
+        """The runner each check and importers pass was sent, in order."""
         self.importers_asked: list[list[Path]] = []
         self.importer_reports: list[FileReport] = []
 
@@ -205,14 +208,22 @@ class FakeEngine(Checker):
         return []
 
     def check(
-        self, root: Path, sources: list[Source], selected: list[Selected]
+        self,
+        root: Path,
+        sources: list[Source],
+        selected: list[Selected],
+        runner: Runner,
     ) -> list[FileReport]:
         self.checked.append(sources)
         self.selections.append(selected)
+        self.runners.append(runner)
         return [self.report(root, source) for source in sources]
 
-    def importers(self, root: Path, changed: list[Path]) -> list[FileReport]:
+    def importers(
+        self, root: Path, changed: list[Path], runner: Runner
+    ) -> list[FileReport]:
         self.importers_asked.append(changed)
+        self.runners.append(runner)
         return self.importer_reports
 
 
@@ -222,7 +233,15 @@ class FakeLinter(Linter):
     `# FIXABLE <code>` is one of ruff's findings with a safe fix.
     """
 
-    def findings(self, root: Path, sources: list[Source]) -> list[Finding]:
+    def __init__(self) -> None:
+        self.runners: list[Runner] = []
+        """The runner each run was sent, in order."""
+
+    def findings(
+        self, root: Path, sources: list[Source], runner: Runner
+    ) -> list[Finding]:
+        self.runners.append(runner)
+
         def content(source: Source) -> str:
             return (
                 source.content

@@ -24,9 +24,10 @@ from lup_dev import CodeRules, Module, Modules, Rules
 from lup_dev import Project as Declaration
 from lup_dev.codescan.contract import FileReport, Rule, Source
 from lup_dev.codescan.directives import Defer, Ignore, Malformed, Note
-from lup_dev.codescan.engine import EngineChecker, EngineError
+from lup_dev.codescan.engine import EngineChecker, EngineError, EngineStatus
 from lup_dev.declaration.resolve import Selected, resolve
 from lup_dev.declaration.runner import Plain, Runner
+from lup_dev.declaration.runner import Uv as UvRunner
 from lup_dev.layout import Bundle, Layout
 
 if TYPE_CHECKING:
@@ -47,25 +48,51 @@ reportUnusedVariable = "warning"
 """
 
 
+class Bound:
+    """The engine's client asked with one runner, as the judge asks it for a worktree
+    by the runner of the declaration it reads."""
+
+    def __init__(self, engine: EngineChecker, runner: Runner) -> None:
+        self.engine = engine
+        self.runner = runner
+
+    def rules(self) -> list[Rule]:
+        return self.engine.rules()
+
+    def check(
+        self, root: Path, sources: list[Source], selected: list[Selected]
+    ) -> list[FileReport]:
+        return self.engine.check(root, sources, selected, self.runner)
+
+    def importers(self, root: Path, changed: list[Path]) -> list[FileReport]:
+        return self.engine.importers(root, changed, self.runner)
+
+    def status(self, root: Path) -> EngineStatus:
+        return self.engine.status(root, self.runner)
+
+    def stop(self, root: Path) -> None:
+        self.engine.stop(root, self.runner)
+
+
 def engine_for(
     runtime: Path,
     state: Path,
     bundle: Bundle | None = None,
     runner: Runner | None = None,
-) -> EngineChecker:
+) -> Bound:
     """An engine for tests, through uv unless given another runner."""
     engine = EngineChecker(
         layout=Layout(state=state, runtime=runtime),
         idle=timedelta(minutes=5),
         bundle=bundle or Bundle(),
     )
-    return engine if runner is None else engine.model_copy(update={"runner": runner})
+    return Bound(engine, UvRunner() if runner is None else runner)
 
 
 class Project:
     """A small project on disk, with its own engine."""
 
-    def __init__(self, root: Path, engine: EngineChecker) -> None:
+    def __init__(self, root: Path, engine: Bound) -> None:
         self.root = root
         self.engine = engine
 
@@ -650,8 +677,8 @@ def test_with_plain_the_engine_reads_the_python_on_the_path(
 
 
 class Chosen(Runner):
-    """Python as the interpreter the worktree's `choice` file names, which decides
-    its environment."""
+    """Each tool in the environment the worktree's `choice` file names, which decides
+    it: its own command, `script`, put before the tool, as a runner's is."""
 
     script: Path
 
@@ -661,15 +688,20 @@ class Chosen(Runner):
 
     @override
     def judging(self, tool: list[str]) -> list[str]:
-        match tool:
-            case ["python", *arguments]:
-                return [str(self.script), *arguments]
-            case _:
-                return tool
+        return [str(self.script), *tool]
 
     @override
     def environment(self) -> list[str]:
         return ["choice"]
+
+
+CHOOSE = """\
+#!/bin/sh
+PATH="$(cat "$(dirname "$0")/choice"):$PATH"
+export PATH
+exec "$@"
+"""
+"""Runs a tool with the directory `choice` names first on the `PATH`."""
 
 
 def test_a_file_the_runner_names_changing_builds_another_program(
@@ -679,16 +711,16 @@ def test_a_file_the_runner_names_changing_builds_another_program(
     releasing = environment(tmp_path / "releasing", workspace(root, RELEASING))
     holding = environment(tmp_path / "holding", workspace(tmp_path / "old", HOLDING))
     script = root / "choose"
-    script.write_text('#!/bin/sh\nexec "$(cat "$(dirname "$0")/choice")" "$@"\n')
+    script.write_text(CHOOSE)
     script.chmod(0o755)
-    (root / "choice").write_text(str(releasing / "python"))
+    (root / "choice").write_text(str(releasing))
     engine = engine_for(
         short / "chosen", tmp_path / "state", runner=Chosen(script=script)
     )
     try:
         [report] = engine.check(root, [CALLING], EVERY)
         assert pyright(report) == []
-        (root / "choice").write_text(str(holding / "python"))
+        (root / "choice").write_text(str(holding))
         [report] = engine.check(root, [CALLING], EVERY)
         assert any("release" in each for each in pyright(report))
     finally:
@@ -939,7 +971,7 @@ def test_an_engine_started_with_another_runner_is_replaced(
     monkeypatch.setenv(
         "PATH", f"{fresh.root / '.venv' / 'bin'}{os.pathsep}{os.environ['PATH']}"
     )
-    plain = fresh.engine.model_copy(update={"runner": Plain()})
+    plain = Bound(fresh.engine.engine, Plain())
     try:
         before = fresh.engine.status(fresh.root)
         after = plain.status(fresh.root)

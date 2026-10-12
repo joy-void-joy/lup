@@ -1435,7 +1435,8 @@ def unclean(bench: Bench, worktree: Worktree, paths: list[Path]) -> list[Finding
 
     As the files stand on disk, once `ignore`s apply, each named by its absolute
     path. A finding ruff fixes safely isn't one: the session landing the work
-    applies the fix.
+    applies the fix. The engine and ruff are asked with the rule selection and
+    the runner of the declaration the worktree is judged by.
     """
     services = bench.services
     sources = [
@@ -1445,10 +1446,11 @@ def unclean(bench: Bench, worktree: Worktree, paths: list[Path]) -> list[Finding
     ]
     if not sources:
         return []
+    declaration = worktree.declaration
     reports = services.checker.check(
-        worktree.root, sources, worktree.declaration.rules
+        worktree.root, sources, declaration.rules, declaration.runner
     )
-    ruff = services.linter.findings(worktree.root, sources)
+    ruff = services.linter.findings(worktree.root, sources, declaration.runner)
     found = [
         found
         for report in reports
@@ -1499,7 +1501,9 @@ def ended(
     checked = checkpoint(bench, worktree, key, agent) if judging else Checked()
     if agent:
         return Ended(checked=checked, remaining=[], working=[])
-    worktree.importers().wait(services.checker, services.clock)
+    worktree.importers().wait(
+        services.checker, worktree.declaration.runner, services.clock
+    )
     with worktree.lock():
         session = worktree.session(key, bench.runtime)
         watch(worktree, session, worktree.importers().collect())

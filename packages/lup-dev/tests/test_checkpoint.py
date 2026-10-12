@@ -14,6 +14,7 @@ from lup_dev.codescan.contract import FileReport, Finding, Position, Span
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.grammar import Drop
 from lup_dev.declaration.resolve import Declaration, Selected
+from lup_dev.declaration.runner import Plain, Prefixed
 from lup_dev.policy.before import Overwrite, Replacement, before
 from lup_dev.policy.checkpoint import (
     CallFinished,
@@ -889,15 +890,16 @@ def test_the_importers_pass_runs_once_with_everything_requested(
     kit: Kit, repo: Path
 ) -> None:
     importers = ImportersPass(layout=kit.layout.store(repo), root=repo)
-    runner = FileLock(kit.layout.store(repo).importers_run)
-    with runner:
+    held = FileLock(kit.layout.store(repo).importers_run)
+    with held:
         importers.request([Path("a.py")], [OWN], kit.spawner)
         importers.request([Path("b.py")], [WORKER], kit.spawner)
         assert kit.spawner.spawned == []
-        importers.run(kit.engine)
+        importers.run(kit.engine, Plain())
         assert kit.engine.importers_asked == []
-    importers.run(kit.engine)
+    importers.run(kit.engine, Plain())
     assert kit.engine.importers_asked == [[Path("a.py"), Path("b.py")]]
+    assert kit.engine.runners == [Plain()]
     assert importers.collect().writers == [OWN, WORKER]
     assert importers.collect().writers == []
 
@@ -1319,6 +1321,71 @@ def test_a_stand_in_declaration_sends_its_own_rule_selection(
     assert kit.engine.selections
     for selected in kit.engine.selections:
         assert dropped(selected) == ["runtime-mention", "regex"]
+
+
+PLAIN = (
+    "from lup_dev import Modules, Plain, Project, Python\n"
+    "project = Project(modules=Modules.default().edit(Python(runner=Plain())))\n"
+)
+"""A declaration whose tools run as the `PATH` finds them."""
+
+POETRY = '''
+from lup_dev import Modules, Project, Python, Runner
+
+
+class Poetry(Runner):
+    """The project's own runner, a class the judge's kept data can't bring back."""
+
+    def command(self, tool: list[str]) -> list[str]:
+        return ["poetry", "run", *tool]
+
+    def judging(self, tool: list[str]) -> list[str]:
+        return ["poetry", "run", *tool]
+
+    def environment(self) -> list[str]:
+        return ["poetry.lock"]
+
+
+project = Project(modules=Modules.default().edit(Python(runner=Poetry())))
+'''
+
+
+def test_the_engine_and_ruff_run_with_the_integration_branchs_runner(
+    kit: Kit, repo: Path, linked: Path, shell: Shell
+) -> None:
+    shell.git(repo, "switch", "-q", "-c", "dev")
+    (repo / "lup_project.py").write_text(PLAIN)
+    shell.commit(repo, "dev: no uv")
+    start(kit, repo)
+    before(kit.bench, core_edit(linked), SESSION, repo)
+    call(kit, linked, "c1")
+    (linked / CORE).write_text((linked / CORE).read_text() + "# TYPE\n")
+    finish(kit, linked, "c1")
+    end(kit, repo)
+    plain = Prefixed.of(Plain())
+    assert kit.engine.runners
+    assert kit.linter.runners
+    assert all(each == plain for each in [*kit.engine.runners, *kit.linter.runners])
+
+
+def test_a_stand_in_declaration_runs_the_tools_with_its_runners_commands(
+    kit: Kit, repo: Path, linked: Path, shell: Shell
+) -> None:
+    shell.git(repo, "switch", "-q", "-c", "dev")
+    (repo / "lup_project.py").write_text(POETRY)
+    shell.commit(repo, "dev: poetry")
+    start(kit, repo)
+    before(kit.bench, core_edit(linked), SESSION, repo)
+    (repo / "lup_project.py").write_text("from lup_dev import Unheard\n" + POETRY)
+    shell.commit(repo, "dev: a name the judge lacks")
+    kit.engine.runners.clear()
+    kit.linter.runners.clear()
+    before(kit.bench, core_edit(linked), SESSION, repo)
+    ran = [*kit.engine.runners, *kit.linter.runners]
+    assert ran
+    for runner in ran:
+        assert runner.judging(["ruff"]) == ["poetry", "run", "ruff"]
+        assert runner.environment() == ["poetry.lock"]
 
 
 def test_before_the_first_commit_the_defaults_rule_selection_judges(

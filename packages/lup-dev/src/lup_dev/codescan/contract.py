@@ -21,6 +21,7 @@ from lup_dev.codescan.directives import Directive
 
 if TYPE_CHECKING:
     from lup_dev.declaration.resolve import Selected
+    from lup_dev.declaration.runner import Runner
 
 
 class Position(Model):
@@ -164,16 +165,27 @@ class Checker(ABC):
 
     @abstractmethod
     def check(
-        self, root: Path, sources: list[Source], selected: list[Selected]
+        self,
+        root: Path,
+        sources: list[Source],
+        selected: list[Selected],
+        runner: Runner,
     ) -> list[FileReport]:
         """Check the given files of the project at `root`, one report per file.
 
         The rules run are those `selected` chooses: each module's selection, as
-        the project's declaration records it, which the engine resolves. Each
-        report holds their findings and pyright's type errors, the file's
+        the project's declaration records it, which the engine resolves. Types
+        are read in the environment the project's `runner` gives the worktree.
+        Each report holds their findings and pyright's type errors, the file's
         directives, its public surface and its imports.
         """
 
     @abstractmethod
-    def importers(self, root: Path, changed: list[Path]) -> list[FileReport]:
-        """Re-check, for type errors only, the files that import any of `changed`."""
+    def importers(
+        self, root: Path, changed: list[Path], runner: Runner
+    ) -> list[FileReport]:
+        """Re-check, for type errors only, the files that import any of `changed`.
+
+        Types are read in the environment the project's `runner` gives the
+        worktree.
+        """

@@ -220,7 +220,7 @@ class Poetry(Runner):
 
     @override
     def judging(self, tool: list[str]) -> list[str]:
-        return ["poetry", "run", *tool]
+        return ["env", "-u", "VIRTUAL_ENV", "poetry", "run", *tool]
 
     @override
     def environment(self) -> list[str]:
@@ -248,7 +248,18 @@ def test_what_judging_reads_is_kept_as_json_whatever_classes_the_project_brings(
 ) -> None:
     write(tmp_path / "lup_project.py", OWN_CLASSES)
     declaration = Declaration.read(tmp_path)
-    assert Declaration.model_validate_json(declaration.model_dump_json()) == declaration
+    kept = Declaration.model_validate_json(declaration.model_dump_json())
+    assert kept == declaration
+    assert kept.runner.judging(["ruff"]) == [
+        "env",
+        "-u",
+        "VIRTUAL_ENV",
+        "poetry",
+        "run",
+        "ruff",
+    ]
+    assert kept.runner.command(["pytest"]) == ["poetry", "run", "pytest"]
+    assert kept.runner.environment() == ["poetry.lock"]
     assert declaration.source == Path("lup_project.py")
     assert "episodes/**" in declaration.paths.protected
     assert declaration.conditions == ["audiobook.conditions"]

@@ -12,10 +12,14 @@ import pytest
 
 from lup_dev.codescan.contract import Source
 from lup_dev.codescan.ruff import Ruff, RuffError
+from lup_dev.declaration import runner
 from lup_dev.declaration.runner import Plain, Runner
 
 if TYPE_CHECKING:
     from conftest import Uv
+
+UV = runner.Uv()
+"""lup's default runner."""
 
 CODE = "import os\n\nx = 1\nif x == None:\n    print(undefined)\n"
 
@@ -32,7 +36,9 @@ def test_only_a_safe_fix_makes_a_finding_fixable(
         [Source(path=Path("a.py"))],
         [Source(path=Path("a.py"), content=CODE)],
     ]:
-        found = {each.rule: each.fixable for each in Ruff().findings(tmp_path, sources)}
+        found = {
+            each.rule: each.fixable for each in Ruff().findings(tmp_path, sources, UV)
+        }
         assert found == {"F401": True, "E711": False, "F821": False}
 
 
@@ -44,7 +50,7 @@ def test_a_fix_the_configuration_makes_unfixable_isnt_fixable(
     )
     offline_uv.lock(tmp_path)
     (tmp_path / "a.py").write_text(CODE)
-    [found] = Ruff().findings(tmp_path, [Source(path=Path("a.py"))])
+    [found] = Ruff().findings(tmp_path, [Source(path=Path("a.py"))], UV)
     assert (found.rule, found.fixable) == ("F401", False)
 
 
@@ -83,7 +89,7 @@ def test_ruff_is_the_one_in_the_environment_uv_gives_the_worktree(
     monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", str(environment))
     offline_uv.sync(root)
     stand_in(environment / "bin", "WORKTREE", root)
-    [found] = Ruff().findings(root, [Source(path=Path("a.py"))])
+    [found] = Ruff().findings(root, [Source(path=Path("a.py"))], UV)
     assert found.rule == "WORKTREE"
 
 
@@ -93,7 +99,7 @@ def test_where_uv_cant_run_ruff_the_error_says_why(
     (tmp_path / "pyproject.toml").write_text("[tool.ruff]\n")
     (tmp_path / "a.py").write_text(CODE)
     with pytest.raises(RuffError, match=r"`uv\.lock`"):
-        Ruff().findings(tmp_path, [Source(path=Path("a.py"))])
+        Ruff().findings(tmp_path, [Source(path=Path("a.py"))], UV)
 
 
 def test_ruff_runs_as_the_runners_judging_command(
@@ -104,7 +110,7 @@ def test_ruff_runs_as_the_runners_judging_command(
     (root / "a.py").write_text(CODE)
     stand_in(tmp_path / "bin", "PATHS", root)
     monkeypatch.setenv("PATH", f"{tmp_path / 'bin'}{os.pathsep}{os.environ['PATH']}")
-    [found] = Ruff(runner=Plain()).findings(root, [Source(path=Path("a.py"))])
+    [found] = Ruff().findings(root, [Source(path=Path("a.py"))], Plain())
     assert found.rule == "PATHS"
 
 
@@ -127,4 +133,4 @@ class Elsewhere(Runner):
 def test_a_runner_this_machine_lacks_is_named(tmp_path: Path) -> None:
     (tmp_path / "a.py").write_text(CODE)
     with pytest.raises(RuffError, match=r"`lup-no-such-runner` isn't on the `PATH`"):
-        Ruff(runner=Elsewhere()).findings(tmp_path, [Source(path=Path("a.py"))])
+        Ruff().findings(tmp_path, [Source(path=Path("a.py"))], Elsewhere())

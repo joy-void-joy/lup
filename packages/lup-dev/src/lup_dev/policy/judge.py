@@ -233,7 +233,9 @@ class Judge(Model, arbitrary_types_allowed=True):
             ]
         )
         ruff = self.linter.findings(
-            self.root, [Source(path=c.path, content=c.after) for c in checked]
+            self.root,
+            [Source(path=c.path, content=c.after) for c in checked],
+            self.roles.declaration.runner,
         )
         return [
             self.one(
@@ -252,14 +254,18 @@ class Judge(Model, arbitrary_types_allowed=True):
         """Ask the engine about `sources`, and return its reports by path.
 
         Each check carries the declaration's rule selection, for the engine to
-        resolve: the one the worktree is judged by, or the one standing in for it.
+        resolve, and its runner, for the engine to read types in the environment
+        it gives: the declaration the worktree is judged by, or the one standing in
+        for it.
         """
         if not sources:
             return {}
-        selected = self.roles.declaration.rules
+        declaration = self.roles.declaration
         reports = {
             report.path: report
-            for report in self.checker.check(self.root, sources, selected)
+            for report in self.checker.check(
+                self.root, sources, declaration.rules, declaration.runner
+            )
         }
         unreported = [source.path for source in sources if source.path not in reports]
         if unreported:

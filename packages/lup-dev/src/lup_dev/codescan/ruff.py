@@ -15,15 +15,17 @@ runner's command for the judge, which never writes the project's files: for
 import shlex
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Literal, override
+from typing import TYPE_CHECKING, Literal, override
 
 import sh
 from pydantic import TypeAdapter
 
 from lup.types import Model
 from lup_dev.codescan.contract import Finding, Position, Source, Span
-from lup_dev.declaration.runner import Runner, Uv
 from lup_dev.errors import LupDevError
+
+if TYPE_CHECKING:
+    from lup_dev.declaration.runner import Runner
 
 
 class RuffError(LupDevError):
@@ -34,25 +36,29 @@ class Linter(ABC):
     """A linter the judge asks about the files a change touches."""
 
     @abstractmethod
-    def findings(self, root: Path, sources: list[Source]) -> list[Finding]:
-        """Return the findings in `sources`, as written or as their would-be content."""
+    def findings(
+        self, root: Path, sources: list[Source], runner: Runner
+    ) -> list[Finding]:
+        """Return the findings in `sources`, as written or as their would-be content.
+
+        The linter runs as the project's `runner` runs a tool for the judge.
+        """
 
 
-class Ruff(Model, Linter):
+class Ruff(Linter):
     """ruff as the project's runner finds it in the worktree.
 
     That's the project's own where its environment has one, as for the gate's
-    ruff step; with `Uv()`, else the one on the path. Files on disk are checked
-    in one run; would-be content one file at a time, through stdin, under the
-    file's own name so its configuration applies.
+    ruff step; with `Uv()`, else the one on the path. It runs as the runner's
+    `judging` command. Files on disk are checked in one run; would-be content one
+    file at a time, through stdin, under the file's own name so its
+    configuration applies.
     """
 
-    runner: Runner = Uv()
-    """How the project runs its tools: ruff runs as the runner's `judging`
-    command."""
-
     @override
-    def findings(self, root: Path, sources: list[Source]) -> list[Finding]:
+    def findings(
+        self, root: Path, sources: list[Source], runner: Runner
+    ) -> list[Finding]:
         class Location(Model):
             """A place in ruff's JSON output."""
 
@@ -98,7 +104,7 @@ class Ruff(Model, Linter):
         messages = TypeAdapter(list[Message])
         # `--exit-zero` keeps a failure apart from findings: the runner's failures
         # (uv's) exit 1, as ruff's findings otherwise would.
-        command = self.runner.judging(
+        command = runner.judging(
             [
                 "ruff",
                 "check",

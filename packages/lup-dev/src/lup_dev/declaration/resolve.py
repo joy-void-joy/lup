@@ -43,7 +43,7 @@ from lup_dev.declaration.modules.core import Core
 from lup_dev.declaration.modules.shipped import default, shipped
 from lup_dev.declaration.project import Project
 from lup_dev.declaration.requirements import Needed
-from lup_dev.declaration.runner import Plain, Runner
+from lup_dev.declaration.runner import Plain, Prefixed, Runner
 
 
 class PathRoles(Model, extra="forbid"):
@@ -280,9 +280,10 @@ class Declaration(Model):
 
     `Resolved` holds the selected modules and the runner, which may be a project's
     own subclasses, so it can't be read back from JSON. This holds only what the
-    roles, the judge and `lup-dev rules check` read, all of it plain data, so the
-    last declaration that loaded is kept as JSON and stands in for one that can't
-    (`docs/judging-writes.md`, *A declaration that can't load has a stand-in*).
+    roles, the judge and `lup-dev rules check` read, all of it plain data, the
+    runner kept as its commands, so the last declaration that loaded is kept as
+    JSON and stands in for one that can't (`docs/judging-writes.md`, *A
+    declaration that can't load has a stand-in*).
     """
 
     source: Path | None = None
@@ -297,6 +298,10 @@ class Declaration(Model):
     """The Python modules declaring the conditions a `defer` waits on, by name."""
     rules: list[Selected]
     """Each module's rule selection, as recorded, for the engine to resolve."""
+    runner: Prefixed
+    """The project's runner, kept as the commands it puts before a tool and its
+    environment's files: the judge runs ruff, and names the engine's interpreter,
+    with them."""
     asks: Literal["every", "protected"]
 
     @classmethod
@@ -317,6 +322,7 @@ class Declaration(Model):
             exempt=resolved.exempt,
             conditions=resolved.conditions,
             rules=resolved.rules,
+            runner=Prefixed.of(resolved.runner),
             asks=resolved.asks,
         )
 

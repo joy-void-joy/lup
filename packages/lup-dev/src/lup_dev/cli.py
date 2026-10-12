@@ -161,7 +161,8 @@ def rules_check(
     """Check files as the gate does: lup's rules, pyright, ruff and the deferrals.
 
     lup's rules are those the worktree's declaration selects, sent to the engine
-    as the judge sends them. `# lup: ignore` applies to every owner's findings. A
+    as the judge sends them, and pyright and ruff run through its runner as the
+    judge runs them. `# lup: ignore` applies to every owner's findings. A
     deferral whose issue is closed, or whose condition holds, fails the check.
     lup's rules read production and protected modules; tests are checked by
     pyright and ruff only; what the declaration excludes isn't checked. With no
@@ -189,9 +190,10 @@ def rules_check(
         typer.echo("lup checked no files.")
         return
     sources = [Source(path=path) for path in checked]
-    reports = engine().check(root, sources, worktree.declaration.rules)
-    ruff = Ruff().findings(root, sources)
-    conditions = loaded(root, worktree.declaration.conditions)
+    declaration = worktree.declaration
+    reports = engine().check(root, sources, declaration.rules, declaration.runner)
+    ruff = Ruff().findings(root, sources, declaration.runner)
+    conditions = loaded(root, declaration.conditions)
     gate = Trackers(issues=GitHubIssues(root=root), conditions=conditions)
 
     def found(path: Path) -> list[Finding]:
@@ -384,9 +386,15 @@ def verdicts(
 
 @app.command("importers", hidden=True)
 def importers(worktree: Path) -> None:
-    """Run a worktree's background importers pass; the checkpoint starts it."""
-    layout = Layout.of(LupDevSettings())
-    Worktree.at(worktree, layout).importers().run(engine())
+    """Run a worktree's background importers pass; the checkpoint starts it.
+
+    The engine is asked with the runner of the declaration the judge reads there,
+    the integration branch's, so the pass and the judge share one engine.
+    """
+    judging = services()
+    repository = Worktree.at(worktree, judging.layout).repository
+    judged = Worktree.of(worktree, repository, judging)
+    judged.importers().run(judging.checker, judged.declaration.runner)
 
 
 @review.command("keep", hidden=True)

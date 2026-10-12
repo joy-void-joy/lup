@@ -15,7 +15,17 @@ from lup_dev.declaration.requirements import Requirement
 
 
 class Runner(Model, ABC):
-    """How a project runs its tools in its environment."""
+    """How a project runs its tools in its environment.
+
+    Its contract: a runner runs a tool by putting its own command before it, as
+    `uv run`, `poetry run` and `conda run -n …` do. `command(tool)` is
+    `command([])` followed by `tool`, and `judging(tool)` is `judging([])`
+    followed by `tool`. The judge keeps a declaration it read as plain data, to
+    stand in for one that can't load, so it keeps a project's runner as those
+    commands and its environment's files (`Prefixed`) rather than as its class: a
+    runner that rewrote the tool itself would be judged with other commands than
+    it gives.
+    """
 
     requirements: ClassVar[list[Requirement]] = []
     """What it needs from outside the project's environment, checked with the
@@ -88,3 +98,47 @@ class Plain(Runner):
     @override
     def environment(self) -> list[str]:
         return []
+
+
+class Prefixed(Runner):
+    """A runner kept as the commands it puts before a tool, and its files.
+
+    It's how the judge holds a project's runner, which may be a class of the
+    project's own that the judge's kept data can't bring back. By `Runner`'s
+    contract those commands are the whole of a runner, so the judge runs each
+    tool as the project's runner gives it, a stand-in declaration's included.
+
+    >>> kept = Prefixed.of(Uv())
+    >>> kept.judging(["ruff"]) == Uv().judging(["ruff"])
+    True
+    >>> kept.environment() == Uv().environment()
+    True
+    """
+
+    gate: list[str]
+    """What the gate puts before a tool: the runner's `command([])`."""
+    judge: list[str]
+    """What the judge puts before a tool: the runner's `judging([])`."""
+    files: list[str]
+    """The files, from the root, whose change means another environment."""
+
+    @classmethod
+    def of(cls, runner: Runner) -> Prefixed:
+        """Keep `runner` as the commands it puts before a tool, and its files."""
+        return cls(
+            gate=runner.command([]),
+            judge=runner.judging([]),
+            files=runner.environment(),
+        )
+
+    @override
+    def command(self, tool: list[str]) -> list[str]:
+        return [*self.gate, *tool]
+
+    @override
+    def judging(self, tool: list[str]) -> list[str]:
+        return [*self.judge, *tool]
+
+    @override
+    def environment(self) -> list[str]:
+        return self.files

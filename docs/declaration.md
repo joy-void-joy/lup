@@ -307,12 +307,14 @@ class Runner(Model, ABC):
 
 Two methods because the judge and the gate differ: the gate may lock and sync (plain `uv run` relocks a stale lock), while the judge must never write `uv.lock`, a protected path the checkpoint would then judge as the agent's shell write (`docs/judging-writes.md`, *The engine: one typed tree*). A prefix string in place of the class couldn't give the judge a command apart from the gate's.
 
+**A runner's contract:** it runs a tool by putting its own command before it, as `uv run`, `poetry run` and `conda run -n …` do, so `command(tool)` is `command([])` followed by the tool, and `judging(tool)` is `judging([])` followed by it (`Runner`'s docstring). The judge keeps what it reads of a declaration as plain data, to stand in for one that can't load (`docs/judging-writes.md`, *The declaration, from the integration branch*), and a project's runner may be a class of its own that the data can't bring back. So the snapshot (`Declaration`, `declaration/resolve.py`) keeps the runner's commands, not the runner: `Prefixed`, lup's own runner holding the gate's and the judge's commands and the environment's files, built with `Prefixed.of(runner)`. By the contract those are the whole runner, so a stand-in judges with the commands the project's runner gave. The alternative, keeping the runner by its class's import path and importing it again, fails exactly when a stand-in is needed: the declaration that can't load is where that class lives.
+
 Where it's used:
-- **the gate:** each step's command is the tool alone (`["ruff", "check", "--ignore-noqa"]`), run as `runner.command(…)`, or as written for a step with `in_environment=False` (`Step.in_environment`, `catalog/gate.py`); the `--fix` steps too;
+- **the gate:** each step's command is the tool alone (`["ruff", "check", "--ignore-noqa"]`), run as `runner.command(…)`, or as written for a step with `in_environment=False` (`Step.in_environment`, `catalog/gate.py`); the `--fix` steps too. The gate reads the worktree's own declaration's runner, resolved;
 - **ruff in the judge:** `runner.judging(["ruff", "check", …])`;
 - **the engine:** started with the runner's interpreter command (`judging(["python"])`) and its environment files, each as a JSON list (`--interpreter`, `--environment-files`), so `program.ts` runs that command to name the interpreter, and stamps those files with pyright's own configuration. Every request carries the same pair (`EngineEnvironment`, `codescan/engine.py`), so an engine started with another runner answers stale and is replaced, as one from another build is.
 
-`Ruff` and `EngineChecker` hold the runner as a field, `Uv()` where none is given. The gate runs its steps through the worktree's declared runner; the judge's `Services`, `lup-dev rules check` and the importers pass build `Ruff` and the engine without one, so they run through `Uv()` until they pass the runner of the declaration they read.
+ruff and the engine are given the runner with each call (`Linter.findings`, `Checker.check` and `Checker.importers` take it, as they take the root and the rule selection), rather than holding one: the judge's services are built once per hook, before it knows which worktrees it judges, each by its own declaration. The judge passes the runner of the declaration it judges by, a stand-in's included; the turn's end and the background importers pass, the same; `lup-dev rules check`, the worktree's own, as the gate. So `Uv()` is spelled only as `Python.runner`'s default.
 
 `gate.py`'s own seam for running a command, which its tests stub (`Shell` running it as a process), is `Processes`, so `Runner` means one thing in `lup_dev`.
 
@@ -543,7 +545,7 @@ In `packages/lup-dev/src/lup_dev/`. The declaration is a subsystem of its own (`
 | `declaration/module.py` | `Module`, its parts, its `requires`, and `.edit`; `Modules`, the selection of modules | A |
 | `declaration/kinds.py` | Each kind as a `Selection`: `Rules`, `Paths`, `Gate`, `Commands`, `Rooms`, later `Skills`, `Guidance`, `Runtimes` | A |
 | `declaration/project.py` | `Project`, holding `modules`, and `asks` until the judge's asks become proposals | A |
-| `declaration/runner.py` | `Runner`, `Uv`, `Plain` | A |
+| `declaration/runner.py` | `Runner`, `Uv`, `Plain`; `Prefixed`, a runner kept as its commands, as the judge keeps one | A |
 | `declaration/requirements.py` | `Requirement`, and checking a declaration's requirements all at once | A |
 | `declaration/modules/` | lup's modules as `Module` subclasses, data only: `core.py`, `python.py`, `code_rules.py`, and the default list | A |
 | `declaration/resolve.py` | A declaration resolved: each kind's entries from the selected modules, names checked, `Core` present, every required module present and no cycle, every layer applied in order, each value with the layer that set it | A |

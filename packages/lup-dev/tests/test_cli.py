@@ -11,7 +11,9 @@ from lup_dev import Rules, cli
 from lup_dev.codescan.directives import IssueRef, Issues
 from lup_dev.codescan.engine import EngineChecker
 from lup_dev.declaration.modules.code_rules import lup_default
+from lup_dev.declaration.runner import Plain, Prefixed
 from lup_dev.policy.holds import HeldFile, Hold, HoldError, Holds, waiting
+from lup_dev.policy.importers import Conversation, ImportersPass
 from lup_dev.policy.verdicts import Verdict, VerdictLog
 
 if TYPE_CHECKING:
@@ -182,6 +184,43 @@ def test_rules_check_reports_every_owner_through_lups_ignore(
     assert any(line.startswith("tests/test_core.py:2:") for line in lines)
     assert not any(line.startswith("tests/test_core.py:1:") for line in lines)
     assert lines[-1] == "lup checked 3 files: 3 findings."
+
+
+PLAIN = (
+    "from lup_dev import Modules, Plain, Project, Python\n"
+    "project = Project(modules=Modules.default().edit(Python(runner=Plain())))\n"
+)
+"""A declaration whose tools run as the `PATH` finds them."""
+
+
+def test_rules_check_runs_the_engine_and_ruff_with_the_worktrees_runner(
+    fakes: Kit, repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (repo / "lup_project.py").write_text(PLAIN)
+    monkeypatch.chdir(repo)
+    result = runner.invoke(cli.app, ["rules", "check"])
+    assert result.exit_code == 0, result.output
+    plain = Prefixed.of(Plain())
+    assert fakes.engine.runners == [plain]
+    assert fakes.linter.runners == [plain]
+
+
+def test_the_importers_pass_asks_with_the_runner_the_judge_reads(
+    fakes: Kit, state: Layout, repo: Path, shell: Shell
+) -> None:
+    shell.git(repo, "switch", "-q", "-c", "dev")
+    (repo / "lup_project.py").write_text(PLAIN)
+    shell.commit(repo, "dev: no uv")
+    (repo / "lup_project.py").write_text(
+        "from lup_dev import Project\nproject = Project()\n"
+    )
+    pending = ImportersPass(layout=state.store(repo), root=repo)
+    changed = Path("src/pkg/core.py")
+    pending.request([changed], [Conversation(session="s1")], fakes.spawner)
+    result = runner.invoke(cli.app, ["importers", str(repo)])
+    assert result.exit_code == 0, result.output
+    assert fakes.engine.importers_asked == [[changed]]
+    assert fakes.engine.runners == [Prefixed.of(Plain())]
 
 
 def test_rules_check_reads_protected_modules_with_lups_rules(
