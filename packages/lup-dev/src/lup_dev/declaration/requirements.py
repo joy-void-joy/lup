@@ -60,7 +60,9 @@ class Requirement(Model, extra="forbid"):
         if self.version is None:
             return self
         if not self.probe:
-            message = f"`{self.named()}` takes a version, so it needs a `probe` printing it"
+            message = (
+                f"`{self.named()}` takes a version, so it needs a `probe` printing it"
+            )
             raise ProjectError(message)
         try:
             SpecifierSet(self.version)

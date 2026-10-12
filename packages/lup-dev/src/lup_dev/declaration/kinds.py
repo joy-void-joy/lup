@@ -111,7 +111,9 @@ class Paths(Model, extra="forbid"):
         """Add patterns to the roles named, beside the ones below."""
         self.known(list(roles))
         return self.model_copy(
-            update={role: self.role(role).add(*patterns) for role, patterns in roles.items()}
+            update={
+                role: self.role(role).add(*patterns) for role, patterns in roles.items()
+            }
         )
 
     def drop(self, *, why: str | None = None, **roles: list[str]) -> Self:
@@ -127,7 +129,9 @@ class Paths(Model, extra="forbid"):
     def over(self, below: Self) -> Self:
         """Return these paths as a layer over `below`, role by role."""
         return self.model_copy(
-            update={role: self.role(role).over(below.role(role)) for role in self.roles()}
+            update={
+                role: self.role(role).over(below.role(role)) for role in self.roles()
+            }
         )
 
     def resolve(self, defaults: Paths) -> dict[str, list[str]]:

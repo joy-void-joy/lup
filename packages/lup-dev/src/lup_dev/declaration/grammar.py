@@ -234,8 +234,7 @@ class Selection[E](Model):
                 chosen = [Placed(entry=by_name[name]) for name in names]
             case Of(entries=entries, before=before, after=after):
                 chosen = [
-                    Placed(entry=entry, before=before, after=after)
-                    for entry in entries
+                    Placed(entry=entry, before=before, after=after) for entry in entries
                 ]
         names = [self.named(each.entry) for each in chosen]
         twice = [name for at, name in enumerate(names) if name in names[:at]]
@@ -256,7 +255,9 @@ class Selection[E](Model):
         kind = type(self).__name__
         match operation:
             case Add(entries=added, before=before, after=after):
-                there = [self.named(entry) for entry in added if self.named(entry) in names]
+                there = [
+                    self.named(entry) for entry in added if self.named(entry) in names
+                ]
                 if there:
                     message = (
                         f"`{kind}.add` names {listed(there)}, already there: "
@@ -279,7 +280,9 @@ class Selection[E](Model):
                 ]
             case Drop(names=dropped):
                 self.present("drop", dropped, names)
-                return [each for each in entries if self.named(each.entry) not in dropped]
+                return [
+                    each for each in entries if self.named(each.entry) not in dropped
+                ]
             case Replace(name=name, entry=entry, why=why):
                 self.present("replace", [name], names)
                 renamed = self.named(entry)

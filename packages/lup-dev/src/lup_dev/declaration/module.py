@@ -119,7 +119,9 @@ class Module(Model, extra="forbid"):
         if not cls.__doc__:
             message = f"`{declared}` has no docstring, which is its one sentence"
             raise ProjectError(message)
-        required = [field for field, info in cls.model_fields.items() if info.is_required()]
+        required = [
+            field for field, info in cls.model_fields.items() if info.is_required()
+        ]
         if required:
             message = (
                 f"`{declared}` gives {', '.join(f'`{field}`' for field in required)} "

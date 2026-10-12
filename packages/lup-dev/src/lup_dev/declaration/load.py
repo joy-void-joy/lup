@@ -167,6 +167,8 @@ def load(root: Path) -> Declared:
         message = f"`{shown}` binds no `project`"
         raise ProjectError(message)
     if not isinstance(declared, Project):
-        message = f"`project` in `{shown}` is a `{type(declared).__name__}`, not a `Project`"
+        message = (
+            f"`project` in `{shown}` is a `{type(declared).__name__}`, not a `Project`"
+        )
         raise ProjectError(message)
     return Declared(project=declared, source=shown)
