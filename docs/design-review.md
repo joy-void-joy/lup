@@ -103,6 +103,18 @@ The bridge was meant to be light scaffolding until lup hosts itself. Instead, it
     - **A follower pins the run id when it attaches.** If `current` moves, it says "superseded by <id>".
     - **What a run shows:** a unit reports its progress (`unit.report("depth 12")`), and a run can carry its own detail model (`Run[CampaignDetail]`), whose fields become columns. Opening a run emits an event naming its directory, so the dashboard finds it without a declaration.
     - **A unit can wait on other units and on an inbox answer,** which is what the resolver needs (decision 22).
+31. **(agreed)** **Every agent lup runs can speak to whoever asked, through lup's speaking tools.** They act on nothing, so they're served even where an agent has no other tool. Other tools an agent finds useful for speaking to its caller may join them.
+    - **`report(problem)`** stops without an answer and says what's wrong: the question can't be answered, something needed is missing, an instruction seems wrong. The result depends on who asked:
+      - from code, `ask` raises `ProblemReportedError` with the agent's words, so a caller tells "the agent says this can't be done" from a failure;
+      - a worker's report is its hand-back;
+      - an interactive session's report reaches the operator's inbox as a problem, and its turn ends.
+
+      Terminal sessions get it through lup's MCP server.
+    - **`note(remark)`** attaches a remark to the answer without ending the turn: an assumption, a doubt, a counterargument. A caller reads it in `TurnResult.notes`, and the trace keeps it. *Why:* aib found that in its worst misses the agent's own counterargument often held the right answer and was dismissed (`DESIGN.md`, *Field Notes*).
+    - The attempts limit stays, as the safety net for an agent that neither answers nor reports.
+    - *Alternative:* the guard alone, which leaves an agent that can't answer nothing to do but fail until its attempts run out.
+32. **(agreed)** **A guarantee says what can actually happen, not how lup arranges it.** An ask from code can't run commands, touch files, reach the network or start agents; it can only call lup's tools. A runtime's own tools that can do none of those don't break it: Codex's code-mode models qualify if their `exec` reaches none of them, which the Codex adapter checks. *Alternative:* "no tools but lup's own" taken literally, which would refuse Codex's default model for tools that can't act.
+33. **(agreed)** **On Claude, lup serves its tools through its own MCP server,** with `mcp` a direct dependency of `lup[claude]`, as the first lup did. The SDK's helper validates a call's arguments before the handler runs, so lup could neither count those refusals against the attempts nor keep them in `rejected`, and a turn making only malformed calls would be bounded by nothing but its timeout. *Alternatives:* the SDK's helper, with refusals read back from the message stream; or a cap on turns.
 
 ## The environment
 
@@ -205,8 +217,10 @@ The bridge was meant to be light scaffolding until lup hosts itself. Instead, it
   - the gate runs lup's rules (since be47f6b).
 - **Calling agents from code:**
   - sessions (9, 10), rooms (11), where tools run and images (12, 13);
+  - the speaking tools (31), the guarantee as what can happen (32), lup's own tool server (33);
   - the additions from the first lup (15);
   - a runs subsection (16).
+- **Sessions:** every session lup launches serves the speaking tools (31).
 - **The dashboard:** panels (20), runs shown (16), unproposed work shown (6), steering (24).
 - **Feedback:** the hand-back's `how_it_felt` (14).
 - **Graveyard:**
