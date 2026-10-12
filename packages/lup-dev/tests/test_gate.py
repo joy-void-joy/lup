@@ -133,10 +133,9 @@ def test_a_command_not_installed_fails_its_step(tmp_path: Path) -> None:
     assert "isn't installed" in ran.output
 
 
-def test_the_catalogs_gate_runs_the_engine_then_lups_rules_then_the_tools() -> None:
+def test_the_catalogs_gate_runs_lups_rules_then_the_tools() -> None:
     commands = {step.name: step.command for step in Gate().steps}
     assert list(commands) == [
-        "engine",
         "rules",
         "ruff",
         "format",
@@ -207,15 +206,10 @@ def test_the_gate_passes_a_worktree_without_findings(fakes: Kit, repo: Path) -> 
 def test_the_gates_rules_leave_tests_scratch_and_excluded_paths_out(
     fakes: Kit, repo: Path
 ) -> None:
-    (repo / "src" / "decl_gate").mkdir()
-    (repo / "src" / "decl_gate" / "__init__.py").write_text("")
-    (repo / "src" / "decl_gate" / "lup_project.py").write_text(
-        "from lup_dev.project import Project\n"
-        'project = Project(excluded=["vendor/**"])\n'
-    )
-    (repo / "pyproject.toml").write_text(
-        '[tool.lup]\nproject = "decl_gate.lup_project:project"\n'
-        '[tool.pytest]\ntestpaths = ["tests", "src"]\n'
+    (repo / "lup_project.py").write_text(
+        "from lup_dev import Core, Modules, Paths, Project\n"
+        "excluding = Core(paths=Paths().add(excluded=['vendor/**']))\n"
+        "project = Project(modules=Modules.default().edit(excluding))\n"
     )
     for written in ["vendor/lib.py", "tmp/try.py", "tests/test_core.py"]:
         (repo / written).parent.mkdir(exist_ok=True)
@@ -249,6 +243,41 @@ def test_lup_dev_check_fix_runs_the_fixes_then_the_whole_gate(
     ]
 
 
+BUILDING = '''
+from lup_dev import Gate, Module, Modules, Project, Step
+
+
+class Building(Module):
+    """A module of the project's own, building something first."""
+
+    name = "building"
+
+    gate: Gate = Gate.of(Step(name="build", command=["build", "it"]), before="rules")
+
+
+project = Project(modules=Modules.default().add(Building()))
+'''
+
+
+def test_lup_dev_check_runs_the_steps_the_worktrees_declaration_gives(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "lup_project.py").write_text(BUILDING)
+    runner = Scripted({})
+
+    def shell() -> Runner:
+        return runner
+
+    def toplevel(_: Path) -> Path:
+        return tmp_path
+
+    monkeypatch.setattr(cli, "Shell", shell)
+    monkeypatch.setattr(cli, "toplevel", toplevel)
+    result = CliRunner().invoke(cli.app, ["check"])
+    assert result.exit_code == 0
+    assert runner.ran == [["build", "it"], *(step.command for step in Gate().steps)]
+
+
 def test_the_fixes_run_before_the_gate_and_count_like_its_steps(
     tmp_path: Path,
 ) -> None:
@@ -277,14 +306,23 @@ def test_the_fixes_are_ruffs_safe_fixes_then_the_formatter() -> None:
 
 @pytest.fixture
 def scripted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Scripted:
-    """`lup-dev check` run over `GATE` in `tmp_path`, by a scripted runner."""
+    """`lup-dev check` run over `GATE` in `tmp_path`, by a scripted runner.
+
+    `GATE`'s steps are `Python`'s there, as the worktree's declaration gives them.
+    """
     runner = Scripted({"types": Ran(code=0, output="types said so\n")})
+    steps = [step.model_dump() for step in GATE.steps]
+    (tmp_path / "lup_project.py").write_text(
+        "from lup_dev import Gate, Modules, Project, Python, Step\n"
+        f"steps = [Step.model_validate(each) for each in {steps!r}]\n"
+        "gate = Python(gate=Gate.of(*steps))\n"
+        "project = Project(modules=Modules.default().edit(gate))\n"
+    )
 
     def shell() -> Runner:
         return runner
 
     monkeypatch.setattr(cli, "Shell", shell)
-    monkeypatch.setattr(cli, "Gate", lambda: GATE)
 
     def toplevel(_: Path) -> Path:
         return tmp_path

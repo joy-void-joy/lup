@@ -10,7 +10,7 @@ import pytest
 from lup_dev import Project
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.load import load
-from lup_dev.declaration.resolve import resolve
+from lup_dev.declaration.resolve import Declaration, resolve
 
 DECLARATION = """
 from lup_dev import CodeRules, Modules, Project, Rules
@@ -166,3 +166,102 @@ def test_an_exported_commit_loads_as_a_root_does(tmp_path: Path) -> None:
     write(exported / "lup_project.py", DECLARATION.format(why="exported"))
     assert why(exported) == "exported"
     assert load(exported).source == Path("lup_project.py")
+
+
+def test_lups_own_declaration_is_its_modules_with_its_changes() -> None:
+    root = Path(__file__).resolve().parents[3]
+    resolved = resolve(load(root).project)
+    assert [each.name for each in resolved.modules] == [
+        "core",
+        "python",
+        "code-rules",
+        "lup-development",
+    ]
+    assert resolved.asks == "protected"
+    assert [each.name for each in resolved.gate][:2] == ["engine", "rules"]
+    assert "packages/lup-dev/src/lup_dev/catalog/**" in resolved.paths.protected
+    assert resolved.paths.excluded == [".claude/hooks/**"]
+    assert [each.root for each in resolved.tests] == [Path("packages/*/tests")]
+    assert [(each.rule, each.paths) for each in resolved.exempt] == [
+        ("runtime-mention", ["packages/lup/src/lup/__init__.py"]),
+        ("constant-home", ["packages/lup-dev/src/lup_dev/catalog/**"]),
+    ]
+    [selected] = resolved.rules
+    assert [operation.verb for operation in selected.rules.operations] == ["add"]
+    assert ("lup-development", "npm") in [
+        (each.module, each.requirement.tool) for each in resolved.requirements
+    ]
+
+
+def test_loading_a_declaration_leaves_no_bytecode_at_the_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sys, "dont_write_bytecode", False)
+    write(tmp_path / "lup_project.py", DECLARATION.format(why="no bytecode"))
+    load(tmp_path)
+    assert not (tmp_path / "__pycache__").exists()
+    assert sys.dont_write_bytecode is False
+
+
+OWN_CLASSES = '''
+from typing import override
+
+from lup_dev import Module, Modules, Paths, Project, Python, Runner
+
+
+class Poetry(Runner):
+    """Poetry's environment."""
+
+    @override
+    def command(self, tool: list[str]) -> list[str]:
+        return ["poetry", "run", *tool]
+
+    @override
+    def judging(self, tool: list[str]) -> list[str]:
+        return ["poetry", "run", *tool]
+
+    @override
+    def environment(self) -> list[str]:
+        return ["poetry.lock"]
+
+
+class Narration(Module):
+    """Turning a page into an episode."""
+
+    name = "narration"
+
+    paths: Paths = Paths.of(protected=["episodes/**"])
+    conditions: str | None = "audiobook.conditions"
+
+
+project = Project(
+    asks="protected",
+    modules=Modules.default().edit(Python(runner=Poetry())).add(Narration()),
+)
+'''
+
+
+def test_what_judging_reads_is_kept_as_json_whatever_classes_the_project_brings(
+    tmp_path: Path,
+) -> None:
+    write(tmp_path / "lup_project.py", OWN_CLASSES)
+    declaration = Declaration.read(tmp_path)
+    assert Declaration.model_validate_json(declaration.model_dump_json()) == declaration
+    assert declaration.source == Path("lup_project.py")
+    assert "episodes/**" in declaration.paths.protected
+    assert declaration.conditions == ["audiobook.conditions"]
+    assert declaration.asks == "protected"
+    assert declaration.tests is None
+
+
+def test_a_declaration_that_doesnt_resolve_fails_its_reading(tmp_path: Path) -> None:
+    write(
+        tmp_path / "lup_project.py",
+        """
+        from lup_dev import Modules, Project
+
+        project = Project(modules=Modules.default().drop("ledger"))
+        """,
+    )
+    with pytest.raises(ProjectError, match=r"`Modules.drop` names `ledger`"):
+        Declaration.read(tmp_path)

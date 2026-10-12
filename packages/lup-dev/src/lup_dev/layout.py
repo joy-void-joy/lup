@@ -216,7 +216,7 @@ class CheckoutLayout(Model):
 
     @property
     def pyproject(self) -> Path:
-        """The worktree's own project file, where `[tool.lup]` names the declaration."""
+        """The worktree's own project file, which says where its packages are."""
         return self.root / "pyproject.toml"
 
     @property
@@ -348,8 +348,11 @@ class Layout(Model):
         return self.repository(repository) / "heads.json"
 
     def declaration(self, repository: Path) -> Path:
-        """Say where the last of a repository's declarations that loaded is kept."""
-        return self.repository(repository) / "declaration.json"
+        """Say where the last of a repository's declarations that loaded is kept.
+
+        It's kept resolved, as the values judging reads.
+        """
+        return self.repository(repository) / "last-declaration.json"
 
     def exported(self, repository: Path, commit: str) -> Path:
         """Say where a commit's modules are exported, to import its declaration."""

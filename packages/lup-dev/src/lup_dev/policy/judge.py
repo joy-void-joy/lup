@@ -273,7 +273,7 @@ class Judge(Model, arbitrary_types_allowed=True):
         ]
         match role:
             case "protected":
-                pattern = self.roles.project.protected.matching(change.path)
+                pattern = self.roles.protecting(change.path)
                 why = f" ({pattern})" if pattern else ", the project's declaration"
                 reason = f"{self.root / change.path} is a protected path{why}"
                 ask = Ask(kind="protected", reason=reason)
@@ -313,7 +313,7 @@ class Judge(Model, arbitrary_types_allowed=True):
 
         A project asking only about protected paths has every other ask allowed.
         """
-        match self.roles.project.asks:
+        match self.roles.declaration.asks:
             case "every":
                 return asks
             case "protected":

@@ -10,6 +10,7 @@ import sh
 from filelock import FileLock
 
 from lup_dev.codescan.contract import FileReport, Finding, Position, Span
+from lup_dev.declaration.errors import ProjectError
 from lup_dev.policy.before import Overwrite, Replacement, before
 from lup_dev.policy.checkpoint import (
     CallFinished,
@@ -25,7 +26,6 @@ from lup_dev.policy.holds import Holds, Response, answer, waiting
 from lup_dev.policy.importers import Conversation, ImportersPass
 from lup_dev.policy.store import read_model
 from lup_dev.policy.verdicts import VerdictLog
-from lup_dev.project import ProjectError
 
 if TYPE_CHECKING:
     from conftest import FakeRuntime, Kit, Shell
@@ -1041,7 +1041,7 @@ def test_every_worktree_is_judged_by_the_integration_branchs_declaration(
     shell.git(repo, "switch", "-q", "-c", "dev")
     declare(repo, PROTECTING_CORE)
     shell.commit(repo, "dev: protect the core")
-    declare(linked, "from lup_dev.project import Project\nproject = Project()\n")
+    declare(linked, PROTECTING_NOTHING)
     shell.commit(linked, "feat: protect nothing")
     start(kit, repo)
     asked = before(kit.bench, core_edit(linked), SESSION, repo)
@@ -1049,10 +1049,7 @@ def test_every_worktree_is_judged_by_the_integration_branchs_declaration(
     assert asked.reason == (
         f"lup asks: {linked}/src/pkg/core.py is a protected path (src/pkg/core.py)"
     )
-    assert (
-        Worktree.at(linked, kit.layout).declared.project.protected.matching(CORE)
-        is None
-    )
+    assert Worktree.at(linked, kit.layout).roles.protecting(CORE) is None
 
 
 def test_the_integration_branchs_declaration_changes_when_committed(
@@ -1062,9 +1059,7 @@ def test_the_integration_branchs_declaration_changes_when_committed(
     declare(repo, PROTECTING_CORE)
     shell.commit(repo, "dev: protect the core")
     start(kit, repo)
-    (repo / "lup_project.py").write_text(
-        "from lup_dev.project import Project\nproject = Project()\n"
-    )
+    (repo / "lup_project.py").write_text(PROTECTING_NOTHING)
     assert before(kit.bench, core_edit(linked), SESSION, repo).outcome == "ask"
     shell.commit(repo, "dev: protect nothing")
     assert before(kit.bench, core_edit(linked), SESSION, repo).outcome == "allow"
@@ -1075,9 +1070,7 @@ def test_without_the_integration_branch_a_worktree_is_judged_by_its_head(
 ) -> None:
     declare(repo, PROTECTING_CORE)
     shell.commit(repo, "main: protect the core")
-    (repo / "lup_project.py").write_text(
-        "from lup_dev.project import Project\nproject = Project()\n"
-    )
+    (repo / "lup_project.py").write_text(PROTECTING_NOTHING)
     start(kit, repo)
     assert before(kit.bench, core_edit(repo), SESSION, repo).outcome == "ask"
 
@@ -1090,9 +1083,7 @@ def test_only_the_latest_commits_declaration_stays_exported(
     shell.commit(repo, "dev: protect the core")
     start(kit, repo)
     before(kit.bench, core_edit(repo), SESSION, repo)
-    (repo / "lup_project.py").write_text(
-        "from lup_dev.project import Project\nproject = Project()\n"
-    )
+    (repo / "lup_project.py").write_text(PROTECTING_NOTHING)
     shell.commit(repo, "dev: protect nothing")
     before(kit.bench, core_edit(repo), SESSION, repo)
     head = shell.git(repo, "rev-parse", "HEAD")
@@ -1170,17 +1161,26 @@ def test_a_repository_nested_in_a_worktree_is_another_repository(
     assert before(kit.bench, write, SESSION, repo).outcome is None
 
 
-PROTECTING_CORE = (
-    "from lup_dev.project import Project, Protected\n"
-    'project = Project(protected=Protected.default().add("src/pkg/core.py"))\n'
-)
+PROTECTING_CORE = '''
+from lup_dev import Module, Modules, Paths, Project
+
+
+class Guard(Module):
+    """The project's own module, protecting its core."""
+
+    name = "guard"
+
+    paths: Paths = Paths.of(protected=["src/pkg/core.py"])
+
+
+project = Project(modules=Modules.default().add(Guard()))
+'''
+"""A declaration holding a module of the project's own, which JSON can't bring back."""
+
+PROTECTING_NOTHING = "from lup_dev import Project\nproject = Project()\n"
 
 
 def declare(root: Path, declaration: str) -> None:
-    (root / "pyproject.toml").write_text(
-        '[tool.lup]\nproject = "lup_project:project"\n'
-        '[tool.pytest]\ntestpaths = ["tests", "src"]\n'
-    )
     (root / "lup_project.py").write_text(declaration)
 
 
@@ -1200,7 +1200,7 @@ def test_the_last_declaration_that_loaded_stands_in_for_one_that_cant(
     start(kit, repo)
     assert before(kit.bench, core_edit(linked), SESSION, repo).outcome == "ask"
     (repo / "lup_project.py").write_text(
-        "from lup_dev.project import Unheard\n" + PROTECTING_CORE
+        "from lup_dev import Unheard\n" + PROTECTING_CORE
     )
     shell.commit(repo, "dev: a name the judge lacks")
     broken = shell.git(repo, "rev-parse", "HEAD")
@@ -1217,10 +1217,27 @@ def test_the_last_declaration_that_loaded_stands_in_for_one_that_cant(
     assert "can't load" not in finish(kit, linked, "c2").context
 
 
+def test_a_declaration_that_doesnt_resolve_has_the_same_stand_in(
+    kit: Kit, repo: Path, linked: Path, shell: Shell
+) -> None:
+    shell.git(repo, "switch", "-q", "-c", "dev")
+    declare(repo, PROTECTING_CORE)
+    shell.commit(repo, "dev: protect the core")
+    start(kit, repo)
+    assert before(kit.bench, core_edit(linked), SESSION, repo).outcome == "ask"
+    (repo / "lup_project.py").write_text(
+        PROTECTING_CORE.replace(".add(Guard())", '.add(Guard()).drop("ledger")')
+    )
+    shell.commit(repo, "dev: drop a module that isn't there")
+    stood_in = before(kit.bench, core_edit(linked), SESSION, repo)
+    assert stood_in.outcome == "ask"
+    assert "is a protected path (src/pkg/core.py)" in stood_in.reason
+
+
 def test_with_no_declaration_kept_one_that_cant_load_fails(
     kit: Kit, repo: Path, shell: Shell
 ) -> None:
-    declare(repo, "from lup_dev.project import Unheard\n")
+    declare(repo, "from lup_dev import Unheard\n")
     shell.commit(repo, "a name the judge lacks")
     start(kit, repo)
     with pytest.raises(ProjectError, match="Unheard"):
@@ -1235,6 +1252,6 @@ def test_the_gate_reads_the_worktree_as_it_stands_with_no_stand_in(
     shell.commit(repo, "dev: protect the core")
     start(kit, repo)
     before(kit.bench, core_edit(linked), SESSION, repo)
-    declare(linked, "from lup_dev.project import Unheard\n")
+    declare(linked, "from lup_dev import Unheard\n")
     with pytest.raises(ProjectError):
-        _ = Worktree.at(linked, kit.layout).declared
+        _ = Worktree.at(linked, kit.layout).declaration

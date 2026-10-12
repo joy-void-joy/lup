@@ -7,6 +7,7 @@ import pytest
 
 from lup_dev.codescan.conditions import (
     Condition,
+    ConditionError,
     PackageIndex,
     PackageReleased,
     PyPI,
@@ -29,7 +30,6 @@ from lup_dev.codescan.directives import (
     added_suppressions,
     missing,
 )
-from lup_dev.project import Project
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -207,8 +207,45 @@ def test_conditions_are_read_without_running_and_loaded_at_the_gate(repo: Path) 
         'python_315 = PythonAvailable(version="3.15")\n'
         "limit: int = 3\n"
     )
-    project = Project(conditions="cond_one.conditions")
-    assert declared(repo, project) == ["python_315", "limit"]
-    assert list(loaded(repo, project)) == ["python_315"]
-    assert declared(repo, Project()) is None
-    assert loaded(repo, Project()) == {}
+    modules = ["cond_one.conditions"]
+    assert declared(repo, modules) == ["python_315", "limit"]
+    assert list(loaded(repo, modules)) == ["python_315"]
+    assert declared(repo, []) is None
+    assert loaded(repo, []) == {}
+
+
+def conditions_module(repo: Path, package: str, text: str) -> str:
+    (repo / "src" / package).mkdir()
+    (repo / "src" / package / "__init__.py").write_text("")
+    (repo / "src" / package / "conditions.py").write_text(
+        f"from lup_dev.codescan.conditions import PythonAvailable\n{text}"
+    )
+    return f"{package}.conditions"
+
+
+def test_each_modules_conditions_are_read_together(repo: Path) -> None:
+    modules = [
+        conditions_module(
+            repo, "cond_two", 'python_315 = PythonAvailable(version="3.15")\n'
+        ),
+        conditions_module(
+            repo, "cond_three", 'python_316 = PythonAvailable(version="3.16")\n'
+        ),
+    ]
+    assert declared(repo, modules) == ["python_315", "python_316"]
+    assert list(loaded(repo, modules)) == ["python_315", "python_316"]
+    assert list(loaded(repo, [*modules, modules[0]])) == ["python_315", "python_316"]
+
+
+def test_two_modules_binding_one_condition_fail_at_the_gate(repo: Path) -> None:
+    text = 'python_315 = PythonAvailable(version="3.15")\n'
+    modules = [
+        conditions_module(repo, "cond_four", text),
+        conditions_module(repo, "cond_five", text),
+    ]
+    assert declared(repo, modules) == ["python_315"]
+    with pytest.raises(
+        ConditionError,
+        match=r"`python_315` from `cond_four.conditions` and `cond_five.conditions`",
+    ):
+        loaded(repo, modules)
