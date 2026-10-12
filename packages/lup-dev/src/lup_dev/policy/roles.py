@@ -23,7 +23,7 @@ from pathlib import Path, PurePath
 from typing import Literal
 
 from lup.types import Model
-from lup_dev.catalog.paths import Paths
+from lup_dev.catalog.paths import CorePaths, PythonPaths
 from lup_dev.layout import CheckoutLayout
 from lup_dev.project import Declared, Project, Pytest
 
@@ -45,8 +45,10 @@ class Roles(Model):
     project: Project
     declaration: Path | None = None
     """The declaration's file, relative to the root, which is always protected."""
-    paths: Paths = Paths()
-    """lup's default patterns (`lup_dev.catalog.paths`)."""
+    paths: CorePaths = CorePaths()
+    """`Core`'s default patterns (`lup_dev.catalog.paths`)."""
+    python: PythonPaths = PythonPaths()
+    """`Python`'s default patterns (`lup_dev.catalog.paths`)."""
 
     @classmethod
     def of(cls, root: Path, declared: Declared) -> Roles:
@@ -79,7 +81,7 @@ class Roles(Model):
 
     def is_python(self, path: Path) -> bool:
         """Say whether `path` is a Python module, which the rules read."""
-        return matches(PurePath(path.name), self.paths.python)
+        return matches(PurePath(path.name), self.python.python)
 
     def is_excluded(self, path: Path) -> bool:
         """Say whether the project's declaration holds `path` to nothing."""
@@ -129,7 +131,7 @@ class Roles(Model):
         for pytest in roots or self.configured(path):
             if not path.full_match(str(pytest.root / "**")):
                 continue
-            if named.name == self.paths.conftest:
+            if matches(named, self.python.conftest):
                 return True
             if matches(named, pytest.files):
                 return True
@@ -198,7 +200,7 @@ class Roles(Model):
 
     def in_source_tree(self, path: Path) -> bool:
         """Say whether `path` sits in a source tree: under `src/`, or in a package."""
-        if matches(path, self.paths.source_trees):
+        if matches(path, self.python.source_trees):
             return True
         return any(
             CheckoutLayout(root=self.root / directory).package.is_file()

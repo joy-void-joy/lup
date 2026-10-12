@@ -3,17 +3,19 @@
 Patterns are relative to a worktree's root and matched whole, `**` spanning any
 number of directories (`PurePath.full_match`). `lup_dev.policy.roles` says how each list
 is used and in which order (`docs/judging-writes.md`, *What each change gets*).
+
+Each module's patterns are its own list here, read by the module that holds them
+(`lup_dev.declaration.modules`): `Core`'s are every project's, `Python`'s go with
+`Python`, so a project in another language that replaces it takes them away.
 """
 
 from lup.types import Model
 
 
-class Paths(Model):
-    """lup's default path patterns, one list per role."""
+class CorePaths(Model):
+    """`Core`'s default path patterns, one list per role."""
 
     protected: list[str] = [
-        "**/pyproject.toml",
-        "**/uv.lock",
         "**/package.json",
         "**/bun.lock",
         ".github/**",
@@ -31,24 +33,10 @@ class Paths(Model):
         "**/sync.json.local",
         "**/.env*.local",
         "**/.gitignore",
-        "**/ruff.toml",
-        "**/.ruff.toml",
-        "**/pyrightconfig.json",
-        "**/pytest.toml",
-        "**/.pytest.toml",
-        "**/pytest.ini",
-        "**/setup.cfg",
-        "**/tox.ini",
-        "**/.importlinter",
-        "**/uv.toml",
-        "**/.python-version",
     ]
     """Every write to these asks the operator.
 
-    - dependency manifests and lockfiles, which choose what runs;
-    - the tools' own configuration files, each read before its table in
-      `pyproject.toml`, so one written unasked would override what the gate checks
-      (pyright's strictness, ruff's selection, uv's age gate) or which Python runs;
+    - Node's manifest and lockfile, which choose what runs;
     - what runs outside the agent's reach: CI, git's own directory and hooks,
       pre-commit, editor and container configurations, the runtimes' settings;
     - what widens a later launch, `sync.json` and `sync.json.local`;
@@ -74,6 +62,33 @@ class Paths(Model):
         "*.parquet",
     ]
     """Data formats, by file name: allowed outside a source tree, production inside."""
+
+
+class PythonPaths(Model):
+    """`Python`'s default path patterns, one list per role."""
+
+    protected: list[str] = [
+        "**/pyproject.toml",
+        "**/uv.lock",
+        "**/ruff.toml",
+        "**/.ruff.toml",
+        "**/pyrightconfig.json",
+        "**/pytest.toml",
+        "**/.pytest.toml",
+        "**/pytest.ini",
+        "**/setup.cfg",
+        "**/tox.ini",
+        "**/.importlinter",
+        "**/uv.toml",
+        "**/.python-version",
+    ]
+    """Every write to these asks the operator.
+
+    - the manifest and lockfile, which choose what runs;
+    - the tools' own configuration files, each read before its table in
+      `pyproject.toml`, so one written unasked would override what the gate checks
+      (pyright's strictness, ruff's selection, uv's age gate) or which Python runs.
+    """
     source_trees: list[str] = ["**/src/**"]
     """Where code lives: a data file here ships with it, so it's production.
 
@@ -81,5 +96,5 @@ class Paths(Model):
     """
     python: list[str] = ["*.py", "*.pyi"]
     """Python modules, by file name: what lup's rules and the engine read."""
-    conftest: str = "conftest.py"
+    conftest: list[str] = ["conftest.py"]
     """The module pytest reads beside a suite's tests, which counts as a test."""

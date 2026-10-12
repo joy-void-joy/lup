@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import Field
 
 from lup.types import Model
-from lup_dev.catalog.paths import Paths
+from lup_dev.catalog.paths import CorePaths, PythonPaths
 from lup_dev.errors import LupDevError
 from lup_dev.layout import CheckoutLayout
 
@@ -49,7 +49,7 @@ class Protected(Model):
         >>> Protected.default().matching(PurePath("packages/lup/pyproject.toml"))
         '**/pyproject.toml'
         """
-        return cls(patterns=Paths().protected)
+        return cls(patterns=[*CorePaths().protected, *PythonPaths().protected])
 
     def add(self, *patterns: str) -> Protected:
         """Return these protected paths with `patterns` added.

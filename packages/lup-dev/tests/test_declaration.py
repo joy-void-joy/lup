@@ -30,7 +30,7 @@ from lup_dev import (
     TestRoots,
     Uv,
 )
-from lup_dev.catalog import paths as lup_paths
+from lup_dev.catalog.paths import CorePaths, PythonPaths
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.module import Origin
 from lup_dev.declaration.resolve import Resolved, resolve
@@ -241,7 +241,10 @@ def test_modules_edit_with_another_class_points_at_replace() -> None:
 def test_the_defaults_resolve_to_lup_s_modules_and_parts() -> None:
     resolved = resolve(Project())
     assert [each.name for each in resolved.modules] == ["core", "python", "code-rules"]
-    assert sorted(resolved.paths.protected) == sorted(lup_paths.Paths().protected)
+    assert resolved.paths.protected == [
+        *CorePaths().protected,
+        *PythonPaths().protected,
+    ]
     assert resolved.paths.operator_documents == ["DESIGN.md", "AGENTS.md"]
     assert resolved.paths.conftest == ["conftest.py"]
     assert resolved.paths.excluded == []
@@ -272,9 +275,8 @@ def test_core_and_python_split_lup_s_protected_paths() -> None:
     assert "**/pyproject.toml" in python["protected"]
     assert "**/pyproject.toml" not in core["protected"]
     assert ".github/**" in core["protected"]
-    assert sorted([*core["protected"], *python["protected"]]) == sorted(
-        lup_paths.Paths().protected
-    )
+    assert core["protected"] == CorePaths().protected
+    assert python["protected"] == PythonPaths().protected
 
 
 def test_the_note_s_layers_resolve_to_both_drops_and_both_exemptions() -> None:
