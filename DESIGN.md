@@ -54,7 +54,7 @@ The split is what a project imports in its production code, against what it uses
 
 **Packages (tentative).** One repository with a uv workspace holds three packages, with dependencies running one way only:
 - `lup`, the library;
-- `lup-dev` (`lup_dev`), the environment, named for the boundary: what a project uses only while it's being developed;
+- `lup-dev` (`lup_dev`), the environment, named for the boundary: what a project uses only while it's being developed. It ships the one command, `lup`;
 - `lup-dashboard`, the dashboard, the one part with its own stack. It depends on `lup-dev` through the typed protocol, never the reverse.
 
 Python 3.14 or later, for its lazily evaluated annotations. The library's runtimes are the optional extras `lup[claude]` and `lup[codex]` (`docs/library.md`).
@@ -74,21 +74,23 @@ Python 3.14 or later, for its lazily evaluated annotations. The library's runtim
 The whole may be larger than any agent can hold, as long as each part can be held on its own:
 - the core is small enough to hold alone;
 - every module uses only the core's public API, never another module or the core's internals;
-- dropping each module is tested (in the first lup, removing one module kept breaking another).
+- dropping each module is tested, one test per lup module: the declaration dropping it serves none of its parts, and lup's tests pass (in the first lup, removing one module kept breaking another).
 
-The parts that cut across everything (the one hook, the dashboard's protocol, the declaration) sit in the core, so the core's size is the number that matters.
+The parts that cut across everything (the one hook, the dashboard's protocol, the declaration) sit in the core, so the core's size is the number that matters. lup's parts are modules a project selects in its declaration (`docs/declaration.md`).
 
-- **Core:**
+- **`Core`** (required: dropping it fails the load) holds path roles and protected paths, the one hook, the policy, runtimes and session settings, and the core's machinery:
   - launching sessions, with containers, mounts and accounts;
-  - the wall, holds and protected paths (the policy);
-  - code rules and the gate;
+  - the wall and holds;
+  - judging writes, running the gate and the engine's code rules;
   - compiling the harness at launch;
   - worktrees, commits and merging;
   - updates and migrations;
   - the dashboard;
   - the "how it felt" notes;
   - lup's tools for spawning, messaging, waiting and asking.
-- **Modules, on by default:**
+- **Modules, on by default,** each one line to drop:
+  - `Python`: the runner, test roots and the gate's Python steps, and lup's settings for ruff and pyright;
+  - `CodeRules`: lup's rule selection and exemptions;
   - `coordination`: roster, messages, handoffs;
   - `ledger`: the one place for open work;
   - `git-workflow`: landing and PRs.
@@ -102,35 +104,33 @@ The parts that cut across everything (the one hook, the dashboard's protocol, th
   - `realtime`: wanted;
   - `conversation`;
   - **reflection** (open).
-- **What the library holds and the environment serves:** `runs` and the outcome loop are the library's; the environment serves their commands (`run monitor` and the like) to a project that uses them. Rooms are the library's; the free mode is a room a project declares, and a tidy pass follows a free run that changed shared code.
+- **What the library holds and the environment serves:** `runs` and the outcome loop are the library's, callable from code; making one a command is the project's own wiring, or `lup-dev`'s job. Rooms are the library's; the free mode is a room a project declares, and a tidy pass follows a free run that changed shared code.
 - **Corpus merges into the ledger** as a kind, for reports that regenerate and stay current, as the research project used it.
 
-**Everything is a selection, never an on/off switch.** At every level (modules, rules and rule families, commands, skills, hooks), a project says "take these" or "everything except these". Overrides are operations on lup's defaults, one grammar for every kind: set arithmetic for selections, and `.add`, `.replace` and `.drop` for the rest.
+**Everything is a selection, never an on/off switch.** At every level (modules, rules and rule families, commands, skills, hooks), a project says "take these" or "everything except these". Overrides are operations on lup's defaults, one grammar of methods for every kind: `Kind.default()`, `.all()`, `.only()` and `.of()` to start from, `.add`, `.drop` and `.replace` to change, and `.edit` on modules. There's no set arithmetic: `set-shape` refuses the literal. A `.drop`, `.edit` or `.replace` may carry its reason, shown on the overview. Modules and selections are plain values a project can bind, import and build on. How a layer (a shared base, the project) builds on what's below it is slightly open (`docs/declaration.md`, decision 51): an edit changing only the fields it sets, with `.current()` to start from the value being edited, or everything a base or a project writes being a layer that names only what it changes.
 
-**A project extends anything lup declares as easily as lup declares it.** Not only selecting and overriding lup's defaults: a project adds its own of every kind, in its declaration or its own code, in the same form lup uses for its own, with no fork and no change upstream. A rule is an entry in the project's own table, written as lup's are; a module, a command, and a catalog's entries (path roles, protected paths, conditions, a runtime's spellings) are the project's own beside lup's. The agent's proposal for keeping it true: lup's own defaults are declared through the same public surface a project uses, so nothing lup declares is out of a project's reach. What a project adds that the judge runs, its rules first, is reviewed before it runs, as the judge is (Open questions, 10).
+**A project extends anything lup declares as easily as lup declares it.** Not only selecting and overriding lup's defaults: a project adds its own of every kind, in its declaration or its own code, in the same form lup uses for its own, with no fork and no change upstream. Every kind is filled by the selected modules, lup's and the project's alike, and a project's module is a `Module` subclass written as lup's are. A rule is an entry in a table one of the project's modules names, written as lup's are and loaded when the engine starts; a command, and a catalog's entries (path roles, protected paths, conditions, a runtime's spellings) are the project's own beside lup's. The tables are protected and read from the integration branch's tip, as the declaration is, so what a project adds that the judge runs is reviewed before it runs. To keep it true, lup's defaults are its modules, declared through the same public surface a project uses, so nothing lup declares is out of a project's reach, and lup's repository declares its own specifics in its own `lup_project.py`: lup uses lup.
 
 ### How lup reaches a project
 
-- **A project holds its own code, a dependency on lup, and one declaration.** Where it lives is open (Open questions, 8): a fixed `lup_project.py` at the project's root (leaning), or a module named in `pyproject.toml` (`[tool.lup] project = "audiobook.lup_project:project"`), as lup's own declaration is today.
+- **A project holds its own code, a dependency on lup, and one declaration.** The declaration is `lup_project.py` at the project's root (or the package `lup_project/`, once the project's own modules outgrow one file), found without a pointer. It holds the project's modules: lup's with the project's changes, and its own (`Narration` here).
   ```python
   project = Project(
-      package="audiobook",
-      modules=Modules.all() - {"ledger"},
-      rules=Rules.all() - {"tuple-shape"},
-      guidance=Guidance.default().replace("code", Path("guidance/code.md")),
-      skills=[Skill.from_file("skills/narrate.md")],
-      devtools=Devtools.default().add(studio_cli, name="studio"),
-      rooms=[audiobook],
-      tests=[Pytest("tests"), Pytest("studio/tests", environment="studio")],
+      modules=Modules.default()
+      .add(Narration(), Budgets(share=0.5))
+      .edit(Ledger(directory="work"))
+      .edit(CodeRules(rules=Rules.default().drop("collection-loop", why="the pipeline's stages are loops by design")))
+      .drop("coordination", why="one agent at a time here"),
   )
   ```
-- **The declaration says which paths are what, and every tool's settings are compiled from it.** It declares the paths that are code (held to lup's rules, ruff and pyright), tests (ruff and pyright only) and excluded (held to nothing), beside the protected ones. ruff's, pyright's, pytest's and import-linter's settings are compiled from lup's defaults plus the declaration, with a gate test failing when they drift, so no project copies lup's tool settings, and an update to lup reaches them by recompiling. Where the declaration lives, where the compiled settings go, and who owns dependencies are open (Open questions).
+- **The declaration says which paths are what, and lup's settings for ruff and pyright are generated from it.** It declares the paths that are code (held to lup's rules, ruff and pyright), tests (ruff and pyright only) and excluded (held to nothing), beside the protected ones. lup writes only files of its own (`.lup/settings/ruff.toml` and pyright's, committed), generated from its defaults and the declaration. The project's `pyproject.toml` extends them through one pointer per tool and stays the project's: its own settings are layered on top by the tools themselves, and lup never writes it after `lup new`. pytest's settings and import-linter's contracts are the project's own. The gate fails when lup's files are stale or a pointer is missing. Dependencies stay in `[project]`, and `lup project` shows everything about the project on one page. So no project copies lup's tool settings, and an update to lup reaches them by regenerating.
+- **Requirements.** Each module declares the tools it needs from outside the project's environment: Node for `CodeRules`, uv for `Python`, podman for `Core` once launch exists. They're checked strictly and all at once when a session launches and when the gate runs. A missing required one stops the launch or the gate, naming the tool, the module and how to install it; a missing optional one turns its feature off, said once. The README's list is generated from them. Node is installed on the system.
 - **Nothing of lup is copied into a project.** There's no copied half and no lup tests in projects. Changes to lup go upstream; whoever wants a different lup forks it.
 - **Runtime trees (`.claude/`, `.codex/`) are built at launch and never committed.** Wherever the launch places them they're read-only, and an attempt to edit one is refused with a pointer to the source to change. lup's own docs stay committed in lup and are served to projects from the installed version (`lup docs <topic>`).
-- **One CLI, from the library.** It builds its command tree at startup from the declaration: lup's groups for the selected modules, plus the project's own commands, replacements and removals. It loads only the command invoked, and stays fast under load; today each call costs about 10 seconds.
-- **A new project starts with `lup new <name>`.** lup itself has its own declaration, since it's developed with itself.
+- **One CLI, `lup`, shipped by `lup-dev`; the library ships none.** It's built from the selected modules' commands, loads only the command invoked, and stays fast under load; today each call costs about 10 seconds. Only the hook command is fixed. Published commands are the project's `[project.scripts]`, installed with its package under its own name, listed by `lup --help` and never importing `lup_dev`; the declaration's commands are development-only.
+- **A new project starts with `lup new <name>`.** It runs `uv init`, then writes `lup_project.py` with `Modules.default()`, the pointers to lup's settings, pytest's defaults and a first commit, and the project passes the gate as made. lup itself has its own declaration, since it's developed with itself.
 - **Precedence:** lup's default, then the person's config (`~/.config/lup/config.toml`), then the project, then an argument. Personal matters live in the person's config: accounts, theme, budget shares.
-- **An update is a version bump plus automatic migrations.** It stops only for what a person must decide. `Rules.all()` includes rules added later, and an update that brings one lists its findings in the project and asks whether to exclude it.
+- **An update is a version bump plus automatic migrations.** It stops only for what a person must decide. `Rules.default()` takes the rules a release adds to the default and `Rules.only(…)` doesn't, since a selection is recorded and resolved at load. An update that brings one lists its findings in the project and asks whether to exclude it.
 - **Releases only, never pins to branches.** A project never edits lup in place and never points at a branch of lup. When lup is in its way:
   - **It fixes the problem locally**, through its declaration's overrides or in its own code, with whatever unblocks its task. The local fix may be ugly: the generic one is lup's job.
   - **It declares an upstream candidate** beside the fix: the friction, the local fix or a pointer to it, the evidence, and the lup version it was written against. A candidate is the dual of a migration: a migration is lup telling a project what changed, a candidate is a project telling lup what it needed.
@@ -236,7 +236,8 @@ The control runs as its own small host process. A hold within the hour keeps its
   - **Filtered egress stays possible**, but it's expected to bring the old friction back.
 - **Privileges: leaning sudo in free (room) modes.** Inherited capabilities are always cleared; a session user held root's capabilities without sudo. Package installs default to a minimum age, for example nothing newer than 3 days.
 - **Protected paths:**
-  - the project declaration;
+  - the project declaration (`lup_project.py`, or the `lup_project/` package) and the rule tables its modules name;
+  - lup's settings files (`.lup/settings/`): a write equal to what the integration branch's declaration generates is allowed, any other asks;
   - dependency manifests and lockfiles;
   - what runs outside the container: CI, git hooks and `.git/config`, pre-commit, editor and devcontainer configs;
   - what widens the wall: `sync.json`, `sync.json.local`;
@@ -257,7 +258,8 @@ The control runs as its own small host process. A hold within the hour keeps its
   - **Rules read one typed tree, from the first rule.** Each file is parsed once and type-checked once, and every rule reads types straight from that tree: pyright's own tree, built against its source at a pinned release, as a spike measured (`docs/judging-writes.md`). No regex, no separate oracle asked about one position at a time, and no syntax-only first stage, which is how the first lup's catalog grew into a patchwork. The conventions the rules enforce, and which tool owns each, are in `docs/conventions.md`.
   - **`# lup:` comments are one grammar.** A directive is written as a call (`# lup: ignore("tuple-shape", why="…")`), and anything that isn't a call is a note. A call to an unknown directive is a finding, and so is an `ignore` without its reason. Every rule accepts `ignore`, and adding one asks the operator. `defer` points at a GitHub issue or carries a condition the gate can check; the ledger's to-do items point at GitHub issues too. A note added in the same session can be removed freely; removing a committed one is reported.
 - **Information never travels on a "blocking" channel.** Type errors and ruff's findings arrive as plain context, limited to the files touched, at each checkpoint. What must be fixed before finishing is enforced when the turn ends. The formatter runs at commit.
-- **Tests are exempt from code rules, and the rule docs say so.** A file's test role comes from the declared test roots, nested projects included. In the art studio the exemption existed but never applied, because a pytest root gave its files no test role. lup's own architecture rules (front-door, seam-boundary and the like) apply only to lup itself.
+- **Tests are exempt from code rules, and the rule docs say so.** A file's test role comes from the declared test roots, nested projects included. In the art studio the exemption existed but never applied, because a pytest root gave its files no test role. lup's own architecture rules (`runtime-mention` and the like) live in the table of lup's own module, in lup's declaration, so they apply only to lup.
+- **A project writes its own code rules** in a table one of its modules names, as lup's are. `lup rules new` writes a skeleton with its examples, which are its tests, and `lup rules check` runs the rules on one file.
 - **No flaky tests.** A test that fails and then passes is a failure to fix. Changed and new tests run repeatedly and under load before they land. Tests depending on the real clock or on wall-clock timing are refused. A unit test over about 10 s fails the gate unless it's declared slow with a reason.
 - **Tests stub every agent and network call.** The library ships a fake agent, and a guard refuses real calls during tests.
 - **The gate:**
@@ -285,7 +287,7 @@ The control runs as its own small host process. A hold within the hour keeps its
   result = await translator.ask(segment.model_dump_json(), Translations)
   result.output                                                      # Translations
   ```
-- **A room has the same shape, and is the library's.** It's declared in `lup_project.py` and used from code, waiting (`room.ask()`) or detached (`room.spawn()`), or in a terminal (`room.launch()`, or `lup launch claude audiobook`). One declaration compiles two ways: to SDK options for code, and to argv for the terminal. `Claude(...).launch()`, `.command()` and `.prepare()` already work that way on today's dev (merge `008d23ca1`), and `harness claude|codex` is built on them. The parity checklist in `tmp/lup-dx-overhaul.md` maps every harness flag and launch step to a declaration field. The verbs are open (see Open questions).
+- **A room has the same shape, and is the library's.** It's declared in the project's own code, which production code imports, and a module of the declaration references it by address (`Rooms.of("audiobook.rooms:narrator")`) so the environment can launch and show it. It's used from code, waiting (`room.ask()`) or detached (`room.spawn()`), or in a terminal (`room.launch()`, or `lup launch claude audiobook`). One declaration compiles two ways: to SDK options for code, and to argv for the terminal. `Claude(...).launch()`, `.command()` and `.prepare()` already work that way on today's dev (merge `008d23ca1`), and `harness claude|codex` is built on them. The parity checklist in `tmp/lup-dx-overhaul.md` maps every harness flag and launch step to a declaration field. The verbs are open (see Open questions).
 - **Publishing stays outside the room.** An audiobook pipeline ("turn this page into an episode and publish it") runs the room to produce the episode, and host code publishes it, with credentials the container never sees.
 - **Typed output through a lup tool on both runtimes (tentative; earlier leaning: native on both).** The answer is submitted through `lup_submit`, an ordinary lup tool whose input is the output model, so it keeps everything a normal tool has, hooks included.
   - **Corrections happen inside the turn.** Validation, and any `before` hook on the output tool (a review answering `Allow()` or `Deny(reason)`), reject with feedback, and the agent corrects its answer without being re-prompted.
@@ -436,6 +438,13 @@ Facts that were expensive to learn. Versions are as measured in October 2026.
 - bun 1.3.14 has `minimumReleaseAge`;
 - pacman needs a dated Arch Linux Archive mirror (not verified).
 
+**Tools:**
+- ruff 0.16.10 and pyright 1.1.414 resolve an extended base's relative paths from the base's own directory, so a base under `.lup/settings/` writes `../../`;
+- in an extending file, ruff's `select` and `per-file-ignores` replace the base's, while `ignore`, `extend-select` and `extend-per-file-ignores` add to it; pyright's settings replace the base's by name, lists included;
+- a workspace member with its own `[tool.ruff]` and no `extend` is cut off from the root's settings;
+- pyright reads a TOML base's `[tool.pyright]`;
+- Node strips TypeScript types by default from 23.6.0 and 22.18.0, never under `node_modules`.
+
 **From the downstream projects:**
 - **aib:**
   - tool names in prompts must be exact (`mcp__x__y`);
@@ -469,12 +478,9 @@ The operator's to decide:
 5. **Carrying the operator's preferences across containers,** or seeding from the personal config only.
 6. **Native `Agent` for short jobs, beside lup's spawn:** leaning deny. To settle by measuring the new spawn, not today's lagging one: its start time and first request for a short worker, and whether a fork reads its parent's cache.
 7. **A maintaining session as a room lup declares:** leaning yes, if nothing in maintaining falls outside what a room can declare.
-8. **One overseeable place for a project, and who owns what in `pyproject.toml`** (for the declaration piece). The operator wants everything about a project in one place that's easy to oversee. Settled: the declaration declares the paths that are code, tests and excluded, and every tool's settings are compiled from it. Open:
-   - **Dependencies.** (i) Declared in the declaration, which becomes the only source: `pyproject.toml` is compiled from it whole, `lup-dev add` resolves with uv and writes the result into the declaration, and plain `uv add` or a hand edit is refused by the drift test. Costs: a tool editing Python source, a changed habit, tools that edit `pyproject.toml` themselves (dependency bots) stop working, and a fresh project's first `pyproject.toml` comes from `lup new`. (ii) Left in `[project]`, uv's and the packaging standard's, with one overview (`lup-dev project`, then the dashboard) rendering everything about the project on one page: dependencies, paths, rule selection, protected paths, compiled settings. Costs: two sources behind one view. Leaning (ii), lightly.
-   - **Where compiled tool settings go.** `pyproject.toml`'s `[tool.*]` sections (one file, where tools and editors already look, but compiled keys beside uv's), or each tool's own file (`ruff.toml`, `pyrightconfig.json`, …: compiled files apart from what uv edits, but several generated files at the root).
-   - **Where the declaration lives.** A fixed `lup_project.py` at the project's root, found without a pointer (leaning), or a module named in `pyproject.toml` (`[tool.lup] project = …`).
+8. **One overseeable place for a project, and who owns what in `pyproject.toml`.** Settled (2026-10-12): the declaration is `lup_project.py` at the root; lup writes only its own settings files, which the project's `pyproject.toml` extends; dependencies stay in `[project]`; and `lup project` shows everything on one page (`docs/declaration.md`).
 9. **How the code rules and the conventions link.** The rule table (`catalog/rules.ts`, shown as `docs/rules.md`) is what runs; `docs/conventions.md` holds each decision, its why, the first lup's evidence, its alternatives, and what ruff, pyright or review enforce. Today each convention's *Enforced by:* line lists the lup rules by id, by hand, and a test checks only that each named rule exists, so a rule can run with no written decision behind it. Options: (i) each rule in the table names the conventions section it enforces, `docs/rules.md` is generated grouped by section and linked to its why, and the conventions point to their group instead of listing ids, with a test that every rule's section exists (the agent's lean: the link kept once, in the table); (ii) the hand-written lists, checked both ways (redundant, but policed); (iii) the *Enforced by:* lines generated into the conventions (generated text inside a hand-written document). Either way, a rule can't be added without the decision it serves. **Going with (i), slightly open** (2026-10-12): the operator is mulling it over; the declaration piece builds it, with a section as a family of rules (`docs/declaration.md`, *Rules and conventions*).
-10. **A project's own code rules.** lup's 45 rules live in its own table (`catalog/rules.ts`), compiled into the engine when lup is installed; a project can lift one from some paths (`exempt`) or keep a finding (`# lup: ignore`), but not add its own. Open: where a project's rules live (a table beside its declaration, written as lup's are), how they reach the engine (compiled into a per-project bundle, or loaded when the engine starts), and how they're reviewed before they run, since a rule is code the judge runs.
+10. **A project's own code rules.** Settled (2026-10-12): a rule table belongs to a module, written as lup's are, loaded when the engine starts, and protected and read from the integration branch's tip, as the declaration is (`docs/declaration.md`).
 11. **Judging writes, or judging branches.** Kept for now (2026-10-12): the judge decides on each write (allow, ask or refuse), the file tools' before they land and everything else after the call, at checkpoints. The alternative: code rules still refuse at the edit, with nothing kept between calls, and the asks move to landing. A branch's design changes (new files, public-API changes, suppressions, protected paths, dependencies) show live on the dashboard, and a branch with any waits for the operator before it lands. Checkpoints, holds, put-backs, the turn-end block, the `compiled` role and most of the drafts flow (`docs/review-flow.md`) would go; both runtimes would be judged alike; the operator would review a branch at a time. Its costs: a direction the operator would have stopped at the first file can cost a branch's work, and landing needs one command the agents can't go around. A half-way keeps the asks at the write for the file tools only, and judges the rest at landing. The evidence so far: the incidents came from judging after the call (#22, #32, a removed worktree crashing every checkpoint, holds on a commit and merge made in one command) and from the installed judge lagging the declaration it reads (#21); a refusal at the edit cost the agent least.
 
 **Still to discuss:**
@@ -526,7 +532,7 @@ The starting files (`AGENTS.md`, `CLAUDE.md`, `.claude/settings.json`, `.gitigno
 1. **First the code rules and the allow policy, then the library's first slice.** The operator relies on the first two most, so they come back first.
    - Judging every write (`docs/judging-writes.md`), with its three outcomes (allow, ask, refuse), restored declines and saved versions, and the typed engine with the code rules (`docs/conventions.md`). It's the review workflow, every call goes through it, and its cost on a large repository (a git snapshot per command took 1.4–2.8 s at 300k files) is the main technical unknown.
    - The library: `Claude`/`Codex` with typed output, the fake agent and the test guard. live-translator can move to it at once, and the environment launches through it.
-2. **The declaration and the CLI skeleton.** `Project` and its selections, a CLI that loads lazily, `lup new`, `lup docs`.
+2. **The declaration.** `Project` as modules, the runner and requirements; a project's own rules; lup's tool settings; the lazy CLI with `lup new` and `lup docs`; rules linked to their conventions.
 3. **Launch.** A container per session, mounts, secrets through host services, the harness compiled at launch, the session settings, native orchestration tools denied.
 4. **lup's own tools.** Spawn, message, wait, ask, handoff; the one hook (hold and delivery); the roster; the ledger as the place for open work.
 5. **Review.** Hardlinked worktrees, protected paths, merging back, and the dashboard with agents first and the inbox. **Milestone: the new lup hosts its own development**, and the bridge ends.
