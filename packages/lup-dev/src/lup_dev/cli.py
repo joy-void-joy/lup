@@ -5,9 +5,9 @@ line piece builds it; the commands keep their meaning there, and their final
 names are that piece's call (`docs/judging-writes.md`, *Modules*). It's the one
 place that lists the runtimes' adapters.
 
-`submit`, `wait`, `reviews` and `reply` are the operator's command line for lup's
-own tools (`docs/review-flow.md`), from the same code. Who calls them is the
-operator: a conversation of its own, `operator`, in the directory they run in.
+`submit`, `wait`, `reviews` and `reply` serve the built drafts flow
+(`docs/review-flow.md`). Who calls one is a conversation of its own, `operator`,
+in the directory it runs in.
 """
 
 import secrets

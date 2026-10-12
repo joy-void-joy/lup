@@ -1,8 +1,7 @@
 """Submitting drafts for review, waiting on the answers, and carrying them out.
 
-The behaviour behind lup's own tools, `submit`, `wait`, `reviews` and `reply`,
-which the operator's command line shares (`docs/review-flow.md`, *lup's own
-tools*). A review is numbered in its worktree and parked through a `Queue`, which
+The behaviour behind `lup-dev`'s `submit`, `wait`, `reviews` and `reply`
+(`docs/review-flow.md`, *Submitting* and *Waiting*). A review is numbered in its worktree and parked through a `Queue`, which
 never says where it waits. Every submission is recorded in the worktree's store
 (`StoreLayout.submissions`), changed only under the store's lock, the lock a
 checkpoint holds:

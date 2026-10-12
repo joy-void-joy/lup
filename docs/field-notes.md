@@ -57,6 +57,37 @@ Read from its source and checked against the bundled CLI with a scripted fake Me
 - `RateLimitEvent` wasn't emitted for an API key's 429; how a subscription's spent window surfaces is unverified.
 - An interrupt yields `ResultMessage(subtype="error_during_execution", terminal_reason="aborted_streaming")`, and raises nothing.
 
+## Claude Code 2.1.295: what a hook can do to a file tool
+
+From a spike: `claude -p --model haiku` with `PreToolUse` and `PostToolUse` hooks on Write, Edit and Read.
+- A `PreToolUse` `allow` with `updatedInput` pointing a Write at another path lands it there; the result reports success and names the new path.
+- `PostToolUse`'s `updatedToolOutput` replaced an Edit's result text before the model saw it.
+- Claude Code checks an Edit against the path the agent gave, before any hook runs: the file must exist, have been read, and hold `old_string`. Those rejections fire neither `PreToolUse` nor `PostToolUseFailure` (hooks reference), so only the execution can be redirected ("File does not exist.", "String to replace not found in file.").
+- A redirected Edit needs no Read of the path it's redirected to; once that file was moved into place, the real file could be edited without a fresh Read.
+- A redirected Read shows the redirected file, and counts as reading both paths.
+- A hook's `allow` doesn't approve a write into a directory Claude Code protects (`.git`, `.claude`, `.vscode`, `.husky`, `.devcontainer` and others), at any depth of the redirected path; in `-p` the prompt is a refusal ("Claude requested permissions to edit … which is a sensitive file."). Allow rules can't pre-approve one either: "The safety check runs before Claude Code evaluates allow rules from settings". Protected files include `pyrightconfig.json`, `bunfig.toml`, `lefthook.yml` and the Gradle and Maven wrappers' `.properties`.
+- Unchecked: whether `PostToolBatch` can explain a refused Edit; whether protected file names match at any depth; whether a `PermissionRequest` hook's `allow` approves a protected-path prompt.
+
+## MCP servers, from the runtimes' docs
+
+- **Claude Code:**
+  - a project's server is declared in `.mcp.json` and approved with `enabledMcpjsonServers` in a trusted folder, read when the session starts;
+  - a call's time limit is the server's `timeout` (ms), else `MCP_TOOL_TIMEOUT`, else about 28 hours; a stdio call with no response and no progress notification for 30 minutes aborts, and a per-server timeout of at least 1000 ms floors that window (2.1.203 and later);
+  - a main conversation's MCP call still running after 2 minutes moves to the background unless `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0`; a subagent's calls never move;
+  - the server learns only `CLAUDE_PROJECT_DIR`, not the session or the subagent;
+  - `PreToolUse` and `PostToolUse` fire for MCP tools (`mcp__<server>__<tool>`), and `updatedInput` replaces the arguments.
+- **Codex:** servers go in `[mcp_servers.<name>]` in `.codex/config.toml`, trusted projects only; `tool_timeout_sec` defaults to 60 s per the docs but 300 s in the source (`codex-mcp/src/rmcp_client.rs:104`); `approval_mode` is `auto`, `prompt`, `writes` or `approve`; no idle limit or backgrounding is documented; `PreToolUse` fires for MCP tools, and `updatedInput` replaces the arguments.
+
+## Codex 0.156.1: what a hook can do to a patch
+
+Read from its docs and its source at `rust-v0.156.1`; nothing run.
+- `PreToolUse` can rewrite `apply_patch`, shell and MCP calls by answering `allow` with `updatedInput`: for Bash and `apply_patch` it carries `command`, for MCP tools the replacement arguments (`core/src/tools/handlers/apply_patch.rs:466-479`; test `pre_tool_use_rewrites_apply_patch_before_execution`).
+- The hook sees only the patch text, not a list of files (`apply_patch.rs:459-463`).
+- A patch sent through the shell (`apply_patch <<EOF`) fires `PreToolUse` as `Bash`, not `apply_patch` (`unified_exec/exec_command.rs:378-405`).
+- An `*** Update File:` needs its target to exist (`apply-patch/src/file_update.rs:34-45`).
+- `PermissionRequest` can't rewrite: its `updatedInput` fails closed (`hooks/src/engine/output_parser.rs:401-414`).
+- `PostToolUse` can't undo side effects from a tool that already ran.
+
 ## Codex 0.160.1
 
 - its own memories feature, off by default;
