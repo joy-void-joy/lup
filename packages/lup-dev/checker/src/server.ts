@@ -4,21 +4,32 @@
 // Requests run one at a time, checks first. An importers pass runs a step at a time
 // between them, so an edit's check never waits for a whole pass. The engine stops
 // when nothing has asked anything for its idle time, when told to, or when a client
-// expects another build.
+// expects another build or another environment.
 
 import * as fs from 'fs';
 import * as net from 'net';
 import * as readline from 'readline';
 
-import { ruleInfos, UnknownRuleError } from './catalog';
+import { ruleInfos, SelectionError } from './catalog';
 import { Engine, ImportersJob } from './engine';
-import { Answer, CheckRequest, ImportersRequest, Request } from './protocol';
+import { Answer, CheckRequest, Environment, ImportersRequest, Request } from './protocol';
 
 export interface ServeOptions {
     root: string;
     socket: string;
     idleSeconds: number;
     build: string;
+    environment: Environment;
+}
+
+function sameList(left: unknown, right: string[]): boolean {
+    return Array.isArray(left) && left.length === right.length && left.every((each, at) => each === right[at]);
+}
+
+// Whether a request was told of the environment this engine was started with. One
+// sent by a client with another runner, or with none, is another environment.
+function sameEnvironment(asked: Environment | undefined, own: Environment): boolean {
+    return asked !== undefined && sameList(asked.interpreter, own.interpreter) && sameList(asked.files, own.files);
 }
 
 type Reply = (answer: Answer) => void;
@@ -86,7 +97,7 @@ export class Server {
         this.wake();
         // Stopping closes the socket before the answer goes out: a client reading the
         // answer then finds no engine to reconnect to, rather than one closing on it.
-        if (request.build !== this.options.build) {
+        if (request.build !== this.options.build || !sameEnvironment(request.environment, this.options.environment)) {
             this.stop();
             reply(this.answer({ stale: true }));
             return;
@@ -168,7 +179,7 @@ export class Server {
             return this.answer(work());
         } catch (error) {
             const message =
-                error instanceof UnknownRuleError || !(error instanceof Error)
+                error instanceof SelectionError || !(error instanceof Error)
                     ? String(error instanceof Error ? error.message : error)
                     : error.stack ?? error.message;
             return this.answer({ error: message });

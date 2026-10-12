@@ -234,12 +234,13 @@ import-linter checks the whole graph at the gate. The engine reads the same cont
 - **A subpackage is named for the subsystem it implements.** Where the first lup had the same subsystem, its name is reused, so what's read in `lup-legacy` maps onto the same place: `codescan` (its `harness/codescan`), `policy`.
 - **A word the library uses means the same thing in the environment:** `adapters` holds each runtime's adapter in `lup` and in `lup_dev` alike.
 - **Every subpackage's `__init__.py` docstring says in one line what it is.**
-- **Package-wide modules stay at the root:** errors, settings, layout, the project declaration, the clock, the command line.
-- **Subsystems import downwards only,** declared as an import-linter `layers` contract. In `lup_dev`: `adapters` > `policy` > `codescan` > `catalog`, so the runtimes' adapters sit on judging, judging on reading code, and everything on the catalog's data.
+- **Package-wide modules stay at the root:** errors, settings, layout, the clock, the command line, and the front door a project's declaration imports (`__init__.py`).
+- **Subsystems import downwards only,** declared as an import-linter `layers` contract. In `lup_dev`: `adapters` > `policy` > `codescan` > `declaration` > `catalog`, so the runtimes' adapters sit on judging, judging on reading code, both on what a project declares, and everything on the catalog's data.
 
 | `lup_dev` | What it is |
 |---|---|
-| root | `errors.py`, `settings.py`, `layout.py`, `project.py`, `clock.py`, `cli.py`; the gate as one command (`gate.py`); installing the judge (`install.py`); what reviews share (`review.py`) and the bridge parking them in the first lup's dashboard (`legacy_dashboard.py`) |
+| root | `errors.py`, `settings.py`, `layout.py`, `clock.py`, `cli.py`; the front door for a project's declaration (`__init__.py`); the gate as one command (`gate.py`); installing the judge (`install.py`); what reviews share (`review.py`) and the bridge parking them in the first lup's dashboard (`legacy_dashboard.py`) |
+| `declaration/` | what a project declares, and reading it: the grammar, `Module`, the kinds, lup's modules, loading `lup_project.py` and resolving it (`docs/declaration.md`) |
 | `catalog/` | the data that sets lup's policy, protected: path patterns (`paths.py`), the gate's steps (`gate.py`), the rule table (`rules.ts`) |
 | `codescan/` | reading code: the engine's contract and client, the `# lup:` directives, conditions, ruff, and `docs/rules.md` compiled from the rule table |
 | `policy/` | judging every write: roles, the judgement, the checkpoint and its store, holds, verdicts, reports |
@@ -267,7 +268,7 @@ Each lup rule says which ruff rules it turns off, in `pyproject.toml`.
 
 ## Tests
 
-Tests are exempt from lup's rules. Until the project declaration names its test roots (`docs/declaration.md`), a file is a test if pytest collects it: a module under a root pytest reads (`testpaths` in the nearest `pyproject.toml` holding pytest's options, nested projects included) matching its `python_files` patterns (`test_*.py` by default), or a `conftest.py` under such a root. The patterns matter: the source directories are in `testpaths` too, so pytest runs their doctests, and a source module collected only for its doctests stays production code. Test roles come from the suites the gate runs, so the exemption covers exactly what runs as tests. ruff and pyright still run on tests, with ruff's test-only exemptions (`S101`, `D`, `ARG`, `INP001`).
+Tests are exempt from lup's rules. A file is a test if it's a module under a test root matching that root's file patterns (`test_*.py` and `*_test.py` by default), or a `conftest.py` under one. The test roots are the ones the declaration names (`Python.tests`, `docs/declaration.md`); a project that keeps lup's default names none, and its roots are the ones pytest reads (`testpaths` in the nearest `pyproject.toml` holding pytest's options, nested projects included, with its `python_files` patterns). lup's own declaration names `packages/*/tests`. The patterns matter: the source directories are in `testpaths` too, so pytest runs their doctests, and a source module collected only for its doctests stays production code. Test roles come from the suites the gate runs, so the exemption covers exactly what runs as tests. ruff and pyright still run on tests, with ruff's test-only exemptions (`S101`, `D`, `ARG`, `INP001`).
 
 ## Keeping the rules cohesive
 

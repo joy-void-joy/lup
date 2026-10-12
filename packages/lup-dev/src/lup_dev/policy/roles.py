@@ -1,21 +1,23 @@
 """Path roles: which role a path in a worktree has, the first that matches.
 
-1. **protected:** the project's declaration and the protected paths
-   (`Protected.default()` and the project's additions);
+1. **protected:** the project's declaration, and the paths its modules protect;
 2. **operator:** the operator's documents, `DESIGN.md` and `AGENTS.md`;
-3. **excluded:** what the project's declaration holds to nothing (`excluded`);
-4. **test:** a module pytest collects as a test, under a root it reads and matching
-   its `python_files` patterns, or a `conftest.py` under such a root;
+3. **excluded:** what its modules hold to nothing;
+4. **test:** a module under a test root and matching its file patterns, or a
+   `conftest.py` under one: the roots the declaration names, or where it keeps
+   lup's default, the ones pytest's configuration gives;
 5. **scratch:** `tmp/` at any depth, and the saved versions under `.lup/`;
 6. **docs:** Markdown files and `docs/`;
 7. **data:** data formats outside a source tree;
 8. **production:** everything else, so a file nobody classified is gated.
 
-A protected Python module gets lup's rules as production code does: protection
-adds the operator's review, it doesn't take the rules away. A protected path the
+Each role's patterns come from the declaration resolved (`Declaration`), every
+selected module's own, starting from lup's (`lup_dev.catalog.paths`). A protected
+Python module gets lup's rules as production code does: protection adds the
+operator's review, it doesn't take the rules away. A protected path the
 declaration also excludes still asks, but gets no rules and no findings. A rule the
-declaration exempts a path from (`exempt`) is lifted there alone. The table of what
-each role gets is in `docs/judging-writes.md`, *What each change gets*.
+declaration exempts a path from is lifted there alone. The table of what each role
+gets is in `docs/judging-writes.md`, *What each change gets*.
 """
 
 import tomllib
@@ -23,9 +25,9 @@ from pathlib import Path, PurePath
 from typing import Literal
 
 from lup.types import Model
-from lup_dev.catalog.paths import Paths
+from lup_dev.declaration.kinds import Pytest
+from lup_dev.declaration.resolve import Declaration
 from lup_dev.layout import CheckoutLayout
-from lup_dev.project import Declared, Project, Pytest
 
 type Role = Literal[
     "protected", "operator", "excluded", "test", "scratch", "docs", "data", "production"
@@ -42,61 +44,70 @@ class Roles(Model):
     """The role of every path in one worktree, from its project's declaration."""
 
     root: Path
-    project: Project
-    declaration: Path | None = None
-    """The declaration's file, relative to the root, which is always protected."""
-    paths: Paths = Paths()
-    """lup's default patterns (`lup_dev.catalog.paths`)."""
-
-    @classmethod
-    def of(cls, root: Path, declared: Declared) -> Roles:
-        """Classify the paths of the worktree at `root` by its declaration."""
-        return cls(root=root, project=declared.project, declaration=declared.source)
+    declaration: Declaration
+    """The declaration the worktree is judged by."""
 
     def role(self, path: Path) -> Role:
         """Return the role of `path`, relative to the root.
 
-        >>> roles = Roles(root=Path("/nowhere"), project=Project())
+        >>> from lup_dev import Project
+        >>> roles = Roles(root=Path("/nowhere"), declaration=Declaration.of(Project()))
         >>> [roles.role(Path(p)) for p in ["uv.lock", "AGENTS.md", "tmp/a.py", "x.py"]]
         ['protected', 'operator', 'scratch', 'production']
         """
-        if path == self.declaration or self.project.protected.matching(path):
+        paths = self.declaration.paths
+        if self.protecting(path) is not None or path == self.declaration.source:
             return "protected"
-        if matches(path, self.paths.operator_documents):
+        if matches(path, paths.operator_documents):
             return "operator"
         if self.is_excluded(path):
             return "excluded"
         if self.is_test(path):
             return "test"
-        if matches(path, self.paths.scratch):
+        if matches(path, paths.scratch):
             return "scratch"
-        if matches(path, self.paths.docs):
+        if matches(path, paths.docs):
             return "docs"
-        data = matches(PurePath(path.name), self.paths.data)
+        data = matches(PurePath(path.name), paths.data)
         if data and not self.in_source_tree(path):
             return "data"
         return "production"
 
+    def protecting(self, path: Path) -> str | None:
+        """Return the first protected pattern `path` matches, or none.
+
+        >>> from lup_dev import Project
+        >>> roles = Roles(root=Path("/nowhere"), declaration=Declaration.of(Project()))
+        >>> roles.protecting(Path("packages/lup/pyproject.toml"))
+        '**/pyproject.toml'
+        """
+        protected = self.declaration.paths.protected
+        return next(
+            (pattern for pattern in protected if path.full_match(pattern)), None
+        )
+
     def is_python(self, path: Path) -> bool:
         """Say whether `path` is a Python module, which the rules read."""
-        return matches(PurePath(path.name), self.paths.python)
+        return matches(PurePath(path.name), self.declaration.paths.python)
 
     def is_excluded(self, path: Path) -> bool:
         """Say whether the project's declaration holds `path` to nothing."""
-        return matches(path, self.project.excluded)
+        return matches(path, self.declaration.paths.excluded)
 
     def exempt(self, path: Path, rule: str) -> bool:
         """Say whether the project's declaration lifts `rule` from `path`.
 
-        >>> from lup_dev.project import Exemption
+        >>> from lup_dev import CodeRules, Exemption, Exemptions, Modules, Project
         >>> lifted = Exemption(rule="regex", paths=["parsers/**"], why="a grammar")
-        >>> roles = Roles(root=Path("/nowhere"), project=Project(exempt=[lifted]))
+        >>> lifting = CodeRules(exempt=Exemptions().add(lifted))
+        >>> project = Project(modules=Modules.default().edit(lifting))
+        >>> roles = Roles(root=Path("/nowhere"), declaration=Declaration.of(project))
         >>> [roles.exempt(Path("parsers/a.py"), r) for r in ["regex", "elif"]]
         [True, False]
         """
         return any(
             lifted.rule == rule and matches(path, lifted.paths)
-            for lifted in self.project.exempt
+            for lifted in self.declaration.exempt
         )
 
     def ruled(self, path: Path) -> bool:
@@ -104,8 +115,10 @@ class Roles(Model):
 
         Never one the declaration excludes, even where it's protected.
 
-        >>> project = Project(excluded=[".github/x/**"])
-        >>> roles = Roles(root=Path("/nowhere"), project=project)
+        >>> from lup_dev import Core, Modules, Paths, Project
+        >>> excluding = Core(paths=Paths().add(excluded=[".github/x/**"]))
+        >>> project = Project(modules=Modules.default().edit(excluding))
+        >>> roles = Roles(root=Path("/nowhere"), declaration=Declaration.of(project))
         >>> [roles.ruled(Path(p)) for p in ["a.py", ".github/h.py", ".github/x/h.py"]]
         [True, True, False]
         """
@@ -121,15 +134,22 @@ class Roles(Model):
         return self.ruled(path) or (self.is_python(path) and self.role(path) == "test")
 
     def is_test(self, path: Path) -> bool:
-        """Say whether pytest collects `path` as a test, or reads it as a conftest."""
+        """Say whether pytest collects `path` as a test, or reads it as a conftest.
+
+        The test roots are the ones the declaration names; where it keeps lup's
+        default, pytest's configuration says where tests are, as it did before a
+        project could name its own, until the gate checks `testpaths` against the
+        declared roots (`docs/declaration.md`, *pytest and import-linter*).
+        """
         if not self.is_python(path):
             return False
         named = PurePath(path.name)
-        roots = self.project.tests if self.project.tests is not None else []
-        for pytest in roots or self.configured(path):
+        declared = self.declaration.tests
+        roots = declared if declared is not None else self.configured(path)
+        for pytest in roots:
             if not path.full_match(str(pytest.root / "**")):
                 continue
-            if named.name == self.paths.conftest:
+            if matches(named, self.declaration.paths.conftest):
                 return True
             if matches(named, pytest.files):
                 return True
@@ -198,7 +218,7 @@ class Roles(Model):
 
     def in_source_tree(self, path: Path) -> bool:
         """Say whether `path` sits in a source tree: under `src/`, or in a package."""
-        if matches(path, self.paths.source_trees):
+        if matches(path, self.declaration.paths.source_trees):
             return True
         return any(
             CheckoutLayout(root=self.root / directory).package.is_file()

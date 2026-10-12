@@ -25,7 +25,6 @@ from lup.types import Model
 
 # lup: ignore("runtime-mention", why="the one place listing the adapters")
 from lup_dev.adapters import claude, codex
-from lup_dev.catalog.gate import Gate
 from lup_dev.clock import SystemClock
 from lup_dev.codescan.conditions import loaded
 from lup_dev.codescan.contract import Checker, Finding, Source
@@ -33,8 +32,9 @@ from lup_dev.codescan.directives import Checking, Fired, GitHubIssues, Trackers
 from lup_dev.codescan.engine import EngineChecker
 from lup_dev.codescan.reference import reference
 from lup_dev.codescan.ruff import Ruff
+from lup_dev.declaration.requirements import Machine
 from lup_dev.errors import LupDevError
-from lup_dev.gate import Check, Fixes, Shell, failed, report
+from lup_dev.gate import Check, Shell, failed, report
 from lup_dev.install import Installer, Terminal, Uv
 from lup_dev.layout import CheckoutLayout, Layout
 from lup_dev.legacy_dashboard import LegacyDashboard, LegacyQueue
@@ -160,11 +160,14 @@ def rules_check(
 ) -> None:
     """Check files as the gate does: lup's rules, pyright, ruff and the deferrals.
 
-    `# lup: ignore` applies to every owner's findings. A deferral whose issue is
-    closed, or whose condition holds, fails the check. lup's rules read production
-    and protected modules; tests are checked by pyright and ruff only; what the
-    declaration excludes isn't checked. With no paths, it checks every such file
-    in the worktree, as the gate's `rules` step runs it.
+    lup's rules are those the worktree's declaration selects, sent to the engine
+    as the judge sends them, and pyright and ruff run through its runner as the
+    judge runs them. `# lup: ignore` applies to every owner's findings. A
+    deferral whose issue is closed, or whose condition holds, fails the check.
+    lup's rules read production and protected modules; tests are checked by
+    pyright and ruff only; what the declaration excludes isn't checked. With no
+    paths, it checks every such file in the worktree, as the gate's `rules` step
+    runs it.
     """
     root = toplevel(Path.cwd())
     layout = Layout.of(LupDevSettings())
@@ -187,9 +190,10 @@ def rules_check(
         typer.echo("lup checked no files.")
         return
     sources = [Source(path=path) for path in checked]
-    reports = engine().check(root, sources)
-    ruff = Ruff().findings(root, sources)
-    conditions = loaded(root, worktree.declared.project)
+    declaration = worktree.declaration
+    reports = engine().check(root, sources, declaration.rules, declaration.runner)
+    ruff = Ruff().findings(root, sources, declaration.runner)
+    conditions = loaded(root, declaration.conditions)
     gate = Trackers(issues=GitHubIssues(root=root), conditions=conditions)
 
     def found(path: Path) -> list[Finding]:
@@ -302,21 +306,19 @@ def check(
 ) -> None:
     """Run the gate, every step even after one fails, and fail if any did.
 
-    A stale engine is rebuilt, then lup's rules (`rules check`), ruff, the
-    formatter, pyright, pytest and the import contracts run. Each step's outcome
-    is reported, then each failure's output in full; the exit code is non-zero
-    when any step failed. With `--fix`, which the session landing work runs on
-    the merged result, ruff's safe fixes and the formatter rewrite the worktree
-    first.
+    The steps are the worktree's declaration's, and so is how the project runs
+    its tools: lup's rules (`rules check`), ruff, the formatter, pyright, pytest
+    and the import contracts by default, with what its modules add, such as lup's
+    own engine, rebuilt when stale. Its modules' requirements are checked first,
+    all at once: a required tool missing stops the gate before any step. Each
+    step's outcome is reported, then each failure's output in full; the exit code
+    is non-zero when any step failed. With `--fix`, which the session landing work
+    runs on the merged result, ruff's safe fixes and the formatter rewrite the
+    worktree first.
     """
-    outcomes = Check(
-        root=toplevel(Path.cwd()),
-        runner=Shell(),
-        gate=Gate(),
-        fixes=Fixes().steps if fix else [],
-    ).run()
-    typer.echo(report(outcomes))
-    if failed(outcomes):
+    gated = Check.declared(toplevel(Path.cwd()), Shell(), Machine(), fix=fix).run()
+    typer.echo(report(gated))
+    if failed(gated.outcomes):
         raise typer.Exit(code=1)
 
 
@@ -384,9 +386,15 @@ def verdicts(
 
 @app.command("importers", hidden=True)
 def importers(worktree: Path) -> None:
-    """Run a worktree's background importers pass; the checkpoint starts it."""
-    layout = Layout.of(LupDevSettings())
-    Worktree.at(worktree, layout).importers().run(engine())
+    """Run a worktree's background importers pass; the checkpoint starts it.
+
+    The engine is asked with the runner of the declaration the judge reads there,
+    the integration branch's, so the pass and the judge share one engine.
+    """
+    judging = services()
+    repository = Worktree.at(worktree, judging.layout).repository
+    judged = Worktree.of(worktree, repository, judging)
+    judged.importers().run(judging.checker, judged.declaration.runner)
 
 
 @review.command("keep", hidden=True)

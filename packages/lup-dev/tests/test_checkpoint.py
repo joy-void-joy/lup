@@ -9,7 +9,12 @@ import pytest
 import sh
 from filelock import FileLock
 
+from lup_dev import Project
 from lup_dev.codescan.contract import FileReport, Finding, Position, Span
+from lup_dev.declaration.errors import ProjectError
+from lup_dev.declaration.grammar import Drop
+from lup_dev.declaration.resolve import Declaration, Selected
+from lup_dev.declaration.runner import Plain, Prefixed
 from lup_dev.policy.before import Overwrite, Replacement, before
 from lup_dev.policy.checkpoint import (
     CallFinished,
@@ -25,7 +30,6 @@ from lup_dev.policy.holds import Holds, Response, answer, waiting
 from lup_dev.policy.importers import Conversation, ImportersPass
 from lup_dev.policy.store import read_model
 from lup_dev.policy.verdicts import VerdictLog
-from lup_dev.project import ProjectError
 
 if TYPE_CHECKING:
     from conftest import FakeRuntime, Kit, Shell
@@ -886,15 +890,16 @@ def test_the_importers_pass_runs_once_with_everything_requested(
     kit: Kit, repo: Path
 ) -> None:
     importers = ImportersPass(layout=kit.layout.store(repo), root=repo)
-    runner = FileLock(kit.layout.store(repo).importers_run)
-    with runner:
+    held = FileLock(kit.layout.store(repo).importers_run)
+    with held:
         importers.request([Path("a.py")], [OWN], kit.spawner)
         importers.request([Path("b.py")], [WORKER], kit.spawner)
         assert kit.spawner.spawned == []
-        importers.run(kit.engine)
+        importers.run(kit.engine, Plain())
         assert kit.engine.importers_asked == []
-    importers.run(kit.engine)
+    importers.run(kit.engine, Plain())
     assert kit.engine.importers_asked == [[Path("a.py"), Path("b.py")]]
+    assert kit.engine.runners == [Plain()]
     assert importers.collect().writers == [OWN, WORKER]
     assert importers.collect().writers == []
 
@@ -1041,7 +1046,7 @@ def test_every_worktree_is_judged_by_the_integration_branchs_declaration(
     shell.git(repo, "switch", "-q", "-c", "dev")
     declare(repo, PROTECTING_CORE)
     shell.commit(repo, "dev: protect the core")
-    declare(linked, "from lup_dev.project import Project\nproject = Project()\n")
+    declare(linked, PROTECTING_NOTHING)
     shell.commit(linked, "feat: protect nothing")
     start(kit, repo)
     asked = before(kit.bench, core_edit(linked), SESSION, repo)
@@ -1049,10 +1054,7 @@ def test_every_worktree_is_judged_by_the_integration_branchs_declaration(
     assert asked.reason == (
         f"lup asks: {linked}/src/pkg/core.py is a protected path (src/pkg/core.py)"
     )
-    assert (
-        Worktree.at(linked, kit.layout).declared.project.protected.matching(CORE)
-        is None
-    )
+    assert Worktree.at(linked, kit.layout).roles.protecting(CORE) is None
 
 
 def test_the_integration_branchs_declaration_changes_when_committed(
@@ -1062,9 +1064,7 @@ def test_the_integration_branchs_declaration_changes_when_committed(
     declare(repo, PROTECTING_CORE)
     shell.commit(repo, "dev: protect the core")
     start(kit, repo)
-    (repo / "lup_project.py").write_text(
-        "from lup_dev.project import Project\nproject = Project()\n"
-    )
+    (repo / "lup_project.py").write_text(PROTECTING_NOTHING)
     assert before(kit.bench, core_edit(linked), SESSION, repo).outcome == "ask"
     shell.commit(repo, "dev: protect nothing")
     assert before(kit.bench, core_edit(linked), SESSION, repo).outcome == "allow"
@@ -1075,9 +1075,7 @@ def test_without_the_integration_branch_a_worktree_is_judged_by_its_head(
 ) -> None:
     declare(repo, PROTECTING_CORE)
     shell.commit(repo, "main: protect the core")
-    (repo / "lup_project.py").write_text(
-        "from lup_dev.project import Project\nproject = Project()\n"
-    )
+    (repo / "lup_project.py").write_text(PROTECTING_NOTHING)
     start(kit, repo)
     assert before(kit.bench, core_edit(repo), SESSION, repo).outcome == "ask"
 
@@ -1090,9 +1088,7 @@ def test_only_the_latest_commits_declaration_stays_exported(
     shell.commit(repo, "dev: protect the core")
     start(kit, repo)
     before(kit.bench, core_edit(repo), SESSION, repo)
-    (repo / "lup_project.py").write_text(
-        "from lup_dev.project import Project\nproject = Project()\n"
-    )
+    (repo / "lup_project.py").write_text(PROTECTING_NOTHING)
     shell.commit(repo, "dev: protect nothing")
     before(kit.bench, core_edit(repo), SESSION, repo)
     head = shell.git(repo, "rev-parse", "HEAD")
@@ -1170,17 +1166,26 @@ def test_a_repository_nested_in_a_worktree_is_another_repository(
     assert before(kit.bench, write, SESSION, repo).outcome is None
 
 
-PROTECTING_CORE = (
-    "from lup_dev.project import Project, Protected\n"
-    'project = Project(protected=Protected.default().add("src/pkg/core.py"))\n'
-)
+PROTECTING_CORE = '''
+from lup_dev import Module, Modules, Paths, Project
+
+
+class Guard(Module):
+    """The project's own module, protecting its core."""
+
+    name = "guard"
+
+    paths: Paths = Paths.of(protected=["src/pkg/core.py"])
+
+
+project = Project(modules=Modules.default().add(Guard()))
+'''
+"""A declaration holding a module of the project's own, which JSON can't bring back."""
+
+PROTECTING_NOTHING = "from lup_dev import Project\nproject = Project()\n"
 
 
 def declare(root: Path, declaration: str) -> None:
-    (root / "pyproject.toml").write_text(
-        '[tool.lup]\nproject = "lup_project:project"\n'
-        '[tool.pytest]\ntestpaths = ["tests", "src"]\n'
-    )
     (root / "lup_project.py").write_text(declaration)
 
 
@@ -1200,7 +1205,7 @@ def test_the_last_declaration_that_loaded_stands_in_for_one_that_cant(
     start(kit, repo)
     assert before(kit.bench, core_edit(linked), SESSION, repo).outcome == "ask"
     (repo / "lup_project.py").write_text(
-        "from lup_dev.project import Unheard\n" + PROTECTING_CORE
+        "from lup_dev import Unheard\n" + PROTECTING_CORE
     )
     shell.commit(repo, "dev: a name the judge lacks")
     broken = shell.git(repo, "rev-parse", "HEAD")
@@ -1217,10 +1222,27 @@ def test_the_last_declaration_that_loaded_stands_in_for_one_that_cant(
     assert "can't load" not in finish(kit, linked, "c2").context
 
 
+def test_a_declaration_that_doesnt_resolve_has_the_same_stand_in(
+    kit: Kit, repo: Path, linked: Path, shell: Shell
+) -> None:
+    shell.git(repo, "switch", "-q", "-c", "dev")
+    declare(repo, PROTECTING_CORE)
+    shell.commit(repo, "dev: protect the core")
+    start(kit, repo)
+    assert before(kit.bench, core_edit(linked), SESSION, repo).outcome == "ask"
+    (repo / "lup_project.py").write_text(
+        PROTECTING_CORE.replace(".add(Guard())", '.add(Guard()).drop("ledger")')
+    )
+    shell.commit(repo, "dev: drop a module that isn't there")
+    stood_in = before(kit.bench, core_edit(linked), SESSION, repo)
+    assert stood_in.outcome == "ask"
+    assert "is a protected path (src/pkg/core.py)" in stood_in.reason
+
+
 def test_with_no_declaration_kept_one_that_cant_load_fails(
     kit: Kit, repo: Path, shell: Shell
 ) -> None:
-    declare(repo, "from lup_dev.project import Unheard\n")
+    declare(repo, "from lup_dev import Unheard\n")
     shell.commit(repo, "a name the judge lacks")
     start(kit, repo)
     with pytest.raises(ProjectError, match="Unheard"):
@@ -1235,6 +1257,143 @@ def test_the_gate_reads_the_worktree_as_it_stands_with_no_stand_in(
     shell.commit(repo, "dev: protect the core")
     start(kit, repo)
     before(kit.bench, core_edit(linked), SESSION, repo)
-    declare(linked, "from lup_dev.project import Unheard\n")
+    declare(linked, "from lup_dev import Unheard\n")
     with pytest.raises(ProjectError):
-        _ = Worktree.at(linked, kit.layout).declared
+        _ = Worktree.at(linked, kit.layout).declaration
+
+
+def dropping(rule: str) -> str:
+    """Return a declaration whose `CodeRules` drops `rule` from lup's default."""
+    return (
+        "from lup_dev import CodeRules, Modules, Project, Rules\n"
+        "project = Project(\n"
+        f"    modules=Modules.default().edit(CodeRules(rules=Rules().drop({rule!r}))),\n"
+        ")\n"
+    )
+
+
+def dropped(selected: list[Selected]) -> list[str]:
+    [code_rules] = selected
+    return [
+        name
+        for operation in code_rules.rules.operations
+        if isinstance(operation, Drop)
+        for name in operation.names
+    ]
+
+
+def test_every_check_sends_the_integration_branchs_rule_selection(
+    kit: Kit, repo: Path, linked: Path, shell: Shell
+) -> None:
+    shell.git(repo, "switch", "-q", "-c", "dev")
+    (repo / "lup_project.py").write_text(dropping("regex"))
+    shell.commit(repo, "dev: drop regex")
+    (linked / "lup_project.py").write_text(dropping("tuple-shape"))
+    start(kit, repo)
+    before(kit.bench, core_edit(linked), SESSION, repo)
+    call(kit, linked, "c1")
+    (linked / CORE).write_text((linked / CORE).read_text() + "# TYPE\n")
+    finish(kit, linked, "c1")
+    end(kit, repo)
+    assert kit.engine.selections
+    for selected in kit.engine.selections:
+        assert dropped(selected) == ["runtime-mention", "regex"]
+    assert dropped(Worktree.at(linked, kit.layout).declaration.rules) == [
+        "runtime-mention",
+        "tuple-shape",
+    ]
+
+
+def test_a_stand_in_declaration_sends_its_own_rule_selection(
+    kit: Kit, repo: Path, linked: Path, shell: Shell
+) -> None:
+    shell.git(repo, "switch", "-q", "-c", "dev")
+    (repo / "lup_project.py").write_text(dropping("regex"))
+    shell.commit(repo, "dev: drop regex")
+    start(kit, repo)
+    before(kit.bench, core_edit(linked), SESSION, repo)
+    (repo / "lup_project.py").write_text(
+        "from lup_dev import Unheard\n" + dropping("tuple-shape")
+    )
+    shell.commit(repo, "dev: a name the judge lacks")
+    kit.engine.selections.clear()
+    before(kit.bench, core_edit(linked), SESSION, repo)
+    assert kit.engine.selections
+    for selected in kit.engine.selections:
+        assert dropped(selected) == ["runtime-mention", "regex"]
+
+
+PLAIN = (
+    "from lup_dev import Modules, Plain, Project, Python\n"
+    "project = Project(modules=Modules.default().edit(Python(runner=Plain())))\n"
+)
+"""A declaration whose tools run as the `PATH` finds them."""
+
+POETRY = '''
+from lup_dev import Modules, Project, Python, Runner
+
+
+class Poetry(Runner):
+    """The project's own runner, a class the judge's kept data can't bring back."""
+
+    def command(self, tool: list[str]) -> list[str]:
+        return ["poetry", "run", *tool]
+
+    def judging(self, tool: list[str]) -> list[str]:
+        return ["poetry", "run", *tool]
+
+    def environment(self) -> list[str]:
+        return ["poetry.lock"]
+
+
+project = Project(modules=Modules.default().edit(Python(runner=Poetry())))
+'''
+
+
+def test_the_engine_and_ruff_run_with_the_integration_branchs_runner(
+    kit: Kit, repo: Path, linked: Path, shell: Shell
+) -> None:
+    shell.git(repo, "switch", "-q", "-c", "dev")
+    (repo / "lup_project.py").write_text(PLAIN)
+    shell.commit(repo, "dev: no uv")
+    start(kit, repo)
+    before(kit.bench, core_edit(linked), SESSION, repo)
+    call(kit, linked, "c1")
+    (linked / CORE).write_text((linked / CORE).read_text() + "# TYPE\n")
+    finish(kit, linked, "c1")
+    end(kit, repo)
+    plain = Prefixed.of(Plain())
+    assert kit.engine.runners
+    assert kit.linter.runners
+    assert all(each == plain for each in [*kit.engine.runners, *kit.linter.runners])
+
+
+def test_a_stand_in_declaration_runs_the_tools_with_its_runners_commands(
+    kit: Kit, repo: Path, linked: Path, shell: Shell
+) -> None:
+    shell.git(repo, "switch", "-q", "-c", "dev")
+    (repo / "lup_project.py").write_text(POETRY)
+    shell.commit(repo, "dev: poetry")
+    start(kit, repo)
+    before(kit.bench, core_edit(linked), SESSION, repo)
+    (repo / "lup_project.py").write_text("from lup_dev import Unheard\n" + POETRY)
+    shell.commit(repo, "dev: a name the judge lacks")
+    kit.engine.runners.clear()
+    kit.linter.runners.clear()
+    before(kit.bench, core_edit(linked), SESSION, repo)
+    ran = [*kit.engine.runners, *kit.linter.runners]
+    assert ran
+    for runner in ran:
+        assert runner.judging(["ruff"]) == ["poetry", "run", "ruff"]
+        assert runner.environment() == ["poetry.lock"]
+
+
+def test_before_the_first_commit_the_defaults_rule_selection_judges(
+    kit: Kit, tmp_path: Path, shell: Shell
+) -> None:
+    root = tmp_path / "fresh"
+    (root / "src" / "pkg").mkdir(parents=True)
+    shell.git(root, "init", "-q", "-b", "main")
+    (root / "lup_project.py").write_text(dropping("regex"))
+    judged = Worktree.of(root, root / ".git", kit.bench.services).declaration
+    assert judged.rules == Declaration.of(Project()).rules

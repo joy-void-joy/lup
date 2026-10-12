@@ -7,10 +7,13 @@ from typing import TYPE_CHECKING, Literal
 
 from typer.testing import CliRunner
 
-from lup_dev import cli
+from lup_dev import Rules, cli
 from lup_dev.codescan.directives import IssueRef, Issues
 from lup_dev.codescan.engine import EngineChecker
+from lup_dev.declaration.modules.code_rules import lup_default
+from lup_dev.declaration.runner import Plain, Prefixed
 from lup_dev.policy.holds import HeldFile, Hold, HoldError, Holds, waiting
+from lup_dev.policy.importers import Conversation, ImportersPass
 from lup_dev.policy.verdicts import Verdict, VerdictLog
 
 if TYPE_CHECKING:
@@ -183,6 +186,43 @@ def test_rules_check_reports_every_owner_through_lups_ignore(
     assert lines[-1] == "lup checked 3 files: 3 findings."
 
 
+PLAIN = (
+    "from lup_dev import Modules, Plain, Project, Python\n"
+    "project = Project(modules=Modules.default().edit(Python(runner=Plain())))\n"
+)
+"""A declaration whose tools run as the `PATH` finds them."""
+
+
+def test_rules_check_runs_the_engine_and_ruff_with_the_worktrees_runner(
+    fakes: Kit, repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (repo / "lup_project.py").write_text(PLAIN)
+    monkeypatch.chdir(repo)
+    result = runner.invoke(cli.app, ["rules", "check"])
+    assert result.exit_code == 0, result.output
+    plain = Prefixed.of(Plain())
+    assert fakes.engine.runners == [plain]
+    assert fakes.linter.runners == [plain]
+
+
+def test_the_importers_pass_asks_with_the_runner_the_judge_reads(
+    fakes: Kit, state: Layout, repo: Path, shell: Shell
+) -> None:
+    shell.git(repo, "switch", "-q", "-c", "dev")
+    (repo / "lup_project.py").write_text(PLAIN)
+    shell.commit(repo, "dev: no uv")
+    (repo / "lup_project.py").write_text(
+        "from lup_dev import Project\nproject = Project()\n"
+    )
+    pending = ImportersPass(layout=state.store(repo), root=repo)
+    changed = Path("src/pkg/core.py")
+    pending.request([changed], [Conversation(session="s1")], fakes.spawner)
+    result = runner.invoke(cli.app, ["importers", str(repo)])
+    assert result.exit_code == 0, result.output
+    assert fakes.engine.importers_asked == [[changed]]
+    assert fakes.engine.runners == [Prefixed.of(Plain())]
+
+
 def test_rules_check_reads_protected_modules_with_lups_rules(
     fakes: Kit, repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -198,15 +238,10 @@ def test_rules_check_reads_protected_modules_with_lups_rules(
 def test_rules_check_leaves_excluded_paths_out(
     fakes: Kit, repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (repo / "src" / "decl_ex").mkdir()
-    (repo / "src" / "decl_ex" / "__init__.py").write_text("")
-    (repo / "src" / "decl_ex" / "lup_project.py").write_text(
-        "from lup_dev.project import Project\n"
-        'project = Project(excluded=["vendor/**"])\n'
-    )
-    (repo / "pyproject.toml").write_text(
-        '[tool.lup]\nproject = "decl_ex.lup_project:project"\n'
-        '[tool.pytest]\ntestpaths = ["tests", "src"]\n'
+    (repo / "lup_project.py").write_text(
+        "from lup_dev import Core, Modules, Paths, Project\n"
+        "excluding = Core(paths=Paths().add(excluded=['vendor/**']))\n"
+        "project = Project(modules=Modules.default().edit(excluding))\n"
     )
     (repo / "vendor").mkdir()
     (repo / "vendor" / "lib.py").write_text("x = 1  # BAD regex\n")
@@ -231,17 +266,11 @@ def test_rules_check_lists_every_file_on_disk_its_names_kept_whole(
 def test_rules_check_lifts_an_exempt_rule_from_its_paths(
     fakes: Kit, repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    (repo / "src" / "decl_lift").mkdir()
-    (repo / "src" / "decl_lift" / "__init__.py").write_text("")
-    (repo / "src" / "decl_lift" / "lup_project.py").write_text(
-        "from lup_dev.project import Exemption, Project\n"
-        "project = Project(exempt=[Exemption(\n"
-        '    rule="regex", paths=["src/pkg/**"], why="a grammar"\n'
-        ")])\n"
-    )
-    (repo / "pyproject.toml").write_text(
-        '[tool.lup]\nproject = "decl_lift.lup_project:project"\n'
-        '[tool.pytest]\ntestpaths = ["tests", "src"]\n'
+    (repo / "lup_project.py").write_text(
+        "from lup_dev import CodeRules, Exemption, Exemptions, Modules, Project\n"
+        "lifted = Exemption(rule='regex', paths=['src/pkg/**'], why='a grammar')\n"
+        "lifting = CodeRules(exempt=Exemptions().add(lifted))\n"
+        "project = Project(modules=Modules.default().edit(lifting))\n"
     )
     (repo / "src" / "pkg" / "core.py").write_text(
         "x = 1  # BAD regex\ny = (1, 2)  # BAD tuple-shape\n"
@@ -251,6 +280,23 @@ def test_rules_check_lifts_an_exempt_rule_from_its_paths(
     assert result.exit_code == 1
     assert "tuple-shape" in result.output
     assert "regex" not in result.output
+
+
+def test_rules_check_sends_the_worktrees_rule_selection(
+    fakes: Kit, repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (repo / "lup_project.py").write_text(
+        "from lup_dev import CodeRules, Modules, Project, Rules\n"
+        "project = Project(\n"
+        '    modules=Modules.default().edit(CodeRules(rules=Rules.only("regex"))),\n'
+        ")\n"
+    )
+    monkeypatch.chdir(repo)
+    result = runner.invoke(cli.app, ["rules", "check", "src/pkg/core.py"])
+    assert result.exit_code == 0
+    [[code_rules]] = fakes.engine.selections
+    assert (code_rules.module, code_rules.rules) == ("code-rules", Rules.only("regex"))
+    assert code_rules.default == lup_default()
 
 
 class Closed(Issues):

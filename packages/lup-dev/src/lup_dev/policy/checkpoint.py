@@ -54,6 +54,9 @@ from lup_dev.clock import Clock
 from lup_dev.codescan.conditions import declared
 from lup_dev.codescan.contract import Checker, FileReport, Finding, Source
 from lup_dev.codescan.ruff import Linter
+from lup_dev.declaration.errors import ProjectError
+from lup_dev.declaration.project import Project
+from lup_dev.declaration.resolve import Declaration
 from lup_dev.layout import Layout
 from lup_dev.policy.holds import HeldFile, Hold, Holds, answered
 from lup_dev.policy.importers import Conversation, Found, ImportersPass, Spawner
@@ -85,7 +88,6 @@ from lup_dev.policy.store import (
 )
 from lup_dev.policy.verdicts import Verdict, VerdictLog
 from lup_dev.policy.worktrees import Holding, Place, SessionIndex, place
-from lup_dev.project import Declared, Project, ProjectError, load
 
 
 class Services(Model, arbitrary_types_allowed=True):
@@ -230,9 +232,13 @@ def decoded(content: bytes | None) -> str | None:
 
 
 class LastDeclaration(Model):
-    """The last of a repository's declarations that loaded, kept for when one can't."""
+    """The last of a repository's declarations that loaded, kept for when one can't.
 
-    declared: Declared
+    It's kept resolved, as the values judging reads: the declaration itself may
+    hold a project's own module or runner, which JSON can't bring back.
+    """
+
+    declaration: Declaration
     commit: str
     """The commit it was read from."""
     told: str = ""
@@ -242,10 +248,10 @@ class LastDeclaration(Model):
 class Loaded(Model):
     """The declaration a worktree is judged by, and where it came from."""
 
-    declared: Declared
+    declaration: Declaration
     root: Path
     """Where it was imported from: a commit's export, or the worktree's own files.
-    The conditions module it names is read there too."""
+    The conditions modules it names are read there too."""
     commit: str | None = None
     """The commit it was read from; none for the worktree's own files."""
     failure: str = ""
@@ -307,20 +313,20 @@ class Worktree(Model):
         """
         judging = self.judging
         if judging is None:
-            return Loaded(declared=load(self.root), root=self.root)
+            return Loaded(declaration=Declaration.read(self.root), root=self.root)
         commit = self.store.tip(judging.integration) or self.store.head()
         if commit is None:
-            return Loaded(declared=Declared(project=Project()), root=self.root)
+            return Loaded(declaration=Declaration.of(Project()), root=self.root)
         kept = judging.layout.declaration(self.repository)
         try:
             source = self.exported(judging.layout, commit)
-            found = load(source)
+            found = Declaration.read(source)
         except ProjectError as failure:
             last = read_model(kept, LastDeclaration)
             if last is None:
                 raise
             return Loaded(
-                declared=last.declared,
+                declaration=last.declaration,
                 root=self.exported(judging.layout, last.commit),
                 commit=last.commit,
                 failure=f"{commit}: {failure}",
@@ -330,9 +336,9 @@ class Worktree(Model):
             if last is None or last.commit != commit:
                 told = last.told if last else ""
                 write_model(
-                    kept, LastDeclaration(declared=found, commit=commit, told=told)
+                    kept, LastDeclaration(declaration=found, commit=commit, told=told)
                 )
-        return Loaded(declared=found, root=source, commit=commit)
+        return Loaded(declaration=found, root=source, commit=commit)
 
     def exported(self, layout: Layout, commit: str) -> Path:
         """Return where `commit`'s Python modules are exported, exporting them once.
@@ -364,9 +370,9 @@ class Worktree(Model):
         return target
 
     @property
-    def declared(self) -> Declared:
+    def declaration(self) -> Declaration:
         """The declaration it's judged by, or the one standing in for it."""
-        return self.loaded.declared
+        return self.loaded.declaration
 
     def told(self) -> str:
         """Say, once for each failure, that a stand-in declaration judges here."""
@@ -391,7 +397,7 @@ class Worktree(Model):
     @cached_property
     def roles(self) -> Roles:
         """The role of each path in it, from the declaration it's judged by."""
-        return Roles.of(self.root, self.declared)
+        return Roles(root=self.root, declaration=self.declaration)
 
     def lock(self) -> FileLock:
         """Return the lock a checkpoint holds over the store."""
@@ -431,7 +437,7 @@ class Worktree(Model):
             roles=self.roles,
             checker=services.checker,
             linter=services.linter,
-            conditions=declared(self.loaded.root, self.declared.project),
+            conditions=declared(self.loaded.root, self.declaration.conditions),
             approved=approved,
         )
 
@@ -1429,7 +1435,8 @@ def unclean(bench: Bench, worktree: Worktree, paths: list[Path]) -> list[Finding
 
     As the files stand on disk, once `ignore`s apply, each named by its absolute
     path. A finding ruff fixes safely isn't one: the session landing the work
-    applies the fix.
+    applies the fix. The engine and ruff are asked with the rule selection and
+    the runner of the declaration the worktree is judged by.
     """
     services = bench.services
     sources = [
@@ -1439,8 +1446,11 @@ def unclean(bench: Bench, worktree: Worktree, paths: list[Path]) -> list[Finding
     ]
     if not sources:
         return []
-    reports = services.checker.check(worktree.root, sources)
-    ruff = services.linter.findings(worktree.root, sources)
+    declaration = worktree.declaration
+    reports = services.checker.check(
+        worktree.root, sources, declaration.rules, declaration.runner
+    )
+    ruff = services.linter.findings(worktree.root, sources, declaration.runner)
     found = [
         found
         for report in reports
@@ -1491,7 +1501,9 @@ def ended(
     checked = checkpoint(bench, worktree, key, agent) if judging else Checked()
     if agent:
         return Ended(checked=checked, remaining=[], working=[])
-    worktree.importers().wait(services.checker, services.clock)
+    worktree.importers().wait(
+        services.checker, worktree.declaration.runner, services.clock
+    )
     with worktree.lock():
         session = worktree.session(key, bench.runtime)
         watch(worktree, session, worktree.importers().collect())

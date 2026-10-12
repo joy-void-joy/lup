@@ -11,7 +11,7 @@ import { Uri } from 'pyright/common/uri/uri';
 
 import { selected } from './catalog';
 import { WarmProgram } from './program';
-import { CheckRequest, FileReport } from './protocol';
+import { CheckRequest, Environment, FileReport } from './protocol';
 import { fullReport, typeReport } from './report';
 
 export class Engine {
@@ -20,8 +20,8 @@ export class Engine {
     // again before going on.
     generation = 0;
 
-    constructor(readonly root: string) {
-        this.warm = new WarmProgram(root);
+    constructor(readonly root: string, private readonly environment: Environment) {
+        this.warm = new WarmProgram(root, environment);
     }
 
     get program(): WarmProgram {
@@ -29,13 +29,14 @@ export class Engine {
     }
 
     // Bring the program in line with the disk, with a new one if the configuration or
-    // the interpreter uv gave the worktree changed, but for the files about to be given
-    // would-be content. A new program that fails (uv gives no environment) leaves the
-    // old stamps in place, so each request tries again, failing with uv's message.
+    // the interpreter the runner named changed, but for the files about to be given
+    // would-be content. A new program that fails (the runner gives no environment)
+    // leaves the old stamps in place, so each request tries again, failing with the
+    // runner's message.
     fresh(keep: Set<string> = new Set()) {
         if (this.warm.setupChanged()) {
             this.warm.service.dispose();
-            this.warm = new WarmProgram(this.root);
+            this.warm = new WarmProgram(this.root, this.environment);
         }
         this.warm.sync(keep);
     }

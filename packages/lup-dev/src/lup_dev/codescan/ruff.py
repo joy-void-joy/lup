@@ -6,11 +6,16 @@ ends; they never refuse an edit. A finding ruff fixes safely is marked `fixable`
 and the agent never hears of it: the session landing the work applies the fix. It
 runs with `--ignore-noqa`, so lup's own `# lup: ignore` is the one suppression,
 applied by the judge to every owner alike.
+
+It runs through the project's runner, as the gate's ruff step does, but with the
+runner's command for the judge, which never writes the project's files: for
+`Uv()`, `uv.lock` is read without relocking (`lup_dev.declaration.runner`).
 """
 
+import shlex
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Literal, override
+from typing import TYPE_CHECKING, Literal, override
 
 import sh
 from pydantic import TypeAdapter
@@ -19,13 +24,8 @@ from lup.types import Model
 from lup_dev.codescan.contract import Finding, Position, Source, Span
 from lup_dev.errors import LupDevError
 
-UV_RUN = ("uv", "run", "--frozen", "--quiet")
-"""How ruff is run: in the environment uv gives the worktree, as the gate runs it.
-
-That environment is made if it's missing and synced to `uv.lock`, which `--frozen`
-reads without relocking, so the judge never writes the worktree's `uv.lock`. The
-engine asks uv for its interpreter the same way (`checker/src/program.ts`).
-"""
+if TYPE_CHECKING:
+    from lup_dev.declaration.runner import Runner
 
 
 class RuffError(LupDevError):
@@ -36,21 +36,29 @@ class Linter(ABC):
     """A linter the judge asks about the files a change touches."""
 
     @abstractmethod
-    def findings(self, root: Path, sources: list[Source]) -> list[Finding]:
-        """Return the findings in `sources`, as written or as their would-be content."""
+    def findings(
+        self, root: Path, sources: list[Source], runner: Runner
+    ) -> list[Finding]:
+        """Return the findings in `sources`, as written or as their would-be content.
+
+        The linter runs as the project's `runner` runs a tool for the judge.
+        """
 
 
 class Ruff(Linter):
-    """ruff as `uv run ruff` finds it in the worktree.
+    """ruff as the project's runner finds it in the worktree.
 
-    That's the project's own where its environment has one, else the one on the
-    path, as for the gate's `uv run ruff`. Files on disk are checked in one run;
-    would-be content one file at a time, through stdin, under the file's own name so
-    its configuration applies.
+    That's the project's own where its environment has one, as for the gate's
+    ruff step; with `Uv()`, else the one on the path. It runs as the runner's
+    `judging` command. Files on disk are checked in one run; would-be content one
+    file at a time, through stdin, under the file's own name so its
+    configuration applies.
     """
 
     @override
-    def findings(self, root: Path, sources: list[Source]) -> list[Finding]:
+    def findings(
+        self, root: Path, sources: list[Source], runner: Runner
+    ) -> list[Finding]:
         class Location(Model):
             """A place in ruff's JSON output."""
 
@@ -93,33 +101,40 @@ class Ruff(Linter):
                     fixable=self.fix is not None and self.fix.applicability == "safe",
                 )
 
-        # `env -u` leaves out the session's `VIRTUAL_ENV`, which the judge inherits from
-        # the hook and may be another worktree's.
-        ruff = sh.Command("env").bake("-u", "VIRTUAL_ENV", *UV_RUN, "ruff")
         messages = TypeAdapter(list[Message])
-        # `--exit-zero` keeps a failure apart from findings: uv's failures exit 1, as
-        # ruff's findings otherwise would.
-        check = [
-            "check",
-            "--ignore-noqa",
-            "--force-exclude",
-            "--exit-zero",
-            "--output-format",
-            "json",
-        ]
+        # `--exit-zero` keeps a failure apart from findings: the runner's failures
+        # (uv's) exit 1, as ruff's findings otherwise would.
+        command = runner.judging(
+            [
+                "ruff",
+                "check",
+                "--ignore-noqa",
+                "--force-exclude",
+                "--exit-zero",
+                "--output-format",
+                "json",
+            ]
+        )
+        program, *fixed = command
 
         def ran(*arguments: str, content: str | None = None) -> list[Finding]:
             try:
-                output = ruff(
-                    *check,
+                output = sh.Command(program)(
+                    *fixed,
                     *arguments,
                     _in=content,
                     _cwd=str(root),
                     _tty_out=False,
                     _return_cmd=True,
                 )
+            except sh.CommandNotFound as missing:
+                message = (
+                    f"`{program}` isn't on the `PATH`, so ruff can't run in {root}"
+                )
+                raise RuffError(message) from missing
             except sh.ErrorReturnCode as failed:
-                message = f"`uv run ruff` failed in {root}: {failed.stderr.decode()}"
+                shown = shlex.join(command)
+                message = f"`{shown}` failed in {root}: {failed.stderr.decode()}"
                 raise RuffError(message) from failed
             return [
                 message.finding() for message in messages.validate_json(output.stdout)

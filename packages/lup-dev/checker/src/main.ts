@@ -1,13 +1,17 @@
 // lup's typed engine (`docs/judging-writes.md`, *The engine: one typed tree*).
 //
-//   start --root R --socket S --idle-seconds N --log L
+//   start --root R --socket S --idle-seconds N --interpreter I --environment-files F --log L
 //       Make sure an engine serves the worktree R on socket S: return at once if one
 //       answers there, otherwise start one detached, logging to L, and return once it
 //       listens. Hooks run this; the engine outlives them.
-//   serve --root R --socket S --idle-seconds N
+//   serve --root R --socket S --idle-seconds N --interpreter I --environment-files F
 //       Be that engine, in the foreground.
 //   rules
 //       Print lup's rules (id, mistake, steer, examples) as JSON.
+//
+// I and F are JSON lists of strings, from the project's runner: the command running
+// the worktree's Python, which the engine runs to name its interpreter, and the
+// files, from the root, whose change means another environment.
 //
 // The engine's build is identified by its bundle's size and modification time,
 // which the client reads from the same file.
@@ -21,6 +25,7 @@ import { initializeDependencies } from 'pyright/common/asyncInitialization';
 
 import { ruleInfos } from './catalog';
 import { Engine } from './engine';
+import { Environment } from './protocol';
 import { Server, ServeOptions } from './server';
 
 interface Arguments {
@@ -28,7 +33,23 @@ interface Arguments {
     root: string;
     socket: string;
     idleSeconds: number;
+    environment: Environment;
     log: string;
+}
+
+// A JSON list of strings, as the client passes the runner's command and files.
+function strings(name: string, text: string): string[] {
+    const refused = () => new Error(`--${name} takes a JSON list of strings, not ${JSON.stringify(text)}`);
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(text);
+    } catch {
+        throw refused();
+    }
+    if (!Array.isArray(parsed) || !parsed.every((each) => typeof each === 'string')) {
+        throw refused();
+    }
+    return parsed as string[];
 }
 
 function parse(argv: string[]): Arguments {
@@ -47,11 +68,16 @@ function parse(argv: string[]): Arguments {
         }
         return value;
     };
+    const listed = (name: string) => strings(name, need(name));
     return {
         command,
         root: command === 'rules' ? '' : path.resolve(need('root')),
         socket: command === 'rules' ? '' : need('socket'),
         idleSeconds: command === 'rules' ? 0 : Number(need('idle-seconds')),
+        environment:
+            command === 'rules'
+                ? { interpreter: [], files: [] }
+                : { interpreter: listed('interpreter'), files: listed('environment-files') },
         log: command === 'start' ? need('log') : '',
     };
 }
@@ -91,6 +117,10 @@ async function start(args: Arguments) {
             args.socket,
             '--idle-seconds',
             String(args.idleSeconds),
+            '--interpreter',
+            JSON.stringify(args.environment.interpreter),
+            '--environment-files',
+            JSON.stringify(args.environment.files),
         ],
         { detached: true, stdio: ['ignore', 'ignore', log, 'ipc'] }
     );
@@ -111,9 +141,10 @@ async function serve(args: Arguments) {
         socket: args.socket,
         idleSeconds: args.idleSeconds,
         build: build(),
+        environment: args.environment,
     };
     try {
-        const server = new Server(new Engine(args.root), options);
+        const server = new Server(new Engine(args.root, args.environment), options);
         await server.listen();
         process.send?.('ready');
     } catch (error) {

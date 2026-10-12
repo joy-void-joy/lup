@@ -11,9 +11,9 @@
 //   which re-enumerates the tracked files;
 // - a changed directory on the import search path means packages were installed or
 //   removed, which drops pyright's import cache;
-// - a changed configuration (pyright's, or what decides uv's environment), or the
-//   interpreter uv gave the worktree going or replaced, needs a new program, which
-//   the engine builds, asking uv again.
+// - a changed configuration (pyright's, or the files the project's runner says decide
+//   its environment), or the interpreter the runner named going or replaced, needs a
+//   new program, which the engine builds, asking the runner again.
 
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
@@ -35,39 +35,39 @@ import { Uri } from 'pyright/common/uri/uri';
 import { ParseFileResults } from 'pyright/parser/parser';
 import { PyrightFileSystem } from 'pyright/pyrightFileSystem';
 
-// What a program is set up from besides the project's files, so that a change to any
-// of them needs a new program: pyright's configuration, what decides the environment
-// uv gives the worktree (`pyproject.toml` again, `uv.toml`, `uv.lock`,
-// `.python-version`), and that environment's interpreter, which decides where imports
-// resolve, the project's own packages among them when they're installed editable.
-const configurations = ['pyproject.toml', 'pyrightconfig.json', 'uv.toml', 'uv.lock', '.python-version'];
+import { Environment } from './protocol';
+
+// pyright's own configuration. A program is set up from these, from the files the
+// project's runner says decide its environment (for uv, `pyproject.toml` again,
+// `uv.toml`, `uv.lock`, `.python-version`), and from that environment's interpreter,
+// which decides where imports resolve, the project's own packages among them when
+// they're installed editable; a change to any of them needs a new program.
+const pyrightConfigurations = ['pyproject.toml', 'pyrightconfig.json'];
 
 // Run in the worktree's environment, it names that environment's interpreter, as JSON.
 const nameInterpreter = 'import json, sys; print(json.dumps(sys.executable))';
 
-// The interpreter of the environment uv gives the worktree, as the gate's `uv run`
-// finds it (`UV_PROJECT_ENVIRONMENT`, else `.venv`), made if it's missing and synced
-// to `uv.lock`. `--frozen` reads the lock without relocking, so the judge never
-// writes the worktree's `uv.lock`, and a project without one fails here. The session's
-// `VIRTUAL_ENV` is left out: the judge inherits it from the hook that started it, it
-// may be another worktree's, and uv warns about it.
-function environmentOf(root: string): string {
-    const inherited = { ...process.env };
-    delete inherited.VIRTUAL_ENV;
-    const asked = spawnSync('uv', ['run', '--frozen', '--quiet', 'python', '-c', nameInterpreter], {
-        cwd: root,
-        env: inherited,
-        encoding: 'utf8',
-    });
+// The interpreter of the worktree's environment, named by running the project's
+// runner's command for Python from the root, the command the judge runs tools with.
+// With uv, that's the environment the gate's `uv run` finds (`UV_PROJECT_ENVIRONMENT`,
+// else `.venv`), made if it's missing and synced to `uv.lock` without relocking, the
+// session's `VIRTUAL_ENV` left out (`Uv.judging` in `lup_dev/declaration/runner.py`).
+function interpreterOf(root: string, command: string[]): string {
+    const [program, ...rest] = command;
+    if (program === undefined) {
+        throw new Error(`the runner gave ${root} no command to run Python with`);
+    }
+    const shown = command.join(' ');
+    const asked = spawnSync(program, [...rest, '-c', nameInterpreter], { cwd: root, encoding: 'utf8' });
     if (asked.error) {
-        throw new Error(`uv couldn't be run to find ${root}'s environment: ${asked.error.message}`);
+        throw new Error(`\`${program}\` couldn't be run to name ${root}'s interpreter: ${asked.error.message}`);
     }
     if (asked.status !== 0) {
         const ended = asked.status === null ? `was killed by ${asked.signal}` : `exited with ${asked.status}`;
-        throw new Error(`uv gave ${root} no environment: \`uv run\` ${ended}: ${asked.stderr.trim()}`);
+        throw new Error(`the runner gave ${root} no environment: \`${shown}\` ${ended}: ${asked.stderr.trim()}`);
     }
     const unnamed = () =>
-        new Error(`${root}'s environment printed ${JSON.stringify(asked.stdout)}, not its interpreter's path as JSON`);
+        new Error(`\`${shown}\` printed ${JSON.stringify(asked.stdout)} in ${root}, not its interpreter's path as JSON`);
     let named: unknown;
     try {
         named = JSON.parse(asked.stdout);
@@ -110,27 +110,31 @@ export class WarmProgram {
     private readonly parses = new Map<string, ParseFileResults>();
     private version = 0;
 
-    constructor(root: string) {
+    constructor(root: string, environment: Environment) {
         this.root = path.resolve(root);
-        // The configuration is stamped before uv is asked, so a change while uv runs
-        // builds another program at the next request.
-        const configured = configurations.map((name) => path.join(this.root, name));
+        // The configuration is stamped before the runner is asked, so a change while it
+        // runs builds another program at the next request.
+        const configured = [...new Set([...pyrightConfigurations, ...environment.files])].map((name) =>
+            path.join(this.root, name)
+        );
         const stamps = configured.map((file): [string, string | undefined] => [file, stampOf(file)]);
-        const interpreter = environmentOf(this.root);
+        const interpreter = interpreterOf(this.root, environment.interpreter);
         this.setupStamps = new Map([...stamps, [interpreter, stampOf(interpreter)]]);
         const output = new StderrConsole(LogLevel.Error);
         const tempFile = new RealTempFile();
         const fileSystem = new PyrightFileSystem(createFromRealFileSystem(tempFile, output));
         const serviceProvider = createServiceProvider(fileSystem, output, tempFile);
-        // As if `uv run pyright` ran from the worktree, as the gate runs it. The judge
-        // runs from its own installed copy, so the worktree's environment is named
-        // rather than found on the path, which the engine inherited from the hook that
-        // started it and may lead to another worktree's environment.
+        // As if the gate's pyright step ran from the worktree, through the project's
+        // runner. The judge runs from its own installed copy, so the worktree's
+        // interpreter is named rather than found on the path, which the engine
+        // inherited from the hook that started it and may lead to another worktree's
+        // environment.
         const commandLine = new CommandLineOptions(this.root, /* fromLanguageServer */ false);
         commandLine.configSettings.pythonPath = interpreter;
         // Which environment this program reads goes to the engine's log, since it decides
         // where the project's own imports resolve and nothing else shows it.
-        process.stderr.write(`program for ${this.root} reads ${interpreter}, the environment uv gives it\n`);
+        const named = environment.interpreter.join(' ');
+        process.stderr.write(`program for ${this.root} reads ${interpreter}, which \`${named}\` named\n`);
         // Analysis runs when asked, never on pyright's own timers.
         commandLine.languageServerSettings.enableAmbientAnalysis = false;
         this.service = new AnalyzerService('lup-engine', serviceProvider, {
@@ -151,7 +155,7 @@ export class WarmProgram {
         return Uri.file(path.resolve(this.root, file), this.service.serviceProvider);
     }
 
-    // Whether the configuration, or the interpreter uv gave the worktree, changed since
+    // Whether the configuration, or the interpreter the runner named, changed since
     // this program was set up: a new `uv.lock` to sync to, say, the environment
     // removed, or its Python replaced. An environment made again on the same Python is
     // the import search path changing, which `sync` sees.

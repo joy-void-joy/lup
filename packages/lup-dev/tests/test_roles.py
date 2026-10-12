@@ -1,18 +1,32 @@
 """Path roles, and the project declaration they read."""
 
-import sys
 from pathlib import Path
 
 import pytest
 
+from lup_dev import (
+    Core,
+    Module,
+    Modules,
+    Paths,
+    Project,
+    Pytest,
+    Python,
+    TestRoots,
+)
+from lup_dev.declaration.resolve import Declaration
 from lup_dev.policy.roles import Roles
-from lup_dev.project import Project, ProjectError, Protected, Pytest, load
 
 
 def roles(
-    root: Path, project: Project | None = None, declaration: Path | None = None
+    root: Path, project: Project | None = None, source: Path | None = None
 ) -> Roles:
-    return Roles(root=root, project=project or Project(), declaration=declaration)
+    declaration = Declaration.of(project or Project(), source)
+    return Roles(root=root, declaration=declaration)
+
+
+def core(paths: Paths) -> Project:
+    return Project(modules=Modules.default().edit(Core(paths=paths)))
 
 
 @pytest.mark.parametrize(
@@ -94,24 +108,60 @@ def test_without_pytest_configuration_tests_are_found_anywhere(tmp_path: Path) -
 
 
 def test_declared_test_roots_replace_pytests_configuration(repo: Path) -> None:
-    project = Project(tests=[Pytest(root=Path("spec"))])
-    assert roles(repo, project).role(Path("spec/test_a.py")) == "test"
+    spec = TestRoots.of(Pytest(root=Path("spec"), files=["check_*.py"]))
+    project = Project(modules=Modules.default().edit(Python(tests=spec)))
+    assert roles(repo, project).role(Path("spec/check_a.py")) == "test"
+    assert roles(repo, project).role(Path("spec/conftest.py")) == "test"
+    assert roles(repo, project).role(Path("spec/test_a.py")) == "production"
     assert roles(repo, project).role(Path("tests/test_core.py")) == "production"
 
 
+def test_test_roots_a_projects_own_module_holds_are_named_too(repo: Path) -> None:
+    class Studio(Module):
+        """The studio, a suite of its own."""
+
+        name = "studio"
+
+        tests: TestRoots = TestRoots.of(Pytest(root=Path("studio/tests")))
+
+    project = Project(modules=Modules.default().add(Studio()))
+    assert roles(repo, project).role(Path("studio/tests/test_a.py")) == "test"
+    assert roles(repo, project).role(Path("tests/test_core.py")) == "test"
+    assert roles(repo, project).role(Path("src/pkg/test_helpers.py")) == "production"
+
+
 def test_a_project_adds_protected_paths(repo: Path) -> None:
-    project = Project(protected=Protected.default().add("tests/spec/**"))
+    project = core(Paths().add(protected=["tests/spec/**"]))
     assert roles(repo, project).role(Path("tests/spec/test_a.py")) == "protected"
     assert roles(repo, project).role(Path("pyproject.toml")) == "protected"
+    assert roles(repo, project).protecting(Path("tests/spec/a.py")) == "tests/spec/**"
+
+
+def test_a_project_drops_a_protected_path(repo: Path) -> None:
+    project = core(Paths().drop(protected=["**/.gitignore"], why="a test"))
+    assert roles(repo, project).role(Path(".gitignore")) == "production"
 
 
 def test_the_declaration_itself_is_protected(repo: Path) -> None:
-    declaration = Path("src/pkg/lup_project.py")
-    assert roles(repo, declaration=declaration).role(declaration) == "protected"
+    source = Path("lup_project.py")
+    assert roles(repo, source=source).role(source) == "protected"
+    assert roles(repo, source=source).protecting(source) is None
+
+
+def test_the_declaration_read_from_a_root_is_protected_there(repo: Path) -> None:
+    (repo / "lup_project.py").write_text(
+        "from lup_dev import Project\nproject = Project()\n"
+    )
+    declaration = Declaration.read(repo)
+    assert declaration.source == Path("lup_project.py")
+    roles = Roles(root=repo, declaration=declaration)
+    assert roles.role(Path("lup_project.py")) == "protected"
 
 
 def test_an_excluded_path_is_held_to_nothing(repo: Path) -> None:
-    project = Project(excluded=["vendor/**", ".claude/hooks/**", "tests/legacy/**"])
+    project = core(
+        Paths().add(excluded=["vendor/**", ".claude/hooks/**", "tests/legacy/**"])
+    )
     excluded = roles(repo, project)
     for path in ["vendor/lib.py", "tests/legacy/test_old.py"]:
         assert excluded.role(Path(path)) == "excluded", path
@@ -121,7 +171,9 @@ def test_an_excluded_path_is_held_to_nothing(repo: Path) -> None:
 
 
 def test_exclusion_never_lifts_protection(repo: Path) -> None:
-    excluded = roles(repo, Project(excluded=[".claude/hooks/**", "DESIGN.md"]))
+    excluded = roles(
+        repo, core(Paths().add(excluded=[".claude/hooks/**", "DESIGN.md"]))
+    )
     hook = Path(".claude/hooks/review.py")
     assert excluded.role(hook) == "protected"
     assert not excluded.ruled(hook)
@@ -129,81 +181,9 @@ def test_exclusion_never_lifts_protection(repo: Path) -> None:
     assert excluded.role(Path("DESIGN.md")) == "operator"
 
 
-def test_without_a_declaration_the_defaults_apply(repo: Path) -> None:
-    declared = load(repo)
-    assert declared.source is None
-    assert declared.project == Project()
-
-
-def test_a_declaration_is_loaded_from_tool_lup(repo: Path) -> None:
-    (repo / "src" / "decl_one").mkdir()
-    (repo / "src" / "decl_one" / "__init__.py").write_text("")
-    (repo / "src" / "decl_one" / "lup_project.py").write_text(
-        "from pathlib import Path\n"
-        "from lup_dev.project import Project, Protected, Pytest\n"
-        'project = Project(tests=[Pytest(root=Path("spec"))], '
-        'protected=Protected.default().add("spec/**"), '
-        'conditions="decl_one.conditions")\n'
-    )
-    (repo / "pyproject.toml").write_text(
-        '[tool.lup]\nproject = "decl_one.lup_project:project"\n'
-    )
-    declared = load(repo)
-    assert declared.source == Path("src/decl_one/lup_project.py")
-    assert declared.project.tests == [Pytest(root=Path("spec"))]
-    assert declared.project.conditions == "decl_one.conditions"
-    assert (
-        Roles.of(repo, declared).role(Path("src/decl_one/lup_project.py"))
-        == "protected"
-    )
-
-
-def test_each_worktree_loads_its_own_declaration_in_one_process(
-    tmp_path: Path,
-) -> None:
-    roots = [tmp_path / "one", tmp_path / "two"]
-    for root in roots:
-        (root / "helpers").mkdir(parents=True)
-        (root / "helpers" / "__init__.py").write_text(f"NAME = {root.name!r}\n")
-        (root / "pyproject.toml").write_text(
-            '[tool.lup]\nproject = "lup_project:project"\n'
-        )
-        (root / "lup_project.py").write_text(
-            "from helpers import NAME\n"
-            "from lup_dev.project import Project\n"
-            "project = Project(excluded=[NAME])\n"
-        )
-    assert [load(root).project.excluded for root in roots] == [["one"], ["two"]]
-    assert "lup_project" not in sys.modules
-    assert "helpers" not in sys.modules
-    assert "lup_dev.project" in sys.modules
-
-
-def test_loading_a_declaration_leaves_no_bytecode_in_the_worktree(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(sys, "dont_write_bytecode", False)
-    (tmp_path / "pyproject.toml").write_text(
-        '[tool.lup]\nproject = "lup_project:project"\n'
-    )
-    (tmp_path / "lup_project.py").write_text(
-        "from lup_dev.project import Project\nproject = Project()\n"
-    )
-    load(tmp_path)
-    assert not (tmp_path / "__pycache__").exists()
-    assert sys.dont_write_bytecode is False
-
-
-def test_a_declaration_that_isnt_a_project_is_refused(repo: Path) -> None:
-    (repo / "src" / "decl_two.py").write_text("project = 3\n")
-    (repo / "pyproject.toml").write_text('[tool.lup]\nproject = "decl_two:project"\n')
-    with pytest.raises(ProjectError, match="not a `Project`"):
-        load(repo)
-
-
-def test_a_declaration_that_cant_be_imported_is_refused(repo: Path) -> None:
-    (repo / "pyproject.toml").write_text(
-        '[tool.lup]\nproject = "decl_missing:project"\n'
-    )
-    with pytest.raises(ProjectError, match="can't be loaded"):
-        load(repo)
+def test_without_python_nothing_is_a_python_module(repo: Path) -> None:
+    project = Project(modules=Modules.default().drop("python"))
+    without = roles(repo, project)
+    assert not without.is_python(Path("src/pkg/core.py"))
+    assert without.role(Path("tests/test_core.py")) == "production"
+    assert without.role(Path("pyproject.toml")) == "data"

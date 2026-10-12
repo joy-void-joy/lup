@@ -9,7 +9,9 @@ and until they approve, the copy installed before keeps judging:
    changes not committed, since the copy would carry what the review didn't show;
 2. list the files the judge carries that changed since the commit approved last,
    or all of them the first time; where none did, stop;
-3. build the engine (`packages/lup-dev/checker/build.py`);
+3. build the engine, with the step lup's declaration gives its gate
+   (`packages/lup-dev/checker/build.py`), run through its runner as the gate runs
+   it;
 4. show each changed file whole on both sides to a `Reviewer`, and wait for its
    answer: the first lup's dashboard in the bridge (`lup_dev.legacy_dashboard`),
    or the terminal;
@@ -27,14 +29,15 @@ from typing import TYPE_CHECKING, Literal, override
 
 import sh
 import typer
-from pydantic import Field
 from rich.console import Console
 from rich.text import Text
 
 from lup.types import Model
-from lup_dev.catalog.gate import Gate, Step
 from lup_dev.clock import Clock
+from lup_dev.declaration.load import load
+from lup_dev.declaration.resolve import Resolved, resolve
 from lup_dev.errors import LupDevError
+from lup_dev.gate import invoked
 from lup_dev.layout import CheckoutLayout, Layout
 from lup_dev.policy.runtime import Runtime
 from lup_dev.policy.store import Git, nul_separated, read_model, write_model
@@ -42,6 +45,8 @@ from lup_dev.review import Answer
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+
+    from lup_dev.catalog.gate import Step
 
 
 class InstallError(LupDevError):
@@ -171,21 +176,46 @@ class Toolchain(Model, ABC):
         """Install the judge from the checkout at `checkout`, replacing any copy."""
 
 
-def engine() -> Step:
-    """Return the gate's step that builds the engine, which the installer runs too."""
-    return next(step for step in Gate().steps if step.builds is not None)
+def engine(resolved: Resolved) -> Step:
+    """Return the gate's step that builds the engine, which the installer runs too.
+
+    It's lup's own repository's (`LupDevelopment`, in its `lup_project.py`): the
+    one step of its gate that builds a file. Raise `InstallError` where there's
+    none, or more than one.
+    """
+    building = [step for step in resolved.gate if step.builds is not None]
+    match building:
+        case [step]:
+            return step
+        case []:
+            message = (
+                "the checkout's declaration has no step building the engine, which "
+                "lup's own declares: is this a checkout of lup?"
+            )
+        case _:
+            names = ", ".join(f"`{step.name}`" for step in building)
+            message = (
+                f"the checkout's declaration has several steps that build a file, "
+                f"{names}, so which builds the engine isn't clear"
+            )
+    raise InstallError(message)
 
 
 class Uv(Toolchain):
     """uv, building the engine as the gate does and installing as a uv tool."""
 
     executable: str = "uv"
-    engine: Step = Field(default_factory=engine)
-    """How the engine is built: the gate's own step, so the two never differ."""
 
     @override
     def build(self, checkout: Path) -> None:
-        program, *arguments = self.engine.command
+        """Run the checkout's own step building the engine, as the gate runs it.
+
+        The step is read from the checkout's declaration and runs through its
+        runner, unless it says not, so the gate and the installer build the engine
+        one way.
+        """
+        resolved = resolve(load(checkout).project)
+        program, *arguments = invoked(engine(resolved), resolved.runner)
         sh.Command(program)(*arguments, _cwd=str(checkout), _fg=True)
 
     @override

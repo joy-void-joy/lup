@@ -1,68 +1,124 @@
-"""The gate as one command: every step runs, and a failure exits non-zero."""
+"""The gate as one command: its requirements first, then every step runs, each
+through the project's runner, and a failure exits non-zero. Every process and
+probe is stubbed."""
 
 import os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import pytest
 from typer.testing import CliRunner
 
-from lup_dev import cli
+from lup_dev import Requirement, cli
 from lup_dev.catalog.gate import Gate, Step
-from lup_dev.gate import Check, Fixes, Outcome, Ran, Runner, Shell, failed, report
+from lup_dev.declaration.requirements import (
+    Needed,
+    Printed,
+    RequirementError,
+    Tools,
+)
+from lup_dev.declaration.runner import Plain, Uv
+from lup_dev.gate import (
+    Check,
+    Fixes,
+    Gated,
+    Outcome,
+    Processes,
+    Ran,
+    Shell,
+    failed,
+    report,
+)
 
 if TYPE_CHECKING:
     from conftest import Kit
 
 
-class Scripted(Runner):
+class Scripted(Processes):
     """Answers each command as scripted by its first word, recording every run."""
 
     def __init__(self, answers: dict[str, Ran]) -> None:
         self.answers = answers
         self.ran: list[list[str]] = []
 
+    @override
     def run(self, command: list[str], cwd: Path) -> Ran:
         self.ran.append(command)
         return self.answers.get(command[0], Ran(code=0, output=f"{command[0]} ok\n"))
 
 
-GATE = Gate(
-    steps=[
-        Step(name="lint", command=["lint", "--strict"]),
-        Step(name="types", command=["types"]),
-        Step(name="tests", command=["tests", "-q"]),
-    ]
-)
+class Stubbed(Tools):
+    """The programs a test says are on the `PATH`, each probe printing as told."""
+
+    def __init__(
+        self, programs: list[str], printed: dict[str, Printed] | None = None
+    ) -> None:
+        self.programs = programs
+        self.printed = printed or {}
+
+    @override
+    def found(self, program: str) -> bool:
+        return program in self.programs
+
+    @override
+    def run(self, command: list[str]) -> Printed:
+        return self.printed.get(command[0], Printed(code=127, output=""))
+
+
+NODE = Stubbed(["node", "uv"], {"node": Printed(code=0, output="26.10.0\n")})
+"""lup's default requirements, met."""
+
+STEPS = [
+    Step(name="lint", command=["lint", "--strict"]),
+    Step(name="types", command=["types"]),
+    Step(name="tests", command=["tests", "-q"]),
+]
+
+
+def gate(
+    root: Path,
+    processes: Processes,
+    steps: list[Step] = STEPS,
+    *,
+    fixes: list[Step] | None = None,
+) -> Gated:
+    """Run `steps` over `root` as written, with no requirements."""
+    return Check(
+        root=root,
+        processes=processes,
+        tools=Stubbed([]),
+        runner=Plain(),
+        steps=steps,
+        fixes=fixes or [],
+    ).run()
 
 
 def test_every_step_passes(tmp_path: Path) -> None:
-    runner = Scripted({})
-    outcomes = Check(root=tmp_path, runner=runner, gate=GATE).run()
-    assert [(o.step, o.result, o.code) for o in outcomes] == [
+    gated = gate(tmp_path, Scripted({}))
+    assert [(o.step, o.result, o.code) for o in gated.outcomes] == [
         ("lint", "passed", 0),
         ("types", "passed", 0),
         ("tests", "passed", 0),
     ]
-    assert failed(outcomes) == []
-    assert report(outcomes).endswith("The gate passed.")
+    assert failed(gated.outcomes) == []
+    assert report(gated).endswith("The gate passed.")
 
 
 def test_every_step_runs_after_one_fails(tmp_path: Path) -> None:
-    runner = Scripted({"lint": Ran(code=1, output="a.py:1:1 - E501 too long\n")})
-    outcomes = Check(root=tmp_path, runner=runner, gate=GATE).run()
-    assert runner.ran == [["lint", "--strict"], ["types"], ["tests", "-q"]]
-    assert [o.result for o in outcomes] == ["failed", "passed", "passed"]
-    assert failed(outcomes) == ["lint"]
+    processes = Scripted({"lint": Ran(code=1, output="a.py:1:1 - E501 too long\n")})
+    gated = gate(tmp_path, processes)
+    assert processes.ran == [["lint", "--strict"], ["types"], ["tests", "-q"]]
+    assert [o.result for o in gated.outcomes] == ["failed", "passed", "passed"]
+    assert failed(gated.outcomes) == ["lint"]
 
 
 def test_the_report_gives_each_failures_output_in_full(tmp_path: Path) -> None:
     long = "".join(f"finding {n}\n" for n in range(500))
-    runner = Scripted(
+    processes = Scripted(
         {"types": Ran(code=1, output=long), "tests": Ran(code=2, output="1 failed\n")}
     )
-    text = report(Check(root=tmp_path, runner=runner, gate=GATE).run())
+    text = report(gate(tmp_path, processes))
     assert text.startswith(
         "passed   lint\nfailed   types (exit 1)\nfailed   tests (exit 2)\n"
     )
@@ -71,6 +127,120 @@ def test_the_report_gives_each_failures_output_in_full(tmp_path: Path) -> None:
     assert "lint ok" not in text
     assert text.endswith("The gate failed: types, tests.")
 
+
+def test_the_fixes_run_before_the_gate_and_count_like_its_steps(
+    tmp_path: Path,
+) -> None:
+    processes = Scripted({"format": Ran(code=2, output="a.py: invalid syntax\n")})
+    fixes = [
+        Step(name="fix", command=["fix"]),
+        Step(name="reformat", command=["format"]),
+    ]
+    gated = gate(tmp_path, processes, fixes=fixes)
+    assert processes.ran == [
+        ["fix"],
+        ["format"],
+        ["lint", "--strict"],
+        ["types"],
+        ["tests", "-q"],
+    ]
+    assert failed(gated.outcomes) == ["reformat"]
+
+
+def test_each_step_runs_through_the_runner_unless_it_says_not(tmp_path: Path) -> None:
+    processes = Scripted({})
+    Check(
+        root=tmp_path,
+        processes=processes,
+        tools=Stubbed([]),
+        runner=Uv(),
+        steps=[
+            Step(name="lint", command=["ruff", "check"]),
+            Step(name="build", command=["make", "all"], in_environment=False),
+        ],
+        fixes=Fixes().steps,
+    ).run()
+    assert processes.ran == [
+        ["uv", "run", "ruff", "check", "--fix-only", "--ignore-noqa"],
+        ["uv", "run", "ruff", "format"],
+        ["uv", "run", "ruff", "check"],
+        ["make", "all"],
+    ]
+
+
+# Requirements, checked before any step.
+
+NEEDED = [
+    Needed(
+        module="code-rules",
+        requirement=Requirement(
+            tool="node",
+            why="runs the rule engine",
+            install="https://nodejs.org/en/download",
+        ),
+    ),
+    Needed(
+        module="python",
+        requirement=Requirement(tool="uv", why="runs the project's tools"),
+    ),
+]
+CLIPBOARD = Needed(
+    module="review",
+    requirement=Requirement(
+        any_of=["wl-copy", "xclip"], optional=True, why="copies a review"
+    ),
+)
+
+
+def test_a_missing_requirement_stops_the_gate_naming_every_one(
+    tmp_path: Path,
+) -> None:
+    processes = Scripted({})
+    check = Check(
+        root=tmp_path,
+        processes=processes,
+        tools=Stubbed([]),
+        runner=Plain(),
+        steps=STEPS,
+        requirements=NEEDED,
+        fixes=Fixes().steps,
+    )
+    with pytest.raises(RequirementError) as refused:
+        check.run()
+    assert processes.ran == []
+    assert str(refused.value).splitlines() == [
+        "Requirements not met, so nothing ran:",
+        (
+            "- `node`, for `code-rules` (runs the rule engine): not on the `PATH`. "
+            "Install: https://nodejs.org/en/download."
+        ),
+        "- `uv`, for `python` (runs the project's tools): not on the `PATH`.",
+    ]
+
+
+def test_a_missing_optional_requirement_is_said_once_and_the_gate_runs(
+    tmp_path: Path,
+) -> None:
+    processes = Scripted({})
+    gated = Check(
+        root=tmp_path,
+        processes=processes,
+        tools=Stubbed(["node", "uv"]),
+        runner=Plain(),
+        steps=STEPS,
+        requirements=[*NEEDED, CLIPBOARD],
+    ).run()
+    assert len(processes.ran) == len(STEPS)
+    text = report(gated)
+    assert text.startswith(
+        "off      `wl-copy or xclip`, for `review` (copies a review): "
+        "not on the `PATH`.\npassed   lint\n"
+    )
+    assert text.count("wl-copy") == 1
+    assert text.endswith("The gate passed.")
+
+
+# A step that builds a file.
 
 ENGINE = Step(
     name="engine",
@@ -87,20 +257,20 @@ def touch(path: Path, when: int) -> None:
 
 
 def check_engine(root: Path) -> tuple[Outcome, Scripted]:
-    runner = Scripted({})
-    [outcome] = Check(root=root, runner=runner, gate=Gate(steps=[ENGINE])).run()
-    return outcome, runner
+    processes = Scripted({})
+    [outcome] = gate(root, processes, [ENGINE]).outcomes
+    return outcome, processes
 
 
 def test_a_build_newer_than_its_sources_is_skipped(tmp_path: Path) -> None:
     touch(tmp_path / "src" / "deep" / "rule.ts", 1_000)
     touch(tmp_path / "table.ts", 1_000)
     touch(tmp_path / "bundle" / "engine.js", 2_000)
-    outcome, runner = check_engine(tmp_path)
+    outcome, processes = check_engine(tmp_path)
     assert outcome.result == "skipped"
     assert outcome.why == "bundle/engine.js is newer than its sources"
-    assert runner.ran == []
-    assert report([outcome]).startswith(
+    assert processes.ran == []
+    assert report(Gated(outcomes=[outcome])).startswith(
         "skipped  engine (bundle/engine.js is newer than its sources)"
     )
 
@@ -108,15 +278,18 @@ def test_a_build_newer_than_its_sources_is_skipped(tmp_path: Path) -> None:
 def test_a_build_older_than_a_source_runs(tmp_path: Path) -> None:
     touch(tmp_path / "bundle" / "engine.js", 2_000)
     touch(tmp_path / "src" / "deep" / "rule.ts", 3_000)
-    outcome, runner = check_engine(tmp_path)
+    outcome, processes = check_engine(tmp_path)
     assert outcome.result == "passed"
-    assert runner.ran == [["build"]]
+    assert processes.ran == [["build"]]
 
 
 def test_a_missing_build_runs(tmp_path: Path) -> None:
     touch(tmp_path / "table.ts", 1_000)
     outcome, _ = check_engine(tmp_path)
     assert outcome.result == "passed"
+
+
+# The shell.
 
 
 def test_the_shell_runs_a_command_and_keeps_its_output(tmp_path: Path) -> None:
@@ -133,10 +306,12 @@ def test_a_command_not_installed_fails_its_step(tmp_path: Path) -> None:
     assert "isn't installed" in ran.output
 
 
-def test_the_catalogs_gate_runs_the_engine_then_lups_rules_then_the_tools() -> None:
+# The catalog's gate.
+
+
+def test_the_catalogs_gate_runs_lups_rules_then_the_tools() -> None:
     commands = {step.name: step.command for step in Gate().steps}
     assert list(commands) == [
-        "engine",
         "rules",
         "ruff",
         "format",
@@ -144,16 +319,24 @@ def test_the_catalogs_gate_runs_the_engine_then_lups_rules_then_the_tools() -> N
         "pytest",
         "lint-imports",
     ]
-    assert commands["rules"] == ["uv", "run", "lup-dev", "rules", "check"]
-    assert commands["ruff"] == ["uv", "run", "ruff", "check", "--ignore-noqa"]
+    assert commands["rules"] == ["lup-dev", "rules", "check"]
+    assert commands["ruff"] == ["ruff", "check", "--ignore-noqa"]
 
 
-class InProcess(Runner):
+def test_the_fixes_are_ruffs_safe_fixes_then_the_formatter() -> None:
+    assert [step.command for step in Fixes().steps] == [
+        ["ruff", "check", "--fix-only", "--ignore-noqa"],
+        ["ruff", "format"],
+    ]
+
+
+class InProcess(Processes):
     """Runs `uv run lup-dev …` in this process, on the fakes; the rest pass."""
 
     def __init__(self) -> None:
         self.ran: list[list[str]] = []
 
+    @override
     def run(self, command: list[str], cwd: Path) -> Ran:
         self.ran.append(command)
         match command:
@@ -172,9 +355,15 @@ class InProcess(Runner):
 
 def rules_step(root: Path) -> tuple[Outcome, list[Outcome]]:
     """Run the catalog's whole gate over `root`; its `rules` step, and every step."""
-    outcomes = Check(root=root, runner=InProcess()).run()
-    [rules] = [outcome for outcome in outcomes if outcome.step == "rules"]
-    return rules, outcomes
+    outcomes = Check(
+        root=root,
+        processes=InProcess(),
+        tools=NODE,
+        runner=Uv(),
+        steps=Gate().steps,
+    ).run()
+    [rules] = [outcome for outcome in outcomes.outcomes if outcome.step == "rules"]
+    return rules, outcomes.outcomes
 
 
 def test_the_gate_fails_on_lups_findings_listing_each_with_its_steer(
@@ -194,7 +383,7 @@ def test_the_gate_fails_on_lups_findings_listing_each_with_its_steer(
         "lup checked 3 files: 2 findings.",
     ]
     assert failed(outcomes) == ["rules"]
-    assert report(outcomes).endswith("The gate failed: rules.")
+    assert report(Gated(outcomes=outcomes)).endswith("The gate failed: rules.")
 
 
 def test_the_gate_passes_a_worktree_without_findings(fakes: Kit, repo: Path) -> None:
@@ -207,15 +396,10 @@ def test_the_gate_passes_a_worktree_without_findings(fakes: Kit, repo: Path) -> 
 def test_the_gates_rules_leave_tests_scratch_and_excluded_paths_out(
     fakes: Kit, repo: Path
 ) -> None:
-    (repo / "src" / "decl_gate").mkdir()
-    (repo / "src" / "decl_gate" / "__init__.py").write_text("")
-    (repo / "src" / "decl_gate" / "lup_project.py").write_text(
-        "from lup_dev.project import Project\n"
-        'project = Project(excluded=["vendor/**"])\n'
-    )
-    (repo / "pyproject.toml").write_text(
-        '[tool.lup]\nproject = "decl_gate.lup_project:project"\n'
-        '[tool.pytest]\ntestpaths = ["tests", "src"]\n'
+    (repo / "lup_project.py").write_text(
+        "from lup_dev import Core, Modules, Paths, Project\n"
+        "excluding = Core(paths=Paths().add(excluded=['vendor/**']))\n"
+        "project = Project(modules=Modules.default().edit(excluding))\n"
     )
     for written in ["vendor/lib.py", "tmp/try.py", "tests/test_core.py"]:
         (repo / written).parent.mkdir(exist_ok=True)
@@ -228,89 +412,132 @@ def test_the_gates_rules_leave_tests_scratch_and_excluded_paths_out(
     assert Path("tmp/try.py") not in sent
 
 
-def test_lup_dev_check_fix_runs_the_fixes_then_the_whole_gate(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    runner = Scripted({})
+# `lup-dev check`, reading the worktree's declaration.
 
-    def shell() -> Runner:
-        return runner
+DECLARED = """\
+from lup_dev import Gate, Modules, Plain, Project, Python, Step
 
-    def toplevel(_: Path) -> Path:
-        return tmp_path
+project = Project(
+    modules=Modules.default().edit(
+        Python(
+            runner=Plain(),
+            gate=Gate.of(
+                Step(name="lint", command=["lint", "--strict"]),
+                Step(name="types", command=["types"]),
+                Step(name="tests", command=["tests", "-q"]),
+            ),
+        )
+    )
+)
+"""
+"""A declaration whose `Python` runs three steps of its own, each as the `PATH`
+finds it."""
 
-    monkeypatch.setattr(cli, "Shell", shell)
-    monkeypatch.setattr(cli, "toplevel", toplevel)
-    result = CliRunner().invoke(cli.app, ["check", "--fix"])
-    assert result.exit_code == 0
-    assert runner.ran == [
-        *(step.command for step in Fixes().steps),
-        *(step.command for step in Gate().steps),
-    ]
-
-
-def test_the_fixes_run_before_the_gate_and_count_like_its_steps(
-    tmp_path: Path,
-) -> None:
-    runner = Scripted({"format": Ran(code=2, output="a.py: invalid syntax\n")})
-    fixes = [
-        Step(name="fix", command=["fix"]),
-        Step(name="reformat", command=["format"]),
-    ]
-    outcomes = Check(root=tmp_path, runner=runner, gate=GATE, fixes=fixes).run()
-    assert runner.ran == [
-        ["fix"],
-        ["format"],
-        ["lint", "--strict"],
-        ["types"],
-        ["tests", "-q"],
-    ]
-    assert failed(outcomes) == ["reformat"]
+BUILDING = '''
+from lup_dev import Gate, Module, Modules, Project, Step
 
 
-def test_the_fixes_are_ruffs_safe_fixes_then_the_formatter() -> None:
-    assert [step.command for step in Fixes().steps] == [
-        ["uv", "run", "ruff", "check", "--fix-only", "--ignore-noqa"],
-        ["uv", "run", "ruff", "format"],
-    ]
+class Building(Module):
+    """A module of the project's own, building something first."""
+
+    name = "building"
+
+    gate: Gate = Gate.of(Step(name="build", command=["build", "it"]), before="rules")
+
+
+project = Project(modules=Modules.default().add(Building()))
+'''
+"""lup's defaults, and a module of the project's own adding a step before them."""
 
 
 @pytest.fixture
 def scripted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Scripted:
-    """`lup-dev check` run over `GATE` in `tmp_path`, by a scripted runner."""
-    runner = Scripted({"types": Ran(code=0, output="types said so\n")})
+    """`lup-dev check` run in `tmp_path`, by scripted processes, node on the `PATH`.
 
-    def shell() -> Runner:
-        return runner
+    The steps are the declaration's a test writes in `tmp_path`'s `lup_project.py`,
+    or lup's defaults where it writes none.
+    """
+    processes = Scripted({"types": Ran(code=0, output="types said so\n")})
 
-    monkeypatch.setattr(cli, "Shell", shell)
-    monkeypatch.setattr(cli, "Gate", lambda: GATE)
+    def shell() -> Processes:
+        return processes
 
     def toplevel(_: Path) -> Path:
         return tmp_path
 
+    def machine() -> Tools:
+        return NODE
+
+    monkeypatch.setattr(cli, "Shell", shell)
+    monkeypatch.setattr(cli, "Machine", machine)
     monkeypatch.setattr(cli, "toplevel", toplevel)
-    return runner
+    return processes
+
+
+def test_lup_dev_check_runs_lups_default_gate_through_uv(scripted: Scripted) -> None:
+    result = CliRunner().invoke(cli.app, ["check", "--fix"])
+    assert result.exit_code == 0
+    assert scripted.ran == [
+        *(["uv", "run", *step.command] for step in Fixes().steps),
+        *(["uv", "run", *step.command] for step in Gate().steps),
+    ]
+
+
+def test_lup_dev_check_runs_the_steps_a_module_of_the_projects_own_adds(
+    scripted: Scripted, tmp_path: Path
+) -> None:
+    (tmp_path / "lup_project.py").write_text(BUILDING)
+    result = CliRunner().invoke(cli.app, ["check"])
+    assert result.exit_code == 0
+    assert scripted.ran == [
+        ["uv", "run", "build", "it"],
+        *(["uv", "run", *step.command] for step in Gate().steps),
+    ]
 
 
 @pytest.mark.parametrize(("code", "exit_code"), [(0, 0), (1, 1)])
 def test_lup_dev_check_exits_non_zero_when_a_step_fails(
-    scripted: Scripted, code: int, exit_code: int
+    scripted: Scripted, tmp_path: Path, code: int, exit_code: int
 ) -> None:
+    (tmp_path / "lup_project.py").write_text(DECLARED)
     scripted.answers = {"types": Ran(code=code, output="types said so\n")}
     result = CliRunner().invoke(cli.app, ["check"])
     assert result.exit_code == exit_code
-    assert [command[0] for command in scripted.ran] == ["lint", "types", "tests"]
+    assert scripted.ran == [["lint", "--strict"], ["types"], ["tests", "-q"]]
     last = result.output.strip().splitlines()[-1]
     assert last == ("The gate passed." if code == 0 else "The gate failed: types.")
 
 
-def test_lup_dev_check_fix_rewrites_first(scripted: Scripted) -> None:
+def test_lup_dev_check_fix_rewrites_first(scripted: Scripted, tmp_path: Path) -> None:
+    (tmp_path / "lup_project.py").write_text(DECLARED)
     result = CliRunner().invoke(cli.app, ["check", "--fix"])
     assert result.exit_code == 0
-    assert [command[3:5] for command in scripted.ran[:2]] == [
-        ["check", "--fix-only"],
-        ["format"],
-    ]
+    assert scripted.ran[:2] == [step.command for step in Fixes().steps]
     assert [command[0] for command in scripted.ran[2:]] == ["lint", "types", "tests"]
     assert result.output.startswith("passed   fix\npassed   reformat\npassed   lint\n")
+
+
+def test_lup_dev_check_runs_nothing_without_a_required_tool(
+    scripted: Scripted, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "lup_project.py").write_text(DECLARED)
+
+    def bare() -> Tools:
+        return Stubbed([])
+
+    monkeypatch.setattr(cli, "Machine", bare)
+    result = CliRunner().invoke(cli.app, ["check"])
+    assert isinstance(result.exception, RequirementError)
+    assert "`node`, for `code-rules` (runs the rule engine)" in str(result.exception)
+    assert scripted.ran == []
+
+
+def test_lup_dev_check_fails_on_a_declaration_that_doesnt_load(
+    scripted: Scripted, tmp_path: Path
+) -> None:
+    (tmp_path / "lup_project.py").write_text("project = 3\n")
+    result = CliRunner().invoke(cli.app, ["check"])
+    assert "is a `builtins.int`, not a `lup_dev.declaration.project.Project`" in str(
+        result.exception
+    )
+    assert scripted.ran == []

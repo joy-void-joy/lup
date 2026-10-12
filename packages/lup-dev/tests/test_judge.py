@@ -5,12 +5,28 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from lup_dev import (
+    CodeRules,
+    Core,
+    Exemption,
+    Exemptions,
+    Modules,
+    Paths,
+    Project,
+    Rules,
+)
+from lup_dev.declaration.resolve import Declaration
 from lup_dev.policy.judge import Change, Judge, Judgement, touched_lines
 from lup_dev.policy.roles import Roles
-from lup_dev.project import Exemption, Project
 
 if TYPE_CHECKING:
     from conftest import Kit
+
+
+def excluding(*patterns: str) -> Project:
+    paths = Paths().add(excluded=list(patterns))
+    return Project(modules=Modules.default().edit(Core(paths=paths)))
+
 
 CORE = (
     '"""Core."""\n\n\n'
@@ -39,7 +55,9 @@ class Judging:
     ) -> Judgement:
         judging = Judge(
             root=self.root,
-            roles=Roles(root=self.root, project=project or Project()),
+            roles=Roles(
+                root=self.root, declaration=Declaration.of(project or Project())
+            ),
             checker=self.kit.engine,
             linter=self.kit.linter,
             conditions=conditions,
@@ -133,7 +151,7 @@ def test_a_protected_module_asks_every_time_and_with_its_design_asks(
 
 
 def test_an_excluded_module_is_allowed_with_nothing_reported(judge: Judging) -> None:
-    project = Project(excluded=["vendor/**"])
+    project = excluding("vendor/**")
     after = "x = 1  # BAD regex\ny: int = 'a'  # TYPE\nimport os  # RUFF F401\n"
     judgement = judge(
         edit("vendor/lib.py", None, after, baseline=None), project=project
@@ -146,7 +164,7 @@ def test_an_excluded_module_is_allowed_with_nothing_reported(judge: Judging) -> 
 def test_an_excluded_protected_module_asks_without_its_findings(
     judge: Judging,
 ) -> None:
-    project = Project(excluded=[".claude/hooks/**"])
+    project = excluding(".claude/hooks/**")
     judgement = judge(
         edit(PROTECTED, CORE, CORE + "y = 2  # BAD regex\n"), project=project
     )
@@ -157,7 +175,8 @@ def test_an_excluded_protected_module_asks_without_its_findings(
 
 def test_an_exempt_rule_is_lifted_from_its_paths_alone(judge: Judging) -> None:
     lifted = Exemption(rule="regex", paths=["src/pkg/**"], why="a grammar")
-    project = Project(exempt=[lifted])
+    lifting = CodeRules(exempt=Exemptions().add(lifted))
+    project = Project(modules=Modules.default().edit(lifting))
     after = CORE + "y = 2  # BAD regex\nz = 3  # BAD tuple-shape\n"
     judgement = judge(edit("src/pkg/core.py", CORE, after), project=project)
     assert [found.rule for found in judgement.refusing] == ["tuple-shape"]
@@ -190,6 +209,25 @@ def test_a_finding_on_a_touched_line_refuses_and_every_finding_is_listed(
     assert judgement.outcome == "refuse"
     assert [finding.rule for finding in judgement.refusing] == ["tuple-shape"]
     assert [finding.rule for finding in judgement.untouched] == ["regex"]
+
+
+def test_every_check_carries_the_declarations_rule_selection(
+    judge: Judging, kit: Kit
+) -> None:
+    project = Project(
+        modules=Modules.default().edit(CodeRules(rules=Rules().drop("regex")))
+    )
+    selected = Declaration.of(project).rules
+    judge(edit("src/pkg/core.py", CORE, CORE + "z = 3\n"), project=project)
+    assert len(kit.engine.selections) == 3  # after, before and the baseline
+    assert all(each == selected for each in kit.engine.selections)
+    [code_rules] = selected
+    assert code_rules.module == "code-rules"
+    assert [
+        operation.names
+        for operation in code_rules.rules.operations
+        if operation.verb == "drop"
+    ] == [["runtime-mention"], ["regex"]]
 
 
 def test_findings_on_untouched_lines_dont_refuse(judge: Judging) -> None:

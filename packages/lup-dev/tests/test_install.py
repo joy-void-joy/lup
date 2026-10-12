@@ -9,7 +9,8 @@ import pytest
 from typer.testing import CliRunner
 
 from lup_dev import cli
-from lup_dev.catalog.gate import Step
+from lup_dev.declaration.load import load
+from lup_dev.declaration.resolve import resolve
 from lup_dev.install import (
     Approval,
     ChangedFile,
@@ -23,6 +24,7 @@ from lup_dev.install import (
     Toolchain,
     Unchanged,
     Uv,
+    engine,
 )
 from lup_dev.layout import CheckoutLayout, Layout
 from lup_dev.policy.store import read_model, write_model
@@ -434,15 +436,86 @@ def test_uv_installs_a_copy_with_the_locks_versions(
     assert constraints == "pydantic==2.13.5"
 
 
-def test_the_installer_builds_the_engine_as_the_gate_does() -> None:
-    assert Uv().engine.name == "engine"
-    assert Uv().engine.command[-1] == "packages/lup-dev/checker/build.py"
+LUP = Path(__file__).resolve().parents[3]
+"""lup's own checkout, whose declaration gives the step building the engine."""
 
 
-def test_uv_runs_the_engines_build_step(checkout: Path) -> None:
-    build = [sys.executable, "packages/lup-dev/checker/build.py"]
-    Uv(engine=Step(name="engine", command=build)).build(checkout)
-    assert (checkout / "built").read_text() == "yes"
+def test_the_installer_builds_the_engine_with_lups_own_gate_step() -> None:
+    resolved = resolve(load(LUP).project)
+    step = engine(resolved)
+    assert step.name == "engine"
+    assert step.command == ["python", "packages/lup-dev/checker/build.py"]
+    assert step.in_environment
+    assert resolved.gate[0] == step
+
+
+BUILDING = '''
+from lup_dev import Gate, Module, Modules, Project, Python, Runner, Step
+
+
+class Marking(Runner):
+    """Runs each tool with `LUP_RUNNER` set, so a build can tell it ran through it."""
+
+    def command(self, tool: list[str]) -> list[str]:
+        return ["env", "LUP_RUNNER=marking", *tool]
+
+    def judging(self, tool: list[str]) -> list[str]:
+        return self.command(tool)
+
+    def environment(self) -> list[str]:
+        return []
+
+
+class Building(Module):
+    """Building the engine, as lup's own declaration does."""
+
+    name = "building"
+
+    gate: Gate = Gate.of(
+        Step(
+            name="engine",
+            command={command!r},
+            builds="bundle.js",
+            in_environment={inside!r},
+        ),
+        before="rules",
+    )
+
+
+project = Project(
+    modules=Modules.default().edit(Python(runner=Marking())).add(Building())
+)
+'''
+"""A declaration building the engine, its tools run through a runner of its own."""
+
+MARKED = """\
+import os
+from pathlib import Path
+Path('built').write_text(os.environ.get('LUP_RUNNER', 'as written'))
+"""
+"""A build saying whether it ran through the runner."""
+
+
+@pytest.mark.parametrize(
+    ("inside", "built"), [(True, "marking"), (False, "as written")]
+)
+def test_uv_runs_the_checkouts_own_build_step_through_its_runner(
+    checkout: Path, *, inside: bool, built: str
+) -> None:
+    (checkout / "packages/lup-dev/checker/build.py").write_text(MARKED)
+    command = [sys.executable, "packages/lup-dev/checker/build.py"]
+    declared = BUILDING.format(command=command, inside=inside)
+    (checkout / "lup_project.py").write_text(declared)
+    Uv().build(checkout)
+    assert (checkout / "built").read_text() == built
+
+
+def test_a_checkout_whose_declaration_builds_no_engine_is_refused(
+    checkout: Path,
+) -> None:
+    with pytest.raises(InstallError, match="no step building the engine"):
+        Uv().build(checkout)
+    assert not (checkout / "built").exists()
 
 
 def test_the_review_waits_in_the_checkout_under_the_approved_commit() -> None:

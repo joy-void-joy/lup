@@ -15,6 +15,9 @@ from lup_dev.policy.store import read_model
 if TYPE_CHECKING:
     from conftest import Kit
 
+    from lup_dev.declaration.resolve import Selected
+    from lup_dev.declaration.runner import Runner
+
 CORE = Path("src/pkg/core.py")
 
 
@@ -239,11 +242,19 @@ class Broken(Checker):
         crashed = "the engine crashed"
         raise RuntimeError(crashed)
 
-    def check(self, root: Path, sources: list[Source]) -> list[FileReport]:
+    def check(
+        self,
+        root: Path,
+        sources: list[Source],
+        selected: list[Selected],
+        runner: Runner,
+    ) -> list[FileReport]:
         crashed = "the engine crashed"
         raise RuntimeError(crashed)
 
-    def importers(self, root: Path, changed: list[Path]) -> list[FileReport]:
+    def importers(
+        self, root: Path, changed: list[Path], runner: Runner
+    ) -> list[FileReport]:
         crashed = "the engine crashed"
         raise RuntimeError(crashed)
 

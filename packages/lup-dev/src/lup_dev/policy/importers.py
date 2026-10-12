@@ -28,6 +28,7 @@ from lup_dev.policy.store import read_model, write_model
 
 if TYPE_CHECKING:
     from lup_dev.clock import Clock
+    from lup_dev.declaration.runner import Runner
 
 
 class Spawner(ABC):
@@ -144,33 +145,40 @@ class ImportersPass(Model):
                 return
         spawner.spawn(self.root, self.layout.importers_log)
 
-    def run(self, checker: Checker) -> None:
-        """Run the pass until nothing is pending; return at once if another runs."""
-        runner = self.runner()
+    def run(self, checker: Checker, runner: Runner) -> None:
+        """Run the pass until nothing is pending; return at once if another runs.
+
+        The engine reads types in the environment the project's `runner` gives
+        the worktree, as the judge's checks do.
+        """
+        held = self.runner()
         try:
-            runner.acquire()
+            held.acquire()
         except Timeout:
             return
         try:
-            while self.step(checker, runner):
+            while self.step(checker, runner, held):
                 pass
         finally:
-            if runner.is_locked:
-                runner.release()
+            if held.is_locked:
+                held.release()
 
-    def step(self, checker: Checker, runner: FileLock) -> bool:
-        """Re-check one batch; say whether to look for another."""
+    def step(self, checker: Checker, runner: Runner, held: FileLock) -> bool:
+        """Re-check one batch; say whether to look for another.
+
+        `held` is the lock the running pass holds, released once nothing is left.
+        """
         with self.guard():
             state = self.state()
             batch = state.pending
             writers = state.pending_writers
             if not batch:
-                runner.release()
+                held.release()
                 return False
             state.pending = []
             state.pending_writers = []
             write_model(self.layout.importers, state)
-        found = checker.importers(self.root, batch)
+        found = checker.importers(self.root, batch, runner)
         with self.guard():
             state = self.state()
             state.found = [*state.found, *found]
@@ -191,6 +199,7 @@ class ImportersPass(Model):
     def wait(
         self,
         checker: Checker,
+        runner: Runner,
         clock: Clock,
         patience: timedelta = timedelta(minutes=10),
         poll: timedelta = timedelta(seconds=1),
@@ -198,10 +207,10 @@ class ImportersPass(Model):
         """Wait for the pass to finish, so no type error surfaces after the turn.
 
         Work left pending with no pass running (one that failed as it started)
-        is done here.
+        is done here, with the project's `runner`.
         """
         deadline = clock.now() + patience
         while self.running() and clock.now() < deadline:
             clock.sleep(poll.total_seconds())
         if not self.running():
-            self.run(checker)
+            self.run(checker, runner)
