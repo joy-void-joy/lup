@@ -220,6 +220,19 @@ class CheckoutLayout(Model):
         return self.root / "pyproject.toml"
 
     @property
+    def declaration(self) -> Path:
+        """The project's declaration, binding `project`, which nothing points at."""
+        return self.root / "lup_project.py"
+
+    @property
+    def declaration_package(self) -> Path:
+        """The declaration as a package, once the project's own modules outgrow a file.
+
+        Its `__init__.py` binds `project`; a worktree holds one form or the other.
+        """
+        return self.root / self.declaration.stem
+
+    @property
     def package(self) -> Path:
         """The file that makes `root` a Python package."""
         return self.root / "__init__.py"
