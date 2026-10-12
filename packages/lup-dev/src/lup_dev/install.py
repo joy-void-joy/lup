@@ -10,7 +10,8 @@ and until they approve, the copy installed before keeps judging:
 2. list the files the judge carries that changed since the commit approved last,
    or all of them the first time; where none did, stop;
 3. build the engine, with the step lup's declaration gives its gate
-   (`packages/lup-dev/checker/build.py`);
+   (`packages/lup-dev/checker/build.py`), run through its runner as the gate runs
+   it;
 4. show each changed file whole on both sides to a `Reviewer`, and wait for its
    answer: the first lup's dashboard in the bridge (`lup_dev.legacy_dashboard`),
    or the terminal;
@@ -36,6 +37,7 @@ from lup_dev.clock import Clock
 from lup_dev.declaration.load import load
 from lup_dev.declaration.resolve import Resolved, resolve
 from lup_dev.errors import LupDevError
+from lup_dev.gate import invoked
 from lup_dev.layout import CheckoutLayout, Layout
 from lup_dev.policy.runtime import Runtime
 from lup_dev.policy.store import Git, nul_separated, read_model, write_model
@@ -208,10 +210,12 @@ class Uv(Toolchain):
     def build(self, checkout: Path) -> None:
         """Run the checkout's own step building the engine, as the gate runs it.
 
-        The step is read from the checkout's declaration, so the gate and the
-        installer build the engine one way.
+        The step is read from the checkout's declaration and runs through its
+        runner, unless it says not, so the gate and the installer build the engine
+        one way.
         """
-        program, *arguments = engine(resolve(load(checkout).project)).command
+        resolved = resolve(load(checkout).project)
+        program, *arguments = invoked(engine(resolved), resolved.runner)
         sh.Command(program)(*arguments, _cwd=str(checkout), _fg=True)
 
     @override

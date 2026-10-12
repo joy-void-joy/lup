@@ -275,7 +275,7 @@ project = Project(
 )
 ```
 
-- **Building lup's engine** is the first of the gate's default steps (`catalog/gate.py`), and the installer runs the same step (`install.py`), though only lup's repository has an engine to build. It becomes `LupDevelopment`'s, and the installer finds it in lup's declaration.
+- **Building lup's engine** is the first of the gate's default steps (`catalog/gate.py`), and the installer runs the same step (`install.py`), though only lup's repository has an engine to build. It becomes `LupDevelopment`'s, its command the tool alone, and the installer finds it in lup's declaration and runs it through the runner, as the gate does.
 - **`runtime-mention` is lup's own.** It fires on any name holding `claude` or `codex` outside that runtime's adapter (`catalog/rules.ts`): a rule about lup's own architecture, which in a project picking a runtime by setting, as live-translator does, would fire on every choice, so it isn't in every project's default for each to drop. Until E it stays in lup's table, out of the default, and lup's declaration adds it back: `.edit(CodeRules(rules=Rules().add("runtime-mention")))`. E moves it into `rules/lup.ts`, its first entry.
 - **lup's import contracts stay in lup's `pyproject.toml`,** as a project's own contracts do (*pytest and import-linter*).
 - **The test of the principle:** nothing in lup's core reads a default that isn't in a module a project can change. Building lup's engine, `runtime-mention`, `install` and `rules-docs` are lup's own, declared where a project declares its own.
@@ -568,7 +568,7 @@ Elsewhere:
 - **`codescan/engine.py`** sends the selections, and starts the engine with the runner's interpreter command and, from E, the tables' paths; **`checker/src/catalog.ts`** resolves a selection; **`checker/src/program.ts`** takes the interpreter command and the environment's files from its start arguments, and stamps lup's pyright settings file with pyright's other configuration, so a change to it builds another program.
 - **`codescan/ruff.py`** runs ruff through the runner; `UV_RUN` goes.
 - **`gate.py`** checks requirements first, then runs each step through the runner; its own `Runner` becomes `Processes`.
-- **`install.py`** finds the engine's build step in lup's declaration.
+- **`install.py`** finds the engine's build step in lup's declaration, and runs it through the declaration's runner as the gate does.
 
 ## Building it
 

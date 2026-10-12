@@ -111,6 +111,22 @@ class Gated(Model):
     outcomes: list[Outcome]
 
 
+def invoked(step: Step, runner: Runner) -> list[str]:
+    """Return what `step` runs: its tool through `runner`, unless it says not.
+
+    The gate runs each step so, and the installer the step building lup's engine.
+
+    >>> from lup_dev.declaration.runner import Uv
+    >>> invoked(Step(name="ruff", command=["ruff", "check"]), Uv())
+    ['uv', 'run', 'ruff', 'check']
+    >>> invoked(Step(name="make", command=["make"], in_environment=False), Uv())
+    ['make']
+    """
+    if step.in_environment:
+        return runner.command(step.command)
+    return step.command
+
+
 class Check(Model, arbitrary_types_allowed=True):
     """The gate, run over one worktree."""
 
@@ -160,18 +176,12 @@ class Check(Model, arbitrary_types_allowed=True):
             for source in self.root.glob(pattern)
         )
 
-    def command(self, step: Step) -> list[str]:
-        """Return what `step` runs: its tool through the runner, unless it says not."""
-        if step.in_environment:
-            return self.runner.command(step.command)
-        return step.command
-
     def one(self, step: Step) -> Outcome:
         """Run one step, or skip it where what it builds is up to date."""
         if not self.stale(step):
             why = f"{step.builds} is newer than its sources"
             return Outcome(step=step.name, result="skipped", why=why)
-        ran = self.processes.run(self.command(step), self.root)
+        ran = self.processes.run(invoked(step, self.runner), self.root)
         result = "passed" if ran.code == 0 else "failed"
         return Outcome(step=step.name, result=result, code=ran.code, output=ran.output)
 

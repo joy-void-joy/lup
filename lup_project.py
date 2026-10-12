@@ -23,7 +23,6 @@ from lup_dev import (
     Rules,
     Step,
     TestRoots,
-    Uv,
 )
 
 
@@ -32,8 +31,9 @@ class LupDevelopment(Module):
 
     - The engine is built before the gate's first step, and again only when its
       bundle is older than one of its sources, since tests that ask a stale engine
-      fail for reasons the change didn't cause. The installer runs the same step
-      (`lup_dev/install.py`).
+      fail for reasons the change didn't cause. Its command is the tool alone, which
+      the gate runs through the project's runner, and the installer runs the same
+      step the same way (`lup_dev/install.py`).
     - The data that sets lup's policy (`lup_dev.catalog`) is protected, so the
       operator reviews every change to it before it lands.
     - The bridge's interim hooks are excluded: uv scripts with their own
@@ -59,7 +59,7 @@ class LupDevelopment(Module):
     gate: Gate = Gate.of(
         Step(
             name="engine",
-            command=Uv().command(["python", "packages/lup-dev/checker/build.py"]),
+            command=["python", "packages/lup-dev/checker/build.py"],
             builds="packages/lup-dev/src/lup_dev/codescan/bundle/engine.js",
             sources=[
                 "packages/lup-dev/checker/src/**/*",

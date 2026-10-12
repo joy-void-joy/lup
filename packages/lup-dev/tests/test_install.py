@@ -444,12 +444,26 @@ def test_the_installer_builds_the_engine_with_lups_own_gate_step() -> None:
     resolved = resolve(load(LUP).project)
     step = engine(resolved)
     assert step.name == "engine"
-    assert step.command[-1] == "packages/lup-dev/checker/build.py"
+    assert step.command == ["python", "packages/lup-dev/checker/build.py"]
+    assert step.in_environment
     assert resolved.gate[0] == step
 
 
 BUILDING = '''
-from lup_dev import Gate, Module, Modules, Project, Step
+from lup_dev import Gate, Module, Modules, Project, Python, Runner, Step
+
+
+class Marking(Runner):
+    """Runs each tool with `LUP_RUNNER` set, so a build can tell it ran through it."""
+
+    def command(self, tool: list[str]) -> list[str]:
+        return ["env", "LUP_RUNNER=marking", *tool]
+
+    def judging(self, tool: list[str]) -> list[str]:
+        return self.command(tool)
+
+    def environment(self) -> list[str]:
+        return []
 
 
 class Building(Module):
@@ -458,20 +472,42 @@ class Building(Module):
     name = "building"
 
     gate: Gate = Gate.of(
-        Step(name="engine", command={command!r}, builds="bundle.js"),
+        Step(
+            name="engine",
+            command={command!r},
+            builds="bundle.js",
+            in_environment={inside!r},
+        ),
         before="rules",
     )
 
 
-project = Project(modules=Modules.default().add(Building()))
+project = Project(
+    modules=Modules.default().edit(Python(runner=Marking())).add(Building())
+)
 '''
+"""A declaration building the engine, its tools run through a runner of its own."""
+
+MARKED = """\
+import os
+from pathlib import Path
+Path('built').write_text(os.environ.get('LUP_RUNNER', 'as written'))
+"""
+"""A build saying whether it ran through the runner."""
 
 
-def test_uv_runs_the_checkouts_own_build_step(checkout: Path) -> None:
+@pytest.mark.parametrize(
+    ("inside", "built"), [(True, "marking"), (False, "as written")]
+)
+def test_uv_runs_the_checkouts_own_build_step_through_its_runner(
+    checkout: Path, *, inside: bool, built: str
+) -> None:
+    (checkout / "packages/lup-dev/checker/build.py").write_text(MARKED)
     command = [sys.executable, "packages/lup-dev/checker/build.py"]
-    (checkout / "lup_project.py").write_text(BUILDING.format(command=command))
+    declared = BUILDING.format(command=command, inside=inside)
+    (checkout / "lup_project.py").write_text(declared)
     Uv().build(checkout)
-    assert (checkout / "built").read_text() == "yes"
+    assert (checkout / "built").read_text() == built
 
 
 def test_a_checkout_whose_declaration_builds_no_engine_is_refused(
