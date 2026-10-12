@@ -6,6 +6,8 @@ The homes (`docs/judging-writes.md`, *Where things live*):
   repository's verdict log;
 - each worktree engine's socket, under `$XDG_RUNTIME_DIR/lup/`, since a socket's
   path is limited in length;
+- the host service's sockets and the launches it serves, under
+  `$XDG_RUNTIME_DIR/lup/host/`, and its log under lup's state (`docs/launch.md`);
 - inside a worktree, `.lup/saved/`, where a refused version waits for the agent,
   `.lup/drafts/`, where a change waits to be submitted for review, and
   `.lup/review/<n>/`, where a review keeps its files while it waits;
@@ -302,6 +304,60 @@ class CheckoutLayout(Model):
         ]
 
 
+class LaunchSockets(Model):
+    """One launch's socket directory, which its room mounts at `/run/lup`.
+
+    The directory is mounted rather than each socket, since a socket mounted as a
+    file stays bound to the old one when the service restarts.
+    """
+
+    directory: Path
+
+    @property
+    def hook(self) -> Path:
+        """The socket the room's hook command sends each payload to."""
+        return self.directory / "hook.sock"
+
+
+class HostLayout(Model):
+    """Where the host service keeps its sockets and the launches it serves, and its log.
+
+    Its sockets and its records of the launches live under lup's runtime directory,
+    which a reboot empties as it ends every room; its log lives in lup's state.
+    """
+
+    sockets: Path
+    state: Path
+
+    @property
+    def control(self) -> Path:
+        """The control socket, on the host only, taking typed requests."""
+        return self.sockets / "control.sock"
+
+    @property
+    def lock(self) -> Path:
+        """The lock the running service holds for its whole life, which the OS frees."""
+        return self.sockets / "service.lock"
+
+    @property
+    def launches(self) -> Path:
+        """Each launch served: its socket directory, and its record beside it."""
+        return self.sockets / "launches"
+
+    @property
+    def log(self) -> Path:
+        """What a service started in the background prints, kept for when it fails."""
+        return self.state / "service.log"
+
+    def launch(self, launch: str) -> LaunchSockets:
+        """Say where launch `launch`'s sockets are."""
+        return LaunchSockets(directory=self.launches / launch)
+
+    def record(self, launch: str) -> Path:
+        """Say where launch `launch` is recorded, so a restarted service serves it."""
+        return self.launches / f"{launch}.json"
+
+
 class Layout(Model):
     """Where lup's state lives for one user: `$XDG_STATE_HOME/lup`, and its sockets."""
 
@@ -320,6 +376,11 @@ class Layout(Model):
     def engine_socket(self, worktree: Path) -> Path:
         """Say where the engine of the worktree at `worktree` listens."""
         return self.runtime / f"{short_digest(worktree)}.sock"
+
+    @property
+    def host(self) -> HostLayout:
+        """Where the host service, one per user, keeps its sockets, records and log."""
+        return HostLayout(sockets=self.runtime / "host", state=self.state / "host")
 
     @property
     def worktrees(self) -> Path:

@@ -285,6 +285,12 @@ class FakeClock(Clock):
             action()
 
 
+@pytest.fixture
+def clock() -> FakeClock:
+    """A clock the test drives: it moves only when slept on."""
+    return FakeClock()
+
+
 class FakeSpawner(Spawner):
     def __init__(self) -> None:
         self.spawned: list[Path] = []
