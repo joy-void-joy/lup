@@ -125,7 +125,7 @@ narrator.launch()                                                        # a ter
   - Writing uses the native tools: a new file lands where it belongs, so its tests can import it.
   - `propose(paths, why, wait)` puts a coherent design before the operator, with the agent's reasons. With `wait`, the call holds until answered; without, the answer reaches the agent through its inbox at its next call.
   - What needs a proposal: a new production file, a whole-file overwrite, a public-API change, an added suppression, a protected path. Suppressions and protected paths hold at the edit itself.
-  - **The dependency guard:** an edit that imports or uses an unproposed design is refused ("propose `a.py` first"); one that uses a proposed design still waiting is held until it's answered. The agent chooses when to propose, never whether.
+  - **The dependency guard:** an edit that imports or uses an unproposed design is refused ("propose `a.py` first"); one that uses a proposed design still waiting is held until it's answered. The agent chooses when to propose, never whether. It applies where the code rules do, by path role: tests, scratch, docs and data use an unproposed design freely, so a design can be tested before it's proposed.
   - At the end of a turn, unproposed design changes are listed; landing refuses a branch with one, or with one declined.
   - A held call is invisible to the agent: it returns once answered, with the operator's comment. A hold under an hour keeps the cache; past it, the context rebuilds, and no loop re-enters a wait to keep it warm.
   - The dashboard shows each agent's unproposed work as it forms, as "in progress, not asking you"; stepping in is the operator's choice. The verdict log records how much code preceded each proposal.
@@ -145,6 +145,7 @@ Shares per project or agent over a time window; a pace limit for unattended runs
 
 ### Policy
 
+- **What the wall is for:** it keeps untrusted code (a compromised dependency, or an agent that's prompt-injected or just wrong) from damaging the host, so that commands inside it run without prompts. It also gives every agent the same standard machine, whatever the host is: bash and the usual tools, none of the operator's own shell setup. It isn't there to contain the agent: the judge steers, it doesn't guard.
 - **Walls, protected paths and proposals; no verdicts on commands.** Inside the container a command simply runs. Effects that can't be undone are stopped by a wall where they pass.
 - **Every write is judged by what it produces,** whichever tool made it: code rules on the native file tools before they land, and on everything at the gate. No command's spelling is parsed.
 - **lup allows, holds for a proposal, or refuses:**
@@ -153,7 +154,7 @@ Shares per project or agent over a time window; a pace limit for unattended runs
   - **refuse:** a code rule's finding, or an edit built on an unproposed design.
   - Every verdict is logged (tool, path, outcome, reason), so how often lup intervenes can be measured and tuned.
 - **A container is required whenever an agent can run code or write files.** Interactively without a container engine there's no lup policy, only the runtime's own permission mode, behind an explicit `--dangerously-…` flag; from code, a call with Bash and no container raises unless it sets a `dangerously_…` flag. Mounts are one declaration: bind mounts in a container, the file tools' allow-list without one.
-- **Leaving the wall is a request with a typed reason** (tentative; the reasons are open): work in another project (spawned there); credentials (a host service doing one action, asked per action); a protected path (a proposal); a tool or device the container lacks, or repairing the environment (a reviewed command on the host); anything else (always reviewed). An answer can be scoped to the session and the reason; a reason that keeps recurring surfaces as what the room's declaration lacks; a launch reports what the host has that the container doesn't.
+- **Leaving the wall is a request with a typed reason** (tentative; the reasons are open): work in another project (spawned there); credentials (a host service doing one action without asking, within limits the declaration sets, such as no push to `main` and no force push); a protected path (a proposal); a tool or device the container lacks, or repairing the environment (a reviewed command on the host); anything else (always reviewed). An answer can be scoped to the session and the reason; a reason that keeps recurring surfaces as what the room's declaration lacks; a launch reports what the host has that the container doesn't.
 - **(leaning) Open egress,** with nothing secret mounted but the runtime's own login, hidden from the agent's commands. Project secrets live in host services the container reaches by name; pushes happen from the host. Saved transcripts and traces are scrubbed of known secret values, each replaced by its name.
 - **(leaning) Sudo in room modes;** inherited capabilities always cleared; package installs held to a minimum age.
 - **Protected paths:** the project's declaration and the rule tables its modules name; lup's settings files (a write equal to what the declaration generates is allowed); dependency manifests and lockfiles; what runs outside the container (CI, git hooks and `.git/config`, pre-commit, editor and devcontainer configs); what widens the wall; secrets (not even readable); in lup itself, its policy and launch code.
@@ -196,7 +197,7 @@ One command, judged by its exit code: lup's rules, ruff, the formatter, pyright,
 - **Modules extend it with code:** a module ships its own panel, loaded at runtime, getting data through the typed protocol (TypeScript types generated from the pydantic models) and lup's exported components; lup's own panels (agents, inbox, runs, setup, usage) use the same API. Declared views (a table, a progress bar) are a shortcut built on panels. A panel runs sandboxed, with a token scoped to its module's data.
 - **Runs** announce themselves and show their identity, plan, ETA, history, each step's progress, and each unit's state, deadline, last report, ending and log.
 - **Controls:** budgets, pause, pace, spawn caps. **(leaning)** Steering beyond pause: interrupt, redirect, stop, and reading an agent's transcript.
-- **Every key is also a button or a menu entry.**
+- **Every key is also a button or a menu entry, and every view has a command-line counterpart** (`lup inbox` for the inbox), for answering from any terminal, over SSH, or when the dashboard is down.
 
 ### Feedback
 
@@ -241,9 +242,8 @@ The operator's to decide; the agent's lean where it has one.
 - Does a `PreToolUse` hook's `allow` skip auto mode's classifier? Which of Claude Code's own commands use `Agent` internally, and break when it's denied?
 - Do parallel held calls in one response reach the operator as one proposal?
 - Can a Codex hook hold an `apply_patch` that builds on an unapproved design?
-- Does the CLI run inside a container while the SDK and lup's in-process tools stay on the host, over the container's standard input and output?
 - Does resuming an SDK session work on Claude Code's current version?
-- Is the cache keepalive flag on for a subscription account? Does a dated Arch Linux Archive mirror hold against `pacman -Sy` in the image? How light can the REPL be?
+- Is the cache keepalive flag on for a subscription account? How light can the REPL be?
 - If the write layer is pursued: a frozen snapshot with a hardlinked environment, the host's view keeping `.git` and editor configs out of reach until review, git inside it, and what merging a layer back costs.
 
 ## Build order
@@ -257,6 +257,8 @@ Each step builds on the ones before it **(leaning)**:
 6. **The host service, the inbox, and lup's tools:** spawn, propose, message, ask, report.
 7. **Worktrees and landing,** with the dependency guard and the landing refusal.
 8. **The dashboard:** agents, the inbox, runs, panels.
+
+**#56 pulls ahead (leaning)** what a maintaining session needs from steps 3, 5, 6 and 7, after the declaration's first slice (`docs/declaration.md`), in four pieces: launch on rooms, with the host service (`docs/launch.md`); lup's MCP server, the inbox and the credential actions; proposals and holds; the dependency guard. The rest of those steps keeps its place.
 
 lup hosts its own development once steps 5–7 are done. Then: budgets, `accounts`, the feedback modules, the outcome loop, the resolver, setup, the Codex capability check, trust on launch.
 
