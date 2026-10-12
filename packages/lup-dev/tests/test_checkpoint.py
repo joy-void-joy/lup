@@ -721,37 +721,6 @@ def test_a_session_starting_again_forgets_its_subagents(kit: Kit, repo: Path) ->
     assert end(kit, repo).block.startswith("lup won't end the turn yet")
 
 
-def test_a_record_an_earlier_judge_stored_reads_as_the_sessions_own(
-    kit: Kit, repo: Path, shell: Shell
-) -> None:
-    (repo / CORE).write_text((repo / CORE).read_text() + "y: int = 'a'  # TYPE\n")
-    shell.commit(repo, "a type error, from before the session")
-    start(kit, repo)
-    layout = worktree(kit, repo).store.layout
-    stored = json.loads(layout.session(SESSION).read_text())
-    layout.session(SESSION).write_text(
-        json.dumps(
-            {
-                **stored,
-                "touched": [str(CORE)],
-                "watched": [],
-                "judged": [{"path": str(CORE), "blob": "0" * 40}],
-            }
-        )
-    )
-    assert session(kit, repo).touched == {"": [CORE]}
-    assert session(kit, repo).judged[0].agent == ""
-    first = end(kit, repo).block
-    assert first.startswith("lup won't end the turn yet")
-    conversations = kit.layout.conversations(SESSION)
-    blocked = json.loads(conversations.read_text())["blocked"][""]
-    conversations.write_text(json.dumps({"working": [], "blocked": blocked}))
-    let = end(kit, repo, after_block=True)
-    assert let.block == ""
-    assert let.note.startswith("lup held the turn's end on these just before")
-    assert subagent_ends(kit, repo, "worker") == Reply()
-
-
 def test_an_importers_state_an_earlier_judge_stored_reads_as_no_ones(
     kit: Kit, repo: Path
 ) -> None:

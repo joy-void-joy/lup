@@ -45,10 +45,9 @@ import shutil
 from abc import ABC, abstractmethod
 from functools import cached_property
 from pathlib import Path
-from typing import Annotated, Literal, override
+from typing import Literal, override
 
 from filelock import FileLock
-from pydantic import BeforeValidator, JsonValue
 
 from lup.types import Model, MutableModel
 from lup_dev.clock import Clock
@@ -170,22 +169,7 @@ class Mail(Model):
     text: str
 
 
-def as_own(stored: JsonValue) -> JsonValue:
-    """Read a record's list, kept for the whole session, as its own conversation's.
-
-    A record an earlier judge stored keeps one list where this one keeps a list
-    for each conversation. Its turn's end was the session's own conversation's, so
-    the list reads as that conversation's: the conservative reading, which still
-    holds the session's end on what it held before (#41).
-    """
-    match stored:
-        case list():
-            return {"": stored}
-        case _:
-            return stored
-
-
-type ByConversation[T] = Annotated[dict[str, list[T]], BeforeValidator(as_own)]
+type ByConversation[T] = dict[str, list[T]]
 """Kept for each conversation of a session: `""` for its own, a subagent's id else."""
 
 
