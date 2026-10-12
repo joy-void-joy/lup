@@ -7,7 +7,8 @@ The homes (`docs/judging-writes.md`, *Where things live*):
 - each worktree engine's socket, under `$XDG_RUNTIME_DIR/lup/`, since a socket's
   path is limited in length;
 - inside a worktree, `.lup/saved/`, where a refused version waits for the agent,
-  and `.lup/review/<n>/`, where a review keeps its files while it waits;
+  `.lup/drafts/`, where a change waits to be submitted for review, and
+  `.lup/review/<n>/`, where a review keeps its files while it waits;
 - inside `lup_dev`, the built engine (`Bundle`).
 """
 
@@ -138,6 +139,23 @@ class StoreLayout(Model):
         return self.home / "parked.lock"
 
     @property
+    def drafts(self) -> Path:
+        """What lup knows of the worktree's drafts: each one's file, base and author.
+
+        Kept under the store's lock (`lock`), which a checkpoint holds too.
+        """
+        return self.home / "drafts.json"
+
+    @property
+    def submissions(self) -> Path:
+        """Every review submitted from the worktree, by number, with how it stands.
+
+        Kept under the store's lock (`lock`), since an approval is carried out
+        under it.
+        """
+        return self.home / "submissions.json"
+
+    @property
     def keeper(self) -> Path:
         """The lock the running keeper holds for its whole life, which the OS frees."""
         return self.home / "keeper.lock"
@@ -181,6 +199,15 @@ class ReviewLayout(Model):
         """
         return self.home / "before"
 
+    @property
+    def submitted(self) -> Path:
+        """Each file's version as submitted, at its path below, until it's applied.
+
+        A line comment on the after side counts lines in this version, which the
+        file's draft may have moved on from.
+        """
+        return self.home / "submitted"
+
 
 class CheckoutLayout(Model):
     """The places inside a worktree that lup reads or writes."""
@@ -206,6 +233,15 @@ class CheckoutLayout(Model):
     def saved(self) -> Path:
         """Where refused versions are saved, one numbered directory per refusal."""
         return self.home / "saved"
+
+    @property
+    def drafts(self) -> Path:
+        """Where each draft is written, at its file's path below, escaped.
+
+        Git ignores it, so no snapshot, commit or test sees a draft, and the
+        agent's file tools and its shell reach it.
+        """
+        return self.home / "drafts"
 
     @property
     def rules_reference(self) -> Path:
