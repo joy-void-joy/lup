@@ -463,6 +463,8 @@ def test_a_name_from_two_modules_is_refused_naming_both() -> None:
     with pytest.raises(ProjectError, match=r"`ruff` from `python` and `linting`"):
         resolve(Project(modules=Modules.default().add(Linting())))
 
+
+def test_two_modules_exempting_one_rule_each_keep_theirs() -> None:
     class Lifting(Module):
         """Lifting a rule."""
 
@@ -477,8 +479,11 @@ def test_a_name_from_two_modules_is_refused_naming_both() -> None:
             exempt=Exemptions().add(Exemption(rule="regex", paths=["a/**"], why="a"))
         )
     )
-    with pytest.raises(ProjectError, match=r"`regex` from `code-rules` and `lifting`"):
-        resolve(Project(modules=modules.add(Lifting())))
+    resolved = resolve(Project(modules=modules.add(Lifting())))
+    assert [(each.rule, each.paths) for each in resolved.exempt] == [
+        ("regex", ["a/**"]),
+        ("regex", ["b/**"]),
+    ]
 
 
 def test_core_is_required() -> None:

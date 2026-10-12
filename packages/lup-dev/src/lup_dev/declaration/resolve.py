@@ -6,7 +6,8 @@ hold it, by the kind's type (`docs/declaration.md`, *What a module is*):
   without a cycle; lup never adds or drops a module behind the project's back;
 - names are per kind and shared across modules, so one name from two modules
   fails, naming both, but for a path pattern, which from two modules is one
-  pattern, and a requirement, which is checked for each module needing it;
+  pattern, a requirement, which is checked for each module needing it, and an
+  exemption, which each module keeps for its own paths;
 - entries placed `before=` or `after=` another go there, whichever module holds
   it, and the rest keep the order of their modules;
 - the runner comes from the one module holding one, `Plain()` where none does.
@@ -130,8 +131,14 @@ def distinct(label: str, owned: list[Owned]) -> None:
         raise ProjectError(message)
 
 
-def held[E](kind: Named[E], found: list[Part[Named[E]]], label: str) -> list[E]:
-    """Resolve each module's selection of a kind, check its names, and order it."""
+def held[E](
+    kind: Named[E], found: list[Part[Named[E]]], label: str, *, shared: bool = True
+) -> list[E]:
+    """Resolve each module's selection of a kind, check its names, and order it.
+
+    With `shared`, a name is shared across modules, so one from two modules fails;
+    without, each module's entries stand beside the others', as an exemption's do.
+    """
 
     def own(part: Part[Named[E]]) -> list[E]:
         if part.default is None:
@@ -139,14 +146,15 @@ def held[E](kind: Named[E], found: list[Part[Named[E]]], label: str) -> list[E]:
         return [each.entry for each in part.default.resolve([], [])]
 
     resolved = [part.value.resolve(own(part), own(part)) for part in found]
-    distinct(
-        label,
-        [
-            Owned(module=part.module, name=kind.named(each.entry))
-            for part, placed in zip(found, resolved, strict=True)
-            for each in placed
-        ],
-    )
+    if shared:
+        distinct(
+            label,
+            [
+                Owned(module=part.module, name=kind.named(each.entry))
+                for part, placed in zip(found, resolved, strict=True)
+                for each in placed
+            ],
+        )
     return kind.ordered([each for placed in resolved for each in placed])
 
 
@@ -233,7 +241,9 @@ def resolve(project: Project) -> Resolved:
             Selected(module=part.module, rules=part.value)
             for part in parts(modules, Rules)
         ],
-        exempt=held(Exemptions(), parts(modules, Exemptions), "Exemptions"),
+        exempt=held(
+            Exemptions(), parts(modules, Exemptions), "Exemptions", shared=False
+        ),
         tests=held(TestRoots(), parts(modules, TestRoots), "Test roots"),
         conditions=[
             module.conditions for module in modules if module.conditions is not None
