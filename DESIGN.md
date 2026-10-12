@@ -180,7 +180,7 @@ One command, judged by its exit code: lup's rules, ruff, the formatter, pyright,
 
 - **Codex is a peer.** A shared construct is done when it works on Claude Code and on Codex, shown by their tests, or when the runtime that can't do it declares the gap with evidence. Everything above the runtime contract is shared, so features are on both runtimes by construction.
 - **What lup needs from a runtime is small:** launching in a container with lup's tools and guidance; one hook that holds a call and delivers waiting messages; a transcript reader for telemetry and cost; optionally, an interrupt.
-- **Capabilities are declared per runtime,** and a short real session checks them whenever an installed CLI's version changes, cached per version. A feature needing a missing capability is unavailable on that runtime, and the launch and the docs say so. A guarantee is checked against what the runtime can actually do: Codex's code-mode models keep the no-tools guarantee if their `exec` can reach no shell, files, network or agents.
+- **Capabilities are declared per runtime,** and a short real session checks them whenever an installed CLI's version changes, cached per version. A feature needing a missing capability is unavailable on that runtime, and the launch and the docs say so. A guarantee is checked against what the runtime can actually do: Codex's code-mode models keep the no-tools guarantee: their `exec` reaches no shell, files, network or agents (checked on 0.162; `docs/field-notes.md`), and the check is owed again on each version.
 
 ### Calling agents from code
 
@@ -243,7 +243,6 @@ The operator's to decide; the agent's lean where it has one.
 - Can a Codex hook hold an `apply_patch` that builds on an unapproved design?
 - Does the CLI run inside a container while the SDK and lup's in-process tools stay on the host, over the container's standard input and output?
 - Does resuming an SDK session work on Claude Code's current version?
-- Can Codex's code-mode `exec` reach a shell, files, the network or agents?
 - Is the cache keepalive flag on for a subscription account? Does a dated Arch Linux Archive mirror hold against `pacman -Sy` in the image? How light can the REPL be?
 - If the write layer is pursued: a frozen snapshot with a hardlinked environment, the host's view keeping `.git` and editor configs out of reach until review, git inside it, and what merging a layer back costs.
 

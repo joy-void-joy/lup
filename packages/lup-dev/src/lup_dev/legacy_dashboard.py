@@ -662,16 +662,17 @@ class LegacyQueue(Queue, Model, arbitrary_types_allowed=True):
     """The reviews an agent submits from one worktree, parked in the first lup's dashboard.
 
     Each is one `Propose`, its before side exported under the review's directory in
-    the worktree (`ReviewLayout.before`, decision 19 of `docs/review-flow.md`). The
-    worktree's store records what's parked (`StoreLayout.parked`): what parks each
-    review, the ids the dashboard gave it, and whether an agent froze on it.
+    the worktree (`ReviewLayout.before`; `docs/review-flow.md`, *The first lup's
+    dashboard*). The worktree's store records what's parked (`StoreLayout.parked`):
+    what parks each review, the ids the dashboard gave it, and whether an agent froze
+    on it.
 
     The operator is told once (*Told once, never re-told*): a desktop notice when a
     review is first parked, and a reply in its thread with a notice when an agent
-    first freezes on it (decision 27). The dashboard expires a review an hour after
-    it's parked, so parking starts the worktree's keeper unless one runs, which
-    parks each expired review again, silently, until nothing waits (`keep`,
-    decision 20).
+    first freezes on it. The dashboard expires a review an hour after it's parked,
+    so parking starts the worktree's keeper unless one runs, which parks each
+    expired review again, silently, until nothing waits (`keep`; both in
+    `docs/review-flow.md`, *`LegacyQueue`*).
     """
 
     worktree: Path
@@ -865,7 +866,8 @@ class LegacyQueue(Queue, Model, arbitrary_types_allowed=True):
     def spend(self, number: int) -> None:
         """Spend review `number`'s approval through the host, then let it go.
 
-        The dashboard shows it carried out (`docs/judging-writes.md`, decision 110).
+        The dashboard shows it carried out (`docs/judging-writes.md`, *Where things
+        live*).
         A review not approved refuses, and nothing is parked.
         """
         host = self.loaded()

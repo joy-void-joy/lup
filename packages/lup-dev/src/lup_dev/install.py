@@ -4,7 +4,7 @@ The judge that runs is a copy installed from a checkout of lup (`uv tool install
 never a worktree's own source, so an agent's edit can't change what judges it
 (`docs/judging-writes.md`, *Where things live*). Refreshing the copy shows the
 operator every file it carries that changed since the commit they last approved,
-and until they approve, the copy installed before keeps judging (decision 26):
+and until they approve, the copy installed before keeps judging:
 1. refuse inside an agent's session, and refuse a checkout whose judge source has
    changes not committed, since the copy would carry what the review didn't show;
 2. list the files the judge carries that changed since the commit approved last,
