@@ -5,6 +5,11 @@ files importing them are re-checked for type errors in the background, and their
 errors arrive at the next checkpoint (`docs/judging-writes.md`, *The engine*,
 question 5). One pass at a time per worktree, and the turn's end waits for it, so
 no type error surfaces after the session.
+
+Each request names the conversations that wrote what changed, and what the pass
+finds comes back with them, so a conversation's end holds only on what its own
+changes broke (#41). The pass re-checks what's pending as one batch, so what it
+finds goes to every conversation that wrote into that batch.
 """
 
 import sys
@@ -55,13 +60,32 @@ class BackgroundSpawner(Spawner, Model):
         )
 
 
+class Conversation(Model):
+    """One conversation of a session, which wrote what the pass re-checks."""
+
+    session: str
+    agent: str
+    """Empty for the session's own conversation, else a subagent's id."""
+
+
+class Found(Model):
+    """What the pass found since the last collection, and whose changes it re-checked."""
+
+    reports: list[FileReport] = []
+    writers: list[Conversation] = []
+
+
 class ImportersState(MutableModel):
     """What the background importers pass has left to do, and what it found."""
 
     pending: list[Path] = []
     """Files changed since the pass took its last batch."""
+    pending_writers: list[Conversation] = []
+    """The conversations that wrote them."""
     found: list[FileReport] = []
     """What the pass found, waiting for the next checkpoint."""
+    found_writers: list[Conversation] = []
+    """The conversations that wrote what the pass re-checked to find it."""
 
 
 class ImportersPass(Model):
@@ -100,8 +124,10 @@ class ImportersPass(Model):
         probe.release()
         return False
 
-    def request(self, changed: list[Path], spawner: Spawner) -> None:
-        """Ask for the files importing `changed` to be re-checked.
+    def request(
+        self, changed: list[Path], writers: list[Conversation], spawner: Spawner
+    ) -> None:
+        """Ask for the files importing `changed`, which `writers` wrote, to be re-checked.
 
         Starts a pass unless one runs; one that runs takes these next.
         """
@@ -110,6 +136,9 @@ class ImportersPass(Model):
         with self.guard():
             state = self.state()
             state.pending = list(dict.fromkeys([*state.pending, *changed]))
+            state.pending_writers = list(
+                dict.fromkeys([*state.pending_writers, *writers])
+            )
             write_model(self.layout.importers, state)
             if self.running():
                 return
@@ -134,24 +163,28 @@ class ImportersPass(Model):
         with self.guard():
             state = self.state()
             batch = state.pending
+            writers = state.pending_writers
             if not batch:
                 runner.release()
                 return False
             state.pending = []
+            state.pending_writers = []
             write_model(self.layout.importers, state)
         found = checker.importers(self.root, batch)
         with self.guard():
             state = self.state()
             state.found = [*state.found, *found]
+            state.found_writers = list(dict.fromkeys([*state.found_writers, *writers]))
             write_model(self.layout.importers, state)
         return True
 
-    def collect(self) -> list[FileReport]:
-        """Take what the pass found since the last collection."""
+    def collect(self) -> Found:
+        """Take what the pass found since the last collection, with its writers."""
         with self.guard():
             state = self.state()
-            found = state.found
+            found = Found(reports=state.found, writers=state.found_writers)
             state.found = []
+            state.found_writers = []
             write_model(self.layout.importers, state)
         return found
 

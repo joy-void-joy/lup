@@ -10,11 +10,12 @@
 
 Claude Code asks the operator in its own prompt: `PreToolUse` answers `allow`, `ask`
 or `deny`, and a hook's `ask` prompts in auto mode too. The agent hears a
-checkpoint's report as `additionalContext` beside the call's result, and the turn
-can't end while a `Stop` hook answers `decision: block`; `stop_hook_active` says a
-turn's end follows such a block. When judging itself fails at a turn's end, the
-turn ends, and the operator is warned once in `systemMessage`, which also carries
-what a turn's end tells without holding it.
+checkpoint's report as `additionalContext` beside the call's result, and a turn,
+the session's or a subagent's, can't end while a `Stop` or `SubagentStop` hook
+answers `decision: block`; `stop_hook_active` says a turn's end follows such a
+block. When judging itself fails at a turn's end, the turn ends, and the operator
+is warned once in `systemMessage`, which also carries what a turn's end tells
+without holding it.
 
 What this relies on, from Claude Code's hooks reference
 (code.claude.com/docs/en/hooks):
@@ -30,7 +31,8 @@ What this relies on, from Claude Code's hooks reference
   subagent call", beside its session's `session_id` (seen in #32), and
   `SubagentStop` "Runs when a Claude Code subagent has finished responding";
 - `Stop`'s `stop_hook_active` "is `true` when Claude Code is already continuing as
-  a result of a stop hook".
+  a result of a stop hook"; `SubagentStop`'s input carries `stop_hook_active` too,
+  and it takes "the same decision control format as Stop hooks".
 """
 
 from abc import ABC, abstractmethod
@@ -346,21 +348,39 @@ class Stop(Payload):
 
 
 class SubagentStop(Payload):
-    """`SubagentStop`: a subagent's conversation ends."""
+    """`SubagentStop`: a subagent's conversation ends its turn.
+
+    The hooks reference: it takes "the same decision control format as Stop
+    hooks", and a block "keeps the subagent running and delivers `reason` to the
+    subagent as its next instruction"; its input carries `stop_hook_active`.
+    """
 
     hook_event_name: Literal["SubagentStop"]
+    stop_hook_active: bool = False
+    """Whether its turn goes on because a `SubagentStop` hook blocked it already."""
 
     @override
     def answer(self, bench: Bench) -> Output | None:
         ended = ConversationEnded(
-            session=self.session_id, agent=self.agent_id, cwd=self.cwd
+            session=self.session_id,
+            agent=self.agent_id,
+            cwd=self.cwd,
+            after_block=self.stop_hook_active,
         )
         reply = ended.apply(bench)
-        return Blocked(reason=reply.block) if reply.block else None
+        if reply.block:
+            return Blocked(reason=reply.block)
+        if reply.note:
+            return OperatorWarning(system_message=reply.note)
+        return None
 
     @override
     def failed(self, bench: Bench, failure: Exception) -> Output | None:
-        return None
+        """Let the subagent's turn end, and warn the operator once, as `Stop` does."""
+        warning = judge_failed(failure)
+        if not first_warning(bench.services.layout, self.session_id, warning):
+            return None
+        return OperatorWarning(system_message=warning)
 
 
 type Received = Annotated[

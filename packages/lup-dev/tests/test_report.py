@@ -167,7 +167,9 @@ def test_what_doesnt_hold_the_turns_end() -> None:
     left = [found(at(2, 5), "reportCallIssue", "wrong arguments", owner="pyright")]
     assert unheld([], "working") == ""
     working = unheld(left, "working")
-    assert working.startswith("A subagent of this session is at work")
+    assert working.startswith(
+        "A subagent of this session at work touched these files too"
+    )
     assert working.endswith(
         "  /work/lup/src/lup/claude.py:2:5 - reportCallIssue: wrong arguments"
     )

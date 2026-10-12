@@ -290,13 +290,13 @@ def moved(moves: list[Moved]) -> str:
 
 
 def turn_end(findings: list[Finding]) -> str:
-    """Say why the turn can't end: what's still wrong in the files touched."""
+    """Say why the turn can't end: what's still wrong in the files it touched."""
     if not findings:
         return ""
     return "\n".join(
         [
             (
-                "lup won't end the turn yet: files touched this session have "
+                "lup won't end the turn yet: files this conversation touched have "
                 "type errors or ruff findings."
             ),
             *(line for found in findings for line in finding_lines(found)),
@@ -312,8 +312,8 @@ def turn_end(findings: list[Finding]) -> str:
 def unheld(findings: list[Finding], why: Literal["working", "repeated"]) -> str:
     """Tell what's left in the files touched where it doesn't hold the turn's end.
 
-    It doesn't while a subagent of the session is `working`, whose files may be in
-    progress, nor when the turn's end held on the same findings just before
+    It doesn't in a file a subagent at work touched too (`working`), which may be
+    its in progress, nor when the turn's end held on the same findings just before
     (`repeated`), which the agent didn't fix.
     """
     if not findings:
@@ -321,15 +321,15 @@ def unheld(findings: list[Finding], why: Literal["working", "repeated"]) -> str:
     match why:
         case "working":
             header = (
-                "A subagent of this session is at work, so lup doesn't hold the "
-                "turn's end on what's left in files touched this session "
-                "(information; it holds the turn's end once no subagent is at work):"
+                "A subagent of this session at work touched these files too, so "
+                "lup doesn't hold the turn's end on what's left in them "
+                "(information; it holds once no subagent touching them is at work):"
             )
         case "repeated":
             header = (
                 "lup held the turn's end on these just before, and doesn't again. "
-                "Left in files touched this session (information; they fail the "
-                "gate until fixed):"
+                "Left in files this conversation touched (information; they fail "
+                "the gate until fixed):"
             )
     return "\n".join(
         [header, *(line for found in findings for line in finding_lines(found))]
