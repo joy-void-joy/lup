@@ -26,15 +26,18 @@ if TYPE_CHECKING:
 
 
 class Spawner(ABC):
-    """Starts the background importers pass of a worktree."""
+    """Starts a worktree's background pass: the importers pass, or the keeper."""
 
     @abstractmethod
     def spawn(self, worktree: Path, log: Path) -> None:
         """Start the pass for the worktree at `worktree`, printing to `log`."""
 
 
-class BackgroundSpawner(Spawner):
-    """Starts the pass as its own process, detached from the hook that asks for it."""
+class BackgroundSpawner(Spawner, Model):
+    """Starts the pass as its own process, detached from the process that asks for it."""
+
+    command: list[str] = ["importers"]
+    """The hidden `lup-dev` command that runs the pass, given the worktree."""
 
     @override
     def spawn(self, worktree: Path, log: Path) -> None:
@@ -42,7 +45,7 @@ class BackgroundSpawner(Spawner):
         sh.Command(sys.executable)(
             "-m",
             "lup_dev.cli",
-            "importers",
+            *self.command,
             str(worktree),
             _bg=True,
             _bg_exc=False,
