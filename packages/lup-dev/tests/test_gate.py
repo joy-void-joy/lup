@@ -2,6 +2,7 @@
 
 import os
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -12,7 +13,7 @@ from lup_dev.catalog.gate import Gate, Step
 from lup_dev.gate import Check, Fixes, Outcome, Ran, Runner, Shell, failed, report
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from conftest import Kit
 
 
 class Scripted(Runner):
@@ -132,16 +133,120 @@ def test_a_command_not_installed_fails_its_step(tmp_path: Path) -> None:
     assert "isn't installed" in ran.output
 
 
-def test_the_catalogs_gate_runs_the_engine_then_the_tools() -> None:
-    assert [step.name for step in Gate().steps] == [
+def test_the_catalogs_gate_runs_the_engine_then_lups_rules_then_the_tools() -> None:
+    commands = {step.name: step.command for step in Gate().steps}
+    assert list(commands) == [
         "engine",
+        "rules",
         "ruff",
         "format",
         "pyright",
         "pytest",
         "lint-imports",
     ]
-    assert Gate().steps[1].command == ["uv", "run", "ruff", "check", "--ignore-noqa"]
+    assert commands["rules"] == ["uv", "run", "lup-dev", "rules", "check"]
+    assert commands["ruff"] == ["uv", "run", "ruff", "check", "--ignore-noqa"]
+
+
+class InProcess(Runner):
+    """Runs `uv run lup-dev …` in this process, on the fakes; the rest pass."""
+
+    def __init__(self) -> None:
+        self.ran: list[list[str]] = []
+
+    def run(self, command: list[str], cwd: Path) -> Ran:
+        self.ran.append(command)
+        match command:
+            case ["uv", "run", "lup-dev", *arguments]:
+                with pytest.MonkeyPatch.context() as patch:
+                    patch.chdir(cwd)
+                    result = CliRunner().invoke(cli.app, arguments)
+                if result.exception is not None and not isinstance(
+                    result.exception, SystemExit
+                ):
+                    raise result.exception
+                return Ran(code=result.exit_code, output=result.output)
+            case _:
+                return Ran(code=0, output="")
+
+
+def rules_step(root: Path) -> tuple[Outcome, list[Outcome]]:
+    """Run the catalog's whole gate over `root`; its `rules` step, and every step."""
+    outcomes = Check(root=root, runner=InProcess()).run()
+    [rules] = [outcome for outcome in outcomes if outcome.step == "rules"]
+    return rules, outcomes
+
+
+def test_the_gate_fails_on_lups_findings_listing_each_with_its_steer(
+    fakes: Kit, repo: Path
+) -> None:
+    (repo / "src" / "pkg" / "core.py").write_text(
+        "x = 1  # BAD regex\ny = (1, 2)  # BAD tuple-shape\n"
+    )
+    rules, outcomes = rules_step(repo)
+    assert rules.result == "failed"
+    assert rules.code == 1
+    assert rules.output.splitlines() == [
+        "src/pkg/core.py:1:8 - regex: regex fires here",
+        "    steer: do it the other way",
+        "src/pkg/core.py:2:13 - tuple-shape: tuple-shape fires here",
+        "    steer: do it the other way",
+        "lup checked 3 files: 2 findings.",
+    ]
+    assert failed(outcomes) == ["rules"]
+    assert report(outcomes).endswith("The gate failed: rules.")
+
+
+def test_the_gate_passes_a_worktree_without_findings(fakes: Kit, repo: Path) -> None:
+    rules, outcomes = rules_step(repo)
+    assert rules.result == "passed"
+    assert rules.output == "lup checked 3 files: 0 findings.\n"
+    assert failed(outcomes) == []
+
+
+def test_the_gates_rules_leave_tests_scratch_and_excluded_paths_out(
+    fakes: Kit, repo: Path
+) -> None:
+    (repo / "src" / "decl_gate").mkdir()
+    (repo / "src" / "decl_gate" / "__init__.py").write_text("")
+    (repo / "src" / "decl_gate" / "lup_project.py").write_text(
+        "from lup_dev.project import Project\n"
+        'project = Project(excluded=["vendor/**"])\n'
+    )
+    (repo / "pyproject.toml").write_text(
+        '[tool.lup]\nproject = "decl_gate.lup_project:project"\n'
+        '[tool.pytest]\ntestpaths = ["tests", "src"]\n'
+    )
+    for written in ["vendor/lib.py", "tmp/try.py", "tests/test_core.py"]:
+        (repo / written).parent.mkdir(exist_ok=True)
+        (repo / written).write_text("x = 1  # BAD regex\n")
+    rules, _ = rules_step(repo)
+    assert rules.result == "passed"
+    sent = {source.path for batch in fakes.engine.checked for source in batch}
+    assert Path("tests/test_core.py") in sent
+    assert Path("vendor/lib.py") not in sent
+    assert Path("tmp/try.py") not in sent
+
+
+def test_lup_dev_check_fix_runs_the_fixes_then_the_whole_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner = Scripted({})
+
+    def shell() -> Runner:
+        return runner
+
+    def toplevel(_: Path) -> Path:
+        return tmp_path
+
+    monkeypatch.setattr(cli, "Shell", shell)
+    monkeypatch.setattr(cli, "toplevel", toplevel)
+    result = CliRunner().invoke(cli.app, ["check", "--fix"])
+    assert result.exit_code == 0
+    assert runner.ran == [
+        *(step.command for step in Fixes().steps),
+        *(step.command for step in Gate().steps),
+    ]
 
 
 def test_the_fixes_run_before_the_gate_and_count_like_its_steps(

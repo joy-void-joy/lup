@@ -44,7 +44,7 @@ from lup_dev.policy.importers import BackgroundSpawner
 from lup_dev.policy.judge import finding
 from lup_dev.policy.report import finding_lines
 from lup_dev.policy.runtime import Runtime
-from lup_dev.policy.store import Git
+from lup_dev.policy.store import Git, nul_separated
 from lup_dev.policy.submissions import (
     AllReviews,
     AnyReview,
@@ -154,14 +154,17 @@ def rules_docs() -> None:
 @rules.command("check")
 def rules_check(
     paths: Annotated[
-        list[Path] | None, typer.Argument(help="Files to check; every Python file.")
+        list[Path] | None,
+        typer.Argument(help="Files to check; every file the roles check, by default."),
     ] = None,
 ) -> None:
     """Check files as the gate does: lup's rules, pyright, ruff and the deferrals.
 
     `# lup: ignore` applies to every owner's findings. A deferral whose issue is
     closed, or whose condition holds, fails the check. lup's rules read production
-    and protected modules; tests are checked by pyright and ruff only.
+    and protected modules; tests are checked by pyright and ruff only; what the
+    declaration excludes isn't checked. With no paths, it checks every such file
+    in the worktree, as the gate's `rules` step runs it.
     """
     root = toplevel(Path.cwd())
     layout = Layout.of(LupDevSettings())
@@ -172,9 +175,12 @@ def rules_check(
     ]
     listed = chosen or [
         Path(name)
-        for name in Git(cwd=root)
-        .text("ls-files", "--cached", "--others", "--exclude-standard")
-        .splitlines()
+        for name in nul_separated(
+            Git(cwd=root)
+            .run("ls-files", "-z", "--cached", "--others", "--exclude-standard")
+            .stdout
+        )
+        if (root / name).is_file()
     ]
     checked = [path for path in listed if worktree.roles.checked(path)]
     if not checked:
@@ -296,11 +302,12 @@ def check(
 ) -> None:
     """Run the gate, every step even after one fails, and fail if any did.
 
-    A stale engine is rebuilt, then ruff, the formatter, pyright, pytest and the
-    import contracts run. Each step's outcome is reported, then each failure's
-    output in full; the exit code is non-zero when any step failed. With `--fix`,
-    which the session landing work runs on the merged result, ruff's safe fixes
-    and the formatter rewrite the worktree first.
+    A stale engine is rebuilt, then lup's rules (`rules check`), ruff, the
+    formatter, pyright, pytest and the import contracts run. Each step's outcome
+    is reported, then each failure's output in full; the exit code is non-zero
+    when any step failed. With `--fix`, which the session landing work runs on
+    the merged result, ruff's safe fixes and the formatter rewrite the worktree
+    first.
     """
     outcomes = Check(
         root=toplevel(Path.cwd()),

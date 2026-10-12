@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Literal
 import pytest
 import sh
 
+from lup_dev import cli
 from lup_dev.clock import Clock
 from lup_dev.codescan.contract import (
     Checker,
@@ -431,3 +432,32 @@ def kit(tmp_path: Path) -> Kit:
 def holding_kit(tmp_path: Path) -> Kit:
     """A bench for a runtime that can't ask before a call, so it holds."""
     return Kit(tmp_path / "state", FakeRuntime("holding", asks_before=False))
+
+
+@pytest.fixture
+def state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Layout:
+    """lup's state under `tmp_path`, outside any runtime's session."""
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg"))
+    monkeypatch.delenv("CLAUDE_CODE_CHILD_SESSION", raising=False)
+    monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
+    return Layout(state=tmp_path / "xdg" / "lup")
+
+
+@pytest.fixture
+def fakes(kit: Kit, state: Layout, monkeypatch: pytest.MonkeyPatch) -> Kit:
+    """The `lup-dev` command, its engine, ruff and services the kit's fakes."""
+    services = kit.bench.services.model_copy(update={"layout": state})
+
+    def engine() -> Checker:
+        return kit.engine
+
+    def linter() -> Linter:
+        return kit.linter
+
+    def configured() -> Services:
+        return services
+
+    monkeypatch.setattr(cli, "engine", engine)
+    monkeypatch.setattr(cli, "Ruff", linter)
+    monkeypatch.setattr(cli, "services", configured)
+    return kit
