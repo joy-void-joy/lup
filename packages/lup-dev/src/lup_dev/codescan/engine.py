@@ -6,6 +6,11 @@ processes, so each finds the worktree's engine on its socket, starts it if none
 answers, asks one question, and leaves it running for the next. An engine stops on
 its own once unasked for a while, and stops at once for a client that expects
 another build, so a rebuilt engine replaces the old one at the next request.
+
+An engine is started with the project's runner's command for Python, which it runs
+to name the worktree's interpreter, and the files deciding the environment, which
+it watches (`EngineEnvironment`). Every request carries them too, so an engine
+started with another runner is replaced as one from another build is.
 """
 
 import json
@@ -19,6 +24,7 @@ from tenacity import Retrying, retry_if_exception_type, stop_after_attempt
 
 from lup.types import Model
 from lup_dev.codescan.contract import Checker, FileReport, Rule, Source
+from lup_dev.declaration.runner import Runner, Uv
 from lup_dev.errors import LupDevError
 from lup_dev.layout import Bundle, Layout
 
@@ -37,7 +43,24 @@ class EngineMissingError(EngineError):
 
 
 class EngineGoneError(EngineError):
-    """The engine stopped before it answered: idle, or from another build."""
+    """The engine stopped before it answered: idle, or from another build or runner."""
+
+
+class EngineEnvironment(Model):
+    """How the engine finds the worktree's environment, from the project's runner."""
+
+    interpreter: list[str]
+    """The command running the environment's Python, `Runner.judging(["python"])`:
+    the engine runs it to name the interpreter."""
+    files: list[str]
+    """The files, from the root, whose change means another environment: the
+    engine stamps them with pyright's own configuration, and builds another
+    program when one changes."""
+
+    @classmethod
+    def of(cls, runner: Runner) -> EngineEnvironment:
+        """Return the environment `runner` gives the engine."""
+        return cls(interpreter=runner.judging(["python"]), files=runner.environment())
 
 
 class EngineSource(Model):
@@ -52,6 +75,7 @@ class CheckRequest(Model):
 
     op: Literal["check"] = "check"
     build: str
+    environment: EngineEnvironment
     root: str
     rules: list[str] | None
     """The rules to run, by id; none runs every rule the engine has."""
@@ -63,15 +87,17 @@ class ImportersRequest(Model):
 
     op: Literal["importers"] = "importers"
     build: str
+    environment: EngineEnvironment
     root: str
     changed: list[str]
 
 
 class PlainRequest(Model):
-    """A request carrying nothing but what it asks: `status` or `stop`."""
+    """A request asking `status` or `stop`, with what every request carries."""
 
     op: Literal["status", "stop"]
     build: str
+    environment: EngineEnvironment
 
 
 class EngineStatus(Model):
@@ -110,6 +136,9 @@ class EngineChecker(Model, Checker):
     bundle: Bundle = Bundle()
     node: str = "node"
     """The Node executable that runs the engine."""
+    runner: Runner = Uv()
+    """How the project runs its tools: the engine names the worktree's interpreter
+    with the runner's command for Python, and watches its environment's files."""
     timeout: timedelta = timedelta(minutes=10)
     """How long to wait for one answer, a whole project's first check included."""
 
@@ -139,6 +168,15 @@ class EngineChecker(Model, Checker):
         stat = self.script().stat()
         return f"{stat.st_size}-{stat.st_mtime_ns}"
 
+    @property
+    def environment(self) -> EngineEnvironment:
+        """How the engine finds the worktree's environment, from the runner.
+
+        An engine started with another is told apart and replaced, as one from
+        another build is.
+        """
+        return EngineEnvironment.of(self.runner)
+
     def rules(self) -> list[Rule]:
         """List the engine's rules, read from its table without loading a project."""
         listed = self.run_engine("rules")
@@ -148,6 +186,7 @@ class EngineChecker(Model, Checker):
         """Check files with the selected rules; the engine refuses one it lacks."""
         request = CheckRequest(
             build=self.build,
+            environment=self.environment,
             root=str(root),
             rules=self.selected,
             sources=[
@@ -160,13 +199,20 @@ class EngineChecker(Model, Checker):
     def importers(self, root: Path, changed: list[Path]) -> list[FileReport]:
         """Re-check, for type errors, the files importing any of `changed`."""
         request = ImportersRequest(
-            build=self.build, root=str(root), changed=[str(path) for path in changed]
+            build=self.build,
+            environment=self.environment,
+            root=str(root),
+            changed=[str(path) for path in changed],
         )
         return self.reports(self.ask(root, request))
 
+    def plain(self, op: Literal["status", "stop"]) -> PlainRequest:
+        """Return a request asking `op` and nothing more."""
+        return PlainRequest(op=op, build=self.build, environment=self.environment)
+
     def status(self, root: Path) -> EngineStatus:
         """Ask the worktree's engine about itself, starting it if none runs."""
-        answer = self.ask(root, PlainRequest(op="status", build=self.build))
+        answer = self.ask(root, self.plain("status"))
         if answer.status is None:
             message = "the engine answered `status` without one"
             raise EngineError(message)
@@ -176,7 +222,7 @@ class EngineChecker(Model, Checker):
         """Stop the worktree's engine, if one runs."""
         path = self.layout.engine_socket(root)
         try:
-            self.exchange(path, PlainRequest(op="stop", build=self.build))
+            self.exchange(path, self.plain("stop"))
         except FileNotFoundError, ConnectionRefusedError, EngineGoneError:
             return
 
@@ -190,8 +236,8 @@ class EngineChecker(Model, Checker):
     def ask(self, root: Path, request: Model) -> Answer:
         """Ask the worktree's engine, starting it first if none answers.
 
-        An engine that stops while asked (idle, or from another build) is started
-        again, and asked once more.
+        An engine that stops while asked (idle, or from another build or runner)
+        is started again, and asked once more.
         """
         path = self.layout.engine_socket(root)
         for attempt in Retrying(
@@ -215,10 +261,13 @@ class EngineChecker(Model, Checker):
         """Start the worktree's engine, unless another client just did.
 
         Starting is done under a lock, so hooks running at once start one engine.
+        The runner's command for Python and its environment's files go as JSON
+        lists.
         """
         path = self.layout.engine_socket(root)
         store = self.layout.store(root)
         store.home.mkdir(parents=True, exist_ok=True)
+        environment = self.environment
         with FileLock(store.engine_lock):
             if answers(path):
                 return
@@ -230,6 +279,10 @@ class EngineChecker(Model, Checker):
                 str(path),
                 "--idle-seconds",
                 str(self.idle.total_seconds()),
+                "--interpreter",
+                json.dumps(environment.interpreter),
+                "--environment-files",
+                json.dumps(environment.files),
                 "--log",
                 str(store.engine_log),
             )
@@ -262,7 +315,10 @@ class EngineChecker(Model, Checker):
             raise EngineGoneError(message)
         answer = Answer.model_validate_json(line)
         if answer.stale:
-            message = f"the engine is from another build than {self.build}"
+            message = (
+                f"the engine is from another build than {self.build}, or was "
+                "started with another runner"
+            )
             raise EngineGoneError(message)
         return answer
 

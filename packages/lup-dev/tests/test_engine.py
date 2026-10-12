@@ -14,7 +14,7 @@ import tempfile
 import threading
 from datetime import timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import pytest
 import sh
@@ -22,6 +22,7 @@ import sh
 from lup_dev.codescan.contract import FileReport, Rule, Source
 from lup_dev.codescan.directives import Defer, Ignore, Malformed, Note
 from lup_dev.codescan.engine import EngineChecker, EngineError
+from lup_dev.declaration.runner import Plain, Runner
 from lup_dev.layout import Bundle, Layout
 
 if TYPE_CHECKING:
@@ -41,13 +42,18 @@ reportUnusedVariable = "warning"
 
 
 def engine_for(
-    runtime: Path, state: Path, bundle: Bundle | None = None
+    runtime: Path,
+    state: Path,
+    bundle: Bundle | None = None,
+    runner: Runner | None = None,
 ) -> EngineChecker:
-    return EngineChecker(
+    """An engine for tests, through uv unless given another runner."""
+    engine = EngineChecker(
         layout=Layout(state=state, runtime=runtime),
         idle=timedelta(minutes=5),
         bundle=bundle or Bundle(),
     )
+    return engine if runner is None else engine.model_copy(update={"runner": runner})
 
 
 class Project:
@@ -475,9 +481,76 @@ def test_where_uv_gives_no_environment_the_engine_says_why(
     engine = engine_for(short / "unlocked", tmp_path / "state")
     try:
         with pytest.raises(
-            EngineError, match=r"(?s)uv gave .* no environment.*`uv\.lock`"
+            EngineError,
+            match=(
+                r"(?s)the runner gave .* no environment: "
+                r"`env -u VIRTUAL_ENV uv run --frozen --quiet python` exited .*`uv\.lock`"
+            ),
         ):
             engine.check(root, [Source(path=Path("packages/pkg/src/pkg/held.py"))])
+    finally:
+        engine.stop(root)
+
+
+# Another runner.
+
+
+def test_with_plain_the_engine_reads_the_python_on_the_path(
+    tmp_path: Path, short: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "plain"
+    found = environment(tmp_path / "environment", workspace(root, RELEASING))
+    monkeypatch.setenv("PATH", f"{found}{os.pathsep}{os.environ['PATH']}")
+    engine = engine_for(short / "plain", tmp_path / "state", runner=Plain())
+    try:
+        [report] = engine.check(root, [CALLING])
+        assert pyright(report) == []
+    finally:
+        engine.stop(root)
+
+
+class Chosen(Runner):
+    """Python as the interpreter the worktree's `choice` file names, which decides
+    its environment."""
+
+    script: Path
+
+    @override
+    def command(self, tool: list[str]) -> list[str]:
+        return self.judging(tool)
+
+    @override
+    def judging(self, tool: list[str]) -> list[str]:
+        match tool:
+            case ["python", *arguments]:
+                return [str(self.script), *arguments]
+            case _:
+                return tool
+
+    @override
+    def environment(self) -> list[str]:
+        return ["choice"]
+
+
+def test_a_file_the_runner_names_changing_builds_another_program(
+    tmp_path: Path, short: Path
+) -> None:
+    root = tmp_path / "chosen"
+    releasing = environment(tmp_path / "releasing", workspace(root, RELEASING))
+    holding = environment(tmp_path / "holding", workspace(tmp_path / "old", HOLDING))
+    script = root / "choose"
+    script.write_text('#!/bin/sh\nexec "$(cat "$(dirname "$0")/choice")" "$@"\n')
+    script.chmod(0o755)
+    (root / "choice").write_text(str(releasing / "python"))
+    engine = engine_for(
+        short / "chosen", tmp_path / "state", runner=Chosen(script=script)
+    )
+    try:
+        [report] = engine.check(root, [CALLING])
+        assert pyright(report) == []
+        (root / "choice").write_text(str(holding / "python"))
+        [report] = engine.check(root, [CALLING])
+        assert any("release" in each for each in pyright(report))
     finally:
         engine.stop(root)
 
@@ -714,6 +787,24 @@ def test_an_engine_from_another_build_is_replaced(
         assert after.pid != before.pid
     finally:
         fresh.engine.stop(fresh.root)
+
+
+def test_an_engine_started_with_another_runner_is_replaced(
+    tmp_path: Path, short: Path, offline_uv: Uv, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fresh = make_project(tmp_path, short / "rerun", offline_uv)
+    fresh.write("one.py", DOCSTRING)
+    monkeypatch.setenv(
+        "PATH", f"{fresh.root / '.venv' / 'bin'}{os.pathsep}{os.environ['PATH']}"
+    )
+    plain = fresh.engine.model_copy(update={"runner": Plain()})
+    try:
+        before = fresh.engine.status(fresh.root)
+        after = plain.status(fresh.root)
+        assert after.pid != before.pid
+        assert plain.status(fresh.root).pid == after.pid
+    finally:
+        plain.stop(fresh.root)
 
 
 def test_without_a_built_engine_the_error_says_how_to_build_it(tmp_path: Path) -> None:
