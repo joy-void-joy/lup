@@ -13,7 +13,7 @@ from typing import Self, override
 from lup.types import Model
 from lup_dev.catalog.gate import Step
 from lup_dev.declaration.errors import ProjectError
-from lup_dev.declaration.grammar import Named, listed
+from lup_dev.declaration.grammar import Layer, Named, listed
 
 
 class Rules(Named[str]):
@@ -37,13 +37,13 @@ class Patterns(Named[str]):
     """
 
 
-class Paths(Model, extra="forbid"):
+class Paths(Layer, extra="forbid"):
     """Each path role's patterns, a selection per role.
 
     Its verbs take roles as keywords: `Paths.of(protected=[…])` gives a module's
     own, `.add(protected=[…])` and `.drop(data=["*.yaml"], why=…)` change the
-    value below. The same pattern from two modules is one pattern. How each role
-    is used, and in which order, is `lup_dev.policy.roles`'s.
+    value below, role by role. The same pattern from two modules is one pattern.
+    How each role is used, and in which order, is `lup_dev.policy.roles`'s.
 
     >>> Paths.of(data=["episodes/**"]).add(data=["takes/**"]).data.operations[0].entries
     ['takes/**']
@@ -123,14 +123,6 @@ class Paths(Model, extra="forbid"):
             update={
                 role: self.role(role).drop(*patterns, why=why)
                 for role, patterns in roles.items()
-            }
-        )
-
-    def over(self, below: Self) -> Self:
-        """Return these paths as a layer over `below`, role by role."""
-        return self.model_copy(
-            update={
-                role: self.role(role).over(below.role(role)) for role in self.roles()
             }
         )
 
