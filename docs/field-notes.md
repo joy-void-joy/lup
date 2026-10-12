@@ -113,6 +113,127 @@ Read from its source and checked against the bundled binary with a local mock Re
 - `auth.json` is written through a symlink under the `file` credentials store; under `keyring` or `auto`, a refresh deletes it. A keyring login is keyed on the canonical `CODEX_HOME` path, so it isn't visible from another home.
 - The SDK's high-level `TurnResult` raises a plain `RuntimeError` for a failed turn, losing `codexErrorInfo`, and reports a thread's usage snapshot.
 
+## Claude Code 2.1.296: launching a session
+
+From the docs (code.claude.com, `cli-reference`, `settings-reference`, `env-vars`, `permission-modes`, `permissions`, `memory`, `mcp`, `hooks`, `authentication`) and the CLI's help; nothing run interactively.
+- **Settings outside the repository.**
+  - `--settings <file>` sits above the user, project and local files and below managed settings; it can set any key a user settings file can.
+  - `--setting-sources user,project,local` chooses which files load. Leaving out `project` drops `.claude/settings.json` and its hooks, `.mcp.json`, the project's skills, commands and agents, and (per the SDK's table) its `CLAUDE.md`.
+  - Whether `--settings` still applies with sources left out is undocumented.
+  - Hooks and arrays merge across files rather than replacing each other.
+- **Guidance.** `--append-system-prompt-file` works interactively and is the documented route for system-level instructions. `CLAUDE.md` arrives as a user message after the system prompt, with "no guarantee of strict compliance"; conflicting layers have no precedence ("Claude may pick one arbitrarily"). `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` stops every `CLAUDE.md`; `claudeMdExcludes` takes absolute-path globs.
+- **`CLAUDE_CONFIG_DIR`** holds settings, credentials, transcripts (`projects/<project>/<session>.jsonl`), auto memory, file history, skills and plugins.
+  - Folder trust is `projects["<path>"].hasTrustDialogAccepted`.
+  - The bypass warning is pre-answered by `skipDangerousModePermissionPrompt`, scoped to user, local or managed settings.
+  - `hasCompletedOnboarding` is undocumented but present in the binary.
+- **A long-lived login.** `claude setup-token` prints a one-year subscription token, read from `CLAUDE_CODE_OAUTH_TOKEN`. It "can only make model requests": no Remote Control and no claude.ai connectors. It writes no file.
+- **No prompts.**
+  - `--permission-mode bypassPermissions` refuses to run as root unless "inside a recognized sandbox". In the binary that's `IS_SANDBOX=1` or `CLAUDE_CODE_BUBBLEWRAP`, both undocumented.
+  - In bypass mode:
+    - deny rules still apply, and so do explicit ask rules;
+    - writes to protected directories (`.git`, `.claude`) are allowed;
+    - whether a hook's `ask` prompts is undocumented.
+- **Tools.** `--tools` restricts the built-in tools, interactively too; `--disallowedTools` and `permissions.deny` with a bare name remove a tool from context.
+- **MCP.**
+  - `--mcp-config` servers need no approval.
+  - A server's `timeout` (ms) is a wall-clock limit per call that progress doesn't extend.
+  - `CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT` (30 minutes for stdio) is reset by a progress notification.
+  - `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0` keeps a main conversation's long call in the foreground; a backgrounded call is lost when the session exits.
+- **Hooks.** A command hook's `timeout` is in seconds, default 600, with no documented maximum.
+- **Variables:**
+  - `CLAUDE_CODE_DISABLE_AUTO_MEMORY`;
+  - `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`, which outranks the setting;
+  - `DISABLE_AUTOUPDATER`;
+  - `DISABLE_TELEMETRY`;
+  - `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`.
+
+## Codex 0.162.1: launching a session
+
+From the source at `rust-v0.162.1` (paths under `codex-rs/`), probed with `codex debug prompt-input` and `app-server`'s `hooks/list` against scratch homes; no model called.
+- **`CODEX_HOME`** must exist, and not under a temporary directory: Codex then refuses to make its helper links ("Refusing to create helper binaries under temporary dir"). It holds `config.toml`, `auth.json`, `hooks.json`, `AGENTS.md`, `sessions/`, `session_index.jsonl`, six SQLite databases, logs and caches.
+- **`config.toml`.**
+  - Codex writes trust, hook trust and first-run counters back into it, following a symbolic link and replacing the target atomically.
+  - The interactive CLI always loads `$CODEX_HOME/config.toml`, so only a separate home keeps the operator's file unloaded.
+  - `--profile <name>` layers `$CODEX_HOME/<name>.config.toml` over it.
+- **`-c` overrides.** `-c` splits a key at every `.` and keeps quotes, so `-c 'projects."<p>".trust_level=…'` does nothing; the inline table `-c 'projects={"<p>"={trust_level="trusted"}}'` works.
+- **The login.**
+  - Under the `file` store, `auth.json` is rewritten in place (truncated, never renamed), so a symbolic link or a one-file bind mount shares one login.
+  - Codex re-reads the file before refreshing and skips a refresh another process made, but no lock spans processes. Two refreshes at once can race, and the loser's token is marked spent (`refresh_token_reused`).
+  - `CODEX_ACCESS_TOKEN` and `CODEX_API_KEY` exist.
+- **The daemon.** The interactive CLI starts a background app-server per home, which keeps "file settings and defaults" until it restarts. `--no-daemon` turns it off, as do `--profile` and most `-c` keys.
+- **Hooks.**
+  - Sources:
+    - Hooks load from every enabled layer: the home's `hooks.json`, a project's `.codex/hooks.json` (only once the project is trusted, read from the main checkout for a linked worktree), and a `[hooks]` table in any `config.toml`, the `-c` layer included.
+    - Turning a project's trust on also turns its `.codex/` back on.
+  - Hook trust:
+    - A hook runs only once trusted: a `trusted_hash` (sha256 of its event, matcher and handler) recorded in the user or `-c` layer, or `--dangerously-bypass-hook-trust`.
+    - Untrusted hooks put a review screen before the session.
+  - Managed hooks: those in `/etc/codex/requirements.toml` need no review, and `allow_managed_hooks_only` there drops every other source (read in source, not probed).
+  - Events: PreToolUse, PermissionRequest, PostToolUse, PreCompact, PostCompact, SessionStart, SessionEnd, UserPromptSubmit, SubagentStart, SubagentStop, Stop and Interrupt.
+  - `timeout` has no maximum (99999 s accepted), but SessionEnd and Interrupt are clamped to 1–3 s.
+- **MCP.**
+  - Approvals:
+    - Under `approval_policy = never`, a tool without `readOnlyHint` is refused ("MCP tool call requires approval, but approval policy is never") unless the sandbox is full access or the server sets `default_tools_approval_mode = "approve"`.
+    - Only a server declared in a project's own `.codex/config.toml` needs the project trusted.
+  - Timeouts:
+    - `tool_timeout_sec` has no cap and defaults to 300 s in the source (60 s per the docs).
+    - Progress notifications are only logged and don't extend it.
+  - Environment: a stdio server gets only a short list of variables (HOME, PATH, LANG, TERM, TZ and a few more), plus those named in `env_vars`.
+- **Guidance.**
+  - `developer_instructions` opens the first developer message.
+  - `model_instructions_file` replaces Codex's own instructions.
+  - The project's `AGENTS.md` is read from the root down to the working directory, and silently cut at `project_doc_max_bytes` (32 KiB); `0` turns it off.
+- **No prompts.** `--dangerously-bypass-approvals-and-sandbox` is `-s danger-full-access -a never`. The trust screen appears unless the working directory, its project root or its main repository is trusted.
+- **Off switches:**
+  - subagents: `agents.enabled = false`, with `features.multi_agent_v2` off, since it wins;
+  - web search: `web_search = "disabled"`;
+  - update checks: `check_for_update_on_startup = false`;
+  - analytics and feedback: `analytics.enabled`, `feedback.enabled`;
+  - the GitHub sync at start: `features.plugins = false`.
+- **Built-in tools** can't be removed by name, only by whole feature groups.
+
+## Rooms
+
+### podman 6.1.3, rootless: the CLIs in a container (measured)
+
+- **The image.**
+  - `archlinux` with its mirror set to the Arch Linux Archive's 2026-08-15 snapshot matched the base exactly.
+  - `pacman -Sy git` built in 7 s, 137 MB over the 408 MB base; with nodejs, 21 s and 637 MB in all.
+  - The snapshot for 2026-08-16 is missing (`core.db` answers 404).
+  - After a run with `--userns=keep-id`, `podman image inspect` reports a larger size, likely a remapped copy of the top layer.
+- **The bundled CLIs** (`claude_agent_sdk/_bundled/claude`, 2.1.294, linked against glibc only; `codex_cli_bin/bin/codex`, 0.162.0, static) run on the bare base. Claude embeds ripgrep; Codex ships `rg` and `bwrap`.
+- **Mounts at their host paths.**
+  - A linked worktree works with the shared git directory mounted read-write and its `config` and `hooks/` read-only: `git config` inside fails with "Device or resource busy", objects and refs are writable.
+  - A tmpfs hiding the sibling worktrees needs `notmpcopyup`, or podman copies what it hides into it.
+- **`--userns=keep-id`.**
+  - It sets `HOME` to the working directory, or `/` without one, so `HOME` is set explicitly.
+  - Files written inside are the operator's on the host.
+  - A mount point podman creates is owned by root: Claude Code refused "Temp directory /tmp/claude-1000 is owned by uid 0", and uv refused a root-owned `~/.cache`.
+  - Through `SO_PEERCRED`, a process in the room shows the operator's uid and its host pid.
+- **The project's environment.**
+  - A uv environment works in the room with uv's interpreter store mounted read-only at its host path. With the interpreter missing, `uv run --frozen` printed "Ignoring existing virtual environment linked to non-existent Python interpreter" and tried to recreate `.venv`; `UV_PYTHON_DOWNLOADS=never` stops it.
+  - In sync, `uv run --frozen pytest` wrote nothing to `.venv`.
+  - lup's suite passed in the room in 417 s (418 s on the host).
+  - The host's `uv` needs `libjemalloc.so.2`, and its `node` can't be mounted at all.
+- **A host socket.** A socket mounted as a file stays bound to the old socket when the server restarts ("Connection refused"); its directory mounted follows the new one.
+- **The logins.**
+  - Claude Code with only `.credentials.json` mounted read-only, and Codex with only `auth.json` mounted read-only, each answered one call. Neither needed a refresh.
+  - With the full Claude login, the room connected the account's claude.ai connectors, Google Drive's share and trash tools among them.
+- **The SDK on the host, the CLI in the room.** `ClaudeSDKClient(cli_path=…)` with a script running `podman run -i --rm --init … claude "$@"` completed the handshake, and the CLI in the room listed and connected an in-process MCP tool served on the host. This answers `DESIGN.md`'s check: the CLI runs in a container while the SDK and lup's in-process tools stay on the host.
+- **Terminals.** `-it` under a real terminal carries its size and `TERM` through.
+- A container starts in 0.55 to 0.9 s.
+
+### From the first lup's rooms
+
+Read in its code and history (`lup-legacy`), with each commit there:
+- **Its image** was 4.5 GB: a 2 GB package layer (five editors, a virtual display, tooling) and a 1 GB layer of CLIs from npm, re-resolved at every launch and rebuilt whenever one released, most days. 46 tags of 4.5 to 5.5 GB were left on this machine.
+- **Its environments** were one per project root, outside the checkout (`.venv-contained`), synced at each start: 25 GB across 31 directories. Their scripts went stale when a repository moved, and a uv-managed interpreter was downloaded again at every start.
+- **Logins** were copied into a volume per repository and kept in step by a companion every 30 s: a read-only mount at the login's own path broke renewal, and Claude Code 2.1.285 renames over its credentials file, which broke symbolic links.
+- **Its sessions' terminals** lost colour, their locale and their time zone until `TERM`, `COLORTERM`, `LANG` and `TZ` were passed. Without `--init`, 4,045 zombies piled up against the pids limit, which counts threads.
+- **Concurrent starts** on one config volume left NUL-prefixed `.claude.json` files, and 16 starts ended on `{"autoUpdates": false}`; Codex's `config.toml` raced the same way.
+- **The network:** lup's own sessions ran on the host's network, for sign-in callbacks and ssh; the default was an internal network behind a squid proxy, whose DNS and staleness caused failures of their own.
+- **Its hooks** ran inside the container on the image's Python, from generated files in the checkout, which a session could rewrite unless they were held read-only.
+
 ## Isolation and effects
 
 - An overlay mounts over 300k files in 13 ms and lists its changes in 12 ms, without root, in lup's container (kernel 7.2).
@@ -126,7 +247,7 @@ Read from its source and checked against the bundled binary with a local mock Re
 
 - uv's `exclude-newer` accepts "3 days" (`UV_EXCLUDE_NEWER`);
 - bun 1.3.14 has `minimumReleaseAge`;
-- pacman needs a dated Arch Linux Archive mirror (not verified).
+- pacman holds to a dated Arch Linux Archive mirror (checked in a room: a snapshot's packages matched its date's base image), though some days are missing (*Rooms*).
 
 ## Tools
 
