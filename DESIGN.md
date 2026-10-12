@@ -242,9 +242,8 @@ The operator's to decide; the agent's lean where it has one.
 - Does a `PreToolUse` hook's `allow` skip auto mode's classifier? Which of Claude Code's own commands use `Agent` internally, and break when it's denied?
 - Do parallel held calls in one response reach the operator as one proposal?
 - Can a Codex hook hold an `apply_patch` that builds on an unapproved design?
-- Does the CLI run inside a container while the SDK and lup's in-process tools stay on the host, over the container's standard input and output?
 - Does resuming an SDK session work on Claude Code's current version?
-- Is the cache keepalive flag on for a subscription account? Does a dated Arch Linux Archive mirror hold against `pacman -Sy` in the image? How light can the REPL be?
+- Is the cache keepalive flag on for a subscription account? How light can the REPL be?
 - If the write layer is pursued: a frozen snapshot with a hardlinked environment, the host's view keeping `.git` and editor configs out of reach until review, git inside it, and what merging a layer back costs.
 
 ## Build order
@@ -258,6 +257,8 @@ Each step builds on the ones before it **(leaning)**:
 6. **The host service, the inbox, and lup's tools:** spawn, propose, message, ask, report.
 7. **Worktrees and landing,** with the dependency guard and the landing refusal.
 8. **The dashboard:** agents, the inbox, runs, panels.
+
+**#56 pulls ahead (leaning)** what a maintaining session needs from steps 3, 5, 6 and 7, after the declaration's first slice (`docs/declaration.md`), in four pieces: launch on rooms, with the host service (`docs/launch.md`); lup's MCP server, the inbox and the credential actions; proposals and holds; the dependency guard. The rest of those steps keeps its place.
 
 lup hosts its own development once steps 5–7 are done. Then: budgets, `accounts`, the feedback modules, the outcome loop, the resolver, setup, the Codex capability check, trust on launch.
 
