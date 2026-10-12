@@ -5,7 +5,16 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from lup_dev import CodeRules, Core, Exemption, Exemptions, Modules, Paths, Project
+from lup_dev import (
+    CodeRules,
+    Core,
+    Exemption,
+    Exemptions,
+    Modules,
+    Paths,
+    Project,
+    Rules,
+)
 from lup_dev.declaration.resolve import Declaration
 from lup_dev.policy.judge import Change, Judge, Judgement, touched_lines
 from lup_dev.policy.roles import Roles
@@ -200,6 +209,25 @@ def test_a_finding_on_a_touched_line_refuses_and_every_finding_is_listed(
     assert judgement.outcome == "refuse"
     assert [finding.rule for finding in judgement.refusing] == ["tuple-shape"]
     assert [finding.rule for finding in judgement.untouched] == ["regex"]
+
+
+def test_every_check_carries_the_declarations_rule_selection(
+    judge: Judging, kit: Kit
+) -> None:
+    project = Project(
+        modules=Modules.default().edit(CodeRules(rules=Rules().drop("regex")))
+    )
+    selected = Declaration.of(project).rules
+    judge(edit("src/pkg/core.py", CORE, CORE + "z = 3\n"), project=project)
+    assert len(kit.engine.selections) == 3  # after, before and the baseline
+    assert all(each == selected for each in kit.engine.selections)
+    [code_rules] = selected
+    assert code_rules.module == "code-rules"
+    assert [
+        operation.names
+        for operation in code_rules.rules.operations
+        if operation.verb == "drop"
+    ] == [["runtime-mention"], ["regex"]]
 
 
 def test_findings_on_untouched_lines_dont_refuse(judge: Judging) -> None:

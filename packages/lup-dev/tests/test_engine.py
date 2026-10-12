@@ -7,6 +7,7 @@ which gives each project its environment, runs offline (`offline_uv`).
 """
 
 import os
+import re
 import shutil
 import sys
 import sysconfig
@@ -19,9 +20,12 @@ from typing import TYPE_CHECKING, override
 import pytest
 import sh
 
+from lup_dev import CodeRules, Module, Modules, Rules
+from lup_dev import Project as Declaration
 from lup_dev.codescan.contract import FileReport, Rule, Source
 from lup_dev.codescan.directives import Defer, Ignore, Malformed, Note
 from lup_dev.codescan.engine import EngineChecker, EngineError
+from lup_dev.declaration.resolve import Selected, resolve
 from lup_dev.declaration.runner import Plain, Runner
 from lup_dev.layout import Bundle, Layout
 
@@ -30,6 +34,8 @@ if TYPE_CHECKING:
 
     from conftest import Uv
 
+EVERY = [Selected(module="code-rules", rules=Rules.all(), default=Rules())]
+"""Every rule of lup's table, which the rules' own examples are checked against."""
 REPOSITORY = Path(__file__).resolve().parents[3]
 DOCSTRING = '"""An example."""\n\n'
 PYPROJECT = """\
@@ -74,7 +80,9 @@ class Project:
         path = Path("example") / name
         if on_disk is not None:
             (self.root / path).write_text(on_disk)
-        [report] = self.engine.check(self.root, [Source(path=path, content=content)])
+        [report] = self.engine.check(
+            self.root, [Source(path=path, content=content)], EVERY
+        )
         return report
 
 
@@ -248,21 +256,151 @@ def test_pyright_errors_and_warnings_come_as_findings(project: Project) -> None:
     assert all(f.steer == "" for f in report.findings if f.owner == "pyright")
 
 
-def test_a_rule_the_engine_lacks_is_refused(project: Project) -> None:
-    project.write("refused.py", DOCSTRING)
-    picky = project.engine.model_copy(update={"selected": ["no-such-rule"]})
-    with pytest.raises(EngineError, match="no rule named `no-such-rule`"):
-        picky.check(project.root, [Source(path=Path("example/refused.py"))])
+# Which rules run: each module's selection as the declaration records it, which the
+# engine resolves.
+
+SELECTING = DOCSTRING + (
+    "import re\n\n\n"
+    "def pair() -> tuple[int, int]:\n    return 1, 2\n\n\n"
+    'def runtime() -> str:\n    """Name a runtime."""\n    return "codex"\n'
+)
+"""A module `regex`, `tuple-shape` and `runtime-mention` each flag."""
 
 
-def test_a_selection_runs_only_its_rules(project: Project) -> None:
-    content = (
-        DOCSTRING + "import re\n\n\ndef pair() -> tuple[int, int]:\n    return 1, 2\n"
+class Tuples(Module):
+    """A module whose own rules start from nothing beneath them."""
+
+    name = "tuples"
+
+    rules: Rules = Rules().add("tuple-shape")
+
+
+class Runtimes(Module):
+    """A module whose own rules are one of lup's."""
+
+    name = "runtimes"
+
+    rules: Rules = Rules.only("runtime-mention")
+
+
+def ran(project: Project, selected: list[Selected]) -> set[str]:
+    """Check `SELECTING` with `selected`, and return the rules that flagged it."""
+    path = project.write("selecting.py", SELECTING)
+    [report] = project.engine.check(project.root, [Source(path=path)], selected)
+    return set(lup(report))
+
+
+def editing(rules: Rules) -> list[Selected]:
+    """Return the selection of a project editing `CodeRules` with `rules`."""
+    project = Declaration(modules=Modules.default().edit(CodeRules(rules=rules)))
+    return resolve(project).rules
+
+
+FLAGGED = {"regex", "tuple-shape", "runtime-mention"}
+
+
+def test_lups_default_runs_every_rule_but_those_it_leaves_out(
+    project: Project,
+) -> None:
+    assert ran(project, resolve(Declaration()).rules) & FLAGGED == {
+        "regex",
+        "tuple-shape",
+    }
+
+
+def test_a_layer_drops_from_and_adds_to_the_modules_default(project: Project) -> None:
+    assert ran(project, editing(Rules().drop("regex"))) & FLAGGED == {"tuple-shape"}
+    assert ran(project, editing(Rules().add("runtime-mention"))) & FLAGGED == FLAGGED
+
+
+def test_default_starts_from_the_modules_own_default(project: Project) -> None:
+    dropped = editing(Rules.default().drop("tuple-shape"))
+    assert ran(project, dropped) & FLAGGED == {"regex"}
+
+
+def test_all_starts_from_every_rule_and_only_from_those_named(
+    project: Project,
+) -> None:
+    assert ran(project, editing(Rules.all())) & FLAGGED == FLAGGED
+    assert ran(project, editing(Rules.only("regex"))) == {"regex"}
+    replaced = editing(Rules.only("regex").replace("regex", "tuple-shape"))
+    assert ran(project, replaced) == {"tuple-shape"}
+
+
+def test_below_starts_from_nothing_beneath_the_modules_own_default(
+    project: Project,
+) -> None:
+    modules = Modules.default().add(Tuples())
+    [*_, tuples] = resolve(Declaration(modules=modules)).rules
+    assert tuples.rules.start.kind == "below"
+    assert ran(project, [tuples]) == {"tuple-shape"}
+
+
+def test_the_selected_modules_rules_run_together(project: Project) -> None:
+    modules = (
+        Modules.default()
+        .edit(CodeRules(rules=Rules.only("regex")))
+        .add(Tuples(), Runtimes())
     )
-    project.write("selected.py", content)
-    chosen = project.engine.model_copy(update={"selected": ["regex"]})
-    [report] = chosen.check(project.root, [Source(path=Path("example/selected.py"))])
-    assert lup(report) == ["regex"]
+    selected = resolve(Declaration(modules=modules)).rules
+    assert [each.module for each in selected] == ["code-rules", "tuples", "runtimes"]
+    assert ran(project, selected) == FLAGGED
+
+
+def test_no_module_holding_rules_runs_none(project: Project) -> None:
+    assert ran(project, []) == set()
+
+
+@pytest.mark.parametrize(
+    ("rules", "refusal"),
+    [
+        (
+            Rules().drop("no-such-rule"),
+            (
+                "`code-rules`'s rules: `Rules.drop` names `no-such-rule`, which isn't "
+                "there; there are `regex`, "
+            ),
+        ),
+        (
+            Rules.only("no-such-rule"),
+            (
+                "`code-rules`'s rules: `Rules.only` names `no-such-rule`, which isn't "
+                "one of lup's rules; they are `regex`, "
+            ),
+        ),
+        (
+            Rules().add("no-such-rule"),
+            "`Rules.add` names `no-such-rule`, which isn't one of lup's rules",
+        ),
+        (Rules().add("regex"), "`Rules.add` names `regex`, already there"),
+        (
+            Rules().drop("regex").drop("regex"),
+            "`Rules.drop` names `regex`, which isn't there",
+        ),
+        (
+            Rules.only("regex", "regex"),
+            "`Rules.only` starts from `regex` more than once",
+        ),
+        (
+            Rules().replace("regex", "tuple-shape"),
+            (
+                "`Rules.replace` puts `tuple-shape` in place of `regex`, but "
+                "`tuple-shape` is already there"
+            ),
+        ),
+    ],
+)
+def test_a_selection_the_table_cant_resolve_is_refused_naming_what_there_is(
+    project: Project, rules: Rules, refusal: str
+) -> None:
+    with pytest.raises(EngineError, match=re.escape(refusal)):
+        ran(project, editing(rules))
+
+
+def test_a_modules_own_default_cant_start_from_itself(project: Project) -> None:
+    circular = Selected(module="mine", rules=Rules.default(), default=Rules.default())
+    with pytest.raises(EngineError, match="which is that default itself"):
+        ran(project, [circular])
 
 
 # Would-be content, and keeping in step with the disk.
@@ -423,7 +561,7 @@ def test_the_engine_reads_the_environment_uv_gives_the_worktree(
     offline_uv.sync(root)
     engine = engine_for(short / "elsewhere", tmp_path / "state")
     try:
-        [report] = engine.check(root, [CALLING])
+        [report] = engine.check(root, [CALLING], EVERY)
         assert pyright(report) == []
     finally:
         engine.stop(root)
@@ -437,12 +575,12 @@ def test_a_missing_environment_is_made_rather_than_borrowed(
     uv_workspace(root, RELEASING, offline_uv)
     engine = engine_for(short / "missing", tmp_path / "state")
     try:
-        [report] = engine.check(root, [CALLING])
+        [report] = engine.check(root, [CALLING], EVERY)
         assert pyright(report) == []
         assert (root / ".venv" / "pyvenv.cfg").is_file()
         # Removed under a running engine, it's made again at the next check.
         shutil.rmtree(root / ".venv")
-        [report] = engine.check(root, [CALLING])
+        [report] = engine.check(root, [CALLING], EVERY)
         assert pyright(report) == []
         assert (root / ".venv" / "pyvenv.cfg").is_file()
     finally:
@@ -456,7 +594,7 @@ def test_a_new_lock_is_synced_before_the_next_check(
     uv_workspace(root, RELEASING, offline_uv)
     engine = engine_for(short / "relocked", tmp_path / "state")
     try:
-        engine.check(root, [CALLING])
+        engine.check(root, [CALLING], EVERY)
         # A package arrives with the lock naming it, as a merge brings them, and
         # nothing syncs the environment.
         extra = root / "packages" / "extra"
@@ -467,7 +605,7 @@ def test_a_new_lock_is_synced_before_the_next_check(
         offline_uv.lock(root)
         using = DOCSTRING + "from extra import EXTRA\n\nVALUE = EXTRA\n"
         source = Source(path=Path("packages/pkg/src/pkg/using.py"), content=using)
-        [report] = engine.check(root, [source])
+        [report] = engine.check(root, [source], EVERY)
         assert pyright(report) == []
     finally:
         engine.stop(root)
@@ -487,7 +625,9 @@ def test_where_uv_gives_no_environment_the_engine_says_why(
                 r"`env -u VIRTUAL_ENV uv run --frozen --quiet python` exited .*`uv\.lock`"
             ),
         ):
-            engine.check(root, [Source(path=Path("packages/pkg/src/pkg/held.py"))])
+            engine.check(
+                root, [Source(path=Path("packages/pkg/src/pkg/held.py"))], EVERY
+            )
     finally:
         engine.stop(root)
 
@@ -503,7 +643,7 @@ def test_with_plain_the_engine_reads_the_python_on_the_path(
     monkeypatch.setenv("PATH", f"{found}{os.pathsep}{os.environ['PATH']}")
     engine = engine_for(short / "plain", tmp_path / "state", runner=Plain())
     try:
-        [report] = engine.check(root, [CALLING])
+        [report] = engine.check(root, [CALLING], EVERY)
         assert pyright(report) == []
     finally:
         engine.stop(root)
@@ -546,10 +686,10 @@ def test_a_file_the_runner_names_changing_builds_another_program(
         short / "chosen", tmp_path / "state", runner=Chosen(script=script)
     )
     try:
-        [report] = engine.check(root, [CALLING])
+        [report] = engine.check(root, [CALLING], EVERY)
         assert pyright(report) == []
         (root / "choice").write_text(str(holding / "python"))
-        [report] = engine.check(root, [CALLING])
+        [report] = engine.check(root, [CALLING], EVERY)
         assert any("release" in each for each in pyright(report))
     finally:
         engine.stop(root)
@@ -712,14 +852,16 @@ def test_a_package_root_exports_its_names_or_its_all(project: Project) -> None:
     )
     (package / "inner.py").write_text(DOCSTRING + "thing = 1\n")
     [report] = project.engine.check(
-        project.root, [Source(path=Path("example/pkg/__init__.py"))]
+        project.root, [Source(path=Path("example/pkg/__init__.py"))], EVERY
     )
     assert report.surface.exported == ["VERSION", "thing"]
     declared = (
         DOCSTRING + "from example.pkg.inner import thing\n\n__all__ = ['thing']\n"
     )
     [report] = project.engine.check(
-        project.root, [Source(path=Path("example/pkg/__init__.py"), content=declared)]
+        project.root,
+        [Source(path=Path("example/pkg/__init__.py"), content=declared)],
+        EVERY,
     )
     assert report.surface.exported == ["thing"]
 

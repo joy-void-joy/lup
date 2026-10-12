@@ -1445,7 +1445,9 @@ def unclean(bench: Bench, worktree: Worktree, paths: list[Path]) -> list[Finding
     ]
     if not sources:
         return []
-    reports = services.checker.check(worktree.root, sources)
+    reports = services.checker.check(
+        worktree.root, sources, worktree.declaration.rules
+    )
     ruff = services.linter.findings(worktree.root, sources)
     found = [
         found

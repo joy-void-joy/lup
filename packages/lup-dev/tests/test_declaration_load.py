@@ -28,8 +28,9 @@ def write(path: Path, text: str) -> None:
 
 
 def why(root: Path) -> str | None:
+    """Return the reason the declaration's own drop gives, after its default's."""
     [selected] = resolve(load(root).project).rules
-    [operation] = selected.rules.operations
+    [operation] = selected.rules.operations[len(selected.default.operations) :]
     assert operation.verb == "drop"
     return operation.why
 
@@ -187,7 +188,8 @@ def test_lups_own_declaration_is_its_modules_with_its_changes() -> None:
         ("constant-home", ["packages/lup-dev/src/lup_dev/catalog/**"]),
     ]
     [selected] = resolved.rules
-    assert [operation.verb for operation in selected.rules.operations] == ["add"]
+    lups = selected.rules.operations[len(selected.default.operations) :]
+    assert [operation.verb for operation in lups] == ["add"]
     assert ("lup-development", "npm") in [
         (each.module, each.requirement.tool) for each in resolved.requirements
     ]

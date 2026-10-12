@@ -146,7 +146,7 @@ The core itself is what every module talks through (`DESIGN.md`, *The environmen
 | Test roots: the test role, and what the gate checks pytest's `testpaths` against | `Python` | `tests` | `TestRoots.of(Pytest(root="tests"))` | A |
 | Source roots read for their doctests only, which stay production | `Python` | `doctests` | `Doctests.of("src")` | B |
 | ruff, the formatter, pyright, pytest, import-linter, the settings step | `Python` | `gate` | lup's steps | A, B |
-| Which of lup's code rules run | `CodeRules` | `rules` | `Rules.default()` | A |
+| Which of lup's code rules run | `CodeRules` | `rules` | `Rules.all()` less what `catalog/rules.py` leaves out, which `Rules.default()` names there | A |
 | A rule lifted from some paths, with its reason | `CodeRules` | `exempt` | `Exemptions()`, none | exists, moved in A |
 | A module's own rule table | any module | `rules` | none | E |
 | The conditions a `defer` waits on | any module | `conditions` | none | exists, moved in A |
@@ -440,7 +440,14 @@ A project's package dependencies stay in `[project]` and `[dependency-groups]`, 
 
 ### Selecting them
 
-`CodeRules.rules` is a `Rules` selection; `Rules.default()` is every rule but those `catalog/rules.py` leaves out (`runtime-mention` until E moves it to lup's own table), and `Rules.all()` every rule. The judge sends each module's selection, recorded as it is (its table, a starting point, the names dropped, the names added), in each check request, and **the engine resolves it**, rather than Python resolving it and sending ids: it holds the tables, so nothing asks it for its rules first, and an unknown name fails there with the names it has. `rules check` and the judge send the same selection; exemptions and `ignore` apply after. The engine's client already carries a list of ids (`selected` in `codescan/engine.py`), and the engine refuses an id its table lacks, naming the ones it holds (`checker/src/catalog.ts`), but nothing sets the list: every rule runs on every production file.
+`CodeRules.rules` is a `Rules` selection. Its own default is every rule but those `catalog/rules.py` leaves out, each with its reason (`runtime-mention` until E moves it to lup's own table), written as a project writes a change: `Rules.all()` with one `.drop(…, why=…)` for each. So `Rules.default()` there names lup's default, the overview shows why each is left out, and `Rules.all()` is every rule.
+
+The judge sends each module's selection, recorded as it is (its starting point and its operations, each with its names), with the module's own default, in each check request (`Selected`, `declaration/resolve.py`), and **the engine resolves it** (`checker/src/catalog.ts`), rather than Python resolving it and sending ids: it holds the tables, so nothing asks it for its rules first, and an unknown name fails there with the names it has. The union of every selected module's rules runs.
+- **A module's selection is every layer applied over its own default,** as `Modules` places it, so its operations begin with the default's: `Rules()` starts from nothing beneath them, and a layer's `Rules.default()` from the module's own default, resolved. A module's own default starting from `Rules.default()` would be itself, and the engine refuses it, steering to `Rules.all()`, `Rules.only(…)` or `Rules()`.
+- **`Rules.of(…)` resolves as `Rules.only(…)` does** until E: a module has no table of its own yet, so its entries are lup's rules, by id.
+- **`lup-dev rules check` and the judge send the same selection,** read from the declaration the worktree is judged by (`Worktree.selected`, `policy/checkpoint.py`), as is the one the turn's end sends; exemptions and `ignore` apply after, in Python.
+
+The alternative was the engine knowing lup's default itself, from a list of ids left out sent with each request or marked in `catalog/rules.ts`: one module's default would then be a notion of the engine's, and `Rules.default()` in a project's module would mean lup's default rather than that module's own.
 
 #33 changes lup's defaults: which ruff rules `catalog/tools.py` turns off, and which lup rules `catalog/rules.py` leaves out of the default. Both are data the operator reviews, made of the entries a project uses to change its own.
 

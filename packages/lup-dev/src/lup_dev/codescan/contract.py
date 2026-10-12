@@ -14,10 +14,13 @@ owner's findings alike, so the engine reports findings as it finds them.
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from lup.types import Model
 from lup_dev.codescan.directives import Directive
+
+if TYPE_CHECKING:
+    from lup_dev.declaration.resolve import Selected
 
 
 class Position(Model):
@@ -160,10 +163,14 @@ class Checker(ABC):
         """List lup's rules, which a project's selection and `ignore`s name."""
 
     @abstractmethod
-    def check(self, root: Path, sources: list[Source]) -> list[FileReport]:
+    def check(
+        self, root: Path, sources: list[Source], selected: list[Selected]
+    ) -> list[FileReport]:
         """Check the given files of the project at `root`, one report per file.
 
-        Each report holds lup's findings and pyright's type errors, the file's
+        The rules run are those `selected` chooses: each module's selection, as
+        the project's declaration records it, which the engine resolves. Each
+        report holds their findings and pyright's type errors, the file's
         directives, its public surface and its imports.
         """
 

@@ -46,6 +46,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
     from pathlib import Path
 
+    from lup_dev.declaration.resolve import Selected
+
 
 def marked(
     path: Path, content: str, marker: str, owner: Literal["lup", "pyright", "ruff"]
@@ -180,6 +182,8 @@ class FakeEngine(Checker):
 
     def __init__(self) -> None:
         self.checked: list[list[Source]] = []
+        self.selections: list[list[Selected]] = []
+        """The rule selections each check was sent, in order."""
         self.importers_asked: list[list[Path]] = []
         self.importer_reports: list[FileReport] = []
 
@@ -200,8 +204,11 @@ class FakeEngine(Checker):
     def rules(self) -> list[Rule]:
         return []
 
-    def check(self, root: Path, sources: list[Source]) -> list[FileReport]:
+    def check(
+        self, root: Path, sources: list[Source], selected: list[Selected]
+    ) -> list[FileReport]:
         self.checked.append(sources)
+        self.selections.append(selected)
         return [self.report(root, source) for source in sources]
 
     def importers(self, root: Path, changed: list[Path]) -> list[FileReport]:

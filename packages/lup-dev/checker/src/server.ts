@@ -10,7 +10,7 @@ import * as fs from 'fs';
 import * as net from 'net';
 import * as readline from 'readline';
 
-import { ruleInfos, UnknownRuleError } from './catalog';
+import { ruleInfos, SelectionError } from './catalog';
 import { Engine, ImportersJob } from './engine';
 import { Answer, CheckRequest, Environment, ImportersRequest, Request } from './protocol';
 
@@ -179,7 +179,7 @@ export class Server {
             return this.answer(work());
         } catch (error) {
             const message =
-                error instanceof UnknownRuleError || !(error instanceof Error)
+                error instanceof SelectionError || !(error instanceof Error)
                     ? String(error instanceof Error ? error.message : error)
                     : error.stack ?? error.message;
             return this.answer({ error: message });

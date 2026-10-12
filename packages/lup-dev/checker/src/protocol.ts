@@ -138,12 +138,45 @@ interface RequestBase {
     environment: Environment;
 }
 
+// A rule selection as the declaration records it, mirroring `Selection` in
+// `lup_dev/declaration/grammar.py` field for field: where it starts, then its
+// operations in the order they were written. The reasons (`why`) and the anchors
+// (`before`, `after`) travel too, and change nothing here: rules have no order.
+export type Start =
+    | { kind: 'below' }
+    | { kind: 'default' }
+    | { kind: 'all' }
+    | { kind: 'only'; names: string[] }
+    | { kind: 'of'; entries: string[] };
+
+export type Operation =
+    | { verb: 'add'; entries: string[] }
+    | { verb: 'drop'; names: string[] }
+    | { verb: 'replace'; name: string; entry: string }
+    | { verb: 'edit'; entry: string };
+
+export interface Selection {
+    start: Start;
+    operations: Operation[];
+}
+
+// One module's rules, mirroring `Selected` in `lup_dev/declaration/resolve.py`.
+// - `default`: the module's own default for them, which `Rules.default()` names there;
+// - `rules`: its selection with every layer applied over that default, so its
+//   operations begin with the default's.
+export interface Selected {
+    module: string;
+    rules: Selection;
+    default: Selection;
+}
+
 export interface CheckRequest extends RequestBase {
     op: 'check';
     root: string;
-    // The rules the project selected, by id, of which one the engine doesn't have is
-    // refused; none runs every rule the engine has.
-    rules: string[] | null;
+    // Each module's rule selection, which the engine resolves against its table and
+    // runs the union of; a name it doesn't hold, or one dropped that isn't there,
+    // refuses the request.
+    rules: Selected[];
     sources: SourceRequest[];
 }
 

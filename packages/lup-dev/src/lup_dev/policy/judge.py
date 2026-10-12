@@ -249,11 +249,17 @@ class Judge(Model, arbitrary_types_allowed=True):
         ]
 
     def reports(self, sources: list[Source]) -> dict[Path, FileReport]:
-        """Ask the engine about `sources`, and return its reports by path."""
+        """Ask the engine about `sources`, and return its reports by path.
+
+        Each check carries the declaration's rule selection, for the engine to
+        resolve: the one the worktree is judged by, or the one standing in for it.
+        """
         if not sources:
             return {}
+        selected = self.roles.declaration.rules
         reports = {
-            report.path: report for report in self.checker.check(self.root, sources)
+            report.path: report
+            for report in self.checker.check(self.root, sources, selected)
         }
         unreported = [source.path for source in sources if source.path not in reports]
         if unreported:
