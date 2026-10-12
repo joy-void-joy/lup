@@ -116,8 +116,6 @@ class SessionDefaults(Model):
         "ReportFindings",
         "EnterWorktree",
         "ExitWorktree",
-        "SendMessage",
-        "ListAgents",
     ]
     """A runtime's built-in tools removed from a session's context, by name.
 
@@ -125,9 +123,12 @@ class SessionDefaults(Model):
       `ReportFindings` weigh in every turn and go unused in lup's sessions: an
       interactive session carries 113 KB of built-in tool schemas, `Artifact`
       alone 55 KB;
-    - `EnterWorktree`, `ExitWorktree`, `SendMessage` and `ListAgents` are the
-      native worktree and messaging tools, which `DESIGN.md` denies in favour of
-      lup's own (*Sessions*).
+    - `EnterWorktree` and `ExitWorktree` are the native worktree tools, which
+      `DESIGN.md` denies in favour of lup's own (*Sessions*).
+
+    The native messaging tools (`SendMessage`, `ListAgents`) stay until lup's
+    spawn exists, with the native `Agent`: a session resumes a subagent it
+    started through `SendMessage`, so removing them alone would strand one.
 
     A runtime that can't remove a built-in tool by name removes none, and its
     adapter says so.

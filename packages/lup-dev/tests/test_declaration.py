@@ -708,12 +708,12 @@ def test_removed_tools_are_a_selection_each_layer_adds_to_or_drops_from() -> Non
         Core(
             session=Session(
                 subagent_cache="5m",
-                removed_tools=RemovedTools().drop("SendMessage", why="we message"),
+                removed_tools=RemovedTools().drop("Workflow", why="we run workflows"),
             )
         )
     )
     session = resolve(Project(modules=modules)).session
-    lups = [name for name in SessionDefaults().removed_tools if name != "SendMessage"]
+    lups = [name for name in SessionDefaults().removed_tools if name != "Workflow"]
     assert session.removed_tools == [*lups, "CronCreate"]
     assert session.subagent_cache == "5m"
     assert session.auto_memory is False
