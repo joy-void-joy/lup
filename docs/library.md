@@ -388,9 +388,9 @@ On the same declarations:
 
 ## Checks owed
 
-- **A live run of each adapter against its real runtime.** Both adapters are tested only on scripted clients. The facts they rely on were checked against the bundled Claude Code with a scripted Messages API, and against the pinned app-server with a local mock of the Responses endpoint. Owed:
-  - on Claude: lup's MCP server through the real CLI, the `init` check, the `Stop` guard and the error classification, on a real model;
-  - on Codex: the dynamic tool on a real model, called directly and from code mode's `exec`, its answer reaching the model's next request (seen on the mock); and the tool-free configuration, that the model's request carries only lup's tools. That last is the declared gap's check, owed again on each pinned version.
+- **Live runs beyond a typed answer.** One typed ask ran live on each runtime, with the operator's logins: Claude on `haiku` (lup's MCP server through the real CLI, the `init` check passing, the answer through `mcp__lup__submit`; no transcript written) and Codex on `gpt-6.1-sol` (code mode: `exec` calling `submit`; everything in lup's own home, nothing in the operator's). Still owed live:
+  - on Claude, the `Stop` guard holding an unanswered turn, and the error classification;
+  - on Codex, the dynamic tool called directly on a model without code mode, and the tool-free configuration, that the model's request carries only lup's tools. That last is the declared gap's check, owed again on each pinned version.
 - **A subscription's spent window on Claude:** how a `RateLimitEvent` with status `rejected` surfaces under a subscription login. An API key's 429 emitted none.
 - **A dropped connection on Claude:** what it reports; it's taken as an API error with no status.
 - **The Codex reset time** arrives on a thread of its own, before the error and outside the turn's stream. Nothing synchronises the two, so a real run could miss it and report no reset; the deterministic alternative is asking `account/rateLimits/read` after the error.
