@@ -6,24 +6,31 @@
 Each ask runs on Codex's app-server, through the `openai-codex` SDK (`runtime.py`),
 in lup's own Codex home with the operator's login (`layout.py`), and serves no
 tools but lup's own.
+
+The same declaration compiles for a terminal (`terminal`, `terminal.py`): Codex's
+interactive CLI in the operator's own home, with lup's settings passed as flags,
+overrides and a requirements file of the launch's own.
 """
 
 from typing import TYPE_CHECKING, overload, override
 
 from pydantic import BaseModel
 
+from lup.adapters.codex.layout import CodexLayout
 from lup.adapters.codex.runtime import CodexAdapter, Effort
+from lup.adapters.codex.settings import CodexSettings
+from lup.adapters.codex.terminal import compiled
 from lup.sessions.declaration import Asking, Declaration
-from lup.sessions.surface import Agent
 
 if TYPE_CHECKING:
     from lup.sessions.results import TurnResult
+    from lup.sessions.terminal import Terminal, TerminalSettings
     from lup.tools.submit import Submit
 
 __all__ = ["Codex"]
 
 
-class Codex(Declaration, Agent):
+class Codex(Declaration):
     """An agent on Codex: its model, system prompt, reasoning effort and layers."""
 
     runtime = "codex"
@@ -48,4 +55,15 @@ class Codex(Declaration, Agent):
         )
         return await Asking(declaration=self, runtime_adapter=adapter).ask(
             prompt, output
+        )
+
+    @override
+    def terminal(self, settings: TerminalSettings) -> Terminal:
+        """Compile the declaration for Codex's interactive CLI, with lup's settings."""
+        return compiled(
+            model=self.model,
+            system_prompt=self.system_prompt,
+            effort=self.effort,
+            settings=settings,
+            layout=CodexLayout.of(CodexSettings()),
         )
