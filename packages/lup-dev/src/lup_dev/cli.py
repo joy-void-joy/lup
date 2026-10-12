@@ -3,19 +3,21 @@
 It stands in for the real `lup` command tree until the declaration and command
 line piece builds it; the commands keep their meaning there, and their final
 names are that piece's call (`docs/judging-writes.md`, *Modules*). It's the one
-place that lists the runtimes' adapters.
+place that lists the runtimes' adapters, so the host service answers each launch's
+hooks with the answerer built here (`docs/launch.md`), as `hook` does.
 
 `submit`, `wait`, `reviews` and `reply` serve the built drafts flow
 (`docs/review-flow.md`). Who calls one is a conversation of its own, `operator`,
 in the directory it runs in.
 """
 
+import asyncio
 import secrets
 import sys
 from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, override
 
 import sh
 import typer
@@ -35,6 +37,8 @@ from lup_dev.codescan.ruff import Ruff
 from lup_dev.declaration.requirements import Machine
 from lup_dev.errors import LupDevError
 from lup_dev.gate import Check, Shell, failed, report
+from lup_dev.host.client import Detached, HostClient
+from lup_dev.host.service import Answerer, HostService
 from lup_dev.install import Installer, Terminal, Uv
 from lup_dev.layout import CheckoutLayout, Layout
 from lup_dev.legacy_dashboard import LegacyDashboard, LegacyQueue
@@ -65,9 +69,11 @@ app = typer.Typer(no_args_is_help=True, help="Develop a project with agents.")
 rules = typer.Typer(no_args_is_help=True, help="lup's code rules.")
 holds = typer.Typer(help="Changes waiting for your answer.")
 review = typer.Typer(no_args_is_help=True, help="Reviews parked for your answer.")
+host = typer.Typer(help="lup's host service, which rooms call.")
 app.add_typer(rules, name="rules")
 app.add_typer(holds, name="holds")
 app.add_typer(review, name="review", hidden=True)
+app.add_typer(host, name="host")
 
 
 class Adapter(Model, arbitrary_types_allowed=True):
@@ -98,6 +104,39 @@ def runtimes() -> list[Runtime]:
     return [adapter.runtime for adapter in adapters()]
 
 
+class Adapters(Model, Answerer):
+    """Every runtime lup knows, answering its hooks: for `hook`, and the host service."""
+
+    known: list[Adapter]
+
+    @override
+    def runtimes(self) -> list[str]:
+        return [adapter.runtime.name() for adapter in self.known]
+
+    def named(self, runtime: str) -> Adapter:
+        """Return the adapter of the runtime named `runtime`, or say which lup knows."""
+        chosen = [
+            adapter for adapter in self.known if adapter.runtime.name() == runtime
+        ]
+        if not chosen:
+            names = ", ".join(self.runtimes())
+            message = f"no runtime named `{runtime}`; lup knows {names}"
+            raise typer.BadParameter(message)
+        [adapter] = chosen
+        return adapter
+
+    @override
+    def answer(self, runtime: str, payload: str) -> str:
+        """Answer one of `runtime`'s hooks, judging with this machine's services.
+
+        What the hook prints is its adapter's output on a line, or nothing.
+        """
+        adapter = self.named(runtime)
+        bench = Bench(runtime=adapter.runtime, services=services())
+        output = adapter.hook(payload, bench)
+        return f"{output}\n" if output else ""
+
+
 def services() -> Services:
     """Return what judging reaches, as configured on this machine."""
     settings = LupDevSettings()
@@ -123,17 +162,44 @@ def hook(
     ],
 ) -> None:
     """Answer one of a runtime's hooks, its payload on stdin."""
-    known = adapters()
-    chosen = [adapter for adapter in known if adapter.runtime.name() == runtime]
-    if not chosen:
-        names = ", ".join(adapter.runtime.name() for adapter in known)
-        message = f"no runtime named `{runtime}`; lup knows {names}"
-        raise typer.BadParameter(message)
-    [adapter] = chosen
-    bench = Bench(runtime=adapter.runtime, services=services())
-    output = adapter.hook(sys.stdin.read(), bench)
-    if output:
-        typer.echo(output)
+    known = Adapters(known=adapters())
+    # An unknown runtime is refused before standard input is read.
+    known.named(runtime)
+    typer.echo(known.answer(runtime, sys.stdin.read()), nl=False)
+
+
+def host_client() -> HostClient:
+    """Return the host service's client, as this machine places the service."""
+    return HostClient(
+        layout=Layout.of(LupDevSettings()).host, clock=SystemClock(), starter=Detached()
+    )
+
+
+@host.callback(invoke_without_command=True)
+def host_serve(context: typer.Context) -> None:
+    """Run the host service in the foreground, until it's stopped.
+
+    It answers each launch's hooks as `lup-dev hook` does, on the launch's own
+    socket. `lup-dev host stop` or Ctrl-C stops it; the launches it serves stay
+    recorded, and the next service serves them.
+    """
+    if context.invoked_subcommand is not None:
+        return
+    service = HostService(
+        layout=Layout.of(LupDevSettings()).host,
+        answerer=Adapters(known=adapters()),
+        say=typer.echo,
+    )
+    asyncio.run(service.serve())
+
+
+@host.command("stop")
+def host_stop() -> None:
+    """Stop the host service, if one runs."""
+    if host_client().stop():
+        typer.echo("Stopped the host service.")
+        return
+    typer.echo("No host service runs.")
 
 
 @rules.command("list")
