@@ -308,11 +308,13 @@ class Runner(Model, ABC):
 Two methods because the judge and the gate differ: the gate may lock and sync (plain `uv run` relocks a stale lock), while the judge must never write `uv.lock`, a protected path the checkpoint would then judge as the agent's shell write (`docs/judging-writes.md`, *The engine: one typed tree*). A prefix string in place of the class couldn't give the judge a command apart from the gate's.
 
 Where it's used:
-- **the gate:** each step's command is the tool alone (`["ruff", "check", "--ignore-noqa"]`), run as `runner.command(…)`, or as written for a step with `in_environment=False`;
+- **the gate:** each step's command is the tool alone (`["ruff", "check", "--ignore-noqa"]`), run as `runner.command(…)`, or as written for a step with `in_environment=False` (`Step.in_environment`, `catalog/gate.py`); the `--fix` steps too;
 - **ruff in the judge:** `runner.judging(["ruff", "check", …])`;
-- **the engine:** started with the runner's interpreter command (`judging(["python"])`, as a JSON list) and its environment files, so `program.ts` runs that command to name the interpreter, and stamps those files with pyright's own configuration. An engine started with another runner is replaced, as one from another build is.
+- **the engine:** started with the runner's interpreter command (`judging(["python"])`) and its environment files, each as a JSON list (`--interpreter`, `--environment-files`), so `program.ts` runs that command to name the interpreter, and stamps those files with pyright's own configuration. Every request carries the same pair (`EngineEnvironment`, `codescan/engine.py`), so an engine started with another runner answers stale and is replaced, as one from another build is.
 
-`gate.py`'s own `Runner` (the seam its tests stub to run a command, with `Shell` running it as a process) is renamed `Processes`, so `Runner` means one thing in `lup_dev`.
+`Ruff` and `EngineChecker` hold the runner as a field, `Uv()` where none is given. The gate runs its steps through the worktree's declared runner; the judge's `Services`, `lup-dev rules check` and the importers pass build `Ruff` and the engine without one, so they run through `Uv()` until they pass the runner of the declaration they read.
+
+`gate.py`'s own seam for running a command, which its tests stub (`Shell` running it as a process), is `Processes`, so `Runner` means one thing in `lup_dev`.
 
 What it doesn't cover: the narrow `Bash` allow rules in `.claude/settings.json` (the launch piece compiles them from the runner and the gate's steps); `PythonAvailable`'s `uv python list` (`codescan/conditions.py`), which asks uv as a Python provider, not as the project's runner; `uv tool install` in the installer (how lup installs its judge, not how a project runs its tools); and Windows (lup runs in a Linux container).
 
@@ -329,7 +331,7 @@ Requirement(any_of=["wl-copy", "xclip"], optional=True, why="copies a review to 
 
 - **Checked strictly, all at once,** when a session launches and when the gate runs, never lazily when a command first needs one. Not on every hook call: a hook runs inside a session already checked.
 - **A missing required one** stops the launch or the gate before anything runs, naming every missing tool, the module needing it, and how to install it.
-- **A missing optional one** turns its feature off, said once.
+- **A missing optional one** turns its feature off, said once: the gate says it at the head of its report.
 - **Each module declares its own:** `ffmpeg` for `Narration`, `npm` for lup's own module.
 
 The shape **(leaning)**:

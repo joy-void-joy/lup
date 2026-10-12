@@ -25,7 +25,6 @@ from lup.types import Model
 
 # lup: ignore("runtime-mention", why="the one place listing the adapters")
 from lup_dev.adapters import claude, codex
-from lup_dev.catalog.gate import Gate
 from lup_dev.clock import SystemClock
 from lup_dev.codescan.conditions import loaded
 from lup_dev.codescan.contract import Checker, Finding, Source
@@ -33,10 +32,9 @@ from lup_dev.codescan.directives import Checking, Fired, GitHubIssues, Trackers
 from lup_dev.codescan.engine import EngineChecker
 from lup_dev.codescan.reference import reference
 from lup_dev.codescan.ruff import Ruff
-from lup_dev.declaration.load import load
-from lup_dev.declaration.resolve import resolve
+from lup_dev.declaration.requirements import Machine
 from lup_dev.errors import LupDevError
-from lup_dev.gate import Check, Fixes, Shell, failed, report
+from lup_dev.gate import Check, Shell, failed, report
 from lup_dev.install import Installer, Terminal, Uv
 from lup_dev.layout import CheckoutLayout, Layout
 from lup_dev.legacy_dashboard import LegacyDashboard, LegacyQueue
@@ -304,23 +302,19 @@ def check(
 ) -> None:
     """Run the gate, every step even after one fails, and fail if any did.
 
-    The steps are the worktree's declaration's: lup's rules (`rules check`), ruff,
-    the formatter, pyright, pytest and the import contracts by default, with what
-    its modules add, such as lup's own engine, rebuilt when stale. Each step's
-    outcome is reported, then each failure's output in full; the exit code is
-    non-zero when any step failed. With `--fix`, which the session landing work
+    The steps are the worktree's declaration's, and so is how the project runs
+    its tools: lup's rules (`rules check`), ruff, the formatter, pyright, pytest
+    and the import contracts by default, with what its modules add, such as lup's
+    own engine, rebuilt when stale. Its modules' requirements are checked first,
+    all at once: a required tool missing stops the gate before any step. Each
+    step's outcome is reported, then each failure's output in full; the exit code
+    is non-zero when any step failed. With `--fix`, which the session landing work
     runs on the merged result, ruff's safe fixes and the formatter rewrite the
     worktree first.
     """
-    root = toplevel(Path.cwd())
-    outcomes = Check(
-        root=root,
-        runner=Shell(),
-        gate=Gate(steps=resolve(load(root).project).gate),
-        fixes=Fixes().steps if fix else [],
-    ).run()
-    typer.echo(report(outcomes))
-    if failed(outcomes):
+    gated = Check.declared(toplevel(Path.cwd()), Shell(), Machine(), fix=fix).run()
+    typer.echo(report(gated))
+    if failed(gated.outcomes):
         raise typer.Exit(code=1)
 
 

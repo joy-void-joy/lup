@@ -1,17 +1,18 @@
 """ruff's findings, read from its JSON output: which ones its `--fix` fixes, and
-which ruff runs, the one `uv run` finds in the worktree. uv runs offline
-(`offline_uv`).
+which ruff runs, the one the project's runner finds in the worktree: `uv run`'s by
+default. uv runs offline (`offline_uv`).
 """
 
 import json
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import pytest
 
 from lup_dev.codescan.contract import Source
 from lup_dev.codescan.ruff import Ruff, RuffError
+from lup_dev.declaration.runner import Plain, Runner
 
 if TYPE_CHECKING:
     from conftest import Uv
@@ -93,3 +94,37 @@ def test_where_uv_cant_run_ruff_the_error_says_why(
     (tmp_path / "a.py").write_text(CODE)
     with pytest.raises(RuffError, match=r"`uv\.lock`"):
         Ruff().findings(tmp_path, [Source(path=Path("a.py"))])
+
+
+def test_ruff_runs_as_the_runners_judging_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "a.py").write_text(CODE)
+    stand_in(tmp_path / "bin", "PATHS", root)
+    monkeypatch.setenv("PATH", f"{tmp_path / 'bin'}{os.pathsep}{os.environ['PATH']}")
+    [found] = Ruff(runner=Plain()).findings(root, [Source(path=Path("a.py"))])
+    assert found.rule == "PATHS"
+
+
+class Elsewhere(Runner):
+    """A runner whose program this machine doesn't have."""
+
+    @override
+    def command(self, tool: list[str]) -> list[str]:
+        return ["lup-no-such-runner", *tool]
+
+    @override
+    def judging(self, tool: list[str]) -> list[str]:
+        return ["lup-no-such-runner", *tool]
+
+    @override
+    def environment(self) -> list[str]:
+        return []
+
+
+def test_a_runner_this_machine_lacks_is_named(tmp_path: Path) -> None:
+    (tmp_path / "a.py").write_text(CODE)
+    with pytest.raises(RuffError, match=r"`lup-no-such-runner` isn't on the `PATH`"):
+        Ruff(runner=Elsewhere()).findings(tmp_path, [Source(path=Path("a.py"))])

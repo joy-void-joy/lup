@@ -121,10 +121,21 @@ export interface SourceRequest {
     content: string | null;
 }
 
-// Every request names the build the client expects, so an engine left running from
-// another build stops instead of answering with other rules.
+// How the engine finds the worktree's environment, from the project's runner
+// (`EngineEnvironment` in `lup_dev/codescan/engine.py`): the command running the
+// environment's Python, which names the interpreter, and the files, from the root,
+// whose change means another environment.
+export interface Environment {
+    interpreter: string[];
+    files: string[];
+}
+
+// Every request names the build the client expects, and the environment it was
+// told of, so an engine left running from another build, or started with another
+// runner, stops instead of answering with other rules or another environment.
 interface RequestBase {
     build: string;
+    environment: Environment;
 }
 
 export interface CheckRequest extends RequestBase {
@@ -157,7 +168,8 @@ export interface StopRequest extends RequestBase {
 export type Request = CheckRequest | ImportersRequest | RulesRequest | StatusRequest | StopRequest;
 
 // One answer per request.
-// - `stale`: the engine is from another build than the client expects, and stops;
+// - `stale`: the engine is from another build than the client expects, or was
+//   started with another environment, and stops;
 // - `error`: the request was refused or failed, with why.
 export interface Answer {
     build: string;
