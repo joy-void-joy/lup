@@ -97,7 +97,7 @@ narrator.launch()                                                        # a ter
 - the outcome loop, off by default, for graded projects: attaching outcomes to runs, grouping runs into arms, comparing them; the project decides what success is.
 - reflection, requiring the outcome loop: *Open questions*.
 
-**Modules may depend on modules, declared** (`requires = [Accounts]`). The loader refuses dropping a required module while keeping one that requires it, naming both, and refuses a cycle; dropping each module is tested together with whatever requires it.
+**Modules may depend on modules, declared** (`requires = [Accounts]`). The loader refuses a selection missing a module that another requires, whether it was dropped or never added, naming both, and refuses a cycle: it never adds or drops a module behind the project's back; dropping each module is tested together with whatever requires it.
 
 **Everything is a selection, never an on/off switch.** At every level (modules, rules, commands, skills, hooks), a project starts from lup's defaults and changes them with one grammar: `Kind.default()`, `.all()`, `.only()`, `.of()`, then `.add`, `.drop`, `.replace`, and `.edit` on modules, each change carrying its reason where given (`docs/declaration.md`). How a shared base and a project layer on lup's defaults is slightly open (`docs/declaration.md`, decision 51).
 
