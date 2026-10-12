@@ -119,10 +119,12 @@ class Toolbox(MutableModel, arbitrary_types_allowed=True):
             taken.remark for taken in self.taken(note.name) if isinstance(taken, Remark)
         ]
 
-    def end(self) -> End | KeepGoing | GiveUp:
+    def end(self, prefix: str = "") -> End | KeepGoing | GiveUp:
         """Say whether the turn may end, counting a refused ending against the attempts.
 
         A turn may end once it's answered, or once the agent reported a problem.
+        `prefix` is what the runtime puts before lup's tool names, so the reason
+        names each tool exactly as the model sees it.
         """
         answered = self.output is None or self.accepted() is not None
         if answered or self.reported() is not None:
@@ -133,7 +135,8 @@ class Toolbox(MutableModel, arbitrary_types_allowed=True):
         self.refused_endings += 1
         return KeepGoing(
             reason=(
-                f"Call the `{self.output}` tool with your final answer, or `{report.name}` "
-                "if it can't be answered: your turn can't end until one is accepted."
+                f"Call the `{prefix}{self.output}` tool with your final answer, or "
+                f"`{prefix}{report.name}` if it can't be answered: your turn can't end "
+                "until one is accepted."
             )
         )

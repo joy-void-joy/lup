@@ -118,7 +118,12 @@ class Asking(Model, arbitrary_types_allowed=True):
             )
         attempts = len(rejected) + ran.toolbox.refused_endings
         message = f"no answer was accepted after {attempts} attempts"
-        raise OutputMissingError(message, rejected=rejected)
+        raise OutputMissingError(
+            message,
+            rejected=rejected,
+            notes=ran.toolbox.notes(),
+            usage=ran.raw.usage,
+        )
 
     async def text(self, prompt: str, began: float) -> TurnResult[str]:
         """Ask for an answer as the final message's text."""
@@ -173,7 +178,9 @@ class Asking(Model, arbitrary_types_allowed=True):
             raise TurnTimeoutError(message) from passed
         problem = ran.toolbox.reported()
         if problem is not None:
-            raise ProblemReportedError(problem, notes=ran.toolbox.notes())
+            raise ProblemReportedError(
+                problem, notes=ran.toolbox.notes(), usage=ran.raw.usage
+            )
         return ran
 
 

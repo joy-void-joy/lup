@@ -374,7 +374,7 @@ class ClaudeAdapter(Model, Adapter, arbitrary_types_allowed=True):
             event: HookInput, tool_use_id: str | None, context: HookContext
         ) -> HookJSONOutput:
             del event, tool_use_id, context
-            match toolbox.end():
+            match toolbox.end(TOOL_PREFIX):
                 case KeepGoing(reason=reason):
                     return SyncHookJSONOutput(decision="block", reason=reason)
                 case End() | GiveUp():

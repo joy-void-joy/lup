@@ -26,8 +26,10 @@ class Recovery(Model, arbitrary_types_allowed=True):
 class Submission(Model):
     """How many refusals a typed ask allows before it gives up.
 
-    Rejected answers and refused endings count together. Past `attempts`, the ask
-    stops the turn and raises `OutputMissingError` with every rejected attempt.
+    Rejected answers and refused endings count together, when the agent tries to
+    end its turn: past `attempts`, the guard lets the turn end, and the ask raises
+    `OutputMissingError` with every rejected attempt. An agent that keeps
+    submitting without trying to end is bounded by the timeout layer.
     """
 
     attempts: int = 3

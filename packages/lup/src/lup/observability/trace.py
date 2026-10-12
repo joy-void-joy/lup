@@ -49,6 +49,7 @@ class Kept(Model):
 
     rejected: list[Rejection] = []
     notes: list[str] = []
+    usage: Usage | None = None
 
 
 class Answered(Model):
@@ -103,14 +104,14 @@ class Asked(Model):
     def failed(self, error: Exception, duration: timedelta) -> CallRecord:
         """Return the record of this ask failing with `error` after `duration`.
 
-        A reported problem keeps the notes the agent attached before reporting, and
-        a missing answer every rejected attempt.
+        A turn that ran without an answer keeps the notes the agent attached and
+        what the turn used; a missing answer also keeps every rejected attempt.
         """
         match error:
-            case ProblemReportedError(notes=notes):
-                kept = Kept(notes=notes)
-            case OutputMissingError(rejected=rejected):
-                kept = Kept(rejected=rejected)
+            case ProblemReportedError(notes=notes, usage=usage):
+                kept = Kept(notes=notes, usage=usage)
+            case OutputMissingError(rejected=rejected, notes=notes, usage=usage):
+                kept = Kept(rejected=rejected, notes=notes, usage=usage)
             case _:
                 kept = Kept()
         return CallRecord(
@@ -123,4 +124,5 @@ class Asked(Model):
             error=f"{type(error).__name__}: {error}",
             rejected=kept.rejected,
             notes=kept.notes,
+            usage=kept.usage,
         )

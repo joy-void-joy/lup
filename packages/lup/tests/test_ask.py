@@ -150,6 +150,29 @@ def test_a_reported_problem_raises_with_the_agents_words(
     assert len(fake_agents.calls) == 1
 
 
+def test_a_turn_without_an_answer_keeps_its_notes_and_usage_in_the_trace(
+    fake_agents: FakeAgents, tmp_path: Path
+) -> None:
+    trace = tmp_path / "calls.jsonl"
+    layers = FAST.model_copy(update={"trace": trace})
+    fake_agents.queue(
+        Forecast,
+        Submitting(submissions=[{"probability": "x"}] * 3, notes=["Unsure of units."]),
+    )
+    fake_agents.report(None, "Nothing to translate.", notes=["The input was empty."])
+    with pytest.raises(OutputMissingError) as missing:
+        asyncio.run(probe(layers).ask("Will it rain?", Forecast))
+    assert missing.value.notes == ["Unsure of units."]
+    with pytest.raises(ProblemReportedError):
+        asyncio.run(probe(layers).ask(""))
+    unanswered, reported = [json.loads(line) for line in trace.read_text().splitlines()]
+    assert unanswered["notes"] == ["Unsure of units."]
+    assert len(unanswered["rejected"]) == 3
+    assert unanswered["usage"] is not None
+    assert reported["notes"] == ["The input was empty."]
+    assert reported["usage"] is not None
+
+
 def test_an_untyped_ask_can_report_a_problem_too(fake_agents: FakeAgents) -> None:
     fake_agents.report(None, "There's nothing to translate.")
     with pytest.raises(ProblemReportedError, match="nothing to translate"):

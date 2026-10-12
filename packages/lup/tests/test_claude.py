@@ -457,8 +457,8 @@ def test_the_stop_hook_keeps_an_unanswered_turn_going_saying_why() -> None:
     assert blocked == {
         "decision": "block",
         "reason": (
-            "Call the `submit` tool with your final answer, or `report` if it can't be "
-            "answered: your turn can't end until one is accepted."
+            "Call the `mcp__lup__submit` tool with your final answer, or `mcp__lup__report` "
+            "if it can't be answered: your turn can't end until one is accepted."
         ),
     }
     assert ended == {}

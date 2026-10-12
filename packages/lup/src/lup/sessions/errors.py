@@ -12,7 +12,7 @@ from lup.errors import LupError
 if TYPE_CHECKING:
     from datetime import datetime
 
-    from lup.sessions.results import Rejection
+    from lup.sessions.results import Rejection, Usage
 
 
 class TurnError(LupError):
@@ -40,29 +40,41 @@ class OutputMissingError(TurnError):
     """No answer was accepted within the submission layer's attempts.
 
     `rejected` holds every refused attempt in full: what was submitted, and why it
-    was refused.
+    was refused. `notes` holds the remarks the agent attached, and `usage` what
+    the turn used, where the runtime reported it.
     """
 
-    def __init__(self, message: str, *, rejected: list[Rejection]) -> None:
-        """Record the message and every refused attempt."""
+    def __init__(
+        self,
+        message: str,
+        *,
+        rejected: list[Rejection],
+        notes: list[str],
+        usage: Usage | None,
+    ) -> None:
+        """Record the message, every refused attempt, the notes and the usage."""
         super().__init__(message)
         self.rejected = rejected
+        self.notes = notes
+        self.usage = usage
 
 
 class ProblemReportedError(TurnError):
     """The agent stopped without an answer and said what's wrong.
 
     `problem` is its report, in its own words; `notes` the remarks it attached
-    before reporting. It isn't retried: asking again gets the same problem.
+    before reporting; `usage` what the turn used, where the runtime reported it.
+    It isn't retried: asking again gets the same problem.
     """
 
-    def __init__(self, problem: str, *, notes: list[str]) -> None:
-        """Record the agent's report and its notes."""
+    def __init__(self, problem: str, *, notes: list[str], usage: Usage | None) -> None:
+        """Record the agent's report, its notes and the turn's usage."""
         super().__init__(
             f"the agent reported a problem instead of answering: {problem}"
         )
         self.problem = problem
         self.notes = notes
+        self.usage = usage
 
 
 class ToolsPresentError(TurnError):
