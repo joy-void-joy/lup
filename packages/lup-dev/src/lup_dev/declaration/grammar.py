@@ -255,8 +255,11 @@ class Selection[E](Model):
         kind = type(self).__name__
         match operation:
             case Add(entries=added, before=before, after=after):
+                adding = [self.named(entry) for entry in added]
                 there = [
-                    self.named(entry) for entry in added if self.named(entry) in names
+                    name
+                    for at, name in enumerate(adding)
+                    if name in names or name in adding[:at]
                 ]
                 if there:
                     message = (

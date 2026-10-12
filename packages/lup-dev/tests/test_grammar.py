@@ -103,6 +103,11 @@ def test_adding_a_name_already_there_is_refused() -> None:
         Rules.default().add("regex").resolve(DEFAULTS, KNOWN)
 
 
+def test_adding_one_name_twice_is_refused() -> None:
+    with pytest.raises(ProjectError, match=r"`Rules.add` names `mine`, already there"):
+        Rules.default().add("mine", "mine").resolve(DEFAULTS, KNOWN)
+
+
 def test_replace_puts_an_entry_where_the_named_one_was() -> None:
     gate = Gate.of(step("ruff"), step("pytest")).replace(
         "ruff", step("lint"), why="ours"
