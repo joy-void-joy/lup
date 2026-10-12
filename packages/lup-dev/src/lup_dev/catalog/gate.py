@@ -1,8 +1,9 @@
 """The gate's steps: what must pass before work lands on `dev`, as data.
 
 `lup-dev check` runs them in this order from a worktree's root, every one even after
-one fails, and fails if any did (`lup_dev.gate`). Each command runs through `uv run`,
-so it uses the worktree's own environment and code, never the installed judge.
+one fails, and fails if any did (`lup_dev.gate`). Each command is the tool alone,
+which the gate runs through the project's runner (`uv run` by default), so it uses
+the worktree's own environment and code, never the installed judge.
 """
 
 from lup.types import Model
@@ -13,6 +14,10 @@ class Step(Model):
 
     name: str
     command: list[str]
+    """The tool and its arguments, without how the project runs its tools."""
+    in_environment: bool = True
+    """Whether the gate runs `command` through the project's runner; otherwise
+    it runs as written."""
     builds: str | None = None
     """A file the step builds, from the root: it runs only when that file is
     missing or older than one of its `sources`."""
@@ -38,12 +43,12 @@ class Gate(Model):
                 "uv.lock",
             ],
         ),
-        Step(name="rules", command=["uv", "run", "lup-dev", "rules", "check"]),
-        Step(name="ruff", command=["uv", "run", "ruff", "check", "--ignore-noqa"]),
-        Step(name="format", command=["uv", "run", "ruff", "format", "--check"]),
-        Step(name="pyright", command=["uv", "run", "pyright", "--warnings"]),
-        Step(name="pytest", command=["uv", "run", "pytest"]),
-        Step(name="lint-imports", command=["uv", "run", "lint-imports"]),
+        Step(name="rules", command=["lup-dev", "rules", "check"]),
+        Step(name="ruff", command=["ruff", "check", "--ignore-noqa"]),
+        Step(name="format", command=["ruff", "format", "--check"]),
+        Step(name="pyright", command=["pyright", "--warnings"]),
+        Step(name="pytest", command=["pytest"]),
+        Step(name="lint-imports", command=["lint-imports"]),
     ]
     """The engine first, rebuilt when its bundle is older than its sources, since
     tests that ask a stale engine fail for reasons the change didn't cause.
