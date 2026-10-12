@@ -225,6 +225,20 @@ From the source at `rust-v0.162.1` (paths under `codex-rs/`), probed with `codex
 - **Terminals.** `-it` under a real terminal carries its size and `TERM` through.
 - A container starts in 0.55 to 0.9 s.
 
+### podman 6.1.3, rootless: the engine's command lines (measured for `lup.rooms`)
+
+- **Mounts.**
+  - `--mount` takes one CSV record: a quoted field (`"source=/a,b"`) mounts a path holding a comma.
+  - A tmpfs from `--mount type=tmpfs,…,tmpfs-mode=0700,U=true` is owned by the operator under keep-id, and runs programs; `--tmpfs`'s default options are `rw,noexec,nosuid,nodev`.
+  - A directory podman makes for a mount inside that tmpfs is owned by root, mode 755: `mkdir ~/.cache/other` failed with "Permission denied" beside a mount at `~/.cache/uv`, and passed once `~/.cache` was a tmpfs of its own with `U=true`.
+  - A single file mounted read-write is written in place, through to the host's file, but can't be replaced by a rename ("Device or resource busy"). Claude Code 2.1.294's writer falls back to writing in place when its atomic write fails ("in-place fallback write", in its binary).
+- **Builds.** `podman build --file - <empty directory>` reads the Containerfile from its input; `--label` adds a last `LABEL` step. `podman image exists` answers 0 or 1. `podman images --format json` lists each image's `Id`, `Names`, `Created` (epoch seconds), `Size`, `Labels` and `Containers`.
+- **Runs.**
+  - `podman run` passes the program's exit status through, and answers 125 for its own failures: `--pull=never` with a missing image says "image not known".
+  - `--log-driver=none` keeps `-it` and the exit status. On this host the default log driver is journald, which would keep a terminal session's output in the journal.
+  - `--detach-keys=` (empty) is accepted with `-it`; its manual says an empty sequence turns off detaching, whose default is Ctrl+P then Ctrl+Q.
+  - `--network=private` ran; its manual says it makes a namespace of the container's own, through pasta for rootless podman.
+
 ### From the first lup's rooms
 
 Read in its code and history (`lup-legacy`), with each commit there:
