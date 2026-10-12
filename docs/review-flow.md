@@ -129,14 +129,15 @@ lup's own tools are served over MCP (*lup's own tools*). From each runtime's MCP
 ### Where drafts live
 
 **At `<worktree>/.lup/drafts/<path>`:** one draft per file, per worktree.
-- **The path is escaped.** Each segment of the file's path that starts with a dot has that dot written `%2E`, so `.claude/settings.json` has its draft at `.lup/drafts/%2Eclaude/settings.json`. Claude Code refuses a hook-approved write into any directory it protects, at any depth (run 7).
+- **The path is escaped.** Each segment of the file's path that starts with a dot has that dot written `%2E`, so `.claude/settings.json` has its draft at `.lup/drafts/%2Eclaude/settings.json`. Claude Code refuses a hook-approved write into any directory it protects, at any depth (run 7). A segment that starts with `%` has it written `%25`, so each draft's path reads back to one file (decision 50).
 - **lup's record of each draft** is kept in the worktree's store, beside the accepted tree (`drafts.json`). It holds:
   - the file;
-  - the draft's path;
   - its base: the file's accepted content when the draft began, kept as a blob in the store;
   - the conversation that began it (the session, and the subagent where there is one);
   - a rename's old path, where it's one;
-  - the submission it's in, if any.
+  - the submission it was last in, if any.
+
+  The draft's path isn't recorded: it's the file's, escaped (`draft_path`). **A draft stands while its file does**: a record whose file is gone reads as dropped, and a draft begun there again replaces it (decision 49).
 
 Why there:
 - **`.lup/` is ignored by git.** So the checkpoint's snapshot never sees a draft, git never commits one, and ruff passes over them.
@@ -190,8 +191,8 @@ The file as last accepted. A test importing a module that exists only as a draft
 - **A judged shell write to a file that has a draft is merged into the draft,** and the file goes back. The merge is three-way, with `git merge-file`: the draft's base, the draft, and the write. A conflict refuses the shell write as a refusal does now (put back, the version saved), and the draft is left as it was.
 - **Content the checkpoint sets aside** (committed elsewhere, a merge, a move of `HEAD`) isn't the session's write, so it's never drafted. When it changes a drafted file, the draft is behind (below).
 - **A move's asks stay as now.** A commit made through the shell is judged once, never put back, and its asks are kept as a hold no agent waits on (`docs/judging-writes.md`, step 4).
-- **An applied approval is judged content.** Applying one (*Approval*) records each file's new content in the session's record, as a file tool's finished write is recorded. The checkpoint accepts it without judging it again.
-- **A deletion that asks** (a protected file or an operator's document removed through the shell) is drafted as a deletion: the file comes back, and the draft records that it's deleted.
+- **An applied approval is accepted content.** Applying one (*Approval*) moves the files it writes into the worktree's accepted tree, so no checkpoint, of any session, judges them again (decision 48).
+- **A deletion that asks** (a protected file or an operator's document removed through the shell) is drafted as a deletion: the file comes back, and the draft records that it's deleted. Since a draft stands while its file does (decision 49), a deletion's draft needs a file standing for it; that's this part's to choose.
 
 ### When the file moves under a draft
 
@@ -208,7 +209,7 @@ The agent submits, waits, lists and replies through four tools: `submit`, `wait`
 - **Typed parameters.** Each file's context is a field, not a shell-quoted string.
 - **The hooks see a named tool** (`mcp__lup__wait`), with its arguments, so nothing parses a command line.
 
-The shell keeps a command line for the operator, from the same code: `lup-dev submit`, `wait`, `reviews` and `reply`.
+The shell keeps a command line for the operator, from the same code: `lup-dev submit`, `wait`, `reviews` and `reply`. Its caller is the operator, a conversation of its own named `operator`, in the directory it runs in (decision 46); `lup-dev submit` reads its files as JSON on standard input, the list the tool takes (decision 47).
 
 **The first of `DESIGN.md`'s lup's tools.** Build order 4 lists lup's own tools: spawn, message, wait, ask, handoff. These are the first of that set, and the server is where the rest join. `wait` is meant to grow into the one wait for whatever the agent waits on: reviews now, workers and messages later.
 
@@ -253,15 +254,17 @@ What it does:
    - Lup's rules: a finding refuses the whole submission, every file's findings listed, as a refusal lists them. Nothing is parked.
    - The asks, which the review lists for each file. A draft that no longer asks anything, or never did (*Asking anyway*), is shown as asked for anyway; it's still the operator's to answer (decision 16).
 2. **Shows a landed file named in it as context:** its diff since the session started there, with nothing to apply (decision 15). That's how a new module comes with its tests.
-3. **Records the submission:** a number, the calling conversation, then each file with its context, its base, and the version submitted. The submitted versions are kept under `.lup/review/<n>/`.
+3. **Records the submission:** a number, the calling conversation, then each file with its context, its base, and the version submitted, and each draft's judgement as a verdict (decision 58). The submitted versions are kept under `.lup/review/<n>/submitted/` (decision 57).
 4. **Parks one review** in the dashboard, holding every file (*What the operator sees*).
 5. **Returns** the review's id and its files; with `wait`, the answer.
 
-- **A file submitted again while its review waits supersedes the review.** The waiting review is withdrawn, and a new one is parked holding all its files: those named again at their draft as it stands, the rest at the version submitted before. Both contexts are kept.
+- **A file submitted again while its review waits supersedes the review.** The waiting review is withdrawn, and a new one is parked holding all its files: those named again at their draft as it stands, the rest at the version submitted before. Both contexts are kept, the earlier first; the review is headed by the latest `why`, else the earlier.
+- **A worktree no session has reached** has no accepted tree yet; submitting there accepts it as it stands, as a session's start does (decision 61).
 - **It refuses:**
   - a path that's neither a draft nor a landed change;
-  - a draft that still holds conflict markers;
-  - an empty context.
+  - a draft whose file changed since it began, which would undo that change, until drafts are rebased (decision 59);
+  - a draft that still holds conflict markers, once rebasing can leave them (*When the file moves under a draft*);
+  - an empty context, or several files with no `why`.
 
 **Its description carries the plain-words guidance,** as the first lup's `review propose --help` did. Proposed text:
 
@@ -286,7 +289,7 @@ What it does:
 | `review` | One review's answer |
 | `any` | The first answer among several reviews |
 | `all` | Every answer to the calling conversation's submissions |
-| `file` | That file's change being applied: through its review's approval, or a later one if it's declined and submitted again |
+| `file` | That file's change answered: the review submitted last holding it, read again at each look, so a resubmission is followed; it returns at a decline (decision 55) |
 | `timeout` | Optional, with any of the above: return "still waiting" after at most this long |
 
 - **It returns each answer it waited for, told once:**
@@ -294,6 +297,7 @@ What it does:
   - declined, with the note, the comments and the draft's path;
   - stale or withdrawn, with why and what to do;
   - or "still waiting", at its `timeout`, or a little before the runtime's day.
+- **A remark ends it too,** told once, with the review still waiting: the agent may `reply`, and wait again (decision 54).
 - **It applies each approval it returns** (*Approval*). Waiting is the agent's moment.
 - **When to call it:** only when the next step needs the change: importing it, running tests on it, building on the operator's answer. The default is no wait: the agent carries on, with no cap on how many reviews are open, and each answer reaches it with its next call.
 - **How it holds:** inside the call, released by the answer.
@@ -317,11 +321,11 @@ Returns the calling conversation's drafts and submissions with their state, read
 - stale or withdrawn;
 - for a command, approved, not yet run.
 
-The operator's `lup-dev reviews` lists the whole worktree's. A draft is dropped by deleting its file under `.lup/drafts/`; the next checkpoint forgets its record.
+The operator's `lup-dev reviews` lists the whole worktree's. A draft is dropped by deleting its file under `.lup/drafts/`: from then on it isn't listed or submitted, and the next checkpoint forgets its record.
 
 ### `reply`
 
-`reply(review, text)` answers the operator on one of the caller's own reviews, in its thread. It settles nothing: the review waits as it did. The first lup's `review reply` did this; its thread keeps the requester's replies in the relay beside the operator's remarks. In the bridge it's appended to the relay through the first lup's host half (`append_relay_records`, as the first lup's own relay appends a reply), in the first lup's own reply record, which `legacy_dashboard.py` models (decisions 28 and 41). Its description asks for plain words: name the file, function or command, and say what you changed or will change, and why.
+`reply(review, text)` answers the operator on one of the caller's session's reviews still waiting, in its thread: the session's own, or a worker's it inherits (*Lifecycle*). It settles nothing: the review waits as it did. The first lup's `review reply` did this; its thread keeps the requester's replies in the relay beside the operator's remarks. In the bridge it's appended to the relay through the first lup's host half (`append_relay_records`, as the first lup's own relay appends a reply), in the first lup's own reply record, which `legacy_dashboard.py` models (decisions 28 and 41). Its description asks for plain words: name the file, function or command, and say what you changed or will change, and why.
 
 ## What the operator sees
 
@@ -347,15 +351,15 @@ It's carried out by whichever comes first:
 - the end of the turn of the conversation that submitted it: `Stop` for the session's own, `SubagentStop` for a subagent's. Only when no other conversation of the session has a call running in that worktree; otherwise at the next such end.
 
 Never at an ordinary call, and never by the dashboard, which runs on the host outside the wall. In one step, under the store's lock:
-1. **Check** that each file still holds the base it was submitted against. If one doesn't, nothing is applied: the review is stale, and the agent is told once why.
-2. **Write** every file's submitted version, delete what the change deletes, and remove a rename's old path: all of it or none.
-3. **Record** each file's new content in the session's record as judged and approved. The checkpoint then accepts it, and the approval covers the path's design asks for the session.
+1. **Check** that each file still holds the base it was submitted against. If one doesn't, nothing is applied: the review is stale, the queue lets it go, and the agent is told once why.
+2. **Write** every file's submitted version, delete what the change deletes, and remove a rename's old path: all of it or none. Each version is written from the store under `.lup/review/<n>/submitted/` first, then moved into place; where a move fails, the files moved already are put back.
+3. **Accept** the files as they now stand in the worktree's accepted tree, every other change left for the next checkpoint, so no checkpoint of any session judges them again (decision 48). The submitting session's record gets the paths as approved, so the approval covers their design asks for the session, and as touched, so its turn's end checks them; the importers pass is asked for, as a checkpoint asks.
 4. **Log** the operator's answer in the verdict log, against the drafts' verdicts.
-5. **Spend** the approval in the first lup's host (`docs/judging-writes.md`, decision 110), so the dashboard shows the review carried out.
-6. **Settle each draft:**
+5. **Settle each draft:**
    - one that still equals its submitted version is removed;
    - one edited since stays, its base now the submitted version, so it holds only the later edits.
-7. **Remove** `.lup/review/<n>/`.
+6. **Remove** `.lup/review/<n>/`.
+7. **Spend** the approval in the first lup's host (`docs/judging-writes.md`, decision 110), so the dashboard shows the review carried out. It comes last, once lup's own record says the review is applied: where spending fails, the failure is raised, and the review stays applied, to be told at the next wait.
 
 Applied at a turn's end, it isn't told again: the agent heard when it would apply. The turn's end then checks the files it touched as it checks any, so type errors the applied files bring are reported there.
 
@@ -363,13 +367,14 @@ Applied at a turn's end, it isn't told again: the agent heard when it would appl
 
 Nothing on disk changes. The file was never touched, and the draft is the agent's version, still where it was, so nothing needs saving, unlike a refusal. `DESIGN.md`'s "a declined change is restored, never lost" holds as it stands.
 - **The note and the line comments are told once,** and kept with the submission, where `reviews` shows them.
+- **The queue lets the review go** once its answer is read, as it does a stale approval and a review gone from the dashboard (decision 56). The submitted versions stay under `.lup/review/<n>/submitted/`, where its after-side comments count their lines.
 - **The agent revises the draft and submits it again,** or answers with `reply`.
 
 ### Remarks and line comments
 
 - **A remark** (the operator's note and comments sent before deciding) is told once, like an answer. The agent may `reply`.
 - **Each comment is anchored to lines of one file,** on its before or after side (the first lup's `LineComment`). Paths come back from the export to the file's own path, printed `path:first-last (side): note`, as the installer prints them.
-- **An after-side comment counts lines in the version submitted,** which `.lup/review/<n>/` keeps until the answer is read. Where the draft changed since, the message says so and names the submitted copy.
+- **An after-side comment counts lines in the version submitted,** which `.lup/review/<n>/submitted/` keeps after a decline, and the file itself holds once applied. Where the draft changed since, the message says so and names where that version stands.
 
 ### Commands
 
@@ -446,8 +451,8 @@ All in `packages/lup-dev/src/lup_dev/` unless named otherwise.
 
 | Module | What it's for | Public API |
 |---|---|---|
-| `policy/drafts.py` | The drafts of a worktree: where each lives, its base, beginning one, merging a write into one, rebasing, a rename's old path | `Draft` (file, draft path, base, began by, renamed from, submission); `Drafts` (one worktree's: `of(path)` for a file or its draft's path, `begin`, `merge`, `rebase`, `forget`, `all`); `draft_path(worktree, file)` |
-| `policy/submissions.py` | Submitting drafts, waiting, listing and replying: the four tools' behaviour, which the server and the command line share; carrying out an answer | `Submission`, `SubmittedFile` (path, context, renamed from, base, version submitted, whether it's context only), `CommandReview`, `Caller` (session, subagent, call, working directory); `submit`, `wait` (with `Waiting`: one, any, all, or a file, and a timeout), `reviews`, `reply`, `apply` |
+| `policy/drafts.py` | The drafts of a worktree: where each lives, its base, beginning one, merging a write into one, rebasing, a rename's old path | `Draft` (file, base, began by, renamed from, submission; its path derived, decision 49); `Conversation` (session, subagent); `Drafts` (one worktree's: `of(path)` for a file or its draft's path, `begin(path, began, copy=)`, `keep`, `merge`, `rebase`, `forget`, `all`; decision 51); `draft_path(worktree, file)`, and `drafted(worktree, path)`, its inverse; `DraftError` |
+| `policy/submissions.py` | Submitting drafts, waiting, listing and replying: the four tools' behaviour, which the server and the command line share; carrying out an answer | `Submission` (its `Standing`: `Open`, `Applied`, `Declined`, `Stale` or `Withdrawn`), `SubmittedFile` (path, context, renamed from, base, version submitted, its asks, whether it's context only), `Offered` (a file as the agent names it), `CommandReview` (later), `Caller` (session, subagent, call, working directory); `Desk`, one worktree's reviews (decision 52): `submit`, `wait` (with an `Awaited`: `OneReview`, `AnyReview`, `AllReviews` or `FileApplied`, and a timeout; decision 53), `reviews`, `reply`, `apply`; their results `Submitted`, `Waited` and its `Told`, `Listing`, each saying itself in `text()`; `SubmissionError` |
 | `review.py` | What reviews share: the operator's answers, and the seam to wherever reviews are parked | `Answer` and `LineComment`, moved from `install.py`, and `Remark`; `ReviewRequest` and `ReviewedFile`, what's parked (decision 36); `Look`, with `Waiting`, `Answered` or `Gone` (decision 37); `ReviewError`; `Queue`, an ABC: `park`, `look`, `spend`, `withdraw`, `reply`, `frozen` (decision 35) |
 | `server.py` | lup's own tools over MCP: `submit`, `wait`, `reviews`, `reply`, each a typed function over `policy/submissions.py`, with its description | `serve()`; the four tools' parameter models |
 
@@ -468,14 +473,14 @@ All in `packages/lup-dev/src/lup_dev/` unless named otherwise.
 - **`policy/holds.py`:** holds an agent waits on go; a move's holds stay.
 - **`policy/store.py`:** rename detection when comparing with the accepted tree.
 - **`policy/verdicts.py`:** a `draft` outcome; a submission's answer logged against its drafts' verdicts.
-- **`policy/report.py`:** the new messages.
+- **`policy/report.py`:** the checkpoint's new messages. What `submit`, `wait` and `reviews` say is said by their results, in `policy/submissions.py`.
 - **`adapters/claude.py`:**
   - `PreToolUse` answers a draft with `allow`, `updatedInput` and its one line, and fills `caller` on lup's tools;
   - `PermissionRequest` parks commands (decision 31);
   - `PostToolBatch` for the hint.
 - **`adapters/codex.py`:** no holds for asks; `caller` on lup's tools.
 - **`catalog/paths.py`:** `.mcp.json` protected.
-- **`layout.py`:** `CheckoutLayout.drafts` and `CheckoutLayout.review(n)`, a `ReviewLayout` holding the dashboard's `before/`; `StoreLayout.parked`, its lock, and the keeper's lock and log.
+- **`layout.py`:** `CheckoutLayout.drafts` and `CheckoutLayout.review(n)`, a `ReviewLayout` holding the dashboard's `before/` and the versions `submitted/`; `StoreLayout.drafts` and `StoreLayout.submissions`, the records, kept under the store's lock; `StoreLayout.parked`, its lock, and the keeper's lock and log.
 - **`cli.py`:**
   - `lup-dev mcp serve`;
   - the operator's `lup-dev submit`, `wait`, `reviews` and `reply`;
@@ -496,6 +501,8 @@ All in `packages/lup-dev/src/lup_dev/` unless named otherwise.
 
 - **`PostToolBatch` explaining a refused Edit:** whether its hook reads the batch's refused Edit and adds a line the agent sees before its next request.
 - **An escaped draft path, `%2Eclaude`,** passing Claude Code's protected-path check.
+- **Protected files whose names don't start with a dot.** Claude Code's permission-modes page lists protected files as well as directories, among them `pyrightconfig.json`, `bunfig.toml`, `lefthook.yml` and the Gradle and Maven wrappers' `.properties`. Escaping a starting dot doesn't change those names, so a draft of `pyrightconfig.json` (a protected path here too) may still meet Claude Code's prompt. Owed: whether that check matches a file's name at any depth, as run 7 showed the directory check does.
+- **A hook approving a protected-path write.** The same page says `permissions.allow` rules can't pre-approve one: "The safety check runs before Claude Code evaluates allow rules from settings". The hooks page says a `PreToolUse` `allow` skips the prompt except for the actions no mode auto-approves, a list that leaves protected paths out, yet run 7's redirected writes were refused. `PermissionRequest` "runs when Claude Code is about to ask you for permission", and neither page says whether that includes a protected-path prompt, or whether its `allow` approves one. If it does, the judge's adapter (decision 31) could approve writes under `.lup/drafts/` only, and drafts would need no escaping. Owed: run 7 again, with a `PermissionRequest` hook answering `allow`.
 - **Claude Code and MCP:**
   - a `wait` held for hours under the server's `timeout`, with progress notifications;
   - that `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS` in `.claude/settings.json`'s `env` keeps a main conversation's call in the foreground;
@@ -572,3 +579,23 @@ Taken while building where reviews are parked (`review.py`, `LegacyQueue` and th
 43. **The frozen mark is said once and stays,** carried to each id the review is parked under afterwards, even once the wait that froze ends: the first lup's thread can't take a reply back. Only the mark carries over; the agent's own replies stay on the id they were written on, beside the remarks the operator sent there. *Alternatives:* carry every reply over; mark only while a wait holds, which the bridge can't undo. *Where:* `legacy_dashboard.py`.
 44. **A desktop notice goes through `notify-send`** (`Notices`, `NotifySend`). Where it isn't installed, none is raised; one that fails is said on standard error, and the review stands parked. *Alternative:* refuse the park when the notice fails. *Where:* `legacy_dashboard.py`.
 45. **The host half's failures raise `ReviewError`,** shared by the installer and the queue; the installer's own refusals stay `InstallError`. *Where:* `review.py`, `legacy_dashboard.py`.
+
+Taken while building drafts and submissions (`policy/drafts.py`, `policy/submissions.py` and the command line), each the operator's until answered:
+
+46. **The command line calls as the operator:** `Caller(session="operator", call=<a token of its own>, cwd=<where it runs>)`, a conversation of its own. `lup-dev wait --all` waits on its reviews and `lup-dev reply` speaks on them; a session's review is waited on by its number; `lup-dev reviews` lists the whole worktree's. Until lup's tools are served, an agent using the command line submits as the operator too. *Alternatives:* the user's login name; `--session` and `--agent` options to act for a session, which nothing yet tells an agent; the runtime's session id read from the environment its commands get, which only an adapter may name. *Where:* `cli.py`.
+47. **`lup-dev submit` reads its files as JSON on standard input,** the list the `submit` tool takes (`[{"path": …, "context": …, "renamed_from": …}]`), with `--why`, `--wait` and `--timeout` as options; a timeout is `HH:MM:SS` or ISO 8601, as `LUP_ENGINE_IDLE` is. *Alternatives:* one file per call (`PATH --context …`), which can't put several files in one review; repeated `--file` and `--context` options paired by position, the positional pairing `AGENTS.md` steers from, with nowhere for one file's `renamed_from`. *Where:* `cli.py`.
+48. **An applied approval moves the files into the accepted tree** (*Approval*, step 3), rather than recording them as judged in the session's record, as this note had it. The session's record is read only by that session's next checkpoint in the worktree: another session's checkpoint there, or an approval applied from the command line, whose caller has no record, would judge the applied files as a shell write, and put a created module back. So applying snapshots the worktree, accepts the applied paths as they stand, and leaves every other change to the next checkpoint (`Store.snapshot`, `changed`, `unstage`, `accept`, as the checkpoint uses them); the submitting session's record gets the paths as approved and touched, and the importers pass is asked for. *Alternative:* the session's `judged` record, which the checkpoint reads, so its touched files and importers come for free, for that session only. *Where:* `policy/submissions.py` (`Desk.accept`, `Desk.carried`).
+49. **A draft's path is derived, never recorded** (`draft_path`), and **a draft stands while its file does:** `of` and `all` read a record whose file is gone as dropped, `begin` replaces it, and `forget` removes the file, the record and the directories left empty. That makes deleting the file (decision 34) drop the draft at once, before any checkpoint forgets its record. A deletion's draft (*The checkpoint and drafts*) will need a file standing for it. *Alternative:* the draft's path as a field of `Draft`, which could disagree with its file's, and a record that stands until forgotten. *Where:* `policy/drafts.py`.
+50. **A segment starting with `%` is written `%25`,** beside a starting dot written `%2E`, so every draft's path reads back to one file (`drafted`); only a segment's first character is escaped, so draft paths read as their files' do. *Alternatives:* dots only, as this note had it, where `.lup/drafts/%2Eenv` drafts both `.env` and a file named `%2Eenv`; percent-encoding whole segments with `urllib.parse.quote`, which never escapes a dot (it's unreserved in URLs) and escapes spaces and every character outside ASCII, so a draft an agent writes by hand wouldn't be found where lup looks. **(agreed, deferred)** The operator agreed it, deferred to #43 (a `# lup: defer` on `ESCAPED`): once lup generates the runtimes' own directories, no agent edits a file in one, so no draft needs escaping. *Where:* `policy/drafts.py`.
+51. **`Drafts` gains `keep(draft)`,** recording what changes in a draft's record (the review it's submitted in, a rename's old path, its base once applied), in its place. `begin(path, began, copy=…)` takes a file or its draft's path; `copy` copies the file as it stands for an edit, nothing for a write; a draft written before its record is kept, never copied over, and recorded. *Alternative:* a method for each change (`submitted`, `settled`). *Where:* `policy/drafts.py`.
+52. **`policy/submissions.py`'s behaviour is the methods of a `Desk`,** one worktree's reviews, holding its `Worktree`, the judge's `Services` and its `Queue`, each method taking the `Caller` where who calls matters. Submissions are numbered per worktree, and a wait, a listing and a reply look at one worktree, the caller's. What each says is its result's `text()`. *Alternatives:* free functions taking the three each time; the records of every worktree a session holds, which the server can add once it knows the session's worktrees. *Where:* `policy/submissions.py`.
+53. **`wait` takes an `Awaited`** (`OneReview`, `AnyReview`, `AllReviews` or `FileApplied`) and a `timeout`, not a `Waiting` as this note had it: `review.Waiting` is a review's state (decision 37). It holds at most `Desk.patience`, 23 hours and 55 minutes, a little under the day a runtime gives the call, polling every 2 seconds, and marks each review it holds on as frozen once, before its first sleep; a wait with no time to hold marks nothing. *Where:* `policy/submissions.py`.
+54. **A remark ends a wait,** told once with the review still waiting, so the agent can `reply` and wait again. *Alternative:* hold until the answer and tell the remarks with it, which leaves an agent frozen on a question it can't see. *Where:* `policy/submissions.py`.
+55. **`file` returns at a decline** (decision 26's open detail, its lean), and waits on the review submitted last holding the file, read again at each look, so a resubmission while it waits is followed. *Where:* `policy/submissions.py`.
+56. **A decline, a stale approval and a review gone from the dashboard are each let go through `Queue.withdraw`** once read, with why, so the queue's record and its export go; a declined review's submitted versions stay for its comments. In the first lup's dashboard, a declined review then reads as cancelled, "withdrawn: declined, and the answer read". *Alternatives:* leave a declined review parked, as the first lup leaves a rejected call, its record in `parked.json` and its export kept for good; a seventh `Queue` method letting an answered review go. *Where:* `policy/submissions.py`.
+57. **The versions submitted are kept at `.lup/review/<n>/submitted/<path>`** (`ReviewLayout.submitted`), apart from the export's `before/`, which a file under a top-level `before/` would otherwise share. Applying writes each version there again from the store before moving it into place, so a copy edited in the worktree is never what's applied. *Alternative:* decision 39's "the rest of `.lup/review/<n>/`", at each file's own path. *Where:* `layout.py`, `policy/submissions.py`.
+58. **Each draft submitted is logged as a verdict:** `ask`, from the tool `submit`, its reasons the kinds of ask, or `asked-anyway` where the judge asks nothing; the answer is logged against it (`approved`, also for a stale approval, `declined`, or `unanswered` for a review gone). A superseding review keeps the verdicts of the files it carries over; those named again are judged and logged afresh. *Alternatives:* log nothing until drafts get their own verdicts (the `draft` outcome, with the hooks' part); log an asked-anyway draft as the `allow` its judgement gives, counting reviewed files among allowed writes. *Where:* `policy/submissions.py`.
+59. **Submit refuses a draft whose file changed since it began** (its base isn't the file's accepted content), until drafts are rebased (*When the file moves under a draft*). *Alternative:* submit it against the accepted content, so the review shows the draft undoing the other change. *Where:* `policy/submissions.py`.
+60. **A draft is judged as a change against the accepted content, not as a whole-file write,** so a draft a `Write` made over a file doesn't list the whole-file ask at submit; it goes to the operator all the same (decision 16). *Alternative:* record how each draft began, to ask as its first write did. *Where:* `policy/submissions.py`.
+61. **Submitting in a worktree with no accepted tree accepts it as it stands,** as a session's start accepts what changed while none ran there, so the command line works where no session has been; a draft can't begin there before (`DraftError`). A landed file's diff runs from the session's start, or from `HEAD` for a caller with none recorded, the operator's. *Where:* `policy/submissions.py` (`Desk.accepted`, `Desk.since`), `policy/drafts.py`.
+62. **Who a review belongs to:** `wait`'s `all` and `reviews` take the calling conversation's (the session and its subagent), as this note says; `reply` takes any of the caller's session's, so a session answers on a worker's review it inherits. *Alternative:* the conversation's only, for `reply` too. *Where:* `policy/submissions.py`.

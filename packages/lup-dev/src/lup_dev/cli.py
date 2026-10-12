@@ -1,19 +1,25 @@
-"""The `lup-dev` command: the hooks, the gate's rule check, holds and verdicts.
+"""The `lup-dev` command: the hooks, the gate's rule check, holds, verdicts, reviews.
 
 It stands in for the real `lup` command tree until the declaration and command
 line piece builds it; the commands keep their meaning there, and their final
 names are that piece's call (`docs/judging-writes.md`, *Modules*). It's the one
 place that lists the runtimes' adapters.
+
+`submit`, `wait`, `reviews` and `reply` are the operator's command line for lup's
+own tools (`docs/review-flow.md`), from the same code. Who calls them is the
+operator: a conversation of its own, `operator`, in the directory they run in.
 """
 
+import secrets
 import sys
 from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import sh
 import typer
+from pydantic import TypeAdapter, ValidationError
 
 from lup.types import Model
 
@@ -39,8 +45,21 @@ from lup_dev.policy.judge import finding
 from lup_dev.policy.report import finding_lines
 from lup_dev.policy.runtime import Runtime
 from lup_dev.policy.store import Git
+from lup_dev.policy.submissions import (
+    AllReviews,
+    AnyReview,
+    Awaited,
+    Caller,
+    Desk,
+    FileApplied,
+    Offered,
+    OneReview,
+)
 from lup_dev.policy.verdicts import VerdictLog
 from lup_dev.settings import LupDevSettings
+
+if TYPE_CHECKING:
+    from lup_dev.review import Queue
 
 app = typer.Typer(no_args_is_help=True, help="Develop a project with agents.")
 rules = typer.Typer(no_args_is_help=True, help="lup's code rules.")
@@ -367,6 +386,146 @@ def importers(worktree: Path) -> None:
 def review_keep(worktree: Path) -> None:
     """Keep a worktree's reviews in the first lup's dashboard; parking starts it."""
     LegacyQueue.configured(worktree, LupDevSettings(), SystemClock()).keep()
+
+
+def queue(worktree: Path) -> Queue:
+    """Return where the worktree's reviews are parked, as this machine sets it."""
+    return LegacyQueue.configured(worktree, LupDevSettings(), SystemClock())
+
+
+def desk(directory: Path) -> Desk:
+    """Return the reviews of the worktree holding `directory`."""
+    root = toplevel(directory)
+    configured = services()
+    common = Git(cwd=root).text(
+        "rev-parse", "--path-format=absolute", "--git-common-dir"
+    )
+    return Desk(
+        worktree=Worktree.of(root, Path(common), configured),
+        services=configured,
+        queue=queue(root),
+    )
+
+
+def caller() -> Caller:
+    """Name who calls from the command line: the operator, where they run it."""
+    return Caller(session="operator", call=secrets.token_hex(8), cwd=Path.cwd())
+
+
+def duration(text: str | None) -> timedelta | None:
+    """Read a timeout given as `HH:MM:SS` or ISO 8601 (`PT30M`); none for none."""
+    if text is None:
+        return None
+    try:
+        return TypeAdapter(timedelta).validate_python(text)
+    except ValidationError as failure:
+        message = f"a timeout is `HH:MM:SS` or ISO 8601 (`PT30M`), not {text!r}"
+        raise typer.BadParameter(message) from failure
+
+
+Timeout = Annotated[
+    str | None,
+    typer.Option(
+        help="Say what still waits after at most this long: `HH:MM:SS`, or `PT30M`."
+    ),
+]
+
+
+@app.command("submit")
+def submit(
+    why: Annotated[
+        str,
+        typer.Option(help="What the whole change does; optional with one file."),
+    ] = "",
+    *,
+    wait_for_answer: Annotated[
+        bool, typer.Option("--wait", help="Wait for its answer, as `wait` does.")
+    ] = False,
+    timeout: Timeout = None,
+) -> None:
+    """Submit drafts for review as one review, its files as JSON on standard input.
+
+    Standard input holds a list of the files, each with its `path` (the file, or
+    its draft's path), its `context` (what changes in it and why, in plain
+    words), and for a rename, `renamed_from`, the old path, which the approval
+    removes: `[{"path": "src/a.py", "context": "..."}]`. A draft is written at
+    `.lup/drafts/<path>`, a dot starting a segment of the path written `%2E` and a
+    `%` starting one written `%25`; a file landed since the session started is
+    shown as context.
+    """
+    try:
+        files = TypeAdapter(list[Offered]).validate_json(sys.stdin.read())
+    except ValidationError as failure:
+        message = f"standard input isn't a list of files to submit: {failure}"
+        raise typer.BadParameter(message) from failure
+    submitted = desk(Path.cwd()).submit(
+        caller(), files, why, wait=wait_for_answer, timeout=duration(timeout)
+    )
+    typer.echo(submitted.text())
+
+
+def awaited(
+    numbers: list[int], *, first: bool, every: bool, file: Path | None
+) -> Awaited:
+    """Read what `wait` waits for from its arguments: exactly one form."""
+    forms = int(bool(numbers) or first) + int(every) + int(file is not None)
+    if forms != 1:
+        message = "name one review, several with --any, or give --all or --file"
+        raise typer.BadParameter(message)
+    if every:
+        return AllReviews()
+    if file is not None:
+        return FileApplied(path=file)
+    if first:
+        return AnyReview(numbers=numbers)
+    if len(numbers) != 1:
+        message = "several reviews are waited on with --any"
+        raise typer.BadParameter(message)
+    [number] = numbers
+    return OneReview(number=number)
+
+
+@app.command("wait")
+def wait(
+    numbers: Annotated[
+        list[int] | None,
+        typer.Argument(help="The review to wait on, or with --any, several."),
+    ] = None,
+    *,
+    first: Annotated[
+        bool, typer.Option("--any", help="Wait for the first of these to end.")
+    ] = False,
+    every: Annotated[
+        bool, typer.Option("--all", help="Wait for every review you submitted.")
+    ] = False,
+    file: Annotated[
+        Path | None,
+        typer.Option(help="Wait for the review submitted last holding this file."),
+    ] = None,
+    timeout: Timeout = None,
+) -> None:
+    """Wait for the answers to reviews, carrying out each approval as it's read.
+
+    Each answer, and each remark the operator sends before answering, is said
+    once; a remark ends the wait too.
+    """
+    chosen = awaited(numbers or [], first=first, every=every, file=file)
+    typer.echo(desk(Path.cwd()).wait(caller(), chosen, duration(timeout)).text())
+
+
+@app.command("reviews")
+def reviews() -> None:
+    """List the worktree's drafts, and every review submitted with how it stands."""
+    typer.echo(desk(Path.cwd()).reviews().text())
+
+
+@app.command("reply")
+def reply(
+    number: Annotated[int, typer.Argument(help="The review, which waits.")],
+    text: Annotated[str, typer.Argument(help="What to say in its thread.")],
+) -> None:
+    """Answer in the thread of a review you submitted; the review waits as it did."""
+    typer.echo(desk(Path.cwd()).reply(caller(), number, text))
 
 
 def main() -> None:
