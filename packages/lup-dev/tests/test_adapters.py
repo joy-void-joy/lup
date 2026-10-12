@@ -180,19 +180,27 @@ def claude_breaks_core(bench: Bench, repo: Path, **subagent: str) -> None:
     )
 
 
-def test_claude_stop_tells_the_operator_while_a_subagent_works(
+def test_claude_subagent_stop_holds_once_on_the_subagents_own_files(
     on_claude: Bench, repo: Path
 ) -> None:
     claude_breaks_core(on_claude, repo, agent_id="sub")
     stop = payload(repo, "Stop", stop_hook_active=False)
-    output = json.loads(claude.hook(stop, on_claude))
-    assert "decision" not in output
-    assert output["systemMessage"].startswith("A subagent of this session is at work")
-    subagent_stop = payload(
-        repo, "SubagentStop", agent_id="sub", stop_hook_active=False
+    assert claude.hook(stop, on_claude) == ""
+
+    def subagent_stop(*, after_block: bool) -> str:
+        return payload(
+            repo, "SubagentStop", agent_id="sub", stop_hook_active=after_block
+        )
+
+    first = json.loads(claude.hook(subagent_stop(after_block=False), on_claude))
+    assert first["decision"] == "block"
+    assert first["reason"].startswith("lup won't end the turn yet")
+    again = json.loads(claude.hook(subagent_stop(after_block=True), on_claude))
+    assert "decision" not in again
+    assert again["systemMessage"].startswith(
+        "lup held the turn's end on these just before"
     )
-    assert claude.hook(subagent_stop, on_claude) == ""
-    assert json.loads(claude.hook(stop, on_claude))["decision"] == "block"
+    assert claude.hook(stop, on_claude) == ""
 
 
 def test_claude_stop_after_a_block_on_the_same_findings_lets_the_turn_end(
@@ -275,6 +283,35 @@ def test_claude_lets_a_turn_end_when_judging_fails_warning_the_operator_once(
     assert output["systemMessage"].startswith("lup's judge failed at a turn's end")
     assert "decision" not in output
     assert claude.hook(stop, bench) == ""
+    subagent_stop = payload(
+        repo, "SubagentStop", agent_id="sub", stop_hook_active=False
+    )
+    assert claude.hook(subagent_stop, bench) == ""
+
+
+def test_claude_lets_a_subagents_turn_end_when_judging_fails_warning_once(
+    broken: Services, repo: Path
+) -> None:
+    bench = Bench(runtime=claude.Claude(), services=broken)
+    claude.hook(
+        payload(
+            repo,
+            "PreToolUse",
+            tool_name="Bash",
+            tool_input={"command": "sed"},
+            tool_use_id="t1",
+            agent_id="sub",
+        ),
+        bench,
+    )
+    (repo / CORE).write_text((repo / CORE).read_text() + "z = 1\n")
+    subagent_stop = payload(
+        repo, "SubagentStop", agent_id="sub", stop_hook_active=False
+    )
+    output = json.loads(claude.hook(subagent_stop, bench))
+    assert output["systemMessage"].startswith("lup's judge failed at a turn's end")
+    assert "decision" not in output
+    assert claude.hook(subagent_stop, bench) == ""
 
 
 def test_claude_knows_its_own_sessions(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -448,24 +485,37 @@ def codex_stop(repo: Path, *, after_block: bool) -> str:
     )
 
 
-def test_codex_stop_tells_the_operator_while_a_subagent_works(
-    on_codex: Bench, repo: Path
-) -> None:
-    codex_breaks_core(on_codex, repo, agent_id="019b")
-    output = json.loads(codex.hook(codex_stop(repo, after_block=False), on_codex))
-    assert "decision" not in output
-    assert output["systemMessage"].startswith("A subagent of this session is at work")
-    subagent_stop = payload(
+def codex_subagent_stop(repo: Path, *, after_block: bool) -> str:
+    return payload(
         repo,
         "SubagentStop",
         turn_id="u2",
         agent_id="019b",
         agent_type="default",
-        stop_hook_active=False,
+        agent_transcript_path=None,
+        last_assistant_message=None,
+        stop_hook_active=after_block,
     )
-    assert codex.hook(subagent_stop, on_codex) == ""
-    stop = json.loads(codex.hook(codex_stop(repo, after_block=False), on_codex))
-    assert stop["decision"] == "block"
+
+
+def test_codex_subagent_stop_holds_once_on_the_subagents_own_files(
+    on_codex: Bench, repo: Path
+) -> None:
+    codex_breaks_core(on_codex, repo, agent_id="019b")
+    assert codex.hook(codex_stop(repo, after_block=False), on_codex) == ""
+    first = json.loads(
+        codex.hook(codex_subagent_stop(repo, after_block=False), on_codex)
+    )
+    assert first["decision"] == "block"
+    assert first["reason"].startswith("lup won't end the turn yet")
+    again = json.loads(
+        codex.hook(codex_subagent_stop(repo, after_block=True), on_codex)
+    )
+    assert "decision" not in again
+    assert again["systemMessage"].startswith(
+        "lup held the turn's end on these just before"
+    )
+    assert codex.hook(codex_stop(repo, after_block=False), on_codex) == ""
 
 
 def test_codex_stop_after_a_block_on_the_same_findings_lets_the_turn_end(
@@ -522,6 +572,30 @@ def test_codex_lets_a_turn_end_when_judging_fails_warning_the_operator_once(
     assert output["systemMessage"].startswith("lup's judge failed at a turn's end")
     assert "decision" not in output
     assert codex.hook(stop, bench) == ""
+
+
+def test_codex_lets_a_subagents_turn_end_when_judging_fails_warning_once(
+    broken: Services, repo: Path
+) -> None:
+    bench = Bench(runtime=codex.Codex(), services=broken)
+    codex.hook(
+        payload(
+            repo,
+            "PreToolUse",
+            turn_id="u1",
+            tool_name="Bash",
+            tool_input={},
+            tool_use_id="b1",
+            agent_id="019b",
+        ),
+        bench,
+    )
+    (repo / CORE).write_text((repo / CORE).read_text() + "z = 1\n")
+    subagent_stop = codex_subagent_stop(repo, after_block=False)
+    output = json.loads(codex.hook(subagent_stop, bench))
+    assert output["systemMessage"].startswith("lup's judge failed at a turn's end")
+    assert "decision" not in output
+    assert codex.hook(subagent_stop, bench) == ""
 
 
 def test_codex_knows_its_own_sessions(monkeypatch: pytest.MonkeyPatch) -> None:

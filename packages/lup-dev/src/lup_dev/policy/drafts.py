@@ -27,6 +27,7 @@ from pathlib import Path
 from lup.types import Model
 from lup_dev.errors import LupDevError
 from lup_dev.layout import CheckoutLayout
+from lup_dev.policy.importers import Conversation
 from lup_dev.policy.store import Store, read_model, write_model
 
 # lup: defer(issue=43, why="drop the escaping once lup generates the runtimes' own directories, when no draft of a file in one is written")
@@ -111,14 +112,6 @@ def draft_path(worktree: Path, file: Path) -> Path:
     return CheckoutLayout(root=worktree).drafts.joinpath(
         *(escaped(part) for part in named.parts)
     )
-
-
-class Conversation(Model):
-    """One conversation of a session: its own, or one of its subagents'."""
-
-    session: str
-    agent: str = ""
-    """The subagent, blank for the session's own conversation."""
 
 
 class Draft(Model):

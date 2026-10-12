@@ -7,12 +7,12 @@ import pytest
 
 from lup_dev.policy.checkpoint import SessionStarted, Worktree
 from lup_dev.policy.drafts import (
-    Conversation,
     DraftError,
     Drafts,
     draft_path,
     drafted,
 )
+from lup_dev.policy.importers import Conversation
 
 if TYPE_CHECKING:
     from conftest import Kit

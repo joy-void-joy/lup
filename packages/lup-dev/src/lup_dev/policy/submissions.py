@@ -34,7 +34,8 @@ from lup.types import Model
 from lup_dev.errors import LupDevError
 from lup_dev.layout import CheckoutLayout
 from lup_dev.policy.checkpoint import Services, Session, Worktree, decoded
-from lup_dev.policy.drafts import Conversation, Draft, Drafts, draft_path, drafted
+from lup_dev.policy.drafts import Draft, Drafts, draft_path, drafted
+from lup_dev.policy.importers import Conversation
 from lup_dev.policy.judge import Change, Judgement
 from lup_dev.policy.report import finding_lines, sections
 from lup_dev.policy.store import Store, read_model, write_model
@@ -1068,8 +1069,12 @@ class Desk(Model, arbitrary_types_allowed=True):
         self.accept(paths)
         session = self.session(submission.by.session)
         if session is not None:
+            agent = submission.by.agent
             session.approved = list(dict.fromkeys([*session.approved, *paths]))
-            session.touched = list(dict.fromkeys([*session.touched, *paths]))
+            session.touched = {
+                **session.touched,
+                agent: list(dict.fromkeys([*session.touched.get(agent, []), *paths])),
+            }
             self.worktree.keep(session)
         kept = self.ended(record, submission, Applied(answer=answer), "approved")
         drafts = self.drafts()
@@ -1093,7 +1098,9 @@ class Desk(Model, arbitrary_types_allowed=True):
             )
         self.cleared(number)
         python = [path for path in paths if self.worktree.roles.checked(path)]
-        self.worktree.importers().request(python, self.services.spawner)
+        self.worktree.importers().request(
+            python, [submission.by], self.services.spawner
+        )
         self.queue.spend(number)
         return kept
 

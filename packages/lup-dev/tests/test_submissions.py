@@ -22,7 +22,8 @@ from lup_dev.policy.checkpoint import (
     SessionStarted,
     Worktree,
 )
-from lup_dev.policy.drafts import Conversation, draft_path
+from lup_dev.policy.drafts import draft_path
+from lup_dev.policy.importers import Conversation
 from lup_dev.policy.store import read_model
 from lup_dev.policy.submissions import (
     AllReviews,

@@ -1,5 +1,6 @@
 """The checkpoint: when it runs, what it judges, and what it does about it."""
 
+import json
 from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -21,7 +22,7 @@ from lup_dev.policy.checkpoint import (
     Worktree,
 )
 from lup_dev.policy.holds import Holds, Response, answer, waiting
-from lup_dev.policy.importers import ImportersPass
+from lup_dev.policy.importers import Conversation, ImportersPass
 from lup_dev.policy.store import read_model
 from lup_dev.policy.verdicts import VerdictLog
 from lup_dev.project import ProjectError
@@ -71,8 +72,12 @@ def end(
     )
 
 
-def subagent_ends(kit: Kit, repo: Path, agent: str) -> Reply:
-    return ConversationEnded(session=SESSION, agent=agent, cwd=repo).apply(kit.bench)
+def subagent_ends(
+    kit: Kit, repo: Path, agent: str, *, after_block: bool = False
+) -> Reply:
+    return ConversationEnded(
+        session=SESSION, agent=agent, cwd=repo, after_block=after_block
+    ).apply(kit.bench)
 
 
 def worktree(kit: Kit, repo: Path) -> Worktree:
@@ -126,7 +131,7 @@ def test_an_allowed_write_becomes_the_accepted_state(kit: Kit, repo: Path) -> No
     assert shell_write(kit, repo, "c1", CORE, changed).context == ""
     store = worktree(kit, repo).store
     assert store.content(store.accepted(), CORE) == changed.encode()
-    assert session(kit, repo).touched == [CORE]
+    assert session(kit, repo).touched == {"": [CORE]}
 
 
 def test_no_checkpoint_while_another_call_runs(kit: Kit, repo: Path) -> None:
@@ -556,25 +561,105 @@ def subagent_breaks_core(kit: Kit, repo: Path, agent: str = "worker") -> None:
     finish(kit, repo, f"{agent}-1", agent=agent)
 
 
-def test_a_subagent_at_work_doesnt_hold_the_turns_end(kit: Kit, repo: Path) -> None:
+def both_break_core(kit: Kit, repo: Path, agent: str = "worker") -> None:
+    """A shell write lands at a checkpoint where the session's and a subagent's calls
+    both finished: the checkpoint can't tell whose it is."""
+    call(kit, repo, "own-1")
+    call(kit, repo, f"{agent}-1", agent=agent)
+    (repo / CORE).write_text((repo / CORE).read_text() + "y: int = 'a'  # TYPE\n")
+    finish(kit, repo, "own-1")
+    finish(kit, repo, f"{agent}-1", agent=agent)
+
+
+def test_the_sessions_turns_end_ignores_a_subagents_files_once_it_stopped(
+    kit: Kit, repo: Path
+) -> None:
     start(kit, repo)
     subagent_breaks_core(kit, repo)
-    reply = end(kit, repo)
-    assert reply.block == ""
-    assert reply.note.startswith("A subagent of this session is at work")
-    assert f"{repo}/src/pkg/core.py:11:" in reply.note
-    assert subagent_ends(kit, repo, "worker") == Reply()
-    assert end(kit, repo).block.startswith("lup won't end the turn yet")
+    assert end(kit, repo) == Reply()
+    assert subagent_ends(kit, repo, "worker").block.startswith(
+        "lup won't end the turn yet"
+    )
+    assert subagent_ends(kit, repo, "worker", after_block=True).block == ""
+    assert end(kit, repo) == Reply()
+    assert end(kit, repo) == Reply()
+    mine = Path("tests/test_core.py")
+    shell_write(kit, repo, "c1", mine, "z: str = 1  # TYPE\n")
+    block = end(kit, repo).block
+    assert block.startswith("lup won't end the turn yet")
+    assert f"{repo}/tests/test_core.py:1:" in block
+    assert "core.py:11" not in block
+
+
+def test_a_subagents_own_end_holds_once_on_its_files_then_lets_it_end(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    subagent_breaks_core(kit, repo)
+    first = subagent_ends(kit, repo, "worker").block
+    assert first.startswith(
+        "lup won't end the turn yet: files this conversation touched have type "
+        "errors or ruff findings."
+    )
+    assert f"{repo}/src/pkg/core.py:11:" in first
+    let = subagent_ends(kit, repo, "worker", after_block=True)
+    assert let.block == ""
+    assert let.note.startswith("lup held the turn's end on these just before")
+    assert f"{repo}/src/pkg/core.py:11:" in let.note
+    assert subagent_ends(kit, repo, "worker").block == first
+
+
+def test_a_shell_write_no_checkpoint_can_attribute_goes_to_every_participant(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    both_break_core(kit, repo)
+    assert session(kit, repo).touched == {"": [CORE], "worker": [CORE]}
+    assert subagent_ends(kit, repo, "worker").block.startswith(
+        "lup won't end the turn yet"
+    )
+
+
+def test_a_file_tools_write_goes_to_the_conversation_that_made_it(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    new = repo / "src" / "pkg" / "new.py"
+    text = '"""New."""\nz: str = 1  # TYPE\n'
+    write = Overwrite(call="w1", tool="Write", path=new, text=text)
+    assert before(kit.bench, write, SESSION, repo).outcome == "ask"
+    call(kit, repo, "c1")
+    call(kit, repo, "w1", tool="Write", agent="worker")
+    new.write_text(text)
+    finish(kit, repo, "c1")
+    finish(kit, repo, "w1", agent="worker")
+    assert session(kit, repo).touched == {"worker": [Path("src/pkg/new.py")]}
+    told = end(kit, repo).block
+    assert told.startswith("Type errors and ruff's findings in the files changed")
+    assert "lup won't end the turn yet" not in told
+    assert end(kit, repo) == Reply()
+    assert subagent_ends(kit, repo, "worker").block.startswith(
+        "lup won't end the turn yet"
+    )
 
 
 def test_a_subagent_is_at_work_until_its_end_lets_it_go(kit: Kit, repo: Path) -> None:
     start(kit, repo)
-    subagent_breaks_core(kit, repo)
+    both_break_core(kit, repo)
     call(kit, repo, "worker-lost", agent="worker")
     (repo / "src" / "pkg" / "new.py").write_text('"""New."""\n')
-    assert subagent_ends(kit, repo, "worker").block.startswith("lup refused 1 file.")
-    assert end(kit, repo).block == ""
-    assert subagent_ends(kit, repo, "worker") == Reply()
+    first = subagent_ends(kit, repo, "worker").block
+    assert first.startswith("lup refused 1 file.")
+    assert "lup won't end the turn yet" in first
+    mailed = end(kit, repo).block
+    assert "lup won't end the turn yet" not in mailed
+    working = end(kit, repo)
+    assert working.block == ""
+    assert working.note.startswith(
+        "A subagent of this session at work touched these files too"
+    )
+    assert f"{repo}/src/pkg/core.py:11:" in working.note
+    assert subagent_ends(kit, repo, "worker", after_block=True).block == ""
     assert end(kit, repo).block.startswith("lup won't end the turn yet")
 
 
@@ -610,12 +695,12 @@ def test_what_the_turns_end_must_tell_still_blocks_while_a_subagent_works(
     kit: Kit, repo: Path
 ) -> None:
     start(kit, repo)
-    subagent_breaks_core(kit, repo)
+    both_break_core(kit, repo)
     call(kit, repo, "lost")
     (repo / "src" / "pkg" / "new.py").write_text('"""New."""\n')
     block = end(kit, repo).block
     assert block.startswith("lup refused 1 file.")
-    assert "A subagent of this session is at work" in block
+    assert "A subagent of this session at work touched these files too" in block
     assert "lup won't end the turn yet" not in block
 
 
@@ -647,9 +732,54 @@ def test_different_findings_after_a_block_block_again(kit: Kit, repo: Path) -> N
 
 def test_a_session_starting_again_forgets_its_subagents(kit: Kit, repo: Path) -> None:
     start(kit, repo)
-    subagent_breaks_core(kit, repo)
+    both_break_core(kit, repo)
+    assert "lup won't end the turn yet" not in end(kit, repo).block
     start(kit, repo)
     assert end(kit, repo).block.startswith("lup won't end the turn yet")
+
+
+def test_a_record_an_earlier_judge_stored_reads_as_the_sessions_own(
+    kit: Kit, repo: Path, shell: Shell
+) -> None:
+    (repo / CORE).write_text((repo / CORE).read_text() + "y: int = 'a'  # TYPE\n")
+    shell.commit(repo, "a type error, from before the session")
+    start(kit, repo)
+    layout = worktree(kit, repo).store.layout
+    stored = json.loads(layout.session(SESSION).read_text())
+    layout.session(SESSION).write_text(
+        json.dumps(
+            {
+                **stored,
+                "touched": [str(CORE)],
+                "watched": [],
+                "judged": [{"path": str(CORE), "blob": "0" * 40}],
+            }
+        )
+    )
+    assert session(kit, repo).touched == {"": [CORE]}
+    assert session(kit, repo).judged[0].agent == ""
+    first = end(kit, repo).block
+    assert first.startswith("lup won't end the turn yet")
+    conversations = kit.layout.conversations(SESSION)
+    blocked = json.loads(conversations.read_text())["blocked"][""]
+    conversations.write_text(json.dumps({"working": [], "blocked": blocked}))
+    let = end(kit, repo, after_block=True)
+    assert let.block == ""
+    assert let.note.startswith("lup held the turn's end on these just before")
+    assert subagent_ends(kit, repo, "worker") == Reply()
+
+
+def test_an_importers_state_an_earlier_judge_stored_reads_as_no_ones(
+    kit: Kit, repo: Path
+) -> None:
+    layout = kit.layout.store(repo)
+    layout.home.mkdir(parents=True)
+    report = importer_error(Path("src/pkg/user.py"))
+    layout.importers.write_text(
+        json.dumps({"pending": [], "found": [report.model_dump(mode="json")]})
+    )
+    found = ImportersPass(layout=layout, root=repo).collect()
+    assert (found.reports, found.writers) == ([report], [])
 
 
 def test_a_finding_ruff_fixes_safely_neither_informs_nor_holds_the_turn(
@@ -796,32 +926,46 @@ def importer_error(path: Path) -> FileReport:
     return FileReport(path=path, findings=[finding])
 
 
+OWN = Conversation(session=SESSION, agent="")
+WORKER = Conversation(session=SESSION, agent="worker")
+
+
 def test_the_importers_pass_runs_once_with_everything_requested(
     kit: Kit, repo: Path
 ) -> None:
     importers = ImportersPass(layout=kit.layout.store(repo), root=repo)
     runner = FileLock(kit.layout.store(repo).importers_run)
     with runner:
-        importers.request([Path("a.py")], kit.spawner)
-        importers.request([Path("b.py")], kit.spawner)
+        importers.request([Path("a.py")], [OWN], kit.spawner)
+        importers.request([Path("b.py")], [WORKER], kit.spawner)
         assert kit.spawner.spawned == []
         importers.run(kit.engine)
         assert kit.engine.importers_asked == []
     importers.run(kit.engine)
     assert kit.engine.importers_asked == [[Path("a.py"), Path("b.py")]]
+    assert importers.collect().writers == [OWN, WORKER]
+    assert importers.collect().writers == []
 
 
 def test_an_idle_request_starts_one_pass(kit: Kit, repo: Path) -> None:
     importers = ImportersPass(layout=kit.layout.store(repo), root=repo)
-    importers.request([Path("a.py")], kit.spawner)
+    importers.request([Path("a.py")], [OWN], kit.spawner)
     assert kit.spawner.spawned == [repo]
+
+
+USER = Path("src/pkg/user.py")
+
+
+def user_with_an_error(kit: Kit, repo: Path) -> None:
+    """`USER` imports `CORE` and has a type error, which the pass reports."""
+    kit.engine.importer_reports = [importer_error(USER)]
+    (repo / USER).write_text("from pkg.core import helper\nhelper('a')  # TYPE\n")
 
 
 def test_the_turns_end_waits_for_the_pass_and_reports_its_errors(
     kit: Kit, repo: Path
 ) -> None:
-    kit.engine.importer_reports = [importer_error(Path("src/pkg/user.py"))]
-    (repo / "src" / "pkg" / "user.py").write_text("from pkg.core import helper\n")
+    user_with_an_error(kit, repo)
     start(kit, repo)
     shell_write(
         kit,
@@ -833,7 +977,42 @@ def test_the_turns_end_waits_for_the_pass_and_reports_its_errors(
     assert kit.spawner.spawned == [repo]
     block = end(kit, repo).block
     assert kit.engine.importers_asked == [[CORE]]
-    assert f"{repo}/src/pkg/user.py:1:1 - reportCallIssue: wrong arguments" in block
+    assert f"{repo}/src/pkg/user.py:2:14 - reportGeneralTypeIssues" in block
+    assert session(kit, repo).watched == {"": [USER]}
+
+
+def test_the_importers_errors_go_to_the_conversation_whose_change_they_follow(
+    kit: Kit, repo: Path
+) -> None:
+    user_with_an_error(kit, repo)
+    start(kit, repo)
+    call(kit, repo, "w1", agent="worker")
+    (repo / CORE).write_text(
+        (repo / CORE).read_text().replace("return x", "return x + 1")
+    )
+    finish(kit, repo, "w1", agent="worker")
+    assert end(kit, repo) == Reply()
+    assert session(kit, repo).watched == {"worker": [USER]}
+    block = subagent_ends(kit, repo, "worker").block
+    assert f"{repo}/src/pkg/user.py:2:14 - reportGeneralTypeIssues" in block
+
+
+def test_the_importers_errors_go_to_the_session_whose_change_they_follow(
+    kit: Kit, repo: Path
+) -> None:
+    user_with_an_error(kit, repo)
+    start(kit, repo, "other")
+    start(kit, repo)
+    CallStarted(session="other", cwd=repo, call="o1", tool="Bash").apply(kit.bench)
+    (repo / CORE).write_text(
+        (repo / CORE).read_text().replace("return x", "return x + 1")
+    )
+    finish(kit, repo, "o1", session="other")
+    assert end(kit, repo) == Reply()
+    other = worktree(kit, repo).recorded("other")
+    assert other is not None
+    assert other.watched == {"": [USER]}
+    assert end(kit, repo, "other").block.startswith("lup won't end the turn yet")
 
 
 def bad(root: Path) -> None:
