@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from lup_dev import Project
+from lup_dev import Project, Section
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.load import load
 from lup_dev.declaration.resolve import Declaration, resolve
@@ -203,6 +203,8 @@ def test_lups_own_declaration_is_its_modules_with_its_changes() -> None:
     assert ("lup-development", "npm") in [
         (each.module, each.requirement.tool) for each in resolved.requirements
     ]
+    assert [each.name for each in resolved.packages][-3:] == ["nodejs", "npm", "uv"]
+    assert resolved.guidance == [Section(name="lup", path=Path("AGENTS.md"))]
 
 
 def test_loading_a_declaration_leaves_no_bytecode_at_the_root(

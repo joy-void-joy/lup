@@ -7,11 +7,12 @@ sentence, and its parts and settings as fields whose defaults are the module's o
 
 A module is a layer. Wherever it's written, in `.add` or `.edit` or bound to a
 name, it means the module below with the fields it set (pydantic's
-`model_fields_set`) changed: a selection it set composes over below's, any other
-field it set replaces below's, and every field it didn't set stays as below has it.
-Where nothing is below, below is the module's own defaults. Each field a layer set
-is credited to that layer, by its place in the chain of `Modules`' verbs and its
-reason, so the overview can show where every value came from.
+`model_fields_set`) changed: a selection or a model of settings (a `Layer`) it
+set composes over below's, any other field it set replaces below's, and every
+field it didn't set stays as below has it. Where nothing is below, below is the module's own
+defaults. Each field a layer set is credited to that layer, by its place in the
+chain of `Modules`' verbs and its reason, so the overview can show where every
+value came from.
 """
 
 from collections.abc import Collection
@@ -22,8 +23,14 @@ from typing import ClassVar, Self, TypeAliasType, get_args, get_origin, override
 
 from lup.types import Model
 from lup_dev.declaration.errors import ProjectError
-from lup_dev.declaration.grammar import Edit, Of, Placed, Selection
-from lup_dev.declaration.kinds import Paths
+from lup_dev.declaration.grammar import (
+    Edit,
+    Of,
+    Placed,
+    Selection,
+    applied,
+    set_fields,
+)
 from lup_dev.declaration.requirements import Requirement
 
 
@@ -149,28 +156,18 @@ class Module(Model, extra="forbid"):
 
     def changed(self) -> list[str]:
         """List the fields this module's layers set, in the order they're declared."""
-        return [
-            field
-            for field in type(self).model_fields
-            if field in self.model_fields_set and field != "origins"
-        ]
+        return [field for field in set_fields(self) if field != "origins"]
 
     def over(self, below: Self) -> Self:
         """Return this module as a layer over `below`: the fields it set, on below's.
 
-        A selection it set composes over below's; any other field it set replaces
-        below's. Every field it didn't set stays as below has it, credited to the
-        layer that set it there.
+        A selection or a model of settings it set composes over below's; any other
+        field it set replaces below's. Every field it didn't set stays as below has
+        it, credited to the layer that set it there.
         """
         changed = self.changed()
-        update = {
-            field: value.over(getattr(below, field))
-            if issubclass(type(value := getattr(self, field)), Selection | Paths)
-            else value
-            for field in changed
-        }
         origins = below.origins.updated([self.origins.of(field) for field in changed])
-        return below.model_copy(update={**update, "origins": origins})
+        return applied(self, below, changed).model_copy(update={"origins": origins})
 
     def stamped(self, position: int | None, why: str | None) -> Self:
         """Credit each field this module set to the layer at `position`, for `why`.

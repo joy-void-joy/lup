@@ -35,6 +35,7 @@ class CodeRules(Module):
             probe=["node", "-p", "process.versions.node"],
             why="runs the rule engine",
             install="https://nodejs.org/en/download",
+            package="nodejs",
         )
     ]
 

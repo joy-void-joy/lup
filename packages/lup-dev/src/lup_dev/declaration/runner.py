@@ -58,6 +58,7 @@ class Uv(Runner):
             tool="uv",
             why="runs the project's tools",
             install="https://docs.astral.sh/uv/getting-started/installation/",
+            package="uv",
         )
     ]
 

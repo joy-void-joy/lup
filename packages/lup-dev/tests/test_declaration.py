@@ -17,26 +17,33 @@ from lup_dev import (
     Exemption,
     Exemptions,
     Gate,
+    Guidance,
     Module,
     Modules,
+    Package,
+    Packages,
     Paths,
     Plain,
     Project,
     Pytest,
     Python,
+    RemovedTools,
     Requirement,
     Rules,
+    Section,
+    Session,
     Step,
     TestRoots,
     Uv,
 )
 from lup_dev.catalog.paths import CorePaths, PythonPaths
+from lup_dev.catalog.room import SessionDefaults, StandardMachine
 from lup_dev.catalog.rules import DefaultRules
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.grammar import Drop
 from lup_dev.declaration.module import Origin
 from lup_dev.declaration.modules.code_rules import lup_default
-from lup_dev.declaration.resolve import Resolved, resolve
+from lup_dev.declaration.resolve import Resolved, SessionChoices, resolve
 
 
 def layered(resolved: Resolved, module: str) -> list[Drop]:
@@ -590,15 +597,216 @@ def test_dropping_a_module_drops_its_parts(dropped: str) -> None:
     resolved = resolve(Project(modules=Modules.default().drop(dropped)))
     assert dropped not in [each.name for each in resolved.modules]
     assert all(each.module != dropped for each in resolved.requirements)
+    packages = [each.name for each in resolved.packages]
     match dropped:
         case "python":
             assert resolved.gate == []
             assert resolved.tests == []
             assert resolved.paths.python == []
             assert "**/pyproject.toml" not in resolved.paths.protected
+            assert "uv" not in packages
         case _:
             assert resolved.rules == []
             assert resolved.exempt == []
+            assert "nodejs" not in packages
+
+
+# The room's parts: packages, session settings, guidance
+
+
+def machine() -> list[str]:
+    return [name for group in StandardMachine().groups for name in group.names]
+
+
+def test_the_image_is_the_standard_machine_and_each_requirement_s_package() -> None:
+    resolved = resolve(Project())
+    assert [each.name for each in resolved.packages] == [*machine(), "nodejs", "uv"]
+    assert resolved.packages[0] == Package(
+        name="bash", why=StandardMachine().groups[0].why
+    )
+    assert resolved.packages[-2] == Package(
+        name="nodejs", why="provides `node` for `code-rules`: runs the rule engine"
+    )
+
+
+def test_a_package_from_two_places_is_one_package_the_first_s() -> None:
+    class Studio(Module):
+        """The studio."""
+
+        name = "studio"
+        requirements = [
+            Requirement(tool="ffmpeg", why="encodes", package="ffmpeg"),
+            Requirement(tool="node", package="nodejs"),
+        ]
+
+        packages: Packages = Packages.of(
+            Package(name="ffmpeg", why="encodes the episodes"),
+            Package(name="git", why="tags each episode"),
+        )
+
+    resolved = resolve(Project(modules=Modules.default().add(Studio())))
+    names = [each.name for each in resolved.packages]
+    assert [names.count(name) for name in ["ffmpeg", "git", "nodejs"]] == [1, 1, 1]
+    assert names.index("ffmpeg") < names.index("nodejs")
+    by_name = {each.name: each.why for each in resolved.packages}
+    assert by_name["ffmpeg"] == "encodes the episodes"
+    assert by_name["git"] == StandardMachine().groups[1].why
+
+
+def test_a_requirement_without_a_package_brings_none() -> None:
+    resolved = resolve(Project(modules=Modules.default().add(Narration())))
+    assert "ffmpeg" not in [each.name for each in resolved.packages]
+
+
+def test_a_layer_changes_core_s_packages_where_they_stand() -> None:
+    layer = Core(
+        packages=Packages()
+        .drop("emacs-nox", why="nobody here uses it")
+        .add(Package(name="graphviz", why="draws the pipeline"))
+    )
+    resolved = resolve(Project(modules=Modules.default().edit(layer)))
+    names = [each.name for each in resolved.packages]
+    kept = [name for name in machine() if name != "emacs-nox"]
+    assert names == [*kept, "graphviz", "nodejs", "uv"]
+
+
+def test_session_settings_are_lup_s_by_default() -> None:
+    assert resolve(Project()).session == SessionChoices(
+        subagent_cache="1h",
+        auto_memory=False,
+        removed_tools=SessionDefaults().removed_tools,
+    )
+    assert SessionDefaults().removed_tools[:5] == [
+        "Artifact",
+        "SendFeedback",
+        "Workflow",
+        "ScheduleWakeup",
+        "ReportFindings",
+    ]
+
+
+def test_a_session_layer_changes_only_the_fields_it_sets() -> None:
+    modules = Modules.default().edit(
+        Core(session=Session(auto_memory=True)), why="this project keeps notes"
+    )
+    resolved = resolve(Project(modules=modules))
+    assert resolved.session == SessionChoices(
+        subagent_cache="1h",
+        auto_memory=True,
+        removed_tools=SessionDefaults().removed_tools,
+    )
+    assert module(resolved, "core").origins.of("session") == Origin(
+        field="session", position=1, why="this project keeps notes"
+    )
+
+
+def test_removed_tools_are_a_selection_each_layer_adds_to_or_drops_from() -> None:
+    base = Modules.default().edit(
+        Core(session=Session(removed_tools=RemovedTools().add("CronCreate")))
+    )
+    modules = base.edit(
+        Core(
+            session=Session(
+                subagent_cache="5m",
+                removed_tools=RemovedTools().drop("Workflow", why="we run workflows"),
+            )
+        )
+    )
+    session = resolve(Project(modules=modules)).session
+    lups = [name for name in SessionDefaults().removed_tools if name != "Workflow"]
+    assert session.removed_tools == [*lups, "CronCreate"]
+    assert session.subagent_cache == "5m"
+    assert session.auto_memory is False
+
+
+def test_removed_tools_default_is_lup_s_and_of_starts_over() -> None:
+    def removed(tools: RemovedTools) -> list[str]:
+        layer = Core(session=Session(removed_tools=tools))
+        return resolve(
+            Project(modules=Modules.default().edit(layer))
+        ).session.removed_tools
+
+    assert removed(RemovedTools.default().drop("Artifact")) == [
+        name for name in SessionDefaults().removed_tools if name != "Artifact"
+    ]
+    assert removed(RemovedTools.of("NotebookEdit")) == ["NotebookEdit"]
+    with pytest.raises(ProjectError, match=r"`RemovedTools.drop` names `Bash`"):
+        removed(RemovedTools().drop("Bash"))
+
+
+def test_session_settings_from_two_modules_are_refused() -> None:
+    class Sessions(Module):
+        """Another way to run sessions."""
+
+        name = "sessions"
+
+        session: Session = Session(auto_memory=True)
+
+    with pytest.raises(
+        ProjectError, match=r"`core` and `sessions` each give session settings"
+    ):
+        resolve(Project(modules=Modules.default().add(Sessions())))
+
+
+def test_the_resolved_session_holds_every_session_setting() -> None:
+    assert list(SessionChoices.model_fields) == list(Session.model_fields)
+
+
+def test_a_misspelled_session_setting_is_refused() -> None:
+    with pytest.raises(pydantic.ValidationError, match=r"auto_memroy"):
+        Session.model_validate({"auto_memroy": True})
+
+
+def test_guidance_lists_each_module_s_sections_in_module_order() -> None:
+    class Pipeline(Module):
+        """The pipeline."""
+
+        name = "pipeline"
+
+        guidance: Guidance = Guidance.of(
+            Section(name="pipeline", path=Path("guidance/pipeline.md")),
+            Section(name="stages", package="pipeline.docs", path=Path("stages.md")),
+        )
+
+    project = Section(name="project", path=Path("AGENTS.md"))
+    modules = (
+        Modules.default()
+        .add(Pipeline(), before="python")
+        .edit(Core(guidance=Guidance().add(project)))
+    )
+    assert [each.name for each in resolve(Project(modules=modules)).guidance] == [
+        "project",
+        "pipeline",
+        "stages",
+    ]
+    first = Section(name="first", path=Path("first.md"))
+    placed = modules.edit(
+        Pipeline(guidance=Guidance().drop("stages").add(first, before="project"))
+    )
+    assert [each.name for each in resolve(Project(modules=placed)).guidance] == [
+        "first",
+        "project",
+        "pipeline",
+    ]
+
+
+def test_a_section_name_from_two_modules_is_refused_naming_both() -> None:
+    class Notes(Module):
+        """Notes."""
+
+        name = "notes"
+
+        guidance: Guidance = Guidance.of(Section(name="project", path=Path("a.md")))
+
+    modules = Modules.default().edit(
+        Core(guidance=Guidance().add(Section(name="project", path=Path("b.md"))))
+    )
+    with pytest.raises(ProjectError, match=r"`project` from `core` and `notes`"):
+        resolve(Project(modules=modules.add(Notes())))
+
+
+def test_lup_s_modules_bring_no_guidance_text() -> None:
+    assert resolve(Project()).guidance == []
 
 
 def test_the_front_door_imports_only_the_declaration_s_models() -> None:

@@ -11,9 +11,15 @@ from lup_dev.declaration.kinds import (
     Exemption,
     Exemptions,
     Gate,
+    Guidance,
+    Package,
+    Packages,
     Paths,
     Pytest,
+    RemovedTools,
     Rules,
+    Section,
+    Session,
     TestRoots,
 )
 
@@ -294,3 +300,22 @@ def test_steps_exemptions_and_test_roots_are_named_by_their_own_field() -> None:
     assert (
         TestRoots().named(Pytest(root=Path("packages/*/tests"))) == "packages/*/tests"
     )
+    assert Packages().named(Package(name="git", why="")) == "git"
+    assert Guidance().named(Section(name="core", path=Path("core.md"))) == "core"
+
+
+def test_a_layer_keeps_what_it_didn_t_set_and_composes_a_selection_it_holds() -> None:
+    below = Session(subagent_cache="5m", removed_tools=RemovedTools.of("A", "B"))
+    layered = Session(
+        auto_memory=True, removed_tools=RemovedTools().drop("A").add("C")
+    ).over(below)
+    assert layered.subagent_cache == "5m"
+    assert layered.auto_memory is True
+    assert names(layered.removed_tools.resolve([], [])) == ["B", "C"]
+
+
+def test_a_layer_given_a_field_at_its_default_value_sets_it() -> None:
+    assert (
+        Session(auto_memory=False).over(Session(auto_memory=True)).auto_memory is False
+    )
+    assert Session().over(Session(auto_memory=True)).auto_memory is True
