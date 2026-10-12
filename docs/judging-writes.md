@@ -486,6 +486,8 @@ Both runtimes hear a report the same way. Codex's docs say a `PostToolUse` hook'
 | Each session's subagents at work, and what held each of its conversations' ends when it last blocked | `$XDG_STATE_HOME/lup/session-index/<session>.conversations.json` | Every turn's end of the session reads them, whichever worktree it's in |
 | Saved versions | `<worktree>/.lup/saved/` | The agent has to edit and move them |
 | A worktree's engine: its socket, and its lock and log | `$XDG_RUNTIME_DIR/lup/<id>.sock` (or `lup-<user>` in the system's temporary directory); the lock and log in the store | A socket's path holds about a hundred bytes, which the store's path can exceed |
+| The host service: its control socket, the lock it holds for its life, and each launch's socket directory with the launch's record beside it | `$XDG_RUNTIME_DIR/lup/host/`: `control.sock`, `service.lock`, `launches/<launch>/hook.sock`, `launches/<launch>.json` | A socket's path is short there; a reboot empties it as it ends every room, records included |
+| What a host service started in the background prints | `$XDG_STATE_HOME/lup/host/service.log`, appended at each start | It outlives the service it tells about, a crash included |
 | The built engine and its stubs | `lup_dev/codescan/bundle/`, built by `packages/lup-dev/checker/build.py`, ignored by git | The installed package carries it, so the judge finds its engine beside it |
 | The judge itself | A local copy installed from `dev` by `lup-dev install` (`uv tool install` from the `dev` checkout), refreshed by the operator when `dev` moves; the hooks run it as `"$(uv tool dir --bin)/lup-dev"` | An agent editing the rules in its worktree isn't judged by its own edit, and a broken judge in a worktree can't refuse every write including its own fix. A branch changing the rules runs them in its own tests until it lands |
 | The commit the operator approved last, with when and from which checkout | `$XDG_STATE_HOME/lup/judge/approved.json` | The next refresh shows the judge's source since it |
@@ -579,6 +581,10 @@ In `packages/lup-dev/src/lup_dev/`, by subsystem (`docs/conventions.md`, *Packag
 | `catalog/paths.py` | The default path patterns each role starts from, `Core`'s and `Python`'s |
 | `catalog/rules.ts` | lup's rules, one entry each: its mistake, its steer, its check and its examples, compiled into the engine |
 | `catalog/gate.py` | `Step`, and `Python`'s gate steps, each the tool alone, in order (*Type errors and ruff's findings*, *The gate's steps*) |
+| **`host/`** | **The host service, which rooms call** (`docs/launch.md`, *On the host: the service*); it imports none of the subsystems above, and takes the hook answerer from `cli.py`, which alone imports the adapters |
+| `host/protocol.py` | The control requests and replies, each told apart by its `kind`: `Register`, `Unregister`, `Stop`; `Registered`, `Done`, `Refused`; `HostError` |
+| `host/service.py` | `HostService`: the control socket, a hook socket per launch answered through the `Answerer` seam off the event loop, each launch recorded for the next service, and the `Handler`s modules register (`Route.to`) |
+| `host/client.py` | `HostClient`: finding the service on its control socket, or starting it (`Detached`, the `Starter` seam) and waiting through the clock until it answers; registering and ending a launch; stopping the service |
 | **root** | **Package-wide** |
 | `gate.py` | `lup-dev check`: the worktree's declaration's requirements checked at once, then its steps run through its runner from the root, every one even after one fails, and their report; with `--fix`, ruff's safe fixes and the formatter first; `Processes`, the seam its tests stub |
 | `install.py` | Installing the judge: the operator reviews its source since the commit approved last before a new copy runs; the `Reviewer` seam, and the terminal's review |
@@ -587,7 +593,7 @@ In `packages/lup-dev/src/lup_dev/`, by subsystem (`docs/conventions.md`, *Packag
 | `settings.py`, `layout.py` | The environment variables `lup_dev` reads; where it keeps what it stores |
 | `clock.py` | The clock judging reads and waits on, which tests drive |
 | `errors.py` | `LupDevError`, the root of what `lup_dev` raises |
-| `cli.py` | `lup-dev hook claude\|codex`, `lup-dev check [--fix]`, `lup-dev rules list\|docs\|check`, `lup-dev holds [approve\|decline]`, `lup-dev verdicts`, `lup-dev install [--in-terminal]`; the review flow's `submit`, `wait`, `reviews` and `reply`; hidden, `importers` (the background pass, which the checkpoint starts) and `review keep` (keeping the review flow's reviews in the first lup's dashboard); the one place listing the adapters |
+| `cli.py` | `lup-dev hook claude\|codex`, `lup-dev check [--fix]`, `lup-dev rules list\|docs\|check`, `lup-dev holds [approve\|decline]`, `lup-dev verdicts`, `lup-dev install [--in-terminal]`, `lup-dev host [stop]`; the review flow's `submit`, `wait`, `reviews` and `reply`; hidden, `importers` (the background pass, which the checkpoint starts) and `review keep` (keeping the review flow's reviews in the first lup's dashboard); the one place listing the adapters, and the hook answerer built from them (`Adapters`), which `hook` and the host service share |
 
 `policy/worktrees.py` is a module of its own rather than part of `policy/checkpoint.py`, already the package's largest **(leaning)**; reaching a worktree, which begins the session there, stays in `policy/checkpoint.py` (`holding`), beside `begin`.
 

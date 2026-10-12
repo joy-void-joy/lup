@@ -186,7 +186,14 @@ The host service is a program lup runs on the operator's machine, outside every 
   - One socket for every room would have each request name its launch, which the room would then say of itself.
   - HTTP on localhost, reachable from rooms on the host's network, would be reachable by every process on the machine, and couldn't tell rooms apart.
 - **Its control is a socket on the host only,** taking typed requests: one JSON request per connection, a pydantic model discriminated by `kind`, and one JSON reply. In this piece the kinds are a launch's registration and its end, and stopping the service. Modules register the handlers for their kinds; piece 2 adds the inbox's, and the socket lup's MCP server reaches from the room.
-- **Its waits go through `lup_dev.clock`,** so its tests drive time.
+  - A handler (`Handler`) names the model of its requests and answers each on the event loop; `Route.to(handler)` routes its kind there, read from the model, so the kind is spelled once. A handler's requests and replies are its module's own models, beside it, so a kind is added without editing the service or the protocol **(leaning)**. A closed union of every kind in `host/protocol.py` would have each module add its models there. Two handlers for one kind are refused when the service is built.
+  - What the service can't carry out is replied as `Refused`, with why: a request that doesn't parse, a kind no handler answers, a launch registered twice or running a runtime lup doesn't know, ending a launch that isn't served, and a handler's failure, which is said with its traceback.
+- **Each hook is answered in a thread of the service's pool** (256 by default), off the event loop, with the answerer `cli.py` builds from the adapters and `Bench`, which `lup-dev hook` answers through too. A hold holds its thread while it waits. A failed answer (a payload that doesn't parse; the adapters answer judging's own failures in the hook's terms) is said with its traceback, and the connection closes unanswered: socat prints nothing and ends with status 0, which the runtime takes as no decision. Where `lup-dev hook` failing ends with status 1, a non-blocking error the runtime shows, as socat's does when no service listens (measured: 0 closed unanswered, 1 with no service).
+- **A launch outlives a restart of the service (leaning).** Each launch is recorded beside its socket directory, under lup's runtime directory, and a service started after one stopped serves every recorded launch again, binding `hook.sock` in the directory the room mounted. A stop closes the sockets and keeps the records; a launch's end removes its record and its directory, with whatever the room left in it. A launch whose launcher died without ending it stays recorded and served: nothing yet tells it's gone.
+- **One service runs at a time:** it holds a lock for its whole life, which the OS frees, so a second `lup-dev host` refuses, naming the socket; a control socket left by a service that died is replaced. Launches starting at once may each start one; all but the first refuse, and each client waits until the socket answers.
+- **A stop doesn't wait for the answers in flight (leaning):** the sockets close at once, the next service may start, and the answers' threads finish before the old process exits, so a hold is still answered and logged as usual, but its hook hears nothing.
+- **Started detached** by the client, as `python -m lup_dev.cli host` with the interpreter running the client **(leaning)**: the installed `lup-dev`'s whenever the launch runs from it. What it prints is appended to `service.log` in lup's state, which the client names when it doesn't answer in time.
+- **Its waits go through `lup_dev.clock`,** so its tests drive time: the client waits up to 10 seconds for a service it started to answer, and for one it stopped to be gone.
 
 ## Modules and public API
 
@@ -231,9 +238,9 @@ status = room.launch(arguments=["--resume"], settings=settings)   # a terminal; 
 | `launch/logins.py` | The operator's runtime directory in the room: the room's own Claude Code state file, and what the room turns off |
 | `launch/guidance.py` | Rendering the modules' guidance sections, and a local section, into one document |
 | `launch/session.py` | A launch's `TerminalSettings`: the hooks, `Core`'s session settings, the guidance, what's trusted |
-| `host/service.py` | The host service: the control socket, a hook socket per launch, the handlers modules register |
-| `host/protocol.py` | The control requests and replies (`Register`, `Unregister`, `Stop`) |
-| `host/client.py` | Finding the service, or starting it |
+| `host/service.py` | The host service (`HostService`): the control socket, a hook socket per launch answered through the `Answerer` seam, the launches recorded for the next service, the handlers modules register (`Handler`, `Route`) |
+| `host/protocol.py` | The control requests and replies (`Register`, `Unregister`, `Stop`; `Registered`, `Done`, `Refused`), and `HostError` |
+| `host/client.py` | Finding the service, or starting it (`HostClient`; `Starter`, and `Detached`, which starts `lup-dev host`) |
 | `catalog/room.py` | lup's base image and its pinned snapshot date, the standard machine's packages, the default session settings |
 | `cli.py` | `launch claude\|codex` and `host [stop]`, until slice C gives each command group its file |
 
@@ -251,7 +258,7 @@ The list of adapters `cli.py` holds moves where the host service reads it too, a
 - The maintaining room for a sample declaration: the image's definition from its modules' packages and requirements, byte for byte; the mounts and variables; each refusal (an environment on a system interpreter, a requirement with no package and no mount).
 - The CLI cache through a stubbed HTTP client: a newer version fetched and checked, a bad checksum refused, the cached version used offline, older versions removed.
 - The engine through a recording fake: no podman in any test.
-- The host service on a socket under the test's temporary directory, with a stub adapter: a payload in and the answer out; a launch's socket gone with the launch; a second start finding the first. Unix sockets are local, not network.
+- The host service on a socket under the test's temporary directory, with a stub answerer: a payload in and the answer out; parallel payloads answered at once, and the control socket answering while a hold waits; a launch's socket gone with the launch; stopping, and a service started again serving the recorded launches in their directories; a second start finding the first; a stale control socket with no service behind it; refusals; a module's handler; and the answer the same as `lup-dev hook`'s. Unix sockets are local, not network.
 - Guidance: sections in module order, a local section after the project's, the runner's spelling, a section naming a command the project doesn't serve refused.
 - **Live, by hand, before landing,** on a scratch project and on each runtime: a first launch reaches the prompt with no screen to dismiss and no login; an Edit with a rule finding is refused through the room's hook; a protected path asks or holds (*Checks owed*); `uv run lup-dev check` passes in the room; `--resume` finds the session before it; an agent's preview server opens in the host's browser; Ctrl+G opens the editor.
 

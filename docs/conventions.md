@@ -245,6 +245,7 @@ import-linter checks the whole graph at the gate. The engine reads the same cont
 | `codescan/` | reading code: the engine's contract and client, the `# lup:` directives, conditions, ruff, and `docs/rules.md` compiled from the rule table |
 | `policy/` | judging every write: roles, the judgement, the checkpoint and its store, holds, verdicts, reports |
 | `adapters/` | each runtime's hooks, the only code naming a runtime |
+| `host/` | the host service, which rooms call, and its client (`docs/launch.md`); it imports none of the other subsystems |
 
 **Why.** A flat package hides which modules belong together. A subpackage per subsystem says what a module is part of before it's opened, and the layer order says which subsystem may know about which.
 
