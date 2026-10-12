@@ -18,7 +18,9 @@ the project uses only while it's being developed. It grows to hold
 
 It holds the first slice (`docs/library.md`): asking either runtime from code, a
 typed answer through the output tool, the layers an ask runs in, its record, and
-the fake and the guard (`lup.testing`).
+the fake and the guard (`lup.testing`). Beside it, each declaration compiles for a
+terminal too, and a room opens that terminal in a container (`lup.rooms`,
+`docs/launch.md`).
 
     translator = Claude(model="opus", system_prompt=PROMPT)
     result = await translator.ask(segment.model_dump_json(), Translations)

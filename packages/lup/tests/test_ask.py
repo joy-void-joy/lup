@@ -21,13 +21,13 @@ from lup import (
 )
 from lup.sessions.contract import Adapter, RawTurn, Seam, TurnRequest, seam
 from lup.sessions.declaration import Asking, Declaration
-from lup.sessions.surface import Agent
 from lup.testing.fake import Submitting, UnscriptedAskError
 from lup.tools import Allow, Deny, Submit
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from lup.sessions.terminal import Terminal, TerminalSettings
     from lup.testing import FakeAgents
 
 
@@ -38,10 +38,15 @@ class Unreachable(Adapter):
         raise AssertionError(message)
 
 
-class Probe(Declaration, Agent):
+class Probe(Declaration):
     """A declaration for no runtime: its asks run on whatever the seam chooses."""
 
     runtime = "probe"
+
+    @override
+    def terminal(self, settings: TerminalSettings) -> Terminal:
+        message = "a probe has no terminal"
+        raise AssertionError(message)
 
     @overload
     async def ask(self, prompt: str, output: None = None) -> TurnResult[str]: ...
