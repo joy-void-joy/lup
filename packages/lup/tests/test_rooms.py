@@ -1,4 +1,4 @@
-"""Rooms: the wall's parts, and podman's command lines through a recording executor.
+"""Rooms: the wall's parts, podman's command lines through a recording executor, and a launch through a recording engine.
 
 No test runs podman.
 """
@@ -6,21 +6,25 @@ No test runs podman.
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import pytest
 from pydantic import ValidationError
 
+from lup.adapters.claude import Claude
 from lup.rooms import (
     Container,
+    ContainerEngine,
     ContainerError,
     Image,
     Mask,
     Mount,
     Podman,
+    Room,
 )
 from lup.rooms.engine import Exited, Invocation, Process, StoredImage
 from lup.sessions.errors import RealCallInTestError
+from lup.sessions.terminal import TerminalSettings
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -322,3 +326,116 @@ def test_listing_and_removing_refuse_when_podman_fails() -> None:
 def test_podman_itself_is_refused_in_tests() -> None:
     with pytest.raises(RealCallInTestError, match="podman"):
         Podman().ensure(IMAGE)
+
+
+# A launch
+
+
+class RecordingEngine(ContainerEngine):
+    """Builds and runs nothing: records what it was asked."""
+
+    def __init__(self) -> None:
+        self.ensured: list[Image] = []
+        self.ran: list[Invocation] = []
+
+    @override
+    def ensure(self, image: Image) -> bool:
+        self.ensured.append(image)
+        return False
+
+    @override
+    def run(self, invocation: Invocation) -> int:
+        self.ran.append(invocation)
+        return 7
+
+
+@pytest.fixture
+def worktree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+    worktree = tmp_path / "lup.git" / "tree" / "dev"
+    worktree.mkdir(parents=True)
+    monkeypatch.chdir(worktree)
+    return worktree
+
+
+def test_a_launch_runs_the_agents_terminal_in_the_room(
+    tmp_path: Path, worktree: Path
+) -> None:
+    repository = tmp_path / "lup.git"
+    launch = tmp_path / "state" / "launch-1"
+    engine = RecordingEngine()
+    own = [Mount(source=repository), Mask(target=repository / "tree" / "other")]
+    room = Room(
+        agent=Claude(model="opus"),
+        container=Container(image=IMAGE, mounts=own, env={"TERM": "xterm"}),
+        engine=engine,
+    )
+    settings = TerminalSettings(
+        directory=launch, cli=Path("/opt/clis/claude"), trusted=[worktree, repository]
+    )
+    terminal = Claude(model="opus").terminal(settings)
+
+    status = room.launch(arguments=["--resume"], settings=settings)
+
+    assert status == 7
+    assert engine.ensured == [IMAGE]
+    assert engine.ran == [
+        Invocation(
+            container=Container(
+                image=IMAGE,
+                mounts=[*own, *terminal.mounts],
+                env={"TERM": "xterm", **terminal.env},
+            ),
+            command=[*terminal.command, "--resume"],
+            workdir=worktree,
+            home=tmp_path / "home",
+            terminal=False,
+        )
+    ]
+    assert {path: path.read_text() for path in terminal.files} == terminal.files
+
+
+def test_a_launch_refuses_a_working_directory_the_room_doesnt_mount(
+    tmp_path: Path, worktree: Path
+) -> None:
+    engine = RecordingEngine()
+    room = Room(
+        agent=Claude(model="opus"),
+        container=Container(image=IMAGE, mounts=[Mount(source=tmp_path / "elsewhere")]),
+        engine=engine,
+    )
+    launch = tmp_path / "launch"
+
+    with pytest.raises(ContainerError, match="doesn't mount the working directory"):
+        room.launch(
+            arguments=[],
+            settings=TerminalSettings(directory=launch, cli=Path("/opt/clis/claude")),
+        )
+    assert not launch.exists()
+    assert engine.ensured == []
+    assert engine.ran == []
+
+
+def test_a_launch_refuses_variables_the_terminal_needs_otherwise(
+    tmp_path: Path, worktree: Path
+) -> None:
+    room = Room(
+        agent=Claude(model="opus"),
+        container=Container(
+            image=IMAGE,
+            mounts=[Mount(source=worktree)],
+            env={"DISABLE_AUTOUPDATER": "0"},
+        ),
+        engine=RecordingEngine(),
+    )
+
+    with pytest.raises(ContainerError, match="DISABLE_AUTOUPDATER"):
+        room.launch(
+            arguments=[],
+            settings=TerminalSettings(
+                directory=tmp_path / "launch", cli=Path("/opt/clis/claude")
+            ),
+        )

@@ -2,6 +2,7 @@
 
 from lup.rooms.container import Container, Image, Mask, Mount
 from lup.rooms.engine import ContainerEngine, ContainerError, Podman
+from lup.rooms.room import Room
 
 __all__ = [
     "Container",
@@ -11,4 +12,5 @@ __all__ = [
     "Mask",
     "Mount",
     "Podman",
+    "Room",
 ]
