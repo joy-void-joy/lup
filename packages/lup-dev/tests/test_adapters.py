@@ -180,27 +180,41 @@ def claude_breaks_core(bench: Bench, repo: Path, **subagent: str) -> None:
     )
 
 
-def test_claude_subagent_stop_holds_once_on_the_subagents_own_files(
+def test_claude_subagent_stop_doesnt_hold_on_the_subagents_own_files(
     on_claude: Bench, repo: Path
 ) -> None:
     claude_breaks_core(on_claude, repo, agent_id="sub")
     stop = payload(repo, "Stop", stop_hook_active=False)
     assert claude.hook(stop, on_claude) == ""
-
-    def subagent_stop(*, after_block: bool) -> str:
-        return payload(
-            repo, "SubagentStop", agent_id="sub", stop_hook_active=after_block
-        )
-
-    first = json.loads(claude.hook(subagent_stop(after_block=False), on_claude))
-    assert first["decision"] == "block"
-    assert first["reason"].startswith("lup won't end the turn yet")
-    again = json.loads(claude.hook(subagent_stop(after_block=True), on_claude))
-    assert "decision" not in again
-    assert again["systemMessage"].startswith(
-        "lup held the turn's end on these just before"
+    subagent_stop = payload(
+        repo, "SubagentStop", agent_id="sub", stop_hook_active=False
     )
+    assert claude.hook(subagent_stop, on_claude) == ""
     assert claude.hook(stop, on_claude) == ""
+
+
+def test_claude_subagent_stop_holds_once_on_a_refusal(
+    on_claude: Bench, repo: Path
+) -> None:
+    claude.hook(
+        payload(
+            repo,
+            "PreToolUse",
+            tool_name="Bash",
+            tool_input={"command": "touch"},
+            tool_use_id="t1",
+            agent_id="sub",
+        ),
+        on_claude,
+    )
+    (repo / "src" / "pkg" / "new.py").write_text('"""New."""\n')
+    subagent_stop = payload(
+        repo, "SubagentStop", agent_id="sub", stop_hook_active=False
+    )
+    first = json.loads(claude.hook(subagent_stop, on_claude))
+    assert first["decision"] == "block"
+    assert first["reason"].startswith("lup refused 1 file.")
+    assert claude.hook(subagent_stop, on_claude) == ""
 
 
 def test_claude_stop_after_a_block_on_the_same_findings_lets_the_turn_end(
@@ -485,7 +499,7 @@ def codex_stop(repo: Path, *, after_block: bool) -> str:
     )
 
 
-def codex_subagent_stop(repo: Path, *, after_block: bool) -> str:
+def codex_subagent_stop(repo: Path) -> str:
     return payload(
         repo,
         "SubagentStop",
@@ -494,28 +508,39 @@ def codex_subagent_stop(repo: Path, *, after_block: bool) -> str:
         agent_type="default",
         agent_transcript_path=None,
         last_assistant_message=None,
-        stop_hook_active=after_block,
+        stop_hook_active=False,
     )
 
 
-def test_codex_subagent_stop_holds_once_on_the_subagents_own_files(
+def test_codex_subagent_stop_doesnt_hold_on_the_subagents_own_files(
     on_codex: Bench, repo: Path
 ) -> None:
     codex_breaks_core(on_codex, repo, agent_id="019b")
     assert codex.hook(codex_stop(repo, after_block=False), on_codex) == ""
-    first = json.loads(
-        codex.hook(codex_subagent_stop(repo, after_block=False), on_codex)
-    )
-    assert first["decision"] == "block"
-    assert first["reason"].startswith("lup won't end the turn yet")
-    again = json.loads(
-        codex.hook(codex_subagent_stop(repo, after_block=True), on_codex)
-    )
-    assert "decision" not in again
-    assert again["systemMessage"].startswith(
-        "lup held the turn's end on these just before"
-    )
+    assert codex.hook(codex_subagent_stop(repo), on_codex) == ""
     assert codex.hook(codex_stop(repo, after_block=False), on_codex) == ""
+
+
+def test_codex_subagent_stop_holds_once_on_a_refusal(
+    on_codex: Bench, repo: Path
+) -> None:
+    codex.hook(
+        payload(
+            repo,
+            "PreToolUse",
+            turn_id="u2",
+            tool_name="Bash",
+            tool_input={"command": "touch"},
+            tool_use_id="b1",
+            agent_id="019b",
+        ),
+        on_codex,
+    )
+    (repo / "src" / "pkg" / "new.py").write_text('"""New."""\n')
+    first = json.loads(codex.hook(codex_subagent_stop(repo), on_codex))
+    assert first["decision"] == "block"
+    assert first["reason"].startswith("lup refused 1 file.")
+    assert codex.hook(codex_subagent_stop(repo), on_codex) == ""
 
 
 def test_codex_stop_after_a_block_on_the_same_findings_lets_the_turn_end(
@@ -591,7 +616,7 @@ def test_codex_lets_a_subagents_turn_end_when_judging_fails_warning_once(
         bench,
     )
     (repo / CORE).write_text((repo / CORE).read_text() + "z = 1\n")
-    subagent_stop = codex_subagent_stop(repo, after_block=False)
+    subagent_stop = codex_subagent_stop(repo)
     output = json.loads(codex.hook(subagent_stop, bench))
     assert output["systemMessage"].startswith("lup's judge failed at a turn's end")
     assert "decision" not in output

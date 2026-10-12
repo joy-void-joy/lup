@@ -49,9 +49,8 @@ What this relies on, from Codex's hooks documentation and its source at
   spawned agent id", and a parent waits only through `wait_agent`, so its turn can
   end while a subagent works;
 - `Stop`'s `stop_hook_active` says "Whether this turn was already continued by
-  `Stop`"; `SubagentStop`'s input carries `stop_hook_active` too, and its output
-  takes `decision`, `reason` and `systemMessage` as `Stop`'s does
-  (`subagent-stop.command.input` and `.output`).
+  `Stop`"; `SubagentStop`'s output takes `decision`, `reason` and `systemMessage`
+  as `Stop`'s does (`subagent-stop.command.output`).
 """
 
 from abc import ABC, abstractmethod
@@ -269,29 +268,19 @@ class Stop(Payload):
 class SubagentStop(Payload):
     """`SubagentStop`: a subagent's turn ends.
 
-    Its input carries `stop_hook_active` (`subagent-stop.command.input`), and its
-    output takes `decision: "block"` and `systemMessage` as `Stop`'s does
+    Its output takes `decision: "block"` and `systemMessage` as `Stop`'s does
     (`subagent-stop.command.output`).
     """
 
     hook_event_name: Literal["SubagentStop"]
-    stop_hook_active: bool = False
-    """Whether its turn goes on because a `SubagentStop` hook blocked it already."""
 
     @override
     def answer(self, bench: Bench) -> Output | None:
         ended = ConversationEnded(
-            session=self.session_id,
-            agent=self.agent_id or "",
-            cwd=self.cwd,
-            after_block=self.stop_hook_active,
+            session=self.session_id, agent=self.agent_id or "", cwd=self.cwd
         )
         reply = ended.apply(bench)
-        if reply.block:
-            return Blocked(reason=reply.block)
-        if reply.note:
-            return OperatorWarning(system_message=reply.note)
-        return None
+        return Blocked(reason=reply.block) if reply.block else None
 
     @override
     def failed(self, bench: Bench, failure: Exception) -> Output | None:
