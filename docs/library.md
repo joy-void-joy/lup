@@ -138,7 +138,7 @@ A plain ask can carry tools without becoming a room. `DESIGN.md` draws the line 
    - A rejection, whether every validation error or a hook's reason, answers the tool call. The agent corrects its answer within the same turn, with its own context. No new prompt is sent.
    - An accepted answer is kept for the turn.
 3. **The turn can't end without an accepted answer.** This is lup's own `stop` hook, the first lup's `create_tool_gate` applied to the end of a turn, delivered through each adapter.
-   - **On Claude**, it's an in-process `Stop` hook (the SDK runs hooks as Python callbacks). It refuses to let the turn finish, saying why: "call `lup_submit` with your answer". The turn continues; it isn't restarted.
+   - **On Claude**, it's an in-process `Stop` hook (the SDK runs hooks as Python callbacks). It refuses to let the turn finish (`decision: block`), saying why: "call the `submit` tool with your final answer, or `report` if it can't be answered". The turn continues; it isn't restarted. Claude Code allows 8 refusals in a row, a tool call resetting the count, so the attempts (3 by default) run out first; once they have, the hook lets the turn end and the ask raises `OutputMissing`.
    - **On Codex**, hooks are commands configured in files, not callbacks. So when the turn ends without an accepted answer, the adapter continues the same thread with that one sentence. The conversation stays, and the original request isn't re-sent.
 4. **Bounded.** `layers.submission.attempts` (default 3) counts rejected answers and refused endings together. Past it, the ask stops the turn and raises `OutputMissing`, carrying every rejected attempt in full.
 5. **Untyped asks** get no tool. The answer is the final message's text.
@@ -148,7 +148,7 @@ A plain ask can carry tools without becoming a room. `DESIGN.md` draws the line 
 ## Tools, minimally
 
 A lup tool is a Python function with a typed input model and a typed output model, declared with `@lup_tool`. It can carry `before` hooks, typed on its input, which run in lup's process before the handler. It is delivered in each runtime's own way:
-- **Claude:** through the SDK's in-process server, so the tool runs in the caller's process. The agent sees it as `mcp__lup__submit`.
+- **Claude:** through lup's own MCP server, built on `mcp`'s low-level `Server` and served in-process by the SDK, so the tool runs in the caller's process. The agent sees it as `mcp__lup__submit`. Every call reaches lup with its arguments as the model sent them: the SDK's own helper (`create_sdk_mcp_server`) checks them against the schema before the handler runs, so lup couldn't count or record that refusal.
 - **Codex:** as a dynamic tool on the thread, answered in-process through the SDK client's server-request callback.
 
 The tool construct is public, but in this slice the only tool is `lup_submit`. The tools slice adds:
@@ -171,11 +171,13 @@ None of them needs a container: a function tool runs in the caller's process, no
 
 ## No tools but lup's own
 
-- **Claude:**
-  - **Configuration.** Built-in tools off (`tools=[]`), no MCP servers except lup's own in-process one (`strict_mcp_config`), and no skills or plugins.
-  - **No filesystem settings** (`setting_sources=[]`), so the user's and project's hooks, `CLAUDE.md` and MCP servers don't load.
-  - **No `@path` expansion.** Prompts are delivered verbatim (`verbatim_prompts`), so text from data can't make Claude Code read a local file.
-  - **Checked on every call.** The CLI's first message lists the tools the session loaded. Anything beyond lup's own stops the call with `ToolsPresent` before the model can use it. Tool calls are also refused by the permission mode (`dontAsk`, nothing pre-approved but lup's tools).
+The guarantee is about what can happen in a session: no commands, no files, no network and no agents, only calls to lup's tools.
+
+- **Claude** (`adapters/claude/runtime.py`):
+  - **Configuration.** Built-in tools off (`tools=[]`, which the SDK passes as `--tools ""`), no MCP servers except lup's own in-process one (`strict_mcp_config`), and no skills or plugins (`skills=[]`, `plugins=[]`).
+  - **No filesystem settings** (`setting_sources=[]`), so the user's and project's hooks, `CLAUDE.md` and MCP servers don't load. Auto memory is read whatever the settings say, so `CLAUDE_CODE_DISABLE_AUTO_MEMORY` turns it off.
+  - **No `@path` expansion.** Prompts are delivered verbatim (`verbatim_prompts`), so text from data can't make Claude Code read a local file: without it, a live check saw `@/etc/hostname` attach the file. Slash commands aren't dispatched either.
+  - **Checked on every call.** The CLI's first message (`init`) lists the tools and MCP servers the session loaded. Any tool but lup's own, or any server but lup's, interrupts the call with `ToolsPresent` before the model can use it, and a turn whose first message never came raises. The message also lists skills, plugins, agents and slash commands, which it lists even when nothing can call them (no `Skill` or `Agent` tool is loaded, and verbatim prompts dispatch no slash command), so only tools and servers are checked. Tool calls are also refused by the permission mode (`dontAsk`, nothing pre-approved but lup's tools).
 - **Codex:**
   - **Configuration.** Environment tools off per thread (`environments: []`, documented in the app-server protocol, sent through the SDK's raw `request`), web search disabled, its own subagents disabled (`agents.enabled=false`), and the other built-in features disabled.
   - **Isolation.** It runs in lup's own Codex home, so the user's MCP servers and hooks don't load.
@@ -184,7 +186,8 @@ None of them needs a container: a function tool runs in the caller's process, no
 ## Out of the operator's history
 
 - **Claude:**
-  - `--no-session-persistence`, so nothing is written to the operator's history or resume list.
+  - `--no-session-persistence`, so nothing is written to the operator's history or resume list. The SDK has no option for it; the adapter passes the flag through `extra_args`, and a live check saw no transcript written.
+  - No auto memory (above), so the operator's memory doesn't reach a session.
   - The login is the operator's own CLI login.
 - **Codex:**
   - `ephemeral` threads, which persist nothing.
@@ -196,13 +199,20 @@ None of them needs a container: a function tool runs in the caller's process, no
 
 | Error | When | Retried by recovery |
 |---|---|---|
-| `AgentUnavailable` | Overload, rate limit, a dropped connection, a 5xx. Classified from `ResultError.api_error_status` (Claude) or `codexErrorInfo` (Codex) | Yes |
+| `AgentUnavailable` | Overload, rate limit, a dropped connection, a 5xx. Classified from the result's `api_error_status` and the assistant messages' `error` (Claude) or `codexErrorInfo` (Codex) | Yes |
 | `UsageLimitReached` | The subscription's window is spent: Claude's `RateLimitEvent` with status `rejected`, or Codex's `usageLimitExceeded`. Carries the reset time when reported | No |
 | `AuthMissing` | No usable login | No |
 | `OutputMissing` | No accepted answer within `submission.attempts` | No |
 | `ToolsPresent` | The tool check failed | No |
 | `RuntimeMissing` | The runtime's extra isn't installed: `install lup[codex]` | No |
 | `TimeoutError` (built-in) | `timeout` passed | No |
+
+**On Claude**, the SDK's client raises nothing when a turn fails: the result's `is_error` says so, and the adapter classifies it from structured fields, in this order:
+- `AuthMissing`: an assistant message's `error` is `authentication_failed`, or the API status is 401. A missing login shows only in the assistant message (its result carries no status).
+- `UsageLimitReached`: the turn failed and the last `RateLimitEvent` said `rejected`, with the window's reset (`resets_at`) when reported. A rejected window that still lets the turn finish (overage) isn't an error. How the event behaves under a subscription login is unverified.
+- `AgentUnavailable`: an API status of 429 or 5xx (an overloaded API is 529), an assistant message's `rate_limit` or `server_error`, or an API error (`terminal_reason` `api_error`) with no status, which means no response arrived: that last case is how a dropped connection is taken, unverified live.
+- `RuntimeMissing`: the SDK's bundled CLI is missing (`CLINotFoundError`).
+- Anything else, such as a refused request (400), an error raised by the SDK, or a crashed CLI: the base `TurnError`, carrying what Claude Code reported.
 
 ## The call record
 
@@ -250,7 +260,7 @@ packages/lup/src/lup/
     tool.py                @lup_tool: a typed Python function as a tool, with before hooks; Allow, Deny
   adapters/
     claude/__init__.py     the Claude declaration
-    claude/runtime.py      the Agent SDK session: options, in-process tools, the Stop guard, the tool check
+    claude/runtime.py      ClaudeAdapter, the Agent SDK session: options, lup's MCP server, the Stop guard, the tool check, the errors
     codex/__init__.py      the Codex declaration
     codex/runtime.py       the app-server session: thread settings, dynamic tools, the continuation guard, lup's Codex home
   observability/
@@ -309,7 +319,9 @@ Each with the alternative and where it lives. **(yours)** marks the operator's.
 ## Checks owed
 
 - **Codex's dynamic tool:** that a dynamic `lup_submit` call reaches the SDK client's server-request callback, and that its answer reaches the model. Checked in the implementation's tests against recorded protocol messages, and in the live check.
-- **Claude's `Stop` hook:** that it can refuse the end of a turn in an SDK session with no persistence, and how its refusals count against Claude Code's cap of 8 consecutive refusals.
+- **Claude's `Stop` hook:** checked live (SDK 0.2.165, Claude Code 2.1.294, no session persistence): a refusal continues the same turn and the model reads the reason; Claude Code's cap of 8 consecutive refusals is reset by any tool call, so lup's attempts run out first.
+- **Claude's adapter end to end:** its facts were checked live with the SDK's own tool helper, and the SDK's in-process bridge was seen serving lup's hand-built server (listing, and a malformed call reaching the handler), but the adapter itself has run only against a scripted client. A live run owes: lup's server through the real CLI, the `init` check, the `Stop` guard and the error classification.
+- **Claude's usage limit and dropped connections:** how a `RateLimitEvent` with status `rejected` behaves under a subscription login, and what a dropped connection reports (taken as an API error with no status).
 - **Parallel startups.** The first lup gave parallel Claude sessions their own config homes because simultaneous startups corrupted `~/.claude.json`. This slice uses the default home, so the live check must show whether CLI 2.1.29x still does that.
 - **Codex's tool-free configuration**, confirmed by the live check on each pinned version.
 
