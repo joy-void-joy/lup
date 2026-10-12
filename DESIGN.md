@@ -145,7 +145,7 @@ Shares per project or agent over a time window; a pace limit for unattended runs
 
 ### Policy
 
-- **What the wall is for:** it keeps untrusted code (a compromised dependency, or an agent that's prompt-injected or just wrong) from damaging the host, so that commands inside it run without prompts. It isn't there to contain the agent: the judge steers, it doesn't guard.
+- **What the wall is for:** it keeps untrusted code (a compromised dependency, or an agent that's prompt-injected or just wrong) from damaging the host, so that commands inside it run without prompts. It also gives every agent the same standard machine, whatever the host is: bash and the usual tools, none of the operator's own shell setup. It isn't there to contain the agent: the judge steers, it doesn't guard.
 - **Walls, protected paths and proposals; no verdicts on commands.** Inside the container a command simply runs. Effects that can't be undone are stopped by a wall where they pass.
 - **Every write is judged by what it produces,** whichever tool made it: code rules on the native file tools before they land, and on everything at the gate. No command's spelling is parsed.
 - **lup allows, holds for a proposal, or refuses:**
