@@ -52,8 +52,9 @@ async def noted(said: BaseModel) -> Heard:
 report = Tool[Problem, Heard](
     name="report",
     description=(
-        "Stop without an answer and say what's wrong: the question can't be answered, "
-        "something you need is missing, or an instruction seems wrong. Your turn ends."
+        "Stop without an answer and say what's wrong.\n\n"
+        "The question can't be answered, something you need is missing, or an "
+        "instruction seems wrong. Your turn ends."
     ),
     input=Problem,
     function=reported,
@@ -63,8 +64,9 @@ report = Tool[Problem, Heard](
 note = Tool[Remark, Heard](
     name="note",
     description=(
-        "Attach a remark to your answer without ending your turn: an assumption it "
-        "rests on, a doubt, or a counterargument your caller should weigh."
+        "Attach a remark to your answer, and carry on.\n\n"
+        "An assumption your answer rests on, a doubt, or a counterargument your "
+        "caller should weigh. Your turn doesn't end."
     ),
     input=Remark,
     function=noted,

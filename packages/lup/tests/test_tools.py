@@ -5,10 +5,11 @@ import asyncio
 import pytest
 from pydantic import BaseModel
 
-from lup.sessions.submission import Answer, End, GiveUp, KeepGoing, Toolbox
-from lup.tools import Allow, Deny, Submit, lup_tool
-from lup.tools.speaking import note, report
-from lup.tools.tool import Accepted, Refused, ToolError
+from lup.sessions.submission import End, GiveUp, KeepGoing, Toolbox
+from lup.tools import Allow, Deny, Submit, Tool, lup_tool
+from lup.tools.serving import Answer
+from lup.tools.speaking import Heard, Problem, note, report
+from lup.tools.tool import Accepted, Refused, ToolError, ToolSpec
 
 
 class Query(BaseModel):
@@ -32,7 +33,73 @@ def test_a_tool_is_named_and_described_by_its_function() -> None:
     spec = weather.spec()
     assert spec.name == "weather"
     assert spec.description == "Look up today's weather in a city."
+    assert spec.summary == "Look up today's weather in a city."
     assert spec.input_schema["required"] == ["city"]
+
+
+def test_a_tool_s_summary_is_its_docstring_s_first_line_and_the_rest_stays() -> None:
+    @lup_tool
+    async def forecast(query: Query) -> Weather:
+        """Forecast a city's weather for the week.
+
+        Each day's summary, from the national service, as it published it last.
+        """
+        return Weather(summary="")
+
+    spec = forecast.spec()
+    assert spec.summary == "Forecast a city's weather for the week."
+    assert spec.description == (
+        "Forecast a city's weather for the week.\n\n"
+        "Each day's summary, from the national service, as it published it last."
+    )
+
+
+def test_a_summary_past_fifty_characters_is_refused_naming_the_tool() -> None:
+    async def long_winded(query: Query) -> Weather:
+        """Look up today's weather in a city, wherever it is in the world."""
+        return Weather(summary="")
+
+    with pytest.raises(
+        ToolError, match=r"`long_winded`'s summary.* 63 characters, past 50"
+    ):
+        lup_tool(long_winded)
+
+
+def test_a_summary_running_onto_a_second_line_is_no_summary() -> None:
+    async def wrapped(query: Query) -> Weather:
+        """Look up today's weather
+        in a city.
+        """
+        return Weather(summary="")
+
+    with pytest.raises(ToolError, match="the tool `wrapped` has no summary"):
+        lup_tool(wrapped)
+
+
+async def heard(problem: Problem) -> Heard:
+    return Heard(message="")
+
+
+def test_a_tool_made_without_lup_tool_is_checked_too() -> None:
+    with pytest.raises(ToolError, match="the tool `quiet` has no summary"):
+        Tool[Problem, Heard](
+            name="quiet", description="", input=Problem, function=heard
+        )
+    with pytest.raises(ToolError, match="the tool `loud`'s summary"):
+        Tool[Problem, Heard](
+            name="loud", description="x" * 51, input=Problem, function=heard
+        )
+    with pytest.raises(ToolError, match="the tool `spec` has no summary"):
+        ToolSpec(name="spec", description="\n", input_schema={})
+
+
+def test_every_tool_of_lup_s_has_a_summary() -> None:
+    summaries = [tool.spec().summary for tool in [Submit(Query), report, note]]
+    assert summaries == [
+        "Submit your final answer once it's complete.",
+        "Stop without an answer and say what's wrong.",
+        "Attach a remark to your answer, and carry on.",
+    ]
 
 
 def test_a_call_validates_then_runs() -> None:
