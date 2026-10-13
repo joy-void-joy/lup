@@ -547,7 +547,7 @@ What that dashboard does with such a review, read in its code at `40c2d28` and c
 
 ## Modules
 
-In `packages/lup-dev/src/lup_dev/`, by subsystem (`docs/conventions.md`, *Package layout*), highest layer first, rather than a flat package of 21 modules; an import contract in `pyproject.toml` keeps `adapters` > `policy` > `codescan` > `declaration` > `catalog`:
+In `packages/lup-dev/src/lup_dev/`, by subsystem (`docs/conventions.md`, *Package layout*), highest layer first, rather than a flat package of 21 modules; an import contract in `pyproject.toml` keeps `adapters` > `policy` > `codescan` > `declaration` > `catalog` > `host`:
 
 | Module | What it's for |
 |---|---|

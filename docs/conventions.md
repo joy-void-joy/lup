@@ -235,7 +235,7 @@ import-linter checks the whole graph at the gate. The engine reads the same cont
 - **A word the library uses means the same thing in the environment:** `adapters` holds each runtime's adapter in `lup` and in `lup_dev` alike.
 - **Every subpackage's `__init__.py` docstring says in one line what it is.**
 - **Package-wide modules stay at the root:** errors, settings, layout, the clock, the command line, and the front door a project's declaration imports (`__init__.py`).
-- **Subsystems import downwards only,** declared as an import-linter `layers` contract. In `lup_dev`: `adapters` > `policy` > `codescan` > `declaration` > `catalog`, so the runtimes' adapters sit on judging, judging on reading code, both on what a project declares, and everything on the catalog's data.
+- **Subsystems import downwards only,** declared as an import-linter `layers` contract. In `lup_dev`: `adapters` > `policy` > `codescan` > `declaration` > `catalog` > `host`, so the runtimes' adapters sit on judging, judging on reading code, both on what a project declares, everything on the catalog's data, and the host service, which imports none of them and is handed what it runs, sits lowest, where any of them can reach its client.
 
 | `lup_dev` | What it is |
 |---|---|
