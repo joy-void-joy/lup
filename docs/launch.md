@@ -24,9 +24,10 @@ What it leaves to other pieces:
 lup-dev launch claude [<the runtime's own arguments>]
 lup-dev launch codex  [<the runtime's own arguments>]
 lup-dev host [stop]
+lup-dev trust
 ```
 
-A launch starts in the worktree it's run from. Any argument lup doesn't know reaches the CLI as given, so `lup-dev launch claude --resume` resumes. `lup-dev host` runs the host service in the foreground, for watching it; `lup-dev host stop` stops it.
+A launch starts in the worktree it's run from. Any argument lup doesn't know reaches the CLI as given, so `lup-dev launch claude --resume` resumes. `lup-dev host` runs the host service in the foreground, for watching it; `lup-dev host stop` stops it. `lup-dev trust` makes a launch's check of what the host runs, and its question, with no session after it (*Trust on launch*).
 
 A launch, in order:
 1. loads the declaration from the integration branch's tip, as the judge does, so a branch can't change the room it runs in;
@@ -46,14 +47,18 @@ Measured: a container starts in 0.55 to 0.9 s; an image already built and a CLI 
 The code that runs on the operator's machine, outside every room, is approved before it runs (`DESIGN.md`, *Policy*, *Trust on launch*). There is no install step to remember: the launch itself asks, the way the first lup's launcher asked adlib's operator, "the first time, and whenever adlib's own code has changed since". `lup-dev install` goes.
 
 - **The host zone** is what the host runs for a project:
-  - its declaration (`lup_project.py`, or the package `lup_project/`), and the files a selected module names that the host imports (its conditions module, later its rule tables);
+  - its declaration (`lup_project.py`, or the package `lup_project/`), and the files a selected module names that the host imports (its conditions module, with the `__init__.py` of each package holding it, which importing it runs; later its rule tables);
   - the `lup-dev` it runs: for lup's own repository, `lup-dev`'s and `lup`'s source and the engine's, which the operator builds from; for any other project, the `lup-dev` release its lock file pins.
-- **Read at the integration branch's tip,** as the judge reads the declaration, so what's approved is what the judge and the host service will run, never a branch's own copy.
-- **Its fingerprint is kept with the copy the operator approved,** per repository, in lup's state. A launch compares the tip's host zone with it.
+  - **As built,** which is which is read from the tip's `uv.lock` (`launch/trust.py`, `Lock.tool`). Where it resolves `lup-dev` from the repository's own workspace, as lup's does, the zone holds uv's files (`pyproject.toml`, `uv.toml`, `uv.lock`, `.python-version`, which say where the workspace's packages are and pin the copy's dependencies), the `pyproject.toml` and `src/` of each workspace package `lup-dev` needs, and the engine's source (`packages/lup-dev/checker/`). Where it pins a release from an index, the zone holds that release and the version of every package it needs, which the copy is held to: a dependency bump the host doesn't run asks nothing. A lock resolving `lup-dev` from git, a URL or a path outside the workspace is refused, naming it: a copy built from git would lack the engine, which is built, never committed.
+- **Read at the integration branch's tip,** as the judge reads the declaration, so what's approved is what the judge and the host service will run, never a branch's own copy; where the repository has no such branch, at the worktree's `HEAD`, as the judge reads it. The declaration is loaded from the tip's export, as the judge loads it, to find the files its modules name. Where it can't load with the `lup-dev` running the check (it uses something that copy predates), the question says so, and those files are shown once it loads; in lup's own repository, `uv run lup-dev trust` from the `dev` checkout loads it with its own code.
+- **Its fingerprint is kept with the copy the operator approved,** per repository, in lup's state (`repositories/<id>/approved.json`). A launch compares the tip's host zone with it. The fingerprint is git's listing of the zone's files at the commit (each path, mode and object) with the `lup-dev` it runs, so a commit that leaves the zone alone asks nothing.
 - **Changed, or never approved:** the launch shows what changed since the approved copy (`git diff` over the host zone, in the terminal's pager; on the first time, every file of the zone), and asks once, yes or no. In the terminal until piece 2 brings the inbox, where `lup inbox` and the dashboard show it as any other item.
+  - **As built:** git's own diff, coloured, with no external diff command or text conversion the repository's configuration could name, after git's one-line count; the paths the approval held since its commit, and a path joining the zone (a conditions module newly named) whole; everything whole where the approved commit is gone from the repository. A release's change is said by its versions. Inside an agent's session nothing is asked: it refuses. Two launches at once take turns on the approval's lock, so the second reads the first's answer.
   - **Yes:** the engine is built, the zone's copy installed as the host's `lup-dev`, the host service restarted on it (its rooms keep their sockets: *On the host: the service*), the approval recorded, and the session launched.
+    - **As built:** the commit is exported whole with `git archive` into a scratch directory, never installed from a worktree, so what installs is the commit shown; the engine is built there through the declaration's own step and runner, as the gate builds it, and `uv tool install` installs `packages/lup-dev` from there, its dependencies held to the lock (a release, from its index, held to its pins). A running service is stopped and started again from the installed copy's command (`uv tool dir --bin`); where none runs, the launch starts one.
   - **No:** the session launches on the copy approved before, and the launch says the tip isn't the code judging it. With no copy approved yet, it doesn't launch.
-- **What it costs:** after a large merge, the next launch shows a large diff (the declaration's slice A was about 5,000 lines of the judge). That is the review; it comes at launch rather than at a separate step.
+- **What it costs:** after a large merge, the next launch shows a large diff (the declaration's slice A was about 5,000 lines of the judge). That is the review; it comes at launch rather than at a separate step. The first approval in lup's own repository shows its whole zone: about 110 files and 24,000 lines at `dev`'s tip when this was built.
+- **Until `launch` exists,** `lup-dev trust` runs the same check and question with no session after it, so the operator approves a judge on lup's own repository.
 - The installer's review parked in the first lup's dashboard (`legacy_dashboard.py`'s `LegacyDashboard`) goes with `lup-dev install`.
 
 ## The room
@@ -260,7 +265,7 @@ status = room.launch(arguments=["--resume"], settings=settings)   # a terminal; 
 | `host/client.py` | Finding the service, or starting it (`HostClient`; `Starter`, and `Detached`, which starts `lup-dev host`) |
 | `catalog/room.py` | lup's base image and its pinned snapshot date, the standard machine's packages, the default session settings |
 | `launch/trust.py` | The host zone, its fingerprint, the copy approved, the diff shown and the answer asked, and installing an approved copy |
-| `cli.py` | `launch claude\|codex` and `host [stop]`, until slice C gives each command group its file; `install` goes |
+| `cli.py` | `launch claude\|codex` and `host [stop]`, until slice C gives each command group its file; `install` goes, and `trust` runs a launch's check and question alone until `launch` exists |
 
 The declaration's slice A gains:
 - the `Packages` kind, each module's `packages` part, and `Core`'s default, the standard machine;
