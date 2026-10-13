@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from pydantic import TypeAdapter
 
 from lup.sessions.terminal import Hook
 from lup_dev.adapters import claude, codex
@@ -676,6 +677,118 @@ def test_codex_holds_only_the_worktree_it_started_in(
     (linked / CORE).write_text((linked / CORE).read_text() + "y = 2  # BAD regex\n")
     assert codex.hook(post(repo, "done"), on_codex) == ""
     assert "# BAD regex" in (linked / CORE).read_text()
+
+
+# What Codex 0.162.1 sent, captured from `codex exec` in a scratch repository: a
+# patch adding `livecheck.py` holding `import subprocess`, a patch updating it, a
+# shell `test -e livecheck.py`, a patch that fails to apply (a `PreToolUse` and no
+# `PostToolUse`), then the turn's end.
+
+CAPTURED = Path(__file__).parent / "payloads" / "codex-0.162.1"
+LIVECHECK = "import subprocess  # BAD subprocess\n"
+"""What the captured patch writes, `import subprocess`, with the fake engine's marker for lup's `subprocess` rule."""
+
+
+def captured(name: str, repo: Path) -> str:
+    """Return a payload Codex 0.162.1 sent, its working directory moved to `repo`."""
+    sent = json.loads((CAPTURED / f"{name}.json").read_text())
+    return json.dumps({**sent, "cwd": str(repo)})
+
+
+@pytest.mark.parametrize(
+    ("name", "kind"),
+    [
+        ("1-session-start", codex.SessionStart),
+        ("2-pre-tool-use-add", codex.PreToolUse),
+        ("3-post-tool-use-add", codex.PostToolUse),
+        ("4-pre-tool-use-update", codex.PreToolUse),
+        ("5-post-tool-use-update", codex.PostToolUse),
+        ("6-pre-tool-use-bash", codex.PreToolUse),
+        ("7-post-tool-use-bash", codex.PostToolUse),
+        ("8-pre-tool-use-failed-patch", codex.PreToolUse),
+        ("9-stop", codex.Stop),
+    ],
+)
+def test_codex_reads_each_hook_0_162_1_sent(
+    name: str, kind: type[codex.Payload]
+) -> None:
+    raw = (CAPTURED / f"{name}.json").read_text()
+    received = TypeAdapter[codex.Received](codex.Received).validate_json(raw)
+    assert isinstance(received, kind)
+
+
+def test_codex_0_162_1_patch_is_refused_after_its_call(
+    on_codex: Bench, repo: Path, kit: Kit
+) -> None:
+    codex.hook(captured("1-session-start", repo), on_codex)
+    assert codex.hook(captured("2-pre-tool-use-add", repo), on_codex) == ""
+    (repo / "livecheck.py").write_text(LIVECHECK)
+    output = json.loads(codex.hook(captured("3-post-tool-use-add", repo), on_codex))
+    said = output["hookSpecificOutput"]["additionalContext"]
+    assert said.startswith("lup refused 1 file.")
+    assert f"{repo}/livecheck.py" in said
+    assert not (repo / "livecheck.py").exists()
+    assert running(kit, repo) == []
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason=(
+        "A Claude Code session hooked only on `PreToolUse` for `Edit|Write` (lup's "
+        "own `.claude/settings.json`, and a launched Claude Code room) counts each "
+        "write it allows as a call running in the worktree, and nothing ever "
+        "finishes it; so no checkpoint runs there again, for any session"
+    ),
+)
+def test_codex_judges_a_patch_in_a_worktree_a_claude_write_was_allowed_in(
+    on_codex: Bench, on_claude: Bench, repo: Path
+) -> None:
+    def from_claude(event: str, **fields: object) -> str:
+        sent = {"session_id": "c1", "cwd": str(repo), "hook_event_name": event}
+        return json.dumps({**sent, **fields})
+
+    claude.hook(from_claude("SessionStart", source="startup"), on_claude)
+    write = {"file_path": "notes.md", "content": "Notes.\n"}
+    raw = from_claude(
+        "PreToolUse", tool_name="Write", tool_input=write, tool_use_id="toolu_1"
+    )
+    allowed = json.loads(claude.hook(raw, on_claude))
+    assert allowed["hookSpecificOutput"]["permissionDecision"] == "allow"
+    (repo / "notes.md").write_text("Notes.\n")
+    codex.hook(captured("1-session-start", repo), on_codex)
+    codex.hook(captured("2-pre-tool-use-add", repo), on_codex)
+    (repo / "livecheck.py").write_text(LIVECHECK)
+    output = codex.hook(captured("3-post-tool-use-add", repo), on_codex)
+    assert not (repo / "livecheck.py").exists()
+    assert json.loads(output)["hookSpecificOutput"]["additionalContext"].startswith(
+        "lup refused 1 file."
+    )
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason=(
+        "Codex 0.162.1 runs `PostToolUse` only for a call that succeeded "
+        "(`core/src/tools/registry.rs`): a patch that fails to apply leaves its "
+        "`PreToolUse` counted as running, and without `Stop` hooked nothing clears "
+        "it, so no checkpoint runs in the worktree again"
+    ),
+)
+def test_codex_judges_a_patch_after_one_that_failed(
+    on_codex: Bench, repo: Path, kit: Kit
+) -> None:
+    codex.hook(captured("1-session-start", repo), on_codex)
+    codex.hook(captured("8-pre-tool-use-failed-patch", repo), on_codex)
+    codex.hook(captured("2-pre-tool-use-add", repo), on_codex)
+    (repo / "livecheck.py").write_text(LIVECHECK)
+    output = codex.hook(captured("3-post-tool-use-add", repo), on_codex)
+    assert not (repo / "livecheck.py").exists()
+    assert json.loads(output)["hookSpecificOutput"]["additionalContext"].startswith(
+        "lup refused 1 file."
+    )
+    assert running(kit, repo) == []
 
 
 # In a launched room
