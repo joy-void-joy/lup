@@ -2,6 +2,9 @@ tmp/
 .venv/
 __pycache__/
 .lup/
+# The person's own section of a session's guidance, never committed
+# (`docs/launch.md`, *Guidance*).
+/AGENTS.local.md
 # The engine's build: the link to pyright's source in a cache outside the
 # repository, the bundler, and the built engine with its stubs.
 packages/lup-dev/checker/pyright
