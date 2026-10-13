@@ -362,12 +362,12 @@ One repository, a uv workspace sharing one lock file, whose packages are version
 
 Dependencies run one way: the dashboard, then `lup-dev`, then `lup`.
 
-**Dependencies:** `pydantic`, `pydantic-settings`, and `tenacity` for recovery. **Extras:**
-- `lup[claude]`: `claude-agent-sdk`, and `mcp` for lup's own tool server;
+**Dependencies:** `pydantic`, `pydantic-settings`, `tenacity` for recovery, `mcp` for lup's own tool server, and `tomlkit` for the settings a runtime reads as TOML. **Extras:**
+- `lup[claude]`: `claude-agent-sdk`;
 - `lup[codex]`: `openai-codex`;
 - `lup[testing]`: `pytest` and `pytest-socket`.
 
-Each SDK ships its runtime's binary (about 240 MB and 360 MB installed), so a project installs only the side it uses. The SDKs drive the runtimes, rather than runtime clients of lup's own. lup's own development group installs all three extras, since every shared construct is tested on both runtimes.
+Each SDK ships its runtime's binary (about 240 MB and 360 MB installed), so a project installs only the side it uses. That's the one reason for an extra: every other library, even one a single runtime's adapter uses today, is a dependency of the package, so the split stays one rule rather than one per library. The SDKs drive the runtimes, rather than runtime clients of lup's own. lup's own development group installs all three extras, since every shared construct is tested on both runtimes.
 
 **Pinned runtimes.** A runtime is the one its SDK bundles, not whatever is on `PATH`, so the lock file pins it: claude-agent-sdk 0.2.165 bundles Claude Code 2.1.294, and openai-codex 0.162.0 pins codex-cli 0.162.0.
 

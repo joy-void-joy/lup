@@ -4,17 +4,22 @@ version = "0.1.0"
 description = "Build with Claude and Codex agents from code: typed asks, tools, rooms they work in, coordination, long-running runs, and fakes to test it all."
 requires-python = ">=3.14"
 dependencies = [
+    # lup serves its tools through its own MCP server, so its handler sees every
+    # call, where the SDK's helper would refuse a malformed one before lup could
+    # count it.
+    "mcp>=2.3,<3",
     "pydantic>=2.12",
     "pydantic-settings>=2.11",
     "tenacity>=9",
+    # A runtime's settings are written as TOML where it reads TOML.
+    "tomlkit>=0.13",
 ]
 
-# Each runtime ships its binary inside its SDK's wheel, so a project installs only
-# the side it uses (`docs/library.md`, *Repository layout and packages*).
+# An extra holds a runtime's SDK alone, since each ships its runtime's binary in
+# its wheel, so a project installs only the side it uses; every other library is
+# a dependency of the package (`docs/library.md`, *Repository layout and packages*).
 [project.optional-dependencies]
-# lup serves its tools through its own MCP server, so its handler sees every call,
-# where the SDK's helper would refuse a malformed one before lup could count it.
-claude = ["claude-agent-sdk>=0.2.165", "mcp>=2.3,<3"]
+claude = ["claude-agent-sdk>=0.2.165"]
 codex = ["openai-codex>=0.160.1"]
 testing = ["pytest>=9.1.1", "pytest-socket>=0.8.1"]
 
