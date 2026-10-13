@@ -30,9 +30,9 @@ from lup import (
     TurnError,
     UsageLimitReachedError,
 )
-from lup.adapters.codex import Codex
+from lup.adapters.codex import Codex, Effort
 from lup.adapters.codex.layout import CodexLayout
-from lup.adapters.codex.runtime import LAUNCH, CodexAdapter, Effort
+from lup.adapters.codex.runtime import LAUNCH, CodexAdapter
 from lup.adapters.codex.settings import CodexSettings
 from lup.sessions.contract import Adapter, RawTurn, Seam, TurnRequest, seam
 from lup.sessions.errors import RealCallInTestError

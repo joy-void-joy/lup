@@ -89,7 +89,6 @@ from claude_agent_sdk import (
     ClaudeSDKClient,
     ClaudeSDKError,
     CLINotFoundError,
-    EffortLevel,
     HookMatcher,
     McpSdkServerConfig,
     RateLimitEvent,
@@ -101,6 +100,8 @@ from claude_agent_sdk.types import AssistantMessageError, SyncHookJSONOutput
 from mcp.server import Server
 from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 
+from lup.adapters.claude import Effort
+from lup.adapters.claude.terminal import AUTO_MEMORY_OFF
 from lup.sessions.contract import Adapter, RawTurn, TurnRequest, guarded
 from lup.sessions.errors import (
     AgentUnavailableError,
@@ -126,14 +127,8 @@ SERVER = "lup"
 TOOL_PREFIX = f"mcp__{SERVER}__"
 """What Claude Code puts before the name of each of the server's tools: `mcp__lup__submit`."""
 
-AUTO_MEMORY_OFF = "CLAUDE_CODE_DISABLE_AUTO_MEMORY"
-"""The variable that keeps Claude Code from reading its auto memory."""
-
 NO_PERSISTENCE = "no-session-persistence"
 """The flag that keeps Claude Code from writing the session to the operator's history."""
-
-type Effort = EffortLevel
-"""How much effort the model puts into an answer, in Claude Code's levels."""
 
 
 def sdk_client(options: ClaudeAgentOptions) -> ClaudeSDKClient:

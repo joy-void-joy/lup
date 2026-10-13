@@ -63,7 +63,6 @@ from pydantic import ValidationError
 from pydantic.alias_generators import to_camel
 
 from lup.adapters.claude.layout import ClaudeLaunch, ClaudeLayout
-from lup.adapters.claude.runtime import AUTO_MEMORY_OFF, Effort
 from lup.rooms.container import Mount
 from lup.sessions.terminal import Cli, Terminal, TerminalError
 from lup.types import Model
@@ -71,7 +70,12 @@ from lup.types import Model
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from lup.adapters.claude import Effort
     from lup.sessions.terminal import Event, Hook, TerminalSettings
+
+AUTO_MEMORY_OFF = "CLAUDE_CODE_DISABLE_AUTO_MEMORY"
+"""The variable turning Claude Code's auto memory off (`1`) or on (`0`); an ask
+sets it too, since auto memory loads whatever the settings sources say."""
 
 SUBAGENT_CACHE = "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL"
 """The variable setting the prompt cache's lifetime outside the main conversation."""

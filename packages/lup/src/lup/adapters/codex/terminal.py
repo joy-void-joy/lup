@@ -74,7 +74,7 @@ from lup.types import JsonObject, Model
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from lup.adapters.codex.runtime import Effort
+    from lup.adapters.codex import Effort
     from lup.sessions.terminal import Event, Hook, TerminalSettings
 
 
