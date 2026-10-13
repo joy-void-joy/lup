@@ -11,6 +11,7 @@ import pydantic
 import pytest
 
 import lup_dev
+from lup.rooms.container import Mount
 from lup_dev import (
     CodeRules,
     Core,
@@ -43,7 +44,14 @@ from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.grammar import Drop
 from lup_dev.declaration.module import Origin
 from lup_dev.declaration.modules.code_rules import lup_default
+from lup_dev.declaration.requirements import Printed, Tools
 from lup_dev.declaration.resolve import Resolved, SessionChoices, resolve
+from lup_dev.declaration.runner import (
+    Interpreter,
+    Prefixed,
+    RoomNeeds,
+    RunnerError,
+)
 
 
 def layered(resolved: Resolved, module: str) -> list[Drop]:
@@ -574,6 +582,76 @@ def test_one_runner_at_most() -> None:
 def test_a_runner_brings_its_requirements() -> None:
     resolved = resolve(Project(modules=Modules.default().edit(Python(runner=Plain()))))
     assert [each.requirement.named() for each in resolved.requirements] == ["node"]
+
+
+class AskedUv(Tools):
+    """uv's answers by the words after `--directory <root>`, each command kept."""
+
+    def __init__(self, answers: dict[str, Printed]) -> None:
+        self.answers = answers
+        self.asked: list[list[str]] = []
+
+    def found(self, program: str) -> bool:
+        return True
+
+    def run(self, command: list[str]) -> Printed:
+        self.asked.append(command)
+        return self.answers[" ".join(command[6:])]
+
+
+def test_uv_mounts_its_interpreters_and_cache_where_uv_keeps_them(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "work" / "tree"
+    store = tmp_path / "data" / "uv" / "python"
+    cache = tmp_path / "cache" / "uv"
+    tools = AskedUv(
+        {
+            "python dir": Printed(code=0, output=f"{store}\n"),
+            "cache dir": Printed(code=0, output=f"{cache}\n"),
+            "python find": Printed(code=0, output=f"{root}/.venv/bin/python\n"),
+        }
+    )
+
+    needs = Uv().room(root, tools)
+
+    assert needs == RoomNeeds(
+        mounts=[Mount(source=store, read_only=True), Mount(source=cache)],
+        env={
+            "UV_CACHE_DIR": str(cache),
+            "UV_PYTHON_INSTALL_DIR": str(store),
+            "UV_PYTHON_DOWNLOADS": "never",
+        },
+        interpreter=Interpreter(
+            path=root / ".venv" / "bin" / "python",
+            remedy=(
+                "run `uv sync --managed-python` in the project, which remakes "
+                "`.venv` on a Python uv manages, installing one if there's none"
+            ),
+        ),
+    )
+    assert cache.is_dir()
+    assert tools.asked == [
+        ["env", "-u", "VIRTUAL_ENV", "uv", "--directory", str(root), *words]
+        for words in [["python", "dir"], ["cache", "dir"], ["python", "find"]]
+    ]
+
+
+def test_uv_failing_to_answer_is_said(tmp_path: Path) -> None:
+    tools = AskedUv({"python dir": Printed(code=2, output="")})
+    with pytest.raises(
+        RunnerError,
+        match=r"`env -u VIRTUAL_ENV uv --directory .* python dir` failed with status 2",
+    ):
+        Uv().room(tmp_path, tools)
+
+
+def test_a_plain_runner_mounts_nothing_and_a_kept_one_refuses(tmp_path: Path) -> None:
+    tools = AskedUv({})
+    assert Plain().room(tmp_path, tools) == RoomNeeds()
+    with pytest.raises(RunnerError, match="can't say what a room mounts"):
+        Prefixed.of(Uv()).room(tmp_path, tools)
+    assert tools.asked == []
 
 
 def test_conditions_are_an_address_any_module_fills() -> None:

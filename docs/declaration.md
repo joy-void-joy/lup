@@ -304,11 +304,22 @@ class Runner(Model, ABC):
     @abstractmethod
     def environment(self) -> list[str]:
         """List the files, from the root, whose change means another environment."""
+
+    @abstractmethod
+    def room(self, root: Path, tools: Tools) -> RoomNeeds:
+        """Say what a room mounts and sets for the environment of the worktree at `root`."""
 ```
 
-- **`Uv()`, the default:** `command` is `uv run …`, as the gate spells it; `judging` is `env -u VIRTUAL_ENV uv run --frozen --quiet …`, as the judge runs ruff and the engine asks for its interpreter (`docs/judging-writes.md`, *Type errors and ruff's findings* and *The engine: one typed tree*); `environment` is `pyproject.toml`, `uv.toml`, `uv.lock`, `.python-version`. Its requirement is uv (*Requirements*).
-- **`Plain()`:** the tool as the `PATH` finds it, for a project with no environment manager; no environment files, no requirement.
+- **`Uv()`, the default:** `command` is `uv run …`, as the gate spells it; `judging` is `env -u VIRTUAL_ENV uv run --frozen --quiet …`, as the judge runs ruff and the engine asks for its interpreter (`docs/judging-writes.md`, *Type errors and ruff's findings* and *The engine: one typed tree*); `environment` is `pyproject.toml`, `uv.toml`, `uv.lock`, `.python-version`. Its requirement is uv (*Requirements*). Its `room` is below.
+- **`Plain()`:** the tool as the `PATH` finds it, for a project with no environment manager; no environment files, no requirement, nothing mounted in a room.
 - **Anything else is a project's own subclass,** a few lines: `poetry run`, `conda run -n …`. lup adds one to its own when a second project needs it.
+
+**What a room needs, `room(root, tools)`.** A launched session works in the worktree's own environment, shared with the host (`docs/launch.md`, *The project's environment, shared with the host*), so the runner says what the room mounts and sets for it: a `RoomNeeds` of mounts, each at its host path, the variables, and the environment's interpreter (`Interpreter`: its path as the runner finds it, and the remedy said when it resolves outside every mount). The launch checks that interpreter against all of the room's mounts and refuses otherwise (`launch/room.py`). It's asked on the host while the launch builds the room, through `Tools`, the seam requirements are checked through (`declaration/requirements.py`), which tests stub.
+- **`Uv()`** asks uv from the worktree, with `VIRTUAL_ENV` unset: `uv python dir`, its interpreter store, mounted read-only; `uv cache dir`, its cache, mounted read-write and made if it's missing, since a mount needs its source; and `uv python find`, the environment's interpreter, or where there's no `.venv` yet, the one uv would make it from. In the room, `UV_CACHE_DIR` and `UV_PYTHON_INSTALL_DIR` name the same two places, so a worktree made in the room gets its `.venv` on the store's interpreter rather than the image's, and `UV_PYTHON_DOWNLOADS=never` keeps uv from fetching one. Its remedy for an environment on a system interpreter is `uv sync --managed-python`, which remakes `.venv` on a Python uv manages (checked: it moved a `.venv` on `/usr/bin/python3.14` onto uv's 3.14).
+- **`Plain()`** mounts nothing, and has no interpreter to check.
+- **`Prefixed`**, the judge's stand-in, refuses: it holds the commands, not what a room mounts, and a launch builds its room from a declaration that loaded.
+
+A fourth abstract method takes `Runner` past the three `interface-shape` allows, which the class's `ignore` names: placing `room()` on the runner, as `docs/launch.md` does, makes each project runner say what its environment needs in a room. The alternative is a seam of its own composed beside the runner (a class attribute holding an object that answers `room`, as `requirements` is one), which keeps the ABC at three at the cost of a second place a runner's author must remember.
 
 Two methods because the judge and the gate differ: the gate may lock and sync (plain `uv run` relocks a stale lock), while the judge must never write `uv.lock`, a protected path the checkpoint would then judge as the agent's shell write (`docs/judging-writes.md`, *The engine: one typed tree*). A prefix string in place of the class couldn't give the judge a command apart from the gate's.
 

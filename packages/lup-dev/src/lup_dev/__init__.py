@@ -41,8 +41,8 @@ from lup_dev.declaration.modules.code_rules import CodeRules
 from lup_dev.declaration.modules.core import Core
 from lup_dev.declaration.modules.python import Python
 from lup_dev.declaration.project import Project
-from lup_dev.declaration.requirements import Requirement
-from lup_dev.declaration.runner import Plain, Runner, Uv
+from lup_dev.declaration.requirements import Requirement, Tools
+from lup_dev.declaration.runner import Interpreter, Plain, RoomNeeds, Runner, Uv
 
 __all__ = [
     "CodeRules",
@@ -51,6 +51,7 @@ __all__ = [
     "Exemptions",
     "Gate",
     "Guidance",
+    "Interpreter",
     "Module",
     "Modules",
     "Named",
@@ -65,11 +66,13 @@ __all__ = [
     "Python",
     "RemovedTools",
     "Requirement",
+    "RoomNeeds",
     "Rules",
     "Runner",
     "Section",
     "Session",
     "Step",
     "TestRoots",
+    "Tools",
     "Uv",
 ]
