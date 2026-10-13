@@ -136,7 +136,7 @@ narrator.launch()                                                        # a ter
   - Batching bursts and not talking over the operator are rules of how an inbox delivers, built so they can't starve replies. Reminders and follow-ups are lup tools, cancelled when the operator speaks.
   - The operator is a peer on the roster: telling them something is a message with a `kind` (question, disagreement, note, problem). Notification channels reach them away from the dashboard.
 - **Coordination is light:** the roster fills itself from what each session does, and conflicts are found when writes merge, not through locks.
-- **Session settings,** declared defaults a project can change: workers get the 1-hour prompt cache; unused built-in tools are removed from context; auto memory is off on both runtimes; compaction stays at the runtime's default.
+- **Session settings,** declared defaults a project can change: workers get the 1-hour prompt cache; unused built-in tools are removed from context; auto memory is off on both runtimes; idle compaction is off where a runtime has it, and compaction when the context fills is left to the runtime. A person's own runtime settings outrank lup's defaults, and a project's declared settings outrank theirs.
 - **Isolation between sessions:** a worktree per agent, environments hardlinked from a cache (*Open questions*).
 
 ### Budgets

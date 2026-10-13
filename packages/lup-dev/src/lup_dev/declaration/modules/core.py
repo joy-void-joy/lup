@@ -50,8 +50,10 @@ class Core(Module):
     usual tools, an agent's everyday work, what the runtimes call on, and editors
     (`lup_dev.catalog.room`)."""
     session: Session = Session()
-    """How every session runs: the subagents' prompt cache, auto memory, and the
-    built-in tools removed from context, lup's unless the project says."""
+    """How every session runs: the subagents' prompt cache, auto memory, idle
+    compaction, the built-in tools removed from context and the account's
+    connectors. lup's, which the person's own runtime settings outrank, unless
+    the project says, which outranks theirs."""
     guidance: Guidance = Guidance.of(
         Section(
             name="core",

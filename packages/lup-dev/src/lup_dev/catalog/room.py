@@ -163,10 +163,11 @@ type CacheLifetime = Literal["5m", "1h"]
 
 
 class SessionDefaults(Model):
-    """How every session runs unless the project says otherwise: `Core`'s session.
+    """How every session runs unless the person's own runtime settings or the project say otherwise: `Core`'s session.
 
     In neutral terms, which each runtime's adapter spells (`DESIGN.md`,
-    *Sessions*).
+    *Sessions*). A person's own settings outrank these, and a field the
+    project's declaration sets outranks theirs.
     """
 
     subagent_cache: CacheLifetime = "1h"
@@ -177,6 +178,12 @@ class SessionDefaults(Model):
     """Whether a runtime keeps its own memory across sessions: off, so every
     session starts from what the repository and its guidance say, and one
     session's notes don't steer another unseen."""
+    idle_compaction: bool = False
+    """Whether a runtime compacts a long conversation while the session sits
+    idle: off, so a session left waiting, on the operator or on a hold, comes
+    back to its conversation as it was rather than to a summary made
+    meanwhile. Compaction when the context fills stays the runtime's own: off,
+    a full session would stop."""
     removed_tools: list[str] = [
         "Artifact",
         "SendFeedback",

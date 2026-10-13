@@ -517,13 +517,9 @@ def hooks(command: list[str], timeout: timedelta) -> list[Hook]:
     ]
 
 
-def agent(fallback: str = "default") -> Declaration:
-    """Return the declaration a launched Claude Code session runs: the model the operator's own settings choose.
-
-    Where they choose none, `fallback`: `default`, which Claude Code documents as
-    reverting "to the runtime default for your account" (`model-config`).
-    """
-    return lup.Claude.chosen(default=fallback)
+def agent() -> Declaration:
+    """Return the declaration a launched Claude Code session runs: no model, so Claude Code reads the operator's own."""
+    return lup.Claude()
 
 
 class Build(Model):

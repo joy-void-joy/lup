@@ -12,7 +12,8 @@ hold it, by the kind's type (`docs/declaration.md`, *What a module is*):
 - entries placed `before=` or `after=` another go there, whichever module holds
   it, and the rest keep the order of their modules;
 - the runner comes from the one module holding one, `Plain()` where none does,
-  and the session settings from the one holding them, `Core`.
+  and the session settings from the one holding them, `Core`, with the fields
+  the declaration set, which a launch imposes over the person's own.
 
 Rule selections are kept as recorded, one per module beside the module's own
 default, for the engine to resolve.
@@ -24,13 +25,15 @@ that can't.
 """
 
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
+
+from pydantic import model_validator
 
 from lup.types import Model
 from lup_dev.catalog.gate import Step
 from lup_dev.catalog.room import CacheLifetime
 from lup_dev.declaration.errors import ProjectError
-from lup_dev.declaration.grammar import Named, listed
+from lup_dev.declaration.grammar import Named, listed, set_fields
 from lup_dev.declaration.kinds import (
     Exemption,
     Exemptions,
@@ -92,14 +95,32 @@ class SessionChoices(Model, extra="forbid"):
     """How the project's sessions run: `Core`'s `session`, its removed tools resolved.
 
     Its fields are `Session`'s, each as a plain value, for the launch to compile
-    into each runtime's settings.
+    into each runtime's settings, and which of them the declaration set: those
+    are imposed over the person's own runtime settings, and the rest are lup's
+    defaults, which theirs outrank.
     """
 
     subagent_cache: CacheLifetime
     auto_memory: bool
+    idle_compaction: bool
     removed_tools: list[str]
     """A runtime's built-in tools removed from a session's context, by name."""
     account_connectors: bool
+    declared: list[str] = []
+    """The fields some layer of the declaration set, by name, in the order
+    they're declared; every other field is lup's default."""
+
+    @model_validator(mode="after")
+    def declared_fields(self) -> Self:
+        """Refuse a declared field that isn't a session setting."""
+        settings = [field for field in type(self).model_fields if field != "declared"]
+        unknown = [field for field in self.declared if field not in settings]
+        if unknown:
+            message = (
+                f"{listed(unknown)} aren't session settings; {listed(settings)} are"
+            )
+            raise ValueError(message)
+        return self
 
 
 class Part[K](Model):
@@ -233,7 +254,10 @@ def settled(found: list[Part[Session]]) -> SessionChoices:
     """Return the session settings from the one module holding them.
 
     `Core` holds them, so a module of a project's own holding them too fails,
-    naming both; with none, they're lup's.
+    naming both; with none, they're lup's. The fields declared are those the
+    value's layers set: each layer is a copy of the one below with its fields
+    updated (`applied`), which pydantic counts as set, so a field nothing set
+    stays lup's default.
     """
     if len(found) > 1:
         holding = listed([part.module for part in found])
@@ -249,8 +273,10 @@ def settled(found: list[Part[Session]]) -> SessionChoices:
     return SessionChoices(
         subagent_cache=session.subagent_cache,
         auto_memory=session.auto_memory,
+        idle_compaction=session.idle_compaction,
         removed_tools=removed,
         account_connectors=session.account_connectors,
+        declared=set_fields(session),
     )
 
 

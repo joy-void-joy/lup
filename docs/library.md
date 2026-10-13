@@ -87,7 +87,7 @@ def test_translates_a_segment(fake_agents: FakeAgents) -> None:
 ### What a declaration holds
 
 `Claude` and `Codex` are frozen models, each a `Declaration` and an `Agent`. In this slice their fields are **(leaning)**:
-- `model`: the runtime's model id, passed as given;
+- `model`: the runtime's model id, passed as given; none leaves it to the runtime (the operator's decision): in a terminal, the person's own settings choose, and in an ask, the runtime's default, since an ask loads none of their settings. So an ask passes no model to either SDK (`claude_agent_sdk` then passes no `--model`, and Codex's `thread/start` leaves its optional `model` out), and the trace records none;
 - `system_prompt`: replaces the runtime's own prompt; none sends no prompt of lup's own (what reaches the model is in each adapter's section);
 - `effort`: in each runtime's own levels, Claude Code's `low`, `medium`, `high`, `xhigh`, `max`, and Codex's `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`; none leaves it to the runtime;
 - `layers` (*The layers an ask runs in*).
@@ -248,7 +248,7 @@ Each adapter's classification is in its section.
 ## The call record
 
 Every ask, answered or failed, appends one `CallRecord` (`observability/trace.py`) to `layers.trace` when it's set. A record holds:
-- the runtime and the model;
+- the runtime and the model the declaration named, none where it left the choice to the runtime;
 - the start time and the duration;
 - the prompt and the system prompt, in full;
 - the output in full (the model as JSON, or the text), or the error's type and message;
@@ -331,6 +331,7 @@ packages/lup/src/lup/
     submission.py          Toolbox: one turn's tools, the calls made to them, and the guard
     results.py             TurnResult, Usage, Rejection
     errors.py              the errors an ask raises, RuntimeMissingError and RealCallInTestError; needs_extra
+    terminal.py            TerminalSettings, SessionSettings, Hook, Cli, Terminal: a declaration compiled for a terminal (docs/launch.md)
   tools/
     tool.py                @lup_tool, Tool, AgentTool and ToolSpec; Allow and Deny; ToolError
     submit.py              Submit, the output tool, and its Receipt
@@ -343,8 +344,10 @@ packages/lup/src/lup/
   adapters/
     claude/__init__.py     Claude, the declaration
     claude/runtime.py      ClaudeAdapter: the options, lup's MCP server, the Stop hook, the init check, the errors
+    claude/terminal.py     Claude Code's terminal: its flags, lup's settings file, and which session settings the operator's own file sets
     codex/__init__.py      Codex, the declaration
     codex/runtime.py       CodexAdapter: the launch, the thread, dynamic tools, the continuation, the errors, usage
+    codex/terminal.py      Codex's terminal: its flags and overrides, the requirements file, and which session settings the operator's config.toml sets
     codex/layout.py        CodexLayout: lup's own Codex home, and the operator's login it links to
     codex/settings.py      CodexSettings: CODEX_HOME and XDG_STATE_HOME
 ```

@@ -381,6 +381,12 @@ def test_an_untyped_session_has_no_output_tool_and_keeps_the_defaults() -> None:
     assert options.effort is None
 
 
+def test_a_session_with_no_model_leaves_it_to_claude_code() -> None:
+    clients = Clients([init(), result("It will.")])
+    asyncio.run(ClaudeAdapter(client=clients.client).run(request()))
+    assert clients.only().options.model is None
+
+
 # lup's tools, served by its own MCP server.
 
 

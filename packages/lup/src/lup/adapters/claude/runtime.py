@@ -352,7 +352,9 @@ def finished(messages: list[Message]) -> RawTurn:
 class ClaudeAdapter(Model, Adapter, arbitrary_types_allowed=True):
     """Runs turns in Claude Code, with no tools but lup's own."""
 
-    model: str
+    model: str | None = None
+    """None passes no `--model`, so Claude Code runs its default: the session
+    loads none of the operator's settings to choose another."""
     system_prompt: str | None = None
     """Replaces Claude Code's system prompt; none sends an empty one."""
     effort: Effort | None = None

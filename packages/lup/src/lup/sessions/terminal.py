@@ -107,21 +107,26 @@ def cache_lifetime(lifetime: timedelta) -> timedelta:
 class SessionSettings(Model):
     """The session's settings, in lup's terms (`DESIGN.md`, *Sessions*).
 
-    A runtime with no setting for one leaves it out, and says so in its adapter.
+    Each is none where it isn't given, which leaves it to the runtime: to the
+    person's own settings, or the runtime's default. A runtime with no setting
+    for one leaves it out, and says so in its adapter.
     """
 
     subagent_cache: Annotated[timedelta, AfterValidator(cache_lifetime)] | None = None
     """How long the prompt cache of the requests outside the main conversation lives:
-    subagents and background work. None keeps the runtime's own."""
+    subagents and background work."""
     auto_memory: bool | None = None
-    """Whether the runtime keeps and reads its own memory between sessions; none
-    keeps the runtime's own setting."""
-    removed_tools: list[str] = []
-    """Built-in tools removed from the session's context, by the runtime's names for them."""
-    account_connectors: bool = False
+    """Whether the runtime keeps and reads its own memory between sessions."""
+    idle_compaction: bool | None = None
+    """Whether the runtime may compact a long conversation while the session sits
+    idle. Compaction when the context fills isn't a session setting: it stays
+    the runtime's own."""
+    removed_tools: list[str] | None = None
+    """Built-in tools removed from the session's context, by the runtime's names
+    for them; none removes none."""
+    account_connectors: bool | None = None
     """Whether the session fetches the connectors the operator's account brings
-    with its login, whose tools reach their mail and files: off, so a terminal
-    session gets none unless it asks."""
+    with its login, whose tools reach their mail and files."""
 
 
 class TerminalSettings(Model):
@@ -137,9 +142,47 @@ class TerminalSettings(Model):
     """Instructions given at system level, beside the runtime's own prompt; none
     gives none. The repository's own instruction files aren't loaded either way."""
     session: SessionSettings = SessionSettings()
+    """The session settings imposed: each one given outranks the person's own
+    runtime settings."""
+    defaults: SessionSettings = SessionSettings()
+    """lup's defaults: each one given is passed only where the person's own
+    runtime settings, read once at launch, don't set it, so theirs outrank it."""
     trusted: list[AbsolutePath] = []
     """The paths the runtime trusts without asking: the worktree, and a linked
     worktree's main repository, which the runtimes ask about too."""
+
+    def passed(self, theirs: list[str]) -> SessionSettings:
+        """Return the session settings a terminal passes, where the person's own set the fields `theirs` names.
+
+        Each field `session` gives is passed; each `defaults` gives, only where
+        theirs don't set it; a field neither gives is left to the runtime. Each
+        adapter reads which fields theirs set from its runtime's own files.
+        Raise `TerminalError` naming a field in `theirs` that isn't a session
+        setting.
+
+        >>> settings = TerminalSettings(
+        ...     directory=Path("/launch"),
+        ...     session=SessionSettings(auto_memory=True),
+        ...     defaults=SessionSettings(auto_memory=False, account_connectors=False),
+        ... )
+        >>> passed = settings.passed(["auto_memory", "account_connectors"])
+        >>> passed.auto_memory, passed.account_connectors
+        (True, None)
+        """
+        fields = list(SessionSettings.model_fields)
+        unknown = [field for field in theirs if field not in fields]
+        if unknown:
+            message = (
+                f"{', '.join(unknown)} aren't session settings; {', '.join(fields)} are"
+            )
+            raise TerminalError(message)
+        imposed = self.session.model_dump(exclude_none=True)
+        defaulted = {
+            field: value
+            for field, value in self.defaults.model_dump(exclude_none=True).items()
+            if field not in theirs
+        }
+        return SessionSettings.model_validate({**defaulted, **imposed})
 
 
 class Terminal(Model):

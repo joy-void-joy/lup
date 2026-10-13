@@ -789,17 +789,6 @@ def test_codex_warns_the_operator_of_anything_else_its_judge_couldnt_answer(
     assert json.loads(codex.unanswered(raw, WHY)) == {"systemMessage": SAID}
 
 
-def test_a_launched_session_keeps_the_operators_model(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
-    monkeypatch.setenv("CODEX_HOME", str(tmp_path / ".codex"))
-    assert claude.agent().model == "default"
-    assert codex.agent().model == "gpt-6.1-sol"
-    (tmp_path / ".claude").mkdir()
-    (tmp_path / ".claude" / "settings.json").write_text('{"model": "opus[1m]"}')
-    (tmp_path / ".codex").mkdir()
-    (tmp_path / ".codex" / "config.toml").write_text('model = "gpt-6-astra"\n')
-    assert claude.agent().model == "opus[1m]"
-    assert codex.agent().model == "gpt-6-astra"
+def test_a_launched_session_names_no_model_so_the_operators_holds() -> None:
+    assert claude.agent().model is None
+    assert codex.agent().model is None

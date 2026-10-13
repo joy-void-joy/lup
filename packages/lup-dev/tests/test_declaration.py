@@ -752,6 +752,7 @@ def test_session_settings_are_lup_s_by_default() -> None:
     assert resolve(Project()).session == SessionChoices(
         subagent_cache="1h",
         auto_memory=False,
+        idle_compaction=False,
         removed_tools=SessionDefaults().removed_tools,
         account_connectors=False,
     )
@@ -772,12 +773,50 @@ def test_a_session_layer_changes_only_the_fields_it_sets() -> None:
     assert resolved.session == SessionChoices(
         subagent_cache="1h",
         auto_memory=True,
+        idle_compaction=False,
         removed_tools=SessionDefaults().removed_tools,
         account_connectors=False,
+        declared=["auto_memory"],
     )
     assert module(resolved, "core").origins.of("session") == Origin(
         field="session", position=1, why="this project keeps notes"
     )
+
+
+def test_the_session_says_which_fields_some_layer_declared() -> None:
+    def declared(modules: Modules) -> list[str]:
+        return resolve(Project(modules=modules)).session.declared
+
+    assert declared(Modules.default()) == []
+    assert declared(
+        Modules.default().edit(Core(session=Session(auto_memory=False)))
+    ) == ["auto_memory"]
+    assert declared(
+        Modules.default()
+        .edit(Core(session=Session(account_connectors=True)))
+        .edit(Core(session=Session(subagent_cache="5m")))
+        .edit(Core(paths=Paths().add(scratch=["notes/**"])))
+    ) == ["subagent_cache", "account_connectors"]
+    assert declared(
+        Modules.default().edit(
+            Core(session=Session(removed_tools=RemovedTools().add("CronCreate")))
+        )
+    ) == ["removed_tools"]
+    assert declared(
+        Modules.default().replace("core", Core(session=Session(auto_memory=True)))
+    ) == ["auto_memory"]
+
+
+def test_a_declared_field_that_isnt_a_session_setting_is_refused() -> None:
+    with pytest.raises(pydantic.ValidationError, match=r"`memory` aren't session"):
+        SessionChoices(
+            subagent_cache="1h",
+            auto_memory=False,
+            idle_compaction=False,
+            removed_tools=[],
+            account_connectors=False,
+            declared=["memory"],
+        )
 
 
 def test_a_project_turns_the_account_s_connectors_on_in_a_layer() -> None:
@@ -839,7 +878,7 @@ def test_session_settings_from_two_modules_are_refused() -> None:
 
 
 def test_the_resolved_session_holds_every_session_setting() -> None:
-    assert list(SessionChoices.model_fields) == list(Session.model_fields)
+    assert list(SessionChoices.model_fields) == [*Session.model_fields, "declared"]
 
 
 def test_a_misspelled_session_setting_is_refused() -> None:

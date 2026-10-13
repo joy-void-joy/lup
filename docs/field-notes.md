@@ -148,6 +148,12 @@ From the docs (code.claude.com, `cli-reference`, `settings-reference`, `env-vars
   - `DISABLE_AUTOUPDATER`;
   - `DISABLE_TELEMETRY`;
   - `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`.
+- **Which value wins, for the session settings** (read in the 2.1.296 binary; the `settings` docs agree that "an `env` block inside a settings file is an ordinary key and follows the levels above"):
+  - At start, each source's `env` is applied over the process's environment in order: `~/.claude.json`'s, then user, project, local and `--settings`, then managed. So a variable in `--settings`' `env` outranks the same in the user's, which outranks the environment the process started with.
+  - The subagents' cache: `FORCE_PROMPT_CACHING_5M`, then `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`, then `subagentPromptCacheTtl`, then an agent's own frontmatter, then `ENABLE_PROMPT_CACHING_1H`.
+  - Auto memory: `CLAUDE_CODE_DISABLE_AUTO_MEMORY` (`1` off, `0` forced on) before `autoMemoryEnabled`.
+  - Connectors: off where any source's `disableClaudeAiConnectors` is `true` or `ENABLE_CLAUDEAI_MCP_SERVERS` is false; nothing turns them back on.
+  - `idleCompaction` ("Setting it to true does not turn idle compaction on"): read from the highest source setting it, `true` where none does. Idle compaction runs only where a server-side flag's mode turns it on, `autoCompactEnabled` is on, and `idleCompaction` isn't `false`.
 
 ## Codex 0.162.1: launching a session
 
@@ -156,7 +162,9 @@ From the source at `rust-v0.162.1` (paths under `codex-rs/`), probed with `codex
 - **`config.toml`.**
   - Codex writes trust, hook trust and first-run counters back into it, following a symbolic link and replacing the target atomically.
   - The interactive CLI always loads `$CODEX_HOME/config.toml`, so only a separate home keeps the operator's file unloaded.
-  - `--profile <name>` layers `$CODEX_HOME/<name>.config.toml` over it.
+  - `--profile <name>` layers `$CODEX_HOME/<name>.config.toml` over it; a `profile` key in `config.toml` is refused ("legacy `profile = …` config is no longer supported", `core/src/config/mod.rs`).
+  - `[features]`' switches are a `BTreeMap`, applied in the order of their keys, and an older key switches the same feature as its new one (`features/src/legacy.rs`: `connectors` for `apps`, `memory_tool` for `memories`), so with both set the later key wins: `connectors` over `apps`, `memory_tool` over `memories`.
+  - No idle compaction: compaction runs past `model_auto_compact_token_limit` and, when set, at a turn's end past `model_post_turn_compact_threshold_percent` (`config/src/config_toml.rs`); the binary names no other compaction setting.
 - **`-c` overrides.** `-c` splits a key at every `.` and keeps quotes, so `-c 'projects."<p>".trust_level=…'` does nothing; the inline table `-c 'projects={"<p>"={trust_level="trusted"}}'` works.
 - **The login.**
   - Under the `file` store, `auth.json` is rewritten in place (truncated, never renamed), so a symbolic link or a one-file bind mount shares one login.

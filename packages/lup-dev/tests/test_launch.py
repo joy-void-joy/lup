@@ -17,11 +17,13 @@ import sh
 from filelock import FileLock
 from typer.testing import CliRunner
 
+import lup
 from lup.rooms.engine import Exited, Podman, Process
-from lup.sessions.terminal import Cli, SessionSettings
-from lup_dev import Project, cli
+from lup.sessions.terminal import Cli, SessionSettings, TerminalSettings
+from lup_dev import Core, Modules, Project, Session, cli
 from lup_dev.adapters import Adapter, claude, codex
 from lup_dev.approval import Approval, ReleaseTool
+from lup_dev.catalog.room import SessionDefaults
 from lup_dev.declaration.requirements import Printed, Tools
 from lup_dev.declaration.resolve import resolve
 from lup_dev.host.client import HostClient, Starter
@@ -30,6 +32,7 @@ from lup_dev.launch.clis import Channel, ChannelError
 from lup_dev.launch.guidance import OPENING
 from lup_dev.launch.session import (
     LaunchError,
+    SessionParts,
     approved_declaration,
     hooked,
     piped,
@@ -397,7 +400,8 @@ def test_a_launch_compiles_the_approved_declarations_guidance_and_hooks(
     assert settings.cli == Cli(program=Path("/opt/cli"))
     assert settings.hooks == claude.hooks(piped(), timedelta(hours=25))
     assert settings.trusted == [project]
-    assert settings.session == session_settings(choices)
+    assert settings.session == session_settings(choices).declared
+    assert settings.defaults == session_settings(choices).defaults
     guidance = settings.guidance or ""
     assert guidance.startswith(OPENING)
     assert "# The room" in guidance
@@ -616,12 +620,71 @@ def test_a_linked_worktree_trusts_its_repositorys_main_worktree(
 def test_the_session_settings_are_cores_in_the_librarys_terms() -> None:
     choices = resolve(Project()).session
 
-    assert session_settings(choices) == SessionSettings(
-        subagent_cache=timedelta(hours=1),
-        auto_memory=False,
-        removed_tools=choices.removed_tools,
-        account_connectors=False,
+    assert session_settings(choices) == SessionParts(
+        declared=SessionSettings(),
+        defaults=SessionSettings(
+            subagent_cache=timedelta(hours=1),
+            auto_memory=False,
+            idle_compaction=False,
+            removed_tools=choices.removed_tools,
+            account_connectors=False,
+        ),
     )
     five = choices.model_copy(update={"subagent_cache": "5m", "auto_memory": True})
-    assert session_settings(five).subagent_cache == timedelta(minutes=5)
-    assert session_settings(five).auto_memory
+    assert session_settings(five).defaults.subagent_cache == timedelta(minutes=5)
+    assert session_settings(five).defaults.auto_memory
+
+
+def test_each_session_setting_is_named_as_the_library_names_it() -> None:
+    assert list(SessionSettings.model_fields) == list(Session.model_fields)
+
+
+def declaring(session: Session) -> Project:
+    """A project whose declaration changes `Core`'s session settings."""
+    return Project(modules=Modules.default().edit(Core(session=session)))
+
+
+def test_the_fields_a_project_declares_are_imposed_and_the_rest_are_defaults() -> None:
+    parts = session_settings(resolve(declaring(Session(auto_memory=False))).session)
+
+    assert parts.declared == SessionSettings(auto_memory=False)
+    assert parts.defaults == SessionSettings(
+        subagent_cache=timedelta(hours=1),
+        idle_compaction=False,
+        removed_tools=SessionDefaults().removed_tools,
+        account_connectors=False,
+    )
+
+
+def test_a_launch_imposes_what_the_project_declares_and_its_defaults_yield_to_the_operator_s(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    (home / ".claude").mkdir()
+    (home / ".claude" / "settings.json").write_text(
+        json.dumps({"autoMemoryEnabled": True, "disableClaudeAiConnectors": False})
+    )
+    (home / ".codex").mkdir()
+    (home / ".codex" / "config.toml").write_text(
+        "[features]\nmemories = true\napps = true\n"
+    )
+    launch = tmp_path / "launch"
+    parts = session_settings(resolve(declaring(Session(auto_memory=False))).session)
+    given = TerminalSettings(
+        directory=launch,
+        cli=Cli(program=Path("/opt/cli")),
+        session=parts.declared,
+        defaults=parts.defaults,
+    )
+
+    on_claude = json.loads(lup.Claude().terminal(given).files[launch / "settings.json"])
+    on_codex = lup.Codex().terminal(given).command
+
+    assert on_claude["env"] == {
+        "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
+        "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL": "1h",
+    }
+    assert "disableClaudeAiConnectors" not in on_claude
+    assert on_claude["idleCompaction"] is False
+    assert "features.memories=false" in on_codex
+    assert not any(argument.startswith("features.apps") for argument in on_codex)

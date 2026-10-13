@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 from lup.adapters.codex.layout import CodexLayout
 from lup.adapters.codex.settings import CodexSettings
-from lup.adapters.codex.terminal import compiled, operator
+from lup.adapters.codex.terminal import compiled
 from lup.sessions.declaration import Asking, Declaration
 from lup.sessions.errors import needs_extra
 
@@ -44,17 +44,6 @@ class Codex(Declaration):
     runtime = "codex"
     effort: Effort | None = None
     """How hard the model reasons; none keeps the model's own default."""
-
-    @classmethod
-    def chosen(cls, default: str) -> Codex:
-        """Return the declaration of the model the operator's own configuration chooses, or of `default` where it chooses none.
-
-        For a terminal session in the operator's own Codex home: the model it
-        compiles to outranks the one their configuration chooses, so this keeps
-        theirs. Their reasoning effort stays theirs too, since this sets none.
-        """
-        layout = CodexLayout.of(CodexSettings())
-        return cls(model=operator(layout.operator_config).model or default)
 
     @overload
     async def ask(self, prompt: str, output: None = None) -> TurnResult[str]: ...

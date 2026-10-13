@@ -50,7 +50,13 @@ class Declaration(Model, Agent, ABC):
 
     runtime: ClassVar[str]
     """The runtime's name, as records and errors give it."""
-    model: str
+    model: str | None = None
+    """The runtime's model id, passed as given.
+
+    None leaves it to the runtime: in a terminal, the person's own settings
+    choose, and in an ask, the runtime's default, since an ask loads none of
+    their settings.
+    """
     system_prompt: str | None = None
     """Replaces the runtime's own system prompt.
 
@@ -64,7 +70,8 @@ class Declaration(Model, Agent, ABC):
     def terminal(self, settings: TerminalSettings) -> Terminal:
         """Compile the declaration for a terminal: its runtime's CLI, with lup's settings.
 
-        The model and effort are spelled as the runtime spells them. A terminal
+        The model and effort are spelled as the runtime spells them, each only
+        where the declaration gives it, so the person's own choice holds. A terminal
         session is the runtime's coding agent, which an empty prompt would leave
         without its tools' guidance, so with no `system_prompt` it keeps its own.
         """
