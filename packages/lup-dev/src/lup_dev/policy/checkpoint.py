@@ -14,7 +14,8 @@ events (`docs/judging-writes.md`, *After a call: the checkpoint*):
 A session holds one or more worktrees of its repository (`worktrees.py`), and a
 call counts as running in every worktree its session holds when it starts. A
 checkpoint runs in each worktree the session holds whenever a call finishes and
-no call counted there is running, and again in each when the turn ends. It
+no call of the session counted there is running, another session's calls there
+holding none of its checkpoints back, and again in each when the turn ends. It
 snapshots the worktree into the store, compares it with the accepted tree, sets
 aside what was committed elsewhere or merged from it, judges a move of `HEAD` once
 as its commits', judges the rest as an edit is judged, puts back what's refused
@@ -135,6 +136,15 @@ class Running(MutableModel):
     """The calls running in one worktree, kept under a lock."""
 
     calls: list[Call] = []
+
+    def idle(self, session: str) -> bool:
+        """Say whether no call of `session` runs: what a checkpoint of `session` waits on.
+
+        Another session's calls don't count: a call no hook will finish, from a
+        configuration hooking only `PreToolUse` or a session that crashed, would
+        otherwise keep every session's checkpoints from running there.
+        """
+        return not any(each.session == session for each in self.calls)
 
 
 class Pending(Model):
@@ -486,23 +496,23 @@ class Worktree(Model):
             heads.worktrees = {**heads.worktrees, self.root: head}
             write_model(path, heads)
 
-    def finish(self, call: str) -> bool:
-        """Note that `call` finished here; say whether no call counted here runs."""
+    def finish(self, session: str, call: str) -> bool:
+        """Note that `call` finished here; say whether no call of `session` runs here."""
         with self.calls_lock():
             running = self.running()
             running.calls = [each for each in running.calls if each.key != call]
             self.ran(running)
-            return not running.calls
+            return running.idle(session)
 
     def clear(self, session: str, agent: str) -> bool:
-        """Forget the calls a conversation left running; say whether none is left."""
+        """Forget the calls a conversation left running; say whether none of its session's is left."""
         with self.calls_lock():
             running = self.running()
             running.calls = [
                 each for each in running.calls if not each.of(session, agent)
             ]
             self.ran(running)
-            return not running.calls
+            return running.idle(session)
 
     def busy(self, session: str, agent: str) -> bool:
         """Say whether a call of another conversation of `session` runs here."""
@@ -516,16 +526,16 @@ class Worktree(Model):
 def begin(bench: Bench, worktree: Worktree, key: str) -> None:
     """Start, or resume, a session in a worktree: accept the worktree as it is.
 
-    What changed while no session ran there is the operator's work or a pull, and
-    is accepted unjudged, and the worktree's `HEAD` is recorded with it. While a
-    call runs there, another session is at work in it: the accepted tree stays,
-    and that call's checkpoint judges what it writes. A resumed session keeps the
-    tree it started from.
+    What changed while the session made no call there is the operator's work, a
+    pull or another session's, and is accepted unjudged, and the worktree's `HEAD`
+    is recorded with it. While a call of the session runs there (one left running
+    as it resumes), the accepted tree stays, and that call's checkpoint judges what
+    it writes. A resumed session keeps the tree it started from.
     """
     store = worktree.store
     with worktree.lock():
         with worktree.calls_lock():
-            busy = bool(worktree.running().calls)
+            busy = not worktree.running().idle(key)
         start = store.accepted() if busy else None
         if start is None:
             start = store.snapshot()
@@ -1698,11 +1708,11 @@ class CallStarted(Event):
 class CallFinished(Event):
     """A tool call finished, whether it succeeded or failed.
 
-    A checkpoint runs in each worktree the session holds where no counted call
-    is still running, one after another, and the agent hears their reports
-    together. One that never started (a runtime can report a command's end on a
-    later call) leaves the calls running as they are, and a checkpoint still runs
-    where none is.
+    A checkpoint runs in each worktree the session holds where no call of the
+    session is still running, one after another, and the agent hears their
+    reports together; another session's calls there don't hold it back. One that
+    never started (a runtime can report a command's end on a later call) leaves
+    the calls running as they are, and a checkpoint still runs where none is.
     """
 
     call: str
@@ -1713,7 +1723,9 @@ class CallFinished(Event):
         if held is None:
             return Reply()
         opened = worktrees(bench, held)
-        idle = [worktree for worktree in opened if worktree.finish(self.call)]
+        idle = [
+            worktree for worktree in opened if worktree.finish(self.session, self.call)
+        ]
         for worktree in opened:
             confirm(bench, worktree, self.session, self.agent, self.call)
         checked = [
@@ -1762,12 +1774,13 @@ class ConversationEnded(Event):
     """A subagent's conversation ended its turn; the session's own goes on.
 
     Its calls are cleared in each worktree the session holds, and a checkpoint
-    runs in each where none is left running. Its end holds on what it must be
-    told, each told once (`end_turn`): a refusal, a move, a checkpoint's notice,
-    mail. It never holds on the type errors and ruff's findings left in its
-    files: every worker passes the gate before it hands back, and one waiting on
-    a review has files importing what hasn't landed, errors it can't fix. Its end
-    ends its time at work, unless it's blocked, which keeps the subagent going.
+    runs in each where none of the session's is left running. Its end holds on
+    what it must be told, each told once (`end_turn`): a refusal, a move, a
+    checkpoint's notice, mail. It never holds on the type errors and ruff's
+    findings left in its files: every worker passes the gate before it hands
+    back, and one waiting on a review has files importing what hasn't landed,
+    errors it can't fix. Its end ends its time at work, unless it's blocked,
+    which keeps the subagent going.
     """
 
     @override

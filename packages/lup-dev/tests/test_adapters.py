@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from pydantic import TypeAdapter
 
 from lup.sessions.terminal import Hook
 from lup_dev.adapters import claude, codex
@@ -678,6 +679,128 @@ def test_codex_holds_only_the_worktree_it_started_in(
     assert "# BAD regex" in (linked / CORE).read_text()
 
 
+# What Codex 0.162.1 sent, captured from `codex exec` in a scratch repository: a
+# patch adding `livecheck.py` holding `import subprocess`, a patch updating it, a
+# shell `test -e livecheck.py`, a patch that fails to apply (a `PreToolUse` and no
+# `PostToolUse`), then the turn's end.
+
+CAPTURED = Path(__file__).parent / "payloads" / "codex-0.162.1"
+LIVECHECK = "import subprocess  # BAD subprocess\n"
+"""What the captured patch writes, `import subprocess`, with the fake engine's marker for lup's `subprocess` rule."""
+
+
+def captured(name: str, repo: Path) -> str:
+    """Return a payload Codex 0.162.1 sent, its working directory moved to `repo`."""
+    sent = json.loads((CAPTURED / f"{name}.json").read_text())
+    return json.dumps({**sent, "cwd": str(repo)})
+
+
+@pytest.mark.parametrize(
+    ("name", "kind"),
+    [
+        ("1-session-start", codex.SessionStart),
+        ("2-pre-tool-use-add", codex.PreToolUse),
+        ("3-post-tool-use-add", codex.PostToolUse),
+        ("4-pre-tool-use-update", codex.PreToolUse),
+        ("5-post-tool-use-update", codex.PostToolUse),
+        ("6-pre-tool-use-bash", codex.PreToolUse),
+        ("7-post-tool-use-bash", codex.PostToolUse),
+        ("8-pre-tool-use-failed-patch", codex.PreToolUse),
+        ("9-stop", codex.Stop),
+    ],
+)
+def test_codex_reads_each_hook_0_162_1_sent(
+    name: str, kind: type[codex.Payload]
+) -> None:
+    raw = (CAPTURED / f"{name}.json").read_text()
+    received = TypeAdapter[codex.Received](codex.Received).validate_json(raw)
+    assert isinstance(received, kind)
+
+
+def test_codex_0_162_1_patch_is_refused_after_its_call(
+    on_codex: Bench, repo: Path, kit: Kit
+) -> None:
+    codex.hook(captured("1-session-start", repo), on_codex)
+    assert codex.hook(captured("2-pre-tool-use-add", repo), on_codex) == ""
+    (repo / "livecheck.py").write_text(LIVECHECK)
+    output = json.loads(codex.hook(captured("3-post-tool-use-add", repo), on_codex))
+    said = output["hookSpecificOutput"]["additionalContext"]
+    assert said.startswith("lup refused 1 file.")
+    assert f"{repo}/livecheck.py" in said
+    assert not (repo / "livecheck.py").exists()
+    assert running(kit, repo) == []
+
+
+def test_codex_judges_a_patch_in_a_worktree_a_claude_write_was_allowed_in(
+    on_codex: Bench, on_claude: Bench, repo: Path, kit: Kit
+) -> None:
+    """A Claude Code session hooked only on `PreToolUse` for `Edit|Write` (lup's own
+    settings, a launched Claude Code room) leaves each write it allows counted, and
+    no hook finishes it: another session's checkpoints don't wait on it."""
+
+    def from_claude(event: str, **fields: object) -> str:
+        sent = {"session_id": "c1", "cwd": str(repo), "hook_event_name": event}
+        return json.dumps({**sent, **fields})
+
+    claude.hook(from_claude("SessionStart", source="startup"), on_claude)
+    write = {"file_path": "notes.md", "content": "Notes.\n"}
+    raw = from_claude(
+        "PreToolUse", tool_name="Write", tool_input=write, tool_use_id="toolu_1"
+    )
+    allowed = json.loads(claude.hook(raw, on_claude))
+    assert allowed["hookSpecificOutput"]["permissionDecision"] == "allow"
+    (repo / "notes.md").write_text("Notes.\n")
+    codex.hook(captured("1-session-start", repo), on_codex)
+    codex.hook(captured("2-pre-tool-use-add", repo), on_codex)
+    (repo / "livecheck.py").write_text(LIVECHECK)
+    output = codex.hook(captured("3-post-tool-use-add", repo), on_codex)
+    assert not (repo / "livecheck.py").exists()
+    assert json.loads(output)["hookSpecificOutput"]["additionalContext"].startswith(
+        "lup refused 1 file."
+    )
+    assert running(kit, repo) == ["toolu_1"]
+
+
+FAILED_PATCH = "exec-b983ecfa-5dea-4c4e-bc2b-98ce1477eed1"
+"""The call of the captured patch that failed to apply, which no `PostToolUse` finishes."""
+
+
+def test_codex_judges_a_patch_after_one_that_failed_at_the_turns_end(
+    on_codex: Bench, repo: Path, kit: Kit
+) -> None:
+    """Codex 0.162.1 runs `PostToolUse` only for a call that succeeded: the failed
+    patch's call stays counted, so its session's checkpoints wait for the turn's
+    end, which clears it and judges what the turn left."""
+    codex.hook(captured("1-session-start", repo), on_codex)
+    codex.hook(captured("8-pre-tool-use-failed-patch", repo), on_codex)
+    codex.hook(captured("2-pre-tool-use-add", repo), on_codex)
+    (repo / "livecheck.py").write_text(LIVECHECK)
+    assert codex.hook(captured("3-post-tool-use-add", repo), on_codex) == ""
+    assert running(kit, repo) == [FAILED_PATCH]
+    output = json.loads(codex.hook(captured("9-stop", repo), on_codex))
+    assert output["decision"] == "block"
+    assert output["reason"].startswith("lup refused 1 file.")
+    assert not (repo / "livecheck.py").exists()
+    assert running(kit, repo) == []
+
+
+def test_codex_clears_a_failed_patchs_call_at_the_turns_end(
+    on_codex: Bench, repo: Path, kit: Kit
+) -> None:
+    codex.hook(captured("1-session-start", repo), on_codex)
+    codex.hook(captured("8-pre-tool-use-failed-patch", repo), on_codex)
+    assert running(kit, repo) == [FAILED_PATCH]
+    assert codex.hook(captured("9-stop", repo), on_codex) == ""
+    assert running(kit, repo) == []
+    codex.hook(captured("2-pre-tool-use-add", repo), on_codex)
+    (repo / "livecheck.py").write_text(LIVECHECK)
+    output = json.loads(codex.hook(captured("3-post-tool-use-add", repo), on_codex))
+    assert output["hookSpecificOutput"]["additionalContext"].startswith(
+        "lup refused 1 file."
+    )
+    assert not (repo / "livecheck.py").exists()
+
+
 # In a launched room
 
 
@@ -719,6 +842,8 @@ def test_codex_hooks_the_judges_events_in_a_room() -> None:
         Hook(event="session-started", command=HOOK, timeout=hold),
         Hook(event="call-started", command=HOOK, timeout=hold),
         Hook(event="call-finished", command=HOOK, timeout=hold),
+        Hook(event="turn-ended", command=HOOK, timeout=hold),
+        Hook(event="conversation-ended", command=HOOK, timeout=hold),
     ]
 
 

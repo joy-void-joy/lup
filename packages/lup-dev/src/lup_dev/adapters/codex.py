@@ -23,8 +23,18 @@ the "Working directory for the session", and `Bash` and `apply_patch` carry only
 Codex's own approval decides it.
 
 In a launched room (`docs/launch.md`, *The one hook and the host service*), Codex
-runs the room's hook on `SessionStart`, `PreToolUse` and `PostToolUse` (`hooks`),
-the checkpoint after each call being the only place its hooks see a patch. Where
+runs the room's hook on `SessionStart`, `PreToolUse`, `PostToolUse`, `Stop` and
+`SubagentStop` (`hooks`): the checkpoint after each call, the only place its
+hooks see a patch, and each conversation's turn's end, which clears the calls it
+left that no `PostToolUse` finishes. That end is the judge's whole set's
+(`docs/judging-writes.md`, *While a subagent works*): the session's `Stop` runs a
+checkpoint, waits for the importers pass, and holds the turn (`decision:
+"block"`, a continuation prompt to Codex) on the type errors and ruff's findings
+left in the files its own conversation touched, until the same findings follow a
+block (`stop_hook_active`), when the turn ends and the operator is told in
+`systemMessage`; a refusal, a move, an answer to a hold, removed notes and mail
+hold it once each. A subagent's `SubagentStop` never holds on findings, only on
+what it must be told. Where
 the launch's judge can't answer a hook, the host service answers it through
 `unanswered`: at `PostToolUse` the agent is told beside the call's result, as when
 judging fails; anything else warns the operator in `systemMessage`, and the call
@@ -33,10 +43,27 @@ Codex marks the hook's run failed, shows "hook exited with code 1" (not what the
 hook wrote to standard error), and the call goes on.
 
 What this relies on, from Codex's hooks documentation and its source at
-`rust-v0.156.1` (`codex-rs/hooks/schema/generated/`):
+`rust-v0.162.1` (paths under `codex-rs/`), whose hook schemas
+(`hooks/schema/generated/`) are those of `rust-v0.156.1`, file for file; the
+payloads 0.162.1 sent for a patch, a shell command and a turn's end are kept in
+`packages/lup-dev/tests/payloads/codex-0.162.1/`:
 - the inputs: `PreToolUse` and `PostToolUse` carry `tool_use_id`, `PostToolUse` its
   `tool_response`, `SubagentStop` its `agent_id`; a subagent's calls carry their
-  `agent_id`;
+  `agent_id`; each carries more than this adapter reads (`model`,
+  `permission_mode`, `transcript_path`, and on a turn's events `turn_id`);
+- a patch's hooks name the tool `apply_patch` (a matcher of `Write` or `Edit`
+  selects them too, the payload still saying `apply_patch`:
+  `core/src/tools/hook_names.rs`), carry the patch as `tool_input.command`, and
+  give both hooks the call's own id as `tool_use_id`
+  (`core/src/tools/handlers/apply_patch.rs`), so a patch's start and finish match;
+- `PostToolUse` runs only for a call that succeeded (`core/src/tools/registry.rs`):
+  a patch that fails to apply, a call that's interrupted, and one another hook
+  blocks have a `PreToolUse` and no `PostToolUse`. A shell command counts as
+  succeeding whatever its exit status; one still running when its call returns
+  has no `PostToolUse` then (`core/src/tools/context.rs`, `ExecCommandToolOutput`),
+  but at the `write_stdin` poll that sees it end (below);
+- a call's hooks carry as `cwd` the session's local working directory, or the
+  turn's where there's none (`core/src/hook_runtime.rs`, `tool_hook_cwd`);
 - `PreToolUse`'s `permissionDecision: "ask"` is "parsed but not supported yet", and
   a plain `allow` fails open: this adapter never answers `PreToolUse`;
 - `PermissionRequest` fires for `apply_patch` only when the patch needs approval
@@ -49,7 +76,8 @@ What this relies on, from Codex's hooks documentation and its source at
   preview pointing at it (`hooks/src/output_spill.rs`), so nothing is lost, and the
   hook configuration raises the limit so a report arrives whole;
 - `write_stdin` can deliver a command's `PostToolUse` with no `PreToolUse` of its
-  own, under the original command's `tool_use_id`;
+  own, under the original command's `tool_use_id`
+  (`core/src/tools/handlers/unified_exec/write_stdin.rs`);
 - a hook's `timeout` defaults to 600 seconds and has no maximum, so the hook
   configuration gives `PostToolUse` and `Stop` a day and more, for holds;
 - "Subagent hooks use the parent session id" (its docs), a thread-spawned
@@ -412,10 +440,18 @@ def hooks(command: list[str], timeout: timedelta) -> list[Hook]:
     """Return the hooks a launched Codex session runs `command` at: the events the judge reads.
 
     `SessionStart`, `PreToolUse` and `PostToolUse` on every tool: Codex is judged
-    after each call. Each waits up to `timeout`, which a hold's wait for the
-    operator needs.
+    after each call. `Stop` and `SubagentStop`: a conversation's turn's end clears
+    the calls it left that no `PostToolUse` finishes (a patch that failed to
+    apply, a call interrupted), and judges what the turn left. Each waits up to
+    `timeout`, which a hold's wait for the operator needs.
     """
-    events: list[Event] = ["session-started", "call-started", "call-finished"]
+    events: list[Event] = [
+        "session-started",
+        "call-started",
+        "call-finished",
+        "turn-ended",
+        "conversation-ended",
+    ]
     return [Hook(event=event, command=command, timeout=timeout) for event in events]
 
 
