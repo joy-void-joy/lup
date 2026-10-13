@@ -235,7 +235,7 @@ import-linter checks the whole graph at the gate. The engine reads the same cont
 - **A word the library uses means the same thing in the environment:** `adapters` holds each runtime's adapter in `lup` and in `lup_dev` alike.
 - **Every subpackage's `__init__.py` docstring says in one line what it is.**
 - **Package-wide modules stay at the root:** errors, settings, layout, the clock, the command line, and the front door a project's declaration imports (`__init__.py`). So do the tools more than one subsystem needs, which belong to none of them: git (`git.py`), which judging and the launch both ask, the models kept in files (`stored.py`), and what the operator approved (`approval.py`), which the launch records and the judge reads.
-- **Subsystems import downwards only,** declared as an import-linter `layers` contract. In `lup_dev`: `adapters` > `policy` > `codescan` > `declaration` > `catalog` > `host`, so the runtimes' adapters sit on judging, judging on reading code, both on what a project declares, everything on the catalog's data, and the host service, which imports none of them and is handed what it runs, sits lowest, where any of them can reach its client.
+- **Subsystems import downwards only,** declared as an import-linter `layers` contract. In `lup_dev`: `adapters` > `launch` > `policy` > `codescan` > `declaration` > `catalog` > `host`, so the runtimes' adapters sit on the launch (each spells its CLI's release channel) and on judging, the launch above judging, though it imports none of it, judging on reading code, both on what a project declares, everything on the catalog's data, and the host service, which imports none of them and is handed what it runs, sits lowest, where any of them can reach its client.
 
 | `lup_dev` | What it is |
 |---|---|
@@ -246,7 +246,7 @@ import-linter checks the whole graph at the gate. The engine reads the same cont
 | `policy/` | judging every write: roles, the judgement, the checkpoint and its store, holds, verdicts, reports |
 | `adapters/` | each runtime's hooks, the only code naming a runtime |
 | `host/` | the host service, which rooms call, and its client (`docs/launch.md`); it imports none of the other subsystems |
-| `launch/` | launching a session (`docs/launch.md`): trust on launch (`trust.py`) so far; not yet in the layers contract |
+| `launch/` | launching a session (`docs/launch.md`): trust on launch (`trust.py`), the maintaining room and its image (`room.py`, `images.py`), each runtime's latest CLI (`clis.py`), the session's guidance (`guidance.py`) |
 
 **Why.** A flat package hides which modules belong together. A subpackage per subsystem says what a module is part of before it's opened, and the layer order says which subsystem may know about which.
 

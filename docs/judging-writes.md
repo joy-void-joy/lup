@@ -504,12 +504,15 @@ In lup itself, the judge's own source isn't asked about at each edit, beyond the
 
 ## Modules
 
-In `packages/lup-dev/src/lup_dev/`, by subsystem (`docs/conventions.md`, *Package layout*), highest layer first, rather than a flat package of 21 modules; an import contract in `pyproject.toml` keeps `adapters` > `policy` > `codescan` > `declaration` > `catalog` > `host`:
+In `packages/lup-dev/src/lup_dev/`, by subsystem (`docs/conventions.md`, *Package layout*), highest layer first, rather than a flat package of 21 modules; an import contract in `pyproject.toml` keeps `adapters` > `launch` > `policy` > `codescan` > `declaration` > `catalog` > `host`:
 
 | Module | What it's for |
 |---|---|
 | **`adapters/`** | **Each runtime's hooks: the only modules naming a runtime** |
 | `adapters/claude.py`, `adapters/codex.py` | Each runtime's payloads in, its outputs out, and the variables it sets in its commands |
+| **`launch/`** | **Launching a session** (`docs/launch.md`, *Modules and public API*); it imports none of `policy`, though it sits above it |
+| `launch/trust.py` | Trust on launch: the host zone at the integration branch's tip, found without running the project's code, its fingerprint, the approval kept per repository, the diff shown and the answer asked (`Asker`), and installing an approved copy (`Toolchain`) and restarting the host service on it |
+| `launch/room.py`, `launch/images.py`, `launch/clis.py`, `launch/guidance.py` | The maintaining session's room, its image, each runtime's latest CLI, and the session's guidance (`docs/launch.md`) |
 | **`policy/`** | **Judging every write** |
 | `policy/roles.py` | Path roles: which role a path has |
 | `policy/judge.py` | One judgement over a set of changed files, shared by `policy/before.py`, the checkpoint and the review flow's submissions: role, rules, public API, directives, outcome |
@@ -542,8 +545,6 @@ In `packages/lup-dev/src/lup_dev/`, by subsystem (`docs/conventions.md`, *Packag
 | `host/protocol.py` | The control requests and replies, each told apart by its `kind`: `Register`, `Unregister`, `Stop`; `Registered`, `Done`, `Refused`; `HostError` |
 | `host/service.py` | `HostService`: the control socket, a hook socket per launch answered through the `Answerer` seam off the event loop, each launch recorded for the next service, and the `Handler`s modules register (`Route.to`) |
 | `host/client.py` | `HostClient`: finding the service on its control socket, or starting it (`Detached`, the `Starter` seam) and waiting through the clock until it answers; registering and ending a launch; stopping the service |
-| **`launch/`** | **Launching a session** (`docs/launch.md`); not yet in the layers contract |
-| `launch/trust.py` | Trust on launch: the host zone at the integration branch's tip, its fingerprint, the approval kept per repository, the diff shown and the answer asked (`Asker`), and installing an approved copy (`Toolchain`) and restarting the host service on it |
 | **root** | **Package-wide** |
 | `gate.py` | `lup-dev check`: the worktree's declaration's requirements checked at once, then its steps run through its runner from the root, every one even after one fails, and their report; with `--fix`, ruff's safe fixes and the formatter first; `Processes`, the seam its tests stub |
 | `review.py` | What reviews share: the operator's answers (`Answer`, `LineComment`), and the review flow's `Queue` seam to wherever reviews wait |

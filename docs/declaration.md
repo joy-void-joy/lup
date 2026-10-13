@@ -561,7 +561,7 @@ Each built with the piece that first reads it; its shape is here so the grammar 
 
 ## Where the code goes
 
-In `packages/lup-dev/src/lup_dev/`. The declaration is a subsystem of its own (`docs/conventions.md`, *Package layout*), rather than `project.py` at the package's root with its neighbours beside it, and sits between the catalog it reads and the subsystems that read it: `adapters` > `policy` > `codescan` > `declaration` > `catalog`.
+In `packages/lup-dev/src/lup_dev/`. The declaration is a subsystem of its own (`docs/conventions.md`, *Package layout*), rather than `project.py` at the package's root with its neighbours beside it, and sits between the catalog it reads and the subsystems that read it: `adapters` > `launch` > `policy` > `codescan` > `declaration` > `catalog`.
 
 | File | What it's for | Slice |
 |---|---|---|
