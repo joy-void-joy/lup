@@ -25,7 +25,7 @@ import secrets
 import shutil
 from datetime import timedelta
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import Field
 
@@ -37,7 +37,6 @@ from lup_dev.policy.drafts import Draft, Drafts, draft_path, drafted
 from lup_dev.policy.importers import Conversation
 from lup_dev.policy.judge import Change, Judgement
 from lup_dev.policy.report import finding_lines, sections
-from lup_dev.policy.store import Store, read_model, write_model
 from lup_dev.policy.verdicts import Answer as Logged
 from lup_dev.policy.verdicts import Verdict
 from lup_dev.policy.worktrees import place
@@ -53,6 +52,10 @@ from lup_dev.review import (
     ReviewRequest,
     Waiting,
 )
+from lup_dev.stored import read_model, write_model
+
+if TYPE_CHECKING:
+    from lup_dev.policy.store import Store
 
 
 class SubmissionError(LupDevError):

@@ -18,8 +18,9 @@ from pathlib import Path
 from filelock import FileLock
 
 from lup.types import Model, MutableModel
+from lup_dev.git import Git
 from lup_dev.layout import Layout
-from lup_dev.policy.store import Git, read_model, write_model
+from lup_dev.stored import read_model, write_model
 
 
 class Place(Model):

@@ -38,6 +38,7 @@ from lup_dev.codescan.ruff import Ruff
 from lup_dev.declaration.requirements import Machine
 from lup_dev.errors import LupDevError
 from lup_dev.gate import Check, Shell, failed, report
+from lup_dev.git import Git, nul_separated
 from lup_dev.host.client import Detached, HostClient
 from lup_dev.host.service import Answerer, HostService
 from lup_dev.launch.trust import trusted
@@ -49,7 +50,6 @@ from lup_dev.policy.importers import BackgroundSpawner
 from lup_dev.policy.judge import finding
 from lup_dev.policy.report import finding_lines
 from lup_dev.policy.runtime import Runtime
-from lup_dev.policy.store import Git, nul_separated
 from lup_dev.policy.submissions import (
     AllReviews,
     AnyReview,
@@ -401,7 +401,8 @@ def trust() -> None:
     service on it where one runs, and records the approval; declined, the copy you
     approved before keeps running. Where nothing changed, it says so and stops.
     """
-    typer.echo(trusted(toplevel(Path.cwd()), runtimes()).report())
+    inside = [runtime.name() for runtime in runtimes() if runtime.inside()]
+    typer.echo(trusted(toplevel(Path.cwd()), inside).report())
 
 
 @app.command("verdicts")

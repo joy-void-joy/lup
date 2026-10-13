@@ -40,9 +40,9 @@ from lup.rooms.container import Container, Image, Mount
 from lup.types import Model
 from lup_dev.catalog.room import Editors, RoomBase
 from lup_dev.errors import LupDevError
+from lup_dev.git import Git, nul_separated
 from lup_dev.launch.images import definition
 from lup_dev.layout import LOCALTIME
-from lup_dev.policy.store import Git, nul_separated
 
 if TYPE_CHECKING:
     from lup_dev.declaration.requirements import Tools

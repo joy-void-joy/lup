@@ -234,12 +234,12 @@ import-linter checks the whole graph at the gate. The engine reads the same cont
 - **A subpackage is named for the subsystem it implements.** Where the first lup had the same subsystem, its name is reused, so what's read in `lup-legacy` maps onto the same place: `codescan` (its `harness/codescan`), `policy`.
 - **A word the library uses means the same thing in the environment:** `adapters` holds each runtime's adapter in `lup` and in `lup_dev` alike.
 - **Every subpackage's `__init__.py` docstring says in one line what it is.**
-- **Package-wide modules stay at the root:** errors, settings, layout, the clock, the command line, and the front door a project's declaration imports (`__init__.py`).
+- **Package-wide modules stay at the root:** errors, settings, layout, the clock, the command line, and the front door a project's declaration imports (`__init__.py`). So do the tools more than one subsystem needs, which belong to none of them: git (`git.py`), which judging and the launch both ask, and the models kept in files (`stored.py`).
 - **Subsystems import downwards only,** declared as an import-linter `layers` contract. In `lup_dev`: `adapters` > `policy` > `codescan` > `declaration` > `catalog` > `host`, so the runtimes' adapters sit on judging, judging on reading code, both on what a project declares, everything on the catalog's data, and the host service, which imports none of them and is handed what it runs, sits lowest, where any of them can reach its client.
 
 | `lup_dev` | What it is |
 |---|---|
-| root | `errors.py`, `settings.py`, `layout.py`, `clock.py`, `cli.py`; the front door for a project's declaration (`__init__.py`); the gate as one command (`gate.py`); what reviews share (`review.py`) and the bridge parking them in the first lup's dashboard (`legacy_dashboard.py`) |
+| root | `errors.py`, `settings.py`, `layout.py`, `clock.py`, `cli.py`; the front door for a project's declaration (`__init__.py`); the gate as one command (`gate.py`); git, run with what could run code turned off (`git.py`); the models kept in files, read and written whole (`stored.py`); what reviews share (`review.py`) and the bridge parking them in the first lup's dashboard (`legacy_dashboard.py`) |
 | `declaration/` | what a project declares, and reading it: the grammar, `Module`, the kinds, lup's modules, loading `lup_project.py` and resolving it (`docs/declaration.md`) |
 | `catalog/` | the data that sets lup's policy, protected: path patterns (`paths.py`), the gate's steps (`gate.py`), the rule table (`rules.ts`) |
 | `codescan/` | reading code: the engine's contract and client, the `# lup:` directives, conditions, ruff, and `docs/rules.md` compiled from the rule table |

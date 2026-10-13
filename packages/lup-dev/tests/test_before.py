@@ -5,9 +5,9 @@ from typing import TYPE_CHECKING
 
 from lup_dev.policy.before import Overwrite, Replacement, before
 from lup_dev.policy.checkpoint import Session, SessionStarted
-from lup_dev.policy.store import read_model
 from lup_dev.policy.verdicts import VerdictLog
 from lup_dev.policy.worktrees import Place, place
+from lup_dev.stored import read_model
 
 if TYPE_CHECKING:
     from conftest import Kit, Shell

@@ -28,8 +28,8 @@ from lup_dev.policy.checkpoint import (
 )
 from lup_dev.policy.holds import Holds, Response, answer, waiting
 from lup_dev.policy.importers import Conversation, ImportersPass
-from lup_dev.policy.store import read_model
 from lup_dev.policy.verdicts import VerdictLog
+from lup_dev.stored import read_model
 
 if TYPE_CHECKING:
     from conftest import FakeRuntime, Kit, Shell

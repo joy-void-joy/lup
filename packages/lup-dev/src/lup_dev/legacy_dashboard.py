@@ -43,9 +43,9 @@ from pydantic import TypeAdapter
 
 from lup.types import Model
 from lup_dev.clock import Clock
+from lup_dev.git import Git
 from lup_dev.layout import CheckoutLayout, Layout, StoreLayout
 from lup_dev.policy.importers import BackgroundSpawner, Spawner
-from lup_dev.policy.store import Git, read_model, write_model
 from lup_dev.review import (
     Answer,
     Answered,
@@ -59,6 +59,7 @@ from lup_dev.review import (
     ReviewRequest,
     Waiting,
 )
+from lup_dev.stored import read_model, write_model
 
 if TYPE_CHECKING:
     from lup_dev.settings import LupDevSettings

@@ -54,12 +54,11 @@ from lup_dev.declaration.resolve import Declaration, resolve
 from lup_dev.declaration.runner import Uv
 from lup_dev.errors import LupDevError
 from lup_dev.gate import invoked
+from lup_dev.git import Git
 from lup_dev.host.client import Detached, HostClient
 from lup_dev.layout import CheckoutLayout, Layout, PackageLayout
-from lup_dev.policy.checkpoint import Worktree
-from lup_dev.policy.runtime import Runtime
-from lup_dev.policy.store import Git, read_model, write_model
 from lup_dev.settings import LupDevSettings
+from lup_dev.stored import read_model, write_model
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -759,31 +758,41 @@ class Trust(Model, arbitrary_types_allowed=True):
     toolchain: Toolchain
     host: HostClient
     clock: Clock
-    runtimes: list[Runtime]
-    """Every runtime lup knows: inside a session of one, nothing is asked."""
+    inside: list[str]
+    """The runtimes whose session this runs inside, by name, as their adapters
+    tell: inside one, nothing is asked."""
     name: str = "lup-dev"
     """The package the host runs, as the lock names it."""
 
     def check(self) -> Standing:
         """Read the tip's host zone, and compare it with the one approved last."""
-        return self.standing(Worktree.at(self.root, self.layout))
+        return self.standing(self.repository())
 
-    def standing(self, worktree: Worktree) -> Standing:
-        """Read the tip's host zone in `worktree`'s repository, beside the approval."""
-        zone = self.zone(worktree)
-        approval = read_model(self.layout.approved(worktree.repository), Approval)
+    def repository(self) -> Path:
+        """Return the git directory every worktree of the repository shares, which keys its approval."""
+        return Path(
+            Git(cwd=self.root).text(
+                "rev-parse", "--path-format=absolute", "--git-common-dir"
+            )
+        )
+
+    def standing(self, repository: Path) -> Standing:
+        """Read the tip's host zone, beside the approval kept for `repository`."""
+        zone = self.zone()
+        approval = read_model(self.layout.approved(repository), Approval)
         return Standing(
             zone=zone, fingerprint=self.fingerprint(zone), approval=approval
         )
 
-    def zone(self, worktree: Worktree) -> Zone:
-        """Read the host zone at the integration branch's tip, as the judge reads it.
+    def zone(self) -> Zone:
+        """Read the host zone at the integration branch's tip.
 
         Where the repository has no such branch, at the worktree's `HEAD`. Raise
         `TrustError` before any commit, or where the lock doesn't say which
         `lup-dev` the host runs.
         """
-        commit = worktree.store.tip(self.integration) or worktree.store.head()
+        git = Git(cwd=self.root)
+        commit = git.commit(f"refs/heads/{self.integration}") or git.commit("HEAD")
         if commit is None:
             message = (
                 f"nothing is committed in {self.root}'s repository, so it has no host "
@@ -791,7 +800,7 @@ class Trust(Model, arbitrary_types_allowed=True):
             )
             raise TrustError(message)
         tool = self.tool(commit)
-        named = self.named(worktree, commit)
+        named = self.named(commit)
         declared = CheckoutLayout(root=Path())
         paths = [
             declared.declaration,
@@ -820,20 +829,24 @@ class Trust(Model, arbitrary_types_allowed=True):
             raise TrustError(message)
         return Lock.parse(found.stdout.decode()).tool(self.name)
 
-    def named(self, worktree: Worktree, commit: str) -> Named:
+    def named(self, commit: str) -> Named:
         """Find the files the commit's selected modules name that the host imports.
 
         The declaration is loaded from the commit's export, as the judge loads it;
         where it can't load, or a module it names can't be found, they aren't
         known, and why is kept.
         """
-        source = worktree.exported(self.layout, commit)
-        try:
-            conditions = Declaration.read(source).conditions
-            files = [module_file(source, each) for each in conditions]
-        except (ProjectError, ConditionError) as failure:
-            return Named(unloaded=str(failure))
-        return Named(paths=[each for file in files for each in holding(source, file)])
+        with tempfile.TemporaryDirectory() as scratch:
+            source = Path(scratch)
+            export(self.root, commit, source)
+            try:
+                conditions = Declaration.read(source).conditions
+                files = [module_file(source, each) for each in conditions]
+            except (ProjectError, ConditionError) as failure:
+                return Named(unloaded=str(failure))
+            return Named(
+                paths=[each for file in files for each in holding(source, file)]
+            )
 
     def fingerprint(self, zone: Zone) -> str:
         """Fingerprint the zone: git's listing of its files, and the `lup-dev` it runs.
@@ -904,20 +917,20 @@ class Trust(Model, arbitrary_types_allowed=True):
         run. Inside an agent's session nothing is asked: `TrustError`. Launches at
         once ask one at a time, so the second reads the first's answer.
         """
-        worktree = Worktree.at(self.root, self.layout)
-        kept = self.layout.approved(worktree.repository)
+        repository = self.repository()
+        kept = self.layout.approved(repository)
         kept.parent.mkdir(parents=True, exist_ok=True)
         with FileLock(kept.with_name(f"{kept.name}.lock")):
-            standing = self.standing(worktree)
+            standing = self.standing(repository)
             zone = standing.zone
             approval = standing.approval
             if approval is not None and standing.approved():
                 return Unchanged(commit=zone.commit, approval=approval)
-            inside = [runtime.name() for runtime in self.runtimes if runtime.inside()]
-            if inside:
+            if self.inside:
                 message = (
-                    f"this runs inside a {inside[0]} session, and an agent doesn't "
-                    "approve the code the host runs: answer from your own terminal"
+                    f"this runs inside a {self.inside[0]} session, and an agent "
+                    "doesn't approve the code the host runs: answer from your own "
+                    "terminal"
                 )
                 raise TrustError(message)
             change = self.change(standing)
@@ -956,11 +969,12 @@ class Trust(Model, arbitrary_types_allowed=True):
         return True
 
 
-def trusted(root: Path, runtimes: list[Runtime]) -> Outcome:
+def trusted(root: Path, inside: list[str]) -> Outcome:
     """Check what the host runs for the repository at `root`: a launch's first step.
 
     As `Trust.ensure` does, with this machine's settings, the terminal, uv and the
-    host service's client. Raise `TrustError` where nothing approved may run.
+    host service's client; `inside` names the runtimes whose session this runs
+    inside. Raise `TrustError` where nothing approved may run.
     """
     settings = LupDevSettings()
     layout = Layout.of(settings)
@@ -973,6 +987,6 @@ def trusted(root: Path, runtimes: list[Runtime]) -> Outcome:
         toolchain=UvToolchain(),
         host=HostClient(layout=layout.host, clock=clock, starter=Detached()),
         clock=clock,
-        runtimes=runtimes,
+        inside=inside,
     )
     return trust.ensure()

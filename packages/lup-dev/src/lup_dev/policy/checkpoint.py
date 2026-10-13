@@ -57,6 +57,7 @@ from lup_dev.codescan.ruff import Linter
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.project import Project
 from lup_dev.declaration.resolve import Declaration
+from lup_dev.git import Git
 from lup_dev.layout import Layout
 from lup_dev.policy.holds import HeldFile, Hold, Holds, answered
 from lup_dev.policy.importers import Conversation, Found, ImportersPass, Spawner
@@ -76,18 +77,10 @@ from lup_dev.policy.report import (
 )
 from lup_dev.policy.roles import Roles
 from lup_dev.policy.runtime import Runtime
-from lup_dev.policy.store import (
-    Elsewhere,
-    Entry,
-    Git,
-    Heads,
-    Held,
-    Store,
-    read_model,
-    write_model,
-)
+from lup_dev.policy.store import Elsewhere, Entry, Heads, Held, Store
 from lup_dev.policy.verdicts import Verdict, VerdictLog
 from lup_dev.policy.worktrees import Holding, Place, SessionIndex, place
+from lup_dev.stored import read_model, write_model
 
 
 class Services(Model, arbitrary_types_allowed=True):

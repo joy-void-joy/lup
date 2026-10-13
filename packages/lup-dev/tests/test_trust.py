@@ -33,10 +33,10 @@ from lup_dev.launch.trust import (
     engine,
 )
 from lup_dev.layout import Layout
-from lup_dev.policy.store import read_model, write_model
+from lup_dev.stored import read_model, write_model
 
 if TYPE_CHECKING:
-    from conftest import FakeRuntime, Kit, Shell
+    from conftest import Kit, Shell
 
     from lup_dev.launch.trust import Tool
 
@@ -259,7 +259,7 @@ def trusting(
     kit: Kit,
     asker: Asker,
     *,
-    runtimes: list[FakeRuntime] | None = None,
+    inside: list[str] | None = None,
     running: bool = True,
 ) -> Trust:
     return Trust(
@@ -275,7 +275,7 @@ def trusting(
             running=running,
         ),
         clock=kit.clock,
-        runtimes=list(runtimes or []),
+        inside=list(inside or []),
     )
 
 
@@ -571,16 +571,15 @@ def test_a_declaration_that_doesnt_load_is_said_and_still_asked(
 
 
 def test_inside_an_agents_session_nothing_is_asked(
-    lup: Path, kit: Kit, shell: Shell, runtimes: list[FakeRuntime]
+    lup: Path, kit: Kit, shell: Shell
 ) -> None:
-    runtimes[0].within = True
-    inside = trusting(lup, kit, yes(), runtimes=runtimes)
+    inside = trusting(lup, kit, yes(), inside=["first"])
     with pytest.raises(TrustError, match="inside a first session"):
         inside.ensure()
     assert answering(inside).shown == []
     assert approved(lup, kit, shell) is None
     trusting(lup, kit, yes()).ensure()
-    again = trusting(lup, kit, unasked(), runtimes=runtimes)
+    again = trusting(lup, kit, unasked(), inside=["first"])
     assert isinstance(again.ensure(), Unchanged)
 
 
