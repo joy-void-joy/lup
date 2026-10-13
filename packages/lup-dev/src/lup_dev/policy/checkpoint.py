@@ -528,20 +528,29 @@ def begin(bench: Bench, worktree: Worktree, key: str) -> None:
 
     What changed while the session made no call there is the operator's work, a
     pull or another session's, and is accepted unjudged, and the worktree's `HEAD`
-    is recorded with it. While a call of the session runs there (one left running
-    as it resumes), the accepted tree stays, and that call's checkpoint judges what
-    it writes. A resumed session keeps the tree it started from.
+    is recorded with it. A file under an open hold isn't: it keeps its accepted
+    content, left to the hold's answer, and the session starts from that. While a
+    call of the session runs there (one left running as it resumes), the accepted
+    tree stays, and that call's checkpoint judges what it writes. A resumed
+    session keeps the tree it started from.
     """
     store = worktree.store
     with worktree.lock():
         with worktree.calls_lock():
             busy = not worktree.running().idle(key)
-        start = store.accepted() if busy else None
+        accepted = store.accepted()
+        start = accepted if busy else None
         if start is None:
-            start = store.snapshot()
+            taken = store.snapshot()
+            state = store.state()
+            held = [each.path for each in state.holding]
+            start = (
+                store.unstage(accepted, held, [])
+                if accepted is not None and held
+                else taken
+            )
             store.accept(start)
             head = store.head()
-            state = store.state()
             state.tips = store.tips(head)
             store.remember(state)
             worktree.record(bench.services.layout, head)
@@ -1522,10 +1531,11 @@ def ended(
     the end. A subagent's end finds nothing, so runs no check and doesn't wait for
     the pass, which the next checkpoint or the session's end collects: every
     worker passes the gate before it hands back, and one waiting on a review has
-    files importing what hasn't landed, errors it can't fix. Without `judging`, no
-    checkpoint: another conversation's call is running there, whose finish runs
-    it, so its writes in progress aren't judged as this one's, put back under it,
-    or told to a conversation that didn't make them.
+    files importing what hasn't landed, errors it can't fix. A file under an open
+    hold isn't anyone's until the operator answers, so it holds no end. Without
+    `judging`, no checkpoint: another conversation's call is running there, whose
+    finish runs it, so its writes in progress aren't judged as this one's, put
+    back under it, or told to a conversation that didn't make them.
     """
     services = bench.services
     checked = checkpoint(bench, worktree, key, agent) if judging else Checked()
@@ -1538,7 +1548,8 @@ def ended(
         session = worktree.session(key, bench.runtime)
         watch(worktree, session, worktree.importers().collect())
         worktree.keep(session)
-    mine = session.files(agent)
+        held = [each.path for each in worktree.store.state().holding]
+    mine = [path for path in session.files(agent) if path not in held]
     shared = [
         worktree.root / path
         for path in mine
