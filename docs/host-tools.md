@@ -15,25 +15,25 @@ What it leaves to other pieces:
 - **Transcripts** (#65): lup's own copy of each launched session's record is a neighbour. It files each copy under the same identity the inbox keys a party on (a session, and a conversation in it), so the two agree from the start.
 - **The clipboard,** devices and a browser in the room, budgets and `accounts`, as `docs/launch.md` leaves them.
 
-## Decisions for the operator
+## Decisions
 
-Each is answerable "leaning", "undecided" or "leave open"; the section holding it says more.
+Answered by the operator on 2026-10-14; where they left a decision to the builder, it's marked so. One is still open (14).
 
-1. **The tools a launched session gets** (*lup's tools*): `report`, `note`, `ask`, `wait_inbox`, and five GitHub tools; not `propose` (piece 3), `spawn`, or `message`, which arrives with spawn, when there's a party besides the operator to address: here `report` and `note` already say what it would (a problem, a note), so each thing has one way to be said. `wait_inbox` is named apart from Codex's own `wait`, which in code mode polls a running cell. **Lean: these.** The alternative: `message` now too, with the kinds `disagreement`, `note` and `problem`, overlapping `report` and `note`.
-2. **Always loaded, and results as text** (*lup's tools*): Claude Code's `alwaysLoad`, Codex's `omit_tools_from = ["deferred"]`; each result as `content`, never `structuredContent`. **Lean: yes.**
-3. **The server runs in the host service, on a socket per launch** (*The server*): `mcp.sock` in the launch's socket directory, bridged in the room by `socat` on both runtimes. A service restart stops lup's tools in running sessions until `/mcp` reconnects (Claude Code) or the session is resumed in a launch of its own (Codex); the hook goes on delivering meanwhile. **Lean: yes.** Alternative for Codex: its own `codex stdio-to-uds`, set aside since its help marks it "Internal" and a launch fetches the latest CLI, which could drop it.
-4. **A third socket, `request.sock`, for the room's programs** (*The room's requests*), with its own routes, so a room never reaches the control socket's kinds. **Lean: yes.**
-5. **Who's calling is read from each call's `_meta`** (*Who's calling*): each conversation, a session's main one or a subagent's, is a party with its own inbox, and an item for a conversation that has ended goes to its session's main conversation. **Lean: yes.**
-6. **Claude Code hooks every call and its turn's ends** (*How an agent is told*), and the service answers what the judge doesn't read without starting the judge. **Lean: yes.**
-7. **The inbox lives in the host service,** durable in lup's state and never mounted, its parties keyed by session rather than by launch, so a resumed session finds what waited for it (*Parties and items*). **Lean: yes.**
-8. **How an agent is told** (*How an agent is told*): at its next call, at its turn's end (holding it once), by `wait_inbox`, and when it's idle, on Claude Code through the session's own messaging socket; nothing reaches an idle Codex session, a declared gap. This answers `DESIGN.md`'s open question 7 for this piece. **Lean: yes.**
-9. **The operator's face is `lup-dev inbox`, with desktop notices** (*The operator's face*); the dashboard later, and no bridge to the first lup's dashboard. **Lean: yes.**
-10. **git through `git-remote-lup`** (*git through a remote helper*): `push` and `fetch`, run on the host by object id to the remote's own URL, the room's git configuration from `GIT_CONFIG_GLOBAL`. The helper runs on the room's bare Python, so where the standard library can't follow lup's conventions (running git without `sh`, a push's refspec read by hand) it takes an `ignore` the operator reviews. **Lean: yes.** The alternative for the helper: excluded from lup's rules, as the bridge's hooks are.
-11. **The limits are a `credentials` part of `Core`** (*What the declaration allows*): the actions a selection, the protected refs a selection; by default no force push, no deletion, and no push to `main` or a tag; an action beyond them refused, saying why. They reach the host with the launch's registration. **Lean: yes.**
-12. **GitHub through `gh` on the host** (*GitHub through `gh`*), the repository named once from its own remote, never from the worktree. **Lean: yes.**
-13. **Where the code goes** (*Modules and public API*): serving tools over one MCP connection is the library's; the inbox, GitHub and git are three subsystems of `lup_dev`, just above `host`. **Lean: yes.**
-14. **Trust's question stays in the terminal, summary first** (*Trust on launch: the summary first*). **Lean: in the terminal this piece.** This changes `docs/launch.md` (*Trust on launch*: "In the terminal until piece 2 brings the inbox") and `DESIGN.md` (*Policy*: "in the terminal until the inbox, then wherever the inbox is answered"). The alternative: an inbox item too, now.
-15. **lup's own sessions move onto launch once this lands,** with the protected-path change the operator makes (*lup's own sessions move onto launch*). **Lean: yes.**
+1. **The tools a launched session gets** (*lup's tools*), decided: every agent has its inbox. `report`, `note`, `ask`, `send` (the general one: a message to a party, the operator in this piece, other agents with spawn), `wait_inbox`, and five GitHub tools; not `propose` (piece 3) or `spawn`. `wait_inbox` is named apart from Codex's own `wait`, which in code mode polls a running cell. **No turn that won't end:** an agent can always end its turn, and what a hold at a turn's end held it for once doesn't hold a later turn's end again (*No turn that won't end*).
+2. **Found through tool search, and listed in the guidance** (*lup's tools*), decided: lup's tools stay behind each runtime's tool search, with descriptions as long as they need, and every session's guidance lists each of lup's tools by name with its summary, compiled from the tools themselves: a tool's docstring's first line, 50 characters at most, as a git commit's subject line is, the rest of the docstring its full description. Results as `content`, never `structuredContent`.
+3. **The server runs in the host service, on a socket per launch** (*The server*), the builder's: `mcp.sock`, bridged in the room by `socat` on both runtimes. A service restart stops lup's tools in running sessions until `/mcp` reconnects (Claude Code) or the session is resumed (Codex); the hook goes on delivering meanwhile.
+4. **A third socket, `request.sock`, for the room's programs** (*The room's requests*), the builder's, with its own routes, so a room never reaches the control socket's kinds.
+5. **lup's own id for each conversation, stamped by the hook** (*Who's calling*), decided: the operator chose lup's own interface over reading each runtime's own ids at the server, which in the first lup didn't stay uniform. lup mints an id for each conversation the first time a hook names it, and the hook writes it into every call to lup's tools; the server reads only that.
+6. **Claude Code hooks every call and its turn's ends** (*How an agent is told*), decided, provided its cost isn't felt: the service answers what the judge doesn't read without starting the judge, measured before landing.
+7. **The inbox lives in the host service** (*Parties and items*), the builder's: durable in lup's state, never mounted, its parties keyed by session, so a resumed session finds what waited for it.
+8. **How an agent is told** (*How an agent is told*), the builder's, never pinging needlessly: at its next call, at its turn's end once, by `wait_inbox`, and when it's idle on Claude Code through its own messaging socket, only for the operator's own acts and a burst once; nothing reaches an idle Codex session, a declared gap.
+9. **The operator's face is `lup-dev inbox`, with desktop notices** (*The operator's face*), decided; the dashboard later, and no bridge to the first lup's dashboard.
+10. **git through `git-remote-lup`** (*git through a remote helper*), the builder's: `push` and `fetch` run on the host by object id to the remote's own URL; the helper held to lup's rules, with an `ignore` where the standard library can't follow them.
+11. **The limits are a `credentials` part of `Core`** (*What the declaration allows*), decided: no force push, no deletion, no push to `main` or a tag by default; beyond them, refused, saying why.
+12. **GitHub through `gh` on the host** (*GitHub through `gh`*), decided, the repository named once from its own remote.
+13. **Where the code goes** (*Modules and public API*), the builder's: serving tools over one MCP connection is the library's; the inbox, GitHub and git are three subsystems of `lup_dev`, just above `host`.
+14. **Trust's question: an inbox item from the start, answerable at the launching terminal too** (*Trust on launch: the summary first*). Open. **Lean: yes**, since its destination is the inbox wherever it's answered, the dashboard in time; building it in the terminal alone now would be rebuilt then. The alternative: in the terminal alone in this piece.
+15. **lup's own sessions move onto launch once this lands** (*lup's own sessions move onto launch*), decided, with the protected-path change the operator makes.
 
 ## lup's tools
 
@@ -44,6 +44,7 @@ Each is answerable "leaning", "undecided" or "leave open"; the section holding i
 | `report` | `problem` | Says what's wrong when the work can't go on; its answer tells the agent to end its turn | a message to the operator, kind `problem` |
 | `note` | `remark` | Tells the operator an assumption, a doubt or a counterargument, and carries on | a message, kind `note` |
 | `ask` | `question`, `decisions` (each with the agent's lean), `wait` | Asks the operator. With `wait`, the call holds until they answer and returns the answer; without, it returns at once and the answer reaches the agent at a later call | a question |
+| `send` | `to`, `kind` (`note`, `problem`, `disagreement`, `question`), `text` | Sends a message to a party's inbox: the operator in this piece, other agents once spawn gives them one; never holds | a message of that kind |
 | `wait_inbox` | none | Holds until something reaches the agent's inbox, and returns all of it | none |
 | `read_issue` | `number` | An issue or pull request of this repository, with its comments, and a pull request's checks | none |
 | `find_issues` | `query`, `state` | Searches this repository's issues and pull requests | none |
@@ -54,25 +55,26 @@ Each is answerable "leaning", "undecided" or "leave open"; the section holding i
 - **`report` and `note` are the library's speaking tools** (`lup.tools.speaking`): the same names and input models (`Problem`, `Remark`), so an agent's habit carries between an ask from code and a launched session. In a launched session whoever asked is the operator, so each lands in their inbox (`DESIGN.md`, *Sessions*: "telling them something is a message with a `kind`"). Their functions are the environment's, putting the item in the inbox; their descriptions say where it goes. `report` keeps its meaning: the agent stops and says why, and its answer tells it the report is with the operator and to end its turn.
 - **`ask` takes numbered decisions,** each with the agent's lean, which the operator answers "leaning", "undecided" or "leave open" with a comment (`DESIGN.md`, *The dashboard*), or a plain question answered in words. A question's answer is told to the conversation that asked, once.
 - **`wait_inbox` takes no time limit (leaning):** the runtime's limit on a call bounds it (*Holding a call*), and no loop re-enters a wait to keep the cache warm (`docs/graveyard.md`). It isn't called `wait`: on a Codex model in code mode, Codex has a `wait` tool of its own, which polls a running cell (`docs/library.md`, *No tools but lup's own*), and two tools of one name invite the model to call the wrong one.
-- **No `message` in this piece (leaning):** with the operator the only other party, `report` and `note` say what it would. It arrives with spawn, when agents message each other.
+- **`send` is the inbox's general verb** (the operator's decision): every agent has an inbox and can write to another's. `report` and `note` keep their own meanings beside it, as the library's speaking tools: `report` stops the work, `note` attaches a doubt to it. A `question` sent is a message that asks for no answer the agent waits on; a decision of the operator's to wait on is `ask`'s. In this piece `to` is `operator`; spawn adds the agents a session can address.
 - **The GitHub tools** act on this repository alone (*GitHub through `gh`*). There's no merge tool, and none closes or edits an issue **(leaning)**: closing one is the operator's judgement, which a comment can ask for. `draft_pull_request` targets the integration branch, `LUP_INTEGRATION_BRANCH` (`settings.py`, `dev` by default), as trust on launch reads it.
 - **Not here:** `propose` (piece 3) and `spawn` (later).
 
-### Loaded, short, and read the same on both runtimes
+### Found through tool search, listed in the guidance
 
-- **Always loaded (leaning).** Both runtimes defer MCP tools to tool search by default: Claude Code loads only names and server instructions (its `mcp` docs, *Scale with MCP tool search*), and Codex leaves them out of the first tool list where the model supports tool search (`core/src/tools/spec_plan.rs`). The first lup found deferred tools made agents conclude a tool didn't exist, and moved to `alwaysLoad: true` (its `8827c0442`, `8f2ecbe10`); aib found "deferred tool schemas made the agent guess search terms" (`docs/field-notes.md`, *From the downstream projects*). So Claude Code's entry gets `alwaysLoad: true`, and Codex's `omit_tools_from = ["deferred"]`.
-- **Short descriptions,** since loaded tools cost context in every request: one or two sentences each, the input fields described in a few words. The first lup's 14 coordination tools carried about 10 KB of descriptions alone.
+- **Behind each runtime's tool search, as it defers MCP tools by default** (the operator's decision): Claude Code loads only names and server instructions (its `mcp` docs, *Scale with MCP tool search*), and Codex leaves them out of the first tool list where the model supports tool search (`core/src/tools/spec_plan.rs`). So a tool's description can be as long as it needs, without costing every request its context. The first lup's 14 coordination tools, always loaded, carried about 10 KB of descriptions alone.
+- **Listed in every session's guidance, so the agent knows what's there.** The first lup found deferred tools made agents conclude a tool didn't exist, and moved to `alwaysLoad: true` (its `8827c0442`, `8f2ecbe10`); aib found "deferred tool schemas made the agent guess search terms" (`docs/field-notes.md`, *From the downstream projects*). So the guidance a launch renders (`launch/guidance.py`) lists each of lup's tools by its name and its summary, compiled from the tools themselves, and says they're found through tool search by name.
+- **A tool's summary is its docstring's first line,** 50 characters at most, as a git commit's subject line is; the rest of the docstring is its full description, as long as it needs. `@lup_tool` already takes the description from the docstring (`lup/tools/tool.py`), so this keeps one source: a summary line past 50 characters, or none, fails when the tool is made, naming it. Set aside: a description field on `lup_tool`, a second place to say what the docstring says.
 - **Results as `content` only,** as the library's server answers today (`served`, `adapters/claude/runtime.py`). Codex shows the model only `structuredContent` where a result has it, dropping the content blocks (`protocol/src/models.rs`); Claude Code reads `content`. A result with both would read differently on the two runtimes.
 - **A large result** is the runtime's to keep whole: Claude Code saves one past `MAX_MCP_OUTPUT_TOKENS` (25,000 by default) to a file and gives the path; Codex cuts one past about 10,000 bytes by default (`utils/output-truncation`) unless a tool's `output_token_limit` is raised. An issue thread can pass that, so `read_issue`'s limit is raised on Codex's entry **(leaning)**, and `DESIGN.md`'s large results to a file arrive with the tools slice.
 
 ### Who's calling
 
-The launch is the socket's: the service hears a call on the launch's own `mcp.sock`, which nothing in the room names (`docs/launch.md`, *On the host: the service*). Within the launch, each call's `_meta` says which conversation is calling **(leaning)**:
-- **Codex** sends `callId`, `threadId` and `sessionId` with every `tools/call`, with turn metadata naming a subagent's parent thread (`core/src/mcp_tool_call.rs`); the thread is the conversation, and the ids are the ones its hooks carry as `tool_use_id`, `agent_id` and `session_id` (`core/src/hook_runtime.rs`).
-- **Claude Code** sends `"claudecode/toolUseId"` to every server (in the 2.1.296 binary: `...he&&{"claudecode/toolUseId":he}...`), and its hooks carry that id with `session_id` and, in a subagent, `agent_id`. Its `PreToolUse` hook runs before the call reaches the server, so the service records each call's conversation from the hook and finds it again by the call's id.
-- `docs/field-notes.md` (*MCP servers, from the runtimes' docs*) says a Claude Code server "learns only `CLAUDE_PROJECT_DIR`, not the session or the subagent", from the docs, which don't mention `_meta`; it's corrected once the live check below confirms the id.
-- **A call whose conversation can't be read** (the field missing, or a call id no hook named) is taken as the launch's main conversation, and the service's log says so.
-- A process in the room could write another conversation's ids into `_meta`. It stays within its own launch, so it can only speak as another conversation of the same session.
+The launch is the socket's: the service hears a call on the launch's own `mcp.sock`, which nothing in the room names (`docs/launch.md`, *On the host: the service*). Within the launch, **each conversation has an id of lup's own, which the hook writes into every call to lup's tools** (the operator's decision):
+- **lup mints it** the first time a hook names a conversation: a session's start, a subagent's start, or its first call. Each runtime's adapter reads its own ids from the hook's payload (a session's, a subagent's), as it does today, and the service keeps which runtime ids each lup id stands for. Nothing past the adapter knows a runtime's ids.
+- **The hook stamps it.** The `call-started` hook on a call to one of lup's tools answers with the call's input rewritten to carry a field the model's schema doesn't show, `caller`, set to that conversation's id. The server reads `caller` and nothing else of who's calling. The first lup did the same with a hidden `caller` field (its `docs/platform-differentiation.md`): measured on Claude Code 2.1.283, "a rewrite with no decision reached the server even for a tool with `additionalProperties: false`"; on Codex 0.158.0 the rewrite reached the server beside `permissionDecision: "allow"`, and without it "was dropped — the call ran as the model wrote it". Owed live on the versions a launch runs.
+- **Set aside: reading each runtime's own ids at the server,** each call's `_meta` (Codex's `callId`, `threadId`, `sessionId`; Claude Code's `claudecode/toolUseId`, joined to its session through the hook). It would put each runtime's spelling in the server too, and the first lup found wiring back to each runtime separately didn't stay uniform, where its own interface did.
+- **A call with no `caller`,** a hook that didn't run, is taken as the launch's main conversation, and the service's log says so.
+- A process in the room could write another conversation's id into a call. It stays within its own launch, so it can only speak as another conversation of the same session.
 
 ## The server: in the host service, reached through a socket
 
@@ -106,7 +108,7 @@ The core's inbox (`DESIGN.md`, *Sessions*: "every party has one, the operator an
 
 "Messages are received at the next tool call, through the one hook, or with a blocking wait. Each answer is told once, never again" (`DESIGN.md`, *Sessions*). Every item waiting for a conversation is told together, oldest first, by whichever of these comes first:
 - **At its next call.** The `call-started` hook's answer carries them as `additionalContext`: Claude Code puts it into the conversation as a system reminder the model reads on its next request (its `hooks` docs, *Add context for Claude*); Codex collects a `PreToolUse` answer's `additionalContext` for the model, unless the answer is one it refuses, such as a plain `allow` (`hooks/src/events/pre_tool_use.rs` at `rust-v0.162.1`), owed live. Where the judge answers the same hook, the items are added to its answer.
-- **At its turn's end,** where some are still waiting: the `turn-ended` or `conversation-ended` hook holds the end once, `decision: "block"` with the items as the reason, which keeps the conversation going on both runtimes (Claude Code's `hooks` docs, *Stop decision control*; Codex's, `docs/launch.md`, *The one hook*). The checkpoint's mail already holds Codex's turn's end this way.
+- **At its turn's end,** where some are still waiting: the `turn-ended` or `conversation-ended` hook holds the end once, `decision: "block"` with the items as the reason, which keeps the conversation going on both runtimes (Claude Code's `hooks` docs, *Stop decision control*; Codex's, `docs/launch.md`, *The one hook*). The items are told by that reason, so they never hold an end again (*No turn that won't end*).
 - **When it calls `wait_inbox`,** whose result is the items.
 - **When its session starts or resumes,** in the `session-started` hook's answer.
 - **When it's idle,** between its turn's end and its next hook:
@@ -122,6 +124,13 @@ The core's inbox (`DESIGN.md`, *Sessions*: "every party has one, the operator an
 - **A held call abandoned with Esc.** Codex never sends `notifications/cancelled` (rmcp's `service.rs`, which Codex's timer doesn't use); Claude Code may (the string is in its binary), unverified. Where it does, the service drops the call and the item stays waiting. Where it doesn't, an answer written into a call nobody reads is the gap, said in that runtime's adapter once the live check settles it.
 
 **Batching and not talking over the operator** (`DESIGN.md`, *Sessions*): in this piece every item an agent receives comes from the operator's own act (an answer, a message they send), so nothing needs holding back; a burst is told together.
+
+### No turn that won't end
+
+An agent can always end its turn, and nothing re-launches it for what it's already been told (the operator's requirement). Every hold at a turn's end, the inbox's and the judge's alike:
+- **Holds once, then lets the turn end:** the agent ending its turn again ends it (`stop_hook_active` on both runtimes), whatever's still there.
+- **Holds once per thing, across turns:** what a hold held an end for doesn't hold a later end again. An inbox item is told in the hold's reason, so it's done. The judge's findings at a turn's end (on Codex in a room: type errors and ruff's findings left in the session's own files, `docs/launch.md`) are remembered as passed once the agent ends its turn past them, and hold a later end only where they've changed. So the agent stopping, the operator asking something, and the agent stopping again ends the turn at once, unless something new came. The Codex room's turn's end as landed holds again at every turn's end on the same findings; it's changed to this with the inbox's own hold (*Building it*).
+- **Never wakes an idle session on its own:** the idle wake (above) is for an item the operator's act made, and a burst of them wakes once. No hook starts a turn because a turn ended.
 
 ### Holding a call
 
@@ -237,7 +246,7 @@ The first approval on lup's own repository showed its whole host zone, about 110
 
 `Asker`'s `show` and `ask` (`launch/trust.py`) are enough for it; only the flow changes.
 
-**It stays in the terminal in this piece (leaning):** the operator is at that terminal when launching, and the launch can't go on until it's answered. `DESIGN.md` (*Policy*) and `docs/launch.md` (*Trust on launch*) move it to the inbox with this piece; taking this lean changes a line in each. The alternative, an inbox item too, would let the operator answer from another terminal while the launch waits.
+**An inbox item from the start, answerable at the launching terminal too (leaning; open):** its destination is the inbox wherever the operator answers it, the dashboard in time (`DESIGN.md`, *Policy*: "in the terminal until the inbox, then wherever the inbox is answered"). So the launch puts the question in the inbox as an approval, and waits on it; the launching terminal shows the summary and asks, its answer answering the item, while `lup-dev inbox answer` from any terminal, and the dashboard once it exists, answer the same item, whichever comes first. Nothing about the question is rebuilt when the dashboard comes. The alternative: in the terminal alone in this piece, moved to the inbox later.
 
 ## lup's own sessions move onto launch
 
@@ -258,35 +267,37 @@ from lup.tools.serving import Toolset, serve
 
 class LaunchTools(Toolset):                 # the environment's, below
     def specs(self) -> list[ToolSpec]: ...
-    async def call(self, name: str, arguments: JsonValue, meta: JsonObject) -> Answer: ...
+    async def call(self, name: str, arguments: JsonValue) -> Answer: ...
 
 await serve(LaunchTools(...), reader, writer)   # one MCP session over one connection, until it closes
 ```
 
 | File | What it's for | Public names |
 |---|---|---|
-| `tools/serving.py` | Serving tools over MCP: what's served, as a seam; an MCP server over it; one connection over a pair of streams, newline-delimited JSON-RPC as stdio carries it, read with `mcp`'s own message model | `Toolset` (an ABC: `specs`, `call`, which gets the call's `_meta` as the runtime sent it), `Answer` (moved from `sessions/submission.py`), `tool_server(toolset, name="lup")`, `serve(toolset, reader, writer, name="lup")` |
-| `sessions/submission.py` | `Toolbox` is a `Toolset`, ignoring `_meta` | |
+| `tools/serving.py` | Serving tools over MCP: what's served, as a seam; an MCP server over it; one connection over a pair of streams, newline-delimited JSON-RPC as stdio carries it, read with `mcp`'s own message model | `Toolset` (an ABC: `specs`, `call`), `Answer` (moved from `sessions/submission.py`), `tool_server(toolset, name="lup")`, `serve(toolset, reader, writer, name="lup")` |
+| `tools/tool.py` | A tool's summary: its docstring's first line, 50 characters at most, checked when the tool is made | `ToolSpec.summary` |
+| `sessions/submission.py` | `Toolbox` is a `Toolset` | |
 | `adapters/claude/runtime.py` | `served(toolbox)` gives way to `tool_server(toolbox)` | |
 | `sessions/terminal.py` | What a terminal's session loads beside its hooks | `ToolServer` (`name`, `socket`, a Unix socket in the room, `timeout`), `TerminalSettings.servers`; `TerminalSettings.messages`, where the session's own messaging socket goes, none for the runtime's default |
-| `adapters/claude/terminal.py` | `--mcp-config <launch>/mcp.json` and `--strict-mcp-config`, each server a stdio entry running `socat` to its socket, with `timeout` in milliseconds and `alwaysLoad: true`; `--messaging-socket-path` and `crossSessionInbound: "accept"` in the launch's settings | none beyond `terminal` |
-| `adapters/codex/terminal.py` | each server in the `mcp_servers` inline table that turns the operator's off: `socat STDIO UNIX-CONNECT:<socket>`, `tool_timeout_sec`, `omit_tools_from = ["deferred"]`, `default_tools_approval_mode = "approve"`; no messaging socket, the gap declared with its evidence | none beyond `terminal` |
+| `adapters/claude/terminal.py` | `--mcp-config <launch>/mcp.json` and `--strict-mcp-config`, each server a stdio entry running `socat` to its socket, with `timeout` in milliseconds; `--messaging-socket-path` and `crossSessionInbound: "accept"` in the launch's settings | none beyond `terminal` |
+| `adapters/codex/terminal.py` | each server in the `mcp_servers` inline table that turns the operator's off: `socat STDIO UNIX-CONNECT:<socket>`, `tool_timeout_sec`, `default_tools_approval_mode = "approve"`; no messaging socket, the gap declared with its evidence | none beyond `terminal` |
 
-- **Always loaded is lup's choice for every server it gives a terminal,** so `ToolServer` has no field for it; keeping a server out of tool search (`DESIGN.md`, *The library*) arrives with the tools slice, as a field arrives with the slice that uses it.
+- **Each runtime's tool search is left as it is,** so `ToolServer` has no field for it; loading a server's tools upfront (`DESIGN.md`, *The library*: "a tool server can be kept out of tool search") arrives with the tools slice, as a field arrives with the slice that uses it.
 - **Which bridge a room runs is the adapter's,** since only it knows its runtime has one of its own; the neutral form is a server reached on a Unix socket in the room.
 
 ### The environment
 
 | File | What it's for |
 |---|---|
-| `host/rooms.py` | A launch's sockets beside its hook: `mcp.sock`, lup's tools for the launch, one MCP session per connection, each call's conversation read from its `_meta` and routed to the module serving that tool (`RoomTools`: `specs`, `call` with the launch and the party); `request.sock`, one typed request per connection, the launch attached, routed to the modules' `RoomHandler`s through `RoomRoute.to`. Two modules serving one tool name, or answering one kind, are refused when the service is built |
-| `host/courier.py` | What the host reads of each runtime's hooks and calls, and how it tells a conversation in a hook's answer: `Courier`, an ABC each adapter fills (`heard`: a hook's event, session, conversation, call and tool, and whether the judge reads it; `caller`: a call's conversation from its `_meta`; `told`: a hook's answer with items added), with `Heard`, `Caller` and `Party` |
+| `host/rooms.py` | A launch's sockets beside its hook: `mcp.sock`, lup's tools for the launch, one MCP session per connection, each call's conversation read from the `caller` its hook stamped, and routed to the module serving that tool (`RoomTools`: `specs`, `call` with the launch and the party); `request.sock`, one typed request per connection, the launch attached, routed to the modules' `RoomHandler`s through `RoomRoute.to`. Two modules serving one tool name, or answering one kind, are refused when the service is built |
+| `host/courier.py` | What the host reads of each runtime's hooks, and how it answers them: `Courier`, an ABC each adapter fills (`heard`: a hook's event, the runtime's session and conversation ids, its call and tool, and whether the judge reads it; `told`: a hook's answer with items added, and a call to lup's tools rewritten to carry its `caller`), with `Heard`; and `Conversations`, the lup id minted for each conversation the first time a hook names it, kept with the runtime ids it stands for |
 | `host/service.py` | `HostService` gains `courier`, `room_routes` and `tools`; a hook the judge doesn't read is answered with what's waiting, without the judge; each launch's room sockets open and close with it |
 | `host/protocol.py` | `Register` gains `repository`, the repository's git directory, and `limits`, a `Limits` of the actions allowed and the protected ref patterns |
 | `host/client.py` | `RoomClient`: one typed request on `/run/lup/request.sock`, from a room's program |
 | `inbox/store.py` | Items and parties, kept one file each in lup's state: `Inbox`, `Item`, `Party` (`Operator`, `Conversation`), `Question`, `Decision`, `Verdict` (`leaning`, `undecided`, `leave open`), `Answer` |
 | `inbox/delivery.py` | Telling a conversation: at its next call, at its turn's end, by `wait_inbox`, at its session's start, and its wake where its runtime has one; told once; an item too long for a hook announced; an item for an ended conversation passed to its session's main one |
-| `inbox/tools.py` | `report`, `note`, `ask` and `wait_inbox` in a launched session, a `RoomTools` |
+| `inbox/tools.py` | `report`, `note`, `ask`, `send` and `wait_inbox` in a launched session, a `RoomTools` |
+| `inbox/ends.py` | A turn's end held once per thing, across turns: what a hold held it for, an item told or the judge's findings passed, remembered per conversation |
 | `inbox/protocol.py` | The operator's requests on the control socket (list, show, answer, done, send) and their handlers |
 | `inbox/notices.py` | `Notices` and `NotifySend`, moved from `legacy_dashboard.py` |
 | `forge/github.py` | GitHub through `gh --json`, on one named repository: `GitHub` |
@@ -298,8 +309,9 @@ await serve(LaunchTools(...), reader, writer)   # one MCP session over one conne
 | `codescan/directives.py` | `HostIssues` beside `GitHubIssues`, sending an `IssueRef`'s repository and number as an `IssueState`; `cli.py`'s `check` picks it where the room's socket is there |
 | `declaration/kinds.py`, `declaration/modules/core.py` | `Credentials` (a `Layer`), `Actions`, `Refs`; `Core.credentials` |
 | `launch/session.py`, `launch/room.py` | The tool server and the messaging socket in `TerminalSettings`; the helper and `GIT_CONFIG_GLOBAL` in the room; the registration's `repository` and `limits` |
-| `launch/trust.py` | The question, summary first |
-| `adapters/__init__.py`, `adapters/claude.py`, `adapters/codex.py` | `Adapter` gains `heard`, `caller` and `told`, which `cli.py` builds the `Courier` from; Claude Code's launched hooks become `SessionStart`, `PreToolUse` on every call, `Stop` and `SubagentStop` |
+| `launch/trust.py` | The question, summary first, an approval in the inbox that the launching terminal answers too |
+| `launch/guidance.py` | Each of lup's tools listed by its name and summary, from the tools served |
+| `adapters/__init__.py`, `adapters/claude.py`, `adapters/codex.py` | `Adapter` gains `heard` and `told`, which `cli.py` builds the `Courier` from; Claude Code's launched hooks become `SessionStart`, `PreToolUse` on every call, `Stop` and `SubagentStop` |
 | `layout.py` | `LaunchSockets.mcp`, `.request`, `.messages`; where the inbox is kept; the launch directory's `gitconfig` and `bin/` |
 | `cli.py` | `inbox`, until the command-line piece gives each command group its file; the courier, the modules' routes and their tools handed to the service |
 
@@ -309,10 +321,11 @@ await serve(LaunchTools(...), reader, writer)   # one MCP session over one conne
 ## Tests
 
 - **No agent and no network in any test.** The host service on sockets under the test's temporary directory, a stand-in `gh` (a script on the `PATH` answering recorded JSON), and git on scratch repositories, the "forge" a bare repository on disk.
-- **The library's serving:** a `Toolset` served over a socket pair to `mcp`'s own client: tools listed, a call routed with its `_meta`, an invalid call refused by the tool, results as `content` only; `Toolbox` through the same path; Claude Code's in-process server unchanged in behaviour.
+- **The library's serving:** a `Toolset` served over a socket pair to `mcp`'s own client: tools listed, a call routed with its arguments, an invalid call refused by the tool, results as `content` only; `Toolbox` through the same path; Claude Code's in-process server unchanged in behaviour; a tool whose docstring's first line passes 50 characters, or that has none, refused when it's made.
 - **Each runtime's terminal compile,** compared whole: Claude Code's `mcp.json`, flags and settings; Codex's `mcp_servers` table holding lup's server and the operator's turned off, one of theirs named `lup` replaced.
 - **The room sockets:** a call heard on one launch's `mcp.sock` reaching that launch's tools with its conversation; a request on `request.sock` with its launch attached; a control kind sent there refused; the sockets gone with the launch and served again after a restart.
-- **Each adapter's `Courier`,** on recorded payloads: who's speaking, whether the judge reads it, and items added to every answer its hooks give (an empty one, the judge's allow, its refusal, a turn's end held or not).
+- **Each adapter's `Courier`,** on recorded payloads: who's speaking, whether the judge reads it, items added to every answer its hooks give (an empty one, the judge's allow, its refusal, a turn's end held or not), and a call to lup's tools stamped with its conversation's lup id, the same id for every call of one conversation.
+- **Turn's ends:** held once per thing across turns: an agent stopping, an item arriving and being told, and the agent stopping again ending at once; the judge's findings passed once not holding a later end until they change.
 - **The inbox:** items told at a call, at a turn's end once, by `wait_inbox`, at session start, and through a stand-in messaging socket; never twice; a long item announced and returned whole by `wait_inbox`; a held call's answer after its turn ended told at the next call; an ended subagent's item passed on; items surviving a restart; numbered decisions answered; `lup-dev inbox` refusing inside an agent's session. Time through `lup_dev.clock`.
 - **git through the helper,** real git on scratch repositories: the helper run by git against a test service, pushing to a bare repository by object id; a force, a lease, a deletion and a protected ref refused with their reasons; a URL that isn't a remote refused; alternates outside the repository refused; a fetch writing no ref on the host; `git push -u` still exiting 0; the helper's requests validating as the host's models.
 - **GitHub:** each tool through the stand-in `gh`, `--repo` always the registered repository; an action outside the limits refused; `gh` missing; `HostIssues` answering the gate.
@@ -324,8 +337,8 @@ await serve(LaunchTools(...), reader, writer)   # one MCP session over one conne
 
 One short live room per runtime settles most of them; they're runtime behaviour, so they're checked live rather than in tests, and what they find goes into `docs/field-notes.md`.
 - **Claude Code 2.1.296:**
-  - `_meta["claudecode/toolUseId"]` arrives on each call and equals the `PreToolUse` hook's `tool_use_id`;
-  - the `socat` bridge under `--mcp-config` and `--strict-mcp-config` in an interactive room, its tools loaded at start (`alwaysLoad`);
+  - a `PreToolUse` answer rewriting a call to lup's tools (`updatedInput` adding `caller`, no decision) reaching the server, the call otherwise as the model wrote it;
+  - the `socat` bridge under `--mcp-config` and `--strict-mcp-config` in an interactive room, and the agent finding lup's tools through tool search by the names its guidance lists;
   - a call held past the 30-minute idle limit, and for hours, with the entry's `timeout`;
   - Esc on a held call: whether it sends `notifications/cancelled`;
   - `--messaging-socket-path` in the socket directory, `crossSessionInbound: "accept"` from `--settings` under `bypassPermissions`, the message's frame, and an idle session starting a turn;
@@ -333,24 +346,23 @@ One short live room per runtime settles most of them; they're runtime behaviour,
   - what a `PreToolUse` hook on every call costs, measured;
   - that `--resume` keeps the session's id.
 - **Codex 0.162.1:**
-  - `_meta`'s `threadId`, `sessionId` and `callId` equal the hooks' `agent_id`, `session_id` and `tool_use_id`;
-  - the `socat` bridge under `-c mcp_servers.lup=…`, and `omit_tools_from = ["deferred"]` loading lup's tools at start;
+  - a `PreToolUse` answer rewriting a call to lup's tools beside `permissionDecision: "allow"` reaching the server, as the first lup measured on 0.158.0;
+  - the `socat` bridge under `-c mcp_servers.lup=…`, and the agent finding lup's tools through tool search, in code mode too;
   - a call held for hours with `tool_timeout_sec`;
   - a `PreToolUse` answer's `additionalContext`, with no decision, reaching the model;
   - in code mode, what the model sees of a held call answered after its turn ended;
   - that resuming keeps the thread's id.
 - **git, before `remote` is built:** the review of host-side git in a repository the room writes (*Running git on the host*), each response confirmed on a scratch repository; a fetch by name from GitHub through the host; the service's SSH agent when a launch started it.
 - **GitHub:** `gh repo view` in a bare repository's git directory naming the repository behind an SSH alias such as `jvj:`.
-- **The field note** on what a Claude Code server learns of its caller, corrected once the first check above is settled.
 
 ## Building it
 
 Each a branch that passes the gate on its own, foundation first **(leaning)**:
-1. **`feat-tool-serving`,** the library: `lup.tools.serving`, `Toolbox` and Claude Code's asks on it; `ToolServer`, `TerminalSettings.servers` and `.messages`, each adapter's compile. The research behind this note goes into `docs/field-notes.md` here.
-2. **`feat-room-sockets`:** `mcp.sock` and `request.sock` per launch, `RoomHandler`, `RoomTools`, the `Courier` and each adapter's part of it, Claude Code's hooks widened, hooks the judge doesn't read answered without it; served with no module's tools yet.
-3. **`feat-inbox`:** the store, delivery, the five tools, `lup-dev inbox`, the notices; the launch giving the session its tool server and messaging socket.
+1. **`feat-tool-serving`,** the library: `lup.tools.serving`, `Toolbox` and Claude Code's asks on it; a tool's summary line; `ToolServer`, `TerminalSettings.servers` and `.messages`, each adapter's compile. The research behind this note goes into `docs/field-notes.md` here.
+2. **`feat-room-sockets`:** `mcp.sock` and `request.sock` per launch, `RoomHandler`, `RoomTools`, the `Courier` and each adapter's part of it, lup's own conversation ids stamped by the hook, Claude Code's hooks widened, hooks the judge doesn't read answered without it; served with no module's tools yet.
+3. **`feat-inbox`:** the store, delivery, the inbox's tools, `lup-dev inbox`, the notices; turn's ends held once per thing across turns, the Codex room's judge's findings among them; lup's tools listed in the guidance; the launch giving the session its tool server and messaging socket.
 4. **`feat-credential-limits`:** `Credentials`, `Actions` and `Refs` on `Core`, resolved by the launch into the registration.
 5. **`feat-forge`:** GitHub through `gh`, its tools, `HostIssues` for the gate in a room.
 6. **`feat-remote`:** once the host-side git review is settled, the helper, the room's git configuration, and pushing and fetching on the host.
-7. **`feat-trust-summary`:** the question, summary first.
+7. **`feat-trust-summary`:** the question, summary first, an approval in the inbox the launching terminal answers too (decision 14).
 8. **The live checks** on both runtimes, recorded in `docs/field-notes.md`; then `Core`'s guidance, and lup's own sessions move onto launch, the operator removing the committed runtime trees.
