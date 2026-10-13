@@ -49,11 +49,12 @@ type Action = Literal[
 ]
 """What the host can do with the operator's credentials for a launch, by name.
 
-Each is a handler lup carries out (`docs/host-tools.md`, *Credentials on the
-host*): fetching from one of the repository's remotes; pushing to one, a push
-that isn't a fast-forward being `force-push`, and one removing a branch or tag
-`delete-ref`; reading the repository's issues and pull requests; filing an
-issue; commenting on one; and opening a draft pull request.
+Each names a handler lup carries out on the host (`docs/host-tools.md`,
+*Credentials on the host*): fetching from one of the repository's remotes;
+pushing to one, a push that isn't a fast-forward being `force-push`, and one
+removing a branch or tag `delete-ref`; reading the repository's issues and pull
+requests; filing an issue; commenting on one; and opening a draft pull request.
+The handlers arrive with GitHub's tools and git's remote helper.
 """
 
 
@@ -70,7 +71,8 @@ class Limits(Model):
     """What the host does with the operator's credentials for a launch without asking.
 
     The project's declaration says it (`Core`'s `credentials`), resolved at the
-    commit the operator approved; beyond it, the host refuses, saying why.
+    commit the operator approved. The host's handlers hold each action to it,
+    refusing one beyond it and saying why, as they arrive.
     """
 
     actions: list[Action]
