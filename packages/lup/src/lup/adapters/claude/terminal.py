@@ -5,11 +5,8 @@ written into the operator's directory or the repository (`docs/launch.md`, *The
 settings compiled for each runtime*):
 - `--settings <launch>/settings.json` with `--setting-sources user`: the operator's
   `~/.claude/settings.json` loads, and the repository's `.claude/settings.json`,
-  `.mcp.json`, skills and `CLAUDE.md` don't. lup's file holds the hooks,
-  `permissions.deny` (the removed tools, as bare names),
-  `disableClaudeAiConnectors` unless the session asks for the account's
-  connectors, so none of the claude.ai connectors arriving with the login is
-  fetched, and `skipDangerousModePermissionPrompt`;
+  `.mcp.json`, skills and `CLAUDE.md` don't. lup's file holds the hooks, the
+  session settings (below) and `skipDangerousModePermissionPrompt`;
 - `--permission-mode bypassPermissions`: the room is the wall;
 - the model with `--model` and the effort with `--effort`, each only where the
   declaration gives one: `--model` outranks the model the operator's settings
@@ -17,14 +14,35 @@ settings compiled for each runtime*):
   declaration naming none leaves theirs to Claude Code, which reads it itself;
 - the declaration's system prompt with `--system-prompt-file`, and the guidance
   with `--append-system-prompt-file`;
-- the variables: auto memory on or off, the subagents' cache lifetime,
-  `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0` so a held call isn't moved to the
-  background after two minutes, `DISABLE_AUTOUPDATER` since the CLI's file is
-  read-only, and `CLAUDE_CONFIG_DIR` where the operator set it;
+- the variables: `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0` so a held call isn't
+  moved to the background after two minutes, `DISABLE_AUTOUPDATER` since the
+  CLI's file is read-only, and `CLAUDE_CONFIG_DIR` where the operator set it;
 - the room's own state file, onboarding done and the trusted paths accepted,
   mounted read-write where the operator's would be, so concurrent starts can't
   race on theirs; and the operator's directory, mounted read-write at its path,
   for their login, settings and history.
+
+**The session settings** go in lup's settings file, which outranks the
+operator's own: each one the settings impose (`TerminalSettings.session`), and
+each of lup's defaults their own file doesn't set (`OwnSettings.sets`, read once
+at launch), so theirs outrank lup's defaults:
+- the subagents' cache lifetime as `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`, and
+  auto memory as `CLAUDE_CODE_DISABLE_AUTO_MEMORY`, both in the file's `env`: a
+  variable there outranks the same variable in their file's `env`, and each
+  outranks its settings key (`subagentPromptCacheTtl`, `autoMemoryEnabled`), so
+  an imposed value wins whichever way they set theirs. Theirs count as set by the
+  key or by the variable in their `env`;
+- the account's connectors as `disableClaudeAiConnectors`. Any source's `true`
+  turns them off, and so does their `env`'s `ENABLE_CLAUDEAI_MCP_SERVERS=false`,
+  so a session asking for the connectors can't turn on what their own settings
+  turned off; and theirs count as set by either;
+- the removed tools, as bare names in `permissions.deny`, imposed or a default
+  alike: permission rules merge across scopes, their own deny rules adding to
+  lup's and none taking one back, so lup's are never theirs to set.
+
+A variable in the room's own environment would lose to their file's `env`,
+which Claude Code applies over its environment at start; their shell's
+variables don't reach the room.
 
 | lup's event | Claude Code's hook events |
 |---|---|
@@ -36,17 +54,26 @@ settings compiled for each runtime*):
 
 What this relies on, from Claude Code's docs (code.claude.com, `cli-reference`,
 `permissions`, `env-vars`, `settings`, `settings-reference`, `mcp`, `hooks`) and
-its 2.1.294 binary:
+its 2.1.294 and 2.1.296 binaries:
 - the system prompt flags work interactively; `--system-prompt-file` replaces the
   prompt, `--append-system-prompt-file` appends to it;
+- `--settings` is a level above user settings, and "an `env` block inside a
+  settings file is an ordinary key and follows the levels above"; lists "merge
+  instead of overriding" (`settings`, *Settings precedence*). The 2.1.296 binary
+  applies each source's `env` over its own environment at start, in that order,
+  user's then `--settings`';
 - `disableClaudeAiConnectors` turns off "the connectors it fetches itself", set
   "to `true` in any settings scope", with "any-source-true semantics: `true` in
   any settings source takes precedence"; `ENABLE_CLAUDEAI_MCP_SERVERS=false` "has
   the same effect for the current shell session" (`mcp`, *Disable claude.ai
-  connectors*). Left out, the operator's own settings decide;
+  connectors*). In the 2.1.296 binary, either turns them off, and nothing turns
+  them back on;
 - `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL` takes `5m` or `1h`, "the only values
-  Claude Code accepts"; `CLAUDE_CODE_DISABLE_AUTO_MEMORY` takes `1` to turn auto
-  memory off and `0` to force it on;
+  Claude Code accepts", and "takes precedence" over `subagentPromptCacheTtl`
+  (its schema's description, 2.1.296). `FORCE_PROMPT_CACHING_5M` outranks both,
+  so a person setting it keeps every cache at five minutes;
+- `CLAUDE_CODE_DISABLE_AUTO_MEMORY` takes `1` to turn auto memory off and `0` to
+  force it on, and the 2.1.296 binary reads it before `autoMemoryEnabled`;
 - with `CLAUDE_CONFIG_DIR` set, the state file is `.claude.json` inside it;
 - a hook's `command` runs in a shell, and its `timeout` is in seconds;
 - a single file mounted into the room can't be replaced by a rename ("Device or
@@ -57,13 +84,14 @@ its 2.1.294 binary:
 
 from datetime import timedelta
 from shlex import join
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
+from pydantic import JsonValue, ValidationError
 from pydantic.alias_generators import to_camel
 
 from lup.adapters.claude.layout import ClaudeLaunch, ClaudeLayout
 from lup.rooms.container import Mount
-from lup.sessions.terminal import Cli, Terminal
+from lup.sessions.terminal import Cli, Terminal, TerminalError
 from lup.types import Model
 
 if TYPE_CHECKING:
@@ -78,6 +106,9 @@ sets it too, since auto memory loads whatever the settings sources say."""
 
 SUBAGENT_CACHE = "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL"
 """The variable setting the prompt cache's lifetime outside the main conversation."""
+
+CONNECTORS = "ENABLE_CLAUDEAI_MCP_SERVERS"
+"""The variable that, false, keeps the account's claude.ai connectors from being fetched."""
 
 KEEP_CALLS = "CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS"
 """The variable after which a running MCP call moves to the background; `0` never moves it."""
@@ -118,6 +149,8 @@ class Permissions(Wire):
 class LaunchSettings(Wire):
     """lup's settings for a launched session, the file `--settings` names."""
 
+    env: dict[str, str]
+    """The session settings spelled as variables, which outrank the operator's."""
     hooks: dict[str, list[HookGroup]]
     permissions: Permissions
     disable_claude_ai_connectors: bool | None = None
@@ -137,6 +170,41 @@ class State(Wire):
 
     has_completed_onboarding: bool = True
     projects: dict[str, Trusted]
+
+
+class OwnSettings(Wire):
+    """What a launch reads of the operator's own Claude Code settings: which session settings they set themselves."""
+
+    subagent_prompt_cache_ttl: Literal["5m", "1h"] | None = None
+    auto_memory_enabled: bool | None = None
+    disable_claude_ai_connectors: bool | None = None
+    env: dict[str, JsonValue] = {}
+    """The variables Claude Code applies to its environment at start."""
+
+    def sets(self) -> list[str]:
+        """List the session settings their file sets, by lup's names: by the key, or by its variable in `env`."""
+        spelled = {
+            "subagent_cache": self.subagent_prompt_cache_ttl is not None
+            or SUBAGENT_CACHE in self.env,
+            "auto_memory": self.auto_memory_enabled is not None
+            or AUTO_MEMORY_OFF in self.env,
+            "account_connectors": self.disable_claude_ai_connectors is not None
+            or CONNECTORS in self.env,
+        }
+        return [field for field, theirs in spelled.items() if theirs]
+
+
+def own_settings(settings: Path) -> OwnSettings:
+    """Read the operator's own settings file at `settings`; empty where there's none."""
+    if not settings.is_file():
+        return OwnSettings()
+    try:
+        return OwnSettings.model_validate_json(settings.read_text())
+    except ValidationError as failed:
+        message = (
+            f"the operator's Claude Code settings, {settings}, don't read: {failed}"
+        )
+        raise TerminalError(message) from failed
 
 
 def spelled(event: Event) -> list[str]:
@@ -164,29 +232,13 @@ def compiled(
     """Return the terminal session of Claude Code for a declaration's fields, with lup's settings."""
     launch = ClaudeLaunch(directory=settings.directory)
     cli = Cli(program=layout.bundled) if settings.cli is None else settings.cli
-    session = settings.session
+    session = settings.passed(own_settings(layout.settings).sets())
 
     def group(hook: Hook) -> HookGroup:
         timeout = None if hook.timeout is None else int(hook.timeout.total_seconds())
         command = CommandHook(command=join(hook.command), timeout=timeout)
         return HookGroup(matcher=hook.matcher, hooks=[command])
 
-    events = dict.fromkeys(
-        name for hook in settings.hooks for name in spelled(hook.event)
-    )
-    lup_settings = LaunchSettings(
-        hooks={
-            name: [
-                group(hook) for hook in settings.hooks if name in spelled(hook.event)
-            ]
-            for name in events
-        },
-        permissions=Permissions(deny=session.removed_tools),
-        disable_claude_ai_connectors=None if session.account_connectors else True,
-    )
-    state = State(
-        projects={str(path): Trusted() for path in settings.trusted},
-    )
     memory = (
         {}
         if session.auto_memory is None
@@ -200,6 +252,25 @@ def compiled(
             if session.subagent_cache == timedelta(hours=1)
             else "5m"
         }
+    )
+    events = dict.fromkeys(
+        name for hook in settings.hooks for name in spelled(hook.event)
+    )
+    lup_settings = LaunchSettings(
+        env={**memory, **cache},
+        hooks={
+            name: [
+                group(hook) for hook in settings.hooks if name in spelled(hook.event)
+            ]
+            for name in events
+        },
+        permissions=Permissions(deny=session.removed_tools or []),
+        disable_claude_ai_connectors=None
+        if session.account_connectors is None
+        else not session.account_connectors,
+    )
+    state = State(
+        projects={str(path): Trusted() for path in settings.trusted},
     )
     moved = {} if layout.configured is None else {CONFIG_DIR: str(layout.configured)}
     prompt = {} if system_prompt is None else {launch.system_prompt: system_prompt}
@@ -234,7 +305,7 @@ def compiled(
                 else ["--append-system-prompt-file", str(launch.guidance)]
             ),
         ],
-        env={KEEP_CALLS: "0", NO_UPDATES: "1", **memory, **cache, **moved},
+        env={KEEP_CALLS: "0", NO_UPDATES: "1", **moved},
         files=files,
         mounts=[
             Mount(source=layout.directory),

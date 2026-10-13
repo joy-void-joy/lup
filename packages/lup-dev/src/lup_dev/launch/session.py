@@ -6,7 +6,9 @@ change the room it runs in or the guidance its session reads. From it, and the
 worktree launched, come the library's `TerminalSettings` (`terminal_settings`):
 - the hooks, each runtime's own (its adapter's `hooks`), every one running the
   room's pipe to the host service (`piped`), and waiting as long as a hold may;
-- `Core`'s session settings, in the library's terms;
+- `Core`'s session settings, in the library's terms: the fields the declaration
+  set, imposed over the person's own runtime settings, and the rest as lup's
+  defaults, which theirs outrank (`session_settings`);
 - the guidance, rendered from lup's sections in the installed package, the
   project's own read at the approved commit, and the person's own,
   `AGENTS.local.md`, from the worktree launched (`launch/guidance.py`);
@@ -115,18 +117,43 @@ def hooked(
     return spelled(piped(hold), hold)
 
 
-def session_settings(choices: SessionChoices) -> SessionSettings:
-    """Return `Core`'s session settings, as the declaration resolves them, in the library's terms."""
+class SessionParts(Model):
+    """`Core`'s session settings in the library's terms, split by who chose each."""
+
+    declared: SessionSettings
+    """The fields the declaration set, imposed over the person's own runtime settings."""
+    defaults: SessionSettings
+    """The rest, lup's defaults, which the person's own runtime settings outrank."""
+
+
+def session_settings(choices: SessionChoices) -> SessionParts:
+    """Return `Core`'s session settings, as the declaration resolves them, in the library's terms.
+
+    Each field is the library's of the same name, so the fields a layer set go
+    in `declared`, and the rest in `defaults`.
+    """
     match choices.subagent_cache:
         case "5m":
             cache = timedelta(minutes=5)
         case "1h":
             cache = timedelta(hours=1)
-    return SessionSettings(
+    every = SessionSettings(
         subagent_cache=cache,
         auto_memory=choices.auto_memory,
         removed_tools=choices.removed_tools,
         account_connectors=choices.account_connectors,
+    ).model_dump()
+    return SessionParts(
+        declared=SessionSettings.model_validate(
+            {field: every[field] for field in choices.declared}
+        ),
+        defaults=SessionSettings.model_validate(
+            {
+                field: value
+                for field, value in every.items()
+                if field not in choices.declared
+            }
+        ),
     )
 
 
@@ -144,11 +171,13 @@ def terminal_settings(
     doesn't render.
     """
     resolved = approved.resolved
+    session = session_settings(resolved.session)
     return TerminalSettings(
         directory=directory,
         cli=cli,
         hooks=hooks,
         guidance=render(resolved, approved.root, worktree),
-        session=session_settings(resolved.session),
+        session=session.declared,
+        defaults=session.defaults,
         trusted=trusted(worktree),
     )

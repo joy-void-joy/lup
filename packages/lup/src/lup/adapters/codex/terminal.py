@@ -13,11 +13,10 @@ each runtime*):
   replaces Codex's own;
 - each trusted path in `projects`, as an inline table, since `-c` splits a dotted
   key at every `.`, which breaks a path like `lup.git`;
-- auto memory as `features.memories`; `check_for_update_on_startup = false`;
-  `features.apps = false` unless the session asks for the account's connectors,
-  which Codex calls apps; `features.plugins = false`, which also stops a sync
-  from GitHub at each start; each of the operator's own MCP servers, read from
-  their `config.toml`, off by name, since they're set up for the host;
+- the session settings (below); `check_for_update_on_startup = false`;
+  `features.plugins = false`, which also stops a sync from GitHub at each start;
+  each of the operator's own MCP servers, read from their `config.toml`, off by
+  name, since they're set up for the host;
 - the guidance as `developer_instructions`, with `project_doc_max_bytes = 0`, so
   the repository's `AGENTS.md` isn't loaded beside it;
 - lup's hooks as managed hooks, in a requirements file mounted at
@@ -34,6 +33,17 @@ each runtime*):
 | `call-finished` | `PostToolUse` |
 | `turn-ended` | `Stop` |
 | `conversation-ended` | `SubagentStop` |
+
+**The session settings** are `-c` overrides, which outrank the operator's
+`config.toml`: each one the settings impose (`TerminalSettings.session`), and
+each of lup's defaults their configuration doesn't set (`OperatorConfig.sets`,
+read once at launch), so theirs outrank lup's defaults. Auto memory switches
+the `memories` feature, and the account's connectors the `apps` feature, which
+is what Codex calls them. Each is spelled `features.<key>`, and also by each
+older key their `[features]` table sets for it (`memory_tool`, `connectors`):
+Codex applies the table's entries in the order of their keys, an older key
+switching the same feature, so their `connectors = true` would apply after
+lup's `apps = false` alone. Theirs count as set by either key.
 
 **Declared gaps.** Codex 0.162.1 has no setting for the prompt cache's lifetime,
 and can't remove a built-in tool by name, only whole feature groups, so a
@@ -56,7 +66,13 @@ What this relies on, read in Codex's source at `rust-v0.162.1` (paths under
 - `instructions` becomes the base instructions when nothing else sets them
   (`core/src/config/mod.rs`); `features.memories` is the memories feature's
   switch, off by default, and `features.apps` the apps', on by default
-  (`features/src/lib.rs`).
+  (`features/src/lib.rs`);
+- the `[features]` table's switches are a `BTreeMap`, applied in the order of
+  their keys (`features/src/lib.rs`, `apply_map`), and `memory_tool` and
+  `connectors` are older keys for `memories` and `apps` (`features/src/legacy.rs`);
+- a `profile` key in `config.toml` is refused, and a profile's own file is read
+  only with `--profile` (`core/src/config/mod.rs`), which a launch doesn't pass,
+  so their `config.toml` is all of the operator's configuration a launch reads.
 """
 
 import tomllib
@@ -95,10 +111,34 @@ def toml(value: JsonValue) -> str:
         raise TerminalError(message) from failed
 
 
-class OperatorConfig(Model):
-    """The part of the operator's Codex configuration a terminal session reads: the servers a room turns off."""
+class Feature(Model):
+    """A Codex feature a session setting switches: its key in `[features]`, and the older keys Codex still reads for it."""
 
+    key: str
+    older: list[str] = []
+
+
+MEMORIES = Feature(key="memories", older=["memory_tool"])
+"""Codex's memories: the session's auto memory."""
+
+APPS = Feature(key="apps", older=["connectors"])
+"""Codex's apps: the account's connectors."""
+
+
+class OperatorConfig(Model):
+    """The part of the operator's Codex configuration a terminal session reads: the features they switch, the servers a room turns off."""
+
+    features: dict[str, JsonValue] = {}
     mcp_servers: dict[str, JsonObject] = {}
+
+    def keys(self, feature: Feature) -> list[str]:
+        """Return the keys their `[features]` table switches `feature` by."""
+        return [key for key in [feature.key, *feature.older] if key in self.features]
+
+    def sets(self) -> list[str]:
+        """List the session settings their configuration sets, by lup's names."""
+        switched = {"auto_memory": MEMORIES, "account_connectors": APPS}
+        return [field for field, feature in switched.items() if self.keys(feature)]
 
 
 def operator(config: Path) -> OperatorConfig:
@@ -130,6 +170,20 @@ class Override(Model):
     def argument(self) -> str:
         """Return the override as `-c` takes it."""
         return f"{self.key}={toml(self.value)}"
+
+
+def switching(
+    feature: Feature, theirs: OperatorConfig, *, on: bool | None
+) -> list[Override]:
+    """Return the overrides switching `feature` on or off; none where `on` is none.
+
+    Its key, and each older key their configuration switches it by, so whichever
+    Codex applies last agrees.
+    """
+    if on is None:
+        return []
+    keys = dict.fromkeys([feature.key, *theirs.keys(feature)])
+    return [Override(key=f"features.{key}", value=on) for key in keys]
 
 
 class CommandHook(Model):
@@ -179,13 +233,14 @@ def compiled(
 ) -> Terminal:
     """Return the terminal session of Codex for a declaration's fields, with lup's settings."""
     launch = CodexLaunch(directory=settings.directory)
-    session = settings.session
+    theirs = operator(layout.operator_config)
+    session = settings.passed(theirs.sets())
     cli = (
         Cli(program=layout.bundled_cli, directory=layout.bundled)
         if settings.cli is None
         else settings.cli
     )
-    servers = list(operator(layout.operator_config).mcp_servers)
+    servers = list(theirs.mcp_servers)
 
     def group(hook: Hook) -> HookGroup:
         timeout = None if hook.timeout is None else int(hook.timeout.total_seconds())
@@ -226,17 +281,9 @@ def compiled(
             if settings.trusted
             else []
         ),
-        *(
-            []
-            if session.auto_memory is None
-            else [Override(key="features.memories", value=session.auto_memory)]
-        ),
+        *switching(MEMORIES, theirs, on=session.auto_memory),
         Override(key="check_for_update_on_startup", value=False),
-        *(
-            []
-            if session.account_connectors
-            else [Override(key="features.apps", value=False)]
-        ),
+        *switching(APPS, theirs, on=session.account_connectors),
         Override(key="features.plugins", value=False),
         *(
             [

@@ -331,6 +331,7 @@ packages/lup/src/lup/
     submission.py          Toolbox: one turn's tools, the calls made to them, and the guard
     results.py             TurnResult, Usage, Rejection
     errors.py              the errors an ask raises, RuntimeMissingError and RealCallInTestError; needs_extra
+    terminal.py            TerminalSettings, SessionSettings, Hook, Cli, Terminal: a declaration compiled for a terminal (docs/launch.md)
   tools/
     tool.py                @lup_tool, Tool, AgentTool and ToolSpec; Allow and Deny; ToolError
     submit.py              Submit, the output tool, and its Receipt
@@ -343,8 +344,10 @@ packages/lup/src/lup/
   adapters/
     claude/__init__.py     Claude, the declaration
     claude/runtime.py      ClaudeAdapter: the options, lup's MCP server, the Stop hook, the init check, the errors
+    claude/terminal.py     Claude Code's terminal: its flags, lup's settings file, and which session settings the operator's own file sets
     codex/__init__.py      Codex, the declaration
     codex/runtime.py       CodexAdapter: the launch, the thread, dynamic tools, the continuation, the errors, usage
+    codex/terminal.py      Codex's terminal: its flags and overrides, the requirements file, and which session settings the operator's config.toml sets
     codex/layout.py        CodexLayout: lup's own Codex home, and the operator's login it links to
     codex/settings.py      CodexSettings: CODEX_HOME and XDG_STATE_HOME
 ```

@@ -7,6 +7,7 @@ import tomllib
 from datetime import timedelta
 from importlib.util import find_spec
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from pydantic import JsonValue, ValidationError
@@ -20,9 +21,13 @@ from lup.sessions.terminal import (
     Cli,
     Hook,
     SessionSettings,
+    Terminal,
     TerminalError,
     TerminalSettings,
 )
+
+if TYPE_CHECKING:
+    from lup.types import JsonObject
 
 HOOK = ["socat", "-t", "36000", "-", "UNIX-CONNECT:/run/lup/hook.sock"]
 HOOK_LINE = "socat -t 36000 - UNIX-CONNECT:/run/lup/hook.sock"
@@ -59,14 +64,26 @@ def settings(directory: Path, cli: Cli | None, **changes: object) -> TerminalSet
             Hook(event="call-finished", command=HOOK),
         ],
         guidance=GUIDANCE,
-        session=SessionSettings(
-            subagent_cache=timedelta(hours=1),
-            auto_memory=False,
-            removed_tools=["Artifact", "SendFeedback"],
-        ),
+        defaults=DEFAULTS,
         trusted=[WORKTREE, REPOSITORY],
     )
     return sample.model_copy(update=changes)
+
+
+DEFAULTS = SessionSettings(
+    subagent_cache=timedelta(hours=1),
+    auto_memory=False,
+    removed_tools=["Artifact", "SendFeedback"],
+    account_connectors=False,
+)
+"""Defaults as lup's are: every setting given."""
+
+IMPOSED = SessionSettings(
+    subagent_cache=timedelta(hours=1),
+    auto_memory=False,
+    account_connectors=False,
+)
+"""A project's declaration imposing what lup's defaults hold."""
 
 
 def nothing(name: str) -> None:
@@ -116,13 +133,15 @@ def test_claude_compiles_its_flags_settings_state_and_mounts(
     assert terminal.env == {
         "CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS": "0",
         "DISABLE_AUTOUPDATER": "1",
-        "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
-        "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL": "1h",
     }
     command = {"type": "command", "command": HOOK_LINE}
     timed = {**command, "timeout": 36000}
     assert decoded(terminal.files) == {
         launch / "settings.json": {
+            "env": {
+                "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
+                "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL": "1h",
+            },
             "hooks": {
                 "SessionStart": [{"hooks": [timed]}],
                 "PreToolUse": [{"matcher": "Edit|Write", "hooks": [timed]}],
@@ -159,6 +178,7 @@ def test_claude_replaces_its_prompt_only_when_the_declaration_gives_one(
         CLAUDE_CLI,
         guidance=None,
         session=SessionSettings(auto_memory=True, subagent_cache=timedelta(minutes=5)),
+        defaults=SessionSettings(),
     )
 
     kept = Claude(model="opus").terminal(bare)
@@ -172,10 +192,18 @@ def test_claude_replaces_its_prompt_only_when_the_declaration_gives_one(
         str(launch / "system-prompt.md"),
     ]
     assert replaced.files[launch / "system-prompt.md"] == "You narrate."
-    assert kept.env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "0"
-    assert kept.env["CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL"] == "5m"
-    deny = json.loads(kept.files[launch / "settings.json"])["permissions"]["deny"]
-    assert deny == []
+    written = json.loads(kept.files[launch / "settings.json"])
+    assert written["env"] == {
+        "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "0",
+        "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL": "5m",
+    }
+    assert written["permissions"] == {"deny": []}
+
+
+def lup_settings(terminal: Terminal, launch: Path) -> JsonObject:
+    written: JsonValue = json.loads(terminal.files[launch / "settings.json"])
+    assert isinstance(written, dict)
+    return written
 
 
 def test_claude_fetches_the_account_s_connectors_only_when_asked(
@@ -183,33 +211,120 @@ def test_claude_fetches_the_account_s_connectors_only_when_asked(
 ) -> None:
     launch = tmp_path / "launch"
 
-    def written(session: SessionSettings) -> object:
+    def written(session: SessionSettings) -> JsonObject:
         terminal = Claude(model="opus").terminal(
             settings(launch, CLAUDE_CLI, session=session)
         )
-        return json.loads(terminal.files[launch / "settings.json"])
+        return lup_settings(terminal, launch)
 
-    off = written(SessionSettings())
-    on = written(SessionSettings(account_connectors=True))
+    assert written(SessionSettings())["disableClaudeAiConnectors"] is True
+    assert written(SessionSettings(account_connectors=False))[
+        "disableClaudeAiConnectors"
+    ]
+    assert (
+        written(SessionSettings(account_connectors=True))["disableClaudeAiConnectors"]
+        is False
+    )
 
-    assert isinstance(off, dict)
-    assert off["disableClaudeAiConnectors"] is True
-    assert isinstance(on, dict)
-    assert "disableClaudeAiConnectors" not in on
-    assert on["permissions"] == {"deny": []}
 
-
-def test_claude_leaves_memory_and_cache_to_the_runtime_when_unset(
+def test_claude_leaves_every_session_setting_to_the_runtime_when_none_is_given(
     tmp_path: Path, home: Path
 ) -> None:
+    launch = tmp_path / "launch"
     terminal = Claude(model="opus").terminal(
-        settings(tmp_path / "launch", CLAUDE_CLI, session=SessionSettings())
+        settings(launch, CLAUDE_CLI, defaults=SessionSettings())
     )
 
     assert terminal.env == {
         "CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS": "0",
         "DISABLE_AUTOUPDATER": "1",
     }
+    written = lup_settings(terminal, launch)
+    assert written["env"] == {}
+    assert written["permissions"] == {"deny": []}
+    assert "disableClaudeAiConnectors" not in written
+
+
+def own(home: Path, settings: JsonObject) -> None:
+    """Write the operator's own Claude Code settings."""
+    (home / ".claude").mkdir(exist_ok=True)
+    (home / ".claude" / "settings.json").write_text(json.dumps(settings))
+
+
+THEIRS: JsonObject = {
+    "theme": "dark",
+    "autoMemoryEnabled": True,
+    "disableClaudeAiConnectors": False,
+    "env": {"CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL": "5m"},
+    "permissions": {"deny": ["WebFetch"]},
+}
+"""The operator's own settings, setting each session setting lup has a default for."""
+
+
+def test_claude_passes_lup_s_defaults_only_where_the_operator_sets_none(
+    tmp_path: Path, home: Path
+) -> None:
+    own(home, THEIRS)
+    launch = tmp_path / "launch"
+
+    written = lup_settings(Claude().terminal(settings(launch, CLAUDE_CLI)), launch)
+
+    assert written["env"] == {}
+    assert "disableClaudeAiConnectors" not in written
+    assert written["permissions"] == {"deny": ["Artifact", "SendFeedback"]}
+
+
+def test_claude_imposes_what_the_declaration_sets_over_the_operator_s_own(
+    tmp_path: Path, home: Path
+) -> None:
+    own(home, THEIRS)
+    launch = tmp_path / "launch"
+
+    written = lup_settings(
+        Claude().terminal(settings(launch, CLAUDE_CLI, session=IMPOSED)), launch
+    )
+
+    assert written["env"] == {
+        "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
+        "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL": "1h",
+    }
+    assert written["disableClaudeAiConnectors"] is True
+
+
+def test_claude_counts_a_variable_in_the_operator_s_env_as_their_setting(
+    tmp_path: Path, home: Path
+) -> None:
+    own(
+        home,
+        {
+            "env": {
+                "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "0",
+                "ENABLE_CLAUDEAI_MCP_SERVERS": "false",
+            },
+            "subagentPromptCacheTtl": "5m",
+        },
+    )
+    launch = tmp_path / "launch"
+
+    written = lup_settings(Claude().terminal(settings(launch, CLAUDE_CLI)), launch)
+
+    assert written["env"] == {}
+    assert "disableClaudeAiConnectors" not in written
+
+
+def test_claude_refuses_operator_settings_that_dont_read(
+    tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    moved = tmp_path / "claude-work"
+    moved.mkdir()
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(moved))
+    (moved / "settings.json").write_text(json.dumps({"autoMemoryEnabled": "maybe"}))
+
+    with pytest.raises(TerminalError, match="don't read"):
+        Claude().terminal(settings(tmp_path / "launch", CLAUDE_CLI))
+    (moved / "settings.json").write_text("{")
+    with pytest.raises(TerminalError, match="don't read"):
+        Claude().terminal(settings(tmp_path / "launch", CLAUDE_CLI))
 
 
 def test_claude_follows_a_moved_config_directory(
@@ -392,8 +507,6 @@ def test_codex_without_an_operator_config_or_settings_turns_off_only_its_own(
         "-c",
         "check_for_update_on_startup=false",
         "-c",
-        "features.apps=false",
-        "-c",
         "features.plugins=false",
         "-c",
         "project_doc_max_bytes=0",
@@ -403,24 +516,71 @@ def test_codex_without_an_operator_config_or_settings_turns_off_only_its_own(
     }
 
 
+def features(terminal: Terminal) -> list[str]:
+    """Return the `-c` overrides switching a feature lup's session settings switch."""
+    return [
+        argument
+        for argument in terminal.command
+        if argument.startswith(
+            (
+                "features.memories",
+                "features.memory_tool",
+                "features.apps",
+                "features.connectors",
+            )
+        )
+    ]
+
+
 def test_codex_keeps_the_account_s_apps_only_when_asked(
     tmp_path: Path, codex_home: Path
 ) -> None:
     def overrides(session: SessionSettings) -> list[str]:
-        terminal = Codex(model="gpt-6.1-sol").terminal(
+        terminal = Codex().terminal(
             TerminalSettings(
                 directory=tmp_path / "launch",
                 cli=CODEX_CLI,
                 session=session,
             )
         )
-        return terminal.command
+        return features(terminal)
 
-    assert "features.apps=false" in overrides(SessionSettings())
-    assert not any(
-        argument.startswith("features.apps")
-        for argument in overrides(SessionSettings(account_connectors=True))
+    assert overrides(SessionSettings()) == []
+    assert overrides(SessionSettings(account_connectors=False)) == [
+        "features.apps=false"
+    ]
+    assert overrides(SessionSettings(account_connectors=True)) == ["features.apps=true"]
+
+
+def test_codex_passes_lup_s_defaults_only_where_the_operator_sets_none(
+    tmp_path: Path, codex_home: Path
+) -> None:
+    (codex_home / "config.toml").write_text(
+        "[features]\nmemories = true\nconnectors = true\n"
     )
+
+    terminal = Codex().terminal(settings(tmp_path / "launch", CODEX_CLI))
+
+    assert features(terminal) == []
+
+
+def test_codex_imposes_what_the_declaration_sets_by_every_key_the_operator_uses(
+    tmp_path: Path, codex_home: Path
+) -> None:
+    (codex_home / "config.toml").write_text(
+        "[features]\nmemory_tool = true\nconnectors = true\napps = true\n"
+    )
+
+    terminal = Codex().terminal(
+        settings(tmp_path / "launch", CODEX_CLI, session=IMPOSED)
+    )
+
+    assert features(terminal) == [
+        "features.memories=false",
+        "features.memory_tool=false",
+        "features.apps=false",
+        "features.connectors=false",
+    ]
 
 
 def test_codex_uses_the_operators_default_home(tmp_path: Path, home: Path) -> None:
@@ -574,6 +734,29 @@ def test_a_hook_times_out_after_whole_seconds() -> None:
 def test_a_prompt_cache_lives_five_minutes_or_an_hour() -> None:
     with pytest.raises(ValidationError, match="five minutes or an hour"):
         SessionSettings(subagent_cache=timedelta(minutes=10))
+
+
+def test_a_terminal_passes_what_s_imposed_and_the_defaults_the_person_sets_none_of(
+    tmp_path: Path,
+) -> None:
+    given = TerminalSettings(
+        directory=tmp_path,
+        session=SessionSettings(auto_memory=True, removed_tools=[]),
+        defaults=DEFAULTS,
+    )
+
+    assert given.passed([]) == SessionSettings(
+        subagent_cache=timedelta(hours=1),
+        auto_memory=True,
+        removed_tools=[],
+        account_connectors=False,
+    )
+    assert given.passed(["auto_memory", "account_connectors"]) == SessionSettings(
+        subagent_cache=timedelta(hours=1), auto_memory=True, removed_tools=[]
+    )
+    assert TerminalSettings(directory=tmp_path).passed([]) == SessionSettings()
+    with pytest.raises(TerminalError, match="memory aren't session settings"):
+        given.passed(["memory"])
 
 
 def test_terminal_paths_are_absolute() -> None:
