@@ -33,6 +33,8 @@ from lup_dev.policy.verdicts import VerdictLog
 from lup_dev.stored import read_model, write_model
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from conftest import FakeRuntime, Kit, Shell
 
 CORE = Path("src/pkg/core.py")
@@ -890,6 +892,83 @@ def test_a_refusal_on_a_holding_runtime_isnt_held(holding_kit: Kit, repo: Path) 
     (repo / CORE).write_text((repo / CORE).read_text() + "y = 2  # BAD regex\n")
     assert finish(holding_kit, repo, "p1").context.startswith("lup refused 1 file.")
     assert waiting(holding_kit.layout) == []
+
+
+PYPROJECT = Path("pyproject.toml")
+
+
+def decline_on_sleep(kit: Kit, meanwhile: Callable[[], None]) -> None:
+    """While the hold waits, run what another session does, then decline it."""
+
+    def then_decline() -> None:
+        meanwhile()
+        [hold] = waiting(kit.layout)
+        Holds(layout=kit.layout.store(hold.worktree)).answer(
+            hold.key, Response(approved=False, comment="not now"), kit.clock
+        )
+
+    kit.clock.on_sleep.append(then_decline)
+
+
+def test_a_held_file_is_left_to_its_hold_by_a_session_starting_meanwhile(
+    holding_kit: Kit, repo: Path
+) -> None:
+    """A session starting in the worktree while a hold waits accepts the rest as it
+    stands, but not the held file, and its checkpoints and turn's end leave it
+    alone: the operator's decline still puts it back. Seen live on 2026-10-13: a
+    Codex session's edit to `pyproject.toml` stayed after the decline, two Claude
+    sessions having started in its worktree while it waited."""
+    kit = holding_kit
+    original = (repo / PYPROJECT).read_text()
+    start(kit, repo)
+    call(kit, repo, "p1", tool="apply_patch")
+    (repo / PYPROJECT).write_text(original + "# a dependency\n")
+    heard: list[Reply] = []
+    accepted: list[bytes | None] = []
+
+    def other_session() -> None:
+        start(kit, repo, "other")
+        store = worktree(kit, repo).store
+        accepted.append(store.content(store.accepted(), PYPROJECT))
+        accepted.append(store.content(store.started("other"), PYPROJECT))
+        call_for("other", kit, repo, "o1")
+        (repo / "README.md").write_text("# Other\n")
+        heard.append(finish(kit, repo, "o1", session="other"))
+        heard.append(end(kit, repo, "other"))
+        accepted.append(store.content(store.accepted(), PYPROJECT))
+
+    decline_on_sleep(kit, other_session)
+    reply = finish(kit, repo, "p1")
+    assert "The operator declined it: not now" in reply.context
+    assert (repo / PYPROJECT).read_text() == original
+    assert (repo / ".lup/saved/1/pyproject.toml").read_text().endswith(
+        "# a dependency\n"
+    )
+    assert accepted == [original.encode()] * 3
+    assert heard == [Reply(), Reply()]
+    store = worktree(kit, repo).store
+    assert store.content(store.accepted(), Path("README.md")) == b"# Other\n"
+
+
+def test_another_sessions_turns_end_doesnt_hold_on_a_held_file(
+    holding_kit: Kit, repo: Path
+) -> None:
+    """What's in a held file is nobody's until the operator answers, so another
+    session that touched it before doesn't hold its turn's end on it."""
+    kit = holding_kit
+    start(kit, repo, "other")
+    call_for("other", kit, repo, "o1")
+    mine = (repo / CORE).read_text().replace("return x", "return x + 1")
+    (repo / CORE).write_text(mine)
+    assert finish(kit, repo, "o1", session="other").context == ""
+    start(kit, repo)
+    call(kit, repo, "p1", tool="apply_patch")
+    (repo / CORE).write_text(mine + "\n\nclass Extra:  # TYPE\n    pass\n")
+    ends: list[Reply] = []
+    decline_on_sleep(kit, lambda: ends.append(end(kit, repo, "other")))
+    assert "The operator declined it" in finish(kit, repo, "p1").context
+    assert ends == [Reply()]
+    assert (repo / CORE).read_text() == mine
 
 
 def importer_error(path: Path) -> FileReport:
