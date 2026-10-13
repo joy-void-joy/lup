@@ -54,7 +54,7 @@ Measured: a container starts in 0.55 to 0.9 s; an image already built and a CLI 
 - **The room opens** with the container named and the launch's socket directory mounted at `/run/lup`; every argument lup doesn't know goes after lup's own flags, so `lup-dev launch claude --resume` resumes, and `-p`, `--model` or anything else reaches the CLI as given.
 - **When the CLI exits, or the launch fails on the way,** the registration ends and the launch's directory is removed; where the service can't end it, that's said, and the next launch's sweep ends it. The command exits with the CLI's status.
 - **The model** is the operator's own: `--model` outranks the model their own settings choose on both runtimes, so the launch reads their choice (`Claude.chosen`, from `~/.claude/settings.json`'s `model`; `Codex.chosen`, from their `config.toml`'s `model`) and passes it on. Where they chose none, Claude Code gets `default`, which "reverts to the runtime default for your account" (its `model-config` docs), and Codex `gpt-6.1-sol`, its default at 0.162.1 **(leaning)**: a declaration always names a model, and Codex has no alias for its own default. Their reasoning effort stays theirs, since the launch sets none.
-- **The runtime's declaration needs its SDK's extra** (`lup[claude]`, `lup[codex]`): `Claude` and `Codex` are the library's, and their package imports the SDK. `lup-dev` depends on `lup` without extras, so a `lup-dev` installed alone refuses to launch, naming the extra; one run from lup's own workspace has both, through the development group. Which way that's settled is the operator's (*Checks owed*).
+- **No runtime's SDK** (the operator's decision): `Claude` and `Codex` are the library's, and each imports its SDK only when an ask runs (`docs/library.md`, *The front door*), so their terminal compile needs neither extra, and `lup-dev`, depending on `lup` without extras, launches either runtime. Set aside: `lup-dev` depending on both extras, which would install each SDK's wheel and the runtime binary it ships (about 600 MB together), never run by a launch, which fetches the latest CLI.
 
 ## Trust on launch
 
@@ -358,7 +358,6 @@ The list of adapters `cli.py` holds moves where the host service reads it too, a
   - a hook held for hours through socat;
   - the trusted main repository of a linked worktree in a bare repository: the launch trusts the main worktree `git worktree list` gives, the bare repository's own directory, and whether each runtime asks about that one, or another, is seen at the first launch from such a worktree.
 - **For the operator to settle:**
-  - **the runtimes' extras:** a launch builds the library's `Claude` or `Codex`, which need `lup[claude]` or `lup[codex]`, and `lup-dev` depends on `lup` alone, so an installed `lup-dev` refuses to launch, naming the extra. Either `lup-dev` depends on both extras (each SDK's wheel ships its runtime's binary, which a launch doesn't run, since it fetches the latest CLI), or the library's terminal compile becomes importable without its SDK;
   - **Codex's model where the operator chose none:** `gpt-6.1-sol`, its default at 0.162.1, which a later Codex may change while a launch keeps passing it.
 
 ## Building it

@@ -69,6 +69,7 @@ from openai_codex.generated import v2_all as wire
 from pydantic import Field, JsonValue
 from pydantic.alias_generators import to_camel
 
+from lup.adapters.codex import Effort
 from lup.adapters.codex.layout import CodexLayout
 from lup.adapters.codex.settings import CodexSettings
 from lup.sessions.contract import Adapter, RawTurn, TurnRequest, guarded
@@ -86,11 +87,6 @@ from lup.types import JsonObject, Model, MutableModel
 
 if TYPE_CHECKING:
     from openai_codex import models as sdk
-
-type Effort = Literal[
-    "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"
-]
-"""How hard Codex's model reasons, in Codex's own words."""
 
 type Connect = Callable[[CodexConfig, ApprovalHandler], CodexClient]
 """Make the client an ask runs on, from its launch and the handler of Codex's requests."""

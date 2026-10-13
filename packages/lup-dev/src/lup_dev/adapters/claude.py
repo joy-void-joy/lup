@@ -521,8 +521,7 @@ def agent(fallback: str = "default") -> Declaration:
     """Return the declaration a launched Claude Code session runs: the model the operator's own settings choose.
 
     Where they choose none, `fallback`: `default`, which Claude Code documents as
-    reverting "to the runtime default for your account" (`model-config`). Raise
-    `lup.RuntimeMissingError` where the `lup[claude]` extra isn't installed.
+    reverting "to the runtime default for your account" (`model-config`).
     """
     return lup.Claude.chosen(default=fallback)
 

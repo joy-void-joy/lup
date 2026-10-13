@@ -1,6 +1,8 @@
 """Each runtime's terminal compile: the command, variables, files and mounts, compared whole."""
 
+import asyncio
 import json
+import sys
 import tomllib
 from datetime import timedelta
 from importlib.util import find_spec
@@ -503,6 +505,41 @@ def test_codex_keeps_the_model_the_operator_chose(codex_home: Path) -> None:
     (codex_home / "config.toml").write_text("model = 6\n")
     with pytest.raises(TerminalError, match="doesn't read"):
         Codex.chosen(default="fallback")
+
+
+def without(monkeypatch: pytest.MonkeyPatch, sdk: str, runtime: str) -> None:
+    """Hide a runtime's SDK and its modules, as when its extra isn't installed, and forget the adapter module importing it."""
+    for name in [*sys.modules]:
+        if name == sdk or name.startswith(f"{sdk}."):
+            monkeypatch.setitem(sys.modules, name, None)
+    monkeypatch.setitem(sys.modules, sdk, None)
+    monkeypatch.delitem(sys.modules, runtime, raising=False)
+
+
+def test_claude_compiles_without_its_sdk_and_an_ask_names_the_extra(
+    tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    without(monkeypatch, "claude_agent_sdk", "lup.adapters.claude.runtime")
+
+    terminal = Claude(model="opus").terminal(settings(tmp_path / "launch", CLAUDE_CLI))
+
+    assert terminal.command[0] == str(CLAUDE_CLI.program)
+    with pytest.raises(RuntimeMissingError, match="lup\\[claude\\]"):
+        asyncio.run(Claude(model="opus").ask("Say hello."))
+
+
+def test_codex_compiles_without_its_sdk_and_an_ask_names_the_extra(
+    tmp_path: Path, codex_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    without(monkeypatch, "openai_codex", "lup.adapters.codex.runtime")
+
+    terminal = Codex(model="gpt-6.1-sol").terminal(
+        TerminalSettings(directory=tmp_path / "launch", cli=CODEX_CLI)
+    )
+
+    assert terminal.command[0] == str(CODEX_CLI.program)
+    with pytest.raises(RuntimeMissingError, match="lup\\[codex\\]"):
+        asyncio.run(Codex(model="gpt-6.1-sol").ask("Say hello."))
 
 
 def test_toml_values_read_back_as_written() -> None:

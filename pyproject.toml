@@ -72,6 +72,8 @@ ignore = [
     "E501",              # flags long lines, which are layout: ruff's formatter
     # Size
     "C901", "PLR0912", "PLR0913", "PLR0915", "PLR1702",  # thresholds on size, not mistakes: review, until #33
+    # Imports
+    "PLC0415",  # flags an import inside a function, which is how an adapter imports its runtime's SDK when an ask first runs: review
     # No convention decides it
     "CPY001",  # no copyright header has been chosen: the operator's call
 ]
@@ -172,7 +174,8 @@ type = "protected"
 protected_modules = ["openai_codex"]
 allowed_importers = ["lup.adapters.codex"]
 
-# Nothing inside lup imports its front door, which loads the adapters on first use.
+# Nothing inside lup imports its front door, which imports the adapters, so a
+# module they import would import itself in a cycle.
 [[tool.importlinter.contracts]]
 name = "nothing inside lup imports lup's front door"
 type = "protected"
