@@ -15,11 +15,12 @@ network, no agents. A session gets:
 - no session persistence, so nothing reaches the operator's history or resume
   list.
 
-**lup's tools** are served by lup's own MCP server, built on `mcp`'s low-level
-`Server`, rather than by the SDK's `create_sdk_mcp_server`, which checks a call's
-arguments against the schema before the handler runs. Every call reaches the
-toolbox as the model sent it, so lup validates it: a malformed call is refused,
-counted and recorded like any other.
+**lup's tools** are served in-process by lup's own MCP server over the turn's
+toolbox (`tool_server`, `lup.tools.serving`), rather than by the SDK's
+`create_sdk_mcp_server`, which checks a call's arguments against the schema
+before the handler runs. Every call reaches the toolbox as the model sent it, so
+lup validates it: a malformed call is refused, counted and recorded like any
+other.
 
 **The turn's guard** is a `Stop` hook asking the toolbox whether the turn may end.
 Blocking keeps the same turn going, and the model reads the reason; letting it end
@@ -80,7 +81,6 @@ HTTP status means no response arrived).
 import asyncio
 from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
-from importlib.metadata import version
 from typing import TYPE_CHECKING, override
 
 from claude_agent_sdk import (
@@ -97,8 +97,6 @@ from claude_agent_sdk import (
     SystemMessage,
 )
 from claude_agent_sdk.types import AssistantMessageError, SyncHookJSONOutput
-from mcp.server import Server
-from mcp.types import CallToolResult, ListToolsResult, TextContent, Tool
 
 from lup.adapters.claude import Effort
 from lup.adapters.claude.terminal import AUTO_MEMORY_OFF
@@ -114,12 +112,11 @@ from lup.sessions.errors import (
 )
 from lup.sessions.results import Usage
 from lup.sessions.submission import End, GiveUp, KeepGoing, Toolbox
+from lup.tools.serving import tool_server
 from lup.types import Model
 
 if TYPE_CHECKING:
     from claude_agent_sdk import HookContext, HookInput, HookJSONOutput, Message
-    from mcp.server import ServerRequestContext
-    from mcp.types import CallToolRequestParams, PaginatedRequestParams
 
 SERVER = "lup"
 """The name lup's tool server goes by in Claude Code."""
@@ -140,41 +137,6 @@ def sdk_client(options: ClaudeAgentOptions) -> ClaudeSDKClient:
         )
         raise RealCallInTestError(message)
     return ClaudeSDKClient(options)
-
-
-def served(toolbox: Toolbox) -> Server:
-    """Return an MCP server listing the toolbox's tools and handing each call to it.
-
-    A call reaches the toolbox with its arguments as the model sent them, valid or
-    not: the toolbox validates them.
-    """
-
-    async def listed(
-        context: ServerRequestContext, params: PaginatedRequestParams | None
-    ) -> ListToolsResult:
-        del context, params
-        tools = [
-            Tool(
-                name=spec.name,
-                description=spec.description,
-                input_schema=spec.input_schema,
-            )
-            for spec in toolbox.specs()
-        ]
-        return ListToolsResult(tools=tools)
-
-    async def called(
-        context: ServerRequestContext, params: CallToolRequestParams
-    ) -> CallToolResult:
-        del context
-        answer = await toolbox.call(params.name, params.arguments or {})
-        return CallToolResult(
-            content=[TextContent(text=answer.text)], is_error=answer.error
-        )
-
-    return Server(
-        SERVER, version=version("lup"), on_list_tools=listed, on_call_tool=called
-    )
 
 
 class LoadedServer(Model):
@@ -377,7 +339,9 @@ class ClaudeAdapter(Model, Adapter, arbitrary_types_allowed=True):
                 case End() | GiveUp():
                     return SyncHookJSONOutput()
 
-        server = McpSdkServerConfig(type="sdk", name=SERVER, instance=served(toolbox))
+        server = McpSdkServerConfig(
+            type="sdk", name=SERVER, instance=tool_server(toolbox, SERVER)
+        )
         return ClaudeAgentOptions(
             model=self.model,
             system_prompt=self.system_prompt,
