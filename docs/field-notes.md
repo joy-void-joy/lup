@@ -213,6 +213,27 @@ From the source at `rust-v0.162.1` (paths under `codex-rs/`), and one `codex exe
 - **A call's `cwd`** is the session's local working directory, or the turn's where there's none (`core/src/hook_runtime.rs`, `tool_hook_cwd`); 0.156.1 gave the turn's.
 - **`--dangerously-bypass-hook-trust`** runs every enabled layer's hooks for one invocation with no trusted hash, a trusted project's `.codex/hooks.json` among them: enough to capture payloads without recording hook trust. The run still wrote the scratch repository into the operator's `config.toml` as a trusted project (it sat under a trusted directory), `--ephemeral` notwithstanding.
 
+## Launch, live (2026-10-13)
+
+`lup-dev launch` from `dev` (d0c629a, then 66e5b3a), in lup's own `tree/dev`, a linked worktree of a bare repository, driven through tmux on the operator's machine (podman 6.1.3). The room's image built in 48 s, 2.88 GB.
+
+- **Claude Code 2.1.296:**
+  - A first launch reached the prompt with no screen: no onboarding, theme, folder trust or login. The person's model (`opus[1m]`), effort and `editorMode` held, so `--settings` applies beside `--setting-sources user`, and a fresh `~/.claude.json` beside their `~/.claude` opens logged in.
+  - A `Write` with a rule finding was refused through the room's hook (socat to the host service, the repository's judge copy), the agent's version saved.
+  - A `PreToolUse` `ask` prompts under `bypassPermissions` ("Do you want to make this edit to pyproject.toml?"); declined, the tool result was "The user doesn't want to proceed with this tool use", the file unchanged.
+  - The person's own `idleCompaction`, `autoMemoryEnabled` and `subagentPromptCacheTtl` kept those out of the launch's settings (`env` empty); `disableClaudeAiConnectors: true` went in, and `/mcp` answered "No MCP servers configured": none of the account's connectors (Gmail, Drive, Calendar, Docs) reached the room.
+  - A server on `127.0.0.1:8765` in the room answered `curl` on the host. Ctrl+G opened vim on `/tmp/claude-prompt-<uuid>.md`, and the edited text came back to the prompt.
+  - `/exit` with a background shell running asked "Exit and stop tasks / Move to background and exit / Stay"; exiting removed the container and ended the launch's registration. Claude Code's exit line names `claude --resume <id>`; `lup-dev launch claude --resume <id>` restored the conversation in a new room.
+  - Two rooms at once on the shared `~/.claude` each ran a command and answered, with no lock or state errors.
+  - `uv run lup-dev check` in the room passed every step but `rules`, which crashed on `CommandNotFound: gh` (a room holds neither `gh` nor a GitHub login); since then, deferrals' issues go unchecked there, and the check says why.
+- **Codex 0.162.1:**
+  - A first launch reached the prompt with no login, in full access ("YOLO mode"), on the person's own model (GPT-6-Astra), no `--model` passed. The managed hooks from the mounted requirements file ran: the service answered `SessionStart` and each call's `PreToolUse` and `PostToolUse`.
+  - A patch with a rule finding first landed unjudged: calls no hook would finish (Claude's writes judged before they land, 1,659 in `tree/dev`) kept every checkpoint there from running. Since a checkpoint waits only on its own session's calls, the patch was put back after its call, the finding told.
+  - A patch to a protected path was held. The room's hook (`sh -c 'socat -t 90000 …'`) was still alive and waiting at 1 h 01 min, and the operator's decline reached it.
+  - **A hold doesn't hold a code-mode agent.** GPT-6-Astra runs tools in code mode: the patch ran in a cell, and the model read "Script running with cell ID 4", polled it, said the call was still pending, and ended its turn after 7 min 49 s, the hook still waiting. A held call is visible to it as pending, not invisible.
+  - Two Claude sessions starting in the worktree while the patch was held accepted it as it stood, so the decline put back nothing (fixed on its own branch: a held file stays out of other sessions' accepted tree).
+  - With the host service stopped, a shell call's hooks failed: Codex showed "Hook failed — hook exited with code 1", not what the hook wrote to standard error, and the call went on. Quitting then, the launcher's client started the service again, which served the recorded launch and ended it.
+
 ## Rooms
 
 ### podman 6.1.3, rootless: the CLIs in a container (measured)

@@ -354,22 +354,16 @@ The list of adapters `cli.py` holds moves where the host service reads it too, a
 
 ## Checks owed
 
+Seen live on 2026-10-13 (`docs/field-notes.md`, *Launch, live*): every check of *Tests*' live list on both runtimes; on Claude Code, a hook's `ask` prompting under `bypassPermissions`, `--settings` applying with `--setting-sources user`, a fresh `~/.claude.json` opening logged in with no screen, two rooms at once on the shared `~/.claude`, and `disableClaudeAiConnectors` keeping the account's connectors out; on Codex, the managed hooks running and a failing hook's call going on; on both, a hook held over an hour through socat, and a linked worktree of a bare repository asking no folder trust. Still owed:
 - **Claude Code:**
-  - whether a `PreToolUse` hook's `ask` prompts under `bypassPermissions`;
-  - whether `--settings` still applies with `--setting-sources user`;
-  - whether a fresh `~/.claude.json` beside the operator's `~/.claude` opens logged in, with no screen at all (the theme picker among them);
-  - whether the lock files Claude Code keeps in `~/.claude` with process ids behave when a room's process ids mean nothing on the host;
-  - that `disableClaudeAiConnectors` keeps every connector of the account out of the room;
   - that the session settings' variables in the `env` of the launch's settings take effect over the same in the operator's own `env`, as read in the 2.1.296 binary, and that `idleCompaction: false` stops idle compaction;
   - lup's own needs (`CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS`, `DISABLE_AUTOUPDATER`) are still the room's environment, which a variable of the same name in the operator's own `env` would overwrite at start; moving them into the launch's settings' `env` too waits on the check above.
 - **Codex:**
-  - managed hooks through a mounted `/etc/codex/requirements.toml`, with `allow_managed_hooks_only` dropping every other source;
-  - that `features.memories` and `features.apps`, overridden with the older key the operator's `config.toml` uses, hold as the source reads.
+  - that `allow_managed_hooks_only` drops every hook source but the mounted requirements file;
+  - that `features.memories` and `features.apps`, overridden with the older key the operator's `config.toml` uses, hold as the source reads;
   - the room's `--no-daemon` beside the host's daemon on the same home;
-  - what a failing hook command does to the call, live: read in its source at `rust-v0.156.1` (*In the room: a pipe*), not yet seen in a session at the version a launch fetches.
-- **Both:**
-  - a hook held for hours through socat;
-  - the trusted main repository of a linked worktree in a bare repository: the launch trusts the main worktree `git worktree list` gives, the bare repository's own directory, and whether each runtime asks about that one, or another, is seen at the first launch from such a worktree.
+  - a hold in code mode: the agent sees its call pending in a cell and can end its turn while the hook waits (*Launch, live*), where `DESIGN.md` has a held call invisible to the agent. Piece 3's holds answer it.
+- **Both:** a hook held for hours, past the hour seen.
 
 ## Building it
 
