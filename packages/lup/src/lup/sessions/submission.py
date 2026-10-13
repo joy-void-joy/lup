@@ -1,16 +1,17 @@
 """One turn's tools, every call made to them, and whether the turn may end.
 
-An adapter serves the toolbox's specs, routes each call the model makes to
-`Toolbox.call`, and asks `Toolbox.end` when the model tries to end its turn. The
-calls recorded are the one source of what the turn said: the last accepted call
-to the output tool is the answer, the refused ones are the rejections, and the
-`report` and `note` calls are the problem and the remarks. A typed turn can't end
-until an answer is accepted or a problem reported, which is lup's own guard, the
-same on every runtime.
+The toolbox is a `Toolset` (`lup.tools.serving`): an adapter serves its specs,
+routes each call the model makes to `Toolbox.call`, and asks `Toolbox.end` when
+the model tries to end its turn. The calls recorded are the one source of what
+the turn said: the last accepted call to the output tool is the answer, the
+refused ones are the rejections, and the `report` and `note` calls are the
+problem and the remarks. A typed turn can't end until an answer is accepted or a
+problem reported, which is lup's own guard, the same on every runtime.
 """
 
 from typing import TYPE_CHECKING
 
+from lup.tools.serving import Answer, Toolset
 from lup.tools.speaking import Problem, Remark, note, report
 from lup.tools.tool import Accepted, AgentTool, Refused, ToolSpec
 from lup.types import Model, MutableModel
@@ -19,13 +20,6 @@ if TYPE_CHECKING:
     from pydantic import BaseModel, JsonValue
 
     from lup.sessions.results import Rejection
-
-
-class Answer(Model):
-    """What a tool call returns to the model."""
-
-    text: str
-    error: bool = False
 
 
 class Call(Model):
@@ -51,7 +45,7 @@ class GiveUp(Model):
     reason: str
 
 
-class Toolbox(MutableModel, arbitrary_types_allowed=True):
+class Toolbox(MutableModel, Toolset, arbitrary_types_allowed=True):
     """The tools one turn serves, and the calls made to them."""
 
     tools: list[AgentTool]

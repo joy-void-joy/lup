@@ -24,6 +24,7 @@ from lup.sessions.terminal import (
     Terminal,
     TerminalError,
     TerminalSettings,
+    ToolServer,
 )
 
 if TYPE_CHECKING:
@@ -31,6 +32,10 @@ if TYPE_CHECKING:
 
 HOOK = ["socat", "-t", "36000", "-", "UNIX-CONNECT:/run/lup/hook.sock"]
 HOOK_LINE = "socat -t 36000 - UNIX-CONNECT:/run/lup/hook.sock"
+SERVER = ToolServer(
+    name="lup", socket=Path("/run/lup/mcp.sock"), timeout=timedelta(hours=25)
+)
+MESSAGES = Path("/run/lup/messages.sock")
 WORKTREE = Path("/srv/lup.git/tree/dev")
 REPOSITORY = Path("/srv/lup.git")
 GUIDANCE = '# lup\nWork in the room; "quotes" and a tab\tsurvive.\n'
@@ -63,6 +68,8 @@ def settings(directory: Path, cli: Cli | None, **changes: object) -> TerminalSet
             ),
             Hook(event="call-finished", command=HOOK),
         ],
+        servers=[SERVER],
+        messages=MESSAGES,
         guidance=GUIDANCE,
         defaults=DEFAULTS,
         trusted=[WORKTREE, REPOSITORY],
@@ -125,6 +132,11 @@ def test_claude_compiles_its_flags_settings_state_and_mounts(
         str(launch / "settings.json"),
         "--permission-mode",
         "bypassPermissions",
+        "--mcp-config",
+        str(launch / "mcp.json"),
+        "--strict-mcp-config",
+        "--messaging-socket-path",
+        "/run/lup/messages.sock",
         "--model",
         "opus",
         "--effort",
@@ -153,6 +165,7 @@ def test_claude_compiles_its_flags_settings_state_and_mounts(
             "permissions": {"deny": ["Artifact", "SendFeedback"]},
             "idleCompaction": False,
             "disableClaudeAiConnectors": True,
+            "crossSessionInbound": "accept",
             "skipDangerousModePermissionPrompt": True,
         },
         launch / "claude.json": {
@@ -162,6 +175,16 @@ def test_claude_compiles_its_flags_settings_state_and_mounts(
                 str(REPOSITORY): {"hasTrustDialogAccepted": True},
             },
         },
+        launch / "mcp.json": {
+            "mcpServers": {
+                "lup": {
+                    "type": "stdio",
+                    "command": "socat",
+                    "args": ["STDIO", "UNIX-CONNECT:/run/lup/mcp.sock"],
+                    "timeout": 90_000_000,
+                }
+            }
+        },
         launch / "guidance.md": GUIDANCE,
     }
     assert terminal.mounts == [
@@ -170,6 +193,44 @@ def test_claude_compiles_its_flags_settings_state_and_mounts(
         Mount(source=launch, read_only=True),
         Mount(source=launch / "claude.json", target=home / ".claude.json"),
     ]
+
+
+def test_claude_loads_no_server_and_moves_no_socket_where_lup_gives_none(
+    tmp_path: Path, home: Path
+) -> None:
+    launch = tmp_path / "launch"
+    terminal = Claude().terminal(
+        settings(launch, CLAUDE_CLI, servers=[], messages=None)
+    )
+
+    assert not [
+        flag for flag in terminal.command if "mcp" in flag or "messaging" in flag
+    ]
+    assert launch / "mcp.json" not in terminal.files
+    assert "crossSessionInbound" not in lup_settings(terminal, launch)
+
+
+def test_claude_waits_on_a_server_with_no_timeout_as_it_would(
+    tmp_path: Path, home: Path
+) -> None:
+    launch = tmp_path / "launch"
+    terminal = Claude().terminal(
+        TerminalSettings(
+            directory=launch,
+            cli=CLAUDE_CLI,
+            servers=[ToolServer(name="tools", socket=Path("/run/tools.sock"))],
+        )
+    )
+
+    assert json.loads(terminal.files[launch / "mcp.json"]) == {
+        "mcpServers": {
+            "tools": {
+                "type": "stdio",
+                "command": "socat",
+                "args": ["STDIO", "UNIX-CONNECT:/run/tools.sock"],
+            }
+        }
+    }
 
 
 def test_claude_replaces_its_prompt_only_when_the_declaration_gives_one(
@@ -448,7 +509,11 @@ def test_codex_compiles_its_flags_overrides_requirements_and_mounts(
         "-c",
         "features.plugins=false",
         "-c",
-        'mcp_servers={node_repl = {enabled = false},"docs.search" = {enabled = false}}',
+        (
+            'mcp_servers={node_repl = {enabled = false},"docs.search" = {enabled = false},'
+            'lup = {command = "socat",args = ["STDIO", "UNIX-CONNECT:/run/lup/mcp.sock"],'
+            'tool_timeout_sec = 90000,default_tools_approval_mode = "approve"}}'
+        ),
         "-c",
         "developer_instructions=" + json.dumps(GUIDANCE),
         "-c",
@@ -506,10 +571,54 @@ def test_every_codex_override_parses_as_toml_rather_than_falling_back_to_text(
         "check_for_update_on_startup": False,
         "features.apps": False,
         "features.plugins": False,
-        "mcp_servers": {"node_repl": {"enabled": False}},
+        "mcp_servers": {
+            "node_repl": {"enabled": False},
+            "lup": {
+                "command": "socat",
+                "args": ["STDIO", "UNIX-CONNECT:/run/lup/mcp.sock"],
+                "tool_timeout_sec": 90000,
+                "default_tools_approval_mode": "approve",
+            },
+        },
         "developer_instructions": GUIDANCE,
         "project_doc_max_bytes": 0,
     }
+
+
+def test_codex_serves_lup_s_tools_where_the_operator_has_no_server(
+    tmp_path: Path, codex_home: Path
+) -> None:
+    terminal = Codex().terminal(
+        TerminalSettings(
+            directory=tmp_path / "launch",
+            cli=CODEX_CLI,
+            servers=[ToolServer(name="tools", socket=Path("/run/tools.sock"))],
+            messages=MESSAGES,
+        )
+    )
+
+    assert terminal.command[-4:] == [
+        "-c",
+        (
+            'mcp_servers={tools = {command = "socat",'
+            'args = ["STDIO", "UNIX-CONNECT:/run/tools.sock"],'
+            'default_tools_approval_mode = "approve"}}'
+        ),
+        "-c",
+        "project_doc_max_bytes=0",
+    ]
+    assert not [argument for argument in terminal.command if "messag" in argument]
+
+
+def test_codex_refuses_a_server_of_the_operator_s_named_as_lup_s(
+    tmp_path: Path, codex_home: Path
+) -> None:
+    (codex_home / "config.toml").write_text(
+        '[mcp_servers.lup]\nurl = "https://lup.example/mcp"\n'
+    )
+
+    with pytest.raises(TerminalError, match="names an MCP server lup, as lup's own"):
+        Codex().terminal(settings(tmp_path / "launch", CODEX_CLI))
 
 
 def test_codex_without_an_operator_config_or_settings_turns_off_only_its_own(
@@ -761,6 +870,22 @@ def test_a_hook_times_out_after_whole_seconds() -> None:
         Hook(event="call-started", command=HOOK, timeout=timedelta(seconds=1.5))
     with pytest.raises(ValidationError, match="whole seconds"):
         Hook(event="call-started", command=HOOK, timeout=timedelta(0))
+
+
+def test_a_tool_server_is_on_an_absolute_socket_and_times_out_after_whole_seconds() -> (
+    None
+):
+    socket = Path("/run/lup/mcp.sock")
+    with pytest.raises(ValidationError, match="whole seconds"):
+        ToolServer(name="lup", socket=socket, timeout=timedelta(milliseconds=1500))
+    with pytest.raises(ValidationError, match="absolute"):
+        ToolServer(name="lup", socket=Path("mcp.sock"))
+
+
+def test_two_tool_servers_of_one_name_are_refused() -> None:
+    twice = [SERVER, SERVER.model_copy(update={"socket": Path("/run/other.sock")})]
+    with pytest.raises(ValidationError, match="more than one tool server is named lup"):
+        TerminalSettings(directory=Path("/launch"), servers=twice)
 
 
 def test_a_prompt_cache_lives_five_minutes_or_an_hour() -> None:

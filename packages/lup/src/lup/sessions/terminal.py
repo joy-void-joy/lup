@@ -3,11 +3,12 @@
 `Declaration.terminal(settings)` turns a declaration into what starts its runtime's
 CLI for a person at a terminal (`DESIGN.md`, *The library*): the command line, the
 variables, the files to write before it runs, and what to mount for it. The
-settings say what lup adds to the session: the hooks, the guidance, the session's
-settings and the paths to trust. A room then runs the result in its container
-(`lup.rooms`).
+settings say what lup adds to the session: the hooks, the tool servers, the
+guidance, the session's settings, the paths to trust, and where its messaging
+socket goes. A room then runs the result in its container (`lup.rooms`).
 """
 
+from collections import Counter
 from datetime import timedelta
 from pathlib import Path
 from typing import Annotated, Literal, Self
@@ -75,11 +76,9 @@ conversation ending.
 
 
 def whole_seconds(timeout: timedelta) -> timedelta:
-    """Return `timeout`, refusing one that isn't a positive number of whole seconds, which is how hooks are timed."""
+    """Return `timeout`, refusing one that isn't a positive number of whole seconds, which is how hooks and tool servers are timed."""
     if timeout <= timedelta(0) or timeout.microseconds:
-        message = (
-            f"a hook's timeout is a positive number of whole seconds, not {timeout}"
-        )
+        message = f"a timeout is a positive number of whole seconds, not {timeout}"
         raise ValueError(message)
     return timeout
 
@@ -94,6 +93,24 @@ class Hook(Model):
     """The program and its arguments, quoted for the runtime's shell when compiled."""
     timeout: Annotated[timedelta, AfterValidator(whole_seconds)] | None = None
     """How long the runtime waits for it; none keeps the runtime's own default."""
+
+
+class ToolServer(Model):
+    """An MCP server the session loads, listening on a Unix socket in the room.
+
+    The session reaches it through a stdio server that bridges its standard
+    input and output to the socket, which each runtime's adapter chooses, so
+    the server itself runs wherever the socket's other end is: on the host,
+    through a directory the room mounts.
+    """
+
+    name: str
+    """The name the session knows the server by, which its tools' names carry."""
+    socket: AbsolutePath
+    """The socket the server listens on, at its path in the room."""
+    timeout: Annotated[timedelta, AfterValidator(whole_seconds)] | None = None
+    """How long the runtime waits on one call, a call held for the operator
+    among them; none keeps the runtime's own limit."""
 
 
 def cache_lifetime(lifetime: timedelta) -> timedelta:
@@ -138,6 +155,13 @@ class TerminalSettings(Model):
     cli: Cli | None = None
     """The runtime's CLI, mounted read-only into the room; none for the one its SDK bundles."""
     hooks: list[Hook] = []
+    servers: list[ToolServer] = []
+    """The MCP servers lup gives the session, each named once."""
+    messages: AbsolutePath | None = None
+    """Where the session's own messaging socket goes, at its path in the room,
+    so a message from outside can reach the session, idle or not; none leaves it
+    where the runtime puts it. A runtime with no such socket says so in its
+    adapter."""
     guidance: str | None = None
     """Instructions given at system level, beside the runtime's own prompt; none
     gives none. The repository's own instruction files aren't loaded either way."""
@@ -150,6 +174,16 @@ class TerminalSettings(Model):
     trusted: list[AbsolutePath] = []
     """The paths the runtime trusts without asking: the worktree, and a linked
     worktree's main repository, which the runtimes ask about too."""
+
+    @model_validator(mode="after")
+    def servers_named_once(self) -> Self:
+        """Refuse two tool servers of one name, which the session would know as one."""
+        named = Counter(server.name for server in self.servers)
+        twice = [name for name, count in named.items() if count > 1]
+        if twice:
+            message = f"more than one tool server is named {', '.join(twice)}"
+            raise ValueError(message)
+        return self
 
     def passed(self, theirs: list[str]) -> SessionSettings:
         """Return the session settings a terminal passes, where the person's own set the fields `theirs` names.

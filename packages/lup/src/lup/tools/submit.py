@@ -35,7 +35,7 @@ class Submit[T: BaseModel](Tool[T, Receipt]):
         super().__init__(
             name="submit",
             description=(
-                "Submit your final answer through this tool once it's complete. "
+                "Submit your final answer once it's complete.\n\n"
                 "If it's refused, the reply says what to fix: fix it and submit again. "
                 "Your turn can't end until an answer is accepted."
             ),

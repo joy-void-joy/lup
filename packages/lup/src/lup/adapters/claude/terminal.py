@@ -8,6 +8,11 @@ settings compiled for each runtime*):
   `.mcp.json`, skills and `CLAUDE.md` don't. lup's file holds the hooks, the
   session settings (below) and `skipDangerousModePermissionPrompt`;
 - `--permission-mode bypassPermissions`: the room is the wall;
+- lup's tool servers, where it gives any, with `--mcp-config <launch>/mcp.json`
+  and `--strict-mcp-config`, so they're the session's only MCP servers (below);
+- the session's messaging socket, where the settings place it, with
+  `--messaging-socket-path`, and `crossSessionInbound: "accept"` in lup's file
+  (below);
 - the model with `--model` and the effort with `--effort`, each only where the
   declaration gives one: `--model` outranks the model the operator's settings
   choose, which `/model` saves there (`model-config`, *Setting your model*), so a
@@ -48,6 +53,23 @@ A variable in the room's own environment would lose to their file's `env`,
 which Claude Code applies over its environment at start; their shell's
 variables don't reach the room.
 
+**lup's tool servers** are stdio servers in `mcp.json`, each `socat STDIO
+UNIX-CONNECT:<socket>`, a bridge from its standard input and output to the
+server's socket (socat is in every room, for the hooks), with the server's
+`timeout` in milliseconds where it gives one: Claude Code aborts a stdio call
+with no answer and no progress for 30 minutes, and a `timeout` raises that idle
+limit along with the call's own. `--strict-mcp-config` keeps every other MCP
+server out, managed ones included; where lup gives none, neither flag is passed.
+Their tools stay behind Claude Code's tool search, as it defers every MCP tool:
+no `alwaysLoad`.
+
+**The messaging socket**, where the settings place it, is the session's own
+cross-session inbox, through which a message reaches it between calls, or
+starts a turn when it's idle. A session that bypasses permission prompts, as a
+launched one does, holds each incoming message for approval unless
+`crossSessionInbound` is `"accept"`, which lup's file then sets; the operator's
+other Claude Code sessions can then start a turn in the room too.
+
 | lup's event | Claude Code's hook events |
 |---|---|
 | `session-started` | `SessionStart` |
@@ -86,6 +108,22 @@ its 2.1.294 and 2.1.296 binaries:
   auto-compaction is on, and the value isn't `false`;
 - with `CLAUDE_CONFIG_DIR` set, the state file is `.claude.json` inside it;
 - a hook's `command` runs in a shell, and its `timeout` is in seconds;
+- `--strict-mcp-config` is "Only use MCP servers from --mcp-config, ignoring all
+  other MCP configurations" (`cli-reference`), managed servers along with every
+  other (`managed-mcp`); a stdio entry takes `command`, `args` and `timeout` in
+  milliseconds (`mcp`). In the 2.1.296 binary a call's limit is the server's
+  `timeout` where it's at least 1,000 ms, else `MCP_TOOL_TIMEOUT`, else about
+  28 hours; a stdio call's idle limit is 30 minutes, raised to the server's
+  `timeout`; and under `bypassPermissions` an MCP tool prompts only where it's
+  marked as needing the user (`mcp`, *Require approval for a specific tool*);
+- `--messaging-socket-path <path>` is "Cross-session messaging server path: a
+  Unix domain socket on Mac/Linux" (the 2.1.296 binary's help, not in
+  `--help`'s list). "When the receiving session is idle, Claude Code starts a
+  new turn with the message", and a session that bypasses permission prompts
+  holds incoming messages unless `crossSessionInbound` is `"accept"`
+  (`cross-session-messaging`). The binary skips the socket in a session it
+  counts as restricted, or where a server-side gate is off, each said in its
+  debug log; neither is checked in a room yet;
 - a single file mounted into the room can't be replaced by a rename ("Device or
   resource busy"), and Claude Code's writer falls back to writing in place
   ("in-place fallback write", in the binary), so the mounted state file stays
@@ -108,7 +146,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from lup.adapters.claude import Effort
-    from lup.sessions.terminal import Event, Hook, TerminalSettings
+    from lup.sessions.terminal import Event, Hook, TerminalSettings, ToolServer
 
 AUTO_MEMORY_OFF = "CLAUDE_CODE_DISABLE_AUTO_MEMORY"
 """The variable turning Claude Code's auto memory off (`1`) or on (`0`); an ask
@@ -156,6 +194,33 @@ class Permissions(Wire):
     deny: list[str]
 
 
+class StdioServer(Wire):
+    """An MCP server Claude Code runs as a program speaking on its standard input and output."""
+
+    type: str = "stdio"
+    command: str
+    args: list[str]
+    timeout: int | None = None
+    """In milliseconds; none keeps Claude Code's own limits."""
+
+
+class Servers(Wire):
+    """The file `--mcp-config` names: lup's tool servers, by name."""
+
+    mcp_servers: dict[str, StdioServer]
+
+
+def bridged(server: ToolServer) -> StdioServer:
+    """Return the entry for one of lup's tool servers: `socat` bridging standard input and output to its socket."""
+    return StdioServer(
+        command="socat",
+        args=["STDIO", f"UNIX-CONNECT:{server.socket}"],
+        timeout=None
+        if server.timeout is None
+        else server.timeout // timedelta(milliseconds=1),
+    )
+
+
 class LaunchSettings(Wire):
     """lup's settings for a launched session, the file `--settings` names."""
 
@@ -168,6 +233,10 @@ class LaunchSettings(Wire):
     operator's own settings."""
     disable_claude_ai_connectors: bool | None = None
     """True keeps the account's claude.ai connectors from being fetched; none
+    leaves it to the operator's own settings."""
+    cross_session_inbound: Literal["accept"] | None = None
+    """`accept` delivers each message reaching the session's messaging socket,
+    which a session bypassing permission prompts would hold for approval; none
     leaves it to the operator's own settings."""
     skip_dangerous_mode_permission_prompt: bool = True
 
@@ -284,18 +353,32 @@ def compiled(
         disable_claude_ai_connectors=None
         if session.account_connectors is None
         else not session.account_connectors,
+        cross_session_inbound=None if settings.messages is None else "accept",
     )
     state = State(
         projects={str(path): Trusted() for path in settings.trusted},
     )
+    servers = Servers(
+        mcp_servers={server.name: bridged(server) for server in settings.servers}
+    )
     moved = {} if layout.configured is None else {CONFIG_DIR: str(layout.configured)}
     prompt = {} if system_prompt is None else {launch.system_prompt: system_prompt}
     guidance = {} if settings.guidance is None else {launch.guidance: settings.guidance}
+    served = (
+        {
+            launch.servers: servers.model_dump_json(
+                by_alias=True, exclude_none=True, indent=2
+            )
+        }
+        if settings.servers
+        else {}
+    )
     files: dict[Path, str] = {
         launch.settings: lup_settings.model_dump_json(
             by_alias=True, exclude_none=True, indent=2
         ),
         launch.state: state.model_dump_json(by_alias=True, indent=2),
+        **served,
         **prompt,
         **guidance,
     }
@@ -308,6 +391,16 @@ def compiled(
             str(launch.settings),
             "--permission-mode",
             "bypassPermissions",
+            *(
+                ["--mcp-config", str(launch.servers), "--strict-mcp-config"]
+                if settings.servers
+                else []
+            ),
+            *(
+                []
+                if settings.messages is None
+                else ["--messaging-socket-path", str(settings.messages)]
+            ),
             *([] if model is None else ["--model", model]),
             *([] if effort is None else ["--effort", effort]),
             *(
