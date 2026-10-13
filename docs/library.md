@@ -151,6 +151,8 @@ Every ask serves `report` and `note` (`lup/tools/speaking.py`), typed or not. Th
 
 A lup tool is an async Python function taking one pydantic model and returning another, declared with `@lup_tool`. Its name is the function's, its description the docstring (required: it's what the model reads), its input schema the parameter's model. A function shaped otherwise raises `ToolError`.
 
+**A tool's summary is its docstring's first line,** standing alone (a blank line after it where more follows), 50 characters at most, as a git commit's subject line is; the rest of the docstring is its full description, as long as it needs (`docs/host-tools.md`, *Found through tool search, listed in the guidance*). A session that finds tools through its runtime's tool search lists each by its name and summary (`ToolSpec.summary`), so the agent knows what's there. A tool whose description has no such line raises `ToolError` naming it when it's made, whether by `@lup_tool` or as a `Tool` given its description (as `submit`, `report` and `note` are), and so does a `ToolSpec` made directly. The line is read with `pydoc.splitdoc`, which finds no summary where the first line runs onto the second without a blank line between, so a wrapped first sentence is refused rather than cut. Set aside: a description field on `lup_tool`, a second place to say what the docstring says.
+
 ```python
 from lup.tools import lup_tool
 
@@ -163,10 +165,18 @@ async def weather(query: Query) -> Weather:
 A tool can carry `before` hooks, typed on its input, which run on the validated input before the function. A validation error, with every error at once, or a hook's `Deny`, answers the call instead, so one answer tells the agent everything to fix. An accepted call answers with the function's output as JSON.
 
 A tool runs in the caller's process. Each adapter serves a turn's tools (`Toolbox.specs`) and routes every call to `Toolbox.call`, which records it. The calls recorded are the one source of what the turn said: the answer, the rejections, the problem and the notes.
-- **Claude:** through lup's own MCP server, built on `mcp`'s low-level `Server` and served in-process by the SDK. Every call reaches lup with its arguments as the model sent them, so lup validates, refuses, counts and records a malformed call like any other. The SDK's own helper, `create_sdk_mcp_server`, would check the arguments against the schema before the handler ran and answer the refusal itself, out of lup's sight.
+- **Claude:** through lup's own MCP server over the turn's toolbox (`tool_server`, below), served in-process by the SDK. Every call reaches lup with its arguments as the model sent them, so lup validates, refuses, counts and records a malformed call like any other. The SDK's own helper, `create_sdk_mcp_server`, would check the arguments against the schema before the handler ran and answer the refusal itself, out of lup's sight.
 - **Codex:** as the thread's dynamic tools, declared when the thread starts and fixed for its life. Codex sends each call to the client as an `item/tool/call` request, answered in-process (*The Codex adapter*).
 
 In this slice the only tools are `submit` and the speaking tools. The construct is public (`lup.tools`: `lup_tool`, `Tool`, `Allow`, `Deny`, `Submit`, `Receipt`) for the tools slice to build on.
+
+### Serving tools over MCP
+
+What an MCP server serves is a seam, `Toolset` (`lup/tools/serving.py`, an ABC: `specs`, and `call(name, arguments) -> Answer`), so a turn's `Toolbox` is one implementation and the tools a launch gives its session another (`docs/host-tools.md`, *Modules and public API*):
+- **`tool_server(toolset, name="lup")`** is an MCP server over a toolset, on `mcp`'s low-level `Server`: it lists the specs and hands each call, arguments as sent, to `Toolset.call`. Claude's asks serve their toolbox through it.
+- **`serve(toolset, reader, writer, name="lup")`** serves one MCP session over one connection's streams, until the connection closes: newline-delimited JSON-RPC, one message a line, as a stdio server's input and output carry it, each line read with `mcp`'s own message model. A stdio server in a room that only bridges its input and output to a Unix socket (`socat`) reaches a toolset served on the host there. When the other side closes, a call still running is cancelled; what the session would still write to a side that has gone is dropped, as `mcp` drops a write onto a closed transport; a read that breaks raises its error. Closing the connection is the caller's, and a message must fit the reader's line limit.
+- **Results are `content` only,** one text block, never `structuredContent`: Codex shows the model only a result's `structuredContent` where it has one, dropping its content blocks, where Claude Code reads `content`, so a result with both would read differently on the two runtimes (`docs/field-notes.md`, *MCP in a launched session*).
+- **`mcp` is imported when a server is first made,** not with the module: a toolset is named wherever a turn's tools are, the judge's process for every hook among them, and importing `mcp`'s server took `lup_dev.cli`'s imports from about 0.43 s to 0.89 s.
 
 ## The layers an ask runs in
 
@@ -278,7 +288,7 @@ Scripts are matched by output type, the first queued first. A fake turn reports 
 
 ## The Claude adapter
 
-`adapters/claude/` holds the declaration (`__init__.py`) and `ClaudeAdapter` (`runtime.py`), the only module importing `claude_agent_sdk` and `mcp`. Each turn runs in a Claude Code process of its own, through the SDK's `ClaudeSDKClient`, the SDK's one client that can interrupt, with the options of *No tools but lup's own* and *Out of the operator's history*, lup's MCP server, and the `Stop` hook.
+`adapters/claude/` holds the declaration (`__init__.py`) and `ClaudeAdapter` (`runtime.py`), the only module importing `claude_agent_sdk`. Each turn runs in a Claude Code process of its own, through the SDK's `ClaudeSDKClient`, the SDK's one client that can interrupt, with the options of *No tools but lup's own* and *Out of the operator's history*, lup's MCP server over the turn's toolbox (`tool_server`), and the `Stop` hook.
 
 - **System prompt.** `system_prompt` becomes `--system-prompt`, which replaces Claude Code's whole prompt; none sends an empty one. Claude Code still adds an identity line of its own ("You are a Claude agent, built on Anthropic's Claude Agent SDK.", read in the bundled CLI).
 - **The guard** is an in-process `Stop` hook asking the toolbox whether the turn may end. A refusal (`decision: block`) keeps the same turn going, and the model reads the reason. Claude Code honours 8 refusals in a row, a tool call resetting the count, so the submission attempts (3 by default) run out first; once they have, the hook lets the turn end and the ask raises `OutputMissingError`. `Stop` doesn't fire on an interrupt or an API error.
@@ -328,12 +338,13 @@ packages/lup/src/lup/
     declaration.py         Declaration, the fields every declaration has; Asking, an ask inside its layers
     contract.py            Adapter, TurnRequest and RawTurn: what a runtime's adapter implements; the seam and `guarded`
     layers.py              SessionLayers, Recovery, Submission
-    submission.py          Toolbox: one turn's tools, the calls made to them, and the guard
+    submission.py          Toolbox, a Toolset: one turn's tools, the calls made to them, and the guard
     results.py             TurnResult, Usage, Rejection
     errors.py              the errors an ask raises, RuntimeMissingError and RealCallInTestError; needs_extra
-    terminal.py            TerminalSettings, SessionSettings, Hook, Cli, Terminal: a declaration compiled for a terminal (docs/launch.md)
+    terminal.py            TerminalSettings, SessionSettings, Hook, ToolServer, Cli, Terminal: a declaration compiled for a terminal (docs/launch.md)
   tools/
-    tool.py                @lup_tool, Tool, AgentTool and ToolSpec; Allow and Deny; ToolError
+    tool.py                @lup_tool, Tool, AgentTool and ToolSpec, with a tool's summary (summary_of); Allow and Deny; ToolError
+    serving.py             Toolset and Answer; tool_server, an MCP server over a toolset; serve, one connection served
     submit.py              Submit, the output tool, and its Receipt
     speaking.py            report and note
   observability/
@@ -343,18 +354,18 @@ packages/lup/src/lup/
     plugin.py              the pytest plugin: the guard, and the fake_agents fixture
   adapters/
     claude/__init__.py     Claude, the declaration
-    claude/runtime.py      ClaudeAdapter: the options, lup's MCP server, the Stop hook, the init check, the errors
-    claude/terminal.py     Claude Code's terminal: its flags, lup's settings file, and which session settings the operator's own file sets
+    claude/runtime.py      ClaudeAdapter: the options, lup's MCP server over the toolbox, the Stop hook, the init check, the errors
+    claude/terminal.py     Claude Code's terminal: its flags, lup's settings file, its tool servers and messaging socket, and which session settings the operator's own file sets
     codex/__init__.py      Codex, the declaration
     codex/runtime.py       CodexAdapter: the launch, the thread, dynamic tools, the continuation, the errors, usage
-    codex/terminal.py      Codex's terminal: its flags and overrides, the requirements file, and which session settings the operator's config.toml sets
+    codex/terminal.py      Codex's terminal: its flags and overrides, its tool servers, the requirements file, and which session settings the operator's config.toml sets
     codex/layout.py        CodexLayout: lup's own Codex home, and the operator's login it links to
     codex/settings.py      CodexSettings: CODEX_HOME and XDG_STATE_HOME
 ```
 
 Runtime-neutral code lives under `sessions/` and `tools/`, one adapter per runtime under `adapters/`: named `adapters`, not `providers`, since a provider also means a model provider or a compatible endpoint, which the connection will name. An adapter imports its runtime's SDK inside `ask`, under `needs_extra`, which is how a missing extra becomes `RuntimeMissingError` naming the extra instead of an import error deep inside; the declaration, its effort levels (`Effort`, in the adapter's `__init__.py`) and its terminal compile never import it. Import contracts in the root `pyproject.toml` keep each SDK in its adapter (`claude_agent_sdk` in `lup.adapters.claude`, `openai_codex` in `lup.adapters.codex`), keep anything inside `lup` from importing its front door, and keep the library from importing the environment.
 
-The tests are in `packages/lup/tests/`: `test_ask.py` (an ask through the real layers, on the fake), `test_tools.py` (tools and the toolbox's guard), `test_types.py` (the model bases), and `test_claude.py` and `test_codex.py` (each adapter on a scripted client: no process, no network). The docstrings' examples run as doctests.
+The tests are in `packages/lup/tests/`: `test_ask.py` (an ask through the real layers, on the fake), `test_tools.py` (tools, their summaries and the toolbox's guard), `test_serving.py` (a toolset served over a socket pair to `mcp`'s own client), `test_types.py` (the model bases), and `test_claude.py` and `test_codex.py` (each adapter on a scripted client: no process, no network). The docstrings' examples run as doctests.
 
 ## Repository layout and packages
 
