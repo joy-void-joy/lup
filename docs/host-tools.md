@@ -212,15 +212,17 @@ class Credentials(Layer):
 - **`connect`, or git's `ext::` helper,** which pipe git's pack protocol to the forge: fetching needs no policy there, but holding a push to the limits means reading the ref updates inside the protocol's packets, and telling a force from their old and new ids; `ext::` is also off by git's default policy ("known-dangerous protocols (ext) have a default policy of never").
 - **A dumb pipe in the room** like the hook's, with the host reading git's protocol and resolving each `<src>` in the worktree's git directory: the host would then run git in a directory the room writes (below).
 
-**Running git on the host in a repository the room writes: a check owed before building.** The room can't write `config` or `hooks/` (read-only mounts), but it writes the rest of the git directory: refs, `packed-refs`, `objects/` and `objects/info/alternates`, `info/`, `shallow`, each worktree's directory. Each, and what the host does about it:
-- **`objects/info/alternates`** would let host git read objects of any repository on the machine, so a push could carry another repository's history to this remote: the host refuses to push or fetch while it names a directory outside the repository;
-- **replace refs** (`refs/replace/`, which the room can write) could change what an object id reads as: host git runs with `GIT_NO_REPLACE_OBJECTS=1`;
-- **refs and `packed-refs`:** pushing by object id, with destinations checked against the limits and the remote's refs from `ls-remote`, reads no local ref;
-- **a worktree's directory** (`commondir`, `HEAD`, `index`, `config.worktree`): host git runs in the repository's common git directory alone, never a worktree's; `config.worktree` is read only with `extensions.worktreeConfig`, which only the read-only `config` could set;
-- **`info/attributes` and `info/exclude`:** a push and a fetch check nothing out, and an attribute's driver is defined only in `config`;
-- **`shallow`:** a `shallow` file the room writes can only make host git send less history than the forge needs, which the forge refuses; nothing leaves that shouldn't;
-- **`config`'s includes:** an `include.path` or `includeIf` naming a file the room can write would make the read-only `config` writable in effect, for the operator's own git commands too: the launch refuses a repository whose `config` includes a file inside the room's mounts, a check that belongs to piece 1's room as much as to this;
-- **automatic maintenance:** a fetch on the host could start `gc --auto` in a repository the room is using, so host git runs with `gc.auto=0` and `maintenance.auto=false`.
+**Running git on the host in a repository the room writes: checked, 2026-10-14** (`docs/field-notes.md`, *Host-side git in a repository the room writes*: each vector measured on scratch repositories laid out like lup's, a hostile room against git 2.56.0). The room can't write `config` or `hooks/` (read-only mounts), but it writes the rest of the git directory: refs, `packed-refs`, `objects/`, `info/`, `shallow`, each worktree's directory, and the common directory's own `config.worktree`. Each, and what the host does about it:
+- **The object store must be self-contained:** the host refuses to push or fetch while `objects/info/alternates` or `objects/info/http-alternates` exists, or anything under `objects/` is a symbolic link. Measured: alternates naming another repository's objects let a push copy that repository's blob to the forge, through a relative entry and through nested alternates too; and with no alternates at all, a symlinked pack under `objects/pack/` did the same. One filesystem check covers them all; lup's own repository uses none. A project with an in-tree alternate would be refused too, said as such.
+- **replace refs** (`refs/replace/`): a push by object id sends the real objects whatever they say (measured), and host git runs with `GIT_NO_REPLACE_OBJECTS=1` besides, for the commands that read them;
+- **refs and `packed-refs`:** pushing by object id, with destinations checked against the limits and the remote's refs from `ls-remote`, reads no local ref (measured);
+- **an explicit git directory, always:** host git runs with the repository's common git directory named (`git -C <common>`), never discovered from a working directory, so a worktree's directory (`commondir`, `HEAD`, `index`, its `config.worktree`) is never read (measured). `safe.directory` is no backstop: it refuses only a directory another user owns, and under `--userns=keep-id` the room's files are the operator's;
+- **`extensions.worktreeConfig`:** the common directory's `config.worktree` is the room's to write (the read-only mount covers `config` alone), and with `extensions.worktreeConfig=true` in `config` host git reads it, `core.sshCommand` and `core.hooksPath` included (measured): the launch refuses a repository whose `config` sets it;
+- **`info/attributes` and `info/exclude`:** a push and a fetch check nothing out, and an attribute's driver is defined only in `config` (measured);
+- **`shallow`:** the forge refused a push cut short by it (measured); nothing leaves that shouldn't;
+- **`config`'s includes:** an `include.path` naming `info/evil.cfg` made host git read the room's `core.sshCommand` (measured), so the launch refuses a repository whose `config` includes, through `include.path` or `includeIf` (`gitdir:`, `onbranch:`), resolved relative to the including file and followed recursively, a file inside the room's mounts; a check that belongs to piece 1's room as much as to this;
+- **automatic maintenance:** a fetch started `git maintenance run --auto --detach`, outliving it (measured on 2.56), so host git runs with `gc.auto=0` and `maintenance.auto=false`;
+- **a malformed pack** in `objects/pack/` can't change what an object id delivers (measured), but floods host git's standard error, which the service logs: each push or fetch logs git's errors once, not line by line **(leaning)**.
 
 ### GitHub through `gh`
 
@@ -352,7 +354,7 @@ One short live room per runtime settles most of them; they're runtime behaviour,
   - a `PreToolUse` answer's `additionalContext`, with no decision, reaching the model;
   - in code mode, what the model sees of a held call answered after its turn ended;
   - that resuming keeps the thread's id.
-- **git, before `remote` is built:** the review of host-side git in a repository the room writes (*Running git on the host*), each response confirmed on a scratch repository; a fetch by name from GitHub through the host; the service's SSH agent when a launch started it.
+- **git:** a fetch by name from GitHub through the host; the service's SSH agent when a launch started it. (The review of host-side git in a repository the room writes is done, *Running git on the host*.)
 - **GitHub:** `gh repo view` in a bare repository's git directory naming the repository behind an SSH alias such as `jvj:`.
 
 ## Building it
@@ -363,6 +365,6 @@ Each a branch that passes the gate on its own, foundation first **(leaning)**:
 3. **`feat-inbox`:** the store, delivery, the inbox's tools, `lup-dev inbox`, the notices; turn's ends held once per thing across turns, the Codex room's judge's findings among them; lup's tools listed in the guidance; the launch giving the session its tool server and messaging socket.
 4. **`feat-credential-limits`:** `Credentials`, `Actions` and `Refs` on `Core`, resolved by the launch into the registration.
 5. **`feat-forge`:** GitHub through `gh`, its tools, `HostIssues` for the gate in a room.
-6. **`feat-remote`:** once the host-side git review is settled, the helper, the room's git configuration, and pushing and fetching on the host.
+6. **`feat-remote`:** the helper, the room's git configuration, pushing and fetching on the host, and the review's responses: the self-contained object store, the explicit git directory, and the launch's refusal of a `config` that sets `extensions.worktreeConfig` or includes a file the room writes.
 7. **`feat-trust-summary`:** the question, summary first, an approval in the inbox the launching terminal answers too (decision 14).
 8. **The live checks** on both runtimes, recorded in `docs/field-notes.md`; then `Core`'s guidance, and lup's own sessions move onto launch, the operator removing the committed runtime trees.
