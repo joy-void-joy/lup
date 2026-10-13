@@ -28,9 +28,7 @@ shown through the terminal's pager and the operator asked once, yes or no
 """
 
 import hashlib
-import io
 import itertools
-import tarfile
 import tempfile
 import tomllib
 from abc import ABC, abstractmethod
@@ -604,13 +602,6 @@ def engine(resolved: Resolved) -> Step:
     raise TrustError(message)
 
 
-def export(root: Path, commit: str, into: Path) -> None:
-    """Write every file `commit` holds into `into`, as `git archive` gives them."""
-    archived = Git(cwd=root).run("archive", "--format=tar", commit)
-    with tarfile.open(fileobj=io.BytesIO(archived.stdout)) as archive:
-        archive.extractall(into, filter="data")
-
-
 class UvToolchain(Model, Toolchain):
     """uv: the engine built as the gate builds it, and each copy installed as a uv tool."""
 
@@ -621,13 +612,15 @@ class UvToolchain(Model, Toolchain):
         """Install the commit's copy: built from its source, or the release it pins.
 
         A workspace's source is exported whole into a scratch directory and built
-        there, never installed from a worktree, so what installs is the commit's.
+        there, never installed from a worktree, so what installs is the commit's:
+        each file written from git's objects, as the diff the operator approved
+        read them, whatever the repository's `.gitattributes` say.
         """
         match tool:
             case WorkspaceTool():
                 with tempfile.TemporaryDirectory() as scratch:
                     tree = Path(scratch)
-                    export(root, commit, tree)
+                    Git(cwd=root).export(commit, tree)
                     self.build(tree)
                     self.built(tool, tree)
             case ReleaseTool():
@@ -838,7 +831,7 @@ class Trust(Model, arbitrary_types_allowed=True):
         """
         with tempfile.TemporaryDirectory() as scratch:
             source = Path(scratch)
-            export(self.root, commit, source)
+            Git(cwd=self.root).export(commit, source)
             try:
                 conditions = Declaration.read(source).conditions
                 files = [module_file(source, each) for each in conditions]

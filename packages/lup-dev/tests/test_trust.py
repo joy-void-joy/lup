@@ -766,6 +766,8 @@ def test_uv_builds_and_installs_the_commits_copy_held_to_its_lock(
         {
             "packages/lup-dev/checker/build.py": MARKED,
             "lup_project.py": BUILDING.format(command=command, inside=inside),
+            # `git archive` would leave the source out of the copy.
+            ".gitattributes": "packages/lup-dev/src/** export-ignore\n",
         },
         shell,
     )
