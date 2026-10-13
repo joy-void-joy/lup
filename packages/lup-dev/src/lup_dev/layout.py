@@ -263,6 +263,15 @@ class CheckoutLayout(Model):
         """The reference to lup's rules, compiled from the engine's table: lup's own."""
         return self.root / "docs" / "rules.md"
 
+    @property
+    def local_guidance(self) -> Path:
+        """The person's own section of a session's guidance, which git ignores.
+
+        Appended after every section the declaration names, so it holds where they
+        differ (`docs/launch.md`, *Guidance*).
+        """
+        return self.root / "AGENTS.local.md"
+
     def saved_copy(self, number: int, path: Path) -> Path:
         """Say where the version refused in refusal `number` is saved, by its path."""
         return self.saved / str(number) / path
