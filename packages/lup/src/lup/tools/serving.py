@@ -135,8 +135,9 @@ async def answered(
     """Write each message the session sends to the connection, one a line, until the session ends or the other side goes.
 
     Once the other side has gone, the session's later messages are dropped, as
-    `mcp` drops a write onto a closed transport: the error it answers a call
-    still held when the connection closed with is one, every time.
+    `mcp` drops a write onto a closed transport. One comes every time a call is
+    still held when the connection closes: the "Connection closed" error `mcp`
+    answers it with.
     """
     from mcp.shared.message import SessionMessage
 
