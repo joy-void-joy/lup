@@ -357,9 +357,12 @@ The list of adapters `cli.py` holds moves where the host service reads it too, a
   - whether `--settings` still applies with `--setting-sources user`;
   - whether a fresh `~/.claude.json` beside the operator's `~/.claude` opens logged in, with no screen at all (the theme picker among them);
   - whether the lock files Claude Code keeps in `~/.claude` with process ids behave when a room's process ids mean nothing on the host;
-  - that `disableClaudeAiConnectors` keeps every connector of the account out of the room.
+  - that `disableClaudeAiConnectors` keeps every connector of the account out of the room;
+  - that the session settings' variables in the `env` of the launch's settings take effect over the same in the operator's own `env`, as read in the 2.1.296 binary, and that `idleCompaction: false` stops idle compaction;
+  - lup's own needs (`CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS`, `DISABLE_AUTOUPDATER`) are still the room's environment, which a variable of the same name in the operator's own `env` would overwrite at start; moving them into the launch's settings' `env` too waits on the check above.
 - **Codex:**
   - managed hooks through a mounted `/etc/codex/requirements.toml`, with `allow_managed_hooks_only` dropping every other source;
+  - that `features.memories` and `features.apps`, overridden with the older key the operator's `config.toml` uses, hold as the source reads.
   - the room's `--no-daemon` beside the host's daemon on the same home;
   - what a failing hook command does to the call, live: read in its source at `rust-v0.156.1` (*In the room: a pipe*), not yet seen in a session at the version a launch fetches.
 - **Both:**
