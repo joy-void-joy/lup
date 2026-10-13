@@ -394,8 +394,8 @@ def trust() -> None:
     """Approve what the host runs for this repository, as a launch does first.
 
     Run it yourself, in your own terminal. It reads the host zone at the
-    integration branch's tip: the declaration, the files its modules name that the
-    host imports, and the `lup-dev` the host runs. Where that isn't the zone you
+    integration branch's tip, running none of it: the declaration, the files it
+    runs on the host, and the `lup-dev` the host runs. Where that isn't the zone you
     approved last, it shows what changed since through your pager and asks once:
     approved, it installs the tip's `lup-dev` as the host's, restarts the host
     service on it where one runs, and records the approval; declined, the copy you

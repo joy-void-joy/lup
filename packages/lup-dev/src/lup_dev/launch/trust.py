@@ -1,12 +1,15 @@
 """Trust on launch: the code the host runs for a repository, approved before it runs.
 
 `docs/launch.md`, *Trust on launch*. A repository's host zone is what the host runs
-for it, read at the integration branch's tip as the judge reads the declaration, so
-what's approved is what the judge and the host service run, never a branch's own
-copy (`Zone`):
-- its declaration, `lup_project.py` or the package `lup_project/`, and the files a
-  selected module names that the host imports: each conditions module, with the
-  `__init__.py` of each package holding it;
+for it, read at the integration branch's tip, so what's approved is what the judge
+and the host service run, never a branch's own copy (`Zone`):
+- its declaration, `lup_project.py` or the package `lup_project/`, and every file
+  importing it runs on the host: each of the project's own modules it imports,
+  with the `__init__.py` of each package holding one, and in turn what they
+  import; and each conditions module its modules name, with its packages. They're
+  found by reading the declaration with `ast` (`declared`), following its imports
+  to the files they resolve to, so no code of the project runs before the
+  operator is asked;
 - the `lup-dev` the host runs (`Tool`): where the repository's lock resolves it
   from the repository's own workspace, as lup's does, that source
   (`WorkspaceTool`: uv's files, the project file and modules of each workspace
@@ -27,28 +30,28 @@ shown through the terminal's pager and the operator asked once, yes or no
   judging its session; with nothing approved yet, nothing launches.
 """
 
+import ast
 import hashlib
-import itertools
 import tempfile
 import tomllib
 from abc import ABC, abstractmethod
 from datetime import datetime
+from importlib.machinery import SOURCE_SUFFIXES, FileFinder, SourceFileLoader
+from importlib.util import resolve_name
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Literal, override
 
 import sh
 import typer
 from filelock import FileLock
-from pydantic import Field
+from pydantic import Field, ValidationError
 from rich.console import Console
 from rich.text import Text
 
 from lup.types import Model
 from lup_dev.clock import Clock, SystemClock
-from lup_dev.codescan.conditions import ConditionError, module_file
-from lup_dev.declaration.errors import ProjectError
-from lup_dev.declaration.load import load
-from lup_dev.declaration.resolve import Declaration, resolve
+from lup_dev.declaration.load import Pyproject, import_roots, load, read_by_import
+from lup_dev.declaration.resolve import resolve
 from lup_dev.declaration.runner import Uv
 from lup_dev.errors import LupDevError
 from lup_dev.gate import invoked
@@ -379,17 +382,19 @@ class Zone(Model):
     """Each of its paths in the repository, a file or a directory, from the root:
     what its diff and its fingerprint read."""
     tool: Tool
-    unloaded: str = ""
-    """Why the declaration doesn't load here, so the files its modules name aren't
-    among `paths`; empty where it loads."""
+    unread: list[str] = []
+    """What of the declaration couldn't be followed, each said, so a file it runs
+    may be missing from `paths`; empty where all of it was."""
 
 
 class Named(Model):
-    """The files a declaration's modules name that the host imports, or why not."""
+    """The files a declaration runs on the host and the conditions modules it names, read without running any."""
 
     paths: list[Path] = []
-    unloaded: str = ""
-    """Why the declaration doesn't load, so they aren't known; empty where it does."""
+    """From the commit's root, in the order they were found."""
+    unread: list[str] = []
+    """What couldn't be followed, each said: a file that doesn't parse, an import
+    leaving its package, a conditions module that isn't there."""
 
 
 class Approval(Model):
@@ -443,7 +448,8 @@ class Change(Model):
     tool: list[str]
     """How the `lup-dev` release changed, line by line; none for the workspace's
     own source, whose change is in the diff."""
-    unloaded: str = ""
+    unread: list[str] = []
+    """What of the declaration couldn't be followed, so the zone may miss a file it runs."""
 
     def opening(self) -> str:
         """Say which commit is shown, since which, and how much changed."""
@@ -470,12 +476,11 @@ class Change(Model):
             if self.joined.shortstat
             else []
         )
-        unknown = (
-            "The declaration doesn't load with the `lup-dev` running this, so the "
-            f"files its modules name aren't known or shown: {self.unloaded}"
+        unknown = "Not followed, so the zone may miss a file the declaration runs:"
+        unread = (
+            [unknown, *(f"  {each}" for each in self.unread)] if self.unread else []
         )
-        unloaded = [unknown] if self.unloaded else []
-        said = [self.opening(), *joined, *unloaded, *self.tool, ""]
+        said = [self.opening(), *joined, *unread, *self.tool, ""]
         return "\n".join(said) + "\n" + self.changed.diff + self.joined.diff
 
     def question(self) -> str:
@@ -696,23 +701,285 @@ class UvToolchain(Model, Toolchain):
             )
 
 
-def holding(root: Path, file: Path) -> list[Path]:
-    """List `file` and the `__init__.py` of each package holding it, from `root`.
+def dotted(name: str) -> list[str] | None:
+    """Read a module's dotted name into its parts, as Python's parser reads it; none where it isn't one.
 
-    Importing a module imports each package holding it first; outside `root`,
-    nothing is listed.
+    >>> dotted("audiobook.conditions"), dotted("not a module")
+    (['audiobook', 'conditions'], None)
     """
-    inits = [
-        CheckoutLayout(root=parent).package
-        for parent in file.parents
-        if parent.is_relative_to(root) and parent != root
+
+    def parts(node: ast.expr) -> list[str] | None:
+        match node:
+            case ast.Name(id=first):
+                return [first]
+            case ast.Attribute(value=value, attr=last):
+                before = parts(value)
+                return None if before is None else [*before, last]
+            case _:
+                return None
+
+    try:
+        return parts(ast.parse(name, mode="eval").body)
+    except SyntaxError:
+        return None
+
+
+class Place(Model):
+    """Where a module is in a commit's export, as Python's path finder finds it."""
+
+    file: Path | None
+    """Its file: a module's, or a regular package's `__init__.py`; none for a
+    namespace package, which has none."""
+    search: list[Path] | None
+    """Where its submodules are found, for a package; none for a module."""
+
+
+def place(name: list[str], directories: list[Path]) -> Place | None:
+    """Find the module `name` among `directories`, as Python's path finder would, importing nothing.
+
+    The first directory holding it as a module or a regular package has it;
+    otherwise every directory holding it as a directory with no `__init__.py`
+    shares it as a namespace package. None where none holds it.
+    """
+    finders = [
+        FileFinder(str(directory), (SourceFileLoader, SOURCE_SUFFIXES))
+        for directory in directories
     ]
-    packages = itertools.takewhile(Path.is_file, inits)
-    return [
-        each.relative_to(root)
-        for each in dict.fromkeys([file, *packages])
-        if each.is_relative_to(root)
+    specs = [finder.find_spec(".".join(name)) for finder in finders]
+    found = [spec for spec in specs if spec is not None]
+    regular = next((spec for spec in found if spec.origin is not None), None)
+    if regular is not None and regular.origin is not None:
+        search = regular.submodule_search_locations
+        return Place(
+            file=Path(regular.origin),
+            search=None if search is None else [Path(each) for each in search],
+        )
+    shared = [
+        Path(each) for spec in found for each in spec.submodule_search_locations or []
     ]
+    return Place(file=None, search=shared) if shared else None
+
+
+class Ran(Model):
+    """A file of a commit's export that importing a module runs, and the module it is."""
+
+    file: Path
+    name: list[str]
+    """The module's dotted name, by its parts."""
+
+    def package(self) -> list[str]:
+        """Return the package a relative import in this file starts from."""
+        return self.name if self.file.stem == "__init__" else self.name[:-1]
+
+
+class Located(Model):
+    """What importing a module from a commit's export runs, found without running it."""
+
+    name: list[str]
+    packages: list[Ran] = []
+    """The `__init__.py` of each regular package holding it, outermost first, which
+    run before it; as far as they're found, where the module isn't."""
+    own: Ran | None = None
+    """Its own file; none for a namespace package, or where it isn't found."""
+    whole: bool = False
+    """Whether the module itself was found, not only some packages before it."""
+
+    def ran(self) -> list[Ran]:
+        """List every file importing it runs: its packages', then its own."""
+        return [*self.packages, *([self.own] if self.own is not None else [])]
+
+
+def located(name: list[str], roots: list[Path]) -> Located:
+    """Say what importing the module `name` from `roots` runs, finding each package on the way."""
+
+    def within(depth: int, directories: list[Path], packages: list[Ran]) -> Located:
+        prefix = name[:depth]
+        found = place(prefix, directories)
+        if found is None:
+            return Located(name=name, packages=packages)
+        ran = [] if found.file is None else [Ran(file=found.file, name=prefix)]
+        if depth == len(name):
+            own = ran[0] if ran else None
+            return Located(name=name, packages=packages, own=own, whole=True)
+        if found.search is None:
+            return Located(name=name, packages=[*packages, *ran])
+        return within(depth + 1, found.search, [*packages, *ran])
+
+    return within(1, roots, [])
+
+
+class Mentioned(Model):
+    """What a module names that importing it may run: the modules it imports, and the conditions modules it names."""
+
+    imported: list[list[str]] = []
+    """Each module it imports, by its parts; a name imported from a module is
+    there too, in case it's a submodule."""
+    conditions: list[list[str]] = []
+    """Each conditions module named as a string, `conditions = "audiobook.conditions"`
+    or `Core(conditions=…)`, by its parts."""
+    unread: list[str] = []
+
+
+def mentioned(module: Ran, shown: Path) -> Mentioned:
+    """Read what `module` imports and the conditions modules it names, with `ast`, running nothing.
+
+    Every import counts, inside a function or a `TYPE_CHECKING` block too: reading
+    more than runs only shows more.
+    """
+
+    def named(node: ast.AST) -> Mentioned:
+        match node:
+            case ast.Import(names=aliases):
+                return Mentioned(
+                    imported=[
+                        parts for alias in aliases if (parts := dotted(alias.name))
+                    ]
+                )
+            case ast.ImportFrom(module=source, names=aliases, level=level):
+                relative = "." * level + (source or "")
+                try:
+                    absolute = resolve_name(relative, ".".join(module.package()))
+                except ImportError as failed:
+                    return Mentioned(
+                        unread=[f"`{shown}` imports `{relative}`: {failed}"]
+                    )
+                base = dotted(absolute) or []
+                names = [[*base, alias.name] for alias in aliases if alias.name != "*"]
+                return Mentioned(imported=[base, *names] if base else [])
+            case (
+                ast.Assign(
+                    targets=[ast.Name(id="conditions")],
+                    value=ast.Constant(value=str() as address),
+                )
+                | ast.AnnAssign(
+                    target=ast.Name(id="conditions"),
+                    value=ast.Constant(value=str() as address),
+                )
+                | ast.keyword(
+                    arg="conditions", value=ast.Constant(value=str() as address)
+                )
+            ):
+                parts = dotted(address)
+                if parts is None:
+                    said = (
+                        f"`{shown}` names `{address}` as a conditions module, which "
+                        "isn't a module's dotted name"
+                    )
+                    return Mentioned(unread=[said])
+                return Mentioned(conditions=[parts])
+            case _:
+                return Mentioned()
+
+    try:
+        tree = ast.parse(module.file.read_bytes(), filename=str(shown))
+    except (SyntaxError, ValueError) as failed:
+        said = f"`{shown}` doesn't parse ({failed}), so what it imports isn't followed"
+        return Mentioned(unread=[said])
+    each = [named(node) for node in ast.walk(tree)]
+    return Mentioned(
+        imported=[name for one in each for name in one.imported],
+        conditions=[name for one in each for name in one.conditions],
+        unread=[said for one in each for said in one.unread],
+    )
+
+
+class Reached(Model):
+    """What one file of the declaration reaches: the files it runs and those it names to be read."""
+
+    run: list[Ran] = []
+    """Files importing it runs, followed in turn."""
+    read: list[Ran] = []
+    """Conditions modules, read on the host and never run, so not followed."""
+    unread: list[str] = []
+
+
+def declared(tree: Path, covered: list[Path]) -> Named:
+    """Find the files the declaration in `tree` runs on the host, reading them with `ast`.
+
+    `tree` is a commit's export of what importing its declaration reads. The
+    declaration runs as the judge imports it, from its root, `src/` and each uv
+    workspace member (`import_roots`): each module it imports that's found
+    there, with each package holding it, and in turn what they import. A
+    conditions module its modules name is read on the host, never run, so it's
+    named without what it imports; the packages holding it run, since finding
+    it imports them. Nothing in `tree` runs. A path under one of `covered`,
+    already in the zone whole (the `lup-dev` source the host runs), isn't
+    followed.
+    """
+    layout = CheckoutLayout(root=tree)
+    try:
+        pyproject = Pyproject.read(layout.pyproject)
+        broken = ""
+    except (tomllib.TOMLDecodeError, ValidationError) as failed:
+        pyproject = Pyproject()
+        broken = (
+            f"`{layout.pyproject.name}` doesn't read ({failed}), so the workspace's "
+            "members aren't searched"
+        )
+    roots = import_roots(tree, pyproject)
+
+    def shown(file: Path) -> Path:
+        return file.relative_to(tree)
+
+    def module(file: Path) -> Ran:
+        where = shown(file)
+        own = [] if where.stem == "__init__" else [where.stem]
+        return Ran(file=file, name=[*where.parent.parts, *own])
+
+    def kept(each: Ran) -> bool:
+        return not any(shown(each.file).is_relative_to(place) for place in covered)
+
+    def reached(current: Ran) -> Reached:
+        named = mentioned(current, shown(current.file))
+        imports = [located(name, roots) for name in named.imported]
+        conditions = [located(name, roots) for name in named.conditions]
+        missing = [
+            f"`{shown(current.file)}` names `{'.'.join(found.name)}` as a conditions "
+            "module, which isn't in the commit"
+            for found in conditions
+            if not found.whole
+        ]
+        run = [
+            *(each for found in imports for each in found.ran()),
+            *(each for found in conditions for each in found.packages),
+        ]
+        read = [found.own for found in conditions if found.own is not None]
+        return Reached(
+            run=[each for each in run if kept(each)],
+            read=[each for each in read if kept(each)],
+            unread=[*named.unread, *missing],
+        )
+
+    def walk(frontier: list[Ran], seen: list[Path]) -> Iterator[Reached]:
+        fresh = list(
+            {
+                shown(each.file): each
+                for each in frontier
+                if shown(each.file) not in seen
+            }.values()
+        )
+        if not fresh:
+            return
+        done = [reached(each) for each in fresh]
+        yield from done
+        further = [each for one in done for each in one.run]
+        yield from walk(further, [*seen, *(shown(each.file) for each in fresh)])
+
+    starts = [
+        *([module(layout.declaration)] if layout.declaration.is_file() else []),
+        *(module(file) for file in sorted(layout.declaration_package.rglob("*.py"))),
+    ]
+    walked = list(walk(starts, []))
+    paths = dict.fromkeys(
+        shown(each.file) for one in walked for each in [*one.run, *one.read]
+    )
+    return Named(
+        paths=list(paths),
+        unread=[
+            *([broken] if broken else []),
+            *(s for one in walked for s in one.unread),
+        ],
+    )
 
 
 def diffed(git: Git, start: str, end: str, paths: list[Path]) -> Diffed:
@@ -793,20 +1060,24 @@ class Trust(Model, arbitrary_types_allowed=True):
             )
             raise TrustError(message)
         tool = self.tool(commit)
-        named = self.named(commit)
-        declared = CheckoutLayout(root=Path())
-        paths = [
-            declared.declaration,
-            declared.declaration_package,
-            *named.paths,
-            *tool.paths(),
-        ]
-        return Zone(
-            commit=commit,
-            paths=list(dict.fromkeys(paths)),
-            tool=tool,
-            unloaded=named.unloaded,
+        named = self.named(commit, tool.paths())
+        declaration = CheckoutLayout(root=Path())
+        listed = list(
+            dict.fromkeys(
+                [
+                    declaration.declaration,
+                    declaration.declaration_package,
+                    *named.paths,
+                    *tool.paths(),
+                ]
+            )
         )
+        paths = [
+            path
+            for path in listed
+            if not any(path != other and path.is_relative_to(other) for other in listed)
+        ]
+        return Zone(commit=commit, paths=paths, tool=tool, unread=named.unread)
 
     def tool(self, commit: str) -> Tool:
         """Read which `lup-dev` the host runs from the commit's `uv.lock`."""
@@ -822,24 +1093,18 @@ class Trust(Model, arbitrary_types_allowed=True):
             raise TrustError(message)
         return Lock.parse(found.stdout.decode()).tool(self.name)
 
-    def named(self, commit: str) -> Named:
-        """Find the files the commit's selected modules name that the host imports.
+    def named(self, commit: str, covered: list[Path]) -> Named:
+        """Find the files the commit's declaration runs on the host, and the conditions modules it names.
 
-        The declaration is loaded from the commit's export, as the judge loads it;
-        where it can't load, or a module it names can't be found, they aren't
-        known, and why is kept.
+        Read with `ast` from the commit's Python modules and project files,
+        exported from git's objects into a scratch directory (`declared`), so no
+        code of the project runs before the operator is asked. A path under one
+        of `covered`, in the zone whole already, isn't followed.
         """
         with tempfile.TemporaryDirectory() as scratch:
             source = Path(scratch)
-            Git(cwd=self.root).export(commit, source)
-            try:
-                conditions = Declaration.read(source).conditions
-                files = [module_file(source, each) for each in conditions]
-            except (ProjectError, ConditionError) as failure:
-                return Named(unloaded=str(failure))
-            return Named(
-                paths=[each for file in files for each in holding(source, file)]
-            )
+            Git(cwd=self.root).export(commit, source, read_by_import)
+            return declared(source, covered)
 
     def fingerprint(self, zone: Zone) -> str:
         """Fingerprint the zone: git's listing of its files, and the `lup-dev` it runs.
@@ -887,7 +1152,7 @@ class Trust(Model, arbitrary_types_allowed=True):
                 changed=diffed(git, nothing, zone.commit, zone.paths),
                 joined=Diffed(),
                 tool=tool,
-                unloaded=zone.unloaded,
+                unread=zone.unread,
             )
         kept = [path for path in zone.paths if path in approval.paths]
         joined = [path for path in zone.paths if path not in approval.paths]
@@ -898,7 +1163,7 @@ class Trust(Model, arbitrary_types_allowed=True):
             changed=diffed(git, approval.commit, zone.commit, kept),
             joined=diffed(git, nothing, zone.commit, joined),
             tool=tool,
-            unloaded=zone.unloaded,
+            unread=zone.unread,
         )
 
     def ensure(self) -> Outcome:

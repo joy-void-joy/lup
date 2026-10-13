@@ -328,7 +328,7 @@ def test_lups_zone_is_its_declaration_and_its_workspaces_own_source(
         package=Path("packages/lup-dev"),
         members=[Path("packages/lup-dev"), Path("packages/lup")],
     )
-    assert zone.unloaded == ""
+    assert zone.unread == []
 
 
 def test_a_projects_zone_is_its_declaration_its_conditions_and_its_release(
@@ -338,8 +338,8 @@ def test_a_projects_zone_is_its_declaration_its_conditions_and_its_release(
     assert zone.paths == [
         Path("lup_project.py"),
         Path("lup_project"),
-        Path("audiobook/conditions.py"),
         Path("audiobook/__init__.py"),
+        Path("audiobook/conditions.py"),
     ]
     assert zone.tool == ReleaseTool(
         name="lup-dev",
@@ -555,19 +555,116 @@ def test_a_file_joining_the_zone_is_shown_whole(
     assert "audiobook/conditions.py" not in shown
 
 
-def test_a_declaration_that_doesnt_load_is_said_and_still_asked(
+def test_a_declaration_that_doesnt_parse_is_said_and_still_asked(
     lup: Path, kit: Kit, shell: Shell
 ) -> None:
-    changed(lup, {"lup_project.py": "from lup_dev import Nowhere\n"}, shell)
+    changed(lup, {"lup_project.py": "from lup_dev import (\n"}, shell)
     trust = trusting(lup, kit, yes())
     zone = trust.check().zone
-    assert "can't be imported" in zone.unloaded
+    [said] = zone.unread
+    assert said.startswith("`lup_project.py` doesn't parse (")
     trust.ensure()
     [shown] = answering(trust).shown
-    assert shown.splitlines()[1].startswith(
-        "The declaration doesn't load with the `lup-dev` running this, so the files "
-        "its modules name aren't known or shown: "
-    )
+    assert shown.splitlines()[1:3] == [
+        "Not followed, so the zone may miss a file the declaration runs:",
+        f"  {said}",
+    ]
+
+
+STUDIO = {
+    **RELEASE,
+    "lup_project.py": (
+        '"""The declaration."""\n\n'
+        "from audiobook.modules import Studio\n"
+        "from lup_dev import Modules, Project\n\n"
+        "project = Project(modules=Modules.default().add(Studio()))\n"
+    ),
+    "audiobook/modules/__init__.py": (
+        '"""The project\'s modules."""\n\nfrom .studio import Studio\n'
+    ),
+    "audiobook/modules/studio.py": (
+        '"""The studio."""\n\n'
+        "from lup_dev import Module\n\n"
+        "from audiobook import ledger\n\n\n"
+        "class Studio(Module):\n"
+        '    name = "studio"\n'
+        '    conditions = "audiobook.conditions"\n'
+    ),
+    "audiobook/ledger.py": '"""The ledger."""\n\nfrom . import narration\n',
+    "audiobook/conditions.py": (
+        '"""Its conditions."""\n\nfrom audiobook import release\n\nready = 1\n'
+    ),
+    "audiobook/release.py": '"""Read by the conditions, never run on the host."""\n',
+    "audiobook/cover.py": '"""Imported by nothing the declaration runs."""\n',
+}
+"""A project whose declaration imports its own modules, which import more and name
+its conditions module."""
+
+
+def test_the_zone_follows_the_declarations_imports_to_the_files_they_resolve_to(
+    tmp_path: Path, kit: Kit, shell: Shell
+) -> None:
+    project = repository(tmp_path / "studio", STUDIO, shell)
+    zone = trusting(project, kit, unasked()).check().zone
+    assert zone.paths[:2] == [Path("lup_project.py"), Path("lup_project")]
+    assert sorted(zone.paths[2:]) == [
+        Path("audiobook/__init__.py"),
+        Path("audiobook/conditions.py"),
+        Path("audiobook/ledger.py"),
+        Path("audiobook/modules/__init__.py"),
+        Path("audiobook/modules/studio.py"),
+        Path("audiobook/narration.py"),
+    ]
+    assert zone.unread == []
+
+
+def test_a_package_declarations_relative_imports_are_followed(
+    tmp_path: Path, kit: Kit, shell: Shell
+) -> None:
+    package = {
+        **{name: text for name, text in RELEASE.items() if name != "lup_project.py"},
+        "lup_project/__init__.py": (
+            '"""The declaration."""\n\nfrom .studio import project\n'
+        ),
+        "lup_project/studio.py": (
+            '"""Its module."""\n\n'
+            "from lup_dev import Project\n\n"
+            "from audiobook import narration\n\n"
+            "project = Project()\n"
+        ),
+        "lup_project/beyond.py": "from ... import nowhere\n",
+    }
+    project = repository(tmp_path / "packaged", package, shell)
+    zone = trusting(project, kit, unasked()).check().zone
+    assert zone.paths == [
+        Path("lup_project.py"),
+        Path("lup_project"),
+        Path("audiobook/__init__.py"),
+        Path("audiobook/narration.py"),
+    ]
+    [said] = zone.unread
+    assert said.startswith("`lup_project/beyond.py` imports `...`: ")
+
+
+def test_reading_the_zone_runs_nothing_of_the_project(
+    tmp_path: Path, kit: Kit, shell: Shell
+) -> None:
+    ran = tmp_path / "ran"
+    running = {
+        **RELEASE,
+        "lup_project.py": (
+            "import pathlib\n\n"
+            "import audiobook.narration\n\n"
+            f"pathlib.Path({str(ran)!r}).write_text('the declaration ran')\n"
+        ),
+        "audiobook/narration.py": (
+            f"import pathlib\n\npathlib.Path({str(ran)!r}).write_text('it ran')\n"
+        ),
+    }
+    project = repository(tmp_path / "running", running, shell)
+    zone = trusting(project, kit, unasked()).check().zone
+    assert Path("audiobook/narration.py") in zone.paths
+    assert not ran.exists()
 
 
 def test_inside_an_agents_session_nothing_is_asked(
