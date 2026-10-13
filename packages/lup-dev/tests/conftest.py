@@ -35,7 +35,14 @@ from lup_dev.codescan.contract import (
     Span,
     Surface,
 )
-from lup_dev.codescan.directives import Defer, Directive, Ignore, Malformed, Note
+from lup_dev.codescan.directives import (
+    Defer,
+    Directive,
+    GitHubIssues,
+    Ignore,
+    Malformed,
+    Note,
+)
 from lup_dev.codescan.ruff import Linter
 from lup_dev.layout import Layout
 from lup_dev.policy.checkpoint import Bench, Services
@@ -289,6 +296,16 @@ class FakeClock(Clock):
 def clock() -> FakeClock:
     """A clock the test drives: it moves only when slept on."""
     return FakeClock()
+
+
+@pytest.fixture(autouse=True)
+def reachable_issues(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Take GitHub's issues as reachable without asking `gh`, which would reach the network."""
+
+    def reachable(self: GitHubIssues) -> str | None:
+        return None
+
+    monkeypatch.setattr(GitHubIssues, "unreachable", reachable)
 
 
 class FakeSpawner(Spawner):

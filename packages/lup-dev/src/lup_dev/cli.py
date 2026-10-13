@@ -450,8 +450,10 @@ def rules_check(
     lup's rules are those the worktree's declaration selects, sent to the engine
     as the judge sends them, and pyright and ruff run through its runner as the
     judge runs them. `# lup: ignore` applies to every owner's findings. A
-    deferral whose issue is closed, or whose condition holds, fails the check.
-    lup's rules read production and protected modules; tests are checked by
+    deferral whose issue is closed, or whose condition holds, fails the check;
+    where the issue tracker can't be reached (no `gh`, no login, offline), the
+    issues go unchecked and the check says why. lup's rules read production and
+    protected modules; tests are checked by
     pyright and ruff only; what the declaration excludes isn't checked. With no
     paths, it checks every such file in the worktree, as the gate's `rules` step
     runs it.
@@ -481,7 +483,11 @@ def rules_check(
     reports = engine().check(root, sources, declaration.rules, declaration.runner)
     ruff = Ruff().findings(root, sources, declaration.runner)
     conditions = loaded(root, declaration.conditions)
-    gate = Trackers(issues=GitHubIssues(root=root), conditions=conditions)
+    issues = GitHubIssues(root=root)
+    unreachable = issues.unreachable()
+    gate = Trackers(
+        issues=issues if unreachable is None else None, conditions=conditions
+    )
 
     def found(path: Path) -> list[Finding]:
         report = next(each for each in reports if each.path == path)
@@ -512,6 +518,8 @@ def rules_check(
     findings = [each for path in checked for each in found(path)]
     for line in (line for each in findings for line in finding_lines(each, "")):
         typer.echo(line)
+    if unreachable is not None:
+        typer.echo(f"Deferrals' issues weren't checked: {unreachable}.")
     typer.echo(f"lup checked {len(checked)} files: {len(findings)} findings.")
     if findings:
         raise typer.Exit(code=1)

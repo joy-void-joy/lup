@@ -41,6 +41,9 @@ class FakeIssues(Issues):
     def state(self, issue: IssueRef) -> Literal["open", "closed"]:
         return "closed" if issue.number in self.closed else "open"
 
+    def unreachable(self) -> str | None:
+        return None
+
 
 class Always(Condition):
     answer: bool
@@ -105,6 +108,16 @@ def test_at_the_gate_a_closed_issue_is_reported() -> None:
     [problem] = Defer(line=1, issue=12, why="x").problems(Checking(gate=gate))
     assert problem.rule == "defer-closed"
     assert Defer(line=1, issue=13, why="x").problems(Checking(gate=gate)) == []
+
+
+def test_at_the_gate_an_issue_out_of_reach_goes_unchecked_and_a_due_condition_still_reports() -> (
+    None
+):
+    gate = Trackers(issues=None, conditions={"ready": Always(answer=True)})
+    checking = Checking(conditions=["ready"], gate=gate)
+    assert Defer(line=1, issue=12, why="x").problems(checking) == []
+    [problem] = Defer(line=1, issue=12, when="ready", why="x").problems(checking)
+    assert problem.rule == "defer-due"
 
 
 def test_at_the_gate_a_condition_that_holds_makes_the_defer_due() -> None:
