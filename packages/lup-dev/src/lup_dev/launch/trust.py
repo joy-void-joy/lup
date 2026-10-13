@@ -22,12 +22,18 @@ anything else, and `lup-dev trust` compare the tip's zone with it (`Trust.check`
 Where it changed, or nothing was approved, the change since the approved commit is
 shown through the terminal's pager and the operator asked once, yes or no
 (`Asker`):
-- yes: the tip's copy is installed as the host's `lup-dev` (`Toolchain`; for the
-  workspace's source, the engine built first through the declaration's own step
-  and runner, as the gate builds it), the host service restarted on it where one
-  runs, and the approval recorded;
+- yes: the tip's copy is installed as the repository's own (`Toolchain`, into
+  `Layout.judge`; for the workspace's source, the engine built first through the
+  declaration's own step and runner, as the gate builds it), which the host
+  service runs for each of the repository's hooks; and the approval recorded. On
+  lup's own repository, whose copy is lup's own command, it's installed as the
+  user's `lup-dev` too, the one a person runs and the host service runs from, and
+  the service is restarted on it where one runs;
 - no: the copy approved before stays, and the launch says the tip isn't the code
   judging its session; with nothing approved yet, nothing launches.
+
+A repository's copy approved but missing from its place, removed or never
+installed there, is installed from the commit approved, asking nothing.
 """
 
 import ast
@@ -56,7 +62,7 @@ from lup_dev.errors import LupDevError
 from lup_dev.gate import invoked
 from lup_dev.git import Git
 from lup_dev.host.client import Detached, HostClient
-from lup_dev.layout import CheckoutLayout, Layout
+from lup_dev.layout import CheckoutLayout, JudgeLayout, Layout
 from lup_dev.settings import LupDevSettings
 from lup_dev.stored import write_model
 
@@ -377,17 +383,30 @@ class Change(Model):
         )
 
 
+def reinstalled(approval: Approval, *, again: bool) -> str:
+    """Say, where `again`, that the copy approved was missing and is installed again; nothing otherwise."""
+    if not again:
+        return ""
+    return (
+        f" This repository's copy of `lup-dev` from {approval.commit} was missing, "
+        "and is installed again."
+    )
+
+
 class Unchanged(Model):
-    """The tip's host zone is the one approved: nothing was asked or installed."""
+    """The tip's host zone is the one approved: nothing was asked."""
 
     commit: str
     approval: Approval
+    again: bool = False
+    """Whether the repository's copy approved was missing, and installed again."""
 
     def report(self) -> str:
         """Say that nothing changed, in one line."""
         return (
             f"The host zone at {self.commit} is the one you approved at "
             f"{self.approval.commit}: nothing to review."
+            + reinstalled(self.approval, again=self.again)
         )
 
 
@@ -396,19 +415,23 @@ class Trusted(Model):
 
     approval: Approval
     restarted: bool
-    """Whether a host service ran, and was restarted on the copy."""
+    """Whether a host service ran, and was restarted on the copy, which it runs
+    from only where the copy is lup's own command."""
 
     def report(self) -> str:
         """Say what was installed, and where the host service stands."""
+        approved = (
+            f"Approved: `lup-dev` from {self.approval.commit} judges this "
+            "repository's sessions"
+        )
+        if not self.approval.tool.lups_own():
+            return f"{approved}, from their next hook."
         service = (
             "the host service restarted on it"
             if self.restarted
             else "the next launch starts the host service on it"
         )
-        return (
-            f"Approved: `lup-dev` from {self.approval.commit} is the one the host "
-            f"runs, and {service}."
-        )
+        return f"{approved}, and is the `lup-dev` you run; {service}."
 
 
 class Kept(Model):
@@ -416,6 +439,8 @@ class Kept(Model):
 
     commit: str
     approval: Approval
+    again: bool = False
+    """Whether the repository's copy approved before was missing, and installed again."""
 
     def report(self) -> str:
         """Say that the tip isn't the code judging the session, and what is."""
@@ -423,6 +448,7 @@ class Kept(Model):
             "Declined: the tip isn't the code judging this session. The host keeps "
             f"running `lup-dev` from {self.approval.commit}, which you approved; the "
             f"host zone at {self.commit} differs from it."
+            + reinstalled(self.approval, again=self.again)
         )
 
 
@@ -457,15 +483,21 @@ class Terminal(Asker):
 
 
 class Toolchain(ABC):
-    """What installs a copy of `lup-dev` as the host's, and names the command running it."""
+    """What installs the copies of `lup-dev` the host runs, and names the user's own command."""
 
     @abstractmethod
-    def install(self, tool: Tool, root: Path, commit: str) -> None:
-        """Install `tool` at `commit`, in the repository at `root`, replacing any copy."""
+    def install(
+        self, tool: Tool, root: Path, commit: str, copy: JudgeLayout, *, users: bool
+    ) -> None:
+        """Install `tool` at `commit`, in the repository at `root`, as the repository's `copy`.
+
+        With `users`, it's installed as the user's own `lup-dev` too, the one a
+        person runs and the host service runs from. Each replaces the copy there.
+        """
 
     @abstractmethod
     def command(self, name: str) -> list[str]:
-        """Return the command running the copy of package `name` installed."""
+        """Return the command running the user's own copy of package `name`."""
 
 
 def engine(resolved: Resolved) -> Step:
@@ -494,28 +526,47 @@ def engine(resolved: Resolved) -> Step:
 
 
 class UvToolchain(Model, Toolchain):
-    """uv: the engine built as the gate builds it, and each copy installed as a uv tool."""
+    """uv: the engine built as the gate builds it, and each copy installed as a uv tool.
+
+    The repository's own copy is a uv tool of its own, in its own directories
+    (`UV_TOOL_DIR` and `UV_TOOL_BIN_DIR`, set for that install alone); the user's
+    own is in uv's.
+    """
 
     executable: str = "uv"
 
     @override
-    def install(self, tool: Tool, root: Path, commit: str) -> None:
+    def install(
+        self, tool: Tool, root: Path, commit: str, copy: JudgeLayout, *, users: bool
+    ) -> None:
         """Install the commit's copy: built from its source, or the release it pins.
 
         A workspace's source is exported whole into a scratch directory and built
-        there, never installed from a worktree, so what installs is the commit's:
-        each file written from git's objects, as the diff the operator approved
-        read them, whatever the repository's `.gitattributes` say.
+        there once, never installed from a worktree, so what installs is the
+        commit's: each file written from git's objects, as the diff the operator
+        approved read them, whatever the repository's `.gitattributes` say.
         """
+        places = [copy, *([None] if users else [])]
         match tool:
             case WorkspaceTool():
                 with tempfile.TemporaryDirectory() as scratch:
                     tree = Path(scratch)
                     Git(cwd=root).export(commit, tree)
                     self.build(tree)
-                    self.built(tool, tree)
+                    self.built(tool, tree, places)
             case ReleaseTool():
-                self.released(tool)
+                self.released(tool, places)
+
+    def uv(self, place: JudgeLayout | None) -> list[str]:
+        """Return the command running uv's tools in `place`: a repository's own copy, or the user's where none."""
+        if place is None:
+            return [self.executable]
+        return [
+            "env",
+            f"UV_TOOL_DIR={place.tools}",
+            f"UV_TOOL_BIN_DIR={place.bin}",
+            self.executable,
+        ]
 
     @override
     def command(self, name: str) -> list[str]:
@@ -533,17 +584,18 @@ class UvToolchain(Model, Toolchain):
         program, *arguments = invoked(engine(resolved), resolved.runner)
         sh.Command(program)(*arguments, _cwd=str(tree), _fg=True)
 
-    def built(self, tool: WorkspaceTool, tree: Path) -> None:
-        """Install the package from `tree`, its dependencies held to its `uv.lock`.
+    def built(
+        self, tool: WorkspaceTool, tree: Path, places: list[JudgeLayout | None]
+    ) -> None:
+        """Install the package from `tree` in each of `places`, its dependencies held to its `uv.lock`.
 
         `uv tool install` resolves a tool's dependencies afresh, ignoring the
         workspace's lock, so the locked versions are exported as constraints. A
         workspace package it needs is installed from the tree as a copy.
         """
-        uv = sh.Command(self.executable)
         with tempfile.TemporaryDirectory() as scratch:
             constraints = Path(scratch) / "constraints.txt"
-            uv(
+            sh.Command(self.executable)(
                 "export",
                 "--package",
                 tool.name,
@@ -558,33 +610,39 @@ class UvToolchain(Model, Toolchain):
                 str(constraints),
                 _cwd=str(tree),
             )
-            uv(
-                "tool",
-                "install",
-                "--force",
-                "--constraints",
-                str(constraints),
-                str(tree / tool.package),
-                _cwd=str(tree),
-                _fg=True,
-            )
+            for place in places:
+                program, *arguments = self.uv(place)
+                sh.Command(program)(
+                    *arguments,
+                    "tool",
+                    "install",
+                    "--force",
+                    "--constraints",
+                    str(constraints),
+                    str(tree / tool.package),
+                    _cwd=str(tree),
+                    _fg=True,
+                )
 
-    def released(self, tool: ReleaseTool) -> None:
-        """Install the release from its index, its dependencies held to the pins."""
+    def released(self, tool: ReleaseTool, places: list[JudgeLayout | None]) -> None:
+        """Install the release from its index in each of `places`, its dependencies held to the pins."""
         with tempfile.TemporaryDirectory() as scratch:
             constraints = Path(scratch) / "constraints.txt"
             constraints.write_text(tool.constraints())
-            sh.Command(self.executable)(
-                "tool",
-                "install",
-                "--force",
-                "--constraints",
-                str(constraints),
-                "--default-index",
-                tool.registry,
-                tool.requirement(),
-                _fg=True,
-            )
+            for place in places:
+                program, *arguments = self.uv(place)
+                sh.Command(program)(
+                    *arguments,
+                    "tool",
+                    "install",
+                    "--force",
+                    "--constraints",
+                    str(constraints),
+                    "--default-index",
+                    tool.registry,
+                    tool.requirement(),
+                    _fg=True,
+                )
 
 
 def dotted(name: str) -> list[str] | None:
@@ -1055,21 +1113,27 @@ class Trust(Model, arbitrary_types_allowed=True):
     def ensure(self) -> Outcome:
         """Check the tip's host zone; where it isn't the one approved, show and ask.
 
-        Approved, the tip's copy is installed, the host service restarted on it
-        where one runs, and the approval recorded. Declined, the copy approved
-        before stays; with none approved, `TrustError`, since nothing approved may
-        run. Inside an agent's session nothing is asked: `TrustError`. Launches at
-        once ask one at a time, so the second reads the first's answer.
+        Approved, the tip's copy is installed as the repository's own, and on lup's
+        own repository as the user's `lup-dev` too, with the host service, which
+        runs from that, restarted on it where one runs; and the approval recorded.
+        Declined, the copy approved before stays; with none approved, `TrustError`,
+        since nothing approved may run. Inside an agent's session nothing is
+        asked: `TrustError`. Launches at once ask one at a time, so the second
+        reads the first's answer. Where the repository's copy approved is missing,
+        it's installed again, asking nothing: it was approved.
         """
         repository = self.repository()
         kept = self.layout.approved(repository)
+        copy = self.layout.judge(repository)
         kept.parent.mkdir(parents=True, exist_ok=True)
         with FileLock(kept.with_name(f"{kept.name}.lock")):
             standing = self.standing(repository)
             zone = standing.zone
             approval = standing.approval
             if approval is not None and standing.approved():
-                return Unchanged(commit=zone.commit, approval=approval)
+                # The tip's zone is the approved one, so its copy is the same.
+                again = self.reinstall(approval, zone.commit, copy)
+                return Unchanged(commit=zone.commit, approval=approval, again=again)
             if self.inside:
                 message = (
                     f"this runs inside a {self.inside[0]} session, and an agent "
@@ -1087,9 +1151,11 @@ class Trust(Model, arbitrary_types_allowed=True):
                         "nothing launches"
                     )
                     raise TrustError(message)
-                return Kept(commit=zone.commit, approval=approval)
-            self.toolchain.install(zone.tool, self.root, zone.commit)
-            restarted = self.restart()
+                again = self.reinstall(approval, approval.commit, copy)
+                return Kept(commit=zone.commit, approval=approval, again=again)
+            own = zone.tool.lups_own()
+            self.toolchain.install(zone.tool, self.root, zone.commit, copy, users=own)
+            restarted = own and self.restart()
             recorded = Approval(
                 commit=zone.commit,
                 fingerprint=standing.fingerprint,
@@ -1099,6 +1165,25 @@ class Trust(Model, arbitrary_types_allowed=True):
             )
             write_model(kept, recorded)
             return Trusted(approval=recorded, restarted=restarted)
+
+    def reinstall(self, approval: Approval, commit: str, copy: JudgeLayout) -> bool:
+        """Install the repository's copy approved, from `commit`, where it's missing; say whether it was.
+
+        `commit` holds the zone approved. Raise `TrustError` where it's gone from
+        the repository.
+        """
+        if copy.command(approval.tool.name).is_file():
+            return False
+        if Git(cwd=self.root).commit(commit) is None:
+            message = (
+                f"this repository's copy of `{approval.tool.name}`, approved at "
+                f"{commit}, is missing from {copy.home}, and that commit is gone "
+                "from the repository, so there's nothing to install it from: "
+                "approve the integration branch's tip once it changes the host zone"
+            )
+            raise TrustError(message)
+        self.toolchain.install(approval.tool, self.root, commit, copy, users=False)
+        return True
 
     def restart(self) -> bool:
         """Restart the host service on the copy just installed, where one runs.

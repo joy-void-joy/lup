@@ -52,6 +52,14 @@ class WorkspaceTool(Model):
             PackageLayout(root=self.package).engine,
         ]
 
+    def lups_own(self) -> bool:
+        """Say whether the copy is lup's own command too: it is, from lup's own repository.
+
+        Only lup's own repository holds `lup-dev`'s source, so its copy is also
+        installed as the `lup-dev` a person runs and the host service runs from.
+        """
+        return True
+
     def said(self, before: Tool | None) -> list[str]:
         """Say how the `lup-dev` the host runs changed beyond its source's diff."""
         match before:
@@ -81,6 +89,14 @@ class ReleaseTool(Model):
     def paths(self) -> list[Path]:
         """List none: a release is its version and pins, not the repository's files."""
         return []
+
+    def lups_own(self) -> bool:
+        """Say whether the copy is lup's own command too: a project's release isn't.
+
+        The `lup-dev` a person runs, and the host service runs from, stays the one
+        they installed; the release judges the project's own launches alone.
+        """
+        return False
 
     def requirement(self) -> str:
         """Return the release as a requirement: its name at its version."""
