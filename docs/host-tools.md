@@ -17,7 +17,7 @@ What it leaves to other pieces:
 
 ## Decisions
 
-Answered by the operator on 2026-10-14; where they left a decision to the builder, it's marked so. One is still open (14).
+Answered by the operator on 2026-10-14; where they left a decision to the builder, it's marked so.
 
 1. **The tools a launched session gets** (*lup's tools*), decided: every agent has its inbox. `report`, `note`, `ask`, `send` (the general one: a message to a party, the operator in this piece, other agents with spawn), `wait_inbox`, and five GitHub tools; not `propose` (piece 3) or `spawn`. `wait_inbox` is named apart from Codex's own `wait`, which in code mode polls a running cell. **No turn that won't end:** an agent can always end its turn, and what a hold at a turn's end held it for once doesn't hold a later turn's end again (*No turn that won't end*).
 2. **Found through tool search, and listed in the guidance** (*lup's tools*), decided: lup's tools stay behind each runtime's tool search, with descriptions as long as they need, and every session's guidance lists each of lup's tools by name with its summary, compiled from the tools themselves: a tool's docstring's first line, 50 characters at most, as a git commit's subject line is, the rest of the docstring its full description. Results as `content`, never `structuredContent`.
@@ -32,7 +32,7 @@ Answered by the operator on 2026-10-14; where they left a decision to the builde
 11. **The limits are a `credentials` part of `Core`** (*What the declaration allows*), decided: no force push, no deletion, no push to `main` or a tag by default; beyond them, refused, saying why.
 12. **GitHub through `gh` on the host** (*GitHub through `gh`*), decided, the repository named once from its own remote.
 13. **Where the code goes** (*Modules and public API*), the builder's: serving tools over one MCP connection is the library's; the inbox, GitHub and git are three subsystems of `lup_dev`, just above `host`.
-14. **Trust's question: an inbox item from the start, answerable at the launching terminal too** (*Trust on launch: the summary first*). Open. **Lean: yes**, since its destination is the inbox wherever it's answered, the dashboard in time; building it in the terminal alone now would be rebuilt then. The alternative: in the terminal alone in this piece.
+14. **Trust's question: an inbox item from the start, answerable at the launching terminal too** (*Trust on launch: the summary first*), decided: its destination is the inbox wherever it's answered, the dashboard in time, and building it in the terminal alone now would be rebuilt then. Set aside: in the terminal alone in this piece.
 15. **lup's own sessions move onto launch once this lands** (*lup's own sessions move onto launch*), decided, with the protected-path change the operator makes.
 
 ## lup's tools
@@ -246,7 +246,7 @@ The first approval on lup's own repository showed its whole host zone, about 110
 
 `Asker`'s `show` and `ask` (`launch/trust.py`) are enough for it; only the flow changes.
 
-**An inbox item from the start, answerable at the launching terminal too (leaning; open):** its destination is the inbox wherever the operator answers it, the dashboard in time (`DESIGN.md`, *Policy*: "in the terminal until the inbox, then wherever the inbox is answered"). So the launch puts the question in the inbox as an approval, and waits on it; the launching terminal shows the summary and asks, its answer answering the item, while `lup-dev inbox answer` from any terminal, and the dashboard once it exists, answer the same item, whichever comes first. Nothing about the question is rebuilt when the dashboard comes. The alternative: in the terminal alone in this piece, moved to the inbox later.
+**An inbox item from the start, answerable at the launching terminal too** (the operator's decision): its destination is the inbox wherever the operator answers it, the dashboard in time (`DESIGN.md`, *Policy*: "in the terminal until the inbox, then wherever the inbox is answered"). So the launch puts the question in the inbox as an approval, and waits on it; the launching terminal shows the summary and asks, its answer answering the item, while `lup-dev inbox answer` from any terminal, and the dashboard once it exists, answer the same item, whichever comes first. Nothing about the question is rebuilt when the dashboard comes. The alternative: in the terminal alone in this piece, moved to the inbox later.
 
 ## lup's own sessions move onto launch
 
