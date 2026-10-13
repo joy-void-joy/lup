@@ -218,9 +218,10 @@ def test_loading_a_declaration_leaves_no_bytecode_at_the_root(
 
 
 OWN_CLASSES = '''
+from pathlib import Path
 from typing import override
 
-from lup_dev import Module, Modules, Paths, Project, Python, Runner
+from lup_dev import Module, Modules, Paths, Project, Python, RoomNeeds, Runner, Tools
 
 
 class Poetry(Runner):
@@ -237,6 +238,10 @@ class Poetry(Runner):
     @override
     def environment(self) -> list[str]:
         return ["poetry.lock"]
+
+    @override
+    def room(self, root: Path, tools: Tools) -> RoomNeeds:
+        return RoomNeeds()
 
 
 class Narration(Module):

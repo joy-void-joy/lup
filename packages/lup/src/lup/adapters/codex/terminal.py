@@ -11,9 +11,10 @@ each runtime*):
 - each trusted path in `projects`, as an inline table, since `-c` splits a dotted
   key at every `.`, which breaks a path like `lup.git`;
 - auto memory as `features.memories`; `check_for_update_on_startup = false`;
-  `features.plugins = false`, which also stops a sync from GitHub at each start;
-  each of the operator's own MCP servers, read from their `config.toml`, off by
-  name, since they're set up for the host;
+  `features.apps = false` unless the session asks for the account's connectors,
+  which Codex calls apps; `features.plugins = false`, which also stops a sync
+  from GitHub at each start; each of the operator's own MCP servers, read from
+  their `config.toml`, off by name, since they're set up for the host;
 - the guidance as `developer_instructions`, with `project_doc_max_bytes = 0`, so
   the repository's `AGENTS.md` isn't loaded beside it;
 - lup's hooks as managed hooks, in a requirements file mounted at
@@ -35,12 +36,9 @@ each runtime*):
 and can't remove a built-in tool by name, only whole feature groups, so a
 session's `subagent_cache` and `removed_tools` have nothing to compile to here.
 
-**TOML.** Each `-c` value and the requirements file are TOML. The standard library
-reads TOML but doesn't write it, so until a TOML writer is one of lup's
-dependencies, each value is written here: its strings as JSON, which TOML's basic
-strings read the same way, its tables inline, and every text read back with
-`tomllib` and compared with the value, so a value TOML would read otherwise
-raises instead of reaching Codex.
+**TOML.** Each `-c` value and the requirements file are TOML, written by
+`tomlkit`: a `-c` value on one line, its tables inline, and the requirements file
+as a document.
 
 What this relies on, read in Codex's source at `rust-v0.162.1` (paths under
 `codex-rs/`):
@@ -54,15 +52,17 @@ What this relies on, read in Codex's source at `rust-v0.162.1` (paths under
   hook that isn't managed (`hooks/src/engine/discovery.rs`);
 - `instructions` becomes the base instructions when nothing else sets them
   (`core/src/config/mod.rs`); `features.memories` is the memories feature's
-  switch (`features/src/lib.rs`).
+  switch, off by default, and `features.apps` the apps', on by default
+  (`features/src/lib.rs`).
 """
 
-import json
 import tomllib
 from shlex import join
 from typing import TYPE_CHECKING
 
+import tomlkit
 from pydantic import JsonValue
+from tomlkit.exceptions import ConvertError
 
 from lup.adapters.codex.layout import MANAGED_REQUIREMENTS, CodexLaunch, CodexLayout
 from lup.rooms.container import Mount
@@ -76,47 +76,20 @@ if TYPE_CHECKING:
     from lup.sessions.terminal import Event, Hook, TerminalSettings
 
 
-class Parsed(Model):
-    """A TOML value, read back."""
-
-    value: JsonValue
-
-
 def toml(value: JsonValue) -> str:
-    """Return `value` as TOML on one line, checked by reading it back.
+    """Return `value` as a TOML value on one line, its tables inline.
+
+    It's written as `tomlkit` writes an array's item, which is how it writes a
+    table inline, and every table inside it too.
 
     >>> toml({"/srv/lup.git": {"trust_level": "trusted"}})
-    '{"/srv/lup.git" = {"trust_level" = "trusted"}}'
+    '{"/srv/lup.git" = {trust_level = "trusted"}}'
     """
-
-    def written(each: JsonValue) -> str:
-        match each:
-            case bool() | int():
-                return json.dumps(each)
-            case str():
-                return json.dumps(each, ensure_ascii=False)
-            case list():
-                return "[" + ", ".join(written(item) for item in each) + "]"
-            case dict():
-                pairs = [
-                    f"{json.dumps(key, ensure_ascii=False)} = {written(item)}"
-                    for key, item in each.items()
-                ]
-                return "{" + ", ".join(pairs) + "}"
-            case float() | None:
-                message = f"lup writes no {type(each).__name__} as TOML: {each!r}"
-                raise TerminalError(message)
-
-    text = written(value)
     try:
-        parsed = Parsed.model_validate(tomllib.loads(f"value = {text}"))
-    except tomllib.TOMLDecodeError as failed:
-        message = f"{value!r} doesn't write as TOML: {failed}"
+        return tomlkit.item(value, _parent=tomlkit.array()).as_string()
+    except ConvertError as failed:
+        message = f"{value!r} has no TOML value: {failed}"
         raise TerminalError(message) from failed
-    if parsed.value != value:
-        message = f"{value!r} reads back from TOML as {parsed.value!r}"
-        raise TerminalError(message)
-    return text
 
 
 class OperatorConfig(Model):
@@ -219,8 +192,7 @@ def compiled(
             for name in events
         }
     )
-    written = requirements.model_dump(mode="json", exclude_none=True)
-    lines = [f"{json.dumps(key)} = {toml(value)}\n" for key, value in written.items()]
+    written = tomlkit.dumps(requirements.model_dump(mode="json", exclude_none=True))
     overrides = [
         *(
             []
@@ -251,6 +223,11 @@ def compiled(
             else [Override(key="features.memories", value=session.auto_memory)]
         ),
         Override(key="check_for_update_on_startup", value=False),
+        *(
+            []
+            if session.account_connectors
+            else [Override(key="features.apps", value=False)]
+        ),
         Override(key="features.plugins", value=False),
         *(
             [
@@ -283,7 +260,7 @@ def compiled(
             ),
         ],
         env={"CODEX_HOME": str(layout.operator_home)},
-        files={launch.requirements: "".join(lines)},
+        files={launch.requirements: written},
         mounts=[
             Mount(source=layout.operator_home),
             cli,

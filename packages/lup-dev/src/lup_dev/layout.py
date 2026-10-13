@@ -8,6 +8,9 @@ The homes (`docs/judging-writes.md`, *Where things live*):
   path is limited in length;
 - the host service's sockets and the launches it serves, under
   `$XDG_RUNTIME_DIR/lup/host/`, and its log under lup's state (`docs/launch.md`);
+- lup's cache, under `$XDG_CACHE_HOME/lup/`, where pyright's source is kept for
+  building the engine, the one part of the cache a room mounts; and the record of
+  each room image built, in lup's state;
 - inside a worktree, `.lup/saved/`, where a refused version waits for the agent,
   `.lup/drafts/`, where a change waits to be submitted for review, and
   `.lup/review/<n>/`, where a review keeps its files while it waits;
@@ -24,6 +27,9 @@ from lup.types import Model
 
 if TYPE_CHECKING:
     from lup_dev.settings import LupDevSettings
+
+LOCALTIME = Path("/etc/localtime")
+"""The host's time zone, which a room mounts read-only so its clock reads as the operator's."""
 
 
 def digest(path: Path) -> str:
@@ -359,19 +365,39 @@ class HostLayout(Model):
 
 
 class Layout(Model):
-    """Where lup's state lives for one user: `$XDG_STATE_HOME/lup`, and its sockets."""
+    """Where lup's state lives for one user: `$XDG_STATE_HOME/lup`, its cache and its sockets."""
 
     state: Path
     runtime: Path = Path(tempfile.gettempdir()) / f"lup-{getpass.getuser()}"
     """lup's sockets: `$XDG_RUNTIME_DIR/lup`, or the user's own temporary directory."""
+    cache: Path = Path.home() / ".cache" / "lup"
+    """lup's cache: `$XDG_CACHE_HOME/lup`, or `~/.cache/lup`."""
 
     @classmethod
     def of(cls, settings: LupDevSettings) -> Layout:
-        """Place lup's state and sockets where the settings say, or XDG's defaults."""
+        """Place lup's state, cache and sockets where the settings say, or XDG's defaults."""
         home = settings.xdg_state_home or Path.home() / ".local" / "state"
+        cache = (settings.xdg_cache_home or Path.home() / ".cache") / "lup"
         if settings.xdg_runtime_dir is None:
-            return cls(state=home / "lup")
-        return cls(state=home / "lup", runtime=settings.xdg_runtime_dir / "lup")
+            return cls(state=home / "lup", cache=cache)
+        return cls(
+            state=home / "lup", cache=cache, runtime=settings.xdg_runtime_dir / "lup"
+        )
+
+    @property
+    def pyright_source(self) -> Path:
+        """The source of pyright, which the engine's build fetches and builds from.
+
+        `packages/lup-dev/checker/build.py` keeps it here, and a room mounts it
+        read-write for the gate, rather than the whole cache, whose other parts
+        (the CLIs a room runs) a room mustn't rewrite.
+        """
+        return self.cache / "pyright"
+
+    @property
+    def builds(self) -> Path:
+        """Each room image built: one JSON line each, with its duration and size."""
+        return self.state / "rooms" / "builds.jsonl"
 
     def engine_socket(self, worktree: Path) -> Path:
         """Say where the engine of the worktree at `worktree` listens."""

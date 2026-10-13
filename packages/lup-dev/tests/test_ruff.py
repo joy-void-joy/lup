@@ -13,10 +13,12 @@ import pytest
 from lup_dev.codescan.contract import Source
 from lup_dev.codescan.ruff import Ruff, RuffError
 from lup_dev.declaration import runner
-from lup_dev.declaration.runner import Plain, Runner
+from lup_dev.declaration.runner import Plain, RoomNeeds, Runner
 
 if TYPE_CHECKING:
     from conftest import Uv
+
+    from lup_dev.declaration.requirements import Tools
 
 UV = runner.Uv()
 """lup's default runner."""
@@ -128,6 +130,10 @@ class Elsewhere(Runner):
     @override
     def environment(self) -> list[str]:
         return []
+
+    @override
+    def room(self, root: Path, tools: Tools) -> RoomNeeds:
+        return RoomNeeds()
 
 
 def test_a_runner_this_machine_lacks_is_named(tmp_path: Path) -> None:

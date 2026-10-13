@@ -82,6 +82,10 @@ class SessionSettings(Model):
     keeps the runtime's own setting."""
     removed_tools: list[str] = []
     """Built-in tools removed from the session's context, by the runtime's names for them."""
+    account_connectors: bool = False
+    """Whether the session fetches the connectors the operator's account brings
+    with its login, whose tools reach their mail and files: off, so a terminal
+    session gets none unless it asks."""
 
 
 class TerminalSettings(Model):

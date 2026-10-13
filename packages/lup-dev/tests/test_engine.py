@@ -26,7 +26,7 @@ from lup_dev.codescan.contract import FileReport, Rule, Source
 from lup_dev.codescan.directives import Defer, Ignore, Malformed, Note
 from lup_dev.codescan.engine import EngineChecker, EngineError, EngineStatus
 from lup_dev.declaration.resolve import Selected, resolve
-from lup_dev.declaration.runner import Plain, Runner
+from lup_dev.declaration.runner import Plain, RoomNeeds, Runner
 from lup_dev.declaration.runner import Uv as UvRunner
 from lup_dev.layout import Bundle, Layout
 
@@ -34,6 +34,8 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from conftest import Uv
+
+    from lup_dev.declaration.requirements import Tools
 
 EVERY = [Selected(module="code-rules", rules=Rules.all(), default=Rules())]
 """Every rule of lup's table, which the rules' own examples are checked against."""
@@ -693,6 +695,10 @@ class Chosen(Runner):
     @override
     def environment(self) -> list[str]:
         return ["choice"]
+
+    @override
+    def room(self, root: Path, tools: Tools) -> RoomNeeds:
+        return RoomNeeds()
 
 
 CHOOSE = """\
