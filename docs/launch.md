@@ -60,7 +60,7 @@ The code that runs on the operator's machine, outside every room, is approved be
 
 ### The image
 
-- **lup's base, then the packages the selected modules ask for.** The image is `archlinux` with its mirror set to one day's snapshot of the Arch Linux Archive, which lup's release pins, then one `pacman -Sy` of every package the selected modules name. Measured on a small set: git alone builds in 7 s and adds 137 MB to the 408 MB base. Size isn't the constraint; leaving nothing behind is (*Footprint*, below).
+- **lup's base, then the packages the selected modules ask for.** The image is `archlinux` with its mirror set to one day's snapshot of the Arch Linux Archive, which lup's release pins, then one `pacman -Syu` of every package the selected modules name. With the base image and the day pinned together (`catalog/room.py`'s `RoomBase`) the upgrade has nothing to do; were they to part, `-Sy` alone would be Arch's unsupported partial upgrade. Measured on a small set: git alone builds in 7 s and adds 137 MB to the 408 MB base. Size isn't the constraint; leaving nothing behind is (*Footprint*, below).
 - **Each module has a `packages` part,** a selection like every other kind, each package with its reason:
 
   ```python
@@ -109,14 +109,14 @@ Everything is mounted at its host path: a linked worktree's `.git` file and the 
 | What the runner needs (*The project's environment*) | as it says | uv's interpreters and cache |
 | `~/.claude` or `~/.codex` | read-write | the operator's own login, settings and history (*Your login and history*) |
 | The CLI, from lup's cache | read-only | *The CLIs* |
-| lup's cache, `$XDG_CACHE_HOME/lup` | read-write | pyright's source, which the gate builds the engine from |
+| pyright's source in lup's cache, `$XDG_CACHE_HOME/lup/pyright` | read-write | the gate builds the engine from it. Only that part of the cache: the rest holds the CLIs later rooms run, which a room mustn't rewrite |
 | The launch's directory | read-only | lup's settings and guidance for this launch |
 | The launch's socket directory, at `/run/lup` | read-write | the hook. The directory, not the socket: a socket mounted as a file pins the old one when the service restarts |
-| The editor's own configuration (`~/.config/nvim` for nvim, `~/.vimrc` and `~/.vim` for vim, and so on) | read-only | Ctrl+G opens the operator's editor as they know it |
+| The editor's own configuration (`~/.config/nvim` for nvim, `~/.vimrc` and `~/.vim` for vim, and so on: `catalog/room.py`'s `Editors`), for the editor `$EDITOR` or `$VISUAL` names, where it exists | read-only | Ctrl+G opens the operator's editor as they know it |
 | `/etc/localtime` | read-only | the first lup's sessions ran in UTC |
 | A tmpfs at the host's home path, as `HOME` | read-write | with `--userns=keep-id`, podman sets `HOME` to the working directory, so the CLIs would write their state into the worktree |
 
-- **One mount for the whole repository.** The first lup mounted each worktree on its own, and a mount point can't be deleted from inside, so agents couldn't remove a worktree they were done with ("EBUSY"). Mounted as one tree, `git worktree add` and `remove` work as on the host, and an agent reads any other worktree it's pointed at. The refs are writable too: an agent can move or delete a branch, as it can today, and the reflog keeps what was moved. A worktree's `.git` file stays writable for the same reason, so #54 stays the judge's.
+- **One mount for the whole repository.** The first lup mounted each worktree on its own, and a mount point can't be deleted from inside, so agents couldn't remove a worktree they were done with ("EBUSY"). Mounted as one tree, `git worktree add` and `remove` work as on the host, and an agent reads any other worktree it's pointed at. The refs are writable too: an agent can move or delete a branch, as it can today, and the reflog keeps what was moved. A worktree's `.git` file stays writable for the same reason, so #54 stays the judge's. The tree is the nearest directory holding the git directory and every worktree; where that would hold the operator's home (a worktree kept far from the others), the launch refuses and says to keep them under one directory.
 - **Not mounted:** the SSH agent, `gh`'s login, and the rest of the home, the operator's shell configuration among it. `~/.gitconfig` isn't either: it holds the operator's aliases and an LFS filter the image lacks, so the git identity is passed as `GIT_AUTHOR_*` and `GIT_COMMITTER_*`, read from the host's git.
 
 ### The user, the process, the network
@@ -133,7 +133,7 @@ Everything is mounted at its host path: a linked worktree's `.git` file and the 
 - **One environment.** The worktree's `.venv` is the host's, used as it is.
   - Why the first lup didn't: its container ran the image's system Python while the host's `.venv` pointed at a uv-managed one, so each side took the other's environment as broken and rebuilt it ("so host and container stopped clobbering each other's `.venv`"). It moved to an environment per project root outside the checkout, mounted over `.venv-contained`: a mount point agents couldn't remove, which nothing on the host pruned, 25 GB across 31 directories today, whose scripts went stale when a repository moved.
   - Mounting the host's interpreter at its own path removes the cause: both sides run the same Python, so one `.venv` is valid on both. Built into the image, an environment would rebuild the image at every change of the lock; installed at each start, it's the first lup's "minutes the first time".
-- **The runner says what a room must mount:** `Runner.room()` returns mounts and environment variables. `Uv()` gives uv's interpreters read-only and uv's cache read-write, at their host paths, with `UV_CACHE_DIR` and `UV_PYTHON_DOWNLOADS=never`. `Plain()` mounts nothing, and a project's own runner says what it needs.
+- **The runner says what a room must mount:** `Runner.room()` returns mounts and environment variables. `Uv()` gives uv's interpreters read-only and uv's cache read-write, at their host paths, with `UV_CACHE_DIR`, `UV_PYTHON_INSTALL_DIR` (so a worktree made in the room gets its `.venv` on the store's interpreter rather than the image's) and `UV_PYTHON_DOWNLOADS=never`. `Plain()` mounts nothing, and a project's own runner says what it needs.
 - **The interpreter must resolve inside.** A launch checks that the environment's interpreter resolves under the room's mounts, and refuses otherwise, naming it. Without the interpreter, `uv run` printed "Ignoring existing virtual environment linked to non-existent Python interpreter" and set about recreating the shared `.venv`; `UV_PYTHON_DOWNLOADS=never` stops it before it can, and the check says why. An environment on a system interpreter, outside uv's store, is refused with how to move it onto one uv manages.
 - **Checked:** with these mounts, `uv run --frozen pytest` audited the environment and wrote nothing to `.venv`, and lup's whole suite passed in the room in 417 s, against 418 s on the host, with nodejs in the image for the engine.
 
