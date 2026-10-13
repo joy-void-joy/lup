@@ -14,22 +14,20 @@ from rich.text import Text
 from typer.testing import CliRunner
 
 from lup_dev import cli
+from lup_dev.approval import Approval, ReleaseTool, WorkspaceTool
 from lup_dev.declaration.load import load
 from lup_dev.declaration.resolve import resolve
 from lup_dev.host.client import Detached, HostClient
 from lup_dev.launch.trust import (
-    Approval,
     Asker,
     Kept,
     Lock,
-    ReleaseTool,
     Toolchain,
     Trust,
     Trusted,
     TrustError,
     Unchanged,
     UvToolchain,
-    WorkspaceTool,
     engine,
 )
 from lup_dev.layout import Layout
@@ -38,7 +36,7 @@ from lup_dev.stored import read_model, write_model
 if TYPE_CHECKING:
     from conftest import Kit, Shell
 
-    from lup_dev.launch.trust import Tool
+    from lup_dev.approval import Tool
 
 LUP_LOCK = """\
 version = 1

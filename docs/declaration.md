@@ -30,7 +30,7 @@ The fixed file is chosen over a module named in `pyproject.toml` on three counts
 
 **(leaning)** When a project's own modules outgrow one file, the declaration becomes the package `lup_project/`, its `__init__.py` binding `project` (*A project's own module*). Both at once fail the load.
 
-The declaration is protected (`DESIGN.md`, *Policy*): every change to it reaches the operator. The judge reads it from the integration branch's tip, the gate from the worktree.
+The declaration is protected (`DESIGN.md`, *Policy*): every change to it reaches the operator. The judge reads it at the commit the operator approved (`docs/judging-writes.md`, *The declaration, from the approved commit*), the gate from the worktree.
 
 ### The declaration
 
@@ -199,8 +199,8 @@ class Narration(Module):
 ```
 
 - **Its code parts are string addresses** (*One grammar for every kind*), so loading the declaration imports none of the project's code: the room's address is read when a session launches it, the command's when it's invoked.
-- **It lives in `lup_project.py`, or in the package `lup_project/` (leaning),** all of which is protected and read from the integration branch's tip. Every file the declaration is made of is code the judge runs, so it has to be reviewed as the declaration is; a fixed place lets the judge protect it without following imports. The alternatives: any file the declaration imports, protected by recording what loading it imported, which a branch can change; or a fixed sibling directory (`lup_modules/`), a second name for one thing.
-- **Its rule table** is named by its `rules` part (*A project's own rules*), and protected the same way: the judge reads the declaration from the integration branch's tip and protects each table a selected module names, so the protected list derives from the declaration.
+- **It lives in `lup_project.py`, or in the package `lup_project/` (leaning),** all of which is protected and read at the commit the operator approved. Every file the declaration is made of is code the judge runs, so it has to be reviewed as the declaration is; a fixed place lets the judge protect it without following imports. The alternatives: any file the declaration imports, protected by recording what loading it imported, which a branch can change; or a fixed sibling directory (`lup_modules/`), a second name for one thing.
+- **Its rule table** is named by its `rules` part (*A project's own rules*), and protected the same way: the judge reads the declaration at the approved commit and protects each table a selected module names, so the protected list derives from the declaration.
 
 ### One page for the whole project
 
@@ -323,7 +323,7 @@ A fourth abstract method takes `Runner` past the three `interface-shape` allows,
 
 Two methods because the judge and the gate differ: the gate may lock and sync (plain `uv run` relocks a stale lock), while the judge must never write `uv.lock`, a protected path the checkpoint would then judge as the agent's shell write (`docs/judging-writes.md`, *The engine: one typed tree*). A prefix string in place of the class couldn't give the judge a command apart from the gate's.
 
-**A runner's contract:** it runs a tool by putting its own command before it, as `uv run`, `poetry run` and `conda run -n …` do, so `command(tool)` is `command([])` followed by the tool, and `judging(tool)` is `judging([])` followed by it (`Runner`'s docstring). The judge keeps what it reads of a declaration as plain data, to stand in for one that can't load (`docs/judging-writes.md`, *The declaration, from the integration branch*), and a project's runner may be a class of its own that the data can't bring back. So the snapshot (`Declaration`, `declaration/resolve.py`) keeps the runner's commands, not the runner: `Prefixed`, lup's own runner holding the gate's and the judge's commands and the environment's files, built with `Prefixed.of(runner)`. By the contract those are the whole runner, so a stand-in judges with the commands the project's runner gave. The alternative, keeping the runner by its class's import path and importing it again, fails exactly when a stand-in is needed: the declaration that can't load is where that class lives.
+**A runner's contract:** it runs a tool by putting its own command before it, as `uv run`, `poetry run` and `conda run -n …` do, so `command(tool)` is `command([])` followed by the tool, and `judging(tool)` is `judging([])` followed by it (`Runner`'s docstring). The judge keeps what it reads of a declaration as plain data, to stand in for one that can't load (`docs/judging-writes.md`, *The declaration, from the approved commit*), and a project's runner may be a class of its own that the data can't bring back. So the snapshot (`Declaration`, `declaration/resolve.py`) keeps the runner's commands, not the runner: `Prefixed`, lup's own runner holding the gate's and the judge's commands and the environment's files, built with `Prefixed.of(runner)`. By the contract those are the whole runner, so a stand-in judges with the commands the project's runner gave. The alternative, keeping the runner by its class's import path and importing it again, fails exactly when a stand-in is needed: the declaration that can't load is where that class lives.
 
 Where it's used:
 - **the gate:** each step's command is the tool alone (`["ruff", "check", "--ignore-noqa"]`), run as `runner.command(…)`, or as written for a step with `in_environment=False` (`Step.in_environment`, `catalog/gate.py`); the `--fix` steps too. The gate reads the worktree's own declaration's runner, resolved;
@@ -447,12 +447,12 @@ The cost of TOML: a `[tool.pyright]` table in a file that isn't a `pyproject.tom
 ### How lup's settings are judged
 
 `.lup/settings/**` takes the `compiled` role, ahead of scratch (`.lup/**` is otherwise scratch, `catalog/paths.py`), as `DESIGN.md`'s protected paths have it (*Policy*):
-- **a write equal to what the judge generates from the integration branch's declaration is allowed,** so an agent runs `lup settings` after a declaration change lands on `dev` and nothing asks twice for one decision;
+- **a write equal to what the judge generates from the declaration it judges with is allowed,** so an agent runs `lup settings` after a declaration change lands on `dev` and is approved, and nothing asks twice for one decision;
 - **any other write is judged as a protected path's:** it asks, and made through the shell it's refused with the pointer to the file tools. A hand edit, or settings generated by a lup version other than the installed judge's, reaches the operator and never lands unseen.
 
 The alternatives: protected outright, which refuses an agent's regeneration as a shell write; or unguarded, left to the settings step alone.
 
-It's the integration branch's declaration for the same reason the judge reads only that one (`docs/judging-writes.md`, *Every worktree of the repository*): a branch never changes what judges it. The settings also read the workspace members' `pyproject.toml` (their `src/` and `requires-python`), so a branch changing a member's `requires-python` sees its regenerated settings ask until the change is on `dev`.
+It's the approved commit's declaration for the same reason the judge reads only that one (`docs/judging-writes.md`, *Every worktree of the repository*): a branch never changes what judges it. The settings also read the workspace members' `pyproject.toml` (their `src/` and `requires-python`), so a branch changing a member's `requires-python` sees its regenerated settings ask until the change is on `dev` and approved.
 
 **The settings step** (`settings`, `Python`'s, before ruff) fails when a generated file is stale (naming `lup settings`), when a pointer is missing (naming the line), or when pytest's `testpaths` misses a declared root. A `pyproject.toml` holding a tool's table doesn't fail it: those tables are the project's legitimate overrides.
 
@@ -501,7 +501,7 @@ Inserting an entry into an existing table, and type-checking one, take a TypeScr
 
 Either way the engine's helpers (`File` and what it returns) become lup's public API, versioned, with migrations when one changes.
 
-**How they're reviewed: as the declaration is.** Each table a selected module names is protected, so every change to it reaches the operator, and the judge reads it from the integration branch's tip, so a branch's rule runs only once it's on `dev`. The declaration is already code the judge imports and runs, reviewed this way; the tables add nothing to the judge. The alternative is approving a table by its content, in a review of its own, from the start or once trust on launch is built.
+**How they're reviewed: as the declaration is.** Each table a selected module names is protected, so every change to it reaches the operator, and the judge reads it at the approved commit, so a branch's rule runs only once it's on `dev` and approved. The declaration is already code the judge imports and runs, reviewed this way; the tables add nothing to the judge. The alternative is approving a table by its content, in a review of its own, from the start or once trust on launch is built.
 
 ### Rules and conventions
 

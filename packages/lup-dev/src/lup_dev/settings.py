@@ -37,12 +37,13 @@ class LupDevSettings(Settings):
     points both at the first lup. It goes with the bridge.
     """
     lup_integration_branch: str = "dev"
-    """`LUP_INTEGRATION_BRANCH`: the branch whose tip holds the declaration judged by.
+    """`LUP_INTEGRATION_BRANCH`: the branch whose tip holds what the host runs, and the declaration judged by.
 
-    Every worktree of a repository is judged by the declaration committed at that
-    branch's tip, so a branch's edits to it take effect when they land there. A
-    repository without the branch is judged by the declaration each worktree's
-    `HEAD` commit holds.
+    Trust on launch approves the host zone at its tip, and once a commit is
+    approved, every worktree of the repository is judged by the declaration
+    committed there; before any approval, by the declaration at the tip, so a
+    branch's edits to it take effect when they land there. A repository without
+    the branch is judged by the declaration each worktree's `HEAD` commit holds.
     """
 
 

@@ -435,7 +435,7 @@ def importers(worktree: Path) -> None:
     """Run a worktree's background importers pass; the checkpoint starts it.
 
     The engine is asked with the runner of the declaration the judge reads there,
-    the integration branch's, so the pass and the judge share one engine.
+    the approved commit's, so the pass and the judge share one engine.
     """
     judging = services()
     repository = Worktree.at(worktree, judging.layout).repository
