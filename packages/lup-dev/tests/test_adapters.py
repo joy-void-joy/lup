@@ -731,19 +731,13 @@ def test_codex_0_162_1_patch_is_refused_after_its_call(
     assert running(kit, repo) == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason=(
-        "A Claude Code session hooked only on `PreToolUse` for `Edit|Write` (lup's "
-        "own `.claude/settings.json`, and a launched Claude Code room) counts each "
-        "write it allows as a call running in the worktree, and nothing ever "
-        "finishes it; so no checkpoint runs there again, for any session"
-    ),
-)
 def test_codex_judges_a_patch_in_a_worktree_a_claude_write_was_allowed_in(
-    on_codex: Bench, on_claude: Bench, repo: Path
+    on_codex: Bench, on_claude: Bench, repo: Path, kit: Kit
 ) -> None:
+    """A Claude Code session hooked only on `PreToolUse` for `Edit|Write` (lup's own
+    settings, a launched Claude Code room) leaves each write it allows counted, and
+    no hook finishes it: another session's checkpoints don't wait on it."""
+
     def from_claude(event: str, **fields: object) -> str:
         sent = {"session_id": "c1", "cwd": str(repo), "hook_event_name": event}
         return json.dumps({**sent, **fields})
@@ -764,31 +758,47 @@ def test_codex_judges_a_patch_in_a_worktree_a_claude_write_was_allowed_in(
     assert json.loads(output)["hookSpecificOutput"]["additionalContext"].startswith(
         "lup refused 1 file."
     )
+    assert running(kit, repo) == ["toolu_1"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason=(
-        "Codex 0.162.1 runs `PostToolUse` only for a call that succeeded "
-        "(`core/src/tools/registry.rs`): a patch that fails to apply leaves its "
-        "`PreToolUse` counted as running, and without `Stop` hooked nothing clears "
-        "it, so no checkpoint runs in the worktree again"
-    ),
-)
-def test_codex_judges_a_patch_after_one_that_failed(
+FAILED_PATCH = "exec-b983ecfa-5dea-4c4e-bc2b-98ce1477eed1"
+"""The call of the captured patch that failed to apply, which no `PostToolUse` finishes."""
+
+
+def test_codex_judges_a_patch_after_one_that_failed_at_the_turns_end(
     on_codex: Bench, repo: Path, kit: Kit
 ) -> None:
+    """Codex 0.162.1 runs `PostToolUse` only for a call that succeeded: the failed
+    patch's call stays counted, so its session's checkpoints wait for the turn's
+    end, which clears it and judges what the turn left."""
     codex.hook(captured("1-session-start", repo), on_codex)
     codex.hook(captured("8-pre-tool-use-failed-patch", repo), on_codex)
     codex.hook(captured("2-pre-tool-use-add", repo), on_codex)
     (repo / "livecheck.py").write_text(LIVECHECK)
-    output = codex.hook(captured("3-post-tool-use-add", repo), on_codex)
+    assert codex.hook(captured("3-post-tool-use-add", repo), on_codex) == ""
+    assert running(kit, repo) == [FAILED_PATCH]
+    output = json.loads(codex.hook(captured("9-stop", repo), on_codex))
+    assert output["decision"] == "block"
+    assert output["reason"].startswith("lup refused 1 file.")
     assert not (repo / "livecheck.py").exists()
-    assert json.loads(output)["hookSpecificOutput"]["additionalContext"].startswith(
+    assert running(kit, repo) == []
+
+
+def test_codex_clears_a_failed_patchs_call_at_the_turns_end(
+    on_codex: Bench, repo: Path, kit: Kit
+) -> None:
+    codex.hook(captured("1-session-start", repo), on_codex)
+    codex.hook(captured("8-pre-tool-use-failed-patch", repo), on_codex)
+    assert running(kit, repo) == [FAILED_PATCH]
+    assert codex.hook(captured("9-stop", repo), on_codex) == ""
+    assert running(kit, repo) == []
+    codex.hook(captured("2-pre-tool-use-add", repo), on_codex)
+    (repo / "livecheck.py").write_text(LIVECHECK)
+    output = json.loads(codex.hook(captured("3-post-tool-use-add", repo), on_codex))
+    assert output["hookSpecificOutput"]["additionalContext"].startswith(
         "lup refused 1 file."
     )
-    assert running(kit, repo) == []
+    assert not (repo / "livecheck.py").exists()
 
 
 # In a launched room
@@ -832,6 +842,8 @@ def test_codex_hooks_the_judges_events_in_a_room() -> None:
         Hook(event="session-started", command=HOOK, timeout=hold),
         Hook(event="call-started", command=HOOK, timeout=hold),
         Hook(event="call-finished", command=HOOK, timeout=hold),
+        Hook(event="turn-ended", command=HOOK, timeout=hold),
+        Hook(event="conversation-ended", command=HOOK, timeout=hold),
     ]
 
 

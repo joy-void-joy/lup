@@ -179,28 +179,49 @@ def test_a_call_that_never_finishes_is_cleared_when_the_turn_ends(
     assert finish(kit, repo, "c2").context == ""
 
 
+def running(kit: Kit, repo: Path) -> list[str]:
+    return [each.key for each in worktree(kit, repo).running().calls]
+
+
 def test_a_turns_end_clears_only_its_own_sessions_calls(kit: Kit, repo: Path) -> None:
     start(kit, repo, "other")
     start(kit, repo)
     call_for("other", kit, repo, "o1")
+    call(kit, repo, "lost")
     end(kit, repo)
-    (repo / CORE).write_text((repo / CORE).read_text() + "y = 2  # BAD regex\n")
-    call(kit, repo, "c1")
-    assert finish(kit, repo, "c1").context == ""
-    assert "# BAD regex" in (repo / CORE).read_text()
-    told = finish(kit, repo, "o1", session="other").context
-    assert told.startswith("lup refused 1 file.")
+    assert running(kit, repo) == ["o1"]
 
 
-def test_a_session_starting_while_another_writes_leaves_that_write_to_be_judged(
+def test_another_sessions_call_doesnt_hold_back_a_checkpoint(
     kit: Kit, repo: Path
 ) -> None:
+    """A call no hook will finish (a configuration hooking only `PreToolUse`, a
+    session that crashed) mustn't keep every session's checkpoints from running."""
+    start(kit, repo, "other")
+    start(kit, repo)
+    call_for("other", kit, repo, "o1")
+    reply = shell_write(
+        kit, repo, "c1", CORE, (repo / CORE).read_text() + "y = 2  # BAD regex\n"
+    )
+    assert reply.context.startswith("lup refused 1 file.")
+    assert "# BAD regex" not in (repo / CORE).read_text()
+    assert running(kit, repo) == ["o1"]
+
+
+def test_a_session_starting_accepts_the_worktree_whatever_another_session_runs(
+    kit: Kit, repo: Path
+) -> None:
+    """What changed before a session's first call is accepted, even while another
+    session's call runs: that session's write in progress then goes unjudged, the
+    price of not waiting on another session's calls."""
     start(kit, repo, "other")
     call_for("other", kit, repo, "o1")
     (repo / CORE).write_text((repo / CORE).read_text() + "y = 2  # BAD regex\n")
     start(kit, repo)
-    told = finish(kit, repo, "o1", session="other").context
-    assert told.startswith("lup refused 1 file.")
+    call(kit, repo, "c1")
+    assert finish(kit, repo, "c1").context == ""
+    assert finish(kit, repo, "o1", session="other").context == ""
+    assert "# BAD regex" in (repo / CORE).read_text()
 
 
 def test_a_new_file_through_the_shell_comes_back_through_the_file_tools(
