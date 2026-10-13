@@ -261,8 +261,8 @@ def test_codex_compiles_its_flags_overrides_requirements_and_mounts(
         'model_reasoning_effort="high"',
         "-c",
         (
-            'projects={"/srv/lup.git/tree/dev" = {"trust_level" = "trusted"}, '
-            '"/srv/lup.git" = {"trust_level" = "trusted"}}'
+            'projects={"/srv/lup.git/tree/dev" = {trust_level = "trusted"},'
+            '"/srv/lup.git" = {trust_level = "trusted"}}'
         ),
         "-c",
         "features.memories=false",
@@ -271,10 +271,7 @@ def test_codex_compiles_its_flags_overrides_requirements_and_mounts(
         "-c",
         "features.plugins=false",
         "-c",
-        (
-            'mcp_servers={"node_repl" = {"enabled" = false}, '
-            '"docs.search" = {"enabled" = false}}'
-        ),
+        'mcp_servers={node_repl = {enabled = false},"docs.search" = {enabled = false}}',
         "-c",
         "developer_instructions=" + json.dumps(GUIDANCE),
         "-c",
@@ -359,8 +356,7 @@ def test_codex_without_an_operator_config_or_settings_turns_off_only_its_own(
         "project_doc_max_bytes=0",
     ]
     assert terminal.files == {
-        launch
-        / "requirements.toml": '"allow_managed_hooks_only" = true\n"hooks" = {}\n'
+        launch / "requirements.toml": "allow_managed_hooks_only = true\n\n[hooks]\n"
     }
 
 
@@ -414,18 +410,20 @@ def test_codex_refuses_an_operator_config_that_isnt_toml(
 def test_toml_values_read_back_as_written() -> None:
     value: JsonValue = {
         "unicode": "naïve 🎧",
-        "escapes": 'a "quote", a \\ and a\nnewline',
-        "numbers": [0, -3, 12],
-        "nested": {"dotted.key": {"flag": True}},
+        "escapes": 'a "quote", a \\ and a\nnewline, a delete \x7f character',
+        "numbers": [0, -3, 12, 1.5],
+        "nested": {"dotted.key": {"flag": True, "tables": [{"in": "an array"}]}},
     }
 
-    assert tomllib.loads(f"v = {toml(value)}")["v"] == value
+    written = toml(value)
+
+    assert "\n" not in written
+    assert tomllib.loads(f"v = {written}")["v"] == value
 
 
-@pytest.mark.parametrize("value", ["a delete \x7f character", 1.5, None])
-def test_toml_refuses_what_it_cant_write(value: str | float | None) -> None:
-    with pytest.raises(TerminalError):
-        toml(value)
+def test_toml_refuses_what_it_cant_write() -> None:
+    with pytest.raises(TerminalError, match="has no TOML value"):
+        toml({"unset": None})
 
 
 # The neutral terms
