@@ -14,7 +14,7 @@ What it leaves to other pieces:
 - everything in pieces 2 to 4. Until piece 2 lands, a launched session can't push or reach GitHub, so lup's own sessions move onto launch with piece 2 (*Building it*);
 - rooms from code: `Room` as an `Agent`, with `ask` and `spawn` in a container. The check `DESIGN.md` owed for it is answered: the SDK on the host drove the CLI in a container over stdio, and the CLI reached an in-process tool on the host;
 - the clipboard, devices and a browser in the room, each with the first lup's evidence in `docs/field-notes.md`. The clipboard comes later; none blocks a maintaining session;
-- trust on launch, budgets and `accounts`.
+- budgets and `accounts`.
 
 **It builds on the declaration's slice A** (`docs/declaration.md`, *Building it*). A launch reads `Core`'s session settings, each module's guidance, packages and requirements, and the runner, all parts of modules. So slice A lands first, and the command is `lup-dev launch` until slice C makes it `lup launch`.
 
@@ -30,15 +30,31 @@ A launch starts in the worktree it's run from. Any argument lup doesn't know rea
 
 A launch, in order:
 1. loads the declaration from the integration branch's tip, as the judge does, so a branch can't change the room it runs in;
-2. checks the host's requirements (podman) and starts the host service if none is running;
-3. fetches the runtime's latest CLI if a newer one is out (*The CLIs*);
-4. builds the room's image if its definition changed;
-5. compiles lup's settings and guidance into a launch directory under lup's state;
-6. registers the launch with the host service, which opens the launch's hook socket;
-7. runs the container in the foreground with a terminal: its first process checks the modules' requirements inside the room, all at once, then becomes the CLI;
-8. when the CLI exits: the container is removed, the launch unregistered, its directory removed.
+2. checks the host zone against the copy the operator approved, and where it changed, shows the diff and asks (*Trust on launch*);
+3. checks the host's requirements (podman) and starts the host service if none is running, or restarts it on a copy just approved;
+4. fetches the runtime's latest CLI if a newer one is out (*The CLIs*);
+5. builds the room's image if its definition changed;
+6. compiles lup's settings and guidance into a launch directory under lup's state;
+7. registers the launch with the host service, which opens the launch's hook socket;
+8. runs the container in the foreground with a terminal: its first process checks the modules' requirements inside the room, all at once, then becomes the CLI;
+9. when the CLI exits: the container is removed, the launch unregistered, its directory removed.
 
 Measured: a container starts in 0.55 to 0.9 s; an image already built and a CLI already current cost nothing more.
+
+## Trust on launch
+
+The code that runs on the operator's machine, outside every room, is approved before it runs (`DESIGN.md`, *Policy*, *Trust on launch*). There is no install step to remember: the launch itself asks, the way the first lup's launcher asked adlib's operator, "the first time, and whenever adlib's own code has changed since". `lup-dev install` goes.
+
+- **The host zone** is what the host runs for a project:
+  - its declaration (`lup_project.py`, or the package `lup_project/`), and the files a selected module names that the host imports (its conditions module, later its rule tables);
+  - the `lup-dev` it runs: for lup's own repository, `lup-dev`'s and `lup`'s source and the engine's, which the operator builds from; for any other project, the `lup-dev` release its lock file pins.
+- **Read at the integration branch's tip,** as the judge reads the declaration, so what's approved is what the judge and the host service will run, never a branch's own copy.
+- **Its fingerprint is kept with the copy the operator approved,** per repository, in lup's state. A launch compares the tip's host zone with it.
+- **Changed, or never approved:** the launch shows what changed since the approved copy (`git diff` over the host zone, in the terminal's pager; on the first time, every file of the zone), and asks once, yes or no. In the terminal until piece 2 brings the inbox, where `lup inbox` and the dashboard show it as any other item.
+  - **Yes:** the engine is built, the zone's copy installed as the host's `lup-dev`, the host service restarted on it (its rooms keep their sockets: *On the host: the service*), the approval recorded, and the session launched.
+  - **No:** the session launches on the copy approved before, and the launch says the tip isn't the code judging it. With no copy approved yet, it doesn't launch.
+- **What it costs:** after a large merge, the next launch shows a large diff (the declaration's slice A was about 5,000 lines of the judge). That is the review; it comes at launch rather than at a separate step.
+- The installer's review parked in the first lup's dashboard (`legacy_dashboard.py`'s `LegacyDashboard`) goes with `lup-dev install`.
 
 ## The room
 
@@ -243,7 +259,8 @@ status = room.launch(arguments=["--resume"], settings=settings)   # a terminal; 
 | `host/protocol.py` | The control requests and replies (`Register`, `Unregister`, `Stop`; `Registered`, `Done`, `Refused`), and `HostError` |
 | `host/client.py` | Finding the service, or starting it (`HostClient`; `Starter`, and `Detached`, which starts `lup-dev host`) |
 | `catalog/room.py` | lup's base image and its pinned snapshot date, the standard machine's packages, the default session settings |
-| `cli.py` | `launch claude\|codex` and `host [stop]`, until slice C gives each command group its file |
+| `launch/trust.py` | The host zone, its fingerprint, the copy approved, the diff shown and the answer asked, and installing an approved copy |
+| `cli.py` | `launch claude\|codex` and `host [stop]`, until slice C gives each command group its file; `install` goes |
 
 The declaration's slice A gains:
 - the `Packages` kind, each module's `packages` part, and `Core`'s default, the standard machine;
@@ -285,7 +302,7 @@ After the declaration's slice A, on one branch, `feat-launch`:
 1. the library's rooms and each adapter's terminal compile;
 2. slice A's new parts: `Packages`, `Session`, `Guidance`, `Requirement.package`, `Runner.room()`;
 3. the host service, and the hook through it;
-4. the CLI cache, the maintaining room, the logins, guidance and the command;
+4. trust on launch, the CLI cache, the maintaining room, the logins, guidance and the command;
 5. the live checks, and what they find recorded in `docs/field-notes.md`.
 
 lup's own sessions move onto launch once piece 2 lands, since before it a launched session can't push. The committed `.claude/settings.json`, `.claude/hooks/` and `.codex/hooks.json` then go, in a change to protected paths the operator makes.
