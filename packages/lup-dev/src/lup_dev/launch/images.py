@@ -81,6 +81,18 @@ class Build(Model):
     size: int
     """The image's size in bytes, as podman lists it after the build."""
 
+    def took(self) -> timedelta:
+        """Return how long the build took, to the second, as a launch says it.
+
+        >>> from datetime import UTC
+        >>> finished = datetime(2026, 10, 13, tzinfo=UTC)
+        >>> made = Build(tag="t", project="p", finished=finished, size=1,
+        ...     duration=timedelta(seconds=47.665048))
+        >>> str(made.took())
+        '0:00:48'
+        """
+        return timedelta(seconds=round(self.duration.total_seconds()))
+
 
 def build(image: Image, podman: Podman, clock: Clock, record: Path) -> Build | None:
     """Build `image` if its tag is missing, record the build, and remove its project's older images.

@@ -316,7 +316,7 @@ def launched(
             room.image, launcher.podman, launcher.clock, launcher.layout.builds
         )
         if built is not None:
-            launcher.say(f"Built the room's image in {built.duration}: {built.tag}.")
+            launcher.say(f"Built the room's image in {built.took()}: {built.tag}.")
         launch = secrets.token_hex(8)
         own = launcher.layout.launch(launch)
         settings = terminal_settings(
