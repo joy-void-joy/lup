@@ -88,3 +88,7 @@ class Container(Model):
     """The variables set in the room, beside `HOME`, which the run sets."""
     network: Literal["host", "own"] = "own"
     """The host's network, sharing its localhost both ways, or the room's own."""
+    name: str | None = None
+    """The container's name while it runs, which podman gives one container at a
+    time, so whoever started it can ask whether it's still there; none lets podman
+    pick one."""

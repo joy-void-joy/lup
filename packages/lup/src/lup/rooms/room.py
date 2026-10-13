@@ -56,6 +56,7 @@ class Room(Model, arbitrary_types_allowed=True):
             mounts=[*own.mounts, *terminal.mounts],
             env={**own.env, **terminal.env},
             network=own.network,
+            name=own.name,
         )
         workdir = Path.cwd()
         mounted = [

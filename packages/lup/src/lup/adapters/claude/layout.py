@@ -40,6 +40,11 @@ class ClaudeLayout(Model):
         return self.home / ".claude" if self.configured is None else self.configured
 
     @property
+    def settings(self) -> Path:
+        """The operator's own settings: the model their `/model` saved, the theme, and the like."""
+        return self.directory / "settings.json"
+
+    @property
     def state(self) -> Path:
         """The operator's state file: onboarding, folder trust, and the like."""
         return (
