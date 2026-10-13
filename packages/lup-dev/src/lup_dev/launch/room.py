@@ -42,6 +42,7 @@ from typing import TYPE_CHECKING
 from lup.rooms.container import Container, Image, Mount
 from lup.types import Model
 from lup_dev.catalog.room import Editors, RoomBase
+from lup_dev.declaration.requirements import Needed, Requirement
 from lup_dev.errors import LupDevError
 from lup_dev.git import Git, nul_separated
 from lup_dev.launch.images import definition
@@ -59,6 +60,16 @@ class RoomError(LupDevError):
     """A room the declaration and the machine can't make as they stand."""
 
 
+def host_needs() -> list[Needed]:
+    """Return what the host needs to run a room, as requirements checked at once: podman, rootless."""
+    podman = Requirement(
+        tool="podman",
+        why="runs each session's room, rootless",
+        install="your system's `podman` package, set up for rootless containers",
+    )
+    return [Needed(module="lup-dev launch", requirement=podman)]
+
+
 class Repository(Model):
     """A repository as a room mounts it."""
 
@@ -67,6 +78,10 @@ class Repository(Model):
     worktrees: list[Path]
     """Each worktree's root that exists, as `git worktree list` gives it; a bare
     repository's own directory among them."""
+    main: Path
+    """The main worktree, which `git worktree list` gives first: a clone's root, or
+    a bare repository's own directory. The runtimes ask about it for a linked
+    worktree, so a launch trusts it too."""
     tree: Path
     """The nearest directory holding the git directory and every worktree, mounted whole."""
 
@@ -101,7 +116,8 @@ def repository(worktree: Path) -> Repository:
             "(`git worktree move`), and launch again"
         )
         raise RoomError(message)
-    return Repository(git=common, worktrees=present, tree=tree)
+    [main, *_] = roots
+    return Repository(git=common, worktrees=present, main=main, tree=tree)
 
 
 def maintaining_room(

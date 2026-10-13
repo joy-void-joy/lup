@@ -17,8 +17,24 @@ end follows such a block. When judging itself fails at a turn's end, the turn
 ends, and the operator is warned once in `systemMessage`, which also carries what
 the session's turn's end tells without holding it.
 
+In a launched room (`docs/launch.md`, *The one hook and the host service*), Claude
+Code runs the room's hook on `SessionStart`, and on `PreToolUse` for the file tools
+whose writes are judged before they land (`hooks`, `WRITING`): no checkpoint, as in
+lup's own repository. Where the launch's judge can't answer a hook, the host
+service answers it through `unanswered`: a file tool's write is denied, naming why,
+since a write let through unjudged would land unseen; any other hook warns the
+operator in `systemMessage`, and the call goes on. Where the room's hook can't
+reach the service, it ends with status 1 and says why on standard error: a
+non-blocking error, which Claude Code shows, and the call goes on.
+
 What this relies on, from Claude Code's hooks reference
 (code.claude.com/docs/en/hooks):
+- a hook ending with status 0 and printing nothing has "no decision to report";
+  with any status but 0 or 2 it's "a non-blocking error": "You see a `<hook
+  name> hook error` notice in the transcript with `Failed with non-blocking
+  status code:` and the first line of your hook's stderr", and "The action goes
+  ahead"; status 2 alone blocks the call, so the room's hook never ends with it;
+- `systemMessage` is a "Warning message shown to the user";
 - `tool_use_id` is in both `PreToolUse` and `PostToolUse`, so a call's start and
   finish match; a call that fails fires `PostToolUseFailure` instead, with the same
   id;
@@ -52,11 +68,13 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Literal, override
 
-from pydantic import Field, TypeAdapter
+from pydantic import Field, TypeAdapter, ValidationError
 from pydantic.alias_generators import to_camel
 
-from lup.sessions.terminal import Cli
+import lup
+from lup.sessions.terminal import Cli, Hook
 from lup.types import JsonObject, Model, Settings
+from lup_dev.adapters import Adapter
 from lup_dev.launch.clis import (
     Channel,
     ChannelError,
@@ -81,7 +99,15 @@ from lup_dev.policy.report import judge_failed
 from lup_dev.policy.runtime import Runtime
 
 if TYPE_CHECKING:
+    from datetime import timedelta
+
     import httpx
+
+    from lup.sessions.declaration import Declaration
+
+WRITING = ["Edit", "Write"]
+"""The file tools whose writes are judged before they land: `PreToolUse.proposal`
+reads each, and a launched session's hook matches them."""
 
 
 class Variables(Settings):
@@ -178,6 +204,10 @@ class Payload(Model, ABC):
     def failed(self, bench: Bench, failure: Exception) -> Output | None:
         """Return what to print when judging itself failed."""
 
+    @abstractmethod
+    def unanswered(self, said: str) -> Output:
+        """Return what to print where lup's judge couldn't answer the hook at all, `said` saying why."""
+
 
 class SessionStart(Payload):
     """`SessionStart`: a session starts, resumes, or is cleared or compacted."""
@@ -194,6 +224,10 @@ class SessionStart(Payload):
     @override
     def failed(self, bench: Bench, failure: Exception) -> Output | None:
         return None
+
+    @override
+    def unanswered(self, said: str) -> Output:
+        return OperatorWarning(system_message=said)
 
 
 class Edit(Model):
@@ -305,6 +339,20 @@ class PreToolUse(Payload):
         )
         return Specific(hook_specific_output=refused)
 
+    @override
+    def unanswered(self, said: str) -> Output:
+        """Refuse a file tool's write, telling the agent why; warn the operator of any other call, which goes on.
+
+        Let through, a write would land unjudged and unseen.
+        """
+        if self.tool_name not in WRITING:
+            return OperatorWarning(system_message=said)
+        refused = PreToolUseAnswer(
+            permission_decision="deny",
+            permission_decision_reason=f"{said}. Tell the operator.",
+        )
+        return Specific(hook_specific_output=refused)
+
 
 class PostToolUse(Payload):
     """`PostToolUse` or `PostToolUseFailure`: a tool call finished, or failed."""
@@ -336,6 +384,10 @@ class PostToolUse(Payload):
             additional_context=failure_note(failure),
         )
         return Specific(hook_specific_output=said)
+
+    @override
+    def unanswered(self, said: str) -> Output:
+        return OperatorWarning(system_message=said)
 
 
 class Stop(Payload):
@@ -373,6 +425,10 @@ class Stop(Payload):
             return None
         return OperatorWarning(system_message=warning)
 
+    @override
+    def unanswered(self, said: str) -> Output:
+        return OperatorWarning(system_message=said)
+
 
 class SubagentStop(Payload):
     """`SubagentStop`: a subagent's conversation ends its turn.
@@ -400,6 +456,10 @@ class SubagentStop(Payload):
             return None
         return OperatorWarning(system_message=warning)
 
+    @override
+    def unanswered(self, said: str) -> Output:
+        return OperatorWarning(system_message=said)
+
 
 type Received = Annotated[
     SessionStart | PreToolUse | PostToolUse | Stop | SubagentStop,
@@ -422,6 +482,49 @@ def hook(raw: str, bench: Bench) -> str:
     if output is None:
         return ""
     return output.model_dump_json(by_alias=True, exclude_none=True)
+
+
+def unanswered(raw: str, failure: str) -> str:
+    """Answer a hook lup's judge couldn't, saying `failure` in Claude Code's terms.
+
+    Each hook answers as its payload says (`Payload.unanswered`); a payload that
+    doesn't read as a hook warns the operator in `systemMessage`.
+    """
+    said = f"lup's judge couldn't answer this hook, so it wasn't judged: {failure}"
+    try:
+        received: Payload = TypeAdapter[Received](Received).validate_json(raw)
+    except ValidationError:
+        output: Output = OperatorWarning(system_message=said)
+    else:
+        output = received.unanswered(said)
+    return output.model_dump_json(by_alias=True, exclude_none=True)
+
+
+def hooks(command: list[str], timeout: timedelta) -> list[Hook]:
+    """Return the hooks a launched Claude Code session runs `command` at: the events the judge reads.
+
+    `SessionStart`, and `PreToolUse` on the file tools, judged before they land.
+    Each waits up to `timeout`, which a hold's wait for the operator needs.
+    """
+    return [
+        Hook(event="session-started", command=command, timeout=timeout),
+        Hook(
+            event="call-started",
+            matcher="|".join(WRITING),
+            command=command,
+            timeout=timeout,
+        ),
+    ]
+
+
+def agent(fallback: str = "default") -> Declaration:
+    """Return the declaration a launched Claude Code session runs: the model the operator's own settings choose.
+
+    Where they choose none, `fallback`: `default`, which Claude Code documents as
+    reverting "to the runtime default for your account" (`model-config`). Raise
+    `lup.RuntimeMissingError` where the `lup[claude]` extra isn't installed.
+    """
+    return lup.Claude.chosen(default=fallback)
 
 
 class Build(Model):
@@ -480,3 +583,15 @@ class ClaudeChannel(Channel):
             message = f"{url} lists no build for {self.platform}"
             raise ChannelError(message)
         return found
+
+
+def adapter() -> Adapter:
+    """Return what lup needs of Claude Code: its hooks answered, and its launch."""
+    return Adapter(
+        runtime=Claude(),
+        hook=hook,
+        unanswered=unanswered,
+        hooks=hooks,
+        channel=ClaudeChannel(),
+        agent=agent,
+    )

@@ -2,16 +2,19 @@
 
 Each selected module's `guidance` part names its sections, in module order as the
 declaration resolves them (`docs/declaration.md`, *What a launch reads*). Each
-section's text is read from its file at the project's root, or from the Python
-package shipping it, and rendered with Jinja (`docs/launch.md`, *Guidance*):
+section's text is read from its file in the project, at the commit the operator
+approved as its declaration is, or from the Python package shipping it, the
+installed `lup_dev` for lup's own, and rendered with Jinja (`docs/launch.md`,
+*Guidance*):
 - a section names the project's commands through its runner, `{{ run("lup-dev
   check") }}`, which the runner spells, so no section spells uv;
 - a name the section doesn't have is refused, rather than rendered as nothing;
 - the environment is Jinja's sandbox, since an agent can write a section's file
   and the rendering runs on the host, outside every room.
 
-The person's own section, `AGENTS.local.md` at the root, which git ignores, is
-appended after every other where there's one, so it holds where they differ. The
+The person's own section, `AGENTS.local.md` at the root of the worktree launched,
+which git ignores, is appended after every other where there's one, so it holds
+where they differ. The
 document opens with one line saying how its sections stand to each other and to
 the runtime's own instructions.
 """
@@ -74,12 +77,15 @@ def read(section: Section, root: Path) -> str:
         raise GuidanceError(message) from error
 
 
-def render(resolved: Resolved, root: Path) -> str:
-    """Render the session's guidance from `resolved`'s sections, read at `root`.
+def render(resolved: Resolved, project: Path, worktree: Path) -> str:
+    """Render the session's guidance from `resolved`'s sections.
 
-    The sections go in the order the declaration gives them, then the person's
-    own, where `root` has one. Raise `GuidanceError` naming the section that
-    can't be read, or doesn't render.
+    The project's own sections are read in `project`, a directory holding the
+    project's files at the commit its declaration was read from, and the
+    person's own in `worktree`, the worktree launched. The sections go in the
+    order the declaration gives them, then the person's own, where there's one.
+    Raise `GuidanceError` naming the section that can't be read, or doesn't
+    render.
     """
     runner = resolved.runner
 
@@ -105,10 +111,10 @@ def render(resolved: Resolved, root: Path) -> str:
             raise GuidanceError(message) from error
 
     declared = [
-        rendered(described(section), read(section, root))
+        rendered(described(section), read(section, project))
         for section in resolved.guidance
     ]
-    local = CheckoutLayout(root=root).local_guidance
+    local = CheckoutLayout(root=worktree).local_guidance
     own = (
         [rendered(f"the person's own section (`{local}`)", local.read_text())]
         if local.is_file()

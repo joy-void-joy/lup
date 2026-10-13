@@ -2,17 +2,22 @@
 
 `docs/launch.md`, *On the host: the service*. It listens on a control socket on the
 host only, taking typed requests (`host/protocol.py`), each answered by the handler
-routed its kind: the service's own register a launch, end one, and stop the
-service; a module registers its own handlers with the service it builds
-(`Route.to`).
+routed its kind: the service's own register a launch, end one, list those served,
+and stop the service; a module registers its own handlers with the service it
+builds (`Route.to`).
 
 Each launch it serves gets a directory of its own holding `hook.sock`, which the
 launch's room mounts at `/run/lup`, so the service knows which launch speaks by the
 socket it hears it on. The hook socket takes a runtime's raw payload, read to the
-end, answers it with the service's `Answerer` (what `lup-dev hook <runtime>` does),
-writes the answer and closes. Hooks for parallel calls arrive at once and a hold
-waits for hours, so each answer runs in a thread of the service's pool, off the
-event loop.
+end, and answers it by running the launch's judge, its repository's approved copy
+of `lup-dev`, as a process of its own (`<judge> hook <runtime>`, the payload on its
+input, its answer what it prints), so each session is judged by the code approved
+for its repository. Hooks for parallel calls arrive at once and a hold waits for
+hours, so each answer waits on its judge in a thread of the service's pool, off
+the event loop. Where the judge can't answer (its command missing, or ending with
+a failure, a payload it can't read among them), the service answers in the
+runtime's own terms through the `Answerer`, rather than closing empty, which the
+runtime would take as no decision.
 
 Each launch is recorded beside its directory, so a service started after one
 stopped serves the same launches, in the directories their rooms mounted. The
@@ -21,6 +26,7 @@ before its process exits, but their hooks hear nothing.
 """
 
 import asyncio
+import shlex
 import shutil
 import traceback
 from abc import ABC, abstractmethod
@@ -30,6 +36,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, override
 
+import sh
 from filelock import FileLock, Timeout
 from pydantic import ValidationError, field_validator
 
@@ -37,6 +44,8 @@ from lup.types import Model, MutableModel
 from lup_dev.host.protocol import (
     Done,
     HostError,
+    Listed,
+    ListLaunches,
     Refused,
     Register,
     Registered,
@@ -53,19 +62,65 @@ if TYPE_CHECKING:
 
 
 class Answerer(ABC):
-    """Answers a runtime's hooks as `lup-dev hook <runtime>` does: the command line's."""
+    """What the service knows of each runtime lup knows: its name, and how it hears a hook its judge couldn't answer."""
 
     @abstractmethod
     def runtimes(self) -> list[str]:
-        """Name the runtimes whose hooks this answers."""
+        """Name the runtimes whose hooks the service answers."""
 
     @abstractmethod
-    def answer(self, runtime: str, payload: str) -> str:
-        """Answer one of `runtime`'s hooks: its payload in, what the hook prints out.
+    def unanswered(self, runtime: str, payload: str, failure: str) -> str:
+        """Answer one of `runtime`'s hooks its launch's judge couldn't, saying `failure` in the runtime's own terms.
 
-        It blocks for as long as judging does, a hold's wait for the operator
-        included.
+        What the hook prints: a payload in, whether or not it reads as one of the
+        runtime's hooks.
         """
+
+
+class Asked(Model):
+    """One hook put to a launch's judge: the command running it, and the payload on its input."""
+
+    command: list[str]
+    payload: str
+
+
+class Judged(Model):
+    """How a judge's process ended: its status, what it printed, and what it said beside."""
+
+    status: int
+    output: str
+    """What it printed: the hook's answer, where `status` is 0."""
+    error: str
+    """What it wrote to its standard error, or why it couldn't run."""
+
+
+def judged(asked: Asked) -> Judged:
+    """Run the judge's process to its end, the payload on its input."""
+    program, *arguments = asked.command
+    try:
+        ran = sh.Command(program)(
+            *arguments,
+            _in=asked.payload,
+            _ok_code=list(range(256)),
+            _tty_out=False,
+            _return_cmd=True,
+        )
+    except sh.CommandNotFound as missing:
+        return Judged(
+            status=127, output="", error=f"`{program}` isn't there: {missing}"
+        )
+    except sh.ErrorReturnCode as ended:
+        # Only a signal ends it outside the statuses taken.
+        return Judged(
+            status=ended.exit_code,
+            output=ended.stdout.decode(errors="replace"),
+            error=ended.stderr.decode(errors="replace"),
+        )
+    return Judged(
+        status=ran.exit_code,
+        output=ran.stdout.decode(errors="replace"),
+        error=ran.stderr.decode(errors="replace"),
+    )
 
 
 class Handler[R: Request](ABC):
@@ -119,6 +174,8 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
 
     layout: HostLayout
     answerer: Answerer
+    judge: Callable[[Asked], Judged]
+    """Runs a launch's judge for one hook; a test gives a stub."""
     say: Callable[[str], None]
     threads: ThreadPoolExecutor
     """The pool each hook is answered in, off the event loop."""
@@ -127,9 +184,9 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     async def open(self, request: Register) -> Path:
         """Serve a launch: its directory, its hook socket inside, its record.
 
-        A launch served already, or running a runtime the answerer doesn't know, is
-        refused. A directory left by a service before is used as it is, since the
-        launch's room mounted it.
+        A launch served already, running a runtime the answerer doesn't know, or
+        whose judge isn't there, is refused. A directory left by a service before
+        is used as it is, since the launch's room mounted it.
         """
         if request.launch in self.served:
             message = f"a launch named `{request.launch}` is served already"
@@ -139,6 +196,12 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             message = (
                 f"no runtime named `{request.runtime}`; "
                 f"the service answers {', '.join(known)}"
+            )
+            raise HostError(message)
+        if not request.judge.is_file():
+            message = (
+                f"the launch's judge, {request.judge}, isn't there: approving the "
+                "repository's host zone (`lup-dev trust`) installs it"
             )
             raise HostError(message)
         sockets = self.layout.launch(request.launch)
@@ -154,7 +217,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         self.layout.record(request.launch).write_text(request.model_dump_json(indent=2))
         self.say(
             f"{request.launch}: served, {request.runtime} in {request.worktree}, "
-            f"its sockets in {sockets.directory}"
+            f"judged by {request.judge}, its sockets in {sockets.directory}"
         )
         return sockets.directory
 
@@ -166,16 +229,16 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     ) -> None:
         """Answer one hook heard on a launch's socket, and close the connection.
 
-        The payload is read to the end and answered in the pool. A failed answer is
-        said, with its traceback, and the connection closes unanswered: the room's
-        socat prints nothing and ends with status 0, which the runtime takes as no
-        decision.
+        The payload is read to the end and answered in the pool. Where answering
+        fails even so, the failure is said, with its traceback, and the
+        connection closes unanswered: the room's hook prints nothing and ends with
+        status 0, which the runtime takes as no decision.
         """
         payload = (await reader.read()).decode()
         loop = asyncio.get_running_loop()
         try:
             answer = await loop.run_in_executor(
-                self.threads, self.answerer.answer, request.runtime, payload
+                self.threads, self.answered, request, payload
             )
         except Exception as failure:
             told = "".join(traceback.format_exception(failure))
@@ -190,6 +253,31 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             self.say(f"{request.launch}: the hook was gone before its answer: {gone}")
             return
         self.say(f"{request.launch}: answered a hook")
+
+    def answered(self, request: Register, payload: str) -> str:
+        """Return the judge's answer to one hook, or where it can't answer, the runtime's word that it couldn't.
+
+        What the judge said is the service's to tell, in full; the hook's answer
+        points there. It blocks for as long as judging does, a hold's wait for
+        the operator included.
+        """
+        asked = Asked(
+            command=[str(request.judge), "hook", request.runtime], payload=payload
+        )
+        ran = self.judge(asked)
+        if ran.status == 0:
+            return ran.output
+        command = shlex.join(asked.command)
+        self.say(
+            f"{request.launch}: `{command}` couldn't answer a hook (status "
+            f"{ran.status}). What it said:\n{ran.error}"
+        )
+        failure = (
+            f"`{command}` ended with status {ran.status}; what it said is in the "
+            f"host service's output, {self.layout.log} when it runs in the "
+            "background"
+        )
+        return self.answerer.unanswered(request.runtime, payload, failure)
 
     async def close(self, launch: str) -> None:
         """End a launch: its hook socket closed, its record and directory removed.
@@ -254,6 +342,22 @@ class Ending(Model, Handler[Unregister]):
         return Done()
 
 
+class Listing(Model, Handler[ListLaunches]):
+    """Answers `ListLaunches`: each launch served, as it was registered."""
+
+    launches: Launches
+
+    @override
+    def request(self) -> type[ListLaunches]:
+        return ListLaunches
+
+    @override
+    async def answer(self, request: ListLaunches) -> Reply:
+        return Listed(
+            launches=[served.launch for served in self.launches.served.values()]
+        )
+
+
 class Stopping(Model, Handler[Stop], arbitrary_types_allowed=True):
     """Answers `Stop`: the service stops once the reply is written."""
 
@@ -282,6 +386,8 @@ class HostService(Model, arbitrary_types_allowed=True):
     answerer: Answerer
     say: Callable[[str], None]
     """Where the service tells what it does: the terminal, or its log."""
+    judge: Callable[[Asked], Judged] = judged
+    """Runs a launch's judge for one hook, as a process of its own; a test gives a stub."""
     routes: list[Route] = []
     """The handlers modules register, beside the service's own."""
     threads: int = 256
@@ -296,6 +402,7 @@ class HostService(Model, arbitrary_types_allowed=True):
             [
                 Register.named(),
                 Unregister.named(),
+                ListLaunches.named(),
                 Stop.named(),
                 *(route.kind for route in routes),
             ]
@@ -331,12 +438,17 @@ class HostService(Model, arbitrary_types_allowed=True):
             max_workers=self.threads, thread_name_prefix="hook"
         )
         launches = Launches(
-            layout=self.layout, answerer=self.answerer, say=self.say, threads=threads
+            layout=self.layout,
+            answerer=self.answerer,
+            judge=self.judge,
+            say=self.say,
+            threads=threads,
         )
         stopped = asyncio.Event()
         own = [
             Route.to(Registering(launches=launches)),
             Route.to(Ending(launches=launches)),
+            Route.to(Listing(launches=launches)),
             Route.to(Stopping(stopped=stopped)),
         ]
         routes = {route.kind: route for route in [*own, *self.routes]}

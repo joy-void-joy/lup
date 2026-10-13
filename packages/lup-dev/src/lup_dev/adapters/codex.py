@@ -22,6 +22,16 @@ the "Working directory for the session", and `Bash` and `apply_patch` carry only
 `workspace-write` sandbox a write elsewhere lies outside the writable roots, so
 Codex's own approval decides it.
 
+In a launched room (`docs/launch.md`, *The one hook and the host service*), Codex
+runs the room's hook on `SessionStart`, `PreToolUse` and `PostToolUse` (`hooks`),
+the checkpoint after each call being the only place its hooks see a patch. Where
+the launch's judge can't answer a hook, the host service answers it through
+`unanswered`: at `PostToolUse` the agent is told beside the call's result, as when
+judging fails; anything else warns the operator in `systemMessage`, and the call
+goes on. Where the room's hook can't reach the service, it ends with status 1:
+Codex marks the hook's run failed, shows "hook exited with code 1" (not what the
+hook wrote to standard error), and the call goes on.
+
 What this relies on, from Codex's hooks documentation and its source at
 `rust-v0.156.1` (`codex-rs/hooks/schema/generated/`):
 - the inputs: `PreToolUse` and `PostToolUse` carry `tool_use_id`, `PostToolUse` its
@@ -50,7 +60,13 @@ What this relies on, from Codex's hooks documentation and its source at
   end while a subagent works;
 - `Stop`'s `stop_hook_active` says "Whether this turn was already continued by
   `Stop`"; `SubagentStop`'s output takes `decision`, `reason` and `systemMessage`
-  as `Stop`'s does (`subagent-stop.command.output`).
+  as `Stop`'s does (`subagent-stop.command.output`);
+- how a hook's end reads (`hooks/src/events/`, each event's `parse_completed`):
+  status 0 with nothing printed completes with no decision; any status but 0 or 2
+  marks the run failed with the entry "hook exited with code <status>", and the
+  call goes on; status 2 blocks where the event can, so the room's hook never ends
+  with it; `systemMessage` alone is a valid answer to every event this adapter
+  hooks, shown as a warning entry.
 
 Its release channel (`CodexChannel`) is the one its standalone installer reads
 (`https://chatgpt.com/codex/install.sh`, which the repository's README gives,
@@ -77,8 +93,10 @@ from typing import TYPE_CHECKING, Annotated, Literal, override
 from pydantic import Field, TypeAdapter, ValidationError
 from pydantic.alias_generators import to_camel
 
-from lup.sessions.terminal import Cli
+import lup
+from lup.sessions.terminal import Cli, Hook
 from lup.types import Model, Settings
+from lup_dev.adapters import Adapter
 from lup_dev.launch.clis import (
     Channel,
     ChannelError,
@@ -100,7 +118,12 @@ from lup_dev.policy.report import judge_failed
 from lup_dev.policy.runtime import Runtime
 
 if TYPE_CHECKING:
+    from datetime import timedelta
+
     import httpx
+
+    from lup.sessions.declaration import Declaration
+    from lup.sessions.terminal import Event
 
 
 class Variables(Settings):
@@ -188,6 +211,10 @@ class Payload(Model, ABC):
     def failed(self, bench: Bench, failure: Exception) -> Output | None:
         """Return what to print when judging itself failed."""
 
+    @abstractmethod
+    def unanswered(self, said: str) -> Output:
+        """Return what to print where lup's judge couldn't answer the hook at all, `said` saying why."""
+
 
 class SessionStart(Payload):
     """`SessionStart`: a session starts, resumes, or is cleared or compacted."""
@@ -204,6 +231,10 @@ class SessionStart(Payload):
     @override
     def failed(self, bench: Bench, failure: Exception) -> Output | None:
         return None
+
+    @override
+    def unanswered(self, said: str) -> Output:
+        return OperatorWarning(system_message=said)
 
 
 class PreToolUse(Payload):
@@ -229,6 +260,10 @@ class PreToolUse(Payload):
     @override
     def failed(self, bench: Bench, failure: Exception) -> Output | None:
         return None
+
+    @override
+    def unanswered(self, said: str) -> Output:
+        return OperatorWarning(system_message=said)
 
 
 class PostToolUse(Payload):
@@ -256,6 +291,12 @@ class PostToolUse(Payload):
     def failed(self, bench: Bench, failure: Exception) -> Output | None:
         said = PostToolUseAnswer(additional_context=failure_note(failure))
         return Specific(hook_specific_output=said)
+
+    @override
+    def unanswered(self, said: str) -> Output:
+        """Tell the agent beside the call's result, as when judging fails: the checkpoint judged nothing."""
+        told = PostToolUseAnswer(additional_context=f"{said}. Tell the operator.")
+        return Specific(hook_specific_output=told)
 
 
 class Stop(Payload):
@@ -293,6 +334,10 @@ class Stop(Payload):
             return None
         return OperatorWarning(system_message=warning)
 
+    @override
+    def unanswered(self, said: str) -> Output:
+        return OperatorWarning(system_message=said)
+
 
 class SubagentStop(Payload):
     """`SubagentStop`: a subagent's turn ends.
@@ -319,6 +364,10 @@ class SubagentStop(Payload):
             return None
         return OperatorWarning(system_message=warning)
 
+    @override
+    def unanswered(self, said: str) -> Output:
+        return OperatorWarning(system_message=said)
+
 
 type Received = Annotated[
     SessionStart | PreToolUse | PostToolUse | Stop | SubagentStop,
@@ -341,6 +390,43 @@ def hook(raw: str, bench: Bench) -> str:
     if output is None:
         return ""
     return output.model_dump_json(by_alias=True, exclude_none=True)
+
+
+def unanswered(raw: str, failure: str) -> str:
+    """Answer a hook lup's judge couldn't, saying `failure` in Codex's terms.
+
+    Each hook answers as its payload says (`Payload.unanswered`); a payload that
+    doesn't read as a hook warns the operator in `systemMessage`.
+    """
+    said = f"lup's judge couldn't answer this hook, so it wasn't judged: {failure}"
+    try:
+        received: Payload = TypeAdapter[Received](Received).validate_json(raw)
+    except ValidationError:
+        output: Output = OperatorWarning(system_message=said)
+    else:
+        output = received.unanswered(said)
+    return output.model_dump_json(by_alias=True, exclude_none=True)
+
+
+def hooks(command: list[str], timeout: timedelta) -> list[Hook]:
+    """Return the hooks a launched Codex session runs `command` at: the events the judge reads.
+
+    `SessionStart`, `PreToolUse` and `PostToolUse` on every tool: Codex is judged
+    after each call. Each waits up to `timeout`, which a hold's wait for the
+    operator needs.
+    """
+    events: list[Event] = ["session-started", "call-started", "call-finished"]
+    return [Hook(event=event, command=command, timeout=timeout) for event in events]
+
+
+def agent(fallback: str = "gpt-6.1-sol") -> Declaration:
+    """Return the declaration a launched Codex session runs: the model the operator's own configuration chooses.
+
+    Where it chooses none, `fallback`, the default model of Codex 0.162.1
+    (`docs/field-notes.md`), since the declaration always names one. Raise
+    `lup.RuntimeMissingError` where the `lup[codex]` extra isn't installed.
+    """
+    return lup.Codex.chosen(default=fallback)
 
 
 class Asset(Model):
@@ -430,3 +516,15 @@ class CodexChannel(Channel):
             message = f"the release's tag, {release.tag_name}, doesn't start {self.tag}"
             raise ChannelError(message)
         return release.tag_name.removeprefix(self.tag)
+
+
+def adapter() -> Adapter:
+    """Return what lup needs of Codex: its hooks answered, and its launch."""
+    return Adapter(
+        runtime=Codex(),
+        hook=hook,
+        unanswered=unanswered,
+        hooks=hooks,
+        channel=CodexChannel(),
+        agent=agent,
+    )
