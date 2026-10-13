@@ -35,6 +35,11 @@ What this relies on, measured with rootless podman 6.1.3 (`docs/field-notes.md`,
   `Size` and `Containers`, the containers using it;
 - `podman run` answers 125 when podman itself fails, and the program's own status
   otherwise.
+
+`podman container exists` answers 0 when a container of that name or id exists,
+1 when none does, and 125 when podman itself fails (its man page,
+`podman-container-exists(1)`); a run's `--name` names its container while it
+runs, and `--rm` removes it when it exits.
 """
 
 import csv
@@ -234,6 +239,7 @@ class Podman(Model, ContainerEngine):
         )
         network = "host" if container.network == "host" else "private"
         variables = {**container.env, "HOME": str(home)}
+        named = [] if container.name is None else [f"--name={container.name}"]
         return [
             self.program,
             "run",
@@ -244,6 +250,7 @@ class Podman(Model, ContainerEngine):
             "--userns=keep-id",
             "--cap-drop=all",
             "--security-opt=no-new-privileges",
+            *named,
             *terminal,
             f"--network={network}",
             f"--workdir={invocation.workdir}",
@@ -279,6 +286,27 @@ class Podman(Model, ContainerEngine):
             )
             raise ContainerError(message)
         return exited.status
+
+    def exists(self, container: str) -> bool:
+        """Say whether a container named `container` is there, running or stopped.
+
+        A run's container is removed when it exits, so one that's there runs, or
+        is just ending.
+        """
+        asked = self.execute(
+            Process(arguments=[self.program, "container", "exists", container])
+        )
+        match asked.status:
+            case 0:
+                return True
+            case 1:
+                return False
+            case status:
+                message = (
+                    f"podman couldn't say whether the container {container} exists "
+                    f"(status {status})"
+                )
+                raise ContainerError(message)
 
     def images(self, project: str) -> list[StoredImage]:
         """Return the images built for `project`, as podman lists them."""

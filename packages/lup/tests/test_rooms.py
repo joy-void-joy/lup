@@ -323,6 +323,35 @@ def test_listing_and_removing_refuse_when_podman_fails() -> None:
         engine.remove(stored)
 
 
+def test_a_named_container_is_run_by_its_name_and_asked_after() -> None:
+    engine, recorder = podman(Exited(status=0), Exited(status=1), Exited(status=125))
+    invocation = Invocation(
+        container=Container(
+            image=IMAGE, mounts=[Mount(source=Path("/srv/repo"))], name="lup-1a2b"
+        ),
+        command=["true"],
+        workdir=Path("/srv/repo"),
+        home=Path("/home/op"),
+    )
+    command = engine.command(invocation)
+
+    assert command[command.index("--security-opt=no-new-privileges") + 1] == (
+        "--name=lup-1a2b"
+    )
+    assert engine.exists("lup-1a2b")
+    assert not engine.exists("lup-1a2b")
+    with pytest.raises(ContainerError, match="lup-1a2b"):
+        engine.exists("lup-1a2b")
+    assert (
+        recorder.processes
+        == [Process(arguments=["podman", "container", "exists", "lup-1a2b"])] * 3
+    )
+    unnamed = invocation.model_copy(
+        update={"container": invocation.container.model_copy(update={"name": None})}
+    )
+    assert not any(each.startswith("--name") for each in engine.command(unnamed))
+
+
 def test_podman_itself_is_refused_in_tests() -> None:
     with pytest.raises(RealCallInTestError, match="podman"):
         Podman().ensure(IMAGE)
@@ -370,7 +399,9 @@ def test_a_launch_runs_the_agents_terminal_in_the_room(
     own = [Mount(source=repository), Mask(target=repository / "tree" / "other")]
     room = Room(
         agent=Claude(model="opus"),
-        container=Container(image=IMAGE, mounts=own, env={"TERM": "xterm"}),
+        container=Container(
+            image=IMAGE, mounts=own, env={"TERM": "xterm"}, name="lup-1a2b"
+        ),
         engine=engine,
     )
     settings = TerminalSettings(
@@ -390,6 +421,7 @@ def test_a_launch_runs_the_agents_terminal_in_the_room(
                 image=IMAGE,
                 mounts=[*own, *terminal.mounts],
                 env={"TERM": "xterm", **terminal.env},
+                name="lup-1a2b",
             ),
             command=[*terminal.command, "--resume"],
             workdir=worktree,

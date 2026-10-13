@@ -21,6 +21,8 @@ from lup_dev.clock import Clock
 from lup_dev.host.protocol import (
     Done,
     HostError,
+    Listed,
+    ListLaunches,
     Refused,
     Register,
     Registered,
@@ -134,14 +136,21 @@ class HostClient(Model, arbitrary_types_allowed=True):
             raise HostError(replied.error)
         return replied
 
-    def register(self, launch: str, runtime: str, worktree: Path) -> Path:
+    def register(self, launch: Register) -> Path:
         """Have the service serve a launch, starting it if none runs.
 
         Return the launch's socket directory, which its room mounts.
         """
         self.ensure()
-        request = Register(launch=launch, runtime=runtime, worktree=worktree)
-        return self.ask(request, Registered).directory
+        return self.ask(launch, Registered).directory
+
+    def launches(self) -> list[Register]:
+        """List the launches the service serves, starting it if none runs.
+
+        A service started serves every launch recorded, so none recorded is missed.
+        """
+        self.ensure()
+        return self.ask(ListLaunches(), Listed).launches
 
     def unregister(self, launch: str) -> None:
         """End a launch: its sockets closed, its directory removed.

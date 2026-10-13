@@ -8,6 +8,10 @@ The homes (`docs/judging-writes.md`, *Where things live*):
   path is limited in length;
 - the host service's sockets and the launches it serves, under
   `$XDG_RUNTIME_DIR/lup/host/`, and its log under lup's state (`docs/launch.md`);
+  each launch's compiled settings, and the lock its launcher holds, under lup's
+  state;
+- lup's data, under `$XDG_DATA_HOME/lup/`: each repository's own copy of
+  `lup-dev`, which trust on launch installs and its launches' hooks run;
 - lup's cache, what can be fetched again, under `$XDG_CACHE_HOME/lup/`: pyright's
   source, kept for building the engine, the one part of the cache a room mounts;
   and each runtime's CLIs, as its release channel publishes them, under `clis/`
@@ -32,6 +36,9 @@ if TYPE_CHECKING:
 
 LOCALTIME = Path("/etc/localtime")
 """The host's time zone, which a room mounts read-only so its clock reads as the operator's."""
+
+ROOM_SOCKETS = Path("/run/lup")
+"""Where a room mounts its launch's socket directory, so its hook finds the host service."""
 
 
 def digest(path: Path) -> str:
@@ -373,6 +380,48 @@ class HostLayout(Model):
         return self.launches / f"{launch}.json"
 
 
+class JudgeLayout(Model):
+    """One repository's own copy of `lup-dev`, which judges its launches' hooks.
+
+    Trust on launch installs the copy the operator approved here, as a uv tool of
+    its own (`UV_TOOL_DIR` and `UV_TOOL_BIN_DIR`), so a second project's approval
+    doesn't replace the first's (`docs/launch.md`, *Trust on launch*).
+    """
+
+    home: Path
+
+    @property
+    def tools(self) -> Path:
+        """Where uv keeps the copy's environment."""
+        return self.home / "tools"
+
+    @property
+    def bin(self) -> Path:
+        """Where uv puts the copy's commands."""
+        return self.home / "bin"
+
+    def command(self, name: str) -> Path:
+        """Say where the copy's command `name` is: `lup-dev`, by its package's name."""
+        return self.bin / name
+
+
+class LaunchLayout(Model):
+    """One launch's own places in lup's state: what's compiled for it, and its launcher's lock."""
+
+    directory: Path
+    """lup's settings and guidance compiled for the launch, mounted read-only into
+    its room; removed when the launch ends."""
+
+    @property
+    def lock(self) -> Path:
+        """The lock its launcher holds for its whole life, which the OS frees.
+
+        A launch whose lock can be taken has no launcher left, so a later launch
+        may end it once its container is gone too.
+        """
+        return self.directory.with_name(f"{self.directory.name}.lock")
+
+
 class CliCacheLayout(Model):
     """Where one runtime's CLIs are cached, a directory per version (`docs/launch.md`, *The CLIs*).
 
@@ -411,16 +460,23 @@ class Layout(Model):
     """lup's sockets: `$XDG_RUNTIME_DIR/lup`, or the user's own temporary directory."""
     cache: Path = Path.home() / ".cache" / "lup"
     """lup's cache, what can be fetched again: `$XDG_CACHE_HOME/lup`, or `~/.cache/lup`."""
+    data: Path = Path.home() / ".local" / "share" / "lup"
+    """lup's data, the copies of `lup-dev` it installs among it: `$XDG_DATA_HOME/lup`,
+    or `~/.local/share/lup`."""
 
     @classmethod
     def of(cls, settings: LupDevSettings) -> Layout:
-        """Place lup's state, sockets and cache where the settings say, or XDG's defaults."""
+        """Place lup's state, sockets, cache and data where the settings say, or XDG's defaults."""
         home = settings.xdg_state_home or Path.home() / ".local" / "state"
         cache = (settings.xdg_cache_home or Path.home() / ".cache") / "lup"
+        data = (settings.xdg_data_home or Path.home() / ".local" / "share") / "lup"
         if settings.xdg_runtime_dir is None:
-            return cls(state=home / "lup", cache=cache)
+            return cls(state=home / "lup", cache=cache, data=data)
         return cls(
-            state=home / "lup", runtime=settings.xdg_runtime_dir / "lup", cache=cache
+            state=home / "lup",
+            runtime=settings.xdg_runtime_dir / "lup",
+            cache=cache,
+            data=data,
         )
 
     @property
@@ -450,6 +506,19 @@ class Layout(Model):
     def host(self) -> HostLayout:
         """Where the host service, one per user, keeps its sockets, records and log."""
         return HostLayout(sockets=self.runtime / "host", state=self.state / "host")
+
+    def judge(self, repository: Path) -> JudgeLayout:
+        """Say where a repository's own copy of `lup-dev` is installed, by its git directory."""
+        return JudgeLayout(home=self.data / "judges" / digest(repository))
+
+    @property
+    def launches(self) -> Path:
+        """Each launch's own places: its compiled settings, and its launcher's lock."""
+        return self.state / "launches"
+
+    def launch(self, launch: str) -> LaunchLayout:
+        """Say where launch `launch`'s own places are."""
+        return LaunchLayout(directory=self.launches / launch)
 
     @property
     def worktrees(self) -> Path:

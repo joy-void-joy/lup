@@ -7,7 +7,9 @@ each runtime*):
 - `--no-daemon`, apart from the host's daemon on the same home, and
   `--dangerously-bypass-approvals-and-sandbox`: the room is the wall;
 - the model with `--model`, the effort as `model_reasoning_effort`, and the
-  declaration's system prompt as `instructions`, which replaces Codex's own;
+  declaration's system prompt as `instructions`, which replaces Codex's own.
+  `--model` sets the model over the operator's configuration, so `Codex.chosen`
+  reads theirs (`operator`) for a declaration that keeps it;
 - each trusted path in `projects`, as an inline table, since `-c` splits a dotted
   key at every `.`, which breaks a path like `lup.git`;
 - auto memory as `features.memories`; `check_for_update_on_startup = false`;
@@ -61,7 +63,7 @@ from shlex import join
 from typing import TYPE_CHECKING
 
 import tomlkit
-from pydantic import JsonValue
+from pydantic import JsonValue, ValidationError
 from tomlkit.exceptions import ConvertError
 
 from lup.adapters.codex.layout import MANAGED_REQUIREMENTS, CodexLaunch, CodexLayout
@@ -93,15 +95,17 @@ def toml(value: JsonValue) -> str:
 
 
 class OperatorConfig(Model):
-    """The part of the operator's Codex configuration a room turns off."""
+    """The part of the operator's Codex configuration a terminal session reads: the model it keeps, the servers a room turns off."""
 
+    model: str | None = None
+    """The model they chose; none where they chose none."""
     mcp_servers: dict[str, JsonObject] = {}
 
 
-def operator_servers(config: Path) -> list[str]:
-    """Return the names of the MCP servers in the operator's Codex configuration, if they have one."""
+def operator(config: Path) -> OperatorConfig:
+    """Read the operator's Codex configuration at `config`; an empty one where they have none."""
     if not config.is_file():
-        return []
+        return OperatorConfig()
     try:
         read = tomllib.loads(config.read_text())
     except tomllib.TOMLDecodeError as failed:
@@ -109,7 +113,13 @@ def operator_servers(config: Path) -> list[str]:
             f"the operator's Codex configuration, {config}, isn't valid TOML: {failed}"
         )
         raise TerminalError(message) from failed
-    return list(OperatorConfig.model_validate(read).mcp_servers)
+    try:
+        return OperatorConfig.model_validate(read)
+    except ValidationError as failed:
+        message = (
+            f"the operator's Codex configuration, {config}, doesn't read: {failed}"
+        )
+        raise TerminalError(message) from failed
 
 
 class Override(Model):
@@ -176,7 +186,7 @@ def compiled(
         if settings.cli is None
         else settings.cli
     )
-    servers = operator_servers(layout.operator_config)
+    servers = list(operator(layout.operator_config).mcp_servers)
 
     def group(hook: Hook) -> HookGroup:
         timeout = None if hook.timeout is None else int(hook.timeout.total_seconds())

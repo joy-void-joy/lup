@@ -3,8 +3,9 @@
 One request per connection, its JSON read to the end, and one JSON reply. A request
 is a model told apart by its `kind`, which names the handler that answers it
 (`host/service.py`); a reply is told apart by its own. The kinds here are the
-service's own: a launch's registration, its end, and stopping the service. A
-module declares its own kinds beside the handler it registers for them.
+service's own: a launch's registration, its end, listing the launches served, and
+stopping the service. A module declares its own kinds beside the handler it
+registers for them.
 """
 
 from pathlib import Path, PurePath
@@ -12,6 +13,7 @@ from typing import Annotated, Literal
 
 from pydantic import AfterValidator
 
+from lup.rooms.container import AbsolutePath
 from lup.types import Model
 from lup_dev.errors import LupDevError
 
@@ -57,9 +59,16 @@ class Register(Request):
     kind: Literal["register"] = "register"
     launch: LaunchId
     runtime: str
-    """The runtime the launch runs, by its name: whose adapter answers its hooks."""
+    """The runtime the launch runs, by its name: whose hooks its judge answers."""
     worktree: Path
     """The worktree the launch started in."""
+    judge: AbsolutePath
+    """The command of the launch's repository's approved copy of `lup-dev`: each
+    of its hooks runs `<judge> hook <runtime>`, so it's judged by the code
+    approved for its repository."""
+    container: str
+    """The name of the launch's container, which tells a later launch whether
+    this one is gone."""
 
 
 class Unregister(Request):
@@ -67,6 +76,12 @@ class Unregister(Request):
 
     kind: Literal["unregister"] = "unregister"
     launch: LaunchId
+
+
+class ListLaunches(Request):
+    """List the launches the service serves."""
+
+    kind: Literal["list"] = "list"
 
 
 class Stop(Request):
@@ -86,6 +101,13 @@ class Registered(Reply):
 
     kind: Literal["registered"] = "registered"
     directory: Path
+
+
+class Listed(Reply):
+    """The launches the service serves, each as it was registered."""
+
+    kind: Literal["listed"] = "listed"
+    launches: list[Register]
 
 
 class Done(Reply):

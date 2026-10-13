@@ -249,6 +249,27 @@ def test_claude_refuses_without_its_bundled_cli(
         Claude(model="opus").terminal(settings(tmp_path / "launch", None))
 
 
+def test_claude_keeps_the_model_the_operator_chose(
+    tmp_path: Path, home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert Claude.chosen(default="default").model == "default"
+    (home / ".claude").mkdir()
+    (home / ".claude" / "settings.json").write_text(
+        json.dumps({"model": "opus[1m]", "theme": "dark"})
+    )
+
+    assert Claude.chosen(default="default") == Claude(model="opus[1m]")
+
+    moved = tmp_path / "claude-work"
+    moved.mkdir()
+    (moved / "settings.json").write_text(json.dumps({"theme": "dark"}))
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(moved))
+    assert Claude.chosen(default="default").model == "default"
+    (moved / "settings.json").write_text("{")
+    with pytest.raises(TerminalError, match="don't read"):
+        Claude.chosen(default="default")
+
+
 # Codex
 
 
@@ -467,6 +488,21 @@ def test_codex_refuses_an_operator_config_that_isnt_toml(
         Codex(model="gpt-6.1-sol").terminal(
             TerminalSettings(directory=tmp_path / "launch", cli=CODEX_CLI)
         )
+
+
+def test_codex_keeps_the_model_the_operator_chose(codex_home: Path) -> None:
+    assert Codex.chosen(default="fallback").model == "fallback"
+    (codex_home / "config.toml").write_text(
+        'model = "gpt-6-astra"\nmodel_reasoning_effort = "ultra"\n'
+    )
+
+    chosen = Codex.chosen(default="fallback")
+
+    assert chosen == Codex(model="gpt-6-astra")
+    assert chosen.effort is None
+    (codex_home / "config.toml").write_text("model = 6\n")
+    with pytest.raises(TerminalError, match="doesn't read"):
+        Codex.chosen(default="fallback")
 
 
 def test_toml_values_read_back_as_written() -> None:

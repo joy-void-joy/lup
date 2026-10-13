@@ -13,8 +13,9 @@ import pytest
 from rich.text import Text
 from typer.testing import CliRunner
 
+from lup.types import Model
 from lup_dev import cli
-from lup_dev.approval import Approval, ReleaseTool, WorkspaceTool
+from lup_dev.approval import Approval, ReleaseTool, Tool, WorkspaceTool
 from lup_dev.declaration.load import load
 from lup_dev.declaration.resolve import resolve
 from lup_dev.host.client import Detached, HostClient
@@ -30,13 +31,11 @@ from lup_dev.launch.trust import (
     UvToolchain,
     engine,
 )
-from lup_dev.layout import Layout
+from lup_dev.layout import JudgeLayout, Layout
 from lup_dev.stored import read_model, write_model
 
 if TYPE_CHECKING:
     from conftest import Kit, Shell
-
-    from lup_dev.approval import Tool
 
 LUP_LOCK = """\
 version = 1
@@ -169,6 +168,13 @@ RELEASE = {
 PYPI = "https://pypi.org/simple"
 
 
+@pytest.fixture(autouse=True)
+def uvs_own_tools(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Leave uv's tool directories to uv, whatever the operator set them to."""
+    monkeypatch.delenv("UV_TOOL_DIR", raising=False)
+    monkeypatch.delenv("UV_TOOL_BIN_DIR", raising=False)
+
+
 def written(root: Path, files: dict[str, str]) -> None:
     for name, content in files.items():
         path = root / name
@@ -224,14 +230,31 @@ def unasked() -> Answering:
     return Answering([])
 
 
+class Installed(Model):
+    """One install: what, from where and which commit, into which copy, and whether the user's too."""
+
+    tool: Tool
+    root: Path
+    commit: str
+    into: JudgeLayout
+    users: bool
+
+
 class Recording(Toolchain):
-    """Records each install, and names the copy as uv would, under `/tools`."""
+    """Records each install, leaving the copy's command in place, and names the user's as uv would, under `/tools`."""
 
     def __init__(self) -> None:
-        self.installed: list[tuple[Tool, Path, str]] = []
+        self.installed: list[Installed] = []
 
-    def install(self, tool: Tool, root: Path, commit: str) -> None:
-        self.installed.append((tool, root, commit))
+    def install(
+        self, tool: Tool, root: Path, commit: str, copy: JudgeLayout, *, users: bool
+    ) -> None:
+        self.installed.append(
+            Installed(tool=tool, root=root, commit=commit, into=copy, users=users)
+        )
+        command = copy.command(tool.name)
+        command.parent.mkdir(parents=True, exist_ok=True)
+        command.write_text(f"#!/bin/sh\n# {commit}\n")
 
     def command(self, name: str) -> list[str]:
         return [f"/tools/{name}"]
@@ -379,7 +402,17 @@ def test_the_first_time_shows_the_zone_whole_then_installs_restarts_and_records(
         )
     ]
     zone = trust.check().zone
-    assert recording(trust).installed == [(zone.tool, lup, head)]
+    common = Path(shell.git(lup, "rev-parse", "--absolute-git-dir"))
+    assert recording(trust).installed == [
+        Installed(
+            tool=zone.tool,
+            root=lup,
+            commit=head,
+            into=kit.layout.judge(common),
+            users=True,
+        )
+    ]
+    assert kit.layout.judge(common).home.is_relative_to(kit.layout.data)
     assert service(trust).calls == ["stop", "/tools/lup-dev host"]
     assert outcome.restarted
     assert approved(lup, kit, shell) == outcome.approval
@@ -387,8 +420,64 @@ def test_the_first_time_shows_the_zone_whole_then_installs_restarts_and_records(
     assert outcome.approval.paths == zone.paths
     assert outcome.approval.time == kit.clock.now()
     assert outcome.report() == (
-        f"Approved: `lup-dev` from {head} is the one the host runs, and the host "
-        "service restarted on it."
+        f"Approved: `lup-dev` from {head} judges this repository's sessions, and is "
+        "the `lup-dev` you run; the host service restarted on it."
+    )
+
+
+def test_a_projects_release_is_its_own_copy_alone_and_restarts_nothing(
+    audiobook: Path, kit: Kit, shell: Shell
+) -> None:
+    trust = trusting(audiobook, kit, yes())
+    outcome = trust.ensure()
+    head = shell.git(audiobook, "rev-parse", "dev")
+    assert isinstance(outcome, Trusted)
+    [install] = recording(trust).installed
+    assert install.commit == head
+    assert not install.users
+    assert service(trust).calls == []
+    assert not outcome.restarted
+    assert outcome.report() == (
+        f"Approved: `lup-dev` from {head} judges this repository's sessions, from "
+        "their next hook."
+    )
+
+
+def test_two_repositories_keep_their_own_copies(
+    lup: Path, audiobook: Path, kit: Kit
+) -> None:
+    ours = trusting(lup, kit, yes())
+    theirs = trusting(audiobook, kit, yes())
+    ours.ensure()
+    theirs.ensure()
+    [mine] = recording(ours).installed
+    [other] = recording(theirs).installed
+    assert mine.into != other.into
+    assert mine.into.command("lup-dev").is_file()
+    assert other.into.command("lup-dev").is_file()
+
+
+def test_a_missing_copy_is_installed_again_from_the_approved_zone(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    first = trusting(lup, kit, yes()).ensure()
+    assert isinstance(first, Trusted)
+    common = Path(shell.git(lup, "rev-parse", "--absolute-git-dir"))
+    copy = kit.layout.judge(common)
+    copy.command("lup-dev").unlink()
+    head = changed(lup, {"docs/note.md": "# Note, changed\n"}, shell)
+    trust = trusting(lup, kit, unasked(), inside=["first"])
+    outcome = trust.ensure()
+    assert outcome == Unchanged(commit=head, approval=first.approval, again=True)
+    assert recording(trust).installed == [
+        Installed(
+            tool=first.approval.tool, root=lup, commit=head, into=copy, users=False
+        )
+    ]
+    assert service(trust).calls == []
+    assert outcome.report().endswith(
+        f"This repository's copy of `lup-dev` from {first.approval.commit} was "
+        "missing, and is installed again."
     )
 
 
@@ -452,6 +541,29 @@ def test_a_branchs_own_change_isnt_the_tips_and_asks_nothing(
     changed(branch, {"lup_project.py": DECLARED + "# the branch's own\n"}, shell)
     outcome = trusting(branch, kit, unasked()).ensure()
     assert outcome == Unchanged(commit=first.approval.commit, approval=first.approval)
+
+
+def test_no_installs_the_copy_approved_before_where_its_missing(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    first = trusting(lup, kit, yes()).ensure()
+    assert isinstance(first, Trusted)
+    copy = kit.layout.judge(Path(shell.git(lup, "rev-parse", "--absolute-git-dir")))
+    copy.command("lup-dev").unlink()
+    head = changed(lup, {"lup_project.py": DECLARED + "# changed\n"}, shell)
+    trust = trusting(lup, kit, no())
+    outcome = trust.ensure()
+    assert outcome == Kept(commit=head, approval=first.approval, again=True)
+    assert recording(trust).installed == [
+        Installed(
+            tool=first.approval.tool,
+            root=lup,
+            commit=first.approval.commit,
+            into=copy,
+            users=False,
+        )
+    ]
+    assert service(trust).calls == []
 
 
 def test_no_keeps_the_copy_approved_before(lup: Path, kit: Kit, shell: Shell) -> None:
@@ -687,7 +799,7 @@ def test_with_no_host_service_running_the_next_launch_starts_one(
     assert not outcome.restarted
     assert service(trust).calls == ["stop"]
     assert outcome.report().endswith(
-        "and the next launch starts the host service on it."
+        "the `lup-dev` you run; the next launch starts the host service on it."
     )
 
 
@@ -832,7 +944,7 @@ def fake_uv(tmp_path: Path) -> tuple[Path, Path]:
         "#!/bin/sh\n"
         'if [ "$1" = "tool" ] && [ "$2" = "dir" ]; then echo /home/u/.local/bin; '
         "exit 0; fi\n"
-        f'echo "$@" >> "{log}"\n'
+        f'echo "${{UV_TOOL_DIR:-uv}} ${{UV_TOOL_BIN_DIR:-uv}} $@" >> "{log}"\n'
         "while [ $# -gt 0 ]; do\n"
         '  if [ "$1" = "--output-file" ]; then echo "pydantic==2.12.0" > "$2"; fi\n'
         f'  if [ "$1" = "--constraints" ]; then cat "$2" >> "{log}"; fi\n'
@@ -875,21 +987,26 @@ def test_uv_builds_and_installs_the_commits_copy_held_to_its_lock(
         package=Path("packages/lup-dev"),
         members=[Path("packages/lup-dev"), Path("packages/lup")],
     )
-    UvToolchain(executable=str(fake)).install(tool, lup, head)
+    copy = JudgeLayout(home=tmp_path / "judges" / "lup")
+    UvToolchain(executable=str(fake)).install(tool, lup, head, copy, users=True)
     how, _, source = mark.read_text().partition(": ")
     ran, _, where = how.partition(" in ")
     assert ran == built
     assert Path(where) != lup
     assert not Path(where).exists()
     assert source == '"""The environment."""\n'
-    export, install, constraints = log.read_text().splitlines()
+    export, own, constraints, users, again = log.read_text().splitlines()
     assert export.startswith(
-        "export --package lup-dev --no-dev --no-emit-workspace --no-hashes --frozen "
-        "--format requirements-txt --quiet --output-file "
+        "uv uv export --package lup-dev --no-dev --no-emit-workspace --no-hashes "
+        "--frozen --format requirements-txt --quiet --output-file "
     )
-    assert install.startswith("tool install --force --constraints ")
-    assert install.endswith(f"{where}/packages/lup-dev")
-    assert constraints == "pydantic==2.12.0"
+    assert own.startswith(
+        f"{copy.tools} {copy.bin} tool install --force --constraints "
+    )
+    assert own.endswith(f"{where}/packages/lup-dev")
+    assert users.startswith("uv uv tool install --force --constraints ")
+    assert users.endswith(f"{where}/packages/lup-dev")
+    assert constraints == again == "pydantic==2.12.0"
 
 
 def test_uv_installs_a_release_from_its_index_held_to_its_pins(
@@ -902,9 +1019,14 @@ def test_uv_installs_a_release_from_its_index_held_to_its_pins(
         registry=PYPI,
         pins={"lup": "0.4.0", "pydantic": "2.12.0"},
     )
-    UvToolchain(executable=str(fake)).install(release, tmp_path, "unused")
+    copy = JudgeLayout(home=tmp_path / "judges" / "audiobook")
+    UvToolchain(executable=str(fake)).install(
+        release, tmp_path, "unused", copy, users=False
+    )
     install, *constraints = log.read_text().splitlines()
-    assert install.startswith("tool install --force --constraints ")
+    assert install.startswith(
+        f"{copy.tools} {copy.bin} tool install --force --constraints "
+    )
     assert install.endswith(f"--default-index {PYPI} lup-dev==0.4.0")
     assert constraints == ["lup==0.4.0", "pydantic==2.12.0"]
 
@@ -930,9 +1052,10 @@ def test_lup_dev_trust_says_so_in_one_line_when_nothing_changed(
     kit: Kit,
 ) -> None:
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data"))
     monkeypatch.delenv("CLAUDE_CODE_CHILD_SESSION", raising=False)
     monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
-    state = Layout(state=tmp_path / "xdg" / "lup")
+    state = Layout(state=tmp_path / "xdg" / "lup", data=tmp_path / "xdg-data" / "lup")
     first = trusting(lup, kit, yes()).model_copy(update={"layout": state})
     outcome = first.ensure()
     assert isinstance(outcome, Trusted)
