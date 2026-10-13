@@ -13,16 +13,16 @@ end, and answers it by running the launch's judge, its repository's approved cop
 of `lup-dev`, as a process of its own (`<judge> hook <runtime>`, the payload on its
 input, its answer what it prints), so each session is judged by the code approved
 for its repository. Hooks for parallel calls arrive at once and a hold waits for
-hours, so each answer waits on its judge in a thread of the service's pool, off
-the event loop. Where the judge can't answer (its command missing, or ending with
-a failure, a payload it can't read among them), the service answers in the
-runtime's own terms through the `Answerer`, rather than closing empty, which the
-runtime would take as no decision.
+hours, so each judge is spawned through asyncio and awaited on the event loop,
+which goes on serving meanwhile. Where the judge can't answer (its command
+missing, or ending with a failure, a payload it can't read among them), the
+service answers in the runtime's own terms through the `Answerer`, rather than
+closing empty, which the runtime would take as no decision.
 
 Each launch is recorded beside its directory, so a service started after one
 stopped serves the same launches, in the directories their rooms mounted. The
-service stops without waiting for the answers in flight: their threads finish
-before its process exits, but their hooks hear nothing.
+service stops without waiting for the answers in flight: their judges are
+killed, and their hooks hear nothing.
 """
 
 import asyncio
@@ -32,11 +32,9 @@ import traceback
 from abc import ABC, abstractmethod
 from collections import Counter
 from collections.abc import Awaitable, Callable
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, override
 
-import sh
 from filelock import FileLock, Timeout
 from pydantic import ValidationError, field_validator
 
@@ -94,32 +92,37 @@ class Judged(Model):
     """What it wrote to its standard error, or why it couldn't run."""
 
 
-def judged(asked: Asked) -> Judged:
-    """Run the judge's process to its end, the payload on its input."""
+async def judged(asked: Asked) -> Judged:
+    """Run the judge's process to its end, the payload on its input; kill it where the wait is cancelled.
+
+    Spawned rather than forked: `sh` forks from the service's process and runs
+    Python in the child before the judge starts, which can deadlock in a process
+    with threads, and it would hold a thread per hook for a hold's hours.
+    """
     program, *arguments = asked.command
     try:
-        ran = sh.Command(program)(
+        # lup: ignore("subprocess", why="the host service awaits each judge on its event loop, which sh can't: it forks, and holds a thread per hook")
+        process = await asyncio.create_subprocess_exec(
+            program,
             *arguments,
-            _in=asked.payload,
-            _ok_code=list(range(256)),
-            _tty_out=False,
-            _return_cmd=True,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-    except sh.CommandNotFound as missing:
+    except OSError as missing:
         return Judged(
-            status=127, output="", error=f"`{program}` isn't there: {missing}"
+            status=127, output="", error=f"`{program}` doesn't run: {missing}"
         )
-    except sh.ErrorReturnCode as ended:
-        # Only a signal ends it outside the statuses taken.
-        return Judged(
-            status=ended.exit_code,
-            output=ended.stdout.decode(errors="replace"),
-            error=ended.stderr.decode(errors="replace"),
-        )
+    try:
+        output, error = await process.communicate(asked.payload.encode())
+    finally:
+        if process.returncode is None:
+            process.kill()
+            await process.wait()
     return Judged(
-        status=ran.exit_code,
-        output=ran.stdout.decode(errors="replace"),
-        error=ran.stderr.decode(errors="replace"),
+        status=await process.wait(),
+        output=output.decode(errors="replace"),
+        error=error.decode(errors="replace"),
     )
 
 
@@ -174,11 +177,9 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
 
     layout: HostLayout
     answerer: Answerer
-    judge: Callable[[Asked], Judged]
+    judge: Callable[[Asked], Awaitable[Judged]]
     """Runs a launch's judge for one hook; a test gives a stub."""
     say: Callable[[str], None]
-    threads: ThreadPoolExecutor
-    """The pool each hook is answered in, off the event loop."""
     served: dict[str, Served] = {}
 
     async def open(self, request: Register) -> Path:
@@ -229,17 +230,14 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     ) -> None:
         """Answer one hook heard on a launch's socket, and close the connection.
 
-        The payload is read to the end and answered in the pool. Where answering
-        fails even so, the failure is said, with its traceback, and the
+        The payload is read to the end and answered by the launch's judge. Where
+        answering fails even so, the failure is said, with its traceback, and the
         connection closes unanswered: the room's hook prints nothing and ends with
         status 0, which the runtime takes as no decision.
         """
         payload = (await reader.read()).decode()
-        loop = asyncio.get_running_loop()
         try:
-            answer = await loop.run_in_executor(
-                self.threads, self.answered, request, payload
-            )
+            answer = await self.answered(request, payload)
         except Exception as failure:
             told = "".join(traceback.format_exception(failure))
             self.say(f"{request.launch}: answering a hook failed:\n{told}")
@@ -254,17 +252,17 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             return
         self.say(f"{request.launch}: answered a hook")
 
-    def answered(self, request: Register, payload: str) -> str:
+    async def answered(self, request: Register, payload: str) -> str:
         """Return the judge's answer to one hook, or where it can't answer, the runtime's word that it couldn't.
 
         What the judge said is the service's to tell, in full; the hook's answer
-        points there. It blocks for as long as judging does, a hold's wait for
-        the operator included.
+        points there. It waits for as long as judging does, a hold's wait for the
+        operator included.
         """
         asked = Asked(
             command=[str(request.judge), "hook", request.runtime], payload=payload
         )
-        ran = self.judge(asked)
+        ran = await self.judge(asked)
         if ran.status == 0:
             return ran.output
         command = shlex.join(asked.command)
@@ -386,13 +384,10 @@ class HostService(Model, arbitrary_types_allowed=True):
     answerer: Answerer
     say: Callable[[str], None]
     """Where the service tells what it does: the terminal, or its log."""
-    judge: Callable[[Asked], Judged] = judged
+    judge: Callable[[Asked], Awaitable[Judged]] = judged
     """Runs a launch's judge for one hook, as a process of its own; a test gives a stub."""
     routes: list[Route] = []
     """The handlers modules register, beside the service's own."""
-    threads: int = 256
-    """How many hooks are answered at once. A hold holds a thread while it waits;
-    past this many, a hook waits for a thread."""
 
     @field_validator("routes")
     @classmethod
@@ -425,7 +420,7 @@ class HostService(Model, arbitrary_types_allowed=True):
         The service holds a lock for its whole life, which the OS frees, so a second
         refuses to start while one runs; a control socket left by a service that
         died is replaced. On leaving, the sockets close, the launches stay recorded,
-        and answers in flight are left to finish unheard.
+        and the judges of answers in flight are killed, unheard.
         """
         self.layout.sockets.mkdir(mode=0o700, parents=True, exist_ok=True)
         life = FileLock(self.layout.lock, timeout=0)
@@ -434,15 +429,8 @@ class HostService(Model, arbitrary_types_allowed=True):
         except Timeout as running:
             message = f"a host service runs already, on {self.layout.control}"
             raise HostError(message) from running
-        threads = ThreadPoolExecutor(
-            max_workers=self.threads, thread_name_prefix="hook"
-        )
         launches = Launches(
-            layout=self.layout,
-            answerer=self.answerer,
-            judge=self.judge,
-            say=self.say,
-            threads=threads,
+            layout=self.layout, answerer=self.answerer, judge=self.judge, say=self.say
         )
         stopped = asyncio.Event()
         own = [
@@ -468,7 +456,6 @@ class HostService(Model, arbitrary_types_allowed=True):
                 await closed(server)
         finally:
             await launches.shut()
-            threads.shutdown(wait=False, cancel_futures=True)
             life.release()
             self.say("The host service stopped.")
 
