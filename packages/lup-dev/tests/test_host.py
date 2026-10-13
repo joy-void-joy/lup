@@ -8,6 +8,7 @@ otherwise hang.
 
 import asyncio
 import json
+import os
 import socket
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -33,7 +34,7 @@ from lup_dev.host.service import (
 from lup_dev.layout import HostLayout, Layout
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator
+    from collections.abc import Awaitable, Callable, Generator
     from pathlib import Path
 
     from conftest import FakeClock, Kit
@@ -57,7 +58,9 @@ class Judge:
     """A launch's judge, answering each hook with its runtime and payload.
 
     `hold` waits until released, `fail` ends with status 1, `boom` raises, and
-    every answer waits at a barrier for `together` answers in all.
+    every answer waits at a barrier for `together` answers in all. The test's
+    thread releases it, so each wait runs in a thread, leaving the service's
+    event loop free, as a judge's process does.
     """
 
     def __init__(self, together: int = 1) -> None:
@@ -66,7 +69,7 @@ class Judge:
         self.released = threading.Event()
         self.asked: list[Asked] = []
 
-    def __call__(self, asked: Asked) -> Judged:
+    async def __call__(self, asked: Asked) -> Judged:
         self.asked.append(asked)
         self.arrived.set()
         *_, runtime = asked.command
@@ -77,10 +80,10 @@ class Judge:
             case "fail":
                 return Judged(status=1, output="", error="Traceback: it broke\n")
             case "hold":
-                self.released.wait()
+                await asyncio.to_thread(self.released.wait)
             case _:
                 pass
-        self.together.wait()
+        await asyncio.to_thread(self.together.wait)
         return Judged(status=0, output=f"{runtime} answers {asked.payload}\n", error="")
 
 
@@ -170,7 +173,7 @@ def said() -> list[str]:
 
 def service(
     layout: HostLayout,
-    judge: Callable[[Asked], Judged],
+    judge: Callable[[Asked], Awaitable[Judged]],
     said: list[str],
     routes: list[Route] | None = None,
     answerer: Answerer | None = None,
@@ -518,10 +521,12 @@ PAYLOAD = {
 }
 
 
-def lup_dev_hook(asked: Asked) -> Judged:
-    """A launch's copy of `lup-dev`, run in this process: its own `hook` command."""
+async def lup_dev_hook(asked: Asked) -> Judged:
+    """A launch's copy of `lup-dev`, run in this process, in a thread: its own `hook` command."""
     _, *arguments = asked.command
-    ran = runner.invoke(cli.app, arguments, input=asked.payload)
+    ran = await asyncio.to_thread(
+        runner.invoke, cli.app, arguments, input=asked.payload
+    )
     return Judged(status=ran.exit_code, output=ran.output, error="")
 
 
@@ -553,12 +558,39 @@ def test_a_judge_runs_as_a_process_of_its_own(tmp_path: Path) -> None:
     judge.write_text('#!/bin/sh\necho "$@"\ncat\necho said >&2\nexit 3\n')
     judge.chmod(0o755)
 
-    ran = judged(Asked(command=[str(judge), "hook", "first"], payload="the payload"))
+    ran = asyncio.run(
+        judged(Asked(command=[str(judge), "hook", "first"], payload="the payload"))
+    )
 
     assert ran == Judged(status=3, output="hook first\nthe payload", error="said\n")
-    missing = judged(Asked(command=[str(tmp_path / "gone"), "hook"], payload=""))
+    missing = asyncio.run(
+        judged(Asked(command=[str(tmp_path / "gone"), "hook"], payload=""))
+    )
     assert missing.status == 127
     assert "gone" in missing.error
+
+
+def test_a_judge_whose_wait_is_cancelled_is_killed(tmp_path: Path) -> None:
+    judge = tmp_path / "lup-dev"
+    started = tmp_path / "started"
+    # A pipe: the judge's write blocks until the test reads, so nothing polls.
+    os.mkfifo(started)
+    judge.write_text(f"#!/bin/sh\necho $$ > {started}\nexec sleep 3600\n")
+    judge.chmod(0o755)
+
+    async def cancelled() -> int:
+        waiting = asyncio.create_task(
+            judged(Asked(command=[str(judge), "hook"], payload=""))
+        )
+        pid = int(await asyncio.to_thread(started.read_text))
+        waiting.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiting
+        return pid
+
+    pid = asyncio.run(cancelled())
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
 
 
 @pytest.fixture
