@@ -3,7 +3,7 @@
 The homes (`docs/judging-writes.md`, *Where things live*):
 - lup's own state, under `$XDG_STATE_HOME/lup/`: each worktree's store, outside the
   worktree so the restore source is out of the agent's reach, and each
-  repository's verdict log;
+  repository's verdict log and the host zone its operator approved;
 - each worktree engine's socket, under `$XDG_RUNTIME_DIR/lup/`, since a socket's
   path is limited in length;
 - the host service's sockets and the launches it serves, under
@@ -263,45 +263,43 @@ class CheckoutLayout(Model):
         """The reference to lup's rules, compiled from the engine's table: lup's own."""
         return self.root / "docs" / "rules.md"
 
+    @property
+    def lock(self) -> Path:
+        """The project's `uv.lock`, which pins the `lup-dev` the host runs for it."""
+        return self.root / "uv.lock"
+
     def saved_copy(self, number: int, path: Path) -> Path:
         """Say where the version refused in refusal `number` is saved, by its path."""
         return self.saved / str(number) / path
-
-    def install_review(self, since: str | None) -> Path:
-        """Say where the judge's review keeps its files' before side while it waits.
-
-        Each changed file as it stood at `since`, the commit approved last, at its
-        path in the checkout below this directory; `whole/` where no approved
-        commit is known, and the review shows the source whole.
-        """
-        return self.home / "install-review" / (since or "whole")
 
     def review(self, number: int) -> ReviewLayout:
         """Say where review `number` keeps its files in the worktree."""
         return ReviewLayout(home=self.home / "review" / str(number))
 
-    @property
-    def tool(self) -> Path:
-        """The package installed as the judge, `lup-dev`, in a checkout of lup."""
-        return self.root / "packages" / "lup-dev"
+
+class PackageLayout(Model):
+    """One package of a uv workspace, at its directory: what a copy of it is built from."""
+
+    root: Path
 
     @property
-    def judge_source(self) -> list[Path]:
-        """Everything the installed judge carries, from a checkout of lup's root.
+    def pyproject(self) -> Path:
+        """Its project file: its name, its dependencies and how it's built."""
+        return self.root / "pyproject.toml"
 
-        Both packages' metadata and source (`lup` is a dependency of `lup-dev`),
-        the engine's source the bundle is built from, and `uv.lock`, whose
-        versions the installed copy's dependencies are held to.
+    @property
+    def source(self) -> Path:
+        """Its modules, under uv's build backend's default module root."""
+        return self.root / "src"
+
+    @property
+    def engine(self) -> Path:
+        """`lup-dev`'s engine's source, which its build bundles into the package.
+
+        The build is `checker/build.py` there; the gate and trust on launch run it
+        as the declaration's step that builds a file.
         """
-        library = Path("packages") / "lup"
-        return [
-            library / "pyproject.toml",
-            library / "src",
-            Path("packages") / "lup-dev" / "pyproject.toml",
-            Path("packages") / "lup-dev" / "src",
-            Path("packages") / "lup-dev" / "checker",
-            Path("uv.lock"),
-        ]
+        return self.root / "checker"
 
 
 class LaunchSockets(Model):
@@ -431,7 +429,10 @@ class Layout(Model):
         """Say where a session's subagents at work, and its last block, are kept."""
         return self.session_index / f"{session}.conversations.json"
 
-    @property
-    def approval(self) -> Path:
-        """The commit of lup the operator last approved as the judge that runs."""
-        return self.state / "judge" / "approved.json"
+    def approved(self, repository: Path) -> Path:
+        """Say where a repository's host zone the operator approved last is kept.
+
+        The commit approved, the zone's fingerprint there, its paths and the
+        `lup-dev` it runs (`docs/launch.md`, *Trust on launch*).
+        """
+        return self.repository(repository) / "approved.json"

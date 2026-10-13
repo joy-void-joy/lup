@@ -390,8 +390,8 @@ class Worktree(Model):
             "judges with the last of this repository's declarations that loaded, "
             f"from commit {loaded.commit}, until one loads. Tell the operator: if "
             "the declaration uses something the installed judge predates, "
-            "reinstalling it from `dev` (`lup-dev install`) fixes this; otherwise "
-            "the declaration needs fixing."
+            "approving `dev`'s with `lup-dev trust` fixes this; otherwise the "
+            "declaration needs fixing."
         )
 
     @cached_property
