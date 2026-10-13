@@ -117,6 +117,10 @@ class SessionSettings(Model):
     subagents and background work."""
     auto_memory: bool | None = None
     """Whether the runtime keeps and reads its own memory between sessions."""
+    idle_compaction: bool | None = None
+    """Whether the runtime may compact a long conversation while the session sits
+    idle. Compaction when the context fills isn't a session setting: it stays
+    the runtime's own."""
     removed_tools: list[str] | None = None
     """Built-in tools removed from the session's context, by the runtime's names
     for them; none removes none."""

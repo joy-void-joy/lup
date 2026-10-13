@@ -32,6 +32,10 @@ at launch), so theirs outrank lup's defaults:
   outranks its settings key (`subagentPromptCacheTtl`, `autoMemoryEnabled`), so
   an imposed value wins whichever way they set theirs. Theirs count as set by the
   key or by the variable in their `env`;
+- idle compaction as `idleCompaction`, which only `false` changes: `true` turns
+  nothing on, and is passed so an imposed one outranks their `false`, the
+  highest source's value holding. Compaction when the context fills,
+  `autoCompactEnabled`, stays theirs or the runtime's;
 - the account's connectors as `disableClaudeAiConnectors`. Any source's `true`
   turns them off, and so does their `env`'s `ENABLE_CLAUDEAI_MCP_SERVERS=false`,
   so a session asking for the connectors can't turn on what their own settings
@@ -74,6 +78,12 @@ its 2.1.294 and 2.1.296 binaries:
   so a person setting it keeps every cache at five minutes;
 - `CLAUDE_CODE_DISABLE_AUTO_MEMORY` takes `1` to turn auto memory off and `0` to
   force it on, and the 2.1.296 binary reads it before `autoMemoryEnabled`;
+- `idleCompaction`: "Set to false to stop Claude Code from compacting a long
+  conversation while the session is idle. Setting it to true does not turn idle
+  compaction on" (its schema's description, 2.1.296). In that binary it's read
+  from the highest settings source that sets it, `true` where none does, and
+  idle compaction runs only where Claude Code's own rollout turns it on,
+  auto-compaction is on, and the value isn't `false`;
 - with `CLAUDE_CONFIG_DIR` set, the state file is `.claude.json` inside it;
 - a hook's `command` runs in a shell, and its `timeout` is in seconds;
 - a single file mounted into the room can't be replaced by a rename ("Device or
@@ -153,6 +163,9 @@ class LaunchSettings(Wire):
     """The session settings spelled as variables, which outrank the operator's."""
     hooks: dict[str, list[HookGroup]]
     permissions: Permissions
+    idle_compaction: bool | None = None
+    """False stops compaction while the session is idle; none leaves it to the
+    operator's own settings."""
     disable_claude_ai_connectors: bool | None = None
     """True keeps the account's claude.ai connectors from being fetched; none
     leaves it to the operator's own settings."""
@@ -177,6 +190,7 @@ class OwnSettings(Wire):
 
     subagent_prompt_cache_ttl: Literal["5m", "1h"] | None = None
     auto_memory_enabled: bool | None = None
+    idle_compaction: bool | None = None
     disable_claude_ai_connectors: bool | None = None
     env: dict[str, JsonValue] = {}
     """The variables Claude Code applies to its environment at start."""
@@ -188,6 +202,7 @@ class OwnSettings(Wire):
             or SUBAGENT_CACHE in self.env,
             "auto_memory": self.auto_memory_enabled is not None
             or AUTO_MEMORY_OFF in self.env,
+            "idle_compaction": self.idle_compaction is not None,
             "account_connectors": self.disable_claude_ai_connectors is not None
             or CONNECTORS in self.env,
         }
@@ -265,6 +280,7 @@ def compiled(
             for name in events
         },
         permissions=Permissions(deny=session.removed_tools or []),
+        idle_compaction=session.idle_compaction,
         disable_claude_ai_connectors=None
         if session.account_connectors is None
         else not session.account_connectors,

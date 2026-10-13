@@ -625,6 +625,7 @@ def test_the_session_settings_are_cores_in_the_librarys_terms() -> None:
         defaults=SessionSettings(
             subagent_cache=timedelta(hours=1),
             auto_memory=False,
+            idle_compaction=False,
             removed_tools=choices.removed_tools,
             account_connectors=False,
         ),
@@ -649,6 +650,7 @@ def test_the_fields_a_project_declares_are_imposed_and_the_rest_are_defaults() -
     assert parts.declared == SessionSettings(auto_memory=False)
     assert parts.defaults == SessionSettings(
         subagent_cache=timedelta(hours=1),
+        idle_compaction=False,
         removed_tools=SessionDefaults().removed_tools,
         account_connectors=False,
     )
@@ -683,5 +685,6 @@ def test_a_launch_imposes_what_the_project_declares_and_its_defaults_yield_to_th
         "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL": "1h",
     }
     assert "disableClaudeAiConnectors" not in on_claude
+    assert on_claude["idleCompaction"] is False
     assert "features.memories=false" in on_codex
     assert not any(argument.startswith("features.apps") for argument in on_codex)

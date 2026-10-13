@@ -48,6 +48,12 @@ lup's `apps = false` alone. Theirs count as set by either key.
 **Declared gaps.** Codex 0.162.1 has no setting for the prompt cache's lifetime,
 and can't remove a built-in tool by name, only whole feature groups, so a
 session's `subagent_cache` and `removed_tools` have nothing to compile to here.
+Nor does it compact while a session is idle, so `idle_compaction` has nothing
+to turn off: its compaction runs when the context passes
+`model_auto_compact_token_limit`, and at a turn's end past
+`model_post_turn_compact_threshold_percent`, off unless set
+(`config/src/config_toml.rs`; the 0.162.1 binary names no other setting for
+it), both left to the operator.
 
 **TOML.** Each `-c` value and the requirements file are TOML, written by
 `tomlkit`: a `-c` value on one line, its tables inline, and the requirements file

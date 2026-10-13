@@ -102,6 +102,7 @@ class SessionChoices(Model, extra="forbid"):
 
     subagent_cache: CacheLifetime
     auto_memory: bool
+    idle_compaction: bool
     removed_tools: list[str]
     """A runtime's built-in tools removed from a session's context, by name."""
     account_connectors: bool
@@ -272,6 +273,7 @@ def settled(found: list[Part[Session]]) -> SessionChoices:
     return SessionChoices(
         subagent_cache=session.subagent_cache,
         auto_memory=session.auto_memory,
+        idle_compaction=session.idle_compaction,
         removed_tools=removed,
         account_connectors=session.account_connectors,
         declared=set_fields(session),

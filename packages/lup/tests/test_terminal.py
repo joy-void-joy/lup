@@ -73,6 +73,7 @@ def settings(directory: Path, cli: Cli | None, **changes: object) -> TerminalSet
 DEFAULTS = SessionSettings(
     subagent_cache=timedelta(hours=1),
     auto_memory=False,
+    idle_compaction=False,
     removed_tools=["Artifact", "SendFeedback"],
     account_connectors=False,
 )
@@ -81,6 +82,7 @@ DEFAULTS = SessionSettings(
 IMPOSED = SessionSettings(
     subagent_cache=timedelta(hours=1),
     auto_memory=False,
+    idle_compaction=False,
     account_connectors=False,
 )
 """A project's declaration imposing what lup's defaults hold."""
@@ -149,6 +151,7 @@ def test_claude_compiles_its_flags_settings_state_and_mounts(
                 "PostToolUseFailure": [{"hooks": [command]}],
             },
             "permissions": {"deny": ["Artifact", "SendFeedback"]},
+            "idleCompaction": False,
             "disableClaudeAiConnectors": True,
             "skipDangerousModePermissionPrompt": True,
         },
@@ -254,6 +257,7 @@ def own(home: Path, settings: JsonObject) -> None:
 THEIRS: JsonObject = {
     "theme": "dark",
     "autoMemoryEnabled": True,
+    "idleCompaction": True,
     "disableClaudeAiConnectors": False,
     "env": {"CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL": "5m"},
     "permissions": {"deny": ["WebFetch"]},
@@ -270,6 +274,7 @@ def test_claude_passes_lup_s_defaults_only_where_the_operator_sets_none(
     written = lup_settings(Claude().terminal(settings(launch, CLAUDE_CLI)), launch)
 
     assert written["env"] == {}
+    assert "idleCompaction" not in written
     assert "disableClaudeAiConnectors" not in written
     assert written["permissions"] == {"deny": ["Artifact", "SendFeedback"]}
 
@@ -288,7 +293,24 @@ def test_claude_imposes_what_the_declaration_sets_over_the_operator_s_own(
         "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
         "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL": "1h",
     }
+    assert written["idleCompaction"] is False
     assert written["disableClaudeAiConnectors"] is True
+
+
+def test_claude_turns_idle_compaction_off_and_an_imposed_on_outranks_the_operator_s_off(
+    tmp_path: Path, home: Path
+) -> None:
+    launch = tmp_path / "launch"
+
+    def compacting(session: SessionSettings) -> JsonValue:
+        terminal = Claude().terminal(settings(launch, CLAUDE_CLI, session=session))
+        return lup_settings(terminal, launch).get("idleCompaction")
+
+    assert compacting(SessionSettings()) is False
+    own(home, {"idleCompaction": False})
+    assert compacting(SessionSettings(idle_compaction=True)) is True
+    own(home, {"idleCompaction": True})
+    assert compacting(SessionSettings()) is None
 
 
 def test_claude_counts_a_variable_in_the_operator_s_env_as_their_setting(
@@ -583,6 +605,16 @@ def test_codex_imposes_what_the_declaration_sets_by_every_key_the_operator_uses(
     ]
 
 
+def test_codex_has_no_idle_compaction_to_turn_off(
+    tmp_path: Path, codex_home: Path
+) -> None:
+    for session in [SessionSettings(), SessionSettings(idle_compaction=True)]:
+        terminal = Codex().terminal(
+            settings(tmp_path / "launch", CODEX_CLI, session=session)
+        )
+        assert not any("compact" in argument for argument in terminal.command)
+
+
 def test_codex_uses_the_operators_default_home(tmp_path: Path, home: Path) -> None:
     terminal = Codex(model="gpt-6.1-sol").terminal(
         TerminalSettings(directory=tmp_path / "launch", cli=CODEX_CLI)
@@ -748,11 +780,15 @@ def test_a_terminal_passes_what_s_imposed_and_the_defaults_the_person_sets_none_
     assert given.passed([]) == SessionSettings(
         subagent_cache=timedelta(hours=1),
         auto_memory=True,
+        idle_compaction=False,
         removed_tools=[],
         account_connectors=False,
     )
     assert given.passed(["auto_memory", "account_connectors"]) == SessionSettings(
-        subagent_cache=timedelta(hours=1), auto_memory=True, removed_tools=[]
+        subagent_cache=timedelta(hours=1),
+        auto_memory=True,
+        idle_compaction=False,
+        removed_tools=[],
     )
     assert TerminalSettings(directory=tmp_path).passed([]) == SessionSettings()
     with pytest.raises(TerminalError, match="memory aren't session settings"):

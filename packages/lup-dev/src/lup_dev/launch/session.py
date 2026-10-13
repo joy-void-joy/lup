@@ -140,6 +140,7 @@ def session_settings(choices: SessionChoices) -> SessionParts:
     every = SessionSettings(
         subagent_cache=cache,
         auto_memory=choices.auto_memory,
+        idle_compaction=choices.idle_compaction,
         removed_tools=choices.removed_tools,
         account_connectors=choices.account_connectors,
     ).model_dump()

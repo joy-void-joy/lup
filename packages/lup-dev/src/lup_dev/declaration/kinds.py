@@ -224,7 +224,8 @@ class Session(Layer, extra="forbid"):
 
     A layer on it changes only the fields it sets: a project turning auto memory
     on keeps lup's removed tools, and `RemovedTools().add(…)` or `.drop(…)` changes
-    them where they stand.
+    them where they stand. A field some layer sets is imposed over the person's
+    own runtime settings; one none sets is lup's default, which theirs outrank.
 
     >>> mine = Session(auto_memory=True).over(Session())
     >>> mine.auto_memory, mine.removed_tools == Session().removed_tools
@@ -236,13 +237,17 @@ class Session(Layer, extra="forbid"):
     API's other lifetime, `"5m"`."""
     auto_memory: bool = SessionDefaults().auto_memory
     """Whether a runtime keeps its own memory across sessions."""
+    idle_compaction: bool = SessionDefaults().idle_compaction
+    """Whether a runtime compacts a long conversation while the session sits
+    idle, where it can: off unless the person's own settings or the project
+    turn it on. Compaction when the context fills is the runtime's own."""
     removed_tools: RemovedTools = RemovedTools.of(*SessionDefaults().removed_tools)
     """A runtime's built-in tools removed from a session's context, by name:
     lup's (`lup_dev.catalog.room`), unless the project says."""
     account_connectors: bool = SessionDefaults().account_connectors
     """Whether a session fetches the connectors the operator's account brings
-    with its login, which reach their mail and files: off unless the project
-    turns them on."""
+    with its login, which reach their mail and files: off unless the person's
+    own settings or the project turn them on."""
 
 
 class Section(Model, extra="forbid"):

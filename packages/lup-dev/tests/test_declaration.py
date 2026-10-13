@@ -752,6 +752,7 @@ def test_session_settings_are_lup_s_by_default() -> None:
     assert resolve(Project()).session == SessionChoices(
         subagent_cache="1h",
         auto_memory=False,
+        idle_compaction=False,
         removed_tools=SessionDefaults().removed_tools,
         account_connectors=False,
     )
@@ -772,6 +773,7 @@ def test_a_session_layer_changes_only_the_fields_it_sets() -> None:
     assert resolved.session == SessionChoices(
         subagent_cache="1h",
         auto_memory=True,
+        idle_compaction=False,
         removed_tools=SessionDefaults().removed_tools,
         account_connectors=False,
         declared=["auto_memory"],
@@ -810,6 +812,7 @@ def test_a_declared_field_that_isnt_a_session_setting_is_refused() -> None:
         SessionChoices(
             subagent_cache="1h",
             auto_memory=False,
+            idle_compaction=False,
             removed_tools=[],
             account_connectors=False,
             declared=["memory"],
