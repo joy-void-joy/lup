@@ -88,12 +88,15 @@ The code that runs on the operator's machine, outside every room, is approved be
 The first lup left 46 images of 4.5 to 5.5 GB on this machine, kept alive by readable per-checkout tags, and 25 GB of per-project environments nothing pruned. Here:
 - one image per definition, labelled with its project; after a build, the project's older lup images that no container uses are removed;
 - no environment of lup's own: the project's `.venv` is shared (*The project's environment*);
-- the CLI cache keeps each runtime's current version and the one before it, for a session still running;
+- the CLI cache keeps each runtime's current version and the one before it, for a session still running: about 250 MB a version for Claude Code, 430 MB for Codex's package;
 - every build is recorded with its duration and size, one JSON line in lup's state, which the first lup never recorded.
 
 ### The CLIs
 
 - **The latest, fetched at launch.** A launch asks each vendor's own release channel (the one its installer uses) for the latest version, downloads it into lup's cache on the host when it's newer, checks its published checksum, and mounts it read-only into the room. So `lup launch claude` runs the latest Claude Code, whatever the host has installed, or without one. Offline, the cached version runs, and the launch says so.
+  - The channels, read in each installer (`docs/field-notes.md`, *The CLIs' release channels*): Claude Code's `downloads.claude.ai`, a version's binary checked against its manifest, downloaded compressed with zstd as the installer does; Codex's `releases.openai.com`, its package checked against the release's `digest`, unpacked whole, since the binary runs helpers found beside it. A download that doesn't match is never used, and the cached version runs, saying why.
+  - Each channel is spelled in its runtime's adapter in `lup_dev`, since lup's rules keep a runtime's name out of every other module; `launch/clis.py` holds the cache and the seam the adapters fill.
+  - The checksums arrive over HTTPS from the vendor. Both vendors also sign: a GPG signature on Claude Code's manifest, a Sigstore bundle for each Codex package. lup doesn't check either yet.
 - **Never baked into the image:** the first lup installed its CLIs into the image from npm at every release, a 1 GB layer rebuilt on most days.
 - **Asks from code keep the CLI their SDK pins** (`docs/library.md`, *Pinned runtimes*): their guarantees are checked per version, which a launched terminal, the operator's own, doesn't need. In the room, the CLI's own updater is off, since its file is read-only.
 - Checked: the CLIs run on the bare base image. Claude Code's native build links only glibc; Codex's is static, and ships its own `rg` and `bwrap`.
@@ -238,10 +241,10 @@ status = room.launch(arguments=["--resume"], settings=settings)   # a terminal; 
 | `rooms/container.py` | What a room's wall is made of | `Container` (`image`, `mounts`, `env`, `network`), `Image` (`definition`, tagged by its digest), `Mount` (`source`, `target`, `read_only`), `Mask` (a tmpfs hiding what's under it) |
 | `rooms/engine.py` | Running containers | `ContainerEngine`, an ABC (`ensure`, `run`); `Podman`, its one implementation; `ContainerError` |
 | `rooms/room.py` | An agent behind a wall | `Room` (`agent`, `container`), `launch` |
-| `sessions/terminal.py` | A declaration compiled for a terminal, in neutral terms | `TerminalSettings` (`cli`, `hooks`, `guidance`, `session`, `trusted`), `Hook` (`event`, `matcher`, `command`, `timeout`), `SessionSettings`, `Terminal` (`command`, `env`, `files`, `mounts`) |
+| `sessions/terminal.py` | A declaration compiled for a terminal, in neutral terms | `TerminalSettings` (`cli`, `hooks`, `guidance`, `session`, `trusted`), `Cli` (`program`, `directory`), `Hook` (`event`, `matcher`, `command`, `timeout`), `SessionSettings`, `Terminal` (`command`, `env`, `files`, `mounts`) |
 | `adapters/claude/terminal.py`, `adapters/codex/terminal.py` | Each runtime's spelling of a terminal: its flags, its files, the mounts its home needs, what a room turns off | none beyond the declaration's method |
 
-- **`Declaration.terminal(settings) -> Terminal`,** implemented by `Claude` and `Codex`, compiles the declaration's model and effort as the runtime spells them, with the settings above. `settings.cli` names the binary; none takes the one the SDK bundles, as an ask does. In a terminal, `system_prompt` replaces the runtime's prompt as it does in an ask, and none keeps the runtime's own **(leaning)**: a terminal session is the runtime's coding agent, which an empty prompt would leave without its tools' guidance, where an ask with no prompt sends none.
+- **`Declaration.terminal(settings) -> Terminal`,** implemented by `Claude` and `Codex`, compiles the declaration's model and effort as the runtime spells them, with the settings above. `settings.cli` names the binary, and the directory it ships in when it runs helpers found beside it, which the room then mounts whole (Codex's package: `bin/codex-code-mode-host`, `codex-path/rg`, `codex-resources/bwrap`); none takes the one the SDK bundles, as an ask does. In a terminal, `system_prompt` replaces the runtime's prompt as it does in an ask, and none keeps the runtime's own **(leaning)**: a terminal session is the runtime's coding agent, which an empty prompt would leave without its tools' guidance, where an ask with no prompt sends none.
 - **`Room` gets `launch` alone in this piece;** it becomes an `Agent`, with `ask` and `spawn` in a container, in the slice that runs rooms from code, as a field arrives with the slice that uses it (`docs/library.md`, *What a declaration holds*).
 - **The engine is a seam:** tests use a recording engine, so no test runs podman. Running podman needs only the standard library; the library gains no dependency.
 
@@ -251,7 +254,7 @@ status = room.launch(arguments=["--resume"], settings=settings)   # a terminal; 
 |---|---|
 | `launch/room.py` | The maintaining session's room from a resolved declaration: the image's definition, the repository's mounts, the runner's, the operator's runtime directory, the CLI, lup's cache, the editor's configuration, the launch's directories, the git identity and the terminal's variables |
 | `launch/images.py` | The image's definition from the base and the modules' packages; building through the engine; the build record; removing the project's older images |
-| `launch/clis.py` | The latest CLI from each vendor's release channel: the version check, the download and its checksum, the cache, keeping the current version and the one before |
+| `launch/clis.py` | The latest CLI from each vendor's release channel: the version check, the download and its checksum, the cache, keeping the current version and the one before (`CliCache`, returning a `CachedCli`). Each channel (`Channel`) is spelled in its runtime's adapter, `adapters/claude.py` and `adapters/codex.py` |
 | `launch/logins.py` | The operator's runtime directory in the room: the room's own Claude Code state file, and what the room turns off |
 | `launch/guidance.py` | Rendering the modules' guidance sections, and a local section, into one document |
 | `launch/session.py` | A launch's `TerminalSettings`: the hooks, `Core`'s session settings, the guidance, what's trusted |
@@ -293,8 +296,7 @@ The list of adapters `cli.py` holds moves where the host service reads it too, a
   - the room's `--no-daemon` beside the host's daemon on the same home;
   - what a failing hook command does to the call.
 - **Both:**
-  - a hook held for hours through socat;
-  - each vendor's release channel: where the latest version and its checksum are published.
+  - a hook held for hours through socat.
 
 ## Building it
 

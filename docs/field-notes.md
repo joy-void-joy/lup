@@ -239,6 +239,21 @@ From the source at `rust-v0.162.1` (paths under `codex-rs/`), probed with `codex
   - `--detach-keys=` (empty) is accepted with `-it`; its manual says an empty sequence turns off detaching, whose default is Ctrl+P then Ctrl+Q.
   - `--network=private` ran; its manual says it makes a namespace of the container's own, through pasta for rootless podman.
 
+### The CLIs' release channels (2026-10-13)
+
+Read in each vendor's installer and docs, then fetched once each through `launch/clis.py` into a scratch cache: Claude Code 2.1.296 and Codex 0.162.1, each checked against its published checksum, each answering `--version` on the host. Fetching both took 6 s here; with both current, a launch makes one request each.
+- **Claude Code,** as its native installer (`https://claude.ai/install.sh`) and its setup docs (code.claude.com/docs/en/setup, *Configure release channel*, *Binary integrity and code signing*) have it:
+  - `https://downloads.claude.ai/claude-code-releases/latest` answers the newest version as text, 7 bytes (`2.1.296`). `…/stable` answers the stable channel's (`2.1.287`), "typically about one week old, skipping releases with major regressions"; `latest` is the default channel.
+  - `<version>/manifest.json` lists each platform (`linux-x64`, `linux-x64-musl`, `linux-arm64`, …) with its binary's SHA-256 and size; `<version>/manifest.zst.json`, the same binary compressed with zstd. The files are `<version>/<platform>/claude` (257 MB for `linux-x64`) and `claude.zst` (90 MB).
+  - The installer reads `latest` and the manifest. With `zstd` installed, it downloads `claude.zst`, checks it against `manifest.zst.json`, decompresses it and checks the binary against `manifest.json`; without, it downloads the binary and checks that. Then it runs the binary's `install`.
+  - `manifest.json` has a detached GPG signature, `manifest.json.sig`, by "Anthropic Claude Code Release Signing <security@anthropic.com>", whose key is at `https://downloads.claude.ai/keys/claude-code.asc` (fingerprint `31DD DE24 DDFA B679 F42D 7BD2 BAA9 29FF 1A7E CACE`): "verifying the signature on the manifest transitively verifies every binary it lists". The manifest also carries `"manifestSignatureEnforcement": "flag"`, and `sdkCompat`, the SDK versions it was tested with.
+- **Codex,** as its standalone installer (`https://chatgpt.com/codex/install.sh`, which its README gives beside npm and Homebrew) has it:
+  - `https://releases.openai.com/codex/channels/latest` describes the newest release as GitHub's releases API does, 52 KB of JSON: `tag_name` (`rust-v0.162.1`), and `assets`, each with its `name`, `browser_download_url` and `digest` (`sha256:<hex>`). A given version is `releases/<version>/release.json`, its files under `releases/<version>/`.
+  - Where releases.openai.com fails, the installer falls back to GitHub Releases (`https://api.github.com/repos/openai/codex/releases/latest`, files under `https://github.com/openai/codex/releases/download/rust-v<version>/`); `CODEX_INSTALLER_USE_RELEASES_OPENAI_COM=false` goes there first.
+  - For Linux on x86-64 it installs `codex-package-x86_64-unknown-linux-musl.tar.gz` (163 MB; a `.tar.zst` of 117 MB is published beside it). It checks `codex-package_SHA256SUMS` against that file's `digest`, then the package against its line there, which is the package's own `digest`. A release without packages falls back to `codex-npm-linux-x64-<version>.tgz`.
+  - The package is the layout the SDK's `codex_cli_bin` bundles: `codex-package.json` (`version`, `target`, `entrypoint` `bin/codex`, `resourcesDir`, `pathDir`), `bin/codex`, `bin/codex-code-mode-host`, `codex-path/rg`, `codex-resources/bwrap` and `zsh`, and `codex-resources/voice` (a 65 MB voice host and GStreamer's libraries): 432 MB unpacked. The binary finds them beside itself ("no bundled codex-resources/bwrap binary was found next to the Codex executable", in its binary).
+  - Every package and binary also has a Sigstore bundle (`<file>.sigstore`).
+
 ### From the first lup's rooms
 
 Read in its code and history (`lup-legacy`), with each commit there:

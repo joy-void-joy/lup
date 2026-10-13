@@ -61,7 +61,7 @@ from pydantic.alias_generators import to_camel
 from lup.adapters.claude.layout import ClaudeLaunch, ClaudeLayout
 from lup.adapters.claude.runtime import AUTO_MEMORY_OFF, Effort
 from lup.rooms.container import Mount
-from lup.sessions.terminal import Terminal
+from lup.sessions.terminal import Cli, Terminal
 from lup.types import Model
 
 if TYPE_CHECKING:
@@ -156,7 +156,7 @@ def compiled(
 ) -> Terminal:
     """Return the terminal session of Claude Code for a declaration's fields, with lup's settings."""
     launch = ClaudeLaunch(directory=settings.directory)
-    cli = layout.bundled if settings.cli is None else settings.cli
+    cli = Cli(program=layout.bundled) if settings.cli is None else settings.cli
     session = settings.session
 
     def group(hook: Hook) -> HookGroup:
@@ -207,7 +207,7 @@ def compiled(
     }
     return Terminal(
         command=[
-            str(cli),
+            str(cli.program),
             "--setting-sources",
             "user",
             "--settings",
@@ -232,7 +232,7 @@ def compiled(
         files=files,
         mounts=[
             Mount(source=layout.directory),
-            Mount(source=cli, read_only=True),
+            cli.mount,
             Mount(source=settings.directory, read_only=True),
             Mount(source=launch.state, target=layout.state),
         ],

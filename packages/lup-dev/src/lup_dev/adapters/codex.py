@@ -51,16 +51,42 @@ What this relies on, from Codex's hooks documentation and its source at
 - `Stop`'s `stop_hook_active` says "Whether this turn was already continued by
   `Stop`"; `SubagentStop`'s output takes `decision`, `reason` and `systemMessage`
   as `Stop`'s does (`subagent-stop.command.output`).
+
+Its release channel (`CodexChannel`) is the one its standalone installer reads
+(`https://chatgpt.com/codex/install.sh`, which the repository's README gives,
+read on 2026-10-13). The installer falls back to GitHub Releases when this one is
+unavailable; a launch runs what's kept instead.
+- `<releases>/channels/latest` describes the newest release, and
+  `<releases>/releases/<version>/release.json` a given one, as GitHub's releases
+  API does: its tag, `rust-v<version>`, and each file's name, address and
+  `digest`, `sha256:<hex>`;
+- the package for Linux on x86-64 is `codex-package-x86_64-unknown-linux-musl.tar.gz`:
+  `codex-package.json`, naming the version, the target and the binary
+  (`entrypoint`, `bin/codex`), with the helpers it finds beside it,
+  `bin/codex-code-mode-host`, `codex-path/rg` and `codex-resources/bwrap`; the
+  installer checks it against `codex-package_SHA256SUMS`, itself checked against
+  its `digest`, which holds the same checksum as the package's own `digest`;
+- each package also has a Sigstore bundle (`<package>.sigstore`), which lup
+  doesn't check.
 """
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Annotated, Literal, override
+from typing import TYPE_CHECKING, Annotated, Literal, override
 
-from pydantic import Field, TypeAdapter
+from pydantic import Field, TypeAdapter, ValidationError
 from pydantic.alias_generators import to_camel
 
+from lup.sessions.terminal import Cli
 from lup.types import Model, Settings
+from lup_dev.launch.clis import (
+    Channel,
+    ChannelError,
+    check,
+    document,
+    download,
+    extract,
+)
 from lup_dev.policy.checkpoint import (
     Bench,
     CallFinished,
@@ -72,6 +98,9 @@ from lup_dev.policy.checkpoint import (
 )
 from lup_dev.policy.report import judge_failed
 from lup_dev.policy.runtime import Runtime
+
+if TYPE_CHECKING:
+    import httpx
 
 
 class Variables(Settings):
@@ -312,3 +341,92 @@ def hook(raw: str, bench: Bench) -> str:
     if output is None:
         return ""
     return output.model_dump_json(by_alias=True, exclude_none=True)
+
+
+class Asset(Model):
+    """A file of a release, as the channel lists it."""
+
+    name: str
+    browser_download_url: str
+    digest: str
+    """Its checksum, spelled `sha256:<hex>`."""
+
+
+class Release(Model):
+    """A release, as the channel describes it: its tag, and its files."""
+
+    tag_name: str
+    assets: list[Asset]
+
+
+class Package(Model, alias_generator=to_camel, populate_by_name=True):
+    """A package's own manifest, `codex-package.json`: what it holds, and where its binary is."""
+
+    version: str
+    target: str
+    entrypoint: Path
+    """The binary, from the package's directory."""
+
+
+class CodexChannel(Channel):
+    """Codex's release channel, read as its standalone installer reads it."""
+
+    releases: str = "https://releases.openai.com/codex"
+    """The channel's root: the newest release, and each release's description and files."""
+    target: str = "x86_64-unknown-linux-musl"
+    """The packages' name for Linux on x86-64, built static."""
+    tag: str = "rust-v"
+    """What a release's tag holds before its version."""
+    manifest: str = "codex-package.json"
+    """The package's own manifest, at its root."""
+
+    @override
+    def latest(self, client: httpx.Client) -> str:
+        release = document(client, f"{self.releases}/channels/latest", Release)
+        return self.version(release)
+
+    @override
+    def download(self, client: httpx.Client, version: str, into: Path) -> None:
+        url = f"{self.releases}/releases/{version}/release.json"
+        release = document(client, url, Release)
+        if self.version(release) != version:
+            message = f"{url} describes {release.tag_name}, not {version}"
+            raise ChannelError(message)
+        name = f"codex-package-{self.target}.tar.gz"
+        found = [asset for asset in release.assets if asset.name == name]
+        if not found:
+            message = f"{url} lists no {name}"
+            raise ChannelError(message)
+        [asset] = found
+        archive = into / name
+        digest = download(client, asset.browser_download_url, archive)
+        check(asset.browser_download_url, f"sha256:{digest}", asset.digest)
+        extract(archive, into)
+        archive.unlink()
+        package = self.package(into)
+        if package.version != version or package.target != self.target:
+            message = (
+                f"{name} of {version} holds {package.version} for {package.target}"
+            )
+            raise ChannelError(message)
+
+    @override
+    def cli(self, directory: Path) -> Cli:
+        package = self.package(directory)
+        return Cli(program=directory / package.entrypoint, directory=directory)
+
+    def package(self, directory: Path) -> Package:
+        """Read the manifest of the package in `directory`."""
+        path = directory / self.manifest
+        try:
+            return Package.model_validate_json(path.read_text())
+        except (OSError, ValidationError) as failed:
+            message = f"{path} doesn't read as a package's manifest: {failed}"
+            raise ChannelError(message) from failed
+
+    def version(self, release: Release) -> str:
+        """Return the version a release's tag names."""
+        if not release.tag_name.startswith(self.tag):
+            message = f"the release's tag, {release.tag_name}, doesn't start {self.tag}"
+            raise ChannelError(message)
+        return release.tag_name.removeprefix(self.tag)

@@ -1,4 +1,4 @@
-"""Claude Code's hooks: its payloads in, lup's events, its outputs out.
+"""Claude Code's hooks, its payloads in, lup's events, its outputs out; and its release channel.
 
 | Claude Code hook | lup's event |
 |---|---|
@@ -33,16 +33,40 @@ What this relies on, from Claude Code's hooks reference
 - `Stop`'s `stop_hook_active` "is `true` when Claude Code is already continuing as
   a result of a stop hook"; `SubagentStop` takes "the same decision control format
   as Stop hooks".
+
+Its release channel (`ClaudeChannel`) is the one its native installer reads
+(`https://claude.ai/install.sh`, read on 2026-10-13):
+- `<releases>/latest` is the newest version, as text;
+- `<releases>/<version>/manifest.json` publishes each platform's binary with its
+  SHA-256 (`platforms["linux-x64"].checksum`), and `manifest.zst.json` the same
+  binary compressed with zstd, a third of its size, with that file's SHA-256;
+- the installer downloads `<releases>/<version>/<platform>/claude.zst` when `zstd`
+  is installed, checks it against `manifest.zst.json`, decompresses it and checks
+  the binary against `manifest.json`; as this adapter does, with Python's zstd;
+- `manifest.json` is also signed with Anthropic's release key
+  (`manifest.json.sig`; code.claude.com/docs/en/setup, *Binary integrity and code
+  signing*), which lup doesn't check.
 """
 
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Annotated, Literal, override
+from typing import TYPE_CHECKING, Annotated, Literal, override
 
 from pydantic import Field, TypeAdapter
 from pydantic.alias_generators import to_camel
 
+from lup.sessions.terminal import Cli
 from lup.types import JsonObject, Model, Settings
+from lup_dev.launch.clis import (
+    Channel,
+    ChannelError,
+    check,
+    decompress,
+    document,
+    download,
+    executable,
+    text,
+)
 from lup_dev.policy.before import Decision, Overwrite, Replacement, before
 from lup_dev.policy.checkpoint import (
     Bench,
@@ -55,6 +79,9 @@ from lup_dev.policy.checkpoint import (
 )
 from lup_dev.policy.report import judge_failed
 from lup_dev.policy.runtime import Runtime
+
+if TYPE_CHECKING:
+    import httpx
 
 
 class Variables(Settings):
@@ -395,3 +422,61 @@ def hook(raw: str, bench: Bench) -> str:
     if output is None:
         return ""
     return output.model_dump_json(by_alias=True, exclude_none=True)
+
+
+class Build(Model):
+    """One platform's file in a release's manifest."""
+
+    checksum: str
+    """Its SHA-256, as hex."""
+
+
+class Manifest(Model):
+    """A release's manifest: its version, and each platform's file with its checksum."""
+
+    version: str
+    platforms: dict[str, Build]
+
+
+class ClaudeChannel(Channel):
+    """Claude Code's release channel, read as its native installer reads it."""
+
+    releases: str = "https://downloads.claude.ai/claude-code-releases"
+    """The channel's root: the newest version, and each version's manifests and files."""
+    platform: str = "linux-x64"
+    """The manifests' name for Linux on x86-64 against glibc, which the room's Arch Linux has."""
+    binary: str = "claude"
+    """The binary's name, in the channel and in its version's directory."""
+
+    @override
+    def latest(self, client: httpx.Client) -> str:
+        return text(client, f"{self.releases}/latest").strip()
+
+    @override
+    def download(self, client: httpx.Client, version: str, into: Path) -> None:
+        release = f"{self.releases}/{version}"
+        binary = self.build(client, f"{release}/manifest.json", version)
+        packed = self.build(client, f"{release}/manifest.zst.json", version)
+        archive = into / f"{self.binary}.zst"
+        url = f"{release}/{self.platform}/{archive.name}"
+        check(url, download(client, url, archive), packed.checksum)
+        program = into / self.binary
+        check(f"{url}, decompressed,", decompress(archive, program), binary.checksum)
+        archive.unlink()
+        executable(program)
+
+    @override
+    def cli(self, directory: Path) -> Cli:
+        return Cli(program=directory / self.binary)
+
+    def build(self, client: httpx.Client, url: str, version: str) -> Build:
+        """Return the platform's file, as the manifest at `url` for `version` lists it."""
+        manifest = document(client, url, Manifest)
+        if manifest.version != version:
+            message = f"{url} describes {manifest.version}, not {version}"
+            raise ChannelError(message)
+        found = manifest.platforms.get(self.platform)
+        if found is None:
+            message = f"{url} lists no build for {self.platform}"
+            raise ChannelError(message)
+        return found
