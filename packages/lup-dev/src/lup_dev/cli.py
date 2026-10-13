@@ -6,9 +6,10 @@ names are that piece's call (`docs/judging-writes.md`, *Modules*). It's the one
 place that lists the runtimes' adapters, so the host service answers each launch's
 hooks with the answerer built here (`docs/launch.md`), as `hook` does.
 
-`submit`, `wait`, `reviews` and `reply` serve the built drafts flow
-(`docs/review-flow.md`). Who calls one is a conversation of its own, `operator`,
-in the directory it runs in.
+`trust` approves what the host runs for a repository, the check a launch makes
+first (`docs/launch.md`, *Trust on launch*). `submit`, `wait`, `reviews` and
+`reply` serve the built drafts flow (`docs/review-flow.md`). Who calls one is a
+conversation of its own, `operator`, in the directory it runs in.
 """
 
 import asyncio
@@ -39,9 +40,9 @@ from lup_dev.errors import LupDevError
 from lup_dev.gate import Check, Shell, failed, report
 from lup_dev.host.client import Detached, HostClient
 from lup_dev.host.service import Answerer, HostService
-from lup_dev.install import Installer, Terminal, Uv
+from lup_dev.launch.trust import trusted
 from lup_dev.layout import CheckoutLayout, Layout
-from lup_dev.legacy_dashboard import LegacyDashboard, LegacyQueue
+from lup_dev.legacy_dashboard import LegacyQueue
 from lup_dev.policy.checkpoint import Bench, Services, Worktree
 from lup_dev.policy.holds import Hold, Response, answer, waiting
 from lup_dev.policy.importers import BackgroundSpawner
@@ -388,41 +389,19 @@ def check(
         raise typer.Exit(code=1)
 
 
-@app.command("install")
-def install(
-    *,
-    in_terminal: Annotated[
-        bool,
-        typer.Option(
-            "--in-terminal",
-            help="Review in this terminal instead of the first lup's dashboard.",
-        ),
-    ] = False,
-) -> None:
-    """Install this checkout's judge as the one that runs, once you approve its source.
+@app.command("trust")
+def trust() -> None:
+    """Approve what the host runs for this repository, as a launch does first.
 
-    Run it yourself from the `dev` checkout: it builds the engine, parks every file
-    the judge carries that changed since the commit you approved last as one review
-    in the first lup's dashboard, and installs only if you approve. Declined, the
-    copy installed before keeps judging. Where nothing changed, it says so and stops.
+    Run it yourself, in your own terminal. It reads the host zone at the
+    integration branch's tip: the declaration, the files its modules name that the
+    host imports, and the `lup-dev` the host runs. Where that isn't the zone you
+    approved last, it shows what changed since through your pager and asks once:
+    approved, it installs the tip's `lup-dev` as the host's, restarts the host
+    service on it where one runs, and records the approval; declined, the copy you
+    approved before keeps running. Where nothing changed, it says so and stops.
     """
-    checkout = toplevel(Path.cwd())
-    settings = LupDevSettings()
-    clock = SystemClock()
-    reviewer = (
-        Terminal()
-        if in_terminal
-        else LegacyDashboard.configured(checkout, settings, clock)
-    )
-    installer = Installer(
-        checkout=checkout,
-        layout=Layout.of(settings),
-        toolchain=Uv(),
-        reviewer=reviewer,
-        clock=clock,
-        runtimes=runtimes(),
-    )
-    typer.echo(installer.install().report())
+    typer.echo(trusted(toplevel(Path.cwd()), runtimes()).report())
 
 
 @app.command("verdicts")

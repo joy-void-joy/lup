@@ -4,7 +4,7 @@ A change the operator reviews is parked where they read it: in the bridge, the
 first lup's dashboard (`lup_dev.legacy_dashboard`); once it exists, lup's own.
 Whatever parks it answers to `Queue`, so what submits a review never knows where
 it waits (`docs/review-flow.md`, *Modules and public API*). What the operator
-writes back comes in the models here, which the installer's review reads too.
+writes back comes in the models here.
 """
 
 from abc import ABC, abstractmethod

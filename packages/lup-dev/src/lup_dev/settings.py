@@ -30,7 +30,7 @@ class LupDevSettings(Settings):
     """
     lup_interim_review_legacy_checkout: Path = Path("lup-legacy.git/tree/dev")
     """`LUP_INTERIM_REVIEW_LEGACY_CHECKOUT`: the first lup's checkout, whose dashboard
-    reviews the judge before `lup-dev install` installs it.
+    shows the reviews an agent submits from a worktree.
 
     Relative to the directory holding the repository's git directory, or absolute.
     The interim review hook reads the same variable the same way, so one setting

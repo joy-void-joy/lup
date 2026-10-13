@@ -239,13 +239,14 @@ import-linter checks the whole graph at the gate. The engine reads the same cont
 
 | `lup_dev` | What it is |
 |---|---|
-| root | `errors.py`, `settings.py`, `layout.py`, `clock.py`, `cli.py`; the front door for a project's declaration (`__init__.py`); the gate as one command (`gate.py`); installing the judge (`install.py`); what reviews share (`review.py`) and the bridge parking them in the first lup's dashboard (`legacy_dashboard.py`) |
+| root | `errors.py`, `settings.py`, `layout.py`, `clock.py`, `cli.py`; the front door for a project's declaration (`__init__.py`); the gate as one command (`gate.py`); what reviews share (`review.py`) and the bridge parking them in the first lup's dashboard (`legacy_dashboard.py`) |
 | `declaration/` | what a project declares, and reading it: the grammar, `Module`, the kinds, lup's modules, loading `lup_project.py` and resolving it (`docs/declaration.md`) |
 | `catalog/` | the data that sets lup's policy, protected: path patterns (`paths.py`), the gate's steps (`gate.py`), the rule table (`rules.ts`) |
 | `codescan/` | reading code: the engine's contract and client, the `# lup:` directives, conditions, ruff, and `docs/rules.md` compiled from the rule table |
 | `policy/` | judging every write: roles, the judgement, the checkpoint and its store, holds, verdicts, reports |
 | `adapters/` | each runtime's hooks, the only code naming a runtime |
 | `host/` | the host service, which rooms call, and its client (`docs/launch.md`); it imports none of the other subsystems |
+| `launch/` | launching a session (`docs/launch.md`): trust on launch (`trust.py`) so far; not yet in the layers contract |
 
 **Why.** A flat package hides which modules belong together. A subpackage per subsystem says what a module is part of before it's opened, and the layer order says which subsystem may know about which.
 
