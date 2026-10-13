@@ -204,7 +204,13 @@ def test_lups_own_declaration_is_its_modules_with_its_changes() -> None:
         (each.module, each.requirement.tool) for each in resolved.requirements
     ]
     assert [each.name for each in resolved.packages][-3:] == ["nodejs", "npm", "uv"]
-    assert resolved.guidance == [Section(name="lup", path=Path("AGENTS.md"))]
+    assert [each.name for each in resolved.guidance] == [
+        "core",
+        "python",
+        "code-rules",
+        "lup",
+    ]
+    assert resolved.guidance[-1] == Section(name="lup", path=Path("AGENTS.md"))
 
 
 def test_loading_a_declaration_leaves_no_bytecode_at_the_root(

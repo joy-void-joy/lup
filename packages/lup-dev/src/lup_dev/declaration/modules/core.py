@@ -1,8 +1,17 @@
 """`Core`: the core's parts a project can change, which every project holds."""
 
+from pathlib import Path
+
 from lup_dev.catalog.paths import CorePaths
 from lup_dev.catalog.room import StandardMachine
-from lup_dev.declaration.kinds import Guidance, Package, Packages, Paths, Session
+from lup_dev.declaration.kinds import (
+    Guidance,
+    Package,
+    Packages,
+    Paths,
+    Section,
+    Session,
+)
 from lup_dev.declaration.module import Module
 
 
@@ -43,6 +52,13 @@ class Core(Module):
     session: Session = Session()
     """How every session runs: the subagents' prompt cache, auto memory, and the
     built-in tools removed from context, lup's unless the project says."""
-    guidance: Guidance = Guidance()
-    """The sections of guidance `Core` brings: none of lup's, so a project's own
-    section, where it has no module of its own, goes here."""
+    guidance: Guidance = Guidance.of(
+        Section(
+            name="core",
+            package="lup_dev.declaration.modules",
+            path=Path("guidance/core.md"),
+        )
+    )
+    """The room: what's mounted and what isn't, where the walls are, what's the
+    agent's to decide and what's the operator's, and the judge. A project's own
+    section, where it has no module of its own, goes here too, after it."""

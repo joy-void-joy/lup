@@ -1,9 +1,10 @@
 """`CodeRules`: which of lup's code rules run, and where one is lifted."""
 
 from functools import reduce
+from pathlib import Path
 
 from lup_dev.catalog.rules import DefaultRules, LeftOut
-from lup_dev.declaration.kinds import Exemptions, Rules
+from lup_dev.declaration.kinds import Exemptions, Guidance, Rules, Section
 from lup_dev.declaration.module import Module
 from lup_dev.declaration.requirements import Requirement
 
@@ -45,3 +46,12 @@ class CodeRules(Module):
     exempt: Exemptions = Exemptions()
     """Rules lifted from some paths, each with its reason: none unless the project
     says."""
+    guidance: Guidance = Guidance.of(
+        Section(
+            name="code-rules",
+            package="lup_dev.declaration.modules",
+            path=Path("guidance/code_rules.md"),
+        )
+    )
+    """What a rule is for, what a refusal says and how it's answered, and the
+    `# lup:` comments."""

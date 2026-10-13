@@ -865,18 +865,24 @@ def test_guidance_lists_each_module_s_sections_in_module_order() -> None:
         .edit(Core(guidance=Guidance().add(project)))
     )
     assert [each.name for each in resolve(Project(modules=modules)).guidance] == [
+        "core",
         "project",
         "pipeline",
         "stages",
+        "python",
+        "code-rules",
     ]
     first = Section(name="first", path=Path("first.md"))
     placed = modules.edit(
         Pipeline(guidance=Guidance().drop("stages").add(first, before="project"))
     )
     assert [each.name for each in resolve(Project(modules=placed)).guidance] == [
+        "core",
         "first",
         "project",
         "pipeline",
+        "python",
+        "code-rules",
     ]
 
 
@@ -895,8 +901,22 @@ def test_a_section_name_from_two_modules_is_refused_naming_both() -> None:
         resolve(Project(modules=modules.add(Notes())))
 
 
-def test_lup_s_modules_bring_no_guidance_text() -> None:
-    assert resolve(Project()).guidance == []
+def test_lup_s_modules_each_bring_a_section_their_package_ships() -> None:
+    assert [
+        (each.name, each.package, each.path) for each in resolve(Project()).guidance
+    ] == [
+        ("core", "lup_dev.declaration.modules", Path("guidance/core.md")),
+        ("python", "lup_dev.declaration.modules", Path("guidance/python.md")),
+        ("code-rules", "lup_dev.declaration.modules", Path("guidance/code_rules.md")),
+    ]
+
+
+def test_a_project_replaces_one_of_lup_s_sections() -> None:
+    mine = Section(name="core", path=Path("room.md"))
+    modules = Modules.default().edit(
+        Core(guidance=Guidance().replace("core", mine, why="our room differs"))
+    )
+    assert resolve(Project(modules=modules)).guidance[0] == mine
 
 
 def test_the_front_door_imports_only_the_declaration_s_models() -> None:
