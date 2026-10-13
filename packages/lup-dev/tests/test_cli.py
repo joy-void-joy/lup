@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Literal
 from typer.testing import CliRunner
 
 from lup_dev import Rules, cli
-from lup_dev.codescan.directives import IssueRef, Issues
+from lup_dev.codescan.directives import GitHubIssues, IssueRef, Issues
 from lup_dev.codescan.engine import EngineChecker
 from lup_dev.declaration.modules.code_rules import lup_default
 from lup_dev.declaration.runner import Plain, Prefixed
@@ -303,6 +303,18 @@ class Closed(Issues):
     def state(self, issue: IssueRef) -> Literal["open", "closed"]:
         return "closed"
 
+    def unreachable(self) -> str | None:
+        return None
+
+
+class Unreachable(Issues):
+    def state(self, issue: IssueRef) -> Literal["open", "closed"]:
+        message = "an unreachable tracker isn't asked"
+        raise AssertionError(message)
+
+    def unreachable(self) -> str | None:
+        return "`gh` isn't installed here"
+
 
 def test_rules_check_fails_on_a_deferral_whose_issue_closed(
     fakes: Kit, repo: Path, monkeypatch: pytest.MonkeyPatch
@@ -319,6 +331,47 @@ def test_rules_check_fails_on_a_deferral_whose_issue_closed(
     result = runner.invoke(cli.app, ["rules", "check", "src/pkg/core.py"])
     assert result.exit_code == 1
     assert "src/pkg/core.py:1:1 - defer-closed: issue #12 is closed" in result.output
+    assert "weren't checked" not in result.output
+
+
+def test_rules_check_says_it_left_issues_unchecked_where_the_tracker_is_out_of_reach(
+    fakes: Kit, repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (repo / "src" / "pkg" / "core.py").write_text(
+        'x = 1  # lup: defer(issue=12, why="retry on reset")\n'
+    )
+
+    def issues(root: Path) -> Issues:
+        return Unreachable()
+
+    monkeypatch.setattr(cli, "GitHubIssues", issues)
+    monkeypatch.chdir(repo)
+    result = runner.invoke(cli.app, ["rules", "check", "src/pkg/core.py"])
+    assert result.exit_code == 0
+    assert (
+        "Deferrals' issues weren't checked: `gh` isn't installed here." in result.output
+    )
+
+
+def test_github_is_out_of_reach_without_gh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.undo()
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert GitHubIssues(root=tmp_path).unreachable() == "`gh` isn't installed here"
+
+
+def test_github_is_out_of_reach_where_gh_has_no_login(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.undo()
+    gh = tmp_path / "gh"
+    gh.write_text("#!/bin/sh\nexit 1\n")
+    gh.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{tmp_path}:/usr/bin:/bin")
+    reason = GitHubIssues(root=tmp_path).unreachable()
+    assert reason is not None
+    assert reason.startswith("`gh auth status` ended with status 1")
 
 
 def test_the_engine_is_the_worktree_engine_as_settings_place_it(

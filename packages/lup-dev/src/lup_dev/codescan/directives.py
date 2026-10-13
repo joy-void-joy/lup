@@ -76,12 +76,42 @@ class Issues(Model, ABC):
     def state(self, issue: IssueRef) -> Literal["open", "closed"]:
         """Say whether `issue` is open or closed."""
 
+    @abstractmethod
+    def unreachable(self) -> str | None:
+        """Say why the tracker can't be asked about any issue here, or none where it can."""
+
 
 class GitHubIssues(Issues):
     """GitHub's issues, through the `gh` command."""
 
     root: Path
     """The checkout `gh` runs in, which names this repository."""
+
+    @override
+    def unreachable(self) -> str | None:
+        """Say why `gh` can't be asked here: missing, or `gh auth status` failing; none where it can.
+
+        A room holds no GitHub login and no `gh`, and a machine may be offline:
+        there, the gate leaves a deferral's issue unchecked and says why, rather
+        than failing on what it couldn't ask (`docs/launch.md`).
+        """
+        try:
+            status = sh.Command("gh")(
+                "auth",
+                "status",
+                _cwd=str(self.root),
+                _ok_code=list(range(256)),
+                _tty_out=False,
+                _return_cmd=True,
+            )
+        except sh.CommandNotFound:
+            return "`gh` isn't installed here"
+        if status.exit_code != 0:
+            return (
+                f"`gh auth status` ended with status {status.exit_code}: no GitHub "
+                "login here, or GitHub is out of reach"
+            )
+        return None
 
     @override
     @retry(
@@ -118,7 +148,9 @@ class GitHubIssues(Issues):
 class Trackers(Model, arbitrary_types_allowed=True):
     """What a deferral is tracked by, which the gate asks: issues and conditions."""
 
-    issues: Issues
+    issues: Issues | None
+    """None where the tracker can't be reached here, so a deferral's issue isn't
+    checked; the gate says why."""
     conditions: dict[str, Condition]
     """The project's conditions, by the names its conditions module binds."""
 
@@ -261,7 +293,11 @@ class Defer(Comment):
         gate = checking.gate
         if gate is None:
             return []
-        closed = issue is not None and gate.issues.state(issue) == "closed"
+        closed = (
+            issue is not None
+            and gate.issues is not None
+            and gate.issues.state(issue) == "closed"
+        )
         due = self.when is not None and gate.conditions[self.when].holds()
         finish = "finish the work here, or point at the issue tracking what's left"
         closing = [problem("defer-closed", f"issue {issue} is closed", finish)]
