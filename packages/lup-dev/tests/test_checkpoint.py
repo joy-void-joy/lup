@@ -927,12 +927,13 @@ def test_a_held_file_is_left_to_its_hold_by_a_session_starting_meanwhile(
     accepted: list[bytes | None] = []
 
     def other_session() -> None:
+        (repo / "README.md").write_text("# The operator's\n")
         start(kit, repo, "other")
         store = worktree(kit, repo).store
         accepted.append(store.content(store.accepted(), PYPROJECT))
         accepted.append(store.content(store.started("other"), PYPROJECT))
         call_for("other", kit, repo, "o1")
-        (repo / "README.md").write_text("# Other\n")
+        (repo / "tests" / "test_other.py").write_text("def test_other(): ...\n")
         heard.append(finish(kit, repo, "o1", session="other"))
         heard.append(end(kit, repo, "other"))
         accepted.append(store.content(store.accepted(), PYPROJECT))
@@ -941,13 +942,13 @@ def test_a_held_file_is_left_to_its_hold_by_a_session_starting_meanwhile(
     reply = finish(kit, repo, "p1")
     assert "The operator declined it: not now" in reply.context
     assert (repo / PYPROJECT).read_text() == original
-    assert (repo / ".lup/saved/1/pyproject.toml").read_text().endswith(
-        "# a dependency\n"
-    )
+    saved = repo / ".lup" / "saved" / "1" / PYPROJECT
+    assert saved.read_text() == original + "# a dependency\n"
     assert accepted == [original.encode()] * 3
     assert heard == [Reply(), Reply()]
     store = worktree(kit, repo).store
-    assert store.content(store.accepted(), Path("README.md")) == b"# Other\n"
+    assert store.content(store.accepted(), Path("README.md")) == b"# The operator's\n"
+    assert store.content(store.accepted(), Path("tests/test_other.py")) is not None
 
 
 def test_another_sessions_turns_end_doesnt_hold_on_a_held_file(

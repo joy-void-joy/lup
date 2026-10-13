@@ -34,7 +34,12 @@ class Changed(Model):
 
 
 class Held(Model):
-    """A change waiting for the operator's answer, which checkpoints leave alone."""
+    """A change waiting for the operator's answer, nobody's until then.
+
+    The accepted tree keeps the path's content from before the change: a
+    session's start, a checkpoint and a turn's end leave it alone, and only the
+    hold's answer puts it back or accepts it.
+    """
 
     hold: str
     path: Path
