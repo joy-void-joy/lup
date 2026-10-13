@@ -285,6 +285,12 @@ class FakeClock(Clock):
             action()
 
 
+@pytest.fixture
+def clock() -> FakeClock:
+    """A clock the test drives: it moves only when slept on."""
+    return FakeClock()
+
+
 class FakeSpawner(Spawner):
     def __init__(self) -> None:
         self.spawned: list[Path] = []
@@ -427,7 +433,9 @@ class Kit:
         self.linter = FakeLinter()
         self.clock = FakeClock()
         self.spawner = FakeSpawner()
-        self.layout = Layout(state=state)
+        # lup's data under the test's directory too: the copies of `lup-dev`
+        # trust installs live there.
+        self.layout = Layout(state=state, data=state.parent / "data")
         self.runtime = runtime
         self.bench = Bench(
             runtime=runtime,
@@ -462,11 +470,12 @@ def holding_kit(tmp_path: Path) -> Kit:
 
 @pytest.fixture
 def state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Layout:
-    """lup's state under `tmp_path`, outside any runtime's session."""
+    """lup's state and data under `tmp_path`, outside any runtime's session."""
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data"))
     monkeypatch.delenv("CLAUDE_CODE_CHILD_SESSION", raising=False)
     monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
-    return Layout(state=tmp_path / "xdg" / "lup")
+    return Layout(state=tmp_path / "xdg" / "lup", data=tmp_path / "xdg-data" / "lup")
 
 
 @pytest.fixture

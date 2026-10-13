@@ -136,7 +136,7 @@ narrator.launch()                                                        # a ter
   - Batching bursts and not talking over the operator are rules of how an inbox delivers, built so they can't starve replies. Reminders and follow-ups are lup tools, cancelled when the operator speaks.
   - The operator is a peer on the roster: telling them something is a message with a `kind` (question, disagreement, note, problem). Notification channels reach them away from the dashboard.
 - **Coordination is light:** the roster fills itself from what each session does, and conflicts are found when writes merge, not through locks.
-- **Session settings,** declared defaults a project can change: workers get the 1-hour prompt cache; unused built-in tools are removed from context; auto memory is off on both runtimes; compaction stays at the runtime's default.
+- **Session settings,** declared defaults a project can change: workers get the 1-hour prompt cache; unused built-in tools are removed from context; auto memory is off on both runtimes; idle compaction is off where a runtime has it, and compaction when the context fills is left to the runtime. A person's own runtime settings outrank lup's defaults, and a project's declared settings outrank theirs.
 - **Isolation between sessions:** a worktree per agent, environments hardlinked from a cache (*Open questions*).
 
 ### Budgets
@@ -159,7 +159,7 @@ Shares per project or agent over a time window; a pace limit for unattended runs
 - **(leaning) Sudo in room modes;** inherited capabilities always cleared; package installs held to a minimum age.
 - **Protected paths:** the project's declaration and the rule tables its modules name; lup's settings files (a write equal to what the declaration generates is allowed); dependency manifests and lockfiles; what runs outside the container (CI, git hooks and `.git/config`, pre-commit, editor and devcontainer configs); what widens the wall; secrets (not even readable); in lup itself, its policy and launch code.
 - **Reviews happen before, by default.** Examples, docs and guidance are reviewed after: they land, the operator is told, and one step reverts them.
-- **Trust on launch:** the host-zone fingerprint, the review in the dashboard, and launching from the approved copy. The installed judge gets the same: refreshing it shows its diff since the copy the operator last approved.
+- **Trust on launch:** the host-zone fingerprint, the review at launch (in the terminal until the inbox, then wherever the inbox is answered), and launching from the approved copy (`docs/launch.md`, *Trust on launch*). The installed judge gets the same: refreshing it shows its diff since the copy the operator last approved.
 
 ### Code rules and the gate
 
@@ -260,6 +260,6 @@ Each step builds on the ones before it **(leaning)**:
 
 **#56 pulls ahead (leaning)** what a maintaining session needs from steps 3, 5, 6 and 7, after the declaration's first slice (`docs/declaration.md`), in four pieces: launch on rooms, with the host service (`docs/launch.md`); lup's MCP server, the inbox and the credential actions; proposals and holds; the dependency guard. The rest of those steps keeps its place.
 
-lup hosts its own development once steps 5–7 are done. Then: budgets, `accounts`, the feedback modules, the outcome loop, the resolver, setup, the Codex capability check, trust on launch.
+lup hosts its own development once steps 5–7 are done. Then: budgets, `accounts`, the feedback modules, the outcome loop, the resolver, setup, the Codex capability check.
 
 **Already built:** the engine and its rules, the gate, and the judge, which is reshaped around proposals before it goes live again. The declaration is built only as large as the steps above need. **While lup is being built,** its own sessions run only the code rules at the edit, and only protected paths ask (`AGENTS.md`, *How work goes*); a piece of the environment goes live in lup's own sessions once it's finished.

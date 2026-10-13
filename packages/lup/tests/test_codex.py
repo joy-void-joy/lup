@@ -30,9 +30,9 @@ from lup import (
     TurnError,
     UsageLimitReachedError,
 )
-from lup.adapters.codex import Codex
+from lup.adapters.codex import Codex, Effort
 from lup.adapters.codex.layout import CodexLayout
-from lup.adapters.codex.runtime import LAUNCH, CodexAdapter, Effort
+from lup.adapters.codex.runtime import LAUNCH, CodexAdapter
 from lup.adapters.codex.settings import CodexSettings
 from lup.sessions.contract import Adapter, RawTurn, Seam, TurnRequest, seam
 from lup.sessions.errors import RealCallInTestError
@@ -281,6 +281,7 @@ class Rig:
         refuse: dict[str, Exception] | None = None,
         system_prompt: str | None = "Answer briefly.",
         effort: Effort | None = "low",
+        model: str | None = "gpt-6.1-sol",
     ) -> None:
         self.operator = tmp_path / "operator"
         self.operator.mkdir(exist_ok=True)
@@ -305,7 +306,7 @@ class Rig:
             return client
 
         self.adapter = CodexAdapter(
-            model="gpt-6.1-sol",
+            model=model,
             system_prompt=system_prompt,
             effort=effort,
             layout=self.layout,
@@ -380,6 +381,13 @@ def test_no_system_prompt_and_no_effort_send_neither(tmp_path: Path) -> None:
     assert rig.client.sent["turn/start"] == [
         {"threadId": "thread-1", "input": "Will it rain?"}
     ]
+
+
+def test_no_model_starts_the_thread_on_codex_s_default(tmp_path: Path) -> None:
+    rig = Rig(tmp_path, [ANSWERED], model=None)
+    run(rig, toolbox())
+    [started] = rig.client.sent["thread/start"]
+    assert "model" not in started
 
 
 def test_the_app_server_starts_in_lups_home_with_every_built_in_off(

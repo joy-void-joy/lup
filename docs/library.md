@@ -53,7 +53,7 @@ result.usage.cost_usd    # where the runtime reports it
 - **`output` is a model type or an output tool.** `ask(prompt, Forecast)` builds `Submit(Forecast)`; to review an answer before it's accepted, build the tool with `before` hooks (*Typed answers*).
 - **A failure is always an error,** never an empty result (*Errors*).
 - **Async only,** with no sync wrapper beside each method.
-- **The front door** (`lup/__init__.py`) binds the runtime-neutral names (`Agent`, `TurnResult`, `Usage`, `Rejection`, `SessionLayers`, `Recovery`, `Submission`, and the errors) and loads `Claude` and `Codex` from their adapters on first use. So `import lup` reaches neither runtime's SDK, and naming a runtime whose extra isn't installed raises `RuntimeMissingError` naming the extra.
+- **The front door** (`lup/__init__.py`) binds the runtime-neutral names (`Agent`, `TurnResult`, `Usage`, `Rejection`, `SessionLayers`, `Recovery`, `Submission`, and the errors), and `Claude` and `Codex` from their adapters. Each adapter imports its runtime's SDK when an ask first runs, so `import lup` reaches neither SDK, a declaration compiles for a terminal without its extra (a launch runs the CLI it fetches, `docs/launch.md`), and asking a runtime whose extra isn't installed raises `RuntimeMissingError` naming the extra.
 
 **`Agent` is what code naming no runtime holds.** It's an ABC with one abstract method, `ask`, typed by overloads: `ask(prompt)` returns a `TurnResult[str]`, `ask(prompt, Forecast)` a `TurnResult[Forecast]`. Both declarations inherit it, as anything a project writes to stand in for one would. It's an ABC, not a `Protocol` matched by shape, as every interface lup owns is (`docs/conventions.md`, *Interfaces*): the declarations and the fake are lup's, and inherit.
 
@@ -87,7 +87,7 @@ def test_translates_a_segment(fake_agents: FakeAgents) -> None:
 ### What a declaration holds
 
 `Claude` and `Codex` are frozen models, each a `Declaration` and an `Agent`. In this slice their fields are **(leaning)**:
-- `model`: the runtime's model id, passed as given;
+- `model`: the runtime's model id, passed as given; none leaves it to the runtime (the operator's decision): in a terminal, the person's own settings choose, and in an ask, the runtime's default, since an ask loads none of their settings. So an ask passes no model to either SDK (`claude_agent_sdk` then passes no `--model`, and Codex's `thread/start` leaves its optional `model` out), and the trace records none;
 - `system_prompt`: replaces the runtime's own prompt; none sends no prompt of lup's own (what reaches the model is in each adapter's section);
 - `effort`: in each runtime's own levels, Claude Code's `low`, `medium`, `high`, `xhigh`, `max`, and Codex's `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`; none leaves it to the runtime;
 - `layers` (*The layers an ask runs in*).
@@ -235,7 +235,7 @@ Every error lup raises descends from `LupError` (`lup/errors.py`), and every nam
 | `ProblemReportedError` | The agent called `report`; `problem` and `notes` are its words | No |
 | `ToolsPresentError` | The session loaded tools beyond lup's own; `tools` lists what it loaded | No |
 | `TurnTimeoutError` | The timeout passed, and the turn was interrupted | No |
-| `RuntimeMissingError` | A declaration names a runtime whose extra isn't installed ("install `lup[codex]`"), or its runtime is missing | No |
+| `RuntimeMissingError` | An ask runs on a runtime whose extra isn't installed ("install `lup[codex]`"), or its runtime is missing | No |
 | `RealCallInTestError` | A test reached a real agent (*Testing*) | No |
 
 - `TurnTimeoutError` is also the built-in `TimeoutError` **(leaning)**, so code catching that catches it, and so does `except LupError`.
@@ -248,7 +248,7 @@ Each adapter's classification is in its section.
 ## The call record
 
 Every ask, answered or failed, appends one `CallRecord` (`observability/trace.py`) to `layers.trace` when it's set. A record holds:
-- the runtime and the model;
+- the runtime and the model the declaration named, none where it left the choice to the runtime;
 - the start time and the duration;
 - the prompt and the system prompt, in full;
 - the output in full (the model as JSON, or the text), or the error's type and message;
@@ -320,7 +320,7 @@ What it relies on, from `openai-codex` 0.162.0 and the codex-cli 0.162.0 it pins
 
 ```
 packages/lup/src/lup/
-  __init__.py              the front door: the neutral names, and Claude and Codex loaded on first use
+  __init__.py              the front door: the neutral names, Claude and Codex
   types.py                 Model, MutableModel and Settings, the bases every model starts from; JsonObject
   errors.py                LupError, the root of every error lup raises
   sessions/
@@ -330,7 +330,8 @@ packages/lup/src/lup/
     layers.py              SessionLayers, Recovery, Submission
     submission.py          Toolbox: one turn's tools, the calls made to them, and the guard
     results.py             TurnResult, Usage, Rejection
-    errors.py              the errors an ask raises, RuntimeMissingError and RealCallInTestError
+    errors.py              the errors an ask raises, RuntimeMissingError and RealCallInTestError; needs_extra
+    terminal.py            TerminalSettings, SessionSettings, Hook, Cli, Terminal: a declaration compiled for a terminal (docs/launch.md)
   tools/
     tool.py                @lup_tool, Tool, AgentTool and ToolSpec; Allow and Deny; ToolError
     submit.py              Submit, the output tool, and its Receipt
@@ -343,13 +344,15 @@ packages/lup/src/lup/
   adapters/
     claude/__init__.py     Claude, the declaration
     claude/runtime.py      ClaudeAdapter: the options, lup's MCP server, the Stop hook, the init check, the errors
+    claude/terminal.py     Claude Code's terminal: its flags, lup's settings file, and which session settings the operator's own file sets
     codex/__init__.py      Codex, the declaration
     codex/runtime.py       CodexAdapter: the launch, the thread, dynamic tools, the continuation, the errors, usage
+    codex/terminal.py      Codex's terminal: its flags and overrides, the requirements file, and which session settings the operator's config.toml sets
     codex/layout.py        CodexLayout: lup's own Codex home, and the operator's login it links to
     codex/settings.py      CodexSettings: CODEX_HOME and XDG_STATE_HOME
 ```
 
-Runtime-neutral code lives under `sessions/` and `tools/`, one adapter per runtime under `adapters/`: named `adapters`, not `providers`, since a provider also means a model provider or a compatible endpoint, which the connection will name. An adapter is reached only through the front door's first use, which is how a missing extra becomes `RuntimeMissingError` naming the extra instead of an import error deep inside. Import contracts in the root `pyproject.toml` keep each SDK in its adapter (`claude_agent_sdk` in `lup.adapters.claude`, `openai_codex` in `lup.adapters.codex`), keep anything inside `lup` from importing its front door, and keep the library from importing the environment.
+Runtime-neutral code lives under `sessions/` and `tools/`, one adapter per runtime under `adapters/`: named `adapters`, not `providers`, since a provider also means a model provider or a compatible endpoint, which the connection will name. An adapter imports its runtime's SDK inside `ask`, under `needs_extra`, which is how a missing extra becomes `RuntimeMissingError` naming the extra instead of an import error deep inside; the declaration, its effort levels (`Effort`, in the adapter's `__init__.py`) and its terminal compile never import it. Import contracts in the root `pyproject.toml` keep each SDK in its adapter (`claude_agent_sdk` in `lup.adapters.claude`, `openai_codex` in `lup.adapters.codex`), keep anything inside `lup` from importing its front door, and keep the library from importing the environment.
 
 The tests are in `packages/lup/tests/`: `test_ask.py` (an ask through the real layers, on the fake), `test_tools.py` (tools and the toolbox's guard), `test_types.py` (the model bases), and `test_claude.py` and `test_codex.py` (each adapter on a scripted client: no process, no network). The docstrings' examples run as doctests.
 
@@ -362,12 +365,12 @@ One repository, a uv workspace sharing one lock file, whose packages are version
 
 Dependencies run one way: the dashboard, then `lup-dev`, then `lup`.
 
-**Dependencies:** `pydantic`, `pydantic-settings`, and `tenacity` for recovery. **Extras:**
-- `lup[claude]`: `claude-agent-sdk`, and `mcp` for lup's own tool server;
+**Dependencies:** `pydantic`, `pydantic-settings`, `tenacity` for recovery, `mcp` for lup's own tool server, and `tomlkit` for the settings a runtime reads as TOML. **Extras:**
+- `lup[claude]`: `claude-agent-sdk`;
 - `lup[codex]`: `openai-codex`;
 - `lup[testing]`: `pytest` and `pytest-socket`.
 
-Each SDK ships its runtime's binary (about 240 MB and 360 MB installed), so a project installs only the side it uses. The SDKs drive the runtimes, rather than runtime clients of lup's own. lup's own development group installs all three extras, since every shared construct is tested on both runtimes.
+Each SDK ships its runtime's binary (about 240 MB and 360 MB installed), so a project installs only the side it uses. That's the one reason for an extra: every other library, even one a single runtime's adapter uses today, is a dependency of the package, so the split stays one rule rather than one per library. The SDKs drive the runtimes, rather than runtime clients of lup's own. lup's own development group installs all three extras, since every shared construct is tested on both runtimes.
 
 **Pinned runtimes.** A runtime is the one its SDK bundles, not whatever is on `PATH`, so the lock file pins it: claude-agent-sdk 0.2.165 bundles Claude Code 2.1.294, and openai-codex 0.162.0 pins codex-cli 0.162.0.
 

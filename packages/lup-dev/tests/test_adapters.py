@@ -1,16 +1,18 @@
 """Each runtime's payloads in, its outputs out."""
 
 import json
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 
+from lup.sessions.terminal import Hook
 from lup_dev.adapters import claude, codex
 from lup_dev.codescan.contract import Checker, FileReport, Rule, Source
 from lup_dev.policy.checkpoint import Bench, Running, Services
 from lup_dev.policy.holds import Holds, Response, waiting
-from lup_dev.policy.store import read_model
+from lup_dev.stored import read_model
 
 if TYPE_CHECKING:
     from conftest import Kit
@@ -674,3 +676,119 @@ def test_codex_holds_only_the_worktree_it_started_in(
     (linked / CORE).write_text((linked / CORE).read_text() + "y = 2  # BAD regex\n")
     assert codex.hook(post(repo, "done"), on_codex) == ""
     assert "# BAD regex" in (linked / CORE).read_text()
+
+
+# In a launched room
+
+
+HOOK = ["sh", "-c", "socat …"]
+
+
+def test_claude_hooks_the_judges_events_in_a_room() -> None:
+    hold = timedelta(hours=25)
+
+    assert claude.hooks(HOOK, hold) == [
+        Hook(event="session-started", command=HOOK, timeout=hold),
+        Hook(event="call-started", matcher="Edit|Write", command=HOOK, timeout=hold),
+    ]
+
+
+def test_claudes_hook_matches_the_tools_whose_writes_it_reads(repo: Path) -> None:
+    edit: dict[str, object] = {
+        "file_path": "a.py",
+        "old_string": "a",
+        "new_string": "b",
+    }
+    write: dict[str, object] = {"file_path": "a.py", "content": "b"}
+    inputs = {"Edit": edit, "Write": write}
+    for tool in claude.WRITING:
+        read = claude.PreToolUse.model_validate_json(
+            pre_tool_use(repo, tool, inputs[tool])
+        )
+        assert read.proposal() is not None
+    bash = claude.PreToolUse.model_validate_json(
+        pre_tool_use(repo, "Bash", {"command": "ls"})
+    )
+    assert bash.proposal() is None
+
+
+def test_codex_hooks_the_judges_events_in_a_room() -> None:
+    hold = timedelta(hours=25)
+
+    assert codex.hooks(HOOK, hold) == [
+        Hook(event="session-started", command=HOOK, timeout=hold),
+        Hook(event="call-started", command=HOOK, timeout=hold),
+        Hook(event="call-finished", command=HOOK, timeout=hold),
+    ]
+
+
+WHY = "`lup-dev hook` ended with status 1"
+SAID = f"lup's judge couldn't answer this hook, so it wasn't judged: {WHY}"
+
+
+def test_claude_refuses_a_write_its_judge_couldnt_answer(repo: Path) -> None:
+    raw = pre_tool_use(repo, "Write", {"file_path": "a.py", "content": "b"})
+
+    answered = json.loads(claude.unanswered(raw, WHY))
+
+    assert answered == {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": f"{SAID}. Tell the operator.",
+        }
+    }
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        '{"session_id": "s1", "cwd": "/w", "hook_event_name": "SessionStart"}',
+        (
+            '{"session_id": "s1", "cwd": "/w", "hook_event_name": "PreToolUse", '
+            '"tool_name": "Bash", "tool_input": {}, "tool_use_id": "t1"}'
+        ),
+        "not a payload",
+    ],
+)
+def test_claude_warns_the_operator_of_anything_else_its_judge_couldnt_answer(
+    raw: str,
+) -> None:
+    assert json.loads(claude.unanswered(raw, WHY)) == {"systemMessage": SAID}
+
+
+def test_codex_tells_the_agent_of_a_checkpoint_its_judge_couldnt_answer(
+    repo: Path,
+) -> None:
+    raw = payload(repo, "PostToolUse", tool_name="Bash", tool_use_id="t1")
+
+    answered = json.loads(codex.unanswered(raw, WHY))
+
+    assert answered == {
+        "hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "additionalContext": f"{SAID}. Tell the operator.",
+        }
+    }
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        '{"session_id": "s1", "cwd": "/w", "hook_event_name": "SessionStart"}',
+        (
+            '{"session_id": "s1", "cwd": "/w", "hook_event_name": "PreToolUse", '
+            '"tool_name": "Bash", "tool_use_id": "t1"}'
+        ),
+        "{}",
+    ],
+)
+def test_codex_warns_the_operator_of_anything_else_its_judge_couldnt_answer(
+    raw: str,
+) -> None:
+    assert json.loads(codex.unanswered(raw, WHY)) == {"systemMessage": SAID}
+
+
+def test_a_launched_session_names_no_model_so_the_operators_holds() -> None:
+    assert claude.agent().model is None
+    assert codex.agent().model is None

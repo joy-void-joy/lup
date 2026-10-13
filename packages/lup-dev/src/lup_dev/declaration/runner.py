@@ -1,21 +1,54 @@
-"""How a project runs its tools: `uv` spelled once, in `Uv`, for the gate and the judge.
+"""How a project runs its tools: `uv` spelled once, in `Uv`, for the gate, the judge and the room.
 
 Everything that runs a tool in the project's environment derives its command from
 the project's runner (`docs/declaration.md`, *The runner*). Two commands, since the
 gate may make and sync the environment, while the judge must never write the
 project's files, `uv.lock` among them. A runner brings its own requirements, so a
-project whose runner is `Plain()` needs no uv.
+project whose runner is `Plain()` needs no uv. It also says what a room mounts so
+the environment works inside it, the one environment shared with the host
+(`docs/launch.md`, *The project's environment, shared with the host*).
 """
 
 from abc import ABC, abstractmethod
+from pathlib import Path
+from shlex import join
 from typing import ClassVar, override
 
+from lup.rooms.container import Mount
 from lup.types import Model
-from lup_dev.declaration.requirements import Requirement
+from lup_dev.declaration.requirements import Requirement, Tools
+from lup_dev.errors import LupDevError
 
 
+class RunnerError(LupDevError):
+    """A runner that couldn't say what a room needs for the project's environment."""
+
+
+class Interpreter(Model):
+    """The interpreter a project's environment runs on, which a room must reach."""
+
+    path: Path
+    """As the runner finds it: the environment's own link to it, or the
+    interpreter the environment would be made from."""
+    remedy: str
+    """How to move the environment onto an interpreter a room mounts, said when
+    this one resolves outside every mount."""
+
+
+class RoomNeeds(Model):
+    """What a room mounts and sets so the project's environment works inside it, at its host paths."""
+
+    mounts: list[Mount] = []
+    env: dict[str, str] = {}
+    """The variables the room sets for it."""
+    interpreter: Interpreter | None = None
+    """The environment's interpreter, which must resolve under the room's mounts;
+    none for a runner with no environment of its own."""
+
+
+# lup: ignore("interface-shape", why="`docs/launch.md` puts `room()` on the runner beside its three commands, so a project's own runner must say what a room mounts for its environment")
 class Runner(Model, ABC):
-    """How a project runs its tools in its environment.
+    """How a project runs its tools in its environment, and what a room needs for it.
 
     Its contract: a runner runs a tool by putting its own command before it, as
     `uv run`, `poetry run` and `conda run -n …` do. `command(tool)` is
@@ -43,6 +76,14 @@ class Runner(Model, ABC):
     def environment(self) -> list[str]:
         """List the files, from the root, whose change means another environment."""
 
+    @abstractmethod
+    def room(self, root: Path, tools: Tools) -> RoomNeeds:
+        """Say what a room mounts and sets for the environment of the worktree at `root`.
+
+        Asked on the host as a launch builds the room, through `tools`, which a
+        test stubs.
+        """
+
 
 class Uv(Runner):
     """The environment uv makes from the project's `uv.lock`: lup's default.
@@ -58,6 +99,7 @@ class Uv(Runner):
             tool="uv",
             why="runs the project's tools",
             install="https://docs.astral.sh/uv/getting-started/installation/",
+            package="uv",
         )
     ]
 
@@ -79,6 +121,62 @@ class Uv(Runner):
     def environment(self) -> list[str]:
         return ["pyproject.toml", "uv.toml", "uv.lock", ".python-version"]
 
+    @override
+    def room(self, root: Path, tools: Tools) -> RoomNeeds:
+        """Mount uv's interpreters read-only and its cache read-write, where uv keeps them on the host.
+
+        uv is asked from `root`, whose configuration may move either, and with
+        `VIRTUAL_ENV` unset, as the judge runs it. The worktree's `.venv` links
+        to an interpreter in uv's store, so mounting the store at its path makes
+        the one environment valid in the room as on the host. In the room,
+        `UV_CACHE_DIR` and `UV_PYTHON_INSTALL_DIR` name the same two places, and
+        `UV_PYTHON_DOWNLOADS=never` stops uv from fetching an interpreter: with
+        the environment's interpreter missing, `uv run` set about remaking the
+        shared `.venv` (`docs/field-notes.md`, *Rooms*). The cache is made if
+        it's missing, since a mount needs its source. The interpreter is the one
+        `uv python find` names: the environment's own link, or where there's no
+        environment yet, the interpreter uv would make it from.
+        """
+
+        def asked(*command: str) -> Path:
+            asking = [
+                "env",
+                "-u",
+                "VIRTUAL_ENV",
+                "uv",
+                "--directory",
+                str(root),
+                *command,
+            ]
+            ran = tools.run(asking)
+            if ran.code != 0:
+                message = (
+                    f"`{join(asking)}` failed with status {ran.code}, so lup can't "
+                    "say what the room mounts for the project's environment"
+                )
+                raise RunnerError(message)
+            return Path(ran.output.strip())
+
+        store = asked("python", "dir")
+        cache = asked("cache", "dir")
+        interpreter = asked("python", "find")
+        cache.mkdir(parents=True, exist_ok=True)
+        return RoomNeeds(
+            mounts=[Mount(source=store, read_only=True), Mount(source=cache)],
+            env={
+                "UV_CACHE_DIR": str(cache),
+                "UV_PYTHON_INSTALL_DIR": str(store),
+                "UV_PYTHON_DOWNLOADS": "never",
+            },
+            interpreter=Interpreter(
+                path=interpreter,
+                remedy=(
+                    "run `uv sync --managed-python` in the project, which remakes "
+                    "`.venv` on a Python uv manages, installing one if there's none"
+                ),
+            ),
+        )
+
 
 class Plain(Runner):
     """Each tool as the `PATH` finds it, for a project with no environment manager.
@@ -98,6 +196,11 @@ class Plain(Runner):
     @override
     def environment(self) -> list[str]:
         return []
+
+    @override
+    def room(self, root: Path, tools: Tools) -> RoomNeeds:
+        """Mount nothing: the tools on the room's `PATH` are the image's own."""
+        return RoomNeeds()
 
 
 class Prefixed(Runner):
@@ -142,3 +245,17 @@ class Prefixed(Runner):
     @override
     def environment(self) -> list[str]:
         return self.files
+
+    @override
+    def room(self, root: Path, tools: Tools) -> RoomNeeds:
+        """Refuse: a runner kept for judging holds its commands, not what a room mounts.
+
+        A launch builds its room from a declaration that loaded, whose runner is
+        the project's own.
+        """
+        message = (
+            "a runner kept as its commands, standing in for a declaration that "
+            "can't load, can't say what a room mounts: launch from a declaration "
+            "that loads"
+        )
+        raise RunnerError(message)

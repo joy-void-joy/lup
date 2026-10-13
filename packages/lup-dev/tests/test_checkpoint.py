@@ -10,6 +10,7 @@ import sh
 from filelock import FileLock
 
 from lup_dev import Project
+from lup_dev.approval import Approval, ReleaseTool
 from lup_dev.codescan.contract import FileReport, Finding, Position, Span
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.grammar import Drop
@@ -28,8 +29,8 @@ from lup_dev.policy.checkpoint import (
 )
 from lup_dev.policy.holds import Holds, Response, answer, waiting
 from lup_dev.policy.importers import Conversation, ImportersPass
-from lup_dev.policy.store import read_model
 from lup_dev.policy.verdicts import VerdictLog
+from lup_dev.stored import read_model, write_model
 
 if TYPE_CHECKING:
     from conftest import FakeRuntime, Kit, Shell
@@ -1080,6 +1081,63 @@ def test_without_the_integration_branch_a_worktree_is_judged_by_its_head(
     assert before(kit.bench, core_edit(repo), SESSION, repo).outcome == "ask"
 
 
+def approve(kit: Kit, repo: Path, commit: str) -> None:
+    """Record `commit` as the one the operator approved, as trust on launch does."""
+    approval = Approval(
+        commit=commit,
+        fingerprint="approved",
+        paths=[Path("lup_project.py")],
+        tool=ReleaseTool(name="lup-dev", version="0.4.0", registry="index", pins={}),
+        time=kit.clock.now(),
+    )
+    write_model(kit.layout.approved(repo / ".git"), approval)
+
+
+def test_the_approved_commits_declaration_judges_not_the_tip(
+    kit: Kit, repo: Path, linked: Path, shell: Shell
+) -> None:
+    shell.git(repo, "switch", "-q", "-c", "dev")
+    declare(repo, PROTECTING_CORE)
+    shell.commit(repo, "dev: protect the core")
+    approve(kit, repo, shell.git(repo, "rev-parse", "HEAD"))
+    declare(repo, PROTECTING_NOTHING)
+    shell.commit(repo, "dev: protect nothing, not approved yet")
+    start(kit, repo)
+    assert before(kit.bench, core_edit(linked), SESSION, repo).outcome == "ask"
+    approve(kit, repo, shell.git(repo, "rev-parse", "HEAD"))
+    assert before(kit.bench, core_edit(linked), SESSION, repo).outcome == "allow"
+
+
+def test_an_approved_commit_gone_from_the_repository_has_the_stand_in(
+    kit: Kit, repo: Path, linked: Path, shell: Shell
+) -> None:
+    shell.git(repo, "switch", "-q", "-c", "dev")
+    declare(repo, PROTECTING_CORE)
+    shell.commit(repo, "dev: protect the core")
+    start(kit, repo)
+    assert before(kit.bench, core_edit(linked), SESSION, repo).outcome == "ask"
+    gone = "0" * 40
+    approve(kit, repo, gone)
+    stood_in = before(kit.bench, core_edit(linked), SESSION, repo)
+    assert stood_in.outcome == "ask"
+    call(kit, linked, "c1")
+    (linked / "README.md").write_text("# Changed\n")
+    told = finish(kit, linked, "c1").context
+    assert (
+        f"lup can't load the project's declaration at {gone}: the commit approved "
+        f"last, {gone}, isn't in the repository" in told
+    )
+
+
+def test_an_approved_commit_gone_with_nothing_kept_fails(
+    kit: Kit, repo: Path, shell: Shell
+) -> None:
+    approve(kit, repo, "0" * 40)
+    start(kit, repo)
+    with pytest.raises(ProjectError, match="isn't in the repository"):
+        before(kit.bench, core_edit(repo), SESSION, repo)
+
+
 def test_only_the_latest_commits_declaration_stays_exported(
     kit: Kit, repo: Path, shell: Shell
 ) -> None:
@@ -1330,7 +1388,9 @@ PLAIN = (
 """A declaration whose tools run as the `PATH` finds them."""
 
 POETRY = '''
-from lup_dev import Modules, Project, Python, Runner
+from pathlib import Path
+
+from lup_dev import Modules, Project, Python, RoomNeeds, Runner, Tools
 
 
 class Poetry(Runner):
@@ -1344,6 +1404,9 @@ class Poetry(Runner):
 
     def environment(self) -> list[str]:
         return ["poetry.lock"]
+
+    def room(self, root: Path, tools: Tools) -> RoomNeeds:
+        return RoomNeeds()
 
 
 project = Project(modules=Modules.default().edit(Python(runner=Poetry())))

@@ -24,10 +24,16 @@ from lup_dev.declaration.kinds import (
     Exemption,
     Exemptions,
     Gate,
+    Guidance,
+    Package,
+    Packages,
     Paths,
     Patterns,
     Pytest,
+    RemovedTools,
     Rules,
+    Section,
+    Session,
     TestRoots,
 )
 from lup_dev.declaration.module import Module, Modules
@@ -35,8 +41,8 @@ from lup_dev.declaration.modules.code_rules import CodeRules
 from lup_dev.declaration.modules.core import Core
 from lup_dev.declaration.modules.python import Python
 from lup_dev.declaration.project import Project
-from lup_dev.declaration.requirements import Requirement
-from lup_dev.declaration.runner import Plain, Runner, Uv
+from lup_dev.declaration.requirements import Requirement, Tools
+from lup_dev.declaration.runner import Interpreter, Plain, RoomNeeds, Runner, Uv
 
 __all__ = [
     "CodeRules",
@@ -44,9 +50,13 @@ __all__ = [
     "Exemption",
     "Exemptions",
     "Gate",
+    "Guidance",
+    "Interpreter",
     "Module",
     "Modules",
     "Named",
+    "Package",
+    "Packages",
     "Paths",
     "Patterns",
     "Plain",
@@ -54,10 +64,15 @@ __all__ = [
     "ProjectError",
     "Pytest",
     "Python",
+    "RemovedTools",
     "Requirement",
+    "RoomNeeds",
     "Rules",
     "Runner",
+    "Section",
+    "Session",
     "Step",
     "TestRoots",
+    "Tools",
     "Uv",
 ]

@@ -28,7 +28,8 @@ from lup.types import Model
 from lup_dev.errors import LupDevError
 from lup_dev.layout import CheckoutLayout
 from lup_dev.policy.importers import Conversation
-from lup_dev.policy.store import Store, read_model, write_model
+from lup_dev.policy.store import Store
+from lup_dev.stored import read_model, write_model
 
 # lup: defer(issue=43, why="drop the escaping once lup generates the runtimes' own directories, when no draft of a file in one is written")
 ESCAPED = {".": "%2E", "%": "%25"}

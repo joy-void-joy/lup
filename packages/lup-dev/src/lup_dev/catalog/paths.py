@@ -33,6 +33,7 @@ class CorePaths(Model):
         "**/sync.json.local",
         "**/.env*.local",
         "**/.gitignore",
+        "AGENTS.local.md",
     ]
     """Every write to these asks the operator.
 
@@ -41,7 +42,10 @@ class CorePaths(Model):
       pre-commit, editor and container configurations, the runtimes' settings;
     - what widens a later launch, `sync.json` and `sync.json.local`;
     - secrets, `.env*.local`;
-    - `.gitignore`, since what it ignores the checkpoint never sees.
+    - `.gitignore`, since what it ignores the checkpoint never sees;
+    - the person's own section of a session's guidance, `AGENTS.local.md` at the
+      root, which steers every later session and which git ignores, so nothing
+      else would show the operator a change to it.
     """
     operator_documents: list[str] = ["DESIGN.md", "AGENTS.md"]
     """The operator's documents: changing one is a design decision, so it asks."""

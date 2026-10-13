@@ -6,6 +6,8 @@ requires-python = ">=3.14"
 dependencies = [
     "filelock>=4.0.10",
     "httpx>=0.28.1",
+    # Renders a launched session's guidance from the modules' sections.
+    "jinja2>=3.1",
     "lup",
     "packaging>=26.3",
     "pydantic>=2.12",

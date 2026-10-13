@@ -50,6 +50,7 @@ from typing import Literal, override
 from filelock import FileLock
 
 from lup.types import Model, MutableModel
+from lup_dev.approval import approved
 from lup_dev.clock import Clock
 from lup_dev.codescan.conditions import declared
 from lup_dev.codescan.contract import Checker, FileReport, Finding, Source
@@ -57,6 +58,7 @@ from lup_dev.codescan.ruff import Linter
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.project import Project
 from lup_dev.declaration.resolve import Declaration
+from lup_dev.git import Git
 from lup_dev.layout import Layout
 from lup_dev.policy.holds import HeldFile, Hold, Holds, answered
 from lup_dev.policy.importers import Conversation, Found, ImportersPass, Spawner
@@ -76,18 +78,10 @@ from lup_dev.policy.report import (
 )
 from lup_dev.policy.roles import Roles
 from lup_dev.policy.runtime import Runtime
-from lup_dev.policy.store import (
-    Elsewhere,
-    Entry,
-    Git,
-    Heads,
-    Held,
-    Store,
-    read_model,
-    write_model,
-)
+from lup_dev.policy.store import Elsewhere, Entry, Heads, Held, Store
 from lup_dev.policy.verdicts import Verdict, VerdictLog
 from lup_dev.policy.worktrees import Holding, Place, SessionIndex, place
+from lup_dev.stored import read_model, write_model
 
 
 class Services(Model, arbitrary_types_allowed=True):
@@ -99,7 +93,8 @@ class Services(Model, arbitrary_types_allowed=True):
     layout: Layout
     spawner: Spawner
     integration: str
-    """The branch whose tip holds the declaration every worktree is judged by."""
+    """The branch whose tip holds the declaration every worktree is judged by,
+    until the operator approves a commit (`lup_dev.approval`)."""
 
 
 class Bench(Model, arbitrary_types_allowed=True):
@@ -262,7 +257,8 @@ class Judging(Model):
     """Where the declaration a worktree is judged by is read from."""
 
     integration: str
-    """The branch whose tip holds it; without one, the worktree's `HEAD` commit."""
+    """The branch whose tip holds it before the operator approves a commit;
+    without one, the worktree's `HEAD` commit."""
     layout: Layout
 
 
@@ -295,8 +291,9 @@ class Worktree(Model):
     def of(cls, root: Path, repository: Path, services: Services) -> Worktree:
         """Open the worktree at `root` of the repository at `repository`, to judge.
 
-        It's judged by the declaration at the integration branch's tip, not its
-        own, so a branch can't change what judges it (#21).
+        It's judged by the declaration at the commit the operator approved, or
+        before any approval at the integration branch's tip, never by its own, so
+        a branch can't change what judges it (#21).
         """
         store = Store(layout=services.layout.store(root), worktree=root)
         judging = Judging(integration=services.integration, layout=services.layout)
@@ -306,21 +303,41 @@ class Worktree(Model):
     def loaded(self) -> Loaded:
         """The declaration it's judged by, loaded when first read.
 
-        Read from the integration branch's tip, or where the repository has no
-        such branch, from the worktree's `HEAD` commit; the defaults before any
-        commit. Each that loads is kept for the repository, and where one can't
-        load, the last kept stands in.
+        Read from the commit the operator approved last for the repository
+        (`lup_dev.approval`), so what runs on the host is what they approved.
+        Before any approval, from the integration branch's tip, or where the
+        repository has no such branch, from the worktree's `HEAD` commit; the
+        defaults before any commit. Each that loads is kept for the repository,
+        and where one can't load, or the approved commit is gone from the
+        repository, the last kept stands in.
         """
         judging = self.judging
         if judging is None:
             return Loaded(declaration=Declaration.read(self.root), root=self.root)
-        commit = self.store.tip(judging.integration) or self.store.head()
+        approval = approved(judging.layout, self.repository)
+        commit = (
+            approval.commit
+            if approval is not None
+            else self.store.tip(judging.integration) or self.store.head()
+        )
         if commit is None:
             return Loaded(declaration=Declaration.of(Project()), root=self.root)
         kept = judging.layout.declaration(self.repository)
-        try:
+
+        def read(commit: str) -> Loaded:
+            if approval is not None and self.store.repository().commit(commit) is None:
+                message = (
+                    f"the commit approved last, {commit}, isn't in the repository: "
+                    "approve the integration branch's tip with `lup-dev trust`"
+                )
+                raise ProjectError(message)
             source = self.exported(judging.layout, commit)
-            found = Declaration.read(source)
+            return Loaded(
+                declaration=Declaration.read(source), root=source, commit=commit
+            )
+
+        try:
+            found = read(commit)
         except ProjectError as failure:
             last = read_model(kept, LastDeclaration)
             if last is None:
@@ -336,9 +353,12 @@ class Worktree(Model):
             if last is None or last.commit != commit:
                 told = last.told if last else ""
                 write_model(
-                    kept, LastDeclaration(declaration=found, commit=commit, told=told)
+                    kept,
+                    LastDeclaration(
+                        declaration=found.declaration, commit=commit, told=told
+                    ),
                 )
-        return Loaded(declaration=found, root=source, commit=commit)
+        return found
 
     def exported(self, layout: Layout, commit: str) -> Path:
         """Return where `commit`'s Python modules are exported, exporting them once.
@@ -390,8 +410,8 @@ class Worktree(Model):
             "judges with the last of this repository's declarations that loaded, "
             f"from commit {loaded.commit}, until one loads. Tell the operator: if "
             "the declaration uses something the installed judge predates, "
-            "reinstalling it from `dev` (`lup-dev install`) fixes this; otherwise "
-            "the declaration needs fixing."
+            "approving `dev`'s with `lup-dev trust` fixes this; otherwise the "
+            "declaration needs fixing."
         )
 
     @cached_property

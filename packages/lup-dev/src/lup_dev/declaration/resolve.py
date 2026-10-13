@@ -6,11 +6,14 @@ hold it, by the kind's type (`docs/declaration.md`, *What a module is*):
   without a cycle; lup never adds or drops a module behind the project's back;
 - names are per kind and shared across modules, so one name from two modules
   fails, naming both, but for a path pattern, which from two modules is one
-  pattern, a requirement, which is checked for each module needing it, and an
-  exemption, which each module keeps for its own paths;
+  pattern, a package, which from two modules or a requirement is one package, a
+  requirement, which is checked for each module needing it, and an exemption,
+  which each module keeps for its own paths;
 - entries placed `before=` or `after=` another go there, whichever module holds
   it, and the rest keep the order of their modules;
-- the runner comes from the one module holding one, `Plain()` where none does.
+- the runner comes from the one module holding one, `Plain()` where none does,
+  and the session settings from the one holding them, `Core`, with the fields
+  the declaration set, which a launch imposes over the person's own.
 
 Rule selections are kept as recorded, one per module beside the module's own
 default, for the engine to resolve.
@@ -22,19 +25,28 @@ that can't.
 """
 
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
+
+from pydantic import model_validator
 
 from lup.types import Model
 from lup_dev.catalog.gate import Step
+from lup_dev.catalog.room import CacheLifetime
 from lup_dev.declaration.errors import ProjectError
-from lup_dev.declaration.grammar import Named, listed
+from lup_dev.declaration.grammar import Named, listed, set_fields
 from lup_dev.declaration.kinds import (
     Exemption,
     Exemptions,
     Gate,
+    Guidance,
+    Package,
+    Packages,
     Paths,
     Pytest,
+    RemovedTools,
     Rules,
+    Section,
+    Session,
     TestRoots,
 )
 from lup_dev.declaration.load import load
@@ -79,6 +91,38 @@ class Selected(Model):
     there. `Rules()` is none."""
 
 
+class SessionChoices(Model, extra="forbid"):
+    """How the project's sessions run: `Core`'s `session`, its removed tools resolved.
+
+    Its fields are `Session`'s, each as a plain value, for the launch to compile
+    into each runtime's settings, and which of them the declaration set: those
+    are imposed over the person's own runtime settings, and the rest are lup's
+    defaults, which theirs outrank.
+    """
+
+    subagent_cache: CacheLifetime
+    auto_memory: bool
+    idle_compaction: bool
+    removed_tools: list[str]
+    """A runtime's built-in tools removed from a session's context, by name."""
+    account_connectors: bool
+    declared: list[str] = []
+    """The fields some layer of the declaration set, by name, in the order
+    they're declared; every other field is lup's default."""
+
+    @model_validator(mode="after")
+    def declared_fields(self) -> Self:
+        """Refuse a declared field that isn't a session setting."""
+        settings = [field for field in type(self).model_fields if field != "declared"]
+        unknown = [field for field in self.declared if field not in settings]
+        if unknown:
+            message = (
+                f"{listed(unknown)} aren't session settings; {listed(settings)} are"
+            )
+            raise ValueError(message)
+        return self
+
+
 class Part[K](Model):
     """One module's value of a kind, and the module's own default for it."""
 
@@ -115,6 +159,14 @@ class Resolved(Model):
     runner: Runner
     requirements: list[Needed]
     """Every selected module's requirements, its runner's among them."""
+    packages: list[Package]
+    """The room's image's packages: every selected module's own, in their order,
+    then the one each requirement names. One name from two places is one
+    package, the first's."""
+    session: SessionChoices
+    guidance: list[Section]
+    """The sections of guidance, in the order of their modules but where one is
+    placed by another's name."""
     asks: Literal["every", "protected"]
 
 
@@ -173,6 +225,59 @@ def held[E](
             ],
         )
     return kind.ordered([each for placed in resolved for each in placed])
+
+
+def image(modules: list[Module], requirements: list[Needed]) -> list[Package]:
+    """Return the room's image's packages: the modules' own, then the requirements'.
+
+    A requirement's package joins with the requirement's reason. A name from two
+    places is one package, the first's.
+    """
+    own = held(Packages(), parts(modules, Packages), "Packages", shared=False)
+    provided = [
+        Package(
+            name=each.requirement.package,
+            why=(
+                f"provides `{each.requirement.named()}` for `{each.module}`: "
+                f"{each.requirement.why or 'no reason given'}"
+            ),
+        )
+        for each in requirements
+        if each.requirement.package is not None
+    ]
+    every = [*own, *provided]
+    names = [each.name for each in every]
+    return [each for at, each in enumerate(every) if each.name not in names[:at]]
+
+
+def settled(found: list[Part[Session]]) -> SessionChoices:
+    """Return the session settings from the one module holding them.
+
+    `Core` holds them, so a module of a project's own holding them too fails,
+    naming both; with none, they're lup's. The fields declared are those the
+    value's layers set: each layer is a copy of the one below with its fields
+    updated (`applied`), which pydantic counts as set, so a field nothing set
+    stays lup's default.
+    """
+    if len(found) > 1:
+        holding = listed([part.module for part in found])
+        message = (
+            f"{holding} each give session settings, and a project's sessions run "
+            "one way: change `Core`'s with `.edit(Core(session=Session(…)))`"
+        )
+        raise ProjectError(message)
+    session = found[0].value if found else Session()
+    default = found[0].default if found and found[0].default else Session()
+    own = [each.entry for each in default.removed_tools.resolve([], [])]
+    removed = RemovedTools().ordered(session.removed_tools.resolve(own, own))
+    return SessionChoices(
+        subagent_cache=session.subagent_cache,
+        auto_memory=session.auto_memory,
+        idle_compaction=session.idle_compaction,
+        removed_tools=removed,
+        account_connectors=session.account_connectors,
+        declared=set_fields(session),
+    )
 
 
 def checked(modules: list[Module]) -> list[Module]:
@@ -250,6 +355,7 @@ def resolve(project: Project) -> Resolved:
         for part in runners
         for requirement in part.value.requirements
     ]
+    requirements = [*needed, *brought]
     return Resolved(
         modules=modules,
         paths=PathRoles.model_validate({name: role(name) for name in Paths.roles()}),
@@ -270,7 +376,10 @@ def resolve(project: Project) -> Resolved:
             module.conditions for module in modules if module.conditions is not None
         ],
         runner=runner,
-        requirements=[*needed, *brought],
+        requirements=requirements,
+        packages=image(modules, requirements),
+        session=settled(parts(modules, Session)),
+        guidance=held(Guidance(), parts(modules, Guidance), "Guidance"),
         asks=project.asks,
     )
 

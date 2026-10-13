@@ -148,6 +148,12 @@ From the docs (code.claude.com, `cli-reference`, `settings-reference`, `env-vars
   - `DISABLE_AUTOUPDATER`;
   - `DISABLE_TELEMETRY`;
   - `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`.
+- **Which value wins, for the session settings** (read in the 2.1.296 binary; the `settings` docs agree that "an `env` block inside a settings file is an ordinary key and follows the levels above"):
+  - At start, each source's `env` is applied over the process's environment in order: `~/.claude.json`'s, then user, project, local and `--settings`, then managed. So a variable in `--settings`' `env` outranks the same in the user's, which outranks the environment the process started with.
+  - The subagents' cache: `FORCE_PROMPT_CACHING_5M`, then `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`, then `subagentPromptCacheTtl`, then an agent's own frontmatter, then `ENABLE_PROMPT_CACHING_1H`.
+  - Auto memory: `CLAUDE_CODE_DISABLE_AUTO_MEMORY` (`1` off, `0` forced on) before `autoMemoryEnabled`.
+  - Connectors: off where any source's `disableClaudeAiConnectors` is `true` or `ENABLE_CLAUDEAI_MCP_SERVERS` is false; nothing turns them back on.
+  - `idleCompaction` ("Setting it to true does not turn idle compaction on"): read from the highest source setting it, `true` where none does. Idle compaction runs only where a server-side flag's mode turns it on, `autoCompactEnabled` is on, and `idleCompaction` isn't `false`.
 
 ## Codex 0.162.1: launching a session
 
@@ -156,7 +162,9 @@ From the source at `rust-v0.162.1` (paths under `codex-rs/`), probed with `codex
 - **`config.toml`.**
   - Codex writes trust, hook trust and first-run counters back into it, following a symbolic link and replacing the target atomically.
   - The interactive CLI always loads `$CODEX_HOME/config.toml`, so only a separate home keeps the operator's file unloaded.
-  - `--profile <name>` layers `$CODEX_HOME/<name>.config.toml` over it.
+  - `--profile <name>` layers `$CODEX_HOME/<name>.config.toml` over it; a `profile` key in `config.toml` is refused ("legacy `profile = …` config is no longer supported", `core/src/config/mod.rs`).
+  - `[features]`' switches are a `BTreeMap`, applied in the order of their keys, and an older key switches the same feature as its new one (`features/src/legacy.rs`: `connectors` for `apps`, `memory_tool` for `memories`), so with both set the later key wins: `connectors` over `apps`, `memory_tool` over `memories`.
+  - No idle compaction: compaction runs past `model_auto_compact_token_limit` and, when set, at a turn's end past `model_post_turn_compact_threshold_percent` (`config/src/config_toml.rs`); the binary names no other compaction setting.
 - **`-c` overrides.** `-c` splits a key at every `.` and keeps quotes, so `-c 'projects."<p>".trust_level=…'` does nothing; the inline table `-c 'projects={"<p>"={trust_level="trusted"}}'` works.
 - **The login.**
   - Under the `file` store, `auth.json` is rewritten in place (truncated, never renamed), so a symbolic link or a one-file bind mount shares one login.
@@ -224,6 +232,35 @@ From the source at `rust-v0.162.1` (paths under `codex-rs/`), probed with `codex
 - **The SDK on the host, the CLI in the room.** `ClaudeSDKClient(cli_path=…)` with a script running `podman run -i --rm --init … claude "$@"` completed the handshake, and the CLI in the room listed and connected an in-process MCP tool served on the host. This answers `DESIGN.md`'s check: the CLI runs in a container while the SDK and lup's in-process tools stay on the host.
 - **Terminals.** `-it` under a real terminal carries its size and `TERM` through.
 - A container starts in 0.55 to 0.9 s.
+
+### podman 6.1.3, rootless: the engine's command lines (measured for `lup.rooms`)
+
+- **Mounts.**
+  - `--mount` takes one CSV record: a quoted field (`"source=/a,b"`) mounts a path holding a comma.
+  - A tmpfs from `--mount type=tmpfs,…,tmpfs-mode=0700,U=true` is owned by the operator under keep-id, and runs programs; `--tmpfs`'s default options are `rw,noexec,nosuid,nodev`.
+  - A directory podman makes for a mount inside that tmpfs is owned by root, mode 755: `mkdir ~/.cache/other` failed with "Permission denied" beside a mount at `~/.cache/uv`, and passed once `~/.cache` was a tmpfs of its own with `U=true`.
+  - A single file mounted read-write is written in place, through to the host's file, but can't be replaced by a rename ("Device or resource busy"). Claude Code 2.1.294's writer falls back to writing in place when its atomic write fails ("in-place fallback write", in its binary).
+- **Builds.** `podman build --file - <empty directory>` reads the Containerfile from its input; `--label` adds a last `LABEL` step. `podman image exists` answers 0 or 1. `podman images --format json` lists each image's `Id`, `Names`, `Created` (epoch seconds), `Size`, `Labels` and `Containers`.
+- **Runs.**
+  - `podman run` passes the program's exit status through, and answers 125 for its own failures: `--pull=never` with a missing image says "image not known".
+  - `--log-driver=none` keeps `-it` and the exit status. On this host the default log driver is journald, which would keep a terminal session's output in the journal.
+  - `--detach-keys=` (empty) is accepted with `-it`; its manual says an empty sequence turns off detaching, whose default is Ctrl+P then Ctrl+Q.
+  - `--network=private` ran; its manual says it makes a namespace of the container's own, through pasta for rootless podman.
+
+### The CLIs' release channels (2026-10-13)
+
+Read in each vendor's installer and docs, then fetched once each through `launch/clis.py` into a scratch cache: Claude Code 2.1.296 and Codex 0.162.1, each checked against its published checksum, each answering `--version` on the host. Fetching both took 6 s here; with both current, a launch makes one request each.
+- **Claude Code,** as its native installer (`https://claude.ai/install.sh`) and its setup docs (code.claude.com/docs/en/setup, *Configure release channel*, *Binary integrity and code signing*) have it:
+  - `https://downloads.claude.ai/claude-code-releases/latest` answers the newest version as text, 7 bytes (`2.1.296`). `…/stable` answers the stable channel's (`2.1.287`), "typically about one week old, skipping releases with major regressions"; `latest` is the default channel.
+  - `<version>/manifest.json` lists each platform (`linux-x64`, `linux-x64-musl`, `linux-arm64`, …) with its binary's SHA-256 and size; `<version>/manifest.zst.json`, the same binary compressed with zstd. The files are `<version>/<platform>/claude` (257 MB for `linux-x64`) and `claude.zst` (90 MB).
+  - The installer reads `latest` and the manifest. With `zstd` installed, it downloads `claude.zst`, checks it against `manifest.zst.json`, decompresses it and checks the binary against `manifest.json`; without, it downloads the binary and checks that. Then it runs the binary's `install`.
+  - `manifest.json` has a detached GPG signature, `manifest.json.sig`, by "Anthropic Claude Code Release Signing <security@anthropic.com>", whose key is at `https://downloads.claude.ai/keys/claude-code.asc` (fingerprint `31DD DE24 DDFA B679 F42D 7BD2 BAA9 29FF 1A7E CACE`): "verifying the signature on the manifest transitively verifies every binary it lists". The manifest also carries `"manifestSignatureEnforcement": "flag"`, and `sdkCompat`, the SDK versions it was tested with.
+- **Codex,** as its standalone installer (`https://chatgpt.com/codex/install.sh`, which its README gives beside npm and Homebrew) has it:
+  - `https://releases.openai.com/codex/channels/latest` describes the newest release as GitHub's releases API does, 52 KB of JSON: `tag_name` (`rust-v0.162.1`), and `assets`, each with its `name`, `browser_download_url` and `digest` (`sha256:<hex>`). A given version is `releases/<version>/release.json`, its files under `releases/<version>/`.
+  - Where releases.openai.com fails, the installer falls back to GitHub Releases (`https://api.github.com/repos/openai/codex/releases/latest`, files under `https://github.com/openai/codex/releases/download/rust-v<version>/`); `CODEX_INSTALLER_USE_RELEASES_OPENAI_COM=false` goes there first.
+  - For Linux on x86-64 it installs `codex-package-x86_64-unknown-linux-musl.tar.gz` (163 MB; a `.tar.zst` of 117 MB is published beside it). It checks `codex-package_SHA256SUMS` against that file's `digest`, then the package against its line there, which is the package's own `digest`. A release without packages falls back to `codex-npm-linux-x64-<version>.tgz`.
+  - The package is the layout the SDK's `codex_cli_bin` bundles: `codex-package.json` (`version`, `target`, `entrypoint` `bin/codex`, `resourcesDir`, `pathDir`), `bin/codex`, `bin/codex-code-mode-host`, `codex-path/rg`, `codex-resources/bwrap` and `zsh`, and `codex-resources/voice` (a 65 MB voice host and GStreamer's libraries): 432 MB unpacked. The binary finds them beside itself ("no bundled codex-resources/bwrap binary was found next to the Codex executable", in its binary).
+  - Every package and binary also has a Sigstore bundle (`<file>.sigstore`).
 
 ### From the first lup's rooms
 

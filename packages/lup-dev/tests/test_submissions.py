@@ -24,7 +24,6 @@ from lup_dev.policy.checkpoint import (
 )
 from lup_dev.policy.drafts import draft_path
 from lup_dev.policy.importers import Conversation
-from lup_dev.policy.store import read_model
 from lup_dev.policy.submissions import (
     AllReviews,
     AnyReview,
@@ -52,6 +51,7 @@ from lup_dev.review import (
     ReviewRequest,
     Waiting,
 )
+from lup_dev.stored import read_model
 
 if TYPE_CHECKING:
     from conftest import Kit, Shell

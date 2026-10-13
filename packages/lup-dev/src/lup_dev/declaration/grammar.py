@@ -9,11 +9,14 @@ kind*):
 - `.add`, `.drop` and `.replace` change what it started from, each returning a
   selection with the operation recorded after the others.
 
-A selection is a layer: over the selection below, one starting from below keeps
-below's start and adds its operations after below's, and one starting over
-replaces it. It's resolved into entries only when the declaration is read,
-against the defaults of the module holding it, so `Rules.default().drop(…)` takes
-whatever a later release adds to the default, and `Rules.only(…)` doesn't.
+Everything a declaration writes is a change on the value below it. A module, or a
+model of settings such as `Session` (a `Layer`), applies the fields it set
+(`applied`). A selection layers by its start: over the selection below, one
+starting from below keeps below's start and adds its operations after below's,
+and one starting over replaces it. It's resolved into entries only when the
+declaration is read, against the defaults of the module holding it, so
+`Rules.default().drop(…)` takes whatever a later release adds to the default, and
+`Rules.only(…)` doesn't.
 """
 
 from functools import reduce
@@ -39,6 +42,52 @@ def listed(names: list[str]) -> str:
     if not first:
         return last
     return f"{', '.join(first)} and {last}"
+
+
+def set_fields(model: Model) -> list[str]:
+    """List the fields `model` was given, in the order they're declared.
+
+    A field given, even at its default value, counts as given.
+    """
+    return [
+        field for field in type(model).model_fields if field in model.model_fields_set
+    ]
+
+
+def applied[M: Model](layer: M, below: M, fields: list[str]) -> M:
+    """Return `below` with `layer`'s `fields` on it, each a change on below's.
+
+    A field holding a selection or a `Layer` composes over below's, as a layer
+    itself; any other takes below's place. Every other field stays as below has
+    it (`docs/declaration.md`, *The verbs on modules*). Modules and `Layer`s
+    layer this way, by the fields they set.
+    """
+    update = {
+        field: value.over(getattr(below, field))
+        if issubclass(type(value := getattr(layer, field)), Selection | Layer)
+        else value
+        for field in fields
+    }
+    return below.model_copy(update=update)
+
+
+class Layer(Model):
+    """A model of settings a declaration changes field by field, as a module is.
+
+    Over the one below, the fields it set apply, each a change on below's (a
+    selection it holds composing over below's), and the rest stay as below has
+    them: so a layer setting one field keeps whatever below holds in the others.
+
+    >>> class Volume(Layer):
+    ...     level: int = 5
+    ...     muted: bool = False
+    >>> Volume(muted=True).over(Volume(level=9))
+    Volume(level=9, muted=True)
+    """
+
+    def over(self, below: Self) -> Self:
+        """Return this layer over `below`: the fields it set, on below's."""
+        return applied(self, below, set_fields(self))
 
 
 class Anchor(Model):

@@ -42,6 +42,8 @@ def core(paths: Paths) -> Project:
         ("sync.json", "protected"),
         (".env.local", "protected"),
         (".gitignore", "protected"),
+        ("AGENTS.local.md", "protected"),
+        ("docs/AGENTS.local.md", "docs"),
         ("ruff.toml", "protected"),
         ("packages/x/.ruff.toml", "protected"),
         ("pyrightconfig.json", "protected"),

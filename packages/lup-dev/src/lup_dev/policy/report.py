@@ -353,7 +353,7 @@ def judge_failed(failure: Exception) -> str:
     """
     return (
         f"lup's judge failed at a turn's end, so that end wasn't judged: {failure!r}. "
-        "The turn ended, since the agent can't fix the judge: reinstalling it from "
-        "`dev` (`lup-dev install`), or fixing what the error names, is yours. "
+        "The turn ended, since the agent can't fix the judge: approving `dev`'s "
+        "(`lup-dev trust`), or fixing what the error names, is yours. "
         "You're told once for each failure in a session."
     )

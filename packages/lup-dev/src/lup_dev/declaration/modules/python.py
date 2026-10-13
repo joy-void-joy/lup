@@ -4,7 +4,7 @@ from pathlib import Path
 
 from lup_dev.catalog import gate as lup_gate
 from lup_dev.catalog.paths import PythonPaths
-from lup_dev.declaration.kinds import Gate, Paths, Pytest, TestRoots
+from lup_dev.declaration.kinds import Gate, Guidance, Paths, Pytest, Section, TestRoots
 from lup_dev.declaration.module import Module
 from lup_dev.declaration.runner import Runner, Uv
 
@@ -29,3 +29,11 @@ class Python(Module):
     gate: Gate = Gate.of(*lup_gate.Gate().steps)
     """ruff, the formatter, pyright, pytest and import-linter, as the catalog has
     them."""
+    guidance: Guidance = Guidance.of(
+        Section(
+            name="python",
+            package="lup_dev.declaration.modules",
+            path=Path("guidance/python.md"),
+        )
+    )
+    """Running the project's tools: the runner, the gate, and how tests are written."""

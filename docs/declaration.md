@@ -30,7 +30,7 @@ The fixed file is chosen over a module named in `pyproject.toml` on three counts
 
 **(leaning)** When a project's own modules outgrow one file, the declaration becomes the package `lup_project/`, its `__init__.py` binding `project` (*A project's own module*). Both at once fail the load.
 
-The declaration is protected (`DESIGN.md`, *Policy*): every change to it reaches the operator. The judge reads it from the integration branch's tip, the gate from the worktree.
+The declaration is protected (`DESIGN.md`, *Policy*): every change to it reaches the operator. The judge reads it at the commit the operator approved (`docs/judging-writes.md`, *The declaration, from the approved commit*), the gate from the worktree.
 
 ### The declaration
 
@@ -60,6 +60,7 @@ project = Project(
 - **A collection changes by operations on what's below.** `Rules().drop("x")` is the rules below minus `x`, and `Exemptions().add(…)` the exemptions below plus one. `Kind.default()`, `Kind.only(…)` and `Kind.of(…)` start over (*One grammar for every kind*).
 - **Every collection is a selection; there are no plain lists.** `exempt`, `tests` and `doctests` are `Exemptions`, `TestRoots` and `Doctests`, so a layer adds to them without a handle on the base.
 - **A scalar given replaces what's below,** and the later layer wins.
+- **A model of settings is a layer too** (a `Layer`, as `Session` and `Paths` are): given in a layer, only the fields it sets apply, each as a module's would, and the rest stay as below has them. So `Core(session=Session(auto_memory=True))` keeps lup's removed tools, and `Session(removed_tools=RemovedTools().add(…))` adds to them where they stand. One function, `applied` (`declaration/grammar.py`), is the rule for a module and a `Layer` alike. Any other model in a field, a runner say, is a scalar, and replaces below's whole: a model layering field by field whatever its class would merge two runners of one class, where a reader expects the later one to replace the first. The other alternative, the session settings as fields of `Core` itself, layers the same way without `Layer`, but scatters one part over three fields of the core's.
 - **The overview shows, for every value, which layer set it** (*One page for the whole project*), so nothing implicit has to be decoded by hand.
 
 The verbs on `Modules`:
@@ -140,7 +141,9 @@ The core itself is what every module talks through (`DESIGN.md`, *The environmen
 | Which of the judge's asks reach the operator, until they become proposals | `Project` | `asks` | `"every"` | exists |
 | Protected paths, the operator's documents, scratch, docs, data, excluded | `Core` | `paths` | lup's patterns (`catalog/paths.py`) | A |
 | The hook command | `Core` | none: fixed | | C |
-| Runtimes and their spellings, session settings, the policy's choices | `Core` | `runtimes`, `session`, … | lup's | the launch piece |
+| The room's standard machine: the shell, an agent's everyday tools, what the runtimes call on, editors | `Core` | `packages` | lup's (`catalog/room.py`) | the launch piece |
+| Session settings: the subagents' prompt cache, auto memory, idle compaction, the built-in tools removed from context, the account's connectors | `Core` | `session` | lup's (`catalog/room.py`) | the launch piece |
+| Runtimes and their spellings, the policy's choices | `Core` | `runtimes`, … | lup's | the launch piece |
 | Source trees, Python files, `conftest.py`, the Python tools' configuration files and manifests (protected), `.lup/settings/**` (compiled) | `Python` | `paths` | lup's patterns | A, B |
 | How the project runs its tools | `Python` | `runner` | `Uv()` | A |
 | Test roots: the test role, and what the gate checks pytest's `testpaths` against | `Python` | `tests` | `TestRoots.of(Pytest(root="tests"))` | A |
@@ -151,9 +154,11 @@ The core itself is what every module talks through (`DESIGN.md`, *The environmen
 | A module's own rule table | any module | `rules` | none | E |
 | The conditions a `defer` waits on | any module | `conditions` | none | exists, moved in A |
 | Commands | any module | `commands` | the module's own | C |
-| Skills, guidance | any module | `skills`, `guidance` | the module's own | the launch piece |
+| Guidance's sections | any module | `guidance` | the module's own: `Core`'s, `Python`'s and `CodeRules`' each a file `lup_dev` ships (`declaration/modules/guidance/`); a project's own section goes on `Core`, after lup's, where it has no module of its own; lup's own module names `AGENTS.md` | the launch piece |
+| Skills | any module | `skills` | the module's own | the launch piece, once a module ships one |
+| The room's packages beyond the standard machine | any module | `packages` | none | the launch piece |
 | Rooms | any module | `rooms` | none | the rooms slice |
-| Requirements | each module | `requirements` (a class attribute) | the module's own | A |
+| Requirements, each with the package providing it in the room | each module | `requirements` (a class attribute) | the module's own | A; `package` in the launch piece |
 | The modules it depends on | each module | `requires` (a class attribute) | none | with the first module requiring another |
 
 Package dependencies stay in `pyproject.toml` (*Dependencies*), and so do the project's own changes to ruff and pyright (*lup's settings for ruff and pyright*).
@@ -162,7 +167,7 @@ Package dependencies stay in `pyproject.toml` (*Dependencies*), and so do the pr
 
 A module is a `Module` subclass: its name, its one sentence and the modules it requires as class attributes, its parts as fields, and its own settings as further fields (`Python.runner`, `Ledger.directory`, `Budgets.share`).
 
-- **Its parts are the kinds every module can fill (leaning):** `paths`, `rules`, `gate`, `commands`, `skills`, `guidance`, `rooms`, `conditions`, and `requirements`. Each is a selection, but for `conditions`, an address, and `requirements`, a class attribute (*Requirements*). Inside a module, `Kind.default()` means that module's default for the part, recorded and resolved at load like every selection.
+- **Its parts are the kinds every module can fill (leaning):** `paths`, `rules`, `gate`, `commands`, `skills`, `guidance`, `packages`, `rooms`, `conditions`, and `requirements`. Each is a selection, but for `conditions`, an address, and `requirements`, a class attribute (*Requirements*). A module declares the parts it fills as fields of its own (all but `conditions`, which every module has), so a project's layer on one of lup's modules changes only a part that module holds: a project's guidance section goes on `Core`, or on a module of its own. Inside a module, `Kind.default()` means that module's default for the part, recorded and resolved at load like every selection.
 - **Every collection in a module is a selection, and `Module` enforces it:** a field whose type is a plain collection (`list`, `set`, `frozenset`, `tuple`, `dict` or their `collections.abc` forms, optional or not) fails the module's class definition, naming the module and the field, and steering to a selection kind. A layer would replace a plain list whole, so a base couldn't be extended without restating it. The class attributes (`name`, `requires`, `requirements`) aren't fields, so they're exempt. The alternative, a code rule in the engine refusing such a field at the edit, is left for later, if the verdict log shows agents writing them.
 - **The conditions a `defer` waits on are a part any module fills, by address (leaning):** `conditions="audiobook.conditions"`, the Python module declaring them; lup's stock `PythonAvailable` and `PackageReleased` stay classes a project instantiates. As a field of `Core`'s or `Python`'s, a project's conditions would be an edit of lup's module.
 - **The machinery stays lup's core code:** running a gate, running the engine's rules, judging, checking requirements, rendering guidance. Modules only say what to run.
@@ -194,8 +199,8 @@ class Narration(Module):
 ```
 
 - **Its code parts are string addresses** (*One grammar for every kind*), so loading the declaration imports none of the project's code: the room's address is read when a session launches it, the command's when it's invoked.
-- **It lives in `lup_project.py`, or in the package `lup_project/` (leaning),** all of which is protected and read from the integration branch's tip. Every file the declaration is made of is code the judge runs, so it has to be reviewed as the declaration is; a fixed place lets the judge protect it without following imports. The alternatives: any file the declaration imports, protected by recording what loading it imported, which a branch can change; or a fixed sibling directory (`lup_modules/`), a second name for one thing.
-- **Its rule table** is named by its `rules` part (*A project's own rules*), and protected the same way: the judge reads the declaration from the integration branch's tip and protects each table a selected module names, so the protected list derives from the declaration.
+- **It lives in `lup_project.py`, or in the package `lup_project/` (leaning),** all of which is protected and read at the commit the operator approved. Every file the declaration is made of is code the judge runs, so it has to be reviewed as the declaration is; a fixed place lets the judge protect it without following imports. The alternatives: any file the declaration imports, protected by recording what loading it imported, which a branch can change; or a fixed sibling directory (`lup_modules/`), a second name for one thing.
+- **Its rule table** is named by its `rules` part (*A project's own rules*), and protected the same way: the judge reads the declaration at the approved commit and protects each table a selected module names, so the protected list derives from the declaration.
 
 ### One page for the whole project
 
@@ -210,7 +215,7 @@ The dashboard shows the same page (`DESIGN.md`, *The dashboard*).
 
 ## One grammar for every kind
 
-Every kind lup has defaults for (modules, rules, path roles, gate steps, commands, skills, guidance, runtimes) is a set of named entries the project starts from and changes with the same verbs:
+Every kind lup has defaults for (modules, rules, path roles, gate steps, commands, skills, guidance, packages, the removed tools, runtimes) is a set of named entries the project starts from and changes with the same verbs:
 
 | Verb | Means | Example |
 |---|---|---|
@@ -234,7 +239,7 @@ Every kind lup has defaults for (modules, rules, path roles, gate steps, command
 - **References to the project's own code are strings in entry-point form,** as `[project.scripts]` writes them (`"audiobook.cli:app"`). Loading the declaration then imports none of the project's code, which every `lup` call and every hook does; the gate imports each reference and fails on one that doesn't resolve. Objects (`commands=[studio_cli]`) would import the project's command line, and whatever it imports, at every call.
 - **`Project` and every module forbid fields they don't know** (`extra="forbid"`), so a misspelled field fails the load, naming it. `lup.types.Model` keeps pydantic's default and ignores them, so without it a misspelled field is dropped without a word.
 
-`Selection` is generic over the entry; each kind is a subclass binding its entry type: `Modules`, `Rules` (ids), `Paths` (patterns per role), `Gate` (`Step`s), `Commands` (`Command`s), `Rooms` (addresses), later `Skills`, `Guidance`, `Runtimes`.
+`Selection` is generic over the entry; each kind is a subclass binding its entry type: `Modules`, `Rules` (ids), `Patterns` (one role's patterns, which `Paths` holds one of per role), `Gate` (`Step`s), `Packages` (`Package`s), `Guidance` (`Section`s), `RemovedTools` (names), `Commands` (`Command`s), `Rooms` (addresses), later `Skills`, `Runtimes`.
 
 ## lup declares itself the same way
 
@@ -242,7 +247,7 @@ lup's defaults are its modules, made of the public entry types (`Step`, patterns
 
 ```python
 class LupDevelopment(Module):
-    """What only lup's own repository needs: building the engine, lup's architecture rule, installing the judge."""
+    """What only lup's own repository needs: building the engine, lup's architecture rule, its rules' reference."""
 
     name = "lup-development"
     requirements = [Requirement(tool="npm", why="installs the engine's bundler", install="it comes with Node")]
@@ -261,7 +266,6 @@ class LupDevelopment(Module):
     )
     rules: Rules = Rules.table("rules/lup.ts")  # `runtime-mention`, from E
     commands: Commands = Commands.of(
-        Command(name="install", target="lup_dev.commands.install:app", help="Install the judge from this checkout."),
         Command(name="rules-docs", target="lup_dev.commands.reference:app", help="Write docs/rules.md from the rule table."),
     )
 
@@ -275,10 +279,10 @@ project = Project(
 )
 ```
 
-- **Building lup's engine** is the first of the gate's default steps (`catalog/gate.py`), and the installer runs the same step (`install.py`), though only lup's repository has an engine to build. It becomes `LupDevelopment`'s, its command the tool alone, and the installer finds it in lup's declaration and runs it through the runner, as the gate does.
+- **Building lup's engine** is the first of the gate's default steps (`catalog/gate.py`), and trust on launch runs the same step to build the copy it installs (`launch/trust.py`), though only lup's repository has an engine to build. It becomes `LupDevelopment`'s, its command the tool alone, and trust on launch finds it in lup's declaration and runs it through the runner, as the gate does.
 - **`runtime-mention` is lup's own.** It fires on any name holding `claude` or `codex` outside that runtime's adapter (`catalog/rules.ts`): a rule about lup's own architecture, which in a project picking a runtime by setting, as live-translator does, would fire on every choice, so it isn't in every project's default for each to drop. Until E it stays in lup's table, out of the default, and lup's declaration adds it back: `.edit(CodeRules(rules=Rules().add("runtime-mention")))`. E moves it into `rules/lup.ts`, its first entry.
 - **lup's import contracts stay in lup's `pyproject.toml`,** as a project's own contracts do (*pytest and import-linter*).
-- **The test of the principle:** nothing in lup's core reads a default that isn't in a module a project can change. Building lup's engine, `runtime-mention`, `install` and `rules-docs` are lup's own, declared where a project declares its own.
+- **The test of the principle:** nothing in lup's core reads a default that isn't in a module a project can change. Building lup's engine, `runtime-mention` and `rules-docs` are lup's own, declared where a project declares its own. Approving what the host runs, `trust`, isn't: every project's host runs its declaration and a `lup-dev`, so it's `Core`'s command (*The command line*), as a launch's own check (`docs/launch.md`, *Trust on launch*).
 
 ## The runner
 
@@ -299,15 +303,26 @@ class Runner(Model, ABC):
     @abstractmethod
     def environment(self) -> list[str]:
         """List the files, from the root, whose change means another environment."""
+
+    @abstractmethod
+    def room(self, root: Path, tools: Tools) -> RoomNeeds:
+        """Say what a room mounts and sets for the environment of the worktree at `root`."""
 ```
 
-- **`Uv()`, the default:** `command` is `uv run …`, as the gate spells it; `judging` is `env -u VIRTUAL_ENV uv run --frozen --quiet …`, as the judge runs ruff and the engine asks for its interpreter (`docs/judging-writes.md`, *Type errors and ruff's findings* and *The engine: one typed tree*); `environment` is `pyproject.toml`, `uv.toml`, `uv.lock`, `.python-version`. Its requirement is uv (*Requirements*).
-- **`Plain()`:** the tool as the `PATH` finds it, for a project with no environment manager; no environment files, no requirement.
+- **`Uv()`, the default:** `command` is `uv run …`, as the gate spells it; `judging` is `env -u VIRTUAL_ENV uv run --frozen --quiet …`, as the judge runs ruff and the engine asks for its interpreter (`docs/judging-writes.md`, *Type errors and ruff's findings* and *The engine: one typed tree*); `environment` is `pyproject.toml`, `uv.toml`, `uv.lock`, `.python-version`. Its requirement is uv (*Requirements*). Its `room` is below.
+- **`Plain()`:** the tool as the `PATH` finds it, for a project with no environment manager; no environment files, no requirement, nothing mounted in a room.
 - **Anything else is a project's own subclass,** a few lines: `poetry run`, `conda run -n …`. lup adds one to its own when a second project needs it.
+
+**What a room needs, `room(root, tools)`.** A launched session works in the worktree's own environment, shared with the host (`docs/launch.md`, *The project's environment, shared with the host*), so the runner says what the room mounts and sets for it: a `RoomNeeds` of mounts, each at its host path, the variables, and the environment's interpreter (`Interpreter`: its path as the runner finds it, and the remedy said when it resolves outside every mount). The launch checks that interpreter against all of the room's mounts and refuses otherwise (`launch/room.py`). It's asked on the host while the launch builds the room, through `Tools`, the seam requirements are checked through (`declaration/requirements.py`), which tests stub.
+- **`Uv()`** asks uv from the worktree, with `VIRTUAL_ENV` unset: `uv python dir`, its interpreter store, mounted read-only; `uv cache dir`, its cache, mounted read-write and made if it's missing, since a mount needs its source; and `uv python find`, the environment's interpreter, or where there's no `.venv` yet, the one uv would make it from. In the room, `UV_CACHE_DIR` and `UV_PYTHON_INSTALL_DIR` name the same two places, so a worktree made in the room gets its `.venv` on the store's interpreter rather than the image's, and `UV_PYTHON_DOWNLOADS=never` keeps uv from fetching one. Its remedy for an environment on a system interpreter is `uv sync --managed-python`, which remakes `.venv` on a Python uv manages (checked: it moved a `.venv` on `/usr/bin/python3.14` onto uv's 3.14).
+- **`Plain()`** mounts nothing, and has no interpreter to check.
+- **`Prefixed`**, the judge's stand-in, refuses: it holds the commands, not what a room mounts, and a launch builds its room from a declaration that loaded.
+
+A fourth abstract method takes `Runner` past the three `interface-shape` allows, which the class's `ignore` names: placing `room()` on the runner, as `docs/launch.md` does, makes each project runner say what its environment needs in a room. The alternative is a seam of its own composed beside the runner (a class attribute holding an object that answers `room`, as `requirements` is one), which keeps the ABC at three at the cost of a second place a runner's author must remember.
 
 Two methods because the judge and the gate differ: the gate may lock and sync (plain `uv run` relocks a stale lock), while the judge must never write `uv.lock`, a protected path the checkpoint would then judge as the agent's shell write (`docs/judging-writes.md`, *The engine: one typed tree*). A prefix string in place of the class couldn't give the judge a command apart from the gate's.
 
-**A runner's contract:** it runs a tool by putting its own command before it, as `uv run`, `poetry run` and `conda run -n …` do, so `command(tool)` is `command([])` followed by the tool, and `judging(tool)` is `judging([])` followed by it (`Runner`'s docstring). The judge keeps what it reads of a declaration as plain data, to stand in for one that can't load (`docs/judging-writes.md`, *The declaration, from the integration branch*), and a project's runner may be a class of its own that the data can't bring back. So the snapshot (`Declaration`, `declaration/resolve.py`) keeps the runner's commands, not the runner: `Prefixed`, lup's own runner holding the gate's and the judge's commands and the environment's files, built with `Prefixed.of(runner)`. By the contract those are the whole runner, so a stand-in judges with the commands the project's runner gave. The alternative, keeping the runner by its class's import path and importing it again, fails exactly when a stand-in is needed: the declaration that can't load is where that class lives.
+**A runner's contract:** it runs a tool by putting its own command before it, as `uv run`, `poetry run` and `conda run -n …` do, so `command(tool)` is `command([])` followed by the tool, and `judging(tool)` is `judging([])` followed by it (`Runner`'s docstring). The judge keeps what it reads of a declaration as plain data, to stand in for one that can't load (`docs/judging-writes.md`, *The declaration, from the approved commit*), and a project's runner may be a class of its own that the data can't bring back. So the snapshot (`Declaration`, `declaration/resolve.py`) keeps the runner's commands, not the runner: `Prefixed`, lup's own runner holding the gate's and the judge's commands and the environment's files, built with `Prefixed.of(runner)`. By the contract those are the whole runner, so a stand-in judges with the commands the project's runner gave. The alternative, keeping the runner by its class's import path and importing it again, fails exactly when a stand-in is needed: the declaration that can't load is where that class lives.
 
 Where it's used:
 - **the gate:** each step's command is the tool alone (`["ruff", "check", "--ignore-noqa"]`), run as `runner.command(…)`, or as written for a step with `in_environment=False` (`Step.in_environment`, `catalog/gate.py`); the `--fix` steps too. The gate reads the worktree's own declaration's runner, resolved;
@@ -318,15 +333,15 @@ ruff and the engine are given the runner with each call (`Linter.findings`, `Che
 
 `gate.py`'s own seam for running a command, which its tests stub (`Shell` running it as a process), is `Processes`, so `Runner` means one thing in `lup_dev`.
 
-What it doesn't cover: the narrow `Bash` allow rules in `.claude/settings.json` (the launch piece compiles them from the runner and the gate's steps); `PythonAvailable`'s `uv python list` (`codescan/conditions.py`), which asks uv as a Python provider, not as the project's runner; `uv tool install` in the installer (how lup installs its judge, not how a project runs its tools); and Windows (lup runs in a Linux container).
+What it doesn't cover: the narrow `Bash` allow rules in `.claude/settings.json` (the launch piece compiles them from the runner and the gate's steps); `PythonAvailable`'s `uv python list` (`codescan/conditions.py`), which asks uv as a Python provider, not as the project's runner; `uv tool install` in trust on launch (how lup installs the host's `lup-dev`, not how a project runs its tools); and Windows (lup runs in a Linux container).
 
 ## Requirements
 
 Requirements are a kind, and each module declares its own. They're tools from outside the project's Python environment; the Python tools lup runs are `lup-dev`'s dependencies instead (*Dependencies*).
 
 ```python
-Requirement(tool="node", version=">=22.18", probe=["node", "-p", "process.versions.node"], why="runs the rule engine")  # CodeRules
-Requirement(tool="uv", why="runs the project's tools")                                         # Python, through Uv()
+Requirement(tool="node", version=">=22.18", probe=["node", "-p", "process.versions.node"], why="runs the rule engine", package="nodejs")  # CodeRules
+Requirement(tool="uv", why="runs the project's tools", package="uv")                          # Python, through Uv()
 Requirement(tool="podman", why="runs each session's container")                                # Core, once launch exists
 Requirement(any_of=["wl-copy", "xclip"], optional=True, why="copies a review to the clipboard")
 ```
@@ -337,7 +352,7 @@ Requirement(any_of=["wl-copy", "xclip"], optional=True, why="copies a review to 
 - **Each module declares its own:** `ffmpeg` for `Narration`, `npm` for lup's own module.
 
 The shape **(leaning)**:
-- **Fields:** `tool`, or `any_of` for alternatives; `version`, a specifier; `probe`, the command printing the tool's bare version, required with `version`; `optional`; `why`; `install`, how to install it, shown when it's missing. Without `version`, the check is that the tool is on the `PATH`.
+- **Fields:** `tool`, or `any_of` for alternatives; `version`, a specifier; `probe`, the command printing the tool's bare version, required with `version`; `optional`; `why`; `install`, how to install it, shown when it's missing; `package`, the Arch package providing it in lup's room, which joins the room's image so the module names it once (*What a launch reads*). Without `version`, the check is that the tool is on the `PATH`.
 - **The version is read with `packaging`** (already `lup-dev`'s dependency): the probe prints a bare version, so nothing hand-parses a tool's banner. Checked on this machine: `node -p process.versions.node` prints `26.10.0`, `uv self version --short` prints `0.12.23`, `podman version --format '{{.Client.Version}}'` prints `6.1.3`.
 - **A module's requirements are a class attribute,** not a field, since they're what the module needs to work: a project declares its own module's, and can't blank out lup's with an `.edit`. The runner's requirements come with the runner, so `Python` with `Plain()` needs no uv.
 
@@ -346,6 +361,17 @@ The shape **(leaning)**:
 **Which Node (leaning): `>=22.18`.** A project's rule table is TypeScript loaded by stripping its types (E). Node's own documentation (`api/typescript.html`, checked) gives type stripping as enabled by default in 23.6.0, backported to 22.18.0, without its experimental warning from 24.3.0 and 22.18.0, and stable from 25.2.0 and 24.12.0. The module hooks E uses (`module.registerHooks`) were added in 23.5.0 and 22.15.0 (`api/module.html`). So 22.18 is the oldest Node that runs both without a flag. The alternative is `>=24.12`, where type stripping is marked stable, at the cost of refusing Node 22, which is still maintained.
 
 **The README's list is generated (leaning):** `docs/requirements.md`, generated from lup's modules' requirements and linked from the README, kept in step by a test as `docs/rules.md` is. The alternative is a generated block inside the hand-written README: generated text inside a hand-written document, which *Rules and conventions* turns down as option (iii).
+
+## What a launch reads
+
+A launch builds the room's image from the declaration, compiles each session's settings from it, and renders its guidance (`docs/launch.md`). The resolved declaration gives it each, as plain values (`Resolved`, `declaration/resolve.py`):
+
+- **Packages:** `Package(name="ffmpeg", why="encodes the episodes")`, an Arch package and its reason, in a module's `packages` part. `Core`'s is the standard machine, the same in every room whatever the host (`catalog/room.py`, each group of packages with its reason); a project changes it with `.edit(Core(packages=Packages().drop("emacs-nox", why=…)))`, and adds its own in a module of its own. The image's packages are every module's own, in module order, then each requirement's `package`: one name from two places is one package, the first's, as a path pattern from two modules is one pattern.
+- **Session settings:** `Core`'s `session`, a `Session` holding the subagents' prompt cache (`"1h"` or `"5m"`, the API's two lifetimes), auto memory, idle compaction (`idle_compaction`, off by lup's default where a runtime has it), `removed_tools`, a `RemovedTools` selection of the built-in tools removed from context by name, and `account_connectors`, whether a session fetches the connectors the operator's account brings with its login (off: `docs/launch.md`, *The settings compiled for each runtime*); lup's values are in `catalog/room.py`. A `Session` is a `Layer` (*The verbs on modules*), so a project setting one field keeps lup's others. They're in neutral terms, which each runtime's adapter spells. A second module holding a `Session` fails the load, naming both: a project's sessions run one way.
+  - **Who set each field matters** (the operator's decision): a field some layer of the declaration sets is imposed over the person's own runtime settings, and a field no layer sets is lup's default, which theirs outrank (`docs/launch.md`, *The settings compiled for each runtime*). The resolved session says which (`SessionChoices.declared`), read from the final value's `model_fields_set`: `applied` makes each layer a copy of the one below with the fields it set updated (`model_copy(update=…)`), which pydantic adds to the fields set, so the final value's are exactly the fields some layer set, whether by `.edit`, by `.replace`, or by a module of the project's own standing in for `Core`. A field set to lup's own value counts as declared, and so is imposed.
+- **Guidance:** each module's `guidance` part, a `Guidance` selection of `Section`s: `Section(name="pipeline", path=Path("guidance/pipeline.md"))`, a path from the project's root, or `Section(name="core", package="lup_dev.declaration.modules", path=Path("guidance/core.md"))`, a file a Python package ships, as lup's modules' sections are. Sections are listed in module order, but where one is placed `before=` or `after=` another's name; a name from two modules fails, naming both. lup's modules each bring one, named for the module (`core`, `python`, `code-rules`); lup's own declaration names `AGENTS.md` as its section, on `LupDevelopment`, after lup's modules'. A launch renders them into one document (`docs/launch.md`, *Guidance*).
+
+The package and the file are named apart, rather than in one string in entry-point form (`"lup_dev.ledger:guidance.md"`): read back, that string would need parsing, and entry-point syntax refuses a hyphen in a file name.
 
 ## lup's settings for ruff and pyright
 
@@ -421,12 +447,12 @@ The cost of TOML: a `[tool.pyright]` table in a file that isn't a `pyproject.tom
 ### How lup's settings are judged
 
 `.lup/settings/**` takes the `compiled` role, ahead of scratch (`.lup/**` is otherwise scratch, `catalog/paths.py`), as `DESIGN.md`'s protected paths have it (*Policy*):
-- **a write equal to what the judge generates from the integration branch's declaration is allowed,** so an agent runs `lup settings` after a declaration change lands on `dev` and nothing asks twice for one decision;
+- **a write equal to what the judge generates from the declaration it judges with is allowed,** so an agent runs `lup settings` after a declaration change lands on `dev` and is approved, and nothing asks twice for one decision;
 - **any other write is judged as a protected path's:** it asks, and made through the shell it's refused with the pointer to the file tools. A hand edit, or settings generated by a lup version other than the installed judge's, reaches the operator and never lands unseen.
 
 The alternatives: protected outright, which refuses an agent's regeneration as a shell write; or unguarded, left to the settings step alone.
 
-It's the integration branch's declaration for the same reason the judge reads only that one (`docs/judging-writes.md`, *Every worktree of the repository*): a branch never changes what judges it. The settings also read the workspace members' `pyproject.toml` (their `src/` and `requires-python`), so a branch changing a member's `requires-python` sees its regenerated settings ask until the change is on `dev`.
+It's the approved commit's declaration for the same reason the judge reads only that one (`docs/judging-writes.md`, *Every worktree of the repository*): a branch never changes what judges it. The settings also read the workspace members' `pyproject.toml` (their `src/` and `requires-python`), so a branch changing a member's `requires-python` sees its regenerated settings ask until the change is on `dev` and approved.
 
 **The settings step** (`settings`, `Python`'s, before ruff) fails when a generated file is stale (naming `lup settings`), when a pointer is missing (naming the line), or when pytest's `testpaths` misses a declared root. A `pyproject.toml` holding a tool's table doesn't fail it: those tables are the project's legitimate overrides.
 
@@ -475,7 +501,7 @@ Inserting an entry into an existing table, and type-checking one, take a TypeScr
 
 Either way the engine's helpers (`File` and what it returns) become lup's public API, versioned, with migrations when one changes.
 
-**How they're reviewed: as the declaration is.** Each table a selected module names is protected, so every change to it reaches the operator, and the judge reads it from the integration branch's tip, so a branch's rule runs only once it's on `dev`. The declaration is already code the judge imports and runs, reviewed this way; the tables add nothing to the judge. The alternative is approving a table by its content, in a review of its own, from the start or once trust on launch is built.
+**How they're reviewed: as the declaration is.** Each table a selected module names is protected, so every change to it reaches the operator, and the judge reads it at the approved commit, so a branch's rule runs only once it's on `dev` and approved. The declaration is already code the judge imports and runs, reviewed this way; the tables add nothing to the judge. The alternative is approving a table by its content, in a review of its own, from the start or once trust on launch is built.
 
 ### Rules and conventions
 
@@ -499,12 +525,12 @@ Built in C. Until then `lup-dev` (`cli.py`) stands in: a Typer app importing eve
 - **One command, `lup`, shipped by `lup-dev`; the library ships none,** rather than a `lup` in the library finding the environment's groups through entry points. `runs` and the outcome loop are the library's and callable from code; making one a command is the project's own wiring, or `lup-dev`'s job.
 - **Built from the selected modules' commands, loading only what's invoked,** rather than Typer's tree built at import. The root is a click group (Typer's base) whose entries are data: a name, a target in entry-point form (`"lup_dev.commands.holds:app"`), a one-line help. Listing commands (`lup --help`) reads the data and imports nothing; invoking one imports its target alone, a Typer app turned into a click command. click's own help listing calls `get_command` for every entry (`click/core.py`, `format_commands`), so the group lists from its data instead. A dropped module's commands are absent by construction. A command of `Core`'s runs without loading the declaration; `--help` and any other command load it.
 - **Only the hook command is fixed:** the hook is the core's (`DESIGN.md`, *The environment: core and modules*), and a project can't patch it; every other command is an entry a project can replace or drop, by editing the module holding it.
-- **A module's commands are top-level entries of its own (leaning):** no module adds a subcommand to another's group, since a module's parts change only through that module (*What a module is*). So lup's own module serves `lup install` and `lup rules-docs` (`lup-dev rules docs`, which writes lup's `docs/rules.md`), not `lup rules docs`. The alternative, a module adding to another's group, would make a group's contents depend on which modules are on.
+- **A module's commands are top-level entries of its own (leaning):** no module adds a subcommand to another's group, since a module's parts change only through that module (*What a module is*). So lup's own module serves `lup rules-docs` (`lup-dev rules docs`, which writes lup's `docs/rules.md`), not `lup rules docs`. The alternative, a module adding to another's group, would make a group's contents depend on which modules are on.
 - **lup's commands, by module:**
-  - `Core`: `hook claude|codex` (fixed), `check [--fix]`, `holds [approve|decline]`, `verdicts`, `project`, `new`, `docs`, the hidden `importers`;
+  - `Core`: `hook claude|codex` (fixed), `check [--fix]`, `holds [approve|decline]`, `verdicts`, `trust` (approving what the host runs, which a launch asks first: `docs/launch.md`, *Trust on launch*), `project`, `new`, `docs`, the hidden `importers`;
   - `Python`: `settings [--check]`;
   - `CodeRules`: `rules list|check|new`;
-  - lup's own module: `install`, `rules-docs`.
+  - lup's own module: `rules-docs`.
 
   `lup-dev`'s `submit`, `wait`, `reviews` and `reply`, and the hidden `review keep` that parks their reviews in the first lup's dashboard, serve the drafts flow, which the design leaves behind (`docs/graveyard.md`), so no module holds them.
 - **Published commands are the standard `[project.scripts]`.** They're installed with the package under the project's own name, so its users never need lup. `lup --help` lists them, marked published, read from `pyproject.toml` without importing them. The declaration's commands are development-only. The rejected alternative: `Command(published=True)`, with lup writing `[project.scripts]`, a table the project owns.
@@ -526,8 +552,8 @@ The rejected alternative: rooms declared in `lup_project.py` and used from code.
 
 Each built with the piece that first reads it; its shape is here so the grammar holds for it.
 
-- **Guidance and skills (the launch piece, which renders them):** each module's `guidance` and `skills` parts: `Guidance.of(Section(name="pipeline", path="guidance/pipeline.md"))` in a project's module, `.edit(Core(guidance=Guidance.default().replace("code", Section(…), why=…)))` for one of lup's. Rendered into one template at launch. Rendering checks that no section names a command the project doesn't serve. A path in a module of lup's is a package resource (`"lup_dev.modules.ledger:skill.md"`).
-- **Runtimes and their spellings, session settings (the launch piece):** `Core`'s `runtimes` (the adapters `cli.py` lists becoming lup's defaults, so a project can bring an adapter of its own) and `session` parts.
+- **Rendering guidance, and skills (the launch piece):** the guidance's sections are declared (*What a launch reads*), and rendered into one text at launch (`launch/guidance.py`, `docs/launch.md`, *Guidance*). Checking that no section names a command the project doesn't serve waits for C's `Commands`. A section of one of lup's modules is changed as any entry is, `.edit(Core(guidance=Guidance().replace("core", Section(…), why=…)))`. Each module's `skills` part takes the same shape, a `Skill` named and found as a `Section` is, once a module ships one.
+- **Runtimes and their spellings (the launch piece):** `Core`'s `runtimes` (the adapters `cli.py` lists becoming lup's defaults, so a project can bring an adapter of its own).
 - **Nested projects (the gate's nested environments):** a test root in a project of its own runs through the runner from that project's directory (`Pytest(root="studio/tests", project="studio")`), and lup's pyright settings get an execution environment for it, as adlib needed for `studio/` on Python 3.13.
 - **pyright per path** (nori's `reportMissingImports = "none"` under one directory): the project's own `[tool.pyright]` in `pyproject.toml`, with a comment for its reason.
 - **Personal config** (`~/.config/lup/config.toml`): accounts, theme, budget shares, the projects on this machine; between lup's defaults and the project in precedence (`DESIGN.md`). Not a project's, and read by launch, the dashboard and budgets.
@@ -535,15 +561,15 @@ Each built with the piece that first reads it; its shape is here so the grammar 
 
 ## Where the code goes
 
-In `packages/lup-dev/src/lup_dev/`. The declaration is a subsystem of its own (`docs/conventions.md`, *Package layout*), rather than `project.py` at the package's root with its neighbours beside it, and sits between the catalog it reads and the subsystems that read it: `adapters` > `policy` > `codescan` > `declaration` > `catalog`.
+In `packages/lup-dev/src/lup_dev/`. The declaration is a subsystem of its own (`docs/conventions.md`, *Package layout*), rather than `project.py` at the package's root with its neighbours beside it, and sits between the catalog it reads and the subsystems that read it: `adapters` > `launch` > `policy` > `codescan` > `declaration` > `catalog`.
 
 | File | What it's for | Slice |
 |---|---|---|
 | `__init__.py` | The front door for a declaration: every name `lup_project.py` imports, lup's modules among them, in `__all__`, rather than imported from `lup_dev.declaration.…`. It imports only the declaration's models, so loading a declaration costs pydantic and nothing more | A |
 | **`declaration/`** | **What a project declares, and reading it** | |
-| `declaration/grammar.py` | `Selection`: a kind's starting point (the value below, or one it starts over from) and its recorded operations, resolved at load | A |
+| `declaration/grammar.py` | `Selection`: a kind's starting point (the value below, or one it starts over from) and its recorded operations, resolved at load; `Layer`, a model of settings a layer changes field by field, and `applied`, the one rule a module and a `Layer` layer by | A; `Layer` in the launch piece |
 | `declaration/module.py` | `Module`, its parts, its `requires`, and `.edit`; `Modules`, the selection of modules | A |
-| `declaration/kinds.py` | Each kind as a `Selection`: `Rules`, `Paths`, `Gate`, `Commands`, `Rooms`, later `Skills`, `Guidance`, `Runtimes` | A |
+| `declaration/kinds.py` | Each kind as a `Selection`, or a `Layer` holding several: `Rules`, `Paths`, `Gate`, `Exemptions`, `TestRoots`; `Packages`, `Session` and its `RemovedTools`, `Guidance`; later `Commands`, `Rooms`, `Skills`, `Runtimes` | A; the launch piece |
 | `declaration/project.py` | `Project`, holding `modules`, and `asks` until the judge's asks become proposals | A |
 | `declaration/runner.py` | `Runner`, `Uv`, `Plain`; `Prefixed`, a runner kept as its commands, as the judge keeps one | A |
 | `declaration/requirements.py` | `Requirement`, and checking a declaration's requirements all at once | A |
@@ -556,6 +582,7 @@ In `packages/lup-dev/src/lup_dev/`. The declaration is a subsystem of its own (`
 | `catalog/paths.py` | The default path patterns, one list per role, `Core`'s and `Python`'s (exists; gains `compiled`) | A, B |
 | `catalog/gate.py` | `Step` (exists), and the default steps without lup's engine build, which moves to lup's own module; gains the `settings` step | A, B |
 | `catalog/rules.py` | The rules lup's default leaves out, each with its reason: `runtime-mention` until E | A |
+| `catalog/room.py` | The standard machine's packages, each group with its reason, and lup's default session settings; with the image, its base and pinned snapshot | the launch piece |
 | `catalog/tools.py` | `RuffRule` (a code, why it's off, and the lup rule owning its concern, if one does), and lup's settings for ruff and pyright | B |
 
 **Where lup's modules live (leaning):** in `declaration/modules/`, data only, importing nothing but the declaration's models and the catalog, so loading a declaration stays cheap; each module's machinery is in its own subsystem, reached by address (`"lup_dev.ledger.cli:app"`). `Modules.default()` is recorded, and `resolve.py` reads the default list, so `module.py` never imports lup's modules. The alternative, each module declared beside its machinery, would import that machinery at every load.
@@ -568,7 +595,7 @@ Elsewhere:
 - **`codescan/engine.py`** sends the selections, and starts the engine with the runner's interpreter command and, from E, the tables' paths; **`checker/src/catalog.ts`** resolves a selection; **`checker/src/program.ts`** takes the interpreter command and the environment's files from its start arguments, and stamps lup's pyright settings file with pyright's other configuration, so a change to it builds another program.
 - **`codescan/ruff.py`** runs ruff through the runner; `UV_RUN` goes.
 - **`gate.py`** checks requirements first, then runs each step through the runner; its own `Runner` becomes `Processes`.
-- **`install.py`** finds the engine's build step in lup's declaration, and runs it through the declaration's runner as the gate does.
+- **`launch/trust.py`** finds the engine's build step in the approved commit's declaration, and runs it through the declaration's runner as the gate does.
 
 ## Building it
 

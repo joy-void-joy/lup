@@ -50,6 +50,10 @@ class Requirement(Model, extra="forbid"):
     """What it's needed for, shown when it's missing."""
     install: str | None = None
     """How to install it, shown when it's missing."""
+    package: str | None = None
+    """The package providing it in lup's room, by its name in Arch Linux's
+    repositories (`nodejs` for `node`): it joins the room's image, so a module
+    names it once, here."""
 
     @model_validator(mode="after")
     def complete(self) -> Self:

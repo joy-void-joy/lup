@@ -13,6 +13,7 @@ from lup_dev import (
     Exemption,
     Exemptions,
     Gate,
+    Guidance,
     Module,
     Modules,
     Paths,
@@ -21,25 +22,30 @@ from lup_dev import (
     Python,
     Requirement,
     Rules,
+    Section,
     Step,
     TestRoots,
 )
 
 
 class LupDevelopment(Module):
-    """What only lup's repository needs: building lup's engine, guarding its policy.
+    """What only lup's repository needs: building lup's engine, guarding its policy, its guidance.
 
     - The engine is built before the gate's first step, and again only when its
       bundle is older than one of its sources, since tests that ask a stale engine
       fail for reasons the change didn't cause. Its command is the tool alone, which
-      the gate runs through the project's runner, and the installer runs the same
-      step the same way (`lup_dev/install.py`).
+      the gate runs through the project's runner, and trust on launch runs the same
+      step the same way to build the copy the operator approves
+      (`lup_dev/launch/trust.py`). npm, which installs its bundler, joins the
+      room's image as Arch's `npm`.
     - The data that sets lup's policy (`lup_dev.catalog`) is protected, so the
       operator reviews every change to it before it lands.
     - The bridge's interim hooks are excluded: uv scripts with their own
       dependencies, outside the conventions, which go with the bridge. They stay
       protected, as everything in a runtime's own directory is, so a change to one
       still asks.
+    - Working on lup is `AGENTS.md`, the project's own section of the guidance,
+      after the sections of lup's modules.
     """
 
     name = "lup-development"
@@ -48,6 +54,7 @@ class LupDevelopment(Module):
             tool="npm",
             why="installs the engine's bundler",
             install="it comes with Node",
+            package="npm",
         )
     ]
 
@@ -73,6 +80,7 @@ class LupDevelopment(Module):
         ),
         before="rules",
     )
+    guidance: Guidance = Guidance.of(Section(name="lup", path=Path("AGENTS.md")))
 
 
 project = Project(

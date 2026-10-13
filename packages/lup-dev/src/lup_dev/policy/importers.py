@@ -24,7 +24,7 @@ from filelock import FileLock, Timeout
 from lup.types import Model, MutableModel
 from lup_dev.codescan.contract import Checker, FileReport
 from lup_dev.layout import StoreLayout
-from lup_dev.policy.store import read_model, write_model
+from lup_dev.stored import read_model, write_model
 
 if TYPE_CHECKING:
     from lup_dev.clock import Clock

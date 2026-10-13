@@ -22,7 +22,8 @@ class CallRecord(Model):
     """What one ask was, and what came of it."""
 
     runtime: str
-    model: str
+    model: str | None
+    """The model the declaration named; none where it left the choice to the runtime."""
     started_at: datetime
     duration: timedelta
     prompt: str
@@ -81,7 +82,7 @@ class Asked(Model):
     """The request half of a record: who was asked what, and when."""
 
     runtime: str
-    model: str
+    model: str | None
     system_prompt: str | None
     prompt: str
     started_at: datetime

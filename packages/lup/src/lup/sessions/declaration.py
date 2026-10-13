@@ -1,8 +1,11 @@
-"""The fields every declaration has, and `ask`: the layers around the adapter.
+"""The fields every declaration has, its two compilations, and `ask`: the layers around the adapter.
 
-Each runtime's declaration is a `Declaration` and an `Agent`, and answers `ask`
-through `Asking`, which runs the turn on the adapter the seam chooses (its own
-runtime's, unless a test's fake stands in), inside the declaration's layers:
+A declaration compiles two ways (`DESIGN.md`, *The library*): to its runtime's SDK
+for an ask from code, and to its runtime's CLI for a terminal (`terminal`, in
+`lup.sessions.terminal`'s terms). Each runtime's declaration is a `Declaration`,
+which is an `Agent`, and answers `ask` through `Asking`, which runs the turn on the
+adapter the seam chooses (its own runtime's, unless a test's fake stands in),
+inside the declaration's layers:
 - the timeout bounds the whole ask, and interrupts the turn when it passes;
 - recovery retries an unavailable runtime, each attempt a fresh turn;
 - submission: a typed ask's turn runs through the output tool and its guard,
@@ -12,6 +15,7 @@ runtime's, unless a test's fake stands in), inside the declaration's layers:
 
 import asyncio
 import time
+from abc import ABC, abstractmethod
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, ClassVar, TypeGuard
 
@@ -29,6 +33,7 @@ from lup.sessions.errors import (
 from lup.sessions.layers import SessionLayers
 from lup.sessions.results import TurnResult
 from lup.sessions.submission import Toolbox
+from lup.sessions.surface import Agent
 from lup.tools.speaking import note, report
 from lup.tools.submit import Submit
 from lup.types import Model
@@ -36,22 +41,40 @@ from lup.types import Model
 if TYPE_CHECKING:
     from collections.abc import Awaitable
 
+    from lup.sessions.terminal import Terminal, TerminalSettings
     from lup.tools.tool import AgentTool
 
 
-class Declaration(Model):
-    """The fields every agent's declaration has, whatever its runtime."""
+class Declaration(Model, Agent, ABC):
+    """The fields every agent's declaration has, whatever its runtime, and its compilation for a terminal."""
 
     runtime: ClassVar[str]
     """The runtime's name, as records and errors give it."""
-    model: str
-    system_prompt: str | None = None
-    """Replaces the runtime's own system prompt; none sends no prompt of lup's own.
+    model: str | None = None
+    """The runtime's model id, passed as given.
 
-    Either way the runtime's own prompt is left out, though a runtime may still add
-    a line of its own.
+    None leaves it to the runtime: in a terminal, the person's own settings
+    choose, and in an ask, the runtime's default, since an ask loads none of
+    their settings.
+    """
+    system_prompt: str | None = None
+    """Replaces the runtime's own system prompt.
+
+    In an ask, none sends no prompt of lup's own, and either way the runtime's own
+    prompt is left out, though a runtime may still add a line of its own. In a
+    terminal, none keeps the runtime's own prompt.
     """
     layers: SessionLayers = SessionLayers()
+
+    @abstractmethod
+    def terminal(self, settings: TerminalSettings) -> Terminal:
+        """Compile the declaration for a terminal: its runtime's CLI, with lup's settings.
+
+        The model and effort are spelled as the runtime spells them, each only
+        where the declaration gives it, so the person's own choice holds. A terminal
+        session is the runtime's coding agent, which an empty prompt would leave
+        without its tools' guidance, so with no `system_prompt` it keeps its own.
+        """
 
 
 class Ran(Model):

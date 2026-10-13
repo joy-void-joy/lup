@@ -5,11 +5,13 @@ what the runtime reports in structured form, so a caller branches on the type.
 Only `AgentUnavailableError` is retried, by the recovery layer.
 """
 
+from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 from lup.errors import LupError
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
     from datetime import datetime
 
     from lup.sessions.results import Rejection, Usage
@@ -95,6 +97,26 @@ class TurnTimeoutError(TurnError, TimeoutError):
 
 class RuntimeMissingError(LupError):
     """A declaration names a runtime whose extra isn't installed."""
+
+
+@contextmanager
+def needs_extra(extra: str) -> Generator[None]:
+    """Raise `RuntimeMissingError` naming `lup[<extra>]` where the block's import finds no runtime SDK.
+
+    An adapter imports its runtime's SDK inside it, when an ask first needs it, so
+    a missing extra is said where it's needed, rather than as an import error deep
+    inside. A module of lup's own missing is a bug, and raised as it is.
+    """
+    try:
+        yield
+    except ModuleNotFoundError as missing:
+        if missing.name is None or missing.name.startswith("lup"):
+            raise
+        message = (
+            f"asking needs the `lup[{extra}]` extra, which isn't installed (no "
+            f"module {missing.name!r}): install `lup[{extra}]`"
+        )
+        raise RuntimeMissingError(message) from missing
 
 
 class RealCallInTestError(LupError):

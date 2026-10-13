@@ -3,9 +3,20 @@
 The homes (`docs/judging-writes.md`, *Where things live*):
 - lup's own state, under `$XDG_STATE_HOME/lup/`: each worktree's store, outside the
   worktree so the restore source is out of the agent's reach, and each
-  repository's verdict log;
+  repository's verdict log and the host zone its operator approved;
 - each worktree engine's socket, under `$XDG_RUNTIME_DIR/lup/`, since a socket's
   path is limited in length;
+- the host service's sockets and the launches it serves, under
+  `$XDG_RUNTIME_DIR/lup/host/`, and its log under lup's state (`docs/launch.md`);
+  each launch's compiled settings, and the lock its launcher holds, under lup's
+  state;
+- lup's data, under `$XDG_DATA_HOME/lup/`: each repository's own copy of
+  `lup-dev`, which trust on launch installs and its launches' hooks run;
+- lup's cache, what can be fetched again, under `$XDG_CACHE_HOME/lup/`: pyright's
+  source, kept for building the engine, the one part of the cache a room mounts;
+  and each runtime's CLIs, as its release channel publishes them, under `clis/`
+  (`docs/launch.md`, *The CLIs*);
+- the record of each room image built, in lup's state;
 - inside a worktree, `.lup/saved/`, where a refused version waits for the agent,
   `.lup/drafts/`, where a change waits to be submitted for review, and
   `.lup/review/<n>/`, where a review keeps its files while it waits;
@@ -22,6 +33,12 @@ from lup.types import Model
 
 if TYPE_CHECKING:
     from lup_dev.settings import LupDevSettings
+
+LOCALTIME = Path("/etc/localtime")
+"""The host's time zone, which a room mounts read-only so its clock reads as the operator's."""
+
+ROOM_SOCKETS = Path("/run/lup")
+"""Where a room mounts its launch's socket directory, so its hook finds the host service."""
 
 
 def digest(path: Path) -> str:
@@ -261,65 +278,247 @@ class CheckoutLayout(Model):
         """The reference to lup's rules, compiled from the engine's table: lup's own."""
         return self.root / "docs" / "rules.md"
 
+    @property
+    def local_guidance(self) -> Path:
+        """The person's own section of a session's guidance, which git ignores.
+
+        Appended after every section the declaration names, so it holds where they
+        differ (`docs/launch.md`, *Guidance*).
+        """
+        return self.root / "AGENTS.local.md"
+
+    @property
+    def lock(self) -> Path:
+        """The project's `uv.lock`, which pins the `lup-dev` the host runs for it."""
+        return self.root / "uv.lock"
+
     def saved_copy(self, number: int, path: Path) -> Path:
         """Say where the version refused in refusal `number` is saved, by its path."""
         return self.saved / str(number) / path
-
-    def install_review(self, since: str | None) -> Path:
-        """Say where the judge's review keeps its files' before side while it waits.
-
-        Each changed file as it stood at `since`, the commit approved last, at its
-        path in the checkout below this directory; `whole/` where no approved
-        commit is known, and the review shows the source whole.
-        """
-        return self.home / "install-review" / (since or "whole")
 
     def review(self, number: int) -> ReviewLayout:
         """Say where review `number` keeps its files in the worktree."""
         return ReviewLayout(home=self.home / "review" / str(number))
 
-    @property
-    def tool(self) -> Path:
-        """The package installed as the judge, `lup-dev`, in a checkout of lup."""
-        return self.root / "packages" / "lup-dev"
+
+class PackageLayout(Model):
+    """One package of a uv workspace, at its directory: what a copy of it is built from."""
+
+    root: Path
 
     @property
-    def judge_source(self) -> list[Path]:
-        """Everything the installed judge carries, from a checkout of lup's root.
+    def pyproject(self) -> Path:
+        """Its project file: its name, its dependencies and how it's built."""
+        return self.root / "pyproject.toml"
 
-        Both packages' metadata and source (`lup` is a dependency of `lup-dev`),
-        the engine's source the bundle is built from, and `uv.lock`, whose
-        versions the installed copy's dependencies are held to.
+    @property
+    def source(self) -> Path:
+        """Its modules, under uv's build backend's default module root."""
+        return self.root / "src"
+
+    @property
+    def engine(self) -> Path:
+        """`lup-dev`'s engine's source, which its build bundles into the package.
+
+        The build is `checker/build.py` there; the gate and trust on launch run it
+        as the declaration's step that builds a file.
         """
-        library = Path("packages") / "lup"
-        return [
-            library / "pyproject.toml",
-            library / "src",
-            Path("packages") / "lup-dev" / "pyproject.toml",
-            Path("packages") / "lup-dev" / "src",
-            Path("packages") / "lup-dev" / "checker",
-            Path("uv.lock"),
-        ]
+        return self.root / "checker"
+
+
+class LaunchSockets(Model):
+    """One launch's socket directory, which its room mounts at `/run/lup`.
+
+    The directory is mounted rather than each socket, since a socket mounted as a
+    file stays bound to the old one when the service restarts.
+    """
+
+    directory: Path
+
+    @property
+    def hook(self) -> Path:
+        """The socket the room's hook command sends each payload to."""
+        return self.directory / "hook.sock"
+
+
+class HostLayout(Model):
+    """Where the host service keeps its sockets and the launches it serves, and its log.
+
+    Its sockets and its records of the launches live under lup's runtime directory,
+    which a reboot empties as it ends every room; its log lives in lup's state.
+    """
+
+    sockets: Path
+    state: Path
+
+    @property
+    def control(self) -> Path:
+        """The control socket, on the host only, taking typed requests."""
+        return self.sockets / "control.sock"
+
+    @property
+    def lock(self) -> Path:
+        """The lock the running service holds for its whole life, which the OS frees."""
+        return self.sockets / "service.lock"
+
+    @property
+    def launches(self) -> Path:
+        """Each launch served: its socket directory, and its record beside it."""
+        return self.sockets / "launches"
+
+    @property
+    def log(self) -> Path:
+        """What a service started in the background prints, kept for when it fails."""
+        return self.state / "service.log"
+
+    def launch(self, launch: str) -> LaunchSockets:
+        """Say where launch `launch`'s sockets are."""
+        return LaunchSockets(directory=self.launches / launch)
+
+    def record(self, launch: str) -> Path:
+        """Say where launch `launch` is recorded, so a restarted service serves it."""
+        return self.launches / f"{launch}.json"
+
+
+class JudgeLayout(Model):
+    """One repository's own copy of `lup-dev`, which judges its launches' hooks.
+
+    Trust on launch installs the copy the operator approved here, as a uv tool of
+    its own (`UV_TOOL_DIR` and `UV_TOOL_BIN_DIR`), so a second project's approval
+    doesn't replace the first's (`docs/launch.md`, *Trust on launch*).
+    """
+
+    home: Path
+
+    @property
+    def tools(self) -> Path:
+        """Where uv keeps the copy's environment."""
+        return self.home / "tools"
+
+    @property
+    def bin(self) -> Path:
+        """Where uv puts the copy's commands."""
+        return self.home / "bin"
+
+    def command(self, name: str) -> Path:
+        """Say where the copy's command `name` is: `lup-dev`, by its package's name."""
+        return self.bin / name
+
+
+class LaunchLayout(Model):
+    """One launch's own places in lup's state: what's compiled for it, and its launcher's lock."""
+
+    directory: Path
+    """lup's settings and guidance compiled for the launch, mounted read-only into
+    its room; removed when the launch ends."""
+
+    @property
+    def lock(self) -> Path:
+        """The lock its launcher holds for its whole life, which the OS frees.
+
+        A launch whose lock can be taken has no launcher left, so a later launch
+        may end it once its container is gone too.
+        """
+        return self.directory.with_name(f"{self.directory.name}.lock")
+
+
+class CliCacheLayout(Model):
+    """Where one runtime's CLIs are cached, a directory per version (`docs/launch.md`, *The CLIs*).
+
+    A version's directory holds what its release channel published, checked: the
+    binary, or the package it ships in. A download is staged beside the versions
+    and moved among them once checked, so a version's directory is only ever whole.
+    """
+
+    home: Path
+
+    @property
+    def versions(self) -> Path:
+        """Each version kept, in a directory named by the version."""
+        return self.home / "versions"
+
+    @property
+    def staging(self) -> Path:
+        """Where a download waits until it's checked."""
+        return self.home / "staging"
+
+    @property
+    def lock(self) -> Path:
+        """The lock a launch holds while it updates the cache, so two launches download once."""
+        return self.home / "cache.lock"
+
+    def version(self, version: str) -> Path:
+        """Say where version `version` is kept."""
+        return self.versions / version
 
 
 class Layout(Model):
-    """Where lup's state lives for one user: `$XDG_STATE_HOME/lup`, and its sockets."""
+    """Where lup's state lives for one user: `$XDG_STATE_HOME/lup`, its sockets and its cache."""
 
     state: Path
     runtime: Path = Path(tempfile.gettempdir()) / f"lup-{getpass.getuser()}"
     """lup's sockets: `$XDG_RUNTIME_DIR/lup`, or the user's own temporary directory."""
+    cache: Path = Path.home() / ".cache" / "lup"
+    """lup's cache, what can be fetched again: `$XDG_CACHE_HOME/lup`, or `~/.cache/lup`."""
+    data: Path = Path.home() / ".local" / "share" / "lup"
+    """lup's data, the copies of `lup-dev` it installs among it: `$XDG_DATA_HOME/lup`,
+    or `~/.local/share/lup`."""
 
     @classmethod
     def of(cls, settings: LupDevSettings) -> Layout:
-        """Place lup's state and sockets where the settings say, or XDG's defaults."""
+        """Place lup's state, sockets, cache and data where the settings say, or XDG's defaults."""
         home = settings.xdg_state_home or Path.home() / ".local" / "state"
+        cache = (settings.xdg_cache_home or Path.home() / ".cache") / "lup"
+        data = (settings.xdg_data_home or Path.home() / ".local" / "share") / "lup"
         if settings.xdg_runtime_dir is None:
-            return cls(state=home / "lup")
-        return cls(state=home / "lup", runtime=settings.xdg_runtime_dir / "lup")
+            return cls(state=home / "lup", cache=cache, data=data)
+        return cls(
+            state=home / "lup",
+            runtime=settings.xdg_runtime_dir / "lup",
+            cache=cache,
+            data=data,
+        )
+
+    @property
+    def pyright_source(self) -> Path:
+        """The source of pyright, which the engine's build fetches and builds from.
+
+        `packages/lup-dev/checker/build.py` keeps it here, and a room mounts it
+        read-write for the gate, rather than the whole cache, whose other parts
+        (the CLIs a room runs) a room mustn't rewrite.
+        """
+        return self.cache / "pyright"
+
+    @property
+    def builds(self) -> Path:
+        """Each room image built: one JSON line each, with its duration and size."""
+        return self.state / "rooms" / "builds.jsonl"
 
     def engine_socket(self, worktree: Path) -> Path:
         """Say where the engine of the worktree at `worktree` listens."""
         return self.runtime / f"{short_digest(worktree)}.sock"
+
+    def clis(self, runtime: str) -> CliCacheLayout:
+        """Say where the CLIs of a runtime are cached, by the name its adapter gives it."""
+        return CliCacheLayout(home=self.cache / "clis" / runtime)
+
+    @property
+    def host(self) -> HostLayout:
+        """Where the host service, one per user, keeps its sockets, records and log."""
+        return HostLayout(sockets=self.runtime / "host", state=self.state / "host")
+
+    def judge(self, repository: Path) -> JudgeLayout:
+        """Say where a repository's own copy of `lup-dev` is installed, by its git directory."""
+        return JudgeLayout(home=self.data / "judges" / digest(repository))
+
+    @property
+    def launches(self) -> Path:
+        """Each launch's own places: its compiled settings, and its launcher's lock."""
+        return self.state / "launches"
+
+    def launch(self, launch: str) -> LaunchLayout:
+        """Say where launch `launch`'s own places are."""
+        return LaunchLayout(directory=self.launches / launch)
 
     @property
     def worktrees(self) -> Path:
@@ -370,7 +569,10 @@ class Layout(Model):
         """Say where a session's subagents at work, and its last block, are kept."""
         return self.session_index / f"{session}.conversations.json"
 
-    @property
-    def approval(self) -> Path:
-        """The commit of lup the operator last approved as the judge that runs."""
-        return self.state / "judge" / "approved.json"
+    def approved(self, repository: Path) -> Path:
+        """Say where a repository's host zone the operator approved last is kept.
+
+        The commit approved, the zone's fingerprint there, its paths and the
+        `lup-dev` it runs (`docs/launch.md`, *Trust on launch*).
+        """
+        return self.repository(repository) / "approved.json"

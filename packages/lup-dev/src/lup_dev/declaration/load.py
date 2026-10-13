@@ -13,7 +13,7 @@ import importlib
 import sys
 import tomllib
 from contextlib import contextmanager
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import TYPE_CHECKING
 
 from lup.types import Model
@@ -77,6 +77,20 @@ def import_roots(root: Path, pyproject: Pyproject) -> list[Path]:
     ]
     candidates = [root, root / "src", *members, *(member / "src" for member in members)]
     return [candidate for candidate in candidates if candidate.is_dir()]
+
+
+def read_by_import(path: PurePath) -> bool:
+    """Say whether importing a declaration from a directory may read the file at `path`.
+
+    Its Python modules, and each project file, which says where a workspace's
+    packages are (`import_roots`): what a commit's export holds so its declaration
+    can be imported.
+
+    >>> [read_by_import(PurePath(each)) for each in ["a/b.py", "pyproject.toml", "c.md"]]
+    [True, True, False]
+    """
+    project = CheckoutLayout(root=Path()).pyproject
+    return path.suffix in [".py", ".pyi"] or path.name == project.name
 
 
 @contextmanager

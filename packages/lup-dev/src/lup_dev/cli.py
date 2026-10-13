@@ -3,48 +3,71 @@
 It stands in for the real `lup` command tree until the declaration and command
 line piece builds it; the commands keep their meaning there, and their final
 names are that piece's call (`docs/judging-writes.md`, *Modules*). It's the one
-place that lists the runtimes' adapters.
+place that lists the runtimes' adapters: the host service answers a hook a
+launch's judge couldn't with the answerer built here (`docs/launch.md`), and
+`hook` answers through it.
 
-`submit`, `wait`, `reviews` and `reply` serve the built drafts flow
-(`docs/review-flow.md`). Who calls one is a conversation of its own, `operator`,
-in the directory it runs in.
+`trust` approves what the host runs for a repository, the check a launch makes
+first (`docs/launch.md`, *Trust on launch*). `launch` opens a runtime's session in
+a room for the worktree (*The command*). `submit`, `wait`, `reviews` and
+`reply` serve the built drafts flow (`docs/review-flow.md`). Who calls one is a
+conversation of its own, `operator`, in the directory it runs in.
 """
 
+import asyncio
 import secrets
+import shutil
 import sys
 from collections.abc import Callable
 from datetime import timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, override
 
 import sh
 import typer
+from filelock import FileLock
+from filelock import Timeout as Held
 from pydantic import TypeAdapter, ValidationError
 
+from lup.errors import LupError
+from lup.rooms import Mount, Podman, Room
 from lup.types import Model
 
 # lup: ignore("runtime-mention", why="the one place listing the adapters")
-from lup_dev.adapters import claude, codex
-from lup_dev.clock import SystemClock
+from lup_dev.adapters import Adapter, claude, codex
+from lup_dev.approval import approved
+from lup_dev.clock import Clock, SystemClock
 from lup_dev.codescan.conditions import loaded
 from lup_dev.codescan.contract import Checker, Finding, Source
 from lup_dev.codescan.directives import Checking, Fired, GitHubIssues, Trackers
 from lup_dev.codescan.engine import EngineChecker
 from lup_dev.codescan.reference import reference
 from lup_dev.codescan.ruff import Ruff
-from lup_dev.declaration.requirements import Machine
+from lup_dev.declaration.requirements import Machine, Tools
+from lup_dev.declaration.requirements import check as checked
 from lup_dev.errors import LupDevError
 from lup_dev.gate import Check, Shell, failed, report
-from lup_dev.install import Installer, Terminal, Uv
-from lup_dev.layout import CheckoutLayout, Layout
-from lup_dev.legacy_dashboard import LegacyDashboard, LegacyQueue
+from lup_dev.git import Git, nul_separated
+from lup_dev.host.client import Detached, HostClient
+from lup_dev.host.protocol import HostError, Register
+from lup_dev.host.service import Answerer, HostService
+from lup_dev.launch.clis import CliCache
+from lup_dev.launch.images import build
+from lup_dev.launch.room import host_needs, maintaining_room
+from lup_dev.launch.session import (
+    LaunchError,
+    approved_declaration,
+    hooked,
+    terminal_settings,
+)
+from lup_dev.launch.trust import Outcome, trusted
+from lup_dev.layout import ROOM_SOCKETS, CheckoutLayout, Layout
+from lup_dev.legacy_dashboard import LegacyQueue
 from lup_dev.policy.checkpoint import Bench, Services, Worktree
 from lup_dev.policy.holds import Hold, Response, answer, waiting
 from lup_dev.policy.importers import BackgroundSpawner
 from lup_dev.policy.judge import finding
 from lup_dev.policy.report import finding_lines
-from lup_dev.policy.runtime import Runtime
-from lup_dev.policy.store import Git, nul_separated
 from lup_dev.policy.submissions import (
     AllReviews,
     AnyReview,
@@ -56,26 +79,21 @@ from lup_dev.policy.submissions import (
     OneReview,
 )
 from lup_dev.policy.verdicts import VerdictLog
-from lup_dev.settings import LupDevSettings
+from lup_dev.settings import LupDevSettings, TerminalVariables
 
 if TYPE_CHECKING:
+    from lup_dev.policy.runtime import Runtime
     from lup_dev.review import Queue
 
 app = typer.Typer(no_args_is_help=True, help="Develop a project with agents.")
 rules = typer.Typer(no_args_is_help=True, help="lup's code rules.")
 holds = typer.Typer(help="Changes waiting for your answer.")
 review = typer.Typer(no_args_is_help=True, help="Reviews parked for your answer.")
+host = typer.Typer(help="lup's host service, which rooms call.")
 app.add_typer(rules, name="rules")
 app.add_typer(holds, name="holds")
 app.add_typer(review, name="review", hidden=True)
-
-
-class Adapter(Model, arbitrary_types_allowed=True):
-    """A runtime lup knows, with how its adapter answers one of its hooks."""
-
-    runtime: Runtime
-    hook: Callable[[str, Bench], str]
-    """The adapter's `hook`: a payload in, what the hook prints out."""
+app.add_typer(host, name="host")
 
 
 def engine() -> Checker:
@@ -84,18 +102,55 @@ def engine() -> Checker:
 
 
 def adapters() -> list[Adapter]:
-    """List every runtime lup knows, each with how its adapter answers a hook."""
+    """List every runtime lup knows, each with what lup needs of its adapter."""
     return [
         # lup: ignore("runtime-mention", why="the one place listing the adapters")
-        Adapter(runtime=claude.Claude(), hook=claude.hook),
+        claude.adapter(),
         # lup: ignore("runtime-mention", why="the one place listing the adapters")
-        Adapter(runtime=codex.Codex(), hook=codex.hook),
+        codex.adapter(),
     ]
 
 
 def runtimes() -> list[Runtime]:
     """List every runtime lup knows."""
     return [adapter.runtime for adapter in adapters()]
+
+
+class Adapters(Model, Answerer):
+    """Every runtime lup knows, answering its hooks: for `hook`, and for the host service where a launch's judge couldn't."""
+
+    known: list[Adapter]
+
+    @override
+    def runtimes(self) -> list[str]:
+        return [adapter.runtime.name() for adapter in self.known]
+
+    def named(self, runtime: str) -> Adapter:
+        """Return the adapter of the runtime named `runtime`, or say which lup knows."""
+        chosen = [
+            adapter for adapter in self.known if adapter.runtime.name() == runtime
+        ]
+        if not chosen:
+            names = ", ".join(self.runtimes())
+            message = f"no runtime named `{runtime}`; lup knows {names}"
+            raise typer.BadParameter(message)
+        [adapter] = chosen
+        return adapter
+
+    def answer(self, runtime: str, payload: str) -> str:
+        """Answer one of `runtime`'s hooks, judging with this machine's services.
+
+        What the hook prints is its adapter's output on a line, or nothing.
+        """
+        adapter = self.named(runtime)
+        bench = Bench(runtime=adapter.runtime, services=services())
+        output = adapter.hook(payload, bench)
+        return f"{output}\n" if output else ""
+
+    @override
+    def unanswered(self, runtime: str, payload: str, failure: str) -> str:
+        """Answer one of `runtime`'s hooks a launch's judge couldn't, as its adapter says it, on a line."""
+        return f"{self.named(runtime).unanswered(payload, failure)}\n"
 
 
 def services() -> Services:
@@ -123,17 +178,249 @@ def hook(
     ],
 ) -> None:
     """Answer one of a runtime's hooks, its payload on stdin."""
-    known = adapters()
-    chosen = [adapter for adapter in known if adapter.runtime.name() == runtime]
-    if not chosen:
-        names = ", ".join(adapter.runtime.name() for adapter in known)
-        message = f"no runtime named `{runtime}`; lup knows {names}"
-        raise typer.BadParameter(message)
-    [adapter] = chosen
-    bench = Bench(runtime=adapter.runtime, services=services())
-    output = adapter.hook(sys.stdin.read(), bench)
-    if output:
-        typer.echo(output)
+    known = Adapters(known=adapters())
+    # An unknown runtime is refused before standard input is read.
+    known.named(runtime)
+    typer.echo(known.answer(runtime, sys.stdin.read()), nl=False)
+
+
+def host_client() -> HostClient:
+    """Return the host service's client, as this machine places the service."""
+    return HostClient(
+        layout=Layout.of(LupDevSettings()).host, clock=SystemClock(), starter=Detached()
+    )
+
+
+@host.callback(invoke_without_command=True)
+def host_serve(context: typer.Context) -> None:
+    """Run the host service in the foreground, until it's stopped.
+
+    It answers each launch's hooks as `lup-dev hook` does, on the launch's own
+    socket. `lup-dev host stop` or Ctrl-C stops it; the launches it serves stay
+    recorded, and the next service serves them.
+    """
+    if context.invoked_subcommand is not None:
+        return
+    service = HostService(
+        layout=Layout.of(LupDevSettings()).host,
+        answerer=Adapters(known=adapters()),
+        say=typer.echo,
+    )
+    asyncio.run(service.serve())
+
+
+@host.command("stop")
+def host_stop() -> None:
+    """Stop the host service, if one runs."""
+    if host_client().stop():
+        typer.echo("Stopped the host service.")
+        return
+    typer.echo("No host service runs.")
+
+
+class Launcher(Model, arbitrary_types_allowed=True):
+    """What a launch reaches on this machine, each a seam a test stubs."""
+
+    layout: Layout
+    trust: Callable[[Path], Outcome]
+    """Checks what the host runs for the repository at a worktree, asking where it changed."""
+    host: HostClient
+    podman: Podman
+    tools: Tools
+    """Where the host's requirements, and the runner's tools, are found."""
+    clock: Clock
+    terminal: TerminalVariables
+    say: Callable[[str], None]
+    """Where the launch tells the operator what it does."""
+
+
+def swept(launcher: Launcher) -> None:
+    """End each launch the host service serves whose launcher and container are both gone.
+
+    A launcher holds its launch's lock for its whole life, which the OS frees, so
+    a launch whose lock can be taken has no launcher left; its container, named
+    when it registered, tells whether its session still runs. Each launch ended
+    is said, and a launch another launcher ended first is passed over.
+    """
+    for each in launcher.host.launches():
+        own = launcher.layout.launch(each.launch)
+        own.lock.parent.mkdir(parents=True, exist_ok=True)
+        lock = FileLock(own.lock, timeout=0)
+        try:
+            lock.acquire()
+        except Held:
+            continue
+        try:
+            if launcher.podman.exists(each.container):
+                continue
+            try:
+                launcher.host.unregister(each.launch)
+            except HostError as gone:
+                launcher.say(f"Launch {each.launch} was ended already: {gone}")
+                continue
+            if own.directory.is_dir():
+                shutil.rmtree(own.directory)
+            launcher.say(
+                f"Ended launch {each.launch}, {each.runtime} in {each.worktree}: its "
+                f"launcher and its container, {each.container}, are gone."
+            )
+        finally:
+            lock.release()
+        own.lock.unlink(missing_ok=True)
+
+
+def launched(
+    adapter: Adapter, arguments: list[str], worktree: Path, launcher: Launcher
+) -> int:
+    """Launch `adapter`'s runtime in a room for `worktree`, in this terminal, and return its CLI's exit status.
+
+    In the order `docs/launch.md` gives (*The command*): trust on launch, its
+    report said; the declaration at the commit approved; the host's requirements;
+    the host service; the latest CLI, a fallback said; the room, its image built
+    where it's missing; the terminal settings; the sweep, then the launch
+    registered, under its launcher's lock; the CLI in the room, with `arguments`
+    after lup's own. The registration ends, and the launch's directory goes,
+    whatever the CLI did.
+    """
+    runtime = adapter.runtime.name()
+    launcher.say(launcher.trust(worktree).report())
+    repository = Path(
+        Git(cwd=worktree).text(
+            "rev-parse", "--path-format=absolute", "--git-common-dir"
+        )
+    )
+    approval = approved(launcher.layout, repository)
+    if approval is None:
+        message = f"nothing is approved for {repository}, so nothing launches"
+        raise LaunchError(message)
+    judge = launcher.layout.judge(repository).command(approval.tool.name)
+    with approved_declaration(worktree, approval.commit) as declared:
+        checked(host_needs(), launcher.tools).require()
+        launcher.host.ensure()
+        cached = CliCache(
+            layout=launcher.layout.clis(runtime), channel=adapter.channel
+        ).current()
+        if cached.fallback is not None:
+            launcher.say(
+                f"{runtime} {cached.version}, kept, runs: its release channel couldn't "
+                f"give the latest. {cached.fallback}"
+            )
+        room = maintaining_room(
+            declared.resolved,
+            worktree,
+            launcher.layout,
+            launcher.terminal,
+            launcher.tools,
+        )
+        built = build(
+            room.image, launcher.podman, launcher.clock, launcher.layout.builds
+        )
+        if built is not None:
+            launcher.say(f"Built the room's image in {built.duration}: {built.tag}.")
+        launch = secrets.token_hex(8)
+        own = launcher.layout.launch(launch)
+        settings = terminal_settings(
+            declared, worktree, own.directory, cached.cli, hooked(adapter.hooks)
+        )
+        registered = Register(
+            launch=launch,
+            runtime=runtime,
+            worktree=worktree,
+            judge=judge,
+            container=f"lup-{launch}",
+        )
+        own.lock.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with FileLock(own.lock):
+                swept(launcher)
+                sockets = launcher.host.register(registered)
+                try:
+                    walled = room.model_copy(
+                        update={
+                            "name": registered.container,
+                            "mounts": [
+                                *room.mounts,
+                                Mount(source=sockets, target=ROOM_SOCKETS),
+                            ],
+                        }
+                    )
+                    opened = Room(
+                        agent=adapter.agent(), container=walled, engine=launcher.podman
+                    )
+                    return opened.launch(arguments=arguments, settings=settings)
+                finally:
+                    ended(launcher, launch)
+        finally:
+            own.lock.unlink(missing_ok=True)
+
+
+def ended(launcher: Launcher, launch: str) -> None:
+    """End a launch's registration, and remove its directory.
+
+    Where the host service can't end it, that's said, and the launch's record
+    stays for the next launch's sweep.
+    """
+    try:
+        launcher.host.unregister(launch)
+    except HostError as failed:
+        launcher.say(
+            f"The host service didn't end launch {launch}: {failed}. The next "
+            "launch ends it."
+        )
+    directory = launcher.layout.launch(launch).directory
+    if directory.is_dir():
+        shutil.rmtree(directory)
+
+
+def launching(say: Callable[[str], None]) -> Launcher:
+    """Return what a launch reaches on this machine, as its settings place it.
+
+    It runs outside every agent's session, which the command checks first.
+    """
+    layout = Layout.of(LupDevSettings())
+    clock = SystemClock()
+
+    def trust(root: Path) -> Outcome:
+        return trusted(root, [])
+
+    return Launcher(
+        layout=layout,
+        trust=trust,
+        host=HostClient(layout=layout.host, clock=clock, starter=Detached()),
+        podman=Podman(),
+        tools=Machine(),
+        clock=clock,
+        terminal=TerminalVariables(),
+        say=say,
+    )
+
+
+@app.command(
+    "launch",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def launch(
+    context: typer.Context,
+    runtime: Annotated[str, typer.Argument(help="The runtime to launch, by its name.")],
+) -> None:
+    """Launch a runtime's session in a room for this worktree, in this terminal.
+
+    Run it yourself, in your own terminal: it first checks what the host runs for
+    this repository, asking where that changed, as `trust` does. Every argument
+    after the runtime's name that lup doesn't know reaches the runtime's CLI as
+    given, so `lup-dev launch <runtime> --resume` resumes. It ends with the CLI's
+    exit status.
+    """
+    inside = [each.name() for each in runtimes() if each.inside()]
+    if inside:
+        message = (
+            f"this runs inside a {inside[0]} session: launch from your own terminal"
+        )
+        raise LaunchError(message)
+    adapter = Adapters(known=adapters()).named(runtime)
+    launcher = launching(typer.echo)
+    status = launched(adapter, list(context.args), toplevel(Path.cwd()), launcher)
+    raise typer.Exit(code=status)
 
 
 @rules.command("list")
@@ -322,41 +609,20 @@ def check(
         raise typer.Exit(code=1)
 
 
-@app.command("install")
-def install(
-    *,
-    in_terminal: Annotated[
-        bool,
-        typer.Option(
-            "--in-terminal",
-            help="Review in this terminal instead of the first lup's dashboard.",
-        ),
-    ] = False,
-) -> None:
-    """Install this checkout's judge as the one that runs, once you approve its source.
+@app.command("trust")
+def trust() -> None:
+    """Approve what the host runs for this repository, as a launch does first.
 
-    Run it yourself from the `dev` checkout: it builds the engine, parks every file
-    the judge carries that changed since the commit you approved last as one review
-    in the first lup's dashboard, and installs only if you approve. Declined, the
-    copy installed before keeps judging. Where nothing changed, it says so and stops.
+    Run it yourself, in your own terminal. It reads the host zone at the
+    integration branch's tip, running none of it: the declaration, the files it
+    runs on the host, and the `lup-dev` the host runs. Where that isn't the zone you
+    approved last, it shows what changed since through your pager and asks once:
+    approved, it installs the tip's `lup-dev` as the host's, restarts the host
+    service on it where one runs, and records the approval; declined, the copy you
+    approved before keeps running. Where nothing changed, it says so and stops.
     """
-    checkout = toplevel(Path.cwd())
-    settings = LupDevSettings()
-    clock = SystemClock()
-    reviewer = (
-        Terminal()
-        if in_terminal
-        else LegacyDashboard.configured(checkout, settings, clock)
-    )
-    installer = Installer(
-        checkout=checkout,
-        layout=Layout.of(settings),
-        toolchain=Uv(),
-        reviewer=reviewer,
-        clock=clock,
-        runtimes=runtimes(),
-    )
-    typer.echo(installer.install().report())
+    inside = [runtime.name() for runtime in runtimes() if runtime.inside()]
+    typer.echo(trusted(toplevel(Path.cwd()), inside).report())
 
 
 @app.command("verdicts")
@@ -389,7 +655,7 @@ def importers(worktree: Path) -> None:
     """Run a worktree's background importers pass; the checkpoint starts it.
 
     The engine is asked with the runner of the declaration the judge reads there,
-    the integration branch's, so the pass and the judge share one engine.
+    the approved commit's, so the pass and the judge share one engine.
     """
     judging = services()
     repository = Worktree.at(worktree, judging.layout).repository
@@ -544,10 +810,14 @@ def reply(
 
 
 def main() -> None:
-    """Run the command line, reporting lup's own errors without a traceback."""
+    """Run the command line, reporting lup's own errors without a traceback.
+
+    The library's own (`LupError`) among them: a launch's room, and its runtime's
+    declaration, are the library's.
+    """
     try:
         app()
-    except LupDevError as failure:
+    except (LupDevError, LupError) as failure:
         typer.echo(f"lup-dev: {failure}", err=True)
         raise SystemExit(1) from failure
     except sh.ErrorReturnCode as failure:

@@ -1,12 +1,9 @@
 """Reviews parked in the first lup's dashboard, through its host half.
 
 A bridge: until lup's own dashboard exists, the operator reads reviews in the
-first lup's, where the interim review hook shows them an agent's calls. Two kinds
-are parked here, both through `Host`:
-- the judge's own review, which `lup-dev install` waits on (`LegacyDashboard`, a
-  `Reviewer`; `docs/judging-writes.md`, *The judge's review, in the dashboard*);
-- the reviews an agent submits from a worktree (`LegacyQueue`, a `Queue`;
-  `docs/review-flow.md`, *What the operator sees*).
+first lup's, where the interim review hook shows them an agent's calls. The
+reviews an agent submits from a worktree are parked here, through `Host`
+(`LegacyQueue`, a `Queue`; `docs/review-flow.md`, *What the operator sees*).
 
 Only `lup_dev.cli` imports this module; it goes, with its setting, when lup's own
 dashboard lands.
@@ -17,20 +14,18 @@ records it writes. What it answers is modelled here, read against the host at
 `40c2d28`:
 - a review is one `Propose`: each file whole after the change, its text before
   recorded as the review's precondition; the dashboard works out the diff;
-- the before side is exported into the checkout (`Export`) and the review's paths
+- the before side is exported into the worktree (`Export`) and the review's paths
   are there, since the dashboard retires a waiting review whose recorded files
-  don't stand on disk as recorded; line comments come back to the checkout's paths;
+  don't stand on disk as recorded; line comments come back to the worktree's paths;
 - the dashboard expires a review an hour after it's parked when its requester
-  isn't on the first lup's roster, which nothing parked from here is, so an expired
-  review is parked again under another id, and the remarks on each id are read:
-  the installer does it while it waits, a worktree's keeper for an agent's reviews;
+  isn't on the first lup's roster, which nothing parked from here is, so a
+  worktree's keeper parks an expired review again under another id, and the
+  remarks on each id are read;
 - an approval is spent through the host, as an agent's repeated call spends it,
   so the dashboard records the review as carried out;
 - a reply is appended to the relay as the first lup's own `review reply` records
   one, and a withdrawal as the transition its own cancel records, each through the
-  host half's functions;
-- the installer's Ctrl-C only removes the export, so the dashboard retires the
-  review as stale at its next look where a file it records stood there.
+  host half's functions.
 """
 
 import importlib.util
@@ -48,10 +43,9 @@ from pydantic import TypeAdapter
 
 from lup.types import Model
 from lup_dev.clock import Clock
-from lup_dev.install import InstallError, Review, Reviewer
+from lup_dev.git import Git
 from lup_dev.layout import CheckoutLayout, Layout, StoreLayout
 from lup_dev.policy.importers import BackgroundSpawner, Spawner
-from lup_dev.policy.store import Git, read_model, write_model
 from lup_dev.review import (
     Answer,
     Answered,
@@ -65,10 +59,9 @@ from lup_dev.review import (
     ReviewRequest,
     Waiting,
 )
+from lup_dev.stored import read_model, write_model
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
-
     from lup_dev.settings import LupDevSettings
 
 
@@ -412,180 +405,6 @@ def legacy_checkout(checkout: Path, settings: LupDevSettings) -> Path:
         "rev-parse", "--path-format=absolute", "--git-common-dir"
     )
     return Path(common).parent / settings.lup_interim_review_legacy_checkout
-
-
-class LegacyDashboard(Reviewer, Model, arbitrary_types_allowed=True):
-    """The first lup's review dashboard, reached through its host half."""
-
-    checkout: Path
-    """The checkout of lup being installed, whose relay keeps the review."""
-    legacy: Path
-    """The first lup's checkout."""
-    clock: Clock
-    poll: timedelta = timedelta(seconds=2)
-    """How often it looks for the operator's answer."""
-    requester: str = "lup-dev install"
-    """Who the review names as asking for it, which may never answer it."""
-
-    @classmethod
-    def configured(
-        cls, checkout: Path, settings: LupDevSettings, clock: Clock
-    ) -> LegacyDashboard:
-        """Find the first lup's checkout as the interim review hook does."""
-        return cls(
-            checkout=checkout, legacy=legacy_checkout(checkout, settings), clock=clock
-        )
-
-    @property
-    def host(self) -> Path:
-        """The first lup's host half, in its checkout."""
-        return Host.source(self.legacy)
-
-    @override
-    def answer(self, review: Review) -> Answer:
-        """Park the review in the dashboard, wait for the answer, and read it.
-
-        The before side waits in the checkout while the review does, and is
-        removed once it's answered or withdrawn.
-        """
-        if not self.host.is_file():
-            message = (
-                f"the first lup's host half isn't at {self.host}, so its dashboard "
-                "can't show the review: set LUP_INTERIM_REVIEW_LEGACY_CHECKOUT to the "
-                "first lup's checkout, or review in this terminal with "
-                "`lup-dev install --in-terminal`"
-            )
-            raise InstallError(message)
-        host = Host.load(self.host)
-        export = Export(
-            directory=CheckoutLayout(root=self.checkout).install_review(review.since),
-            files=[
-                ExportedFile(
-                    path=changed.path, before=changed.before, after=changed.after
-                )
-                for changed in review.files
-            ],
-        )
-        shown = export.directory.relative_to(self.checkout)
-        why = (
-            f"{review.heading()} Approve to install it as the judge that runs; "
-            "declined, the copy installed before keeps judging. Each file is at its "
-            f"path in the checkout under {shown}/, the commit approved last before "
-            "and `HEAD` after."
-        )
-        call = Call(
-            root=self.checkout,
-            requester=self.requester,
-            rule="lup-dev-install",
-            proposal=export.proposal(why),
-            preconditions=export.preconditions(),
-            reason=review.heading(),
-            answers=host.answers(host.relay(self.checkout)),
-        )
-        try:
-            export.write()
-            return self.waited(host, call, review, export.directory)
-        except KeyboardInterrupt:
-            typer.echo(
-                "Withdrawn: the review's files are removed, so the dashboard retires "
-                "it as stale, and nothing is installed."
-            )
-            raise
-        finally:
-            export.remove()
-
-    def waited(self, host: Host, call: Call, review: Review, export: Path) -> Answer:
-        """Park `call` and wait for its answer, parking it again each time it expires.
-
-        Return the answer with every remark sent on each review parked for it.
-        """
-        parked = host.park(call)
-        match parked.state:
-            case "unavailable":
-                message = f"the first lup's host half can't park it: {parked.reason}"
-                raise InstallError(message)
-            case "pending":
-                typer.echo(self.waiting(review, parked.id))
-            case "approved" | "rejected":
-                typer.echo(f"Review {parked.id} of this same change is answered.")
-        parks = list(self.reviews(host, call, parked.id))
-        last = parks[-1]
-        final = host.decided(call.answers, last)
-        if final is None:
-            message = f"review {last} ended unanswered"
-            raise InstallError(message)
-        if final.approved and parked.state != "approved":
-            host.spend(call, last)
-        said = [*host.remarks(call.answers, parks), final]
-        comments = [
-            comment.comment(export) for each in said for comment in each.comments
-        ]
-        note = "\n\n".join(each.note for each in said if each.note)
-        if note or comments:
-            typer.echo(
-                f"What you wrote stays in the first lup's answers file, {call.answers}."
-            )
-        return Answer(approved=final.approved, note=note, comments=comments)
-
-    def waiting(self, review: Review, parked: str) -> str:
-        """Say what waits, where, how to read it, and how to withdraw it."""
-        command = (
-            f"uv run --directory {self.legacy} lup-devtools dashboard serve "
-            f"--root {self.checkout}"
-        )
-        return "\n".join(
-            [
-                review.heading(),
-                (
-                    f"It waits for your answer as review {parked} in the first "
-                    "lup's dashboard, which this serves:"
-                ),
-                f"    {command}",
-                (
-                    "Unanswered for an hour, it expires and is parked again under "
-                    "another id: what you sent as remarks stays with it, drafts not "
-                    "yet sent don't."
-                ),
-                "Ctrl-C withdraws the review and installs nothing.",
-            ]
-        )
-
-    def reviews(self, host: Host, call: Call, first: str) -> Iterator[str]:
-        """Yield each review parked for `call` from `first`, until one is answered.
-
-        The dashboard expires a review an hour after it's parked; it's parked again
-        under another id. A review that leaves the queue otherwise refuses.
-        """
-        relay = host.relay(call.root)
-        current = first
-        yield current
-        while host.decided(call.answers, current) is None:
-            match host.entries(relay).get(current):
-                case Entry(state="pending"):
-                    self.clock.sleep(self.poll.total_seconds())
-                case Entry(state="expired"):
-                    again = host.park(call)
-                    if again.state != "pending":
-                        message = (
-                            f"review {current} expired, and parking it again "
-                            f"failed: {again.state} {again.reason}"
-                        )
-                        raise InstallError(message)
-                    typer.echo(
-                        f"Review {current} expired unanswered; it's parked again as "
-                        f"review {again.id}."
-                    )
-                    current = again.id
-                    yield current
-                case Entry(state=state, outcome=outcome):
-                    message = (
-                        f"review {current} left the dashboard unanswered, {state}: "
-                        f"{outcome}"
-                    )
-                    raise InstallError(message)
-                case None:
-                    message = f"review {current} isn't in the first lup's relay {relay}"
-                    raise InstallError(message)
 
 
 class Notices(ABC):

@@ -69,6 +69,7 @@ from openai_codex.generated import v2_all as wire
 from pydantic import Field, JsonValue
 from pydantic.alias_generators import to_camel
 
+from lup.adapters.codex import Effort
 from lup.adapters.codex.layout import CodexLayout
 from lup.adapters.codex.settings import CodexSettings
 from lup.sessions.contract import Adapter, RawTurn, TurnRequest, guarded
@@ -86,11 +87,6 @@ from lup.types import JsonObject, Model, MutableModel
 
 if TYPE_CHECKING:
     from openai_codex import models as sdk
-
-type Effort = Literal[
-    "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"
-]
-"""How hard Codex's model reasons, in Codex's own words."""
 
 type Connect = Callable[[CodexConfig, ApprovalHandler], CodexClient]
 """Make the client an ask runs on, from its launch and the handler of Codex's requests."""
@@ -156,7 +152,9 @@ class DynamicTool(Wire):
 class ThreadStart(Wire):
     """The `thread/start` request: an ephemeral thread with lup's tools and nothing else."""
 
-    model: str
+    model: str | None = None
+    """Left out where none is given, so Codex starts the thread on its default
+    model: the protocol's `model` is optional."""
     base_instructions: str
     dynamic_tools: list[DynamicTool]
     ephemeral: bool = True
@@ -493,7 +491,9 @@ class Session(MutableModel, arbitrary_types_allowed=True):
 class CodexAdapter(Model, Adapter, arbitrary_types_allowed=True):
     """Runs an ask's turns on Codex's app-server, in a process of the ask's own."""
 
-    model: str
+    model: str | None = None
+    """None asks for none, so Codex runs its default: lup's home holds no
+    configuration to choose another."""
     system_prompt: str | None = None
     """Replaces Codex's own prompt; none sends no system prompt at all."""
     effort: Effort | None = None

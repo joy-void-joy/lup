@@ -11,95 +11,19 @@ What was committed elsewhere, and what git merges from it, is set aside
 (`Elsewhere`). A move of the worktree's `HEAD` is read from its repository: the
 files it changed, and each as the commit has it.
 
-git runs with `core.fsmonitor` and hooks turned off, in the store and in the
-worktree's own repository alike: the effects probe saw a planted `core.fsmonitor`
-run inside a call.
+git runs as `lup_dev.git` runs it, with `core.fsmonitor` and hooks turned off, in
+the store and in the worktree's own repository alike.
 """
 
-import io
-import os
-import tarfile
 from functools import cached_property
-from pathlib import Path, PurePath
+from pathlib import Path
 from typing import Literal
 
-import sh
-from pydantic import BaseModel
-
 from lup.types import Model, MutableModel
-from lup_dev.errors import LupDevError
+from lup_dev.declaration.load import read_by_import
+from lup_dev.git import Git, nul_separated
 from lup_dev.layout import CheckoutLayout, StoreLayout
-
-
-class StoreError(LupDevError):
-    """git refused something the store asked of it."""
-
-
-def read_model[M: BaseModel](path: Path, model: type[M]) -> M | None:
-    """Read the model stored at `path`, or return none where nothing is stored."""
-    if not path.is_file():
-        return None
-    return model.model_validate_json(path.read_text())
-
-
-def write_model(path: Path, value: BaseModel) -> None:
-    """Store `value` at `path`, replacing what was there in one step."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    partial = path.with_name(f"{path.name}.partial")
-    partial.write_text(value.model_dump_json(indent=2))
-    partial.replace(path)
-
-
-def nul_separated(output: bytes) -> list[str]:
-    r"""Read git's `-z` output: paths, each ended by a NUL byte.
-
-    >>> nul_separated(b"a.py\x00dir/b c.py\x00")
-    ['a.py', 'dir/b c.py']
-    """
-    # lup: ignore("string-split", why="git's -z format ends each path with a NUL")
-    fields = output.split(b"\0")
-    return [field.decode() for field in fields if field]
-
-
-class Git(Model):
-    """git, run in one place with what could run code turned off."""
-
-    arguments: list[str] = []
-    """Arguments before the command: which repository and work tree."""
-    cwd: Path
-
-    def run(
-        self, *arguments: str, stdin: bytes | None = None, ok: list[int] | None = None
-    ) -> sh.RunningCommand:
-        """Run git with `arguments`; raise `StoreError` on an exit code not in `ok`."""
-        safe = [
-            "-c",
-            "core.fsmonitor=false",
-            "-c",
-            f"core.hooksPath={os.devnull}",
-            "-c",
-            "core.quotePath=false",
-            "-c",
-            "core.autocrlf=false",
-        ]
-        try:
-            return sh.Command("git")(
-                *safe,
-                *self.arguments,
-                *arguments,
-                _in=stdin,
-                _cwd=str(self.cwd),
-                _ok_code=ok or [0],
-                _tty_out=False,
-                _return_cmd=True,
-            )
-        except sh.ErrorReturnCode as failed:
-            message = f"git {' '.join(arguments)} failed: {failed.stderr.decode()}"
-            raise StoreError(message) from failed
-
-    def text(self, *arguments: str) -> str:
-        """Run git and return what it printed, without the trailing newline."""
-        return self.run(*arguments).stdout.decode().strip()
+from lup_dev.stored import read_model, write_model
 
 
 class Changed(Model):
@@ -325,44 +249,20 @@ class Store(Model):
 
     def head(self) -> str | None:
         """Return the commit the worktree's `HEAD` names, or none before its first."""
-        found = self.repository().run(
-            "rev-parse", "--verify", "--quiet", "HEAD", ok=[0, 1]
-        )
-        return found.stdout.decode().strip() if found.exit_code == 0 else None
+        return self.repository().commit("HEAD")
 
     def tip(self, branch: str) -> str | None:
         """Return the commit the repository's branch `branch` names; none without it."""
-        found = self.repository().run(
-            "rev-parse",
-            "--verify",
-            "--quiet",
-            f"refs/heads/{branch}^{{commit}}",
-            ok=[0, 1],
-        )
-        return found.stdout.decode().strip() if found.exit_code == 0 else None
+        return self.repository().commit(f"refs/heads/{branch}")
 
     def export(self, commit: str, into: Path) -> None:
         """Write the Python modules and project files `commit` holds into `into`.
 
-        What importing the commit's declaration reads: its `.py` and `.pyi`
-        modules, and each `pyproject.toml`, which says where its packages are.
+        What importing the commit's declaration reads (`read_by_import`), each
+        written from git's objects as the commit holds it, whatever the
+        repository's `.gitattributes` say (`Git.export`).
         """
-        repository = self.repository()
-        listed = repository.run("ls-tree", "-r", "-z", "--name-only", commit)
-        wanted = [
-            path
-            for path in nul_separated(listed.stdout)
-            if PurePath(path).suffix in [".py", ".pyi"]
-            or PurePath(path).name == "pyproject.toml"
-        ]
-        into.mkdir(parents=True, exist_ok=True)
-        if not wanted:
-            return
-        archived = repository.run(
-            "--literal-pathspecs", "archive", "--format=tar", commit, "--", *wanted
-        )
-        with tarfile.open(fileobj=io.BytesIO(archived.stdout)) as archive:
-            archive.extractall(into, filter="data")
+        self.repository().export(commit, into, read_by_import)
 
     def tips(self, head: str | None) -> list[str]:
         """List every commit the worktree's repository names: its refs, and `head`.
