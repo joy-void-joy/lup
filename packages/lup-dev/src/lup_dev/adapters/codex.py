@@ -33,10 +33,27 @@ Codex marks the hook's run failed, shows "hook exited with code 1" (not what the
 hook wrote to standard error), and the call goes on.
 
 What this relies on, from Codex's hooks documentation and its source at
-`rust-v0.156.1` (`codex-rs/hooks/schema/generated/`):
+`rust-v0.162.1` (paths under `codex-rs/`), whose hook schemas
+(`hooks/schema/generated/`) are those of `rust-v0.156.1`, file for file; the
+payloads 0.162.1 sent for a patch, a shell command and a turn's end are kept in
+`packages/lup-dev/tests/payloads/codex-0.162.1/`:
 - the inputs: `PreToolUse` and `PostToolUse` carry `tool_use_id`, `PostToolUse` its
   `tool_response`, `SubagentStop` its `agent_id`; a subagent's calls carry their
-  `agent_id`;
+  `agent_id`; each carries more than this adapter reads (`model`,
+  `permission_mode`, `transcript_path`, and on a turn's events `turn_id`);
+- a patch's hooks name the tool `apply_patch` (a matcher of `Write` or `Edit`
+  selects them too, the payload still saying `apply_patch`:
+  `core/src/tools/hook_names.rs`), carry the patch as `tool_input.command`, and
+  give both hooks the call's own id as `tool_use_id`
+  (`core/src/tools/handlers/apply_patch.rs`), so a patch's start and finish match;
+- `PostToolUse` runs only for a call that succeeded (`core/src/tools/registry.rs`):
+  a patch that fails to apply, a call that's interrupted, and one another hook
+  blocks have a `PreToolUse` and no `PostToolUse`. A shell command counts as
+  succeeding whatever its exit status; one still running when its call returns
+  has no `PostToolUse` then (`core/src/tools/context.rs`, `ExecCommandToolOutput`),
+  but at the `write_stdin` poll that sees it end (below);
+- a call's hooks carry as `cwd` the session's local working directory, or the
+  turn's where there's none (`core/src/hook_runtime.rs`, `tool_hook_cwd`);
 - `PreToolUse`'s `permissionDecision: "ask"` is "parsed but not supported yet", and
   a plain `allow` fails open: this adapter never answers `PreToolUse`;
 - `PermissionRequest` fires for `apply_patch` only when the patch needs approval
@@ -49,7 +66,8 @@ What this relies on, from Codex's hooks documentation and its source at
   preview pointing at it (`hooks/src/output_spill.rs`), so nothing is lost, and the
   hook configuration raises the limit so a report arrives whole;
 - `write_stdin` can deliver a command's `PostToolUse` with no `PreToolUse` of its
-  own, under the original command's `tool_use_id`;
+  own, under the original command's `tool_use_id`
+  (`core/src/tools/handlers/unified_exec/write_stdin.rs`);
 - a hook's `timeout` defaults to 600 seconds and has no maximum, so the hook
   configuration gives `PostToolUse` and `Stop` a day and more, for holds;
 - "Subagent hooks use the parent session id" (its docs), a thread-spawned

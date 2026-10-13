@@ -202,6 +202,17 @@ From the source at `rust-v0.162.1` (paths under `codex-rs/`), probed with `codex
   - the GitHub sync at start: `features.plugins = false`.
 - **Built-in tools** can't be removed by name, only by whole feature groups.
 
+## Codex 0.162.1: its hooks around a call (captured)
+
+From the source at `rust-v0.162.1` (paths under `codex-rs/`), and one `codex exec` on the operator's login in a scratch repository whose `.codex/hooks.json` kept each payload (`--dangerously-bypass-hook-trust --ephemeral`), asked for a patch adding a file, a patch updating it, a shell command, and a patch that can't apply. The nine payloads are kept in `packages/lup-dev/tests/payloads/codex-0.162.1/`.
+- **The hook schemas** (`hooks/schema/generated/`) are 0.156.1's, file for file. Every call's hooks also carry `turn_id`, `model`, `permission_mode` and `transcript_path` (`null` here, under `--ephemeral`). `permission_mode` follows the approval policy alone, `never` reading `bypassPermissions` (`core/src/hook_runtime.rs`, `hook_permission_mode`).
+- **A patch:** `tool_name` is `apply_patch`, `tool_input.command` the patch as the model wrote it (`*** Begin Patch\n*** Add File: livecheck.py\n+import subprocess\n*** End Patch`), and `tool_use_id` the call's id, the same at `PreToolUse` and `PostToolUse` (`exec-<uuid>` under `codex exec`). `PostToolUse`'s `tool_response` is text: `Exit code: 0\nWall time: 0 seconds\nOutput:\nSuccess. Updated the following files:\nA livecheck.py\n`. A matcher of `Write` or `Edit` selects a patch's hooks too, the payload still naming `apply_patch` (`core/src/tools/hook_names.rs`).
+- **A shell command:** `tool_name` is `Bash` and `tool_input.command` the command line; `test -e livecheck.py` had `""` for its `tool_response`.
+- **No `PostToolUse` for a call that didn't succeed** (`core/src/tools/registry.rs`): the patch that couldn't apply ("apply_patch verification failed: Failed to find expected lines") had its `PreToolUse` and nothing after it, the turn's `Stop` coming next. So does a call that's interrupted, or that a `PreToolUse` hook blocks. A shell command succeeds whatever its exit status.
+- **`write_stdin`** fires no `PreToolUse`; a command still running when its call returns has no `PostToolUse` then, and gets it, under its own id, from the `write_stdin` poll that sees it end (`core/src/tools/handlers/unified_exec/write_stdin.rs`), as at 0.156.1. The note on 0.160.1 above, "`write_stdin` fires no hook", holds for `PreToolUse`.
+- **A call's `cwd`** is the session's local working directory, or the turn's where there's none (`core/src/hook_runtime.rs`, `tool_hook_cwd`); 0.156.1 gave the turn's.
+- **`--dangerously-bypass-hook-trust`** runs every enabled layer's hooks for one invocation with no trusted hash, a trusted project's `.codex/hooks.json` among them: enough to capture payloads without recording hook trust. The run still wrote the scratch repository into the operator's `config.toml` as a trusted project (it sat under a trusted directory), `--ephemeral` notwithstanding.
+
 ## Rooms
 
 ### podman 6.1.3, rootless: the CLIs in a container (measured)
