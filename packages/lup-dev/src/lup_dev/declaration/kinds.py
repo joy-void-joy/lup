@@ -2,20 +2,38 @@
 
 Every collection in a module is one of these, so a layer changes it by operations
 on what's below rather than restating it (`docs/declaration.md`, *The verbs on
-modules*). A model holding several, `Paths` or `Session`, is a `Layer`, which a
-layer changes field by field. `Modules`, the selection of modules, is with
-`Module`. The rest of the kinds (commands, rooms, skills, doctests) arrive with
-the pieces that read them.
+modules*). A model holding several, `Paths`, `Session` or `Credentials`, is a
+`Layer`, which a layer changes field by field. `Modules`, the selection of
+modules, is with `Module`. The rest of the kinds (commands, rooms, skills,
+doctests) arrive with the pieces that read them.
 """
 
+from functools import reduce
 from pathlib import Path
 from typing import Self, override
 
+from pydantic import model_validator
+
 from lup.types import Model
+from lup_dev.catalog.credentials import CredentialDefaults, Withheld
 from lup_dev.catalog.gate import Step
 from lup_dev.catalog.room import CacheLifetime, SessionDefaults
 from lup_dev.declaration.errors import ProjectError
-from lup_dev.declaration.grammar import Layer, Named, listed
+from lup_dev.declaration.grammar import (
+    Add,
+    All,
+    Below,
+    Default,
+    Drop,
+    Edit,
+    Layer,
+    Named,
+    Of,
+    Only,
+    Replace,
+    listed,
+)
+from lup_dev.host.protocol import Limits, actions
 
 
 class Rules(Named[str]):
@@ -248,6 +266,150 @@ class Session(Layer, extra="forbid"):
     """Whether a session fetches the connectors the operator's account brings
     with its login, which reach their mail and files: off unless the person's
     own settings or the project turn them on."""
+
+
+def mentioned(selection: Named[str]) -> list[str]:
+    """List the names a selection writes, in order: those it starts from, adds, drops or puts in another's place.
+
+    >>> mentioned(Refs.of("refs/heads/main").add("refs/tags/*").drop("refs/heads/main"))
+    ['refs/heads/main', 'refs/tags/*', 'refs/heads/main']
+    """
+
+    def named(
+        step: Below
+        | Default
+        | All
+        | Only
+        | Of[str]
+        | Add[str]
+        | Drop
+        | Replace[str]
+        | Edit[str],
+    ) -> list[str]:
+        match step:
+            case Only(names=names) | Drop(names=names):
+                return names
+            case Of(entries=entries) | Add(entries=entries):
+                return entries
+            case Replace(name=name, entry=entry):
+                return [name, entry]
+            case Edit(entry=entry):
+                return [entry]
+            case Below() | Default() | All():
+                return []
+
+    return [
+        name
+        for step in [selection.start, *selection.operations]
+        for name in named(step)
+    ]
+
+
+class Actions(Named[str]):
+    """What the host does with the operator's credentials without asking, each by its name.
+
+    Each is a handler lup carries out (`lup_dev.host.protocol`, `Action`):
+    `Actions.all()` is every one, and lup's default leaves out those
+    `lup_dev.catalog.credentials` withholds, each with its reason. A name that
+    isn't an action is refused where it's written, naming those that are.
+
+    >>> Actions().add("forse-push")
+    Traceback (most recent call last):
+    ...
+    lup_dev.declaration.errors.ProjectError: `Actions` has no action `forse-push`; its actions are `fetch`, `push`, `force-push`, `delete-ref`, `read-issues`, `file-issue`, `comment` and `draft-pull-request`
+    """
+
+    @model_validator(mode="after")
+    def known(self) -> Self:
+        """Refuse a name that isn't an action, naming those that are."""
+        every: list[str] = [*actions()]
+        unknown = [name for name in mentioned(self) if name not in every]
+        if unknown:
+            message = (
+                f"`Actions` has no action {listed(unknown)}; "
+                f"its actions are {listed(every)}"
+            )
+            raise ProjectError(message)
+        return self
+
+
+def lup_actions() -> Actions:
+    """Return lup's default actions: every one but those the catalog withholds.
+
+    Each one withheld is a drop with its reason, so the overview shows why, and
+    an action a later release adds is allowed unless the catalog withholds it too.
+
+    >>> [operation.names for operation in lup_actions().operations]
+    [['force-push'], ['delete-ref']]
+    """
+
+    def without(chosen: Actions, withheld: Withheld) -> Actions:
+        return chosen.drop(withheld.action, why=withheld.why)
+
+    return reduce(without, CredentialDefaults().withheld, Actions.all())
+
+
+class Refs(Named[str]):
+    """Patterns over full ref names, such as `refs/heads/main` or `refs/tags/*`.
+
+    A pattern that isn't over full ref names, a branch's short name such as
+    `main`, would match no ref, so it's refused where it's written.
+
+    >>> Refs().add("main")
+    Traceback (most recent call last):
+    ...
+    lup_dev.declaration.errors.ProjectError: `Refs` names `main`, which isn't over full ref names: a pattern starts with `refs/`, as `refs/heads/main` does
+    """
+
+    @model_validator(mode="after")
+    def full(self) -> Self:
+        """Refuse a pattern that doesn't start with `refs/`."""
+        short = [name for name in mentioned(self) if not name.startswith("refs/")]
+        if short:
+            message = (
+                f"`Refs` names {listed(short)}, which isn't over full ref names: "
+                "a pattern starts with `refs/`, as `refs/heads/main` does"
+            )
+            raise ProjectError(message)
+        return self
+
+
+class Credentials(Layer, extra="forbid"):
+    """What the host does with the operator's credentials for a launched session without asking, and the refs no push updates.
+
+    A layer on it changes only the fields it sets, as on `Session`: a project
+    allowing force pushes keeps lup's protected refs, and `Refs().add(…)` adds
+    to them where they stand. Beyond these limits the host refuses, saying why
+    (`docs/host-tools.md`, *What the declaration allows*).
+
+    >>> mine = Credentials(actions=Actions().add("force-push")).over(Credentials())
+    >>> limits = mine.resolve(Credentials())
+    >>> "force-push" in limits.actions, limits.protected
+    (True, ['refs/heads/main', 'refs/tags/*'])
+    """
+
+    actions: Actions = lup_actions()
+    """What the host does with the operator's credentials without asking: every
+    action lup carries out but those `lup_dev.catalog.credentials` withholds,
+    unless the project says."""
+    protected: Refs = Refs.of(*CredentialDefaults().protected)
+    """The refs no push updates, as patterns over full ref names: `main` and
+    every tag (`lup_dev.catalog.credentials`), unless the project says."""
+
+    def resolve(self, defaults: Credentials) -> Limits:
+        """Resolve the actions allowed and the refs protected, `defaults` being the module's own.
+
+        The actions come in the order `Action` names them, whatever order the
+        layers gave them in.
+        """
+        every: list[str] = [*actions()]
+        own = [each.entry for each in defaults.actions.resolve([], every)]
+        allowed = [each.entry for each in self.actions.resolve(own, every)]
+        lups = [each.entry for each in defaults.protected.resolve([], [])]
+        return Limits(
+            actions=[action for action in actions() if action in allowed],
+            protected=Refs().ordered(self.protected.resolve(lups, lups)),
+        )
 
 
 class Section(Model, extra="forbid"):

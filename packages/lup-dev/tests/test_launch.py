@@ -27,7 +27,7 @@ from lup_dev.catalog.room import SessionDefaults
 from lup_dev.declaration.requirements import Printed, Tools
 from lup_dev.declaration.resolve import resolve
 from lup_dev.host.client import HostClient, Starter
-from lup_dev.host.protocol import HostError, Register
+from lup_dev.host.protocol import HostError, Limits, Register
 from lup_dev.launch.clis import Channel, ChannelError
 from lup_dev.launch.guidance import OPENING
 from lup_dev.launch.session import (
@@ -51,11 +51,23 @@ if TYPE_CHECKING:
     import httpx
     from conftest import FakeClock, Shell
 
-DECLARED = '''"""A project's declaration, with a guidance section of its own."""
+DECLARED = '''"""A project's declaration, with a guidance section and limits of its own."""
 
 from pathlib import Path
 
-from lup_dev import Guidance, Module, Modules, Plain, Project, Python, Section
+from lup_dev import (
+    Actions,
+    Core,
+    Credentials,
+    Guidance,
+    Module,
+    Modules,
+    Plain,
+    Project,
+    Python,
+    Refs,
+    Section,
+)
 
 
 class Own(Module):
@@ -65,7 +77,16 @@ class Own(Module):
     guidance: Guidance = Guidance.of(Section(name="own", path=Path("AGENTS.md")))
 
 
-project = Project(modules=Modules.default().edit(Python(runner=Plain())).add(Own()))
+limits = Credentials(
+    actions=Actions().add("force-push"),
+    protected=Refs().add("refs/heads/release/*"),
+)
+project = Project(
+    modules=Modules.default()
+    .edit(Python(runner=Plain()))
+    .edit(Core(credentials=limits))
+    .add(Own())
+)
 '''
 
 runner = CliRunner()
@@ -308,8 +329,10 @@ def dead(project: Path) -> Register:
         launch="dead",
         runtime="claude",
         worktree=project,
+        repository=project / ".git",
         judge=Path("/nowhere/lup-dev"),
         container="lup-dead",
+        limits=resolve(Project()).limits,
     )
 
 
@@ -326,6 +349,9 @@ def test_a_launch_runs_each_step_in_order_and_ends_its_registration(
     (machine.layout.launch("dead").directory).mkdir(parents=True)
     (project / "AGENTS.md").write_text("# The project\n\nUncommitted.\n")
     (project / "AGENTS.local.md").write_text("Mine.\n")
+    (project / "lup_project.py").write_text(
+        DECLARED.replace('add("force-push")', 'add("force-push", "delete-ref")')
+    )
     held = FileLock(machine.layout.launch("live").lock)
     machine.layout.launches.mkdir(parents=True, exist_ok=True)
 
@@ -367,8 +393,21 @@ def test_a_launch_runs_each_step_in_order_and_ends_its_registration(
         launch=launch,
         runtime="claude",
         worktree=project,
+        repository=project / ".git",
         judge=machine.judge(project),
         container=container,
+        limits=Limits(
+            actions=[
+                "fetch",
+                "push",
+                "force-push",
+                "read-issues",
+                "file-issue",
+                "comment",
+                "draft-pull-request",
+            ],
+            protected=["refs/heads/main", "refs/tags/*", "refs/heads/release/*"],
+        ),
     )
     run = machine.engine.run()
     assert f"--name={container}" in run

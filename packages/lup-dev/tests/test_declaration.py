@@ -3,7 +3,7 @@
 import json
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import ClassVar
 
@@ -13,8 +13,10 @@ import pytest
 import lup_dev
 from lup.rooms.container import Mount
 from lup_dev import (
+    Actions,
     CodeRules,
     Core,
+    Credentials,
     Exemption,
     Exemptions,
     Gate,
@@ -28,6 +30,7 @@ from lup_dev import (
     Project,
     Pytest,
     Python,
+    Refs,
     RemovedTools,
     Requirement,
     Rules,
@@ -37,11 +40,14 @@ from lup_dev import (
     TestRoots,
     Uv,
 )
+from lup_dev.catalog.credentials import CredentialDefaults
 from lup_dev.catalog.paths import CorePaths, PythonPaths
 from lup_dev.catalog.room import SessionDefaults, StandardMachine
 from lup_dev.catalog.rules import DefaultRules
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.grammar import Drop
+from lup_dev.declaration.kinds import lup_actions
+from lup_dev.declaration.load import load
 from lup_dev.declaration.module import Origin
 from lup_dev.declaration.modules.code_rules import lup_default
 from lup_dev.declaration.requirements import Printed, Tools
@@ -52,6 +58,7 @@ from lup_dev.declaration.runner import (
     RoomNeeds,
     RunnerError,
 )
+from lup_dev.host.protocol import Action, Limits, actions
 
 
 def layered(resolved: Resolved, module: str) -> list[Drop]:
@@ -884,6 +891,166 @@ def test_the_resolved_session_holds_every_session_setting() -> None:
 def test_a_misspelled_session_setting_is_refused() -> None:
     with pytest.raises(pydantic.ValidationError, match=r"auto_memroy"):
         Session.model_validate({"auto_memroy": True})
+
+
+# The limits on the operator's credentials
+
+
+EVERY_BUT_LUP_S_WITHHELD: list[Action] = [
+    "fetch",
+    "push",
+    "read-issues",
+    "file-issue",
+    "comment",
+    "draft-pull-request",
+]
+
+
+def limits(modules: Modules) -> Limits:
+    return resolve(Project(modules=modules)).limits
+
+
+def test_credentials_are_lup_s_by_default() -> None:
+    assert resolve(Project()).limits == Limits(
+        actions=EVERY_BUT_LUP_S_WITHHELD,
+        protected=["refs/heads/main", "refs/tags/*"],
+    )
+    [force, delete] = CredentialDefaults().withheld
+    assert lup_actions() == Actions.all().drop("force-push", why=force.why).drop(
+        "delete-ref", why=delete.why
+    )
+    assert Core().credentials == Credentials()
+
+
+def test_credentials_layer_across_a_base_and_a_project() -> None:
+    base = Modules.default().edit(
+        Core(credentials=Credentials(protected=Refs().add("refs/heads/release/*"))),
+        why="release branches are the operator's",
+    )
+    project = base.edit(
+        Core(credentials=Credentials(actions=Actions().add("force-push"))),
+        why="feature branches are rebased before review",
+    )
+    resolved = resolve(Project(modules=project))
+    assert resolved.limits == Limits(
+        actions=[
+            "fetch",
+            "push",
+            "force-push",
+            "read-issues",
+            "file-issue",
+            "comment",
+            "draft-pull-request",
+        ],
+        protected=["refs/heads/main", "refs/tags/*", "refs/heads/release/*"],
+    )
+    assert module(resolved, "core").origins.of("credentials") == Origin(
+        field="credentials",
+        position=2,
+        why="feature branches are rebased before review",
+    )
+    assert limits(base).actions == EVERY_BUT_LUP_S_WITHHELD
+
+
+def allowed(chosen: Actions) -> list[str]:
+    layer = Core(credentials=Credentials(actions=chosen))
+    return [*limits(Modules.default().edit(layer)).actions]
+
+
+def test_actions_start_over_from_every_one_lup_s_default_or_a_few() -> None:
+    assert allowed(Actions.all()) == [*actions()]
+    pushes = Actions.default().drop("push", why="pushes wait for the operator")
+    assert allowed(pushes) == [
+        name for name in EVERY_BUT_LUP_S_WITHHELD if name != "push"
+    ]
+    assert allowed(Actions.only("read-issues", "fetch")) == ["fetch", "read-issues"]
+    assert allowed(Actions.of()) == []
+    with pytest.raises(ProjectError, match=r"`Actions.drop` names `force-push`"):
+        allowed(Actions().drop("force-push"))
+
+
+def test_protected_refs_drop_and_start_over() -> None:
+    def protected(chosen: Refs) -> list[str]:
+        layer = Core(credentials=Credentials(protected=chosen))
+        return limits(Modules.default().edit(layer)).protected
+
+    tags = Refs().drop("refs/tags/*", why="tags are the agents' here")
+    assert protected(tags) == ["refs/heads/main"]
+    assert protected(Refs.of("refs/heads/trunk")) == ["refs/heads/trunk"]
+
+
+@pytest.mark.parametrize(
+    ("written", "unknown"),
+    [
+        (lambda: Actions().add("forse-push"), "forse-push"),
+        (lambda: Actions.of("fetch", "merge"), "merge"),
+        (lambda: Actions.only("deploy"), "deploy"),
+        (lambda: Actions().drop("rebase"), "rebase"),
+        (lambda: Actions().replace("push", "publish"), "publish"),
+    ],
+)
+def test_a_name_that_isnt_an_action_is_refused_naming_those_that_are(
+    written: Callable[[], Actions], unknown: str
+) -> None:
+    with pytest.raises(
+        ProjectError,
+        match=(
+            rf"^`Actions` has no action `{unknown}`; its actions are `fetch`, "
+            r"`push`, `force-push`, `delete-ref`, `read-issues`, `file-issue`, "
+            r"`comment` and `draft-pull-request`$"
+        ),
+    ):
+        written()
+
+
+def test_an_unknown_action_fails_the_load(tmp_path: Path) -> None:
+    (tmp_path / "lup_project.py").write_text(
+        "from lup_dev import Actions, Core, Credentials, Modules, Project\n"
+        "\n"
+        "project = Project(\n"
+        "    modules=Modules.default().edit(\n"
+        '        Core(credentials=Credentials(actions=Actions().add("forse-push")))\n'
+        "    )\n"
+        ")\n"
+    )
+    with pytest.raises(
+        ProjectError,
+        match=(
+            r"`lup_project.py` can't be imported: `Actions` has no action "
+            r"`forse-push`; its actions are `fetch`"
+        ),
+    ):
+        load(tmp_path)
+
+
+def test_a_ref_pattern_that_isnt_over_full_ref_names_is_refused() -> None:
+    with pytest.raises(
+        ProjectError,
+        match=r"`Refs` names `main` and `release/\*`, which isn't over full ref",
+    ):
+        Refs().add("main", "release/*")
+    with pytest.raises(ProjectError, match=r"`Refs` names `tags/\*`"):
+        Refs().drop("tags/*")
+
+
+def test_credentials_from_two_modules_are_refused() -> None:
+    class Forge(Module):
+        """The project's own way with the forge."""
+
+        name = "forge"
+
+        credentials: Credentials = Credentials(actions=Actions.all())
+
+    with pytest.raises(
+        ProjectError,
+        match=r"`core` and `forge` each give limits on the operator's credentials",
+    ):
+        resolve(Project(modules=Modules.default().add(Forge())))
+
+
+def test_a_misspelled_credentials_field_is_refused() -> None:
+    with pytest.raises(pydantic.ValidationError, match=r"protect\b"):
+        Credentials.model_validate({"protect": Refs()})
 
 
 def test_guidance_lists_each_module_s_sections_in_module_order() -> None:

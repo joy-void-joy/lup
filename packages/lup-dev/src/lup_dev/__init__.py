@@ -21,6 +21,8 @@ from lup_dev.catalog.gate import Step
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.grammar import Named
 from lup_dev.declaration.kinds import (
+    Actions,
+    Credentials,
     Exemption,
     Exemptions,
     Gate,
@@ -30,6 +32,7 @@ from lup_dev.declaration.kinds import (
     Paths,
     Patterns,
     Pytest,
+    Refs,
     RemovedTools,
     Rules,
     Section,
@@ -45,8 +48,10 @@ from lup_dev.declaration.requirements import Requirement, Tools
 from lup_dev.declaration.runner import Interpreter, Plain, RoomNeeds, Runner, Uv
 
 __all__ = [
+    "Actions",
     "CodeRules",
     "Core",
+    "Credentials",
     "Exemption",
     "Exemptions",
     "Gate",
@@ -64,6 +69,7 @@ __all__ = [
     "ProjectError",
     "Pytest",
     "Python",
+    "Refs",
     "RemovedTools",
     "Requirement",
     "RoomNeeds",
