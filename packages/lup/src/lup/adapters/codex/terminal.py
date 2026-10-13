@@ -17,6 +17,8 @@ each runtime*):
   `features.plugins = false`, which also stops a sync from GitHub at each start;
   each of the operator's own MCP servers, read from their `config.toml`, off by
   name, since they're set up for the host;
+- lup's tool servers, in the same `mcp_servers` table that turns theirs off
+  (below);
 - the guidance as `developer_instructions`, with `project_doc_max_bytes = 0`, so
   the repository's `AGENTS.md` isn't loaded beside it;
 - lup's hooks as managed hooks, in a requirements file mounted at
@@ -45,6 +47,18 @@ Codex applies the table's entries in the order of their keys, an older key
 switching the same feature, so their `connectors = true` would apply after
 lup's `apps = false` alone. Theirs count as set by either key.
 
+**lup's tool servers** are stdio servers, each `socat STDIO UNIX-CONNECT:<socket>`,
+a bridge from its standard input and output to the server's socket (socat is in
+every room, for the hooks), with the server's timeout as `tool_timeout_sec`
+where it gives one (Codex's own is 300 s) and `default_tools_approval_mode =
+"approve"`, so no call asks. They go in one `mcp_servers` table with the
+operator's turned off, since a later `-c` of the same key replaces an earlier
+one. Codex merges that table into theirs key by key, so a server of theirs
+named as one of lup's would lend lup's its other keys (`enabled_tools`, `env`,
+`url`, which Codex then refuses beside `command`): such a configuration is
+refused, naming the server. Their tools stay behind Codex's tool search where
+the model has it: no `omit_tools_from`.
+
 **Declared gaps.** Codex 0.162.1 has no setting for the prompt cache's lifetime,
 and can't remove a built-in tool by name, only whole feature groups, so a
 session's `subagent_cache` and `removed_tools` have nothing to compile to here.
@@ -53,7 +67,12 @@ to turn off: its compaction runs when the context passes
 `model_auto_compact_token_limit`, and at a turn's end past
 `model_post_turn_compact_threshold_percent`, off unless set
 (`config/src/config_toml.rs`; the 0.162.1 binary names no other setting for
-it), both left to the operator.
+it), both left to the operator. And nothing reaches a session idle between its
+turns, so `messages` has nothing to compile to: what a server sends unprompted
+is only logged (`rmcp-client/src/logging_client_handler.rs`), and the
+app-server that could start a turn (`turn/start`) runs inside the terminal's own
+process under `--no-daemon`, out of reach. A message waits for the session's
+next call; the operator typing in its terminal starts one.
 
 **TOML.** Each `-c` value and the requirements file are TOML, written by
 `tomlkit`: a `-c` value on one line, its tables inline, and the requirements file
@@ -64,7 +83,19 @@ What this relies on, read in Codex's source at `rust-v0.162.1` (paths under
 - `-c key=value` parses the value as TOML, and takes it as a plain string when it
   doesn't parse (`utils/cli/src/config_override.rs`); the overrides are one layer,
   merged into the operator's configuration table by table (`config/src/merge.rs`),
-  so `mcp_servers = {name = {enabled = false}}` keeps each server's command;
+  so `mcp_servers = {name = {enabled = false}}` keeps each server's command; and
+  within the layer, a later override of the same key replaces the earlier
+  (`config/src/overrides.rs`);
+- an MCP server's entry takes `command`, `args`, `tool_timeout_sec` (seconds,
+  read as a float, with no cap) and `default_tools_approval_mode`, and refuses
+  a `url` beside a `command` ("url is not supported for stdio",
+  `config/src/mcp_types.rs`); a call's limit is 300 s without it
+  (`codex-mcp/src/rmcp_client.rs`), and progress doesn't extend it. `approve`
+  answers every permission prompt of the server's tools
+  (`codex-mcp/src/mcp/mod.rs`), as approval `never` with full access does too;
+- a result with `structuredContent` shows the model only that, its content
+  blocks dropped (`protocol/src/models.rs`), which is why lup's results carry
+  none (`lup.tools.serving`);
 - the requirements file is `/etc/codex/requirements.toml` on Unix
   (`config/src/loader/mod.rs`); its `hooks` table holds the events' matcher
   groups as a `hooks.json` does, and `allow_managed_hooks_only` there skips every
@@ -82,6 +113,7 @@ What this relies on, read in Codex's source at `rust-v0.162.1` (paths under
 """
 
 import tomllib
+from datetime import timedelta
 from shlex import join
 from typing import TYPE_CHECKING
 
@@ -98,7 +130,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from lup.adapters.codex import Effort
-    from lup.sessions.terminal import Event, Hook, TerminalSettings
+    from lup.sessions.terminal import Event, Hook, TerminalSettings, ToolServer
 
 
 def toml(value: JsonValue) -> str:
@@ -215,6 +247,54 @@ class Requirements(Model):
     hooks: dict[str, list[HookGroup]]
 
 
+class StdioServer(Model):
+    """An MCP server Codex runs as a program speaking on its standard input and output."""
+
+    command: str
+    args: list[str]
+    tool_timeout_sec: int | None = None
+    """In seconds; none keeps Codex's own limit, 300 s."""
+    default_tools_approval_mode: str = "approve"
+    """Every call to the server's tools approved without asking."""
+
+
+def bridged(server: ToolServer) -> StdioServer:
+    """Return the entry for one of lup's tool servers: `socat` bridging standard input and output to its socket."""
+    return StdioServer(
+        command="socat",
+        args=["STDIO", f"UNIX-CONNECT:{server.socket}"],
+        tool_timeout_sec=None
+        if server.timeout is None
+        else server.timeout // timedelta(seconds=1),
+    )
+
+
+def served(
+    settings: TerminalSettings, theirs: OperatorConfig, config: Path
+) -> JsonObject:
+    """Return the `mcp_servers` table: each of the operator's servers turned off, and lup's.
+
+    Raise `TerminalError` where a server of theirs, in `config`, is named as one
+    of lup's, which Codex would merge into lup's rather than replace.
+    """
+    shared = [
+        server.name for server in settings.servers if server.name in theirs.mcp_servers
+    ]
+    if shared:
+        message = (
+            f"the operator's Codex configuration, {config}, names an MCP server "
+            f"{', '.join(shared)}, as lup's own is: Codex would merge lup's server "
+            "into theirs key by key rather than replace it, so rename theirs"
+        )
+        raise TerminalError(message)
+    off: JsonObject = {name: {"enabled": False} for name in theirs.mcp_servers}
+    lups: JsonObject = {
+        server.name: bridged(server).model_dump(mode="json", exclude_none=True)
+        for server in settings.servers
+    }
+    return {**off, **lups}
+
+
 def spelled(event: Event) -> str:
     """Return Codex's hook event for one of lup's."""
     match event:
@@ -246,7 +326,7 @@ def compiled(
         if settings.cli is None
         else settings.cli
     )
-    servers = list(theirs.mcp_servers)
+    servers = served(settings, theirs, layout.operator_config)
 
     def group(hook: Hook) -> HookGroup:
         timeout = None if hook.timeout is None else int(hook.timeout.total_seconds())
@@ -291,16 +371,7 @@ def compiled(
         Override(key="check_for_update_on_startup", value=False),
         *switching(APPS, theirs, on=session.account_connectors),
         Override(key="features.plugins", value=False),
-        *(
-            [
-                Override(
-                    key="mcp_servers",
-                    value={name: {"enabled": False} for name in servers},
-                )
-            ]
-            if servers
-            else []
-        ),
+        *([Override(key="mcp_servers", value=servers)] if servers else []),
         *(
             []
             if settings.guidance is None

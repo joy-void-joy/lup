@@ -82,6 +82,11 @@ class ClaudeLaunch(Model):
         return self.directory / "claude.json"
 
     @property
+    def servers(self) -> Path:
+        """The MCP servers lup gives the session, passed with `--mcp-config`."""
+        return self.directory / "mcp.json"
+
+    @property
     def system_prompt(self) -> Path:
         """The declaration's system prompt, which replaces Claude Code's own."""
         return self.directory / "system-prompt.md"
