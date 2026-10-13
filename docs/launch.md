@@ -258,7 +258,7 @@ status = room.launch(arguments=["--resume"], settings=settings)   # a terminal; 
 | `host/service.py` | The host service (`HostService`): the control socket, a hook socket per launch answered through the `Answerer` seam, the launches recorded for the next service, the handlers modules register (`Handler`, `Route`) |
 | `host/protocol.py` | The control requests and replies (`Register`, `Unregister`, `Stop`; `Registered`, `Done`, `Refused`), and `HostError` |
 | `host/client.py` | Finding the service, or starting it (`HostClient`; `Starter`, and `Detached`, which starts `lup-dev host`) |
-| `catalog/room.py` | lup's base image and its pinned snapshot date, the standard machine's packages, the default session settings |
+| `catalog/room.py` | lup's base image and its pinned snapshot date, the standard machine's packages, the editors' configuration, the default session settings |
 | `launch/trust.py` | The host zone, its fingerprint, the copy approved, the diff shown and the answer asked, and installing an approved copy |
 | `cli.py` | `launch claude\|codex` and `host [stop]`, until slice C gives each command group its file; `install` goes |
 

@@ -450,7 +450,9 @@ def test_the_installer_builds_the_engine_with_lups_own_gate_step() -> None:
 
 
 BUILDING = '''
-from lup_dev import Gate, Module, Modules, Project, Python, Runner, Step
+from pathlib import Path
+
+from lup_dev import Gate, Module, Modules, Project, Python, RoomNeeds, Runner, Step, Tools
 
 
 class Marking(Runner):
@@ -464,6 +466,9 @@ class Marking(Runner):
 
     def environment(self) -> list[str]:
         return []
+
+    def room(self, root: Path, tools: Tools) -> RoomNeeds:
+        return RoomNeeds()
 
 
 class Building(Module):

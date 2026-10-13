@@ -49,7 +49,7 @@ def test_the_definition_installs_every_package_from_the_pinned_day() -> None:
     )
 
 
-def test_lup_s_own_declaration_installs_its_modules_packages() -> None:
+def test_the_default_modules_packages_are_installed() -> None:
     packages = resolve(Project()).packages
     text = definition(packages, RoomBase())
     installing = next(line for line in text.splitlines() if "pacman -Syu" in line)

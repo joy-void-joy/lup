@@ -1330,7 +1330,9 @@ PLAIN = (
 """A declaration whose tools run as the `PATH` finds them."""
 
 POETRY = '''
-from lup_dev import Modules, Project, Python, Runner
+from pathlib import Path
+
+from lup_dev import Modules, Project, Python, RoomNeeds, Runner, Tools
 
 
 class Poetry(Runner):
@@ -1344,6 +1346,9 @@ class Poetry(Runner):
 
     def environment(self) -> list[str]:
         return ["poetry.lock"]
+
+    def room(self, root: Path, tools: Tools) -> RoomNeeds:
+        return RoomNeeds()
 
 
 project = Project(modules=Modules.default().edit(Python(runner=Poetry())))
