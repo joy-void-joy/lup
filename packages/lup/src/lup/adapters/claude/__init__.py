@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 from lup.adapters.claude.layout import ClaudeLayout
 from lup.adapters.claude.settings import ClaudeSettings
-from lup.adapters.claude.terminal import compiled, operator_model
+from lup.adapters.claude.terminal import compiled
 from lup.sessions.declaration import Asking, Declaration
 from lup.sessions.errors import needs_extra
 
@@ -41,16 +41,6 @@ class Claude(Declaration):
     runtime = "claude"
     effort: Effort | None = None
     """How much effort the model puts into an answer; none leaves it to Claude Code."""
-
-    @classmethod
-    def chosen(cls, default: str) -> Claude:
-        """Return the declaration of the model the operator's own settings choose, or of `default` where they choose none.
-
-        For a terminal session in the operator's own Claude Code: the model it
-        compiles to outranks the one their settings choose, so this keeps theirs.
-        """
-        layout = ClaudeLayout.of(ClaudeSettings())
-        return cls(model=operator_model(layout.settings) or default)
 
     @overload
     async def ask(self, prompt: str, output: None = None) -> TurnResult[str]: ...

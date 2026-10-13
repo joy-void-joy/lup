@@ -249,3 +249,13 @@ def test_the_trace_keeps_each_ask_whole(
     assert len(answered["rejected"]) == 1
     assert failed["error"] == "UsageLimitReachedError: spent"
     assert failed["output"] is None
+
+
+def test_the_trace_says_when_the_declaration_named_no_model(
+    fake_agents: FakeAgents, tmp_path: Path
+) -> None:
+    trace = tmp_path / "calls.jsonl"
+    fake_agents.answer_text("Hello.")
+    asyncio.run(Probe(layers=FAST.model_copy(update={"trace": trace})).ask("hello"))
+    [record] = [json.loads(line) for line in trace.read_text().splitlines()]
+    assert record["model"] is None

@@ -419,13 +419,9 @@ def hooks(command: list[str], timeout: timedelta) -> list[Hook]:
     return [Hook(event=event, command=command, timeout=timeout) for event in events]
 
 
-def agent(fallback: str = "gpt-6.1-sol") -> Declaration:
-    """Return the declaration a launched Codex session runs: the model the operator's own configuration chooses.
-
-    Where it chooses none, `fallback`, the default model of Codex 0.162.1
-    (`docs/field-notes.md`), since the declaration always names one.
-    """
-    return lup.Codex.chosen(default=fallback)
+def agent() -> Declaration:
+    """Return the declaration a launched Codex session runs: no model, so Codex reads the operator's own."""
+    return lup.Codex()
 
 
 class Asset(Model):

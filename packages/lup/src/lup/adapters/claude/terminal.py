@@ -11,12 +11,12 @@ settings compiled for each runtime*):
   connectors, so none of the claude.ai connectors arriving with the login is
   fetched, and `skipDangerousModePermissionPrompt`;
 - `--permission-mode bypassPermissions`: the room is the wall;
-- the model with `--model`, the effort with `--effort`, the declaration's system
-  prompt with `--system-prompt-file`, and the guidance with
-  `--append-system-prompt-file`. `--model` outranks the model the operator's
-  settings choose, which `/model` saves there (`model-config`, *Setting your
-  model*), so `Claude.chosen` reads their choice (`operator_model`) for a
-  declaration that keeps it;
+- the model with `--model` and the effort with `--effort`, each only where the
+  declaration gives one: `--model` outranks the model the operator's settings
+  choose, which `/model` saves there (`model-config`, *Setting your model*), so a
+  declaration naming none leaves theirs to Claude Code, which reads it itself;
+- the declaration's system prompt with `--system-prompt-file`, and the guidance
+  with `--append-system-prompt-file`;
 - the variables: auto memory on or off, the subagents' cache lifetime,
   `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0` so a held call isn't moved to the
   background after two minutes, `DISABLE_AUTOUPDATER` since the CLI's file is
@@ -59,12 +59,11 @@ from datetime import timedelta
 from shlex import join
 from typing import TYPE_CHECKING
 
-from pydantic import ValidationError
 from pydantic.alias_generators import to_camel
 
 from lup.adapters.claude.layout import ClaudeLaunch, ClaudeLayout
 from lup.rooms.container import Mount
-from lup.sessions.terminal import Cli, Terminal, TerminalError
+from lup.sessions.terminal import Cli, Terminal
 from lup.types import Model
 
 if TYPE_CHECKING:
@@ -140,26 +139,6 @@ class State(Wire):
     projects: dict[str, Trusted]
 
 
-class OperatorSettings(Wire):
-    """The part of the operator's own Claude Code settings a terminal session keeps."""
-
-    model: str | None = None
-    """The model their `/model` saved, or they set; none where they chose none."""
-
-
-def operator_model(settings: Path) -> str | None:
-    """Return the model the operator's own settings file at `settings` chooses; none where it chooses none."""
-    if not settings.is_file():
-        return None
-    try:
-        return OperatorSettings.model_validate_json(settings.read_text()).model
-    except ValidationError as failed:
-        message = (
-            f"the operator's Claude Code settings, {settings}, don't read: {failed}"
-        )
-        raise TerminalError(message) from failed
-
-
 def spelled(event: Event) -> list[str]:
     """Return Claude Code's hook events for one of lup's."""
     match event:
@@ -176,7 +155,7 @@ def spelled(event: Event) -> list[str]:
 
 
 def compiled(
-    model: str,
+    model: str | None,
     system_prompt: str | None,
     effort: Effort | None,
     settings: TerminalSettings,
@@ -242,8 +221,7 @@ def compiled(
             str(launch.settings),
             "--permission-mode",
             "bypassPermissions",
-            "--model",
-            model,
+            *([] if model is None else ["--model", model]),
             *([] if effort is None else ["--effort", effort]),
             *(
                 []

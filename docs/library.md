@@ -87,7 +87,7 @@ def test_translates_a_segment(fake_agents: FakeAgents) -> None:
 ### What a declaration holds
 
 `Claude` and `Codex` are frozen models, each a `Declaration` and an `Agent`. In this slice their fields are **(leaning)**:
-- `model`: the runtime's model id, passed as given;
+- `model`: the runtime's model id, passed as given; none leaves it to the runtime (the operator's decision): in a terminal, the person's own settings choose, and in an ask, the runtime's default, since an ask loads none of their settings. So an ask passes no model to either SDK (`claude_agent_sdk` then passes no `--model`, and Codex's `thread/start` leaves its optional `model` out), and the trace records none;
 - `system_prompt`: replaces the runtime's own prompt; none sends no prompt of lup's own (what reaches the model is in each adapter's section);
 - `effort`: in each runtime's own levels, Claude Code's `low`, `medium`, `high`, `xhigh`, `max`, and Codex's `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, `ultra`; none leaves it to the runtime;
 - `layers` (*The layers an ask runs in*).
@@ -248,7 +248,7 @@ Each adapter's classification is in its section.
 ## The call record
 
 Every ask, answered or failed, appends one `CallRecord` (`observability/trace.py`) to `layers.trace` when it's set. A record holds:
-- the runtime and the model;
+- the runtime and the model the declaration named, none where it left the choice to the runtime;
 - the start time and the duration;
 - the prompt and the system prompt, in full;
 - the output in full (the model as JSON, or the text), or the error's type and message;

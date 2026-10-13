@@ -6,10 +6,11 @@ operator's home or the repository (`docs/launch.md`, *The settings compiled for
 each runtime*):
 - `--no-daemon`, apart from the host's daemon on the same home, and
   `--dangerously-bypass-approvals-and-sandbox`: the room is the wall;
-- the model with `--model`, the effort as `model_reasoning_effort`, and the
-  declaration's system prompt as `instructions`, which replaces Codex's own.
-  `--model` sets the model over the operator's configuration, so `Codex.chosen`
-  reads theirs (`operator`) for a declaration that keeps it;
+- the model with `--model` and the effort as `model_reasoning_effort`, each only
+  where the declaration gives one: `--model` sets the model over the operator's
+  configuration, so a declaration naming none leaves theirs to Codex, which reads
+  it itself; and the declaration's system prompt as `instructions`, which
+  replaces Codex's own;
 - each trusted path in `projects`, as an inline table, since `-c` splits a dotted
   key at every `.`, which breaks a path like `lup.git`;
 - auto memory as `features.memories`; `check_for_update_on_startup = false`;
@@ -95,10 +96,8 @@ def toml(value: JsonValue) -> str:
 
 
 class OperatorConfig(Model):
-    """The part of the operator's Codex configuration a terminal session reads: the model it keeps, the servers a room turns off."""
+    """The part of the operator's Codex configuration a terminal session reads: the servers a room turns off."""
 
-    model: str | None = None
-    """The model they chose; none where they chose none."""
     mcp_servers: dict[str, JsonObject] = {}
 
 
@@ -172,7 +171,7 @@ def spelled(event: Event) -> str:
 
 
 def compiled(
-    model: str,
+    model: str | None,
     system_prompt: str | None,
     effort: Effort | None,
     settings: TerminalSettings,
@@ -261,8 +260,7 @@ def compiled(
             str(cli.program),
             "--no-daemon",
             "--dangerously-bypass-approvals-and-sandbox",
-            "--model",
-            model,
+            *([] if model is None else ["--model", model]),
             *(
                 argument
                 for override in overrides
