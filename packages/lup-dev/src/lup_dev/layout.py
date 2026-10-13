@@ -8,6 +8,8 @@ The homes (`docs/judging-writes.md`, *Where things live*):
   path is limited in length;
 - the host service's sockets and the launches it serves, under
   `$XDG_RUNTIME_DIR/lup/host/`, and its log under lup's state (`docs/launch.md`);
+- each runtime's CLIs, as its release channel publishes them, under
+  `$XDG_CACHE_HOME/lup/clis/` (`docs/launch.md`, *The CLIs*);
 - inside a worktree, `.lup/saved/`, where a refused version waits for the agent,
   `.lup/drafts/`, where a change waits to be submitted for review, and
   `.lup/review/<n>/`, where a review keeps its files while it waits;
@@ -358,24 +360,63 @@ class HostLayout(Model):
         return self.launches / f"{launch}.json"
 
 
+class CliCacheLayout(Model):
+    """Where one runtime's CLIs are cached, a directory per version (`docs/launch.md`, *The CLIs*).
+
+    A version's directory holds what its release channel published, checked: the
+    binary, or the package it ships in. A download is staged beside the versions
+    and moved among them once checked, so a version's directory is only ever whole.
+    """
+
+    home: Path
+
+    @property
+    def versions(self) -> Path:
+        """Each version kept, in a directory named by the version."""
+        return self.home / "versions"
+
+    @property
+    def staging(self) -> Path:
+        """Where a download waits until it's checked."""
+        return self.home / "staging"
+
+    @property
+    def lock(self) -> Path:
+        """The lock a launch holds while it updates the cache, so two launches download once."""
+        return self.home / "cache.lock"
+
+    def version(self, version: str) -> Path:
+        """Say where version `version` is kept."""
+        return self.versions / version
+
+
 class Layout(Model):
-    """Where lup's state lives for one user: `$XDG_STATE_HOME/lup`, and its sockets."""
+    """Where lup's state lives for one user: `$XDG_STATE_HOME/lup`, its sockets and its cache."""
 
     state: Path
     runtime: Path = Path(tempfile.gettempdir()) / f"lup-{getpass.getuser()}"
     """lup's sockets: `$XDG_RUNTIME_DIR/lup`, or the user's own temporary directory."""
+    cache: Path = Path.home() / ".cache" / "lup"
+    """lup's cache, what can be fetched again: `$XDG_CACHE_HOME/lup`."""
 
     @classmethod
     def of(cls, settings: LupDevSettings) -> Layout:
-        """Place lup's state and sockets where the settings say, or XDG's defaults."""
+        """Place lup's state, sockets and cache where the settings say, or XDG's defaults."""
         home = settings.xdg_state_home or Path.home() / ".local" / "state"
+        cache = (settings.xdg_cache_home or Path.home() / ".cache") / "lup"
         if settings.xdg_runtime_dir is None:
-            return cls(state=home / "lup")
-        return cls(state=home / "lup", runtime=settings.xdg_runtime_dir / "lup")
+            return cls(state=home / "lup", cache=cache)
+        return cls(
+            state=home / "lup", runtime=settings.xdg_runtime_dir / "lup", cache=cache
+        )
 
     def engine_socket(self, worktree: Path) -> Path:
         """Say where the engine of the worktree at `worktree` listens."""
         return self.runtime / f"{short_digest(worktree)}.sock"
+
+    def clis(self, runtime: str) -> CliCacheLayout:
+        """Say where the CLIs of a runtime are cached, by the name its adapter gives it."""
+        return CliCacheLayout(home=self.cache / "clis" / runtime)
 
     @property
     def host(self) -> HostLayout:

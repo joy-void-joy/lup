@@ -19,6 +19,8 @@ class LupDevSettings(Settings):
     """`XDG_STATE_HOME`, where per-user state lives; `layout.py` says the default."""
     xdg_runtime_dir: Path | None = None
     """`XDG_RUNTIME_DIR`, where per-user sockets live; `layout.py` says the default."""
+    xdg_cache_home: Path | None = None
+    """`XDG_CACHE_HOME`, where what can be fetched again lives; `layout.py` says the default."""
     lup_engine_idle: timedelta = timedelta(minutes=15)
     """`LUP_ENGINE_IDLE`: how long a worktree's engine waits unasked before it stops.
 
