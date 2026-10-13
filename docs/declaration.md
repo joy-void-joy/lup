@@ -247,7 +247,7 @@ lup's defaults are its modules, made of the public entry types (`Step`, patterns
 
 ```python
 class LupDevelopment(Module):
-    """What only lup's own repository needs: building the engine, lup's architecture rule, installing the judge."""
+    """What only lup's own repository needs: building the engine, lup's architecture rule, its rules' reference."""
 
     name = "lup-development"
     requirements = [Requirement(tool="npm", why="installs the engine's bundler", install="it comes with Node")]
@@ -266,7 +266,6 @@ class LupDevelopment(Module):
     )
     rules: Rules = Rules.table("rules/lup.ts")  # `runtime-mention`, from E
     commands: Commands = Commands.of(
-        Command(name="install", target="lup_dev.commands.install:app", help="Install the judge from this checkout."),
         Command(name="rules-docs", target="lup_dev.commands.reference:app", help="Write docs/rules.md from the rule table."),
     )
 
@@ -283,7 +282,7 @@ project = Project(
 - **Building lup's engine** is the first of the gate's default steps (`catalog/gate.py`), and trust on launch runs the same step to build the copy it installs (`launch/trust.py`), though only lup's repository has an engine to build. It becomes `LupDevelopment`'s, its command the tool alone, and trust on launch finds it in lup's declaration and runs it through the runner, as the gate does.
 - **`runtime-mention` is lup's own.** It fires on any name holding `claude` or `codex` outside that runtime's adapter (`catalog/rules.ts`): a rule about lup's own architecture, which in a project picking a runtime by setting, as live-translator does, would fire on every choice, so it isn't in every project's default for each to drop. Until E it stays in lup's table, out of the default, and lup's declaration adds it back: `.edit(CodeRules(rules=Rules().add("runtime-mention")))`. E moves it into `rules/lup.ts`, its first entry.
 - **lup's import contracts stay in lup's `pyproject.toml`,** as a project's own contracts do (*pytest and import-linter*).
-- **The test of the principle:** nothing in lup's core reads a default that isn't in a module a project can change. Building lup's engine, `runtime-mention`, `install` and `rules-docs` are lup's own, declared where a project declares its own.
+- **The test of the principle:** nothing in lup's core reads a default that isn't in a module a project can change. Building lup's engine, `runtime-mention` and `rules-docs` are lup's own, declared where a project declares its own. Approving what the host runs, `trust`, isn't: every project's host runs its declaration and a `lup-dev`, so it's `Core`'s command (*The command line*), as a launch's own check (`docs/launch.md`, *Trust on launch*).
 
 ## The runner
 
@@ -525,12 +524,12 @@ Built in C. Until then `lup-dev` (`cli.py`) stands in: a Typer app importing eve
 - **One command, `lup`, shipped by `lup-dev`; the library ships none,** rather than a `lup` in the library finding the environment's groups through entry points. `runs` and the outcome loop are the library's and callable from code; making one a command is the project's own wiring, or `lup-dev`'s job.
 - **Built from the selected modules' commands, loading only what's invoked,** rather than Typer's tree built at import. The root is a click group (Typer's base) whose entries are data: a name, a target in entry-point form (`"lup_dev.commands.holds:app"`), a one-line help. Listing commands (`lup --help`) reads the data and imports nothing; invoking one imports its target alone, a Typer app turned into a click command. click's own help listing calls `get_command` for every entry (`click/core.py`, `format_commands`), so the group lists from its data instead. A dropped module's commands are absent by construction. A command of `Core`'s runs without loading the declaration; `--help` and any other command load it.
 - **Only the hook command is fixed:** the hook is the core's (`DESIGN.md`, *The environment: core and modules*), and a project can't patch it; every other command is an entry a project can replace or drop, by editing the module holding it.
-- **A module's commands are top-level entries of its own (leaning):** no module adds a subcommand to another's group, since a module's parts change only through that module (*What a module is*). So lup's own module serves `lup install` and `lup rules-docs` (`lup-dev rules docs`, which writes lup's `docs/rules.md`), not `lup rules docs`. The alternative, a module adding to another's group, would make a group's contents depend on which modules are on.
+- **A module's commands are top-level entries of its own (leaning):** no module adds a subcommand to another's group, since a module's parts change only through that module (*What a module is*). So lup's own module serves `lup rules-docs` (`lup-dev rules docs`, which writes lup's `docs/rules.md`), not `lup rules docs`. The alternative, a module adding to another's group, would make a group's contents depend on which modules are on.
 - **lup's commands, by module:**
-  - `Core`: `hook claude|codex` (fixed), `check [--fix]`, `holds [approve|decline]`, `verdicts`, `project`, `new`, `docs`, the hidden `importers`;
+  - `Core`: `hook claude|codex` (fixed), `check [--fix]`, `holds [approve|decline]`, `verdicts`, `trust` (approving what the host runs, which a launch asks first: `docs/launch.md`, *Trust on launch*), `project`, `new`, `docs`, the hidden `importers`;
   - `Python`: `settings [--check]`;
   - `CodeRules`: `rules list|check|new`;
-  - lup's own module: `install`, `rules-docs`.
+  - lup's own module: `rules-docs`.
 
   `lup-dev`'s `submit`, `wait`, `reviews` and `reply`, and the hidden `review keep` that parks their reviews in the first lup's dashboard, serve the drafts flow, which the design leaves behind (`docs/graveyard.md`), so no module holds them.
 - **Published commands are the standard `[project.scripts]`.** They're installed with the package under the project's own name, so its users never need lup. `lup --help` lists them, marked published, read from `pyproject.toml` without importing them. The declaration's commands are development-only. The rejected alternative: `Command(published=True)`, with lup writing `[project.scripts]`, a table the project owns.
@@ -595,7 +594,7 @@ Elsewhere:
 - **`codescan/engine.py`** sends the selections, and starts the engine with the runner's interpreter command and, from E, the tables' paths; **`checker/src/catalog.ts`** resolves a selection; **`checker/src/program.ts`** takes the interpreter command and the environment's files from its start arguments, and stamps lup's pyright settings file with pyright's other configuration, so a change to it builds another program.
 - **`codescan/ruff.py`** runs ruff through the runner; `UV_RUN` goes.
 - **`gate.py`** checks requirements first, then runs each step through the runner; its own `Runner` becomes `Processes`.
-- **`install.py`** finds the engine's build step in lup's declaration, and runs it through the declaration's runner as the gate does.
+- **`launch/trust.py`** finds the engine's build step in the approved commit's declaration, and runs it through the declaration's runner as the gate does.
 
 ## Building it
 

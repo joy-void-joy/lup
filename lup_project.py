@@ -34,9 +34,10 @@ class LupDevelopment(Module):
     - The engine is built before the gate's first step, and again only when its
       bundle is older than one of its sources, since tests that ask a stale engine
       fail for reasons the change didn't cause. Its command is the tool alone, which
-      the gate runs through the project's runner, and the installer runs the same
-      step the same way (`lup_dev/install.py`). npm, which installs its bundler,
-      joins the room's image as Arch's `npm`.
+      the gate runs through the project's runner, and trust on launch runs the same
+      step the same way to build the copy the operator approves
+      (`lup_dev/launch/trust.py`). npm, which installs its bundler, joins the
+      room's image as Arch's `npm`.
     - The data that sets lup's policy (`lup_dev.catalog`) is protected, so the
       operator reviews every change to it before it lands.
     - The bridge's interim hooks are excluded: uv scripts with their own
