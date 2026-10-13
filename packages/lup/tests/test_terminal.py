@@ -15,6 +15,7 @@ from lup.adapters.codex.terminal import toml
 from lup.rooms.container import Mount
 from lup.sessions.errors import RuntimeMissingError
 from lup.sessions.terminal import (
+    Cli,
     Hook,
     SessionSettings,
     TerminalError,
@@ -26,6 +27,9 @@ HOOK_LINE = "socat -t 36000 - UNIX-CONNECT:/run/lup/hook.sock"
 WORKTREE = Path("/srv/lup.git/tree/dev")
 REPOSITORY = Path("/srv/lup.git")
 GUIDANCE = '# lup\nWork in the room; "quotes" and a tab\tsurvive.\n'
+CLAUDE_CLI = Cli(program=Path("/opt/clis/claude"))
+CODEX_PACKAGE = Path("/opt/clis/codex/0.162.1")
+CODEX_CLI = Cli(program=CODEX_PACKAGE / "bin" / "codex", directory=CODEX_PACKAGE)
 
 
 @pytest.fixture
@@ -38,7 +42,7 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return home
 
 
-def settings(directory: Path, cli: Path | None, **changes: object) -> TerminalSettings:
+def settings(directory: Path, cli: Cli | None, **changes: object) -> TerminalSettings:
     sample = TerminalSettings(
         directory=directory,
         cli=cli,
@@ -88,9 +92,9 @@ def test_claude_compiles_its_flags_settings_state_and_mounts(
     tmp_path: Path, home: Path
 ) -> None:
     launch = tmp_path / "launch"
-    cli = Path("/opt/clis/claude")
-
-    terminal = Claude(model="opus", effort="high").terminal(settings(launch, cli))
+    terminal = Claude(model="opus", effort="high").terminal(
+        settings(launch, CLAUDE_CLI)
+    )
 
     assert terminal.command == [
         "/opt/clis/claude",
@@ -137,7 +141,7 @@ def test_claude_compiles_its_flags_settings_state_and_mounts(
     }
     assert terminal.mounts == [
         Mount(source=home / ".claude"),
-        Mount(source=cli, read_only=True),
+        Mount(source=Path("/opt/clis/claude"), read_only=True),
         Mount(source=launch, read_only=True),
         Mount(source=launch / "claude.json", target=home / ".claude.json"),
     ]
@@ -149,7 +153,7 @@ def test_claude_replaces_its_prompt_only_when_the_declaration_gives_one(
     launch = tmp_path / "launch"
     bare = settings(
         launch,
-        Path("/opt/clis/claude"),
+        CLAUDE_CLI,
         guidance=None,
         session=SessionSettings(auto_memory=True, subagent_cache=timedelta(minutes=5)),
     )
@@ -175,9 +179,7 @@ def test_claude_leaves_memory_and_cache_to_the_runtime_when_unset(
     tmp_path: Path, home: Path
 ) -> None:
     terminal = Claude(model="opus").terminal(
-        settings(
-            tmp_path / "launch", Path("/opt/clis/claude"), session=SessionSettings()
-        )
+        settings(tmp_path / "launch", CLAUDE_CLI, session=SessionSettings())
     )
 
     assert terminal.env == {
@@ -193,7 +195,7 @@ def test_claude_follows_a_moved_config_directory(
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(moved))
     launch = tmp_path / "launch"
 
-    terminal = Claude(model="opus").terminal(settings(launch, Path("/opt/clis/claude")))
+    terminal = Claude(model="opus").terminal(settings(launch, CLAUDE_CLI))
 
     assert terminal.env["CLAUDE_CONFIG_DIR"] == str(moved)
     assert terminal.mounts[0] == Mount(source=moved)
@@ -247,12 +249,12 @@ def test_codex_compiles_its_flags_overrides_requirements_and_mounts(
         'url = "https://docs.example/mcp"\n'
     )
     launch = tmp_path / "launch"
-    cli = Path("/opt/clis/codex")
-
-    terminal = Codex(model="gpt-6.1-sol", effort="high").terminal(settings(launch, cli))
+    terminal = Codex(model="gpt-6.1-sol", effort="high").terminal(
+        settings(launch, CODEX_CLI)
+    )
 
     assert terminal.command == [
-        "/opt/clis/codex",
+        "/opt/clis/codex/0.162.1/bin/codex",
         "--no-daemon",
         "--dangerously-bypass-approvals-and-sandbox",
         "--model",
@@ -295,7 +297,7 @@ def test_codex_compiles_its_flags_overrides_requirements_and_mounts(
     }
     assert terminal.mounts == [
         Mount(source=codex_home),
-        Mount(source=cli, read_only=True),
+        Mount(source=CODEX_PACKAGE, read_only=True),
         Mount(
             source=launch / "requirements.toml",
             target=Path("/etc/codex/requirements.toml"),
@@ -309,7 +311,7 @@ def test_every_codex_override_parses_as_toml_rather_than_falling_back_to_text(
 ) -> None:
     (codex_home / "config.toml").write_text('[mcp_servers.node_repl]\ncommand = "x"\n')
     terminal = Codex(model="gpt-6.1-sol", system_prompt="You narrate.").terminal(
-        settings(tmp_path / "launch", Path("/opt/clis/codex"))
+        settings(tmp_path / "launch", CODEX_CLI)
     )
 
     overrides = [
@@ -341,12 +343,12 @@ def test_codex_without_an_operator_config_or_settings_turns_off_only_its_own(
     tmp_path: Path, codex_home: Path
 ) -> None:
     launch = tmp_path / "launch"
-    bare = TerminalSettings(directory=launch, cli=Path("/opt/clis/codex"))
+    bare = TerminalSettings(directory=launch, cli=CODEX_CLI)
 
     terminal = Codex(model="gpt-6.1-sol").terminal(bare)
 
     assert terminal.command == [
-        "/opt/clis/codex",
+        "/opt/clis/codex/0.162.1/bin/codex",
         "--no-daemon",
         "--dangerously-bypass-approvals-and-sandbox",
         "--model",
@@ -366,7 +368,7 @@ def test_codex_without_an_operator_config_or_settings_turns_off_only_its_own(
 
 def test_codex_uses_the_operators_default_home(tmp_path: Path, home: Path) -> None:
     terminal = Codex(model="gpt-6.1-sol").terminal(
-        TerminalSettings(directory=tmp_path / "launch", cli=Path("/opt/clis/codex"))
+        TerminalSettings(directory=tmp_path / "launch", cli=CODEX_CLI)
     )
 
     assert terminal.env == {"CODEX_HOME": str(home / ".codex")}
@@ -389,6 +391,19 @@ def test_codex_runs_the_cli_its_sdk_pins_without_one_given(
     assert terminal.mounts[1] == Mount(source=package, read_only=True)
 
 
+def test_codex_given_one_file_mounts_it_alone(tmp_path: Path, codex_home: Path) -> None:
+    alone = Cli(program=Path("/opt/clis/codex-alone"))
+
+    terminal = Codex(model="gpt-6.1-sol").terminal(
+        TerminalSettings(directory=tmp_path / "launch", cli=alone)
+    )
+
+    assert terminal.command[0] == "/opt/clis/codex-alone"
+    assert terminal.mounts[1] == Mount(
+        source=Path("/opt/clis/codex-alone"), read_only=True
+    )
+
+
 def test_codex_refuses_without_its_pinned_cli(
     tmp_path: Path, codex_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -407,7 +422,7 @@ def test_codex_refuses_an_operator_config_that_isnt_toml(
 
     with pytest.raises(TerminalError, match="isn't valid TOML"):
         Codex(model="gpt-6.1-sol").terminal(
-            TerminalSettings(directory=tmp_path / "launch", cli=Path("/opt/clis/codex"))
+            TerminalSettings(directory=tmp_path / "launch", cli=CODEX_CLI)
         )
 
 
@@ -448,3 +463,10 @@ def test_terminal_paths_are_absolute() -> None:
         TerminalSettings(directory=Path("launch"))
     with pytest.raises(ValidationError, match="absolute"):
         TerminalSettings(directory=Path("/launch"), trusted=[Path("tree/dev")])
+    with pytest.raises(ValidationError, match="absolute"):
+        Cli(program=Path("bin/codex"))
+
+
+def test_a_cli_runs_from_inside_the_directory_it_ships_in() -> None:
+    with pytest.raises(ValidationError, match="isn't inside"):
+        Cli(program=Path("/opt/elsewhere/codex"), directory=CODEX_PACKAGE)

@@ -24,7 +24,7 @@ from lup.rooms import (
 )
 from lup.rooms.engine import Exited, Invocation, Process, StoredImage
 from lup.sessions.errors import RealCallInTestError
-from lup.sessions.terminal import TerminalSettings
+from lup.sessions.terminal import Cli, TerminalSettings
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -374,7 +374,9 @@ def test_a_launch_runs_the_agents_terminal_in_the_room(
         engine=engine,
     )
     settings = TerminalSettings(
-        directory=launch, cli=Path("/opt/clis/claude"), trusted=[worktree, repository]
+        directory=launch,
+        cli=Cli(program=Path("/opt/clis/claude")),
+        trusted=[worktree, repository],
     )
     terminal = Claude(model="opus").terminal(settings)
 
@@ -412,7 +414,9 @@ def test_a_launch_refuses_a_working_directory_the_room_doesnt_mount(
     with pytest.raises(ContainerError, match="doesn't mount the working directory"):
         room.launch(
             arguments=[],
-            settings=TerminalSettings(directory=launch, cli=Path("/opt/clis/claude")),
+            settings=TerminalSettings(
+                directory=launch, cli=Cli(program=Path("/opt/clis/claude"))
+            ),
         )
     assert not launch.exists()
     assert engine.ensured == []
@@ -436,6 +440,6 @@ def test_a_launch_refuses_variables_the_terminal_needs_otherwise(
         room.launch(
             arguments=[],
             settings=TerminalSettings(
-                directory=tmp_path / "launch", cli=Path("/opt/clis/claude")
+                directory=tmp_path / "launch", cli=Cli(program=Path("/opt/clis/claude"))
             ),
         )

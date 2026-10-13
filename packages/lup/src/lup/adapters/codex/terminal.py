@@ -66,7 +66,7 @@ from pydantic import JsonValue
 
 from lup.adapters.codex.layout import MANAGED_REQUIREMENTS, CodexLaunch, CodexLayout
 from lup.rooms.container import Mount
-from lup.sessions.terminal import Terminal, TerminalError
+from lup.sessions.terminal import Cli, Terminal, TerminalError
 from lup.types import JsonObject, Model
 
 if TYPE_CHECKING:
@@ -198,11 +198,11 @@ def compiled(
     """Return the terminal session of Codex for a declaration's fields, with lup's settings."""
     launch = CodexLaunch(directory=settings.directory)
     session = settings.session
-    cli = Mount(
-        source=layout.bundled if settings.cli is None else settings.cli,
-        read_only=True,
+    cli = (
+        Cli(program=layout.bundled_cli, directory=layout.bundled)
+        if settings.cli is None
+        else settings.cli
     )
-    program = layout.bundled_cli if settings.cli is None else settings.cli
     servers = operator_servers(layout.operator_config)
 
     def group(hook: Hook) -> HookGroup:
@@ -271,7 +271,7 @@ def compiled(
     ]
     return Terminal(
         command=[
-            str(program),
+            str(cli.program),
             "--no-daemon",
             "--dangerously-bypass-approvals-and-sandbox",
             "--model",
@@ -286,7 +286,7 @@ def compiled(
         files={launch.requirements: "".join(lines)},
         mounts=[
             Mount(source=layout.operator_home),
-            cli,
+            cli.mount,
             Mount(
                 source=launch.requirements,
                 target=MANAGED_REQUIREMENTS,

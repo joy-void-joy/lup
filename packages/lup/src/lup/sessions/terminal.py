@@ -10,9 +10,9 @@ settings and the paths to trust. A room then runs the result in its container
 
 from datetime import timedelta
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import AfterValidator
+from pydantic import AfterValidator, model_validator
 
 from lup.errors import LupError
 from lup.rooms.container import AbsolutePath, Mount
@@ -21,6 +21,42 @@ from lup.types import Model
 
 class TerminalError(LupError):
     """A declaration that couldn't be compiled for a terminal."""
+
+
+class Cli(Model):
+    """A runtime's CLI, as a room mounts and runs it: the program, and what ships with it.
+
+    A CLI that is one file is mounted alone. One that runs helpers shipped beside
+    it, found by their place next to the program, is mounted with the whole
+    directory it ships in, at its path, so it finds them in the room as on the host.
+
+    >>> Cli(program=Path("/opt/cli/bin/agent"), directory=Path("/opt/cli")).mount
+    Mount(source=PosixPath('/opt/cli'), target=None, read_only=True)
+    """
+
+    program: AbsolutePath
+    """The binary the terminal runs."""
+    directory: AbsolutePath | None = None
+    """The directory the program ships in, with the helpers it runs, mounted whole;
+    none mounts the program alone."""
+
+    @model_validator(mode="after")
+    def program_inside(self) -> Self:
+        """Refuse a program outside the directory it's said to ship in, which the room wouldn't hold."""
+        if self.directory is not None and not self.program.is_relative_to(
+            self.directory
+        ):
+            message = f"the CLI {self.program} isn't inside {self.directory}"
+            raise ValueError(message)
+        return self
+
+    @property
+    def mount(self) -> Mount:
+        """Return what the room mounts for the CLI, read-only: its directory, or the program alone."""
+        return Mount(
+            source=self.program if self.directory is None else self.directory,
+            read_only=True,
+        )
 
 
 type Event = Literal[
@@ -90,7 +126,7 @@ class TerminalSettings(Model):
     directory: AbsolutePath
     """The launch's own directory, where the compiled files are written; it's
     mounted read-only into the room at its path."""
-    cli: AbsolutePath | None = None
+    cli: Cli | None = None
     """The runtime's CLI, mounted read-only into the room; none for the one its SDK bundles."""
     hooks: list[Hook] = []
     guidance: str | None = None
