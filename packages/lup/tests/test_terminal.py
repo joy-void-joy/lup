@@ -123,7 +123,8 @@ def test_claude_compiles_its_flags_settings_state_and_mounts(
                 "PostToolUse": [{"hooks": [command]}],
                 "PostToolUseFailure": [{"hooks": [command]}],
             },
-            "permissions": {"deny": ["Artifact", "SendFeedback", "mcp__claude_ai_*"]},
+            "permissions": {"deny": ["Artifact", "SendFeedback"]},
+            "disableClaudeAiConnectors": True,
             "skipDangerousModePermissionPrompt": True,
         },
         launch / "claude.json": {
@@ -168,7 +169,27 @@ def test_claude_replaces_its_prompt_only_when_the_declaration_gives_one(
     assert kept.env["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] == "0"
     assert kept.env["CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL"] == "5m"
     deny = json.loads(kept.files[launch / "settings.json"])["permissions"]["deny"]
-    assert deny == ["mcp__claude_ai_*"]
+    assert deny == []
+
+
+def test_claude_fetches_the_account_s_connectors_only_when_asked(
+    tmp_path: Path, home: Path
+) -> None:
+    launch = tmp_path / "launch"
+    cli = Path("/opt/clis/claude")
+
+    def written(session: SessionSettings) -> object:
+        terminal = Claude(model="opus").terminal(settings(launch, cli, session=session))
+        return json.loads(terminal.files[launch / "settings.json"])
+
+    off = written(SessionSettings())
+    on = written(SessionSettings(account_connectors=True))
+
+    assert isinstance(off, dict)
+    assert off["disableClaudeAiConnectors"] is True
+    assert isinstance(on, dict)
+    assert "disableClaudeAiConnectors" not in on
+    assert on["permissions"] == {"deny": []}
 
 
 def test_claude_leaves_memory_and_cache_to_the_runtime_when_unset(
@@ -269,6 +290,8 @@ def test_codex_compiles_its_flags_overrides_requirements_and_mounts(
         "-c",
         "check_for_update_on_startup=false",
         "-c",
+        "features.apps=false",
+        "-c",
         "features.plugins=false",
         "-c",
         'mcp_servers={node_repl = {enabled = false},"docs.search" = {enabled = false}}',
@@ -327,6 +350,7 @@ def test_every_codex_override_parses_as_toml_rather_than_falling_back_to_text(
         },
         "features.memories": False,
         "check_for_update_on_startup": False,
+        "features.apps": False,
         "features.plugins": False,
         "mcp_servers": {"node_repl": {"enabled": False}},
         "developer_instructions": GUIDANCE,
@@ -351,6 +375,8 @@ def test_codex_without_an_operator_config_or_settings_turns_off_only_its_own(
         "-c",
         "check_for_update_on_startup=false",
         "-c",
+        "features.apps=false",
+        "-c",
         "features.plugins=false",
         "-c",
         "project_doc_max_bytes=0",
@@ -358,6 +384,26 @@ def test_codex_without_an_operator_config_or_settings_turns_off_only_its_own(
     assert terminal.files == {
         launch / "requirements.toml": "allow_managed_hooks_only = true\n\n[hooks]\n"
     }
+
+
+def test_codex_keeps_the_account_s_apps_only_when_asked(
+    tmp_path: Path, codex_home: Path
+) -> None:
+    def overrides(session: SessionSettings) -> list[str]:
+        terminal = Codex(model="gpt-6.1-sol").terminal(
+            TerminalSettings(
+                directory=tmp_path / "launch",
+                cli=Path("/opt/clis/codex"),
+                session=session,
+            )
+        )
+        return terminal.command
+
+    assert "features.apps=false" in overrides(SessionSettings())
+    assert not any(
+        argument.startswith("features.apps")
+        for argument in overrides(SessionSettings(account_connectors=True))
+    )
 
 
 def test_codex_uses_the_operators_default_home(tmp_path: Path, home: Path) -> None:

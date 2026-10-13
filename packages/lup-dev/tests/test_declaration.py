@@ -675,6 +675,7 @@ def test_session_settings_are_lup_s_by_default() -> None:
         subagent_cache="1h",
         auto_memory=False,
         removed_tools=SessionDefaults().removed_tools,
+        account_connectors=False,
     )
     assert SessionDefaults().removed_tools[:5] == [
         "Artifact",
@@ -694,10 +695,21 @@ def test_a_session_layer_changes_only_the_fields_it_sets() -> None:
         subagent_cache="1h",
         auto_memory=True,
         removed_tools=SessionDefaults().removed_tools,
+        account_connectors=False,
     )
     assert module(resolved, "core").origins.of("session") == Origin(
         field="session", position=1, why="this project keeps notes"
     )
+
+
+def test_a_project_turns_the_account_s_connectors_on_in_a_layer() -> None:
+    modules = Modules.default().edit(
+        Core(session=Session(account_connectors=True)),
+        why="this project reads the operator's calendar",
+    )
+    session = resolve(Project(modules=modules)).session
+    assert session.account_connectors is True
+    assert session.removed_tools == SessionDefaults().removed_tools
 
 
 def test_removed_tools_are_a_selection_each_layer_adds_to_or_drops_from() -> None:

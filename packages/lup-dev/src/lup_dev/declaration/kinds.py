@@ -239,6 +239,10 @@ class Session(Layer, extra="forbid"):
     removed_tools: RemovedTools = RemovedTools.of(*SessionDefaults().removed_tools)
     """A runtime's built-in tools removed from a session's context, by name:
     lup's (`lup_dev.catalog.room`), unless the project says."""
+    account_connectors: bool = SessionDefaults().account_connectors
+    """Whether a session fetches the connectors the operator's account brings
+    with its login, which reach their mail and files: off unless the project
+    turns them on."""
 
 
 class Section(Model, extra="forbid"):

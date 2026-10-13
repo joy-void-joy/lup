@@ -6,9 +6,10 @@ settings compiled for each runtime*):
 - `--settings <launch>/settings.json` with `--setting-sources user`: the operator's
   `~/.claude/settings.json` loads, and the repository's `.claude/settings.json`,
   `.mcp.json`, skills and `CLAUDE.md` don't. lup's file holds the hooks,
-  `permissions.deny` (the removed tools, as bare names, and the claude.ai
-  connectors' tools, by the pattern `mcp__claude_ai_*`), and
-  `skipDangerousModePermissionPrompt`;
+  `permissions.deny` (the removed tools, as bare names),
+  `disableClaudeAiConnectors` unless the session asks for the account's
+  connectors, so none of the claude.ai connectors arriving with the login is
+  fetched, and `skipDangerousModePermissionPrompt`;
 - `--permission-mode bypassPermissions`: the room is the wall;
 - the model with `--model`, the effort with `--effort`, the declaration's system
   prompt with `--system-prompt-file`, and the guidance with
@@ -31,13 +32,15 @@ settings compiled for each runtime*):
 | `conversation-ended` | `SubagentStop` |
 
 What this relies on, from Claude Code's docs (code.claude.com, `cli-reference`,
-`permissions`, `env-vars`, `settings`, `hooks`) and its 2.1.294 binary:
+`permissions`, `env-vars`, `settings`, `settings-reference`, `mcp`, `hooks`) and
+its 2.1.294 binary:
 - the system prompt flags work interactively; `--system-prompt-file` replaces the
   prompt, `--append-system-prompt-file` appends to it;
-- "Deny and ask rules also accept glob patterns in the tool-name position", and a
-  tool a bare-name glob deny matches "is removed from Claude's context, the same
-  as a bare tool name"; "Tools from connectors Claude Code fetches itself appear
-  as `mcp__claude_ai_<server>__<tool>`";
+- `disableClaudeAiConnectors` turns off "the connectors it fetches itself", set
+  "to `true` in any settings scope", with "any-source-true semantics: `true` in
+  any settings source takes precedence"; `ENABLE_CLAUDEAI_MCP_SERVERS=false` "has
+  the same effect for the current shell session" (`mcp`, *Disable claude.ai
+  connectors*). Left out, the operator's own settings decide;
 - `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL` takes `5m` or `1h`, "the only values
   Claude Code accepts"; `CLAUDE_CODE_DISABLE_AUTO_MEMORY` takes `1` to turn auto
   memory off and `0` to force it on;
@@ -65,9 +68,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from lup.sessions.terminal import Event, Hook, TerminalSettings
-
-CONNECTORS = "mcp__claude_ai_*"
-"""The deny rule naming every tool of the claude.ai connectors that arrive with the login."""
 
 SUBAGENT_CACHE = "CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL"
 """The variable setting the prompt cache's lifetime outside the main conversation."""
@@ -113,6 +113,9 @@ class LaunchSettings(Wire):
 
     hooks: dict[str, list[HookGroup]]
     permissions: Permissions
+    disable_claude_ai_connectors: bool | None = None
+    """True keeps the account's claude.ai connectors from being fetched; none
+    leaves it to the operator's own settings."""
     skip_dangerous_mode_permission_prompt: bool = True
 
 
@@ -171,7 +174,8 @@ def compiled(
             ]
             for name in events
         },
-        permissions=Permissions(deny=[*session.removed_tools, CONNECTORS]),
+        permissions=Permissions(deny=session.removed_tools),
+        disable_claude_ai_connectors=None if session.account_connectors else True,
     )
     state = State(
         projects={str(path): Trusted() for path in settings.trusted},

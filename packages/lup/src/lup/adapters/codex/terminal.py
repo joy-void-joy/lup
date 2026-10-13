@@ -11,9 +11,10 @@ each runtime*):
 - each trusted path in `projects`, as an inline table, since `-c` splits a dotted
   key at every `.`, which breaks a path like `lup.git`;
 - auto memory as `features.memories`; `check_for_update_on_startup = false`;
-  `features.plugins = false`, which also stops a sync from GitHub at each start;
-  each of the operator's own MCP servers, read from their `config.toml`, off by
-  name, since they're set up for the host;
+  `features.apps = false` unless the session asks for the account's connectors,
+  which Codex calls apps; `features.plugins = false`, which also stops a sync
+  from GitHub at each start; each of the operator's own MCP servers, read from
+  their `config.toml`, off by name, since they're set up for the host;
 - the guidance as `developer_instructions`, with `project_doc_max_bytes = 0`, so
   the repository's `AGENTS.md` isn't loaded beside it;
 - lup's hooks as managed hooks, in a requirements file mounted at
@@ -51,7 +52,8 @@ What this relies on, read in Codex's source at `rust-v0.162.1` (paths under
   hook that isn't managed (`hooks/src/engine/discovery.rs`);
 - `instructions` becomes the base instructions when nothing else sets them
   (`core/src/config/mod.rs`); `features.memories` is the memories feature's
-  switch (`features/src/lib.rs`).
+  switch, off by default, and `features.apps` the apps', on by default
+  (`features/src/lib.rs`).
 """
 
 import tomllib
@@ -221,6 +223,11 @@ def compiled(
             else [Override(key="features.memories", value=session.auto_memory)]
         ),
         Override(key="check_for_update_on_startup", value=False),
+        *(
+            []
+            if session.account_connectors
+            else [Override(key="features.apps", value=False)]
+        ),
         Override(key="features.plugins", value=False),
         *(
             [
