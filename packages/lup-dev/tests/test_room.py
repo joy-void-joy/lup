@@ -193,6 +193,7 @@ def test_the_maintaining_room_mounts_and_sets_what_the_note_lists(
             "LANG": "en_US.UTF-8",
             "EDITOR": "/usr/bin/nvim --clean",
             "VISUAL": "vim",
+            "XDG_CACHE_HOME": str(tmp_path / "cache"),
         },
         network="host",
     )

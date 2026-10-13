@@ -21,8 +21,11 @@ A `lup.rooms.Container` on the host's network, its image the declaration's
 - `/etc/localtime`, read-only, so the room's clock reads in the operator's zone.
 
 Its variables are the runner's, the git identity, read from the host's git as
-`GIT_AUTHOR_*` and `GIT_COMMITTER_*` since `~/.gitconfig` isn't mounted, and the
-terminal's (`TerminalVariables`). What the launch adds is the terminal compile's
+`GIT_AUTHOR_*` and `GIT_COMMITTER_*` since `~/.gitconfig` isn't mounted, the
+terminal's (`TerminalVariables`), and `XDG_CACHE_HOME` as the host's lup has it
+(`Layout.cache`'s parent), so the engine's build in the room finds pyright's
+source where it's mounted: the build takes the path from the same layout. What
+the launch adds is the terminal compile's
 and the launch command's: the launch's directory, its socket directory, the CLI
 and the runtime's home.
 
@@ -201,6 +204,11 @@ def maintaining_room(
             project=str(held.git),
         ),
         mounts=[*mounts],
-        env={**needs.env, **identity, **terminal.passed()},
+        env={
+            **needs.env,
+            **identity,
+            **terminal.passed(),
+            "XDG_CACHE_HOME": str(layout.cache.parent),
+        },
         network="host",
     )

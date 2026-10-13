@@ -2,8 +2,10 @@
 
 1. Read the pyright release the gate pins, from `uv.lock`, so the engine and the gate
    answer alike.
-2. Fetch pyright's source at that release into `$XDG_CACHE_HOME/lup/pyright/`, once,
-   and install its dependencies with the pnpm release pyright's own manifest names.
+2. Fetch pyright's source at that release into lup's cache, once, where `lup_dev`'s
+   layout says (`Layout.pyright_source`: `$XDG_CACHE_HOME/lup/pyright/`), which a
+   room mounts; and install its dependencies with the pnpm release pyright's own
+   manifest names.
 3. Link that source beside the engine as `pyright`, and install the engine's bundler.
 4. Type-check the engine and the rule table (`lup_dev/catalog/rules.ts`).
 5. Bundle them into `lup_dev/codescan/bundle/engine.js`, with the standard-library
@@ -21,17 +23,11 @@ from pathlib import Path
 import sh
 from pydantic import Field
 
-from lup.types import Model, Settings
-from lup_dev.layout import Bundle
+from lup.types import Model
+from lup_dev.layout import Bundle, Layout
+from lup_dev.settings import LupDevSettings
 
 log = logging.getLogger("build")
-
-
-class BuildSettings(Settings):
-    """The environment variables the build reads."""
-
-    xdg_cache_home: Path | None = None
-    """`XDG_CACHE_HOME`, where pyright's source is kept between builds."""
 
 
 class Locked(Model):
@@ -77,10 +73,10 @@ class Places(Model):
         """The engine's own Node tools, its bundler among them."""
         return self.checker / "node_modules" / ".bin"
 
-    def cache(self, settings: BuildSettings) -> Path:
-        """Return where pyright's sources are kept, one directory per release."""
-        home = settings.xdg_cache_home or Path.home() / ".cache"
-        return home / "lup" / "pyright"
+    @property
+    def cache(self) -> Path:
+        """Where pyright's sources are kept, one directory per release: `lup_dev`'s layout's."""
+        return Layout.of(LupDevSettings()).pyright_source
 
 
 def pinned(places: Places) -> str:
@@ -184,7 +180,7 @@ def main() -> None:
     log.setLevel(logging.INFO)
     places = Places()
     try:
-        source = fetch(pinned(places), places.cache(BuildSettings()), places.repository)
+        source = fetch(pinned(places), places.cache, places.repository)
         link(places, source)
         install_bundler(places)
         bundle(places, source)

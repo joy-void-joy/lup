@@ -118,7 +118,7 @@ Everything is mounted at its host path: a linked worktree's `.git` file and the 
 | What the runner needs (*The project's environment*) | as it says | uv's interpreters and cache |
 | `~/.claude` or `~/.codex` | read-write | the operator's own login, settings and history (*Your login and history*) |
 | The CLI, from lup's cache | read-only | *The CLIs* |
-| pyright's source in lup's cache, `$XDG_CACHE_HOME/lup/pyright` | read-write | the gate builds the engine from it. Only that part of the cache: the rest holds the CLIs later rooms run, which a room mustn't rewrite |
+| pyright's source in lup's cache, `$XDG_CACHE_HOME/lup/pyright` | read-write | the gate builds the engine from it. Only that part of the cache: the rest holds the CLIs later rooms run, which a room mustn't rewrite. `XDG_CACHE_HOME` is set in the room to the host's (`Layout.cache`'s parent), and the build takes the path from the same layout (`Layout.pyright_source`), so the room's build and the host's agree on where it is |
 | The launch's directory | read-only | lup's settings and guidance for this launch |
 | The launch's socket directory, at `/run/lup` | read-write | the hook. The directory, not the socket: a socket mounted as a file pins the old one when the service restarts |
 | The editor's own configuration (`~/.config/nvim` for nvim, `~/.vimrc` and `~/.vim` for vim, and so on: `catalog/room.py`'s `Editors`), for the editor `$EDITOR` or `$VISUAL` names, where it exists | read-only | Ctrl+G opens the operator's editor as they know it |
