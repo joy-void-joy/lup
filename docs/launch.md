@@ -131,7 +131,7 @@ Everything is mounted at its host path: a linked worktree's `.git` file and the 
 - **The operator's preferences carry in.** `~/.claude/settings.json` holds the theme, model, editor mode and the like, with no hooks or plugins (checked), and loads in the room as the user's settings.
 - **What changes in the room:**
   - Claude Code's state file (`~/.claude.json`: onboarding, folder trust) is the room's own, written fresh into the room's home at each launch with onboarding done and the repository trusted, so concurrent starts can't race on the operator's (16 starts on one file left the first lup with `{"autoUpdates": false}`);
-  - the claude.ai connectors' tools, which arrive with the login (Google Drive's share and trash among them, in the spike), are removed in the room by name pattern;
+  - the account's connectors, which arrive with the login (claude.ai's Google Drive, with its share and trash tools, connected in the spike; Codex's apps are the same thing), aren't fetched in the room unless the declaration asks for them (*The settings compiled for each runtime*);
   - Codex's plugins and the operator's own MCP servers are off in the room: they're set up for the host (`node_repl` points into the ChatGPT desktop app);
   - Codex runs with `--no-daemon`, apart from the host's daemon on the same home.
 - **What the agent can read:** the login and every transcript in those directories. lup isn't containing the agent, and the login is the runtime's own, readable by any session without a container today.
@@ -147,11 +147,12 @@ lup's settings reach each runtime as flags and files of the launch's own, never 
 | First-run screens | the room's own `~/.claude.json`: onboarding done; the worktree and the main repository trusted (Claude Code asks about the main repository for a linked worktree) | `projects` with each trusted, as an inline table: a dotted `-c` key splits at every `.`, which breaks a path like `lup.git` |
 | The one hook | `hooks` in the launch's settings | lup's hooks as managed hooks, in an `/etc/codex/requirements.toml` the launch mounts into the room, with `allow_managed_hooks_only` so no other hook runs **(leaning)**; or else `--dangerously-bypass-hook-trust` |
 | Session settings | `CLAUDE_CODE_DISABLE_AUTO_MEMORY`, `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL=1h`, the removed tools as bare names in `permissions.deny` | memories off |
-| What the room turns off | the claude.ai connectors' tools | `features.plugins = false`, which also stops a sync from GitHub at each start; each of the operator's MCP servers disabled by name |
+| What the room turns off | the account's connectors, unless the session settings ask for them: `disableClaudeAiConnectors`, so none is fetched | the account's connectors (Codex's apps), unless asked for: `features.apps = false`; `features.plugins = false`, which also stops a sync from GitHub at each start; each of the operator's MCP servers disabled by name |
 | lup's own needs | `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0`, so a held call isn't moved to the background after 2 minutes (piece 3); `DISABLE_AUTOUPDATER` | `check_for_update_on_startup = false` |
 | Guidance | `--append-system-prompt-file <launch>/guidance.md` | `developer_instructions`, with `project_doc_max_bytes = 0` |
 
 - **Session settings are `Core`'s `session` part,** in neutral terms each adapter spells: the subagents' prompt cache, auto memory, and the built-in tools removed from context (`DESIGN.md`, *Sessions*). lup's own needs aren't a project's to change, since lup's mechanisms rely on them.
+- **The account's connectors are a session setting** (`account_connectors`, off by default): the tools an account's claude.ai connectors or Codex's apps bring reach the operator's mail and files, so a room fetches none unless its declaration turns them on. A module passing through only the connectors a project chooses can build on it later.
 - **The removed tools are measured, not guessed.** An interactive session carries 113 KB of built-in tool schemas, `Artifact` alone 55 KB. The default list starts from the five lup's own settings remove today (`Artifact`, `SendFeedback`, `Workflow`, `ScheduleWakeup`, `ReportFindings`) and the native worktree tools `DESIGN.md` denies (`EnterWorktree`, `ExitWorktree`), while its native messaging tools (`SendMessage`, `ListAgents`) stay with the native `Agent` until lup's spawn exists, since a session resumes a subagent it started through them; the first live room's `/context` then shows what else weighs and goes unused (`CronCreate`, `RemoteTrigger`, `PushNotification`, `NotebookEdit` and `DesignSync` are the candidates), and the list is set from it.
 - **Native subagents stay on until lup's spawn exists.** `DESIGN.md` denies the native `Agent` and Codex's subagent tools by default, in favour of lup's spawn. Denied now, a session couldn't delegate at all. The deny becomes the default in the spawn piece.
 - **Codex's built-in tools can't be removed by name** (0.162.1 has no setting for it), only by whole feature groups, so the removed tools are Claude Code's alone, a gap the launch states.
@@ -269,7 +270,7 @@ The list of adapters `cli.py` holds moves where the host service reads it too, a
   - whether `--settings` still applies with `--setting-sources user`;
   - whether a fresh `~/.claude.json` beside the operator's `~/.claude` opens logged in, with no screen at all (the theme picker among them);
   - whether the lock files Claude Code keeps in `~/.claude` with process ids behave when a room's process ids mean nothing on the host;
-  - that removing the claude.ai connectors' tools by name pattern removes them all.
+  - that `disableClaudeAiConnectors` keeps every connector of the account out of the room.
 - **Codex:**
   - managed hooks through a mounted `/etc/codex/requirements.toml`, with `allow_managed_hooks_only` dropping every other source;
   - the room's `--no-daemon` beside the host's daemon on the same home;
