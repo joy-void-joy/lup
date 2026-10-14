@@ -237,7 +237,7 @@ def test_claude_stop_after_a_block_on_the_same_findings_lets_the_turn_end(
     )
     assert "decision" not in again
     assert again["systemMessage"].startswith(
-        "lup held the turn's end on these just before"
+        "lup held the turn's end once already, and lets it end"
     )
 
 
@@ -567,8 +567,53 @@ def test_codex_stop_after_a_block_on_the_same_findings_lets_the_turn_end(
     again = json.loads(codex.hook(codex_stop(repo, after_block=True), on_codex))
     assert "decision" not in again
     assert again["systemMessage"].startswith(
-        "lup held the turn's end on these just before"
+        "lup held the turn's end once already, and lets it end"
     )
+
+
+def test_codex_agent_stops_is_told_an_item_and_stops_again_ending_at_once(
+    on_codex: Bench, repo: Path
+) -> None:
+    """The judge's findings held a turn's end once; a later turn, after an item is told, ends at once."""
+    codex_breaks_core(on_codex, repo)
+    stop = codex_stop(repo, after_block=False)
+    assert json.loads(codex.hook(stop, on_codex))["decision"] == "block"
+    codex.hook(codex_stop(repo, after_block=True), on_codex)
+    call = payload(
+        repo,
+        "PreToolUse",
+        turn_id="u3",
+        tool_name="Bash",
+        tool_input={"command": "ls"},
+        tool_use_id="b9",
+    )
+    item = "lup's inbox, item 1: a note from the operator:\nCarry on."
+    told = codex.told(
+        call, codex.hook(call, on_codex), Telling(caller="c", items=[item])
+    )
+    assert json.loads(told or "")["hookSpecificOutput"]["additionalContext"] == item
+    codex.hook(post(repo, "", call="b9"), on_codex)
+    assert codex.hook(codex_stop(repo, after_block=False), on_codex) == ""
+
+
+def test_a_turns_end_following_a_hold_is_heard_so_on_both_runtimes() -> None:
+    held = {"stop_hook_active": True, "last_assistant_message": None}
+    subagent = {"agent_id": "a1", **held}
+    assert claude.heard(payload(Path("/w"), "Stop", **held)).after_block
+    assert claude.heard(payload(Path("/w"), "SubagentStop", **subagent)).after_block
+    assert codex.heard(payload(Path("/w"), "Stop", **held)).after_block
+    assert codex.heard(payload(Path("/w"), "SubagentStop", **subagent)).after_block
+    assert not claude.heard(payload(Path("/w"), "Stop")).after_block
+
+
+def test_claude_wakes_an_idle_session_naming_it_and_codex_cant() -> None:
+    assert json.loads(claude.woken("s1", "Hello.")) == {
+        "type": "user",
+        "message": {"role": "user", "content": "Hello."},
+        "session_id": "s1",
+    }
+    assert claude.adapter().woken is claude.woken
+    assert codex.adapter().woken is None
 
 
 def test_codex_tells_the_agent_when_a_checkpoint_fails(
@@ -933,11 +978,12 @@ BOTH = "The operator answered.\n\nAnd again."
     [
         (
             '{"session_id": "s1", "cwd": "/w", "hook_event_name": "SessionStart"}',
-            Heard(event="session-started", session="s1", judged=True),
+            Heard(fits=10_000, event="session-started", session="s1", judged=True),
         ),
         (
             pre_tool_use(Path("/w"), "Write", {"file_path": "a", "content": "b"}),
             Heard(
+                fits=10_000,
                 event="call-started",
                 session="s1",
                 call="t1",
@@ -955,6 +1001,7 @@ BOTH = "The operator answered.\n\nAnd again."
                 agent_id="a1",
             ),
             Heard(
+                fits=10_000,
                 event="call-started",
                 session="s1",
                 agent="a1",
@@ -966,16 +1013,19 @@ BOTH = "The operator answered.\n\nAnd again."
         (
             pre_tool_use(Path("/w"), "mcp__lup__report", {"problem": "x"}, "t3"),
             Heard(
+                fits=10_000,
                 event="call-started",
                 session="s1",
                 call="t3",
                 tool="mcp__lup__report",
+                served=True,
                 judged=False,
             ),
         ),
         (
             payload(Path("/w"), "PostToolUse", tool_name="Bash", tool_use_id="t2"),
             Heard(
+                fits=10_000,
                 event="call-finished",
                 session="s1",
                 call="t2",
@@ -985,11 +1035,17 @@ BOTH = "The operator answered.\n\nAnd again."
         ),
         (
             payload(Path("/w"), "Stop", stop_hook_active=False),
-            Heard(event="turn-ended", session="s1", judged=False),
+            Heard(fits=10_000, event="turn-ended", session="s1", judged=False),
         ),
         (
             payload(Path("/w"), "SubagentStop", agent_id="a1"),
-            Heard(event="conversation-ended", session="s1", agent="a1", judged=False),
+            Heard(
+                fits=10_000,
+                event="conversation-ended",
+                session="s1",
+                agent="a1",
+                judged=False,
+            ),
         ),
     ],
 )
@@ -1081,8 +1137,9 @@ def test_codex_says_whos_speaking_and_that_the_judge_reads_every_hook() -> None:
     patch = json.loads(sent["2-pre-tool-use-add"])["tool_use_id"]
 
     assert [codex.heard(raw) for raw in sent.values()] == [
-        Heard(event="session-started", session=session, judged=True),
+        Heard(fits=10_000, event="session-started", session=session, judged=True),
         Heard(
+            fits=10_000,
             event="call-started",
             session=session,
             call=patch,
@@ -1090,6 +1147,7 @@ def test_codex_says_whos_speaking_and_that_the_judge_reads_every_hook() -> None:
             judged=True,
         ),
         Heard(
+            fits=10_000,
             event="call-finished",
             session=session,
             call=patch,
@@ -1098,7 +1156,7 @@ def test_codex_says_whos_speaking_and_that_the_judge_reads_every_hook() -> None:
         ),
     ]
     stop = codex.heard((CAPTURED / "9-stop.json").read_text())
-    assert stop == Heard(event="turn-ended", session=session, judged=True)
+    assert stop == Heard(fits=10_000, event="turn-ended", session=session, judged=True)
     subagent = codex.heard(
         json.dumps(
             {
@@ -1110,7 +1168,11 @@ def test_codex_says_whos_speaking_and_that_the_judge_reads_every_hook() -> None:
         )
     )
     assert subagent == Heard(
-        event="conversation-ended", session=session, agent="a1", judged=True
+        fits=10_000,
+        event="conversation-ended",
+        session=session,
+        agent="a1",
+        judged=True,
     )
 
 

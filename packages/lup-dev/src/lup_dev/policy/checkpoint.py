@@ -60,6 +60,7 @@ from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.project import Project
 from lup_dev.declaration.resolve import Declaration
 from lup_dev.git import Git
+from lup_dev.inbox import ends
 from lup_dev.layout import Layout
 from lup_dev.policy.holds import HeldFile, Hold, Holds, answered
 from lup_dev.policy.importers import Conversation, Found, ImportersPass, Spawner
@@ -1350,22 +1351,13 @@ def first_warning(layout: Layout, session: str, failure: str) -> bool:
 
 
 class Conversations(MutableModel):
-    """What a conversation's turn's end needs to know of the others (#32, #41)."""
+    """What a conversation's turn's end needs to know of the others (#32, #41), and of its own ends before."""
 
     working: list[str] = []
     """The subagents at work, each from its first call to its conversation's end."""
-    blocked: ByConversation[Finding] = {}
-    """What held each conversation's turn's end when it last blocked, until its
-    turn ends."""
-
-
-def same(findings: list[Finding], others: list[Finding]) -> bool:
-    """Say whether two lists hold the same findings, in any order."""
-    return (
-        len(findings) == len(others)
-        and all(each in others for each in findings)
-        and all(each in findings for each in others)
-    )
+    passed: ByConversation[Finding] = {}
+    """What each conversation's turn last ended past: findings that hold none of
+    its later ends (`inbox/ends.py`)."""
 
 
 class ConversationRecord(Model):
@@ -1414,12 +1406,13 @@ class ConversationRecord(Model):
             self.keep(kept)
 
     def restarted(self) -> None:
-        """Forget the record: the session starts, or starts again.
+        """Forget the subagents at work: the session starts, or starts again.
 
-        A subagent still at work is noted again at its next call.
+        A subagent still at work is noted again at its next call. What its turns
+        ended past is kept, so a resumed session isn't held again on it.
         """
         with self.lock():
-            self.layout.conversations(self.session).unlink(missing_ok=True)
+            self.keep(Conversations(passed=self.read().passed))
 
 
 def mail_for(worktree: Worktree, key: str, agent: str, runtime: Runtime) -> str:
@@ -1588,19 +1581,20 @@ def end_turn(
     In each, a checkpoint where `judging` names its root; at the session's own
     end, the importers pass waited on, and what's left in the files its
     conversation touched (`ended`), which a subagent's end never holds on. Those
-    hold the session's end, except in a file a subagent at work touched too,
-    which may be its in progress (#32), and except the same findings that held it
-    just before (`after_block`), which the agent didn't fix: those are
-    information, told to the operator where nothing else keeps the turn going.
-    What a turn's end must tell still blocks, at either end: each is told once.
-    With `listing`, the notes present at the session's start and removed since
-    are listed, once.
+    hold the session's end once per finding, across turns (`holding`, the
+    inbox's `ends.py`): except in a file a subagent at work touched too, which
+    may be its in progress (#32); not at an end following a hold (`after_block`),
+    which ends whatever's left, told to the operator where nothing else keeps
+    the turn going; and not for a finding an earlier turn ended past, until
+    it's gone and comes back. What a turn's end must tell still blocks, at
+    either end: each is told once. With `listing`, the notes present at the
+    session's start and removed since are listed, once.
     """
     session, agent = event.session, event.agent
     record = ConversationRecord(layout=bench.services.layout, session=session)
     with record.lock():
         working = [each for each in record.read().working if each != agent]
-    ends = [
+    endings = [
         ended(
             bench,
             worktree,
@@ -1617,36 +1611,31 @@ def end_turn(
         else []
     )
     waiting = [mail_for(worktree, session, agent, bench.runtime) for worktree in opened]
-    left = [found for end in ends for found in end.remaining]
-    busy = [found for end in ends for found in end.working]
+    left = [found for end in endings for found in end.remaining]
+    busy = [found for end in endings for found in end.working]
     told = [
-        refusal([found for end in ends for found in end.checked.refused]),
-        moved([move for end in ends for move in end.checked.moves]),
-        *(notice for end in ends for notice in end.checked.notices),
+        refusal([found for end in endings for found in end.checked.refused]),
+        moved([move for end in endings for move in end.checked.moves]),
+        *(notice for end in endings for notice in end.checked.notices),
     ]
     listed = [removed_notes(notes), *waiting]
     telling = bool(sections([*told, *listed]))
     with record.lock():
         kept = record.read()
-        last = kept.blocked.get(agent, [])
-        repeated = after_block and same(left, last)
-        holds = bool(left) and not repeated
+        passed = kept.passed.get(agent, [])
+        holds = bool(ends.holding(left, passed, after_block=after_block))
+        if not (holds or telling):
+            kept.passed = {**kept.passed, agent: left}
+            record.keep(kept)
 
-        def blocked() -> list[Finding]:
-            if holds:
-                return left
-            if repeated and telling:
-                return last
-            return []
+    def reported() -> str:
+        if holds:
+            return turn_end(left)
+        if after_block:
+            return unheld(left, "repeated")
+        return ""
 
-        kept.blocked = {**kept.blocked, agent: blocked()}
-        record.keep(kept)
-    said = sections(
-        [
-            turn_end(left) if holds else unheld(left, "repeated"),
-            unheld(busy, "working"),
-        ]
-    )
+    said = sections([reported(), unheld(busy, "working")])
     if holds or telling:
         return Reply(block=sections([*told, said, *listed]))
     return Reply(note=said)

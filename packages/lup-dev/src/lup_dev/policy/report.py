@@ -313,8 +313,8 @@ def unheld(findings: list[Finding], why: Literal["working", "repeated"]) -> str:
     """Tell what's left in the files touched where it doesn't hold the turn's end.
 
     It doesn't in a file a subagent at work touched too (`working`), which may be
-    its in progress, nor when the turn's end held on the same findings just before
-    (`repeated`), which the agent didn't fix.
+    its in progress, nor when the turn's end was held just before (`repeated`):
+    an end following a hold ends, whatever's left.
     """
     if not findings:
         return ""
@@ -327,9 +327,9 @@ def unheld(findings: list[Finding], why: Literal["working", "repeated"]) -> str:
             )
         case "repeated":
             header = (
-                "lup held the turn's end on these just before, and doesn't again. "
-                "Left in files this conversation touched (information; they fail "
-                "the gate until fixed):"
+                "lup held the turn's end once already, and lets it end. Left in "
+                "files this conversation touched (information; they fail the gate "
+                "until fixed, and hold no later turn's end unless they change):"
             )
     return "\n".join(
         [header, *(line for found in findings for line in finding_lines(found))]
