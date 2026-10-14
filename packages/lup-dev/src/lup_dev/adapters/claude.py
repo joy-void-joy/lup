@@ -60,7 +60,11 @@ turn, through a socket moved by `--messaging-socket-path` too (its
 a `user` frame's `message.content` must be a non-empty string, a `session_id`
 other than the session's own drops it, and a missing `priority` is `next`, which
 interrupts nothing. Owed live on the version a launch runs (`docs/host-tools.md`,
-*Checks owed*).
+*Checks owed*). Seen live on 2.1.296: it refuses to start with the socket's
+directory at mode 0755 ("--messaging-socket-path directory /run/lup is not
+private (mode 755); the socket directory must be mode 0700 so no other user or
+group can reach or replace the socket"), so the host service keeps each launch's
+socket directory at 0700.
 
 What the host's part relies on, from Claude Code's hooks reference
 (code.claude.com/docs/en/hooks, read 2026-10-14):

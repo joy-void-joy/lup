@@ -254,6 +254,7 @@ def test_a_hook_is_answered_on_its_launchs_socket(
     with served(service(layout, Judge(), said)):
         directory = host.register(launch(tmp_path, "one", "first"))
         assert directory == layout.launch("one").directory
+        assert directory.stat().st_mode & 0o777 == 0o700
         assert layout.launch("one").hook.is_socket()
         payload = '{"hook_event_name": "Stop"}'
         assert send(layout.launch("one").hook, payload) == f"first answers {payload}\n"
