@@ -1356,13 +1356,16 @@ class Trust(Model, arbitrary_types_allowed=True):
         )
 
     def zone(self) -> Zone:
-        """Read the host zone at the integration branch's tip, with the person's own layer in the worktree.
+        """Read the host zone at the integration branch's tip, with the person's own layer.
 
         Where the repository has no such branch, at the worktree's `HEAD`. The
-        person's own layer, which git doesn't hold, is read from the worktree
-        trust runs from, by its content, and what it imports of the commit joins
-        the zone's paths. Raise `TrustError` before any commit, or where the lock
-        doesn't say which `lup-dev` the host runs.
+        person's own layer, which git doesn't hold, is read by its content from
+        the repository's main worktree (a clone's root, or a bare repository's
+        own directory), whichever worktree trust runs from: one layer per
+        repository, so a worktree added later, which git gives no ignored file,
+        asks nothing. What it imports of the commit joins the zone's paths. Raise
+        `TrustError` before any commit, or where the lock doesn't say which
+        `lup-dev` the host runs.
         """
         git = Git(cwd=self.root)
         commit = git.commit(f"refs/heads/{self.integration}") or git.commit("HEAD")
@@ -1373,7 +1376,7 @@ class Trust(Model, arbitrary_types_allowed=True):
             )
             raise TrustError(message)
         tool = self.tool(commit)
-        own = CheckoutLayout(root=self.root).local_declaration
+        own = CheckoutLayout(root=git.main_worktree()).local_declaration
         local = own.read_text() if own.is_file() else None
         named = self.named(commit, tool.paths(), local)
         declaration = CheckoutLayout(root=Path())

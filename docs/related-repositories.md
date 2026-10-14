@@ -31,7 +31,7 @@ All answered by the operator on 2026-10-14: each lean below taken as stated.
 
 **As built**, where the decisions above left the how open:
 - **The layer binds `project`,** a `Project` written as a layer on the project's (`Project(modules=Modules().add(Mine()))`), applied as a module layers (`applied`); it runs in the same import as the declaration, from its path, so it can import and edit the project's own modules (`load`, `Declared.local`).
-- **The zone takes the layer of the worktree trust runs from,** as the guidance takes `AGENTS.local.md` from the worktree launched: a launch from a worktree whose layer differs from the copy approved, or has none, asks, showing the diff (a removal too).
+- **The zone takes the repository's own layer, in its main worktree** (a clone's root, or a bare repository's own directory, `Git.main_worktree`), whichever worktree trust runs from: one layer per repository, so a worktree added later, which git gives no ignored file, asks nothing, where reading each worktree's own would have asked to approve its absence.
 - **The approved copy is kept whole in the approval** (`Approval.local`); the judge's export is one per copy (`Layout.exported`), the launch writes it beside its own export (`approved_declaration`), and every export leaves out a layer a commit holds anyway (`read_by_import`).
 - **Its diff is in the summary itself,** git's own over the two copies (`git diff --no-index`, `compared`), since git's count of the zone can't show a file git doesn't hold; what it imports of the commit joins the zone's paths.
 - **A change to the layer alone installs nothing** and restarts no service: the copy is the commit's already, and the judge reads the layer from the approval at each hook.

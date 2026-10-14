@@ -109,6 +109,16 @@ class Git(Model):
         """Run git and return what it printed, without the trailing newline."""
         return self.run(*arguments).stdout.decode().strip()
 
+    def main_worktree(self) -> Path:
+        """Return the repository's main worktree, which `git worktree list` gives first: a clone's root, or a bare repository's own directory."""
+        listed = self.run("worktree", "list", "--porcelain", "-z").stdout
+        [main, *_] = [
+            field.removeprefix("worktree ")
+            for field in nul_separated(listed)
+            if field.startswith("worktree ")
+        ]
+        return Path(main)
+
     def commit(self, revision: str) -> str | None:
         """Return the commit `revision` names, or none where it names none."""
         found = self.run(

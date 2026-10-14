@@ -858,6 +858,21 @@ def test_a_layer_removed_is_shown_and_asked(lup: Path, kit: Kit, shell: Shell) -
     assert outcome.approval.local is None
 
 
+def test_the_layer_is_the_main_worktree_s_whichever_worktree_trust_runs_from(
+    lup: Path, kit: Kit, shell: Shell, tmp_path: Path
+) -> None:
+    layered(lup, LAYER)
+    first = trusting(lup, kit, yes()).ensure()
+    assert isinstance(first, Trusted)
+    linked = tmp_path / "linked"
+    shell.git(lup, "worktree", "add", "-q", "-b", "elsewhere", str(linked))
+    trust = trusting(linked, kit, unasked())
+    assert trust.check().zone.local == LAYER
+    assert trust.ensure() == Unchanged(
+        commit=first.approval.commit, approval=first.approval
+    )
+
+
 def test_what_the_layer_imports_of_the_commit_joins_the_zone(
     lup: Path, kit: Kit, shell: Shell
 ) -> None:
