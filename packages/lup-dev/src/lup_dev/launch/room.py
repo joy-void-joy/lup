@@ -11,7 +11,13 @@ A `lup.rooms.Container` on the host's network, its image the declaration's
 - the git directory's `config` and `hooks/` read-only over it: they run on the
   host, so a hook or a `core.fsmonitor` written there would run at the
   operator's next git command. `hooks/` is made if it's missing, so the room
-  can't make it;
+  can't make it. Where the git directory isn't the tree's root (a clone's
+  `.git`), it's mounted on its own too, read-write as the tree is: a mount can't
+  be moved from inside, where a plain directory holding the read-only mounts
+  could be moved aside, and one of the room's own, its `config` among it, put
+  in its place for the host's git to read (measured: `mv .git .git-real`
+  succeeded under the mounts alone, and failed with "Device or resource busy"
+  once `.git` was mounted on its own);
 - what the project's runner needs for its environment (`Runner.room`);
 - pyright's source in lup's cache, read-write, which the gate builds the engine
   from. Only that part: the cache holds the CLIs rooms run, which a room
@@ -191,6 +197,7 @@ def maintaining_room(
     pyright.mkdir(parents=True, exist_ok=True)
     mounts = [
         Mount(source=held.tree),
+        *([] if held.git == held.tree else [Mount(source=held.git)]),
         Mount(source=held.git / "config", read_only=True),
         Mount(source=hooks, read_only=True),
         *needs.mounts,

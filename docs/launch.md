@@ -133,6 +133,7 @@ Everything is mounted at its host path: a linked worktree's `.git` file and the 
 |---|---|---|
 | The repository: its git directory and every worktree, as one tree | read-write | the agent's work, and the other worktrees it's asked to read or clean up |
 | The git directory's `config` and `hooks/` | read-only | what runs on the host: a hook, or a `core.fsmonitor`, a compromised package wrote there would run at the operator's next git command. Inside, a git command that writes config (setting a branch's upstream) fails with "Device or resource busy" |
+| The git directory itself, where it isn't the tree's root (a clone's `.git`) | read-write | a mount can't be moved from inside. Under the tree's mount alone, `mv .git .git-real` succeeded with `config` and `hooks/` mounted inside it, and a `.git` of the room's own, its `config` among it, then stood where the host's git reads (measured with podman 6.1.3); mounted on its own, the move failed with "Device or resource busy". A bare repository's git directory is the tree's root, a mount already |
 | What the runner needs (*The project's environment*) | as it says | uv's interpreters and cache |
 | `~/.claude` or `~/.codex` | read-write | the operator's own login, settings and history (*Your login and history*) |
 | The CLI, from lup's cache | read-only | *The CLIs* |
