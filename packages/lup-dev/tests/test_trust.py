@@ -808,7 +808,7 @@ def test_a_file_joining_the_zone_is_shown_whole(
         "Joining the zone, shown whole:",
         " audiobook/ledger.py (new) | 1 +",
         " 1 file changed, 1 insertion(+)",
-        f"`lup-dev` 0.4.0 from {PYPI}, as before:",
+        f"`lup-dev` 0.4.0 from {PYPI}, as before, needing what it did.",
     ]
     [shown] = answering(trust).shown
     assert '+"""The ledger."""' in shown
