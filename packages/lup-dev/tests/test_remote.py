@@ -504,6 +504,29 @@ def test_a_fetch_brings_the_objects_and_writes_no_ref_on_the_host(
     )
 
 
+def test_a_tag_and_the_remote_s_head_are_fetched_as_git_asks(
+    world: World, clock: FakeClock, tmp_path: Path
+) -> None:
+    git(world.forge, "symbolic-ref", "HEAD", "refs/heads/main")
+    other = tmp_path / "other"
+    git(tmp_path, "clone", "-q", str(world.forge), str(other))
+    named = ["-c", "user.name=Other", "-c", "user.email=other@example.com"]
+    git(other, *named, "commit", "-q", "--allow-empty", "-m", "tagged")
+    git(other, *named, "tag", "-a", "-m", "the first", "v1")
+    git(other, "push", "-q", "origin", "HEAD:refs/heads/main", "refs/tags/v1")
+    tag = git(other, "rev-parse", "v1")
+    tip = git(other, "rev-parse", "HEAD")
+
+    with world.served(clock):
+        tagged = world.room_git("fetch", "origin", "refs/tags/v1:refs/tags/v1")
+        plain = world.room_git("fetch", "origin")
+
+    assert tagged.exit_code == 0, stderr(tagged)
+    assert plain.exit_code == 0, stderr(plain)
+    assert git(world.worktree, "rev-parse", "refs/tags/v1") == tag
+    assert git(world.worktree, "rev-parse", "FETCH_HEAD") == tip
+
+
 def test_a_fetch_the_limits_dont_allow_is_refused(
     world: World, clock: FakeClock
 ) -> None:
