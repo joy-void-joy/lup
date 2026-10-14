@@ -9,7 +9,10 @@ judge couldn't with the answerer (`docs/launch.md`); `hook` answers through it.
 
 `trust` approves what the host runs for a repository, the check a launch makes
 first (`docs/launch.md`, *Trust on launch*). `launch` opens a runtime's session in
-a room for the worktree (*The command*). `submit`, `wait`, `reviews` and
+a room for the worktree (*The command*). `host` runs the host service, handed
+the inbox as what each conversation is told at its hooks, its tools and its
+requests; `inbox` is the operator's face on it (`docs/host-tools.md`, *The
+operator's face*). `submit`, `wait`, `reviews` and
 `reply` serve the built drafts flow (`docs/review-flow.md`). Who calls one is a
 conversation of its own, `operator`, in the directory it runs in.
 """
@@ -52,6 +55,33 @@ from lup_dev.host.client import Detached, HostClient
 from lup_dev.host.courier import Courier, Heard, Telling
 from lup_dev.host.protocol import HostError, Register
 from lup_dev.host.service import Answerer, HostService
+from lup_dev.inbox.delivery import Delivery, opening, what, who
+from lup_dev.inbox.notices import NotifySend
+from lup_dev.inbox.protocol import (
+    AnswerItem,
+    FinishItem,
+    Items,
+    ListInbox,
+    SendItem,
+    ShowItem,
+    Shown,
+)
+from lup_dev.inbox.protocol import routes as inbox_routes
+from lup_dev.inbox.store import (
+    Answer,
+    Answered,
+    Done,
+    Inbox,
+    InboxError,
+    Item,
+    Message,
+    Question,
+    Ruling,
+    Told,
+    Verdict,
+    Waiting,
+)
+from lup_dev.inbox.tools import InboxTools
 from lup_dev.launch.clis import CliCache
 from lup_dev.launch.images import build
 from lup_dev.launch.room import host_needs, maintaining_room
@@ -83,6 +113,8 @@ from lup_dev.policy.verdicts import VerdictLog
 from lup_dev.settings import LupDevSettings, TerminalVariables
 
 if TYPE_CHECKING:
+    from lup.tools.tool import ToolSpec
+    from lup_dev.host.rooms import RoomTools
     from lup_dev.policy.runtime import Runtime
     from lup_dev.review import Queue
 
@@ -91,10 +123,12 @@ rules = typer.Typer(no_args_is_help=True, help="lup's code rules.")
 holds = typer.Typer(help="Changes waiting for your answer.")
 review = typer.Typer(no_args_is_help=True, help="Reviews parked for your answer.")
 host = typer.Typer(help="lup's host service, which rooms call.")
+inbox = typer.Typer(help="What your agents tell and ask you, and your answers.")
 app.add_typer(rules, name="rules")
 app.add_typer(holds, name="holds")
 app.add_typer(review, name="review", hidden=True)
 app.add_typer(host, name="host")
+app.add_typer(inbox, name="inbox")
 
 
 def engine() -> Checker:
@@ -169,6 +203,11 @@ class Couriers(Model, Courier):
         added = self.adapters.named(runtime).told(payload, answer, telling)
         return answer if added is None else f"{added}\n"
 
+    @override
+    def woken(self, runtime: str, session: str, text: str) -> str | None:
+        spelled = self.adapters.named(runtime).woken
+        return None if spelled is None else spelled(session, text)
+
 
 def services() -> Services:
     """Return what judging reaches, as configured on this machine."""
@@ -219,13 +258,44 @@ def host_serve(context: typer.Context) -> None:
     if context.invoked_subcommand is not None:
         return
     known = Adapters(known=adapters())
+    couriers = Couriers(adapters=known)
+    layout = Layout.of(LupDevSettings())
+    delivery = Delivery(
+        inbox=Inbox.opened(layout.inbox),
+        courier=couriers,
+        layout=layout.host,
+        notices=NotifySend(),
+        clock=SystemClock(),
+        say=typer.echo,
+    )
     service = HostService(
-        layout=Layout.of(LupDevSettings()).host,
+        layout=layout.host,
         answerer=known,
-        courier=Couriers(adapters=known),
+        courier=couriers,
+        post=delivery,
+        routes=inbox_routes(delivery),
+        tools=room_tools(delivery),
         say=typer.echo,
     )
     asyncio.run(service.serve())
+
+
+def room_tools(delivery: Delivery) -> list[RoomTools]:
+    """List the modules' tools the host service serves each launched session."""
+    return [InboxTools(delivery=delivery)]
+
+
+def served_tools() -> list[ToolSpec]:
+    """List what a launched session is told of each of lup's tools, which its guidance lists.
+
+    Read from the tools the service is handed, made over a delivery without its
+    fields: what a tool is doesn't depend on whom it delivers to.
+    """
+    return [
+        spec
+        for tools in room_tools(Delivery.model_construct())
+        for spec in tools.specs()
+    ]
 
 
 @host.command("stop")
@@ -235,6 +305,218 @@ def host_stop() -> None:
         typer.echo("Stopped the host service.")
         return
     typer.echo("No host service runs.")
+
+
+def answering() -> HostClient:
+    """Reach the host service for the operator's inbox, starting it where none runs; refuse inside an agent's session."""
+    inside = [runtime.name() for runtime in runtimes() if runtime.inside()]
+    if inside:
+        message = (
+            f"this runs inside a {inside[0]} session, and the inbox is the "
+            "operator's: run it in your own terminal"
+        )
+        raise InboxError(message)
+    client = host_client()
+    client.ensure()
+    return client
+
+
+def line(item: Item) -> str:
+    """Say an item in a line: its number, when it was made, what it is, from whom, and its first line."""
+    where = "" if item.worktree is None else f" in {item.worktree}"
+    return (
+        f"{item.number:>4}  {item.made:%Y-%m-%d %H:%M}  {what(item)} from "
+        f"{who(item.sender)}{where}: {opening(item)}"
+    )
+
+
+def standing(item: Item) -> str:
+    """Say where an item stands."""
+    match item.state:
+        case Waiting(announced=None):
+            return "waiting"
+        case Waiting(announced=announced):
+            return (
+                f"waiting, announced at {announced:%Y-%m-%d %H:%M} as too long to tell"
+            )
+        case Told(at=at, how=how):
+            return f"told at {at:%Y-%m-%d %H:%M} ({how})"
+        case Answered(at=at, answer=answer):
+            return f"answered at {at:%Y-%m-%d %H:%M}, item {answer}"
+        case Done(at=at):
+            return f"done at {at:%Y-%m-%d %H:%M}"
+
+
+def shown(item: Item) -> str:
+    """Say an item whole, for the operator."""
+    where = "" if item.worktree is None else f" in {item.worktree}"
+    heading = (
+        f"Item {item.number}, {what(item)} from {who(item.sender)}{where} to "
+        f"{who(item.recipient)}, made {item.made:%Y-%m-%d %H:%M}, {standing(item)}:"
+    )
+    match item.reason:
+        case Message(text=text):
+            body = [text]
+        case Question(text=text, decisions=decisions):
+            numbered = [
+                f"{number}. {decision.text}\n   Its lean: {decision.lean}"
+                for number, decision in enumerate(decisions, start=1)
+            ]
+            body = [text, *numbered]
+        case Answer(question=question, rulings=rulings, comment=comment):
+            decided = [
+                f"{ruling.decision}. {ruling.verdict}"
+                + (f": {ruling.comment}" if ruling.comment else "")
+                for ruling in rulings
+            ]
+            body = [f"To item {question}.", *decided, comment]
+    return "\n".join([heading, *body])
+
+
+def verdict(decision: int) -> Verdict:
+    """Ask the operator for decision `decision`'s verdict, until it's one."""
+    while True:
+        said = typer.prompt(
+            f"{decision}: leaning, undecided or leave open?", default="leaning"
+        )
+        try:
+            return TypeAdapter[Verdict](Verdict).validate_python(said)
+        except ValidationError:
+            typer.echo("A verdict is `leaning`, `undecided` or `leave open`.")
+
+
+def prompted(item: Item) -> AnswerItem:
+    """Ask the operator their answer to a question, each decision in turn, then a comment on the whole; a plain question in words."""
+    typer.echo(shown(item))
+    match item.reason:
+        case Question(decisions=[]):
+            words = typer.prompt("Your answer")
+            return AnswerItem(number=item.number, comment=words)
+        case Question(decisions=decisions):
+
+            def ruled(decision: int) -> Ruling:
+                chosen = verdict(decision)
+                comment = typer.prompt(
+                    f"{decision}: a comment (optional)", default="", show_default=False
+                )
+                return Ruling(decision=decision, verdict=chosen, comment=comment)
+
+            rulings = [ruled(decision) for decision in range(1, len(decisions) + 1)]
+            whole = typer.prompt(
+                "A comment on the whole (optional)", default="", show_default=False
+            )
+            return AnswerItem(number=item.number, rulings=rulings, comment=whole)
+        case _:
+            message = f"item {item.number} isn't a question"
+            raise InboxError(message)
+
+
+@inbox.callback(invoke_without_command=True)
+def inbox_list(context: typer.Context) -> None:
+    """List what waits for you from your agents, oldest first.
+
+    Run it yourself, in your own terminal. Each item has a number, which `show`,
+    `answer` and `done` take.
+    """
+    if context.invoked_subcommand is not None:
+        return
+    items = answering().ask(ListInbox(), Items).items
+    if not items:
+        typer.echo("Nothing waits for you.")
+        return
+    for item in items:
+        typer.echo(line(item))
+
+
+@inbox.command("show")
+def inbox_show(
+    number: Annotated[int, typer.Argument(help="The item's number.")],
+) -> None:
+    """Show one item whole."""
+    typer.echo(shown(answering().ask(ShowItem(number=number), Shown).item))
+
+
+@inbox.command("answer")
+def inbox_answer(
+    number: Annotated[int, typer.Argument(help="The question's number.")],
+    leaning: Annotated[
+        list[int] | None,
+        typer.Option(help="A decision you go with the agent's lean on; repeat it."),
+    ] = None,
+    undecided: Annotated[
+        list[int] | None,
+        typer.Option(help="A decision you haven't decided; repeat it."),
+    ] = None,
+    leave_open: Annotated[
+        list[int] | None,
+        typer.Option(help="A decision left for later; repeat it."),
+    ] = None,
+    comment: Annotated[
+        str | None,
+        typer.Option(help="A comment on the whole, or a plain question's answer."),
+    ] = None,
+) -> None:
+    """Answer a question: each decision leaning, undecided or leave open, then a comment.
+
+    At a terminal, each numbered decision is asked in turn, with an optional
+    comment, then a comment on the whole; a plain question takes its answer in
+    words. `--leaning`, `--undecided` and `--leave-open`, each repeated for
+    several decisions, and `--comment` answer without asking. The answer reaches
+    the conversation that asked.
+    """
+    client = answering()
+    given = [
+        *(Ruling(decision=each, verdict="leaning") for each in leaning or []),
+        *(Ruling(decision=each, verdict="undecided") for each in undecided or []),
+        *(Ruling(decision=each, verdict="leave open") for each in leave_open or []),
+    ]
+    request = (
+        AnswerItem(number=number, rulings=given, comment=comment or "")
+        if given or comment is not None
+        else prompted(client.ask(ShowItem(number=number), Shown).item)
+    )
+    answer = client.ask(request, Shown).item
+    typer.echo(
+        f"Answered item {number}: your answer, item {answer.number}, is for "
+        f"{who(answer.recipient)}."
+    )
+
+
+@inbox.command("done")
+def inbox_done(
+    number: Annotated[int, typer.Argument(help="The message's number.")],
+) -> None:
+    """Take a message you've read off your list."""
+    answering().ask(FinishItem(number=number), Shown)
+    typer.echo(f"Item {number} is done.")
+
+
+@inbox.command("send")
+def inbox_send(
+    to: Annotated[str, typer.Argument(help="The launch, by its id or its worktree.")],
+    text: Annotated[str, typer.Argument(help="What to tell its session.")],
+) -> None:
+    """Send a message to the session a launch runs, its main conversation."""
+    client = answering()
+    named = Path(to).resolve()
+    found = [
+        each.launch
+        for each in client.launches()
+        if to == each.launch or named == each.worktree
+    ]
+    match found:
+        case [launch]:
+            sent = client.ask(SendItem(launch=launch, text=text), Shown).item
+            typer.echo(f"Sent item {sent.number} to {who(sent.recipient)}.")
+        case []:
+            message = f"no launch served is `{to}`, by its id or its worktree"
+            raise InboxError(message)
+        case _:
+            message = (
+                f"several launches run in {named}: {', '.join(found)}; name one by "
+                "its id"
+            )
+            raise InboxError(message)
 
 
 class Launcher(Model, arbitrary_types_allowed=True):
@@ -314,7 +596,9 @@ def launched(
         raise LaunchError(message)
     judge = launcher.layout.judge(repository).command(approval.tool.name)
     with approved_declaration(worktree, approval.commit) as declared:
-        checked(host_needs(), launcher.tools).require()
+        needs = checked(host_needs(), launcher.tools).require()
+        for off in needs.off:
+            launcher.say(f"Turned off, for want of a tool: {off.described()}")
         launcher.host.ensure()
         cached = CliCache(
             layout=launcher.layout.clis(runtime), channel=adapter.channel
@@ -339,7 +623,12 @@ def launched(
         launch = secrets.token_hex(8)
         own = launcher.layout.launch(launch)
         settings = terminal_settings(
-            declared, worktree, own.directory, cached.cli, hooked(adapter.hooks)
+            declared,
+            worktree,
+            own.directory,
+            cached.cli,
+            hooked(adapter.hooks),
+            tools=served_tools(),
         )
         registered = Register(
             launch=launch,

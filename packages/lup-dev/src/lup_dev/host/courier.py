@@ -9,7 +9,14 @@ judge's process. Every answer, the judge's or the service's own, goes out throug
 the `Courier` again (`told`): with what the conversation is told added, and a call
 to lup's tools rewritten to carry its `caller`, lup's id for the conversation.
 Each runtime's adapter fills both, since only it knows its runtime's spelling;
-`cli.py` builds the `Courier` from them, as it builds the `Answerer`.
+`cli.py` builds the `Courier` from them, as it builds the `Answerer`. The
+`Courier` also spells how an idle session is woken, where its runtime has a way
+(`woken`).
+
+What a conversation is told at each hook is the `Post`'s: the inbox's, which
+`cli.py` hands the service too. It hears every hook, and returns what waits for
+the conversation, counted told once the answer is written, and put back where it
+couldn't be (`returned`).
 
 lup's own id for each conversation (`Conversations`) is minted the first time a
 hook names it (a session's start, a subagent's start, its first call), and kept
@@ -21,9 +28,13 @@ connection the service before held closed with it.
 
 import secrets
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 
 from lup.sessions.terminal import Event
 from lup.types import Model, MutableModel
+
+if TYPE_CHECKING:
+    from lup_dev.host.protocol import Register
 
 
 class Heard(Model):
@@ -42,6 +53,13 @@ class Heard(Model):
     judged: bool
     """Whether the launch's judge reads it; one it doesn't is answered without
     starting the judge."""
+    after_block: bool = False
+    """At a turn's end, whether the turn went on because its end was held just
+    before: an end that follows a hold is let through, whatever's still there
+    (`docs/host-tools.md`, *No turn that won't end*)."""
+    fits: int
+    """The most this hook's answer tells the model whole, in bytes of UTF-8: past
+    it, the runtime keeps the text in a file the model isn't asked to read."""
 
 
 class Telling(Model):
@@ -75,6 +93,45 @@ class Courier(ABC):
         `ValueError` where the payload, or the answer, doesn't read as the
         runtime's.
         """
+
+    @abstractmethod
+    def woken(self, runtime: str, session: str, text: str) -> str | None:
+        """Return the line that starts a turn of `runtime`'s idle session `session` with `text`, written to its messaging socket.
+
+        None where the runtime has no such socket, which its adapter declares.
+        """
+
+
+class Posted(Model):
+    """What a conversation is told at one hook: each item's text, and the numbers of the items it tells."""
+
+    items: list[str] = []
+    """Each item's text, oldest first, or the line announcing one too long to
+    tell here."""
+    numbers: list[int] = []
+    """The items told or announced here, by number: put back as waiting where the
+    hook's answer couldn't be written."""
+
+
+class Post(ABC):
+    """What a launch's conversations are told at their hooks: what waits for each in its inbox.
+
+    `cli.py` hands the service the inbox's, as it hands it the courier, so the
+    service imports no module's code.
+    """
+
+    @abstractmethod
+    async def telling(
+        self, launch: Register, conversation: Conversation, heard: Heard, room: int
+    ) -> Posted:
+        """Note the hook `heard`, and return what `conversation` of `launch` is told in its answer, in `room` bytes at most.
+
+        What's returned is counted told, unless it's put back (`returned`).
+        """
+
+    @abstractmethod
+    def returned(self, posted: Posted) -> None:
+        """Put what `posted` told back as waiting: the hook's answer couldn't carry it."""
 
 
 class Conversation(Model):

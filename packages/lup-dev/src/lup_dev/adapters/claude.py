@@ -37,7 +37,27 @@ The service adds to each answer through `told`: a call to lup's tools
 the conversation calling, as `updatedInput` with no decision, so the call goes
 through the session's own permission mode as it would have; and what the
 conversation is told goes in as `additionalContext` beside a call or a session's
-start, or as the reason a turn's end is held (`decision: "block"`).
+start, or as the reason a turn's end is held (`decision: "block"`). What a hook
+tells whole is 10,000 bytes (`heard`'s `fits`): Claude Code caps a hook's
+`additionalContext` at 10,000 characters, which a text's UTF-8 bytes never
+undercount, and an item past it is announced instead. A turn's end following a
+hold, the session's or a subagent's, carries `stop_hook_active`, so the next
+end is let through.
+
+An idle session is woken through its own messaging socket (`woken`), which the
+launch puts in the room's socket directory: Claude Code "starts a new turn with
+the message" when the receiving session is idle, and closes a connection that
+hasn't sent a complete line within 30 seconds, so the host writes the whole line
+at once (its `cross-session-messaging` docs, read 2026-10-14). The docs give
+only the optional first line, `{"type":"auth","token":…}`, which Linux doesn't
+require; the message's own frame is undocumented. The first lup measured it on
+2.1.278 to 2.1.285: `{"type":"user","message":{"role":"user","content":…}}`, the
+message as the session's own user turn, started an idle background session's
+turn, through a socket moved by `--messaging-socket-path` too (its
+`coordination/wake.py`, `195ff73f3`); and a frame naming another session in
+`session_id` was dropped, only the one carrying the receiver's own id arriving
+(`68eaa2e2e`). Owed live on the version a launch runs (`docs/host-tools.md`,
+*Checks owed*).
 
 What the host's part relies on, from Claude Code's hooks reference
 (code.claude.com/docs/en/hooks, read 2026-10-14):
@@ -57,7 +77,8 @@ What the host's part relies on, from Claude Code's hooks reference
   read ... but Claude Code doesn't ask it to";
 - `Stop` and `SubagentStop`: `decision: "block"` "prevents Claude from
   stopping", its `reason` "Required when `decision` is `"block"`. Tells Claude
-  why it should continue".
+  why it should continue"; "SubagentStop hooks receive `stop_hook_active`" as
+  `Stop` hooks do.
 
 What its judging relies on, from Claude Code's hooks reference
 (code.claude.com/docs/en/hooks):
@@ -302,13 +323,14 @@ class SessionStart(Payload):
 
     hook_event_name: Literal["SessionStart"]
 
-    def heard(self) -> Heard:
+    def heard(self, fits: int) -> Heard:
         """Read the session's start: the judge reads it."""
         return Heard(
             event="session-started",
             session=self.session_id,
             agent=self.agent_id or None,
             judged=True,
+            fits=fits,
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
@@ -379,7 +401,7 @@ class PreToolUse(Payload):
             case _:
                 return None
 
-    def heard(self) -> Heard:
+    def heard(self, fits: int) -> Heard:
         """Read the call's start: the judge reads a file tool's write alone."""
         return Heard(
             event="call-started",
@@ -388,6 +410,7 @@ class PreToolUse(Payload):
             call=self.tool_use_id,
             tool=self.tool_name,
             judged=self.tool_name in WRITING,
+            fits=fits,
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
@@ -494,7 +517,7 @@ class PostToolUse(Payload):
     tool_name: str
     tool_use_id: str
 
-    def heard(self) -> Heard:
+    def heard(self, fits: int) -> Heard:
         """Read the call's finish: the judge reads it, where it's hooked."""
         return Heard(
             event="call-finished",
@@ -503,6 +526,7 @@ class PostToolUse(Payload):
             call=self.tool_use_id,
             tool=self.tool_name,
             judged=True,
+            fits=fits,
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
@@ -550,13 +574,15 @@ class Stop(Payload):
     stop_hook_active: bool = False
     """Whether the turn goes on because a `Stop` hook blocked it already."""
 
-    def heard(self) -> Heard:
+    def heard(self, fits: int) -> Heard:
         """Read the turn's end: in a room, with no checkpoint, the judge doesn't read it."""
         return Heard(
             event="turn-ended",
             session=self.session_id,
             agent=self.agent_id or None,
             judged=False,
+            after_block=self.stop_hook_active,
+            fits=fits,
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
@@ -600,14 +626,18 @@ class SubagentStop(Payload):
     """
 
     hook_event_name: Literal["SubagentStop"]
+    stop_hook_active: bool = False
+    """Whether the subagent goes on because a `SubagentStop` hook blocked it already."""
 
-    def heard(self) -> Heard:
+    def heard(self, fits: int) -> Heard:
         """Read a subagent's turn's end: in a room, with no checkpoint, the judge doesn't read it."""
         return Heard(
             event="conversation-ended",
             session=self.session_id,
             agent=self.agent_id or None,
             judged=False,
+            after_block=self.stop_hook_active,
+            fits=fits,
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
@@ -674,13 +704,14 @@ def unanswered(raw: str, failure: str) -> str:
     return output.model_dump_json(by_alias=True, exclude_none=True)
 
 
-def heard(raw: str) -> Heard:
+def heard(raw: str, fits: int = 10_000) -> Heard:
     """Read one Claude Code hook as the host service does: who's speaking, about which call, and whether the judge reads it.
 
-    Raise `ValidationError` where the payload isn't one of the hooks this adapter
-    reads.
+    Each hook's answer tells `fits` bytes whole: Claude Code's cap on a hook's
+    `additionalContext`, in characters, which UTF-8 bytes never undercount. Raise
+    `ValidationError` where the payload isn't one of the hooks this adapter reads.
     """
-    return TypeAdapter[Received](Received).validate_json(raw).heard()
+    return TypeAdapter[Received](Received).validate_json(raw).heard(fits)
 
 
 def told(raw: str, answer: str, telling: Telling) -> str | None:
@@ -695,6 +726,31 @@ def told(raw: str, answer: str, telling: Telling) -> str | None:
     if added == said:
         return None
     return added.model_dump_json(by_alias=True, exclude_none=True)
+
+
+class UserTurn(Model):
+    """The message a frame carries, as the session's own user turn."""
+
+    role: Literal["user"] = "user"
+    content: str
+
+
+class Frame(Model):
+    """One message to a session's messaging socket, a line of JSON: a user turn, for the session it names."""
+
+    type: Literal["user"] = "user"
+    message: UserTurn
+    session_id: str
+    """The session it's for: one whose id differs drops it."""
+
+
+def woken(session: str, text: str) -> str:
+    """Return the line that starts a turn of the idle Claude Code session `session` with `text`, on its messaging socket.
+
+    >>> woken("s1", "hi")
+    '{"type":"user","message":{"role":"user","content":"hi"},"session_id":"s1"}'
+    """
+    return Frame(message=UserTurn(content=text), session_id=session).model_dump_json()
 
 
 def hooks(command: list[str], timeout: timedelta) -> list[Hook]:
@@ -786,6 +842,7 @@ def adapter() -> Adapter:
         unanswered=unanswered,
         heard=heard,
         told=told,
+        woken=woken,
         hooks=hooks,
         channel=ClaudeChannel(),
         agent=agent,

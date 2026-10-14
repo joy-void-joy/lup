@@ -68,7 +68,22 @@ end is held (`decision: "block"`). From the source at `rust-v0.162.1`:
 - `PreToolUse`'s `additionalContext` is collected for the model unless the
   answer is one it refuses (`pre_tool_use.rs`, `parse_completed`), as are
   `SessionStart`'s and `PostToolUse`'s; `Stop` and `SubagentStop` hold the turn
-  on `decision: "block"` with a `reason` that isn't blank (`parse_stop`).
+  on `decision: "block"` with a `reason` that isn't blank (`parse_stop`);
+- what a hook tells whole is 10,000 bytes (`heard`'s `fits`): an
+  `additionalContext` past its handler's `additionalContextLimit`, 2,500 tokens
+  by default, and a turn's end's continuation past the same default, are kept
+  in a file with a preview (`hooks/src/output_spill.rs`, `engine/mod.rs`'s
+  `run_stop`), a token counted as 4 bytes (`utils/string/src/truncate.rs`,
+  `approx_token_count`). The room's hooks don't raise the limit;
+- `SubagentStop` carries `stop_hook_active` as `Stop` does
+  (`subagent-stop.command.input`), so an end following a hold is let through.
+
+Nothing reaches a Codex session idle between its turns, so the adapter has no
+way to wake one (`woken` is none), a gap declared with its evidence: what an MCP
+server sends unprompted is only logged (`rmcp-client/src/logging_client_handler.rs`),
+and the app-server that could start a turn (`turn/start`) runs inside the
+terminal's own process under `--no-daemon`, out of reach. An item for an idle
+session waits for its next call; the operator typing in its terminal starts one.
 
 What its judging relies on, from Codex's hooks documentation and its source at
 `rust-v0.162.1` (paths under `codex-rs/`), whose hook schemas
@@ -333,13 +348,14 @@ class SessionStart(Payload):
 
     hook_event_name: Literal["SessionStart"]
 
-    def heard(self) -> Heard:
+    def heard(self, fits: int) -> Heard:
         """Read the session's start: the judge reads it."""
         return Heard(
             event="session-started",
             session=self.session_id,
             agent=self.agent_id,
             judged=True,
+            fits=fits,
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
@@ -372,7 +388,7 @@ class PreToolUse(Payload):
     """The call's input: a command's or a patch's `command`, an MCP tool's
     arguments, or their text where that isn't JSON."""
 
-    def heard(self) -> Heard:
+    def heard(self, fits: int) -> Heard:
         """Read the call's start: the judge reads every one."""
         return Heard(
             event="call-started",
@@ -381,6 +397,7 @@ class PreToolUse(Payload):
             call=self.tool_use_id,
             tool=self.tool_name,
             judged=True,
+            fits=fits,
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
@@ -439,7 +456,7 @@ class PostToolUse(Payload):
     tool_name: str
     tool_use_id: str
 
-    def heard(self) -> Heard:
+    def heard(self, fits: int) -> Heard:
         """Read the call's finish: the judge reads every one."""
         return Heard(
             event="call-finished",
@@ -448,6 +465,7 @@ class PostToolUse(Payload):
             call=self.tool_use_id,
             tool=self.tool_name,
             judged=True,
+            fits=fits,
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
@@ -492,13 +510,15 @@ class Stop(Payload):
     stop_hook_active: bool = False
     """Whether the turn goes on because a `Stop` hook blocked it already."""
 
-    def heard(self) -> Heard:
+    def heard(self, fits: int) -> Heard:
         """Read the turn's end: the judge reads it."""
         return Heard(
             event="turn-ended",
             session=self.session_id,
             agent=self.agent_id,
             judged=True,
+            after_block=self.stop_hook_active,
+            fits=fits,
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
@@ -541,14 +561,18 @@ class SubagentStop(Payload):
     """
 
     hook_event_name: Literal["SubagentStop"]
+    stop_hook_active: bool = False
+    """Whether the subagent's turn goes on because a `SubagentStop` hook blocked it already."""
 
-    def heard(self) -> Heard:
+    def heard(self, fits: int) -> Heard:
         """Read a subagent's turn's end: the judge reads it."""
         return Heard(
             event="conversation-ended",
             session=self.session_id,
             agent=self.agent_id,
             judged=True,
+            after_block=self.stop_hook_active,
+            fits=fits,
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
@@ -615,13 +639,14 @@ def unanswered(raw: str, failure: str) -> str:
     return output.model_dump_json(by_alias=True, exclude_none=True)
 
 
-def heard(raw: str) -> Heard:
+def heard(raw: str, fits: int = 10_000) -> Heard:
     """Read one Codex hook as the host service does: who's speaking, about which call, and that the judge reads it.
 
-    Raise `ValidationError` where the payload isn't one of the hooks this adapter
-    reads.
+    Each hook's answer tells `fits` bytes whole: Codex's default limit on a
+    hook's context, 2,500 tokens of 4 bytes. Raise `ValidationError` where the
+    payload isn't one of the hooks this adapter reads.
     """
-    return TypeAdapter[Received](Received).validate_json(raw).heard()
+    return TypeAdapter[Received](Received).validate_json(raw).heard(fits)
 
 
 def told(raw: str, answer: str, telling: Telling) -> str | None:
@@ -759,6 +784,7 @@ def adapter() -> Adapter:
         unanswered=unanswered,
         heard=heard,
         told=told,
+        woken=None,
         hooks=hooks,
         channel=CodexChannel(),
         agent=agent,

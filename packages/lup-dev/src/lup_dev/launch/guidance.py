@@ -12,6 +12,13 @@ installed `lup_dev` for lup's own, and rendered with Jinja (`docs/launch.md`,
 - the environment is Jinja's sandbox, since an agent can write a section's file
   and the rendering runs on the host, outside every room.
 
+After the declared sections come lup's tools, where the session is served any
+(`listed`): each by its name and its summary, compiled from the tools
+themselves, saying they're found through the runtime's tool search by name. Each
+runtime defers an MCP server's tools behind its tool search, and the first lup
+found that agents told nothing of deferred tools concluded they didn't exist
+(`docs/host-tools.md`, *Found through tool search, listed in the guidance*).
+
 The person's own section, `AGENTS.local.md` at the root of the worktree launched,
 which git ignores, is appended after every other where there's one, so it holds
 where they differ. The
@@ -32,6 +39,7 @@ from lup_dev.layout import CheckoutLayout
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from lup.tools.tool import ToolSpec
     from lup_dev.declaration.kinds import Section
     from lup_dev.declaration.resolve import Resolved
 
@@ -77,15 +85,36 @@ def read(section: Section, root: Path) -> str:
         raise GuidanceError(message) from error
 
 
-def render(resolved: Resolved, project: Path, worktree: Path) -> str:
-    """Render the session's guidance from `resolved`'s sections.
+def listed(tools: list[ToolSpec]) -> str:
+    """Return the section listing lup's tools, each by its name and its summary.
+
+    >>> from lup.tools.speaking import note
+    >>> print(listed([note.spec()]))
+    ## lup's tools
+    <BLANKLINE>
+    lup serves these tools in this session. Your tool search finds each by its name, with its full description:
+    <BLANKLINE>
+    - `note`: Attach a remark to your answer, and carry on.
+    """
+    lines = [f"- `{tool.name}`: {tool.summary}" for tool in tools]
+    opening = (
+        "lup serves these tools in this session. Your tool search finds each by "
+        "its name, with its full description:"
+    )
+    return "\n".join(["## lup's tools", "", opening, "", *lines])
+
+
+def render(
+    resolved: Resolved, project: Path, worktree: Path, tools: list[ToolSpec]
+) -> str:
+    """Render the session's guidance from `resolved`'s sections, and the tools it's served.
 
     The project's own sections are read in `project`, a directory holding the
     project's files at the commit its declaration was read from, and the
     person's own in `worktree`, the worktree launched. The sections go in the
-    order the declaration gives them, then the person's own, where there's one.
-    Raise `GuidanceError` naming the section that can't be read, or doesn't
-    render.
+    order the declaration gives them, then lup's `tools` (`listed`), then the
+    person's own, where there's one. Raise `GuidanceError` naming the section
+    that can't be read, or doesn't render.
     """
     runner = resolved.runner
 
@@ -114,10 +143,11 @@ def render(resolved: Resolved, project: Path, worktree: Path) -> str:
         rendered(described(section), read(section, project))
         for section in resolved.guidance
     ]
+    served = [listed(tools)] if tools else []
     local = CheckoutLayout(root=worktree).local_guidance
     own = (
         [rendered(f"the person's own section (`{local}`)", local.read_text())]
         if local.is_file()
         else []
     )
-    return "\n\n".join([OPENING, *declared, *own]) + "\n"
+    return "\n\n".join([OPENING, *declared, *served, *own]) + "\n"
