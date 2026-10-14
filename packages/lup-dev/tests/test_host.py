@@ -234,6 +234,7 @@ def launch(tmp_path: Path, name: str, runtime: str) -> Register:
         judge=judge,
         container=f"lup-{name}",
         limits=Limits(actions=["fetch", "push"], protected=["refs/heads/main"]),
+        github=None,
     )
 
 

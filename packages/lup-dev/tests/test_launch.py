@@ -26,8 +26,9 @@ from lup_dev.approval import Approval, ReleaseTool
 from lup_dev.catalog.room import SessionDefaults
 from lup_dev.declaration.requirements import Printed, Tools
 from lup_dev.declaration.resolve import resolve
+from lup_dev.forge.github import GitHubError
 from lup_dev.host.client import HostClient, Starter
-from lup_dev.host.protocol import HostError, Limits, Register
+from lup_dev.host.protocol import GitHubRepository, HostError, Limits, Register
 from lup_dev.launch.clis import Channel, ChannelError
 from lup_dev.launch.guidance import OPENING
 from lup_dev.launch.session import (
@@ -189,15 +190,18 @@ class Offline(Channel, arbitrary_types_allowed=True):
 
 
 class Found(Tools):
-    """Every program on the `PATH`; no probe runs."""
+    """Every program on the `PATH` but those `missing`; no probe runs."""
 
-    def __init__(self, record: Callable[[str], None]) -> None:
+    def __init__(
+        self, record: Callable[[str], None], missing: list[str] | None = None
+    ) -> None:
         self.record = record
+        self.missing = missing or []
 
     @override
     def found(self, program: str) -> bool:
         self.record(f"found {program}")
-        return True
+        return program not in self.missing
 
     @override
     def run(self, command: list[str]) -> Printed:
@@ -244,8 +248,17 @@ class Engine:
 class Machine:
     """A launch's machine, every seam a stub recording into one list."""
 
-    def __init__(self, tmp_path: Path, clock: FakeClock, *, ran: int = 7) -> None:
+    def __init__(
+        self,
+        tmp_path: Path,
+        clock: FakeClock,
+        *,
+        ran: int = 7,
+        missing: list[str] | None = None,
+        unnamed: str | None = None,
+    ) -> None:
         self.events = Events()
+        self.unnamed = unnamed
         record = self.events.record
         self.layout = Layout(
             state=tmp_path / "state",
@@ -271,7 +284,7 @@ class Machine:
             trust=self.trust,
             host=self.host,
             podman=Podman(execute=self.engine),
-            tools=Found(record),
+            tools=Found(record, missing),
             clock=clock,
             terminal=TerminalVariables(
                 term="xterm-kitty",
@@ -282,6 +295,7 @@ class Machine:
                 visual=None,
             ),
             say=record,
+            github=self.github,
         )
         self.adapter = claude.adapter().model_copy(
             update={"channel": Offline(events=self.events)}
@@ -313,6 +327,12 @@ class Machine:
         write_model(self.layout.approved(common), approval)
         return Unchanged(commit=commit, approval=approval)
 
+    def github(self, repository: Path) -> GitHubRepository:
+        self.events.record(f"github {repository.name}")
+        if self.unnamed is not None:
+            raise GitHubError(self.unnamed)
+        return GitHubRepository(owner="someone", name="work")
+
     def launching(self, say: Callable[[str], None]) -> cli.Launcher:
         """Stand in for the command's machine, whatever it would say through."""
         del say
@@ -333,6 +353,7 @@ def dead(project: Path) -> Register:
         judge=Path("/nowhere/lup-dev"),
         container="lup-dead",
         limits=resolve(Project()).limits,
+        github=None,
     )
 
 
@@ -366,6 +387,8 @@ def test_a_launch_runs_each_step_in_order_and_ends_its_registration(
     assert [each for each in said if not each.startswith("The host zone")] == [
         "trust",
         "found podman",
+        "found gh",
+        "github .git",
         "host",
         "cli",
         (
@@ -408,6 +431,7 @@ def test_a_launch_runs_each_step_in_order_and_ends_its_registration(
             ],
             protected=["refs/heads/main", "refs/tags/*", "refs/heads/release/*"],
         ),
+        github=GitHubRepository(owner="someone", name="work"),
     )
     run = machine.engine.run()
     assert f"--name={container}" in run
@@ -454,6 +478,48 @@ def test_a_launch_compiles_the_approved_declarations_guidance_and_hooks(
     assert "As committed." in guidance
     assert "Uncommitted." not in guidance
     assert guidance.endswith("Mine.\n")
+
+
+def test_a_launch_without_gh_says_so_once_and_names_no_repository(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    machine = Machine(tmp_path, clock, missing=["gh"])
+
+    cli.launched(machine.adapter, [], project, machine.launcher)
+
+    said = machine.events.said
+    off = [each for each in said if "gh" in each and not each.startswith("found")]
+    assert off == [
+        (
+            "Off: `gh`, for `lup-dev launch` (reaches GitHub with your login for "
+            "lup's GitHub tools, and for the gate's issue states in a room): not on "
+            "the `PATH`. Install: your system's `github-cli` package, then `gh auth "
+            "login`."
+        )
+    ]
+    assert not [each for each in said if each.startswith("github")]
+    [registered] = machine.host.served
+    assert registered.github is None
+
+
+def test_a_repository_gh_cant_name_is_said_once_and_registered_without_one(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    machine = Machine(
+        tmp_path, clock, unnamed="none of the git remotes point to GitHub"
+    )
+
+    cli.launched(machine.adapter, [], project, machine.launcher)
+
+    said = machine.events.said
+    assert [each for each in said if "GitHub" in each] == [
+        (
+            "lup's GitHub tools won't reach GitHub from this launch: none of the "
+            "git remotes point to GitHub."
+        )
+    ]
+    [registered] = machine.host.served
+    assert registered.github is None
 
 
 def test_the_registration_ends_when_the_cli_fails(

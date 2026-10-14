@@ -158,7 +158,7 @@ allowed_importers = ["lup_dev.cli"]
 name = "lup_dev's subsystems import downwards"
 type = "layers"
 containers = ["lup_dev"]
-layers = ["adapters", "launch", "policy", "codescan", "declaration", "catalog", "host"]
+layers = ["adapters", "launch", "policy", "codescan", "declaration", "catalog", "forge", "host"]
 
 # A runtime's SDK is imported only in its adapter, so a project installing one
 # extra never reaches the other (`docs/conventions.md`, *Imports and boundaries*).
