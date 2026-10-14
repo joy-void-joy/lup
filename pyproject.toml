@@ -158,7 +158,27 @@ allowed_importers = ["lup_dev.cli"]
 name = "lup_dev's subsystems import downwards"
 type = "layers"
 containers = ["lup_dev"]
-layers = ["adapters", "launch", "policy", "codescan", "declaration", "catalog", "host"]
+layers = ["adapters", "launch", "policy", "codescan", "declaration", "catalog", "remote", "host"]
+
+# git's remote helper runs on a room's own Python, which has the standard library
+# alone (`docs/host-tools.md`, *git through a remote helper*): it imports nothing
+# but the standard library's modules listed here, each one it uses.
+[[tool.importlinter.contracts]]
+name = "lup_dev.remote.helper imports the standard library alone"
+type = "forbidden"
+source_modules = ["lup_dev.remote.helper"]
+forbidden_modules = ["*", "lup.**", "lup_dev.**"]
+as_packages = false
+ignore_imports = [
+    "lup_dev.remote.helper -> collections",
+    "lup_dev.remote.helper -> itertools",
+    "lup_dev.remote.helper -> json",
+    "lup_dev.remote.helper -> pathlib",
+    "lup_dev.remote.helper -> socket",
+    "lup_dev.remote.helper -> subprocess",
+    "lup_dev.remote.helper -> sys",
+    "lup_dev.remote.helper -> typing",
+]
 
 # A runtime's SDK is imported only in its adapter, so a project installing one
 # extra never reaches the other (`docs/conventions.md`, *Imports and boundaries*).

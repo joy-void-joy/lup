@@ -108,11 +108,12 @@ async def judged(asked: Asked) -> Judged:
 
     Spawned rather than forked: `sh` forks from the service's process and runs
     Python in the child before the judge starts, which can deadlock in a process
-    with threads, and it would hold a thread per hook for a hold's hours.
+    with threads, and it would hold a thread per hook for a hold's hours. git's
+    pushes and fetches for a room run through it too (`remote/protocol.py`).
     """
     program, *arguments = asked.command
     try:
-        # lup: ignore("subprocess", why="the host service awaits each judge on its event loop, which sh can't: it forks, and holds a thread per hook")
+        # lup: ignore("subprocess", why="the host service awaits each judge, and git for a room, on its event loop, which sh can't: it forks, and holds a thread per process")
         process = await asyncio.create_subprocess_exec(
             program,
             *arguments,

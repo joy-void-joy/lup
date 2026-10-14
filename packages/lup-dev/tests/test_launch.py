@@ -30,6 +30,7 @@ from lup_dev.host.client import HostClient, Starter
 from lup_dev.host.protocol import HostError, Limits, Register
 from lup_dev.launch.clis import Channel, ChannelError
 from lup_dev.launch.guidance import OPENING
+from lup_dev.launch.room import RoomError
 from lup_dev.launch.session import (
     LaunchError,
     SessionParts,
@@ -366,6 +367,7 @@ def test_a_launch_runs_each_step_in_order_and_ends_its_registration(
     assert [each for each in said if not each.startswith("The host zone")] == [
         "trust",
         "found podman",
+        "found git",
         "host",
         "cli",
         (
@@ -414,6 +416,31 @@ def test_a_launch_runs_each_step_in_order_and_ends_its_registration(
     assert f"--mount=type=bind,source={machine.sockets},destination=/run/lup" in run
     assert run[-1] == "--resume"
     assert str(machine.layout.clis("claude").version("2.1.300") / "cli") in run
+    directory = machine.layout.launch(launch).directory
+    assert f"--env=GIT_CONFIG_GLOBAL={directory / 'gitconfig'}" in run
+    assert (
+        f"--env=PATH={directory / 'bin'}:/usr/local/sbin:/usr/local/bin:/usr/sbin:"
+        "/usr/bin:/sbin:/bin"
+    ) in run
+    for written in [directory / "bin", directory / "gitconfig"]:
+        assert (
+            f"--mount=type=bind,source={written},destination={written},ro=true" in run
+        )
+
+
+def test_a_repository_whose_config_the_room_could_change_doesnt_launch(
+    project: Path, tmp_path: Path, clock: FakeClock, shell: Shell
+) -> None:
+    machine = Machine(tmp_path, clock)
+    shell.git(project, "config", "include.path", "shared.cfg")
+
+    with pytest.raises(RoomError, match=r"includes .*shared.cfg, inside the room's"):
+        cli.launched(machine.adapter, [], project, machine.launcher)
+
+    assert not any(each.startswith("register") for each in machine.events.said)
+    assert not machine.layout.launches.exists() or not any(
+        machine.layout.launches.iterdir()
+    )
 
 
 def test_a_launch_compiles_the_approved_declarations_guidance_and_hooks(
