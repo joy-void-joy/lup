@@ -14,6 +14,7 @@ import ast
 import io
 import os
 import sys
+import time
 import tokenize
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Literal
@@ -306,6 +307,22 @@ def reachable_issues(monkeypatch: pytest.MonkeyPatch) -> None:
         return None
 
     monkeypatch.setattr(GitHubIssues, "unreachable", reachable)
+
+
+@pytest.fixture(autouse=True)
+def utc() -> Iterator[None]:
+    """Read local times as UTC, so what's said of a moment is the same on every machine."""
+    before = os.environ.get("TZ")
+    os.environ["TZ"] = "UTC"
+    time.tzset()
+    try:
+        yield
+    finally:
+        if before is None:
+            del os.environ["TZ"]
+        else:
+            os.environ["TZ"] = before
+        time.tzset()
 
 
 class FakeSpawner(Spawner):

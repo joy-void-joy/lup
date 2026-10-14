@@ -22,7 +22,7 @@ import secrets
 import shutil
 import sys
 from collections.abc import Callable
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, override
 
@@ -352,11 +352,19 @@ def answering() -> HostClient:
     return client
 
 
+def clocked(at: datetime) -> str:
+    """Say a moment as the operator's own clock reads it, to the minute.
+
+    The inbox keeps its times in UTC; the operator reads their own time zone's.
+    """
+    return f"{at.astimezone():%Y-%m-%d %H:%M}"
+
+
 def line(item: Item) -> str:
     """Say an item in a line: its number, when it was made, what it is, from whom, and its first line."""
     where = "" if item.worktree is None else f" in {item.worktree}"
     return (
-        f"{item.number:>4}  {item.made:%Y-%m-%d %H:%M}  {what(item)} from "
+        f"{item.number:>4}  {clocked(item.made)}  {what(item)} from "
         f"{who(item.sender)}{where}: {opening(item)}"
     )
 
@@ -364,20 +372,18 @@ def line(item: Item) -> str:
 def standing(item: Item) -> str:
     """Say where an item stands."""
     match item.state:
-        case Waiting(announced=None):
-            return "waiting"
         case Waiting(announced=announced):
-            return (
-                f"waiting, announced at {announced:%Y-%m-%d %H:%M} as too long to tell"
-            )
+            if announced is None:
+                return "waiting"
+            return f"waiting, announced at {clocked(announced)} as too long to tell"
         case Told(at=at, how=how):
-            return f"told at {at:%Y-%m-%d %H:%M} ({how})"
+            return f"told at {clocked(at)} ({how})"
         case Answered(at=at, answer=answer):
-            return f"answered at {at:%Y-%m-%d %H:%M}, item {answer}"
+            return f"answered at {clocked(at)}, item {answer}"
         case Done(at=at):
-            return f"done at {at:%Y-%m-%d %H:%M}"
+            return f"done at {clocked(at)}"
         case Decided(at=at, approved=approved):
-            return f"{settled(approved=approved)} at {at:%Y-%m-%d %H:%M}"
+            return f"{settled(approved=approved)} at {clocked(at)}"
 
 
 def settled(*, approved: bool) -> str:
@@ -390,7 +396,7 @@ def heading(item: Item) -> str:
     where = "" if item.worktree is None else f" in {item.worktree}"
     return (
         f"Item {item.number}, {what(item)} from {who(item.sender)}{where} to "
-        f"{who(item.recipient)}, made {item.made:%Y-%m-%d %H:%M}, {standing(item)}:"
+        f"{who(item.recipient)}, made {clocked(item.made)}, {standing(item)}:"
     )
 
 
