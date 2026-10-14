@@ -33,7 +33,7 @@ from lup_dev.declaration.grammar import (
     Replace,
     listed,
 )
-from lup_dev.host.protocol import Limits, actions
+from lup_dev.host.protocol import GitHubRepository, Limits, actions
 
 
 class Rules(Named[str]):
@@ -441,4 +441,76 @@ class Guidance(Named[Section]):
 
     @override
     def named(self, entry: Section) -> str:
+        return entry.name
+
+
+class Repository(Model, extra="forbid"):
+    """Another repository the project's sessions may read, where it is on the host, and what it is.
+
+    A launched room mounts it whole and read-only at its host path, and the
+    guidance lists it (`docs/related-repositories.md`). A name, a path, an
+    `about` and a GitHub identity that's `owner/name` where one is given, or
+    the load fails, naming the entry.
+
+    >>> Repository(name="atlas", path=Path("atlas.git"), about="a made-up neighbour").github is None
+    True
+    >>> Repository(name="atlas", path=Path("atlas.git"), about="x", github="atlas")
+    Traceback (most recent call last):
+    ...
+    lup_dev.declaration.errors.ProjectError: `Repository` `atlas` gives its GitHub repository as `atlas`: a repository on GitHub is `owner/name`, not 'atlas'
+    """
+
+    name: str
+    """How sessions and the guidance call it."""
+    path: Path
+    """The repository on the host: a bare repository's git directory, with its
+    worktrees under it, or a clone's working tree, with its `.git`. Relative to
+    the directory holding the project's own repository (`atlas.git` beside
+    `project.git`), or absolute; a leading `~` is the operator's home."""
+    about: str
+    """One line on what it is, and what it's for here."""
+    github: str | None = None
+    """Its `owner/name` on GitHub, where it has one, which the guidance gives so
+    a session reads its issues through lup's GitHub tools."""
+
+    @model_validator(mode="after")
+    def written(self) -> Self:
+        """Refuse an entry without a name, a path or an `about`, or with a GitHub identity that isn't `owner/name`."""
+        if not self.name.strip():
+            message = f"A `Repository` at `{self.path}` has no name"
+            raise ProjectError(message)
+        if self.path == Path():
+            message = f"`Repository` `{self.name}` names no path"
+            raise ProjectError(message)
+        if not self.about.strip():
+            message = (
+                f"`Repository` `{self.name}` says nothing `about` what it is, "
+                "which its sessions read"
+            )
+            raise ProjectError(message)
+        if self.github is not None:
+            try:
+                GitHubRepository.read(self.github)
+            except ValueError as malformed:
+                message = (
+                    f"`Repository` `{self.name}` gives its GitHub repository as "
+                    f"`{self.github}`: {malformed}"
+                )
+                raise ProjectError(message) from malformed
+        return self
+
+
+class Repositories(Named[Repository]):
+    """Other repositories for the project's sessions to read, each named by its name.
+
+    Any module may hold one; `Core` holds none. Which repositories a person
+    relates, and what each is, are theirs, so they go in a module of their own
+    layer, `lup_project.local.py`, never in a committed declaration
+    (`docs/related-repositories.md`, decision 7). One name from two modules is
+    one repository, the first's, where both give it the same path; with
+    different paths, the load fails naming both.
+    """
+
+    @override
+    def named(self, entry: Repository) -> str:
         return entry.name

@@ -7,7 +7,8 @@ hold it, by the kind's type (`docs/declaration.md`, *What a module is*):
 - names are per kind and shared across modules, so one name from two modules
   fails, naming both, but for a path pattern, which from two modules is one
   pattern, a package, which from two modules or a requirement is one package, a
-  requirement, which is checked for each module needing it, and an exemption,
+  related repository, which from two modules is one where both give it one path,
+  a requirement, which is checked for each module needing it, and an exemption,
   which each module keeps for its own paths;
 - entries placed `before=` or `after=` another go there, whichever module holds
   it, and the rest keep the order of their modules;
@@ -46,6 +47,8 @@ from lup_dev.declaration.kinds import (
     Paths,
     Pytest,
     RemovedTools,
+    Repositories,
+    Repository,
     Rules,
     Section,
     Session,
@@ -174,6 +177,10 @@ class Resolved(Model):
     guidance: list[Section]
     """The sections of guidance, in the order of their modules but where one is
     placed by another's name."""
+    repositories: list[Repository]
+    """The other repositories the project's sessions may read, from every module
+    holding some, merged by name; each path as written. A person names theirs
+    in their own layer, `lup_project.local.py`."""
     asks: Literal["every", "protected"]
 
 
@@ -253,6 +260,32 @@ def image(modules: list[Module], requirements: list[Needed]) -> list[Package]:
         if each.requirement.package is not None
     ]
     every = [*own, *provided]
+    names = [each.name for each in every]
+    return [each for at, each in enumerate(every) if each.name not in names[:at]]
+
+
+def neighbours(modules: list[Module]) -> list[Repository]:
+    """Return the other repositories `modules` declare, merged by name.
+
+    One name from two modules is one repository, the first's, where both give
+    it the same path; with different paths, the load fails naming both.
+    """
+    every = held(
+        Repositories(), parts(modules, Repositories), "Repositories", shared=False
+    )
+    clashes = [
+        f"`{one.name}` at `{one.path}` and at `{other.path}`"
+        for at, one in enumerate(every)
+        for other in every[at + 1 :]
+        if one.name == other.name and one.path != other.path
+    ]
+    if clashes:
+        message = (
+            f"Repositories: two modules give one repository different paths, "
+            f"{'; '.join(clashes)}. A name is one repository: give it one path, "
+            "or rename one"
+        )
+        raise ProjectError(message)
     names = [each.name for each in every]
     return [each for at, each in enumerate(every) if each.name not in names[:at]]
 
@@ -407,6 +440,7 @@ def resolve(project: Project) -> Resolved:
         session=settled(parts(modules, Session)),
         limits=limited(parts(modules, Credentials)),
         guidance=held(Guidance(), parts(modules, Guidance), "Guidance"),
+        repositories=neighbours(modules),
         asks=project.asks,
     )
 
