@@ -39,8 +39,8 @@ through the session's own permission mode as it would have; and what the
 conversation is told goes in as `additionalContext` beside a call or a session's
 start, or as the reason a turn's end is held (`decision: "block"`).
 
-What this relies on, from Claude Code's hooks reference
-(code.claude.com/docs/en/hooks, read 2026-10-14), beside what's listed below:
+What the host's part relies on, from Claude Code's hooks reference
+(code.claude.com/docs/en/hooks, read 2026-10-14):
 - "MCP tools follow the naming pattern `mcp__<server>__<tool>`", and "appear as
   regular tools in tool events";
 - `PreToolUse`'s `updatedInput` "Modifies the tool's input parameters before
