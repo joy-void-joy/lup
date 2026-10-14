@@ -12,7 +12,7 @@ This repository is the second lup. The first (`joy-void-joy/lup-legacy`, archive
 
 ## How work goes
 
-1. **A design note first.** For each piece, open a draft pull request into `dev` holding only `docs/<piece>.md`: its modules, what each is for, its public API, and the choices it makes with their alternatives. Implement once the operator approves it. The note stays as that piece's documentation, kept true as the code changes.
+1. **A design note first.** For each piece, write `docs/<piece>.md`: its modules, what each is for, its public API, and the choices it makes with their alternatives. Put its decisions to the operator in the conversation, numbered, each with your lean, and record their take on each in the note. Land it on `dev` once they've answered, and implement from there. The note stays as that piece's documentation, kept true as the code changes.
 2. **One concern per branch, landed on `dev` by the session that started the work.**
    - Branch from `dev`. When the gate passes (`uv run lup-dev check`: the engine rebuilt if stale, lup's rules, ruff, the formatter, pyright, the tests and the import contracts, judged by its exit code), merge the branch into `dev` with a merge commit, and push.
    - **A worker doesn't land its own branch.** It commits on its branch, leaves it unpushed, and hands it back. The session that delegated it reviews it, runs `uv run lup-dev check --fix` on the merged result (ruff's safe fixes and the formatter, which the judge never reports to an agent, then the gate), and lands it with what the fixes changed in the merge commit, one merge at a time, so the shared `dev` checkout never takes two merges at once and every branch is looked at before it lands.
