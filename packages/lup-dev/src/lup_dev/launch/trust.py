@@ -19,9 +19,12 @@ and the host service run, never a branch's own copy (`Zone`):
 The zone's fingerprint is kept with the commit the operator approved, per
 repository, in lup's state (`Approval`). `trusted`, which a launch calls before
 anything else, and `lup-dev trust` compare the tip's zone with it (`Trust.check`).
-Where it changed, or nothing was approved, the change since the approved commit is
-shown through the terminal's pager and the operator asked once, yes or no
-(`Asker`):
+Where it changed, or nothing was approved, the operator reads a summary first
+(`Change.summary`): what's approved and why it runs on the host, the commit
+approved before and the tip, and git's own count of each file changed since
+(`git diff --stat --compact-summary`), coloured, as git prints it. Then they're
+asked whether to show the whole diff, no by default, a yes showing it through the
+terminal's pager; then whether to approve, no by default (`Asker`):
 - yes: the tip's copy is installed as the repository's own (`Toolchain`, into
   `Layout.judge`; for the workspace's source, the engine built first through the
   declaration's own step and runner, as the gate builds it), which the host
@@ -316,12 +319,24 @@ class Standing(Model):
 
 
 class Diffed(Model):
-    """git's diff of some of the zone's paths between two trees, and its count."""
+    """git's diff of some of the zone's paths between two trees, and its count of each file."""
 
-    shortstat: str = ""
-    """git's one-line count of it (`git diff --shortstat`); empty where none changed."""
+    stat: str = ""
+    """git's count of each file and of the whole (`git diff --stat
+    --compact-summary`), coloured, as git prints it; empty where none changed."""
     diff: str = ""
     """The diff, coloured for the terminal."""
+
+
+WHY = (
+    "The host runs this repository's declaration and this `lup-dev` outside every "
+    "room: they judge its sessions' writes, and carry out their pushes and GitHub "
+    "actions with your credentials."
+)
+"""What's approved, and why it runs on the host: the summary's first words."""
+
+WHOLE = "Show the whole diff?"
+"""The question before the diff, which only a yes shows."""
 
 
 class Change(Model):
@@ -343,37 +358,51 @@ class Change(Model):
     unread: list[str] = []
     """What of the declaration couldn't be followed, so the zone may miss a file it runs."""
 
-    def opening(self) -> str:
-        """Say which commit is shown, since which, and how much changed."""
-        counted = self.changed.shortstat or "no file of it changed"
-        if self.since is not None:
+    def before(self) -> str:
+        """Say which commit was approved before, and whether the zone is shown since it or whole."""
+        if self.approved is None:
+            return "Approved before: nothing, so the zone is shown whole."
+        if self.since is None:
             return (
-                f"The host zone at {self.commit}, since {self.since}, the commit you "
-                f"approved last: {counted}."
+                f"Approved before: {self.approved}, which the repository no longer "
+                "holds, so the zone is shown whole."
             )
-        if self.approved is not None:
-            return (
-                f"The host zone at {self.commit}, whole, since {self.approved}, the "
-                f"commit you approved last, isn't in the repository: {counted}."
-            )
-        return (
-            f"The host zone at {self.commit}, whole, since nothing was approved yet: "
-            f"{counted}."
-        )
+        return f"Approved before: {self.approved}."
 
-    def text(self) -> str:
-        """Return what the pager shows: the opening, what else changed, the diff."""
+    def summary(self) -> str:
+        """Return what the operator reads first: what's approved and why, the commits, and git's count of each file.
+
+        The count is git's own, as git prints it: the paths approved before,
+        then those joining the zone, shown whole. A release's change is said by
+        its versions, and what of the declaration couldn't be followed is said
+        last.
+        """
+        changed = self.changed.stat.splitlines() or ["No file of the zone changed."]
         joined = (
-            [f"Joining the zone, shown whole: {self.joined.shortstat}."]
-            if self.joined.shortstat
+            ["Joining the zone, shown whole:", *self.joined.stat.splitlines()]
+            if self.joined.stat
             else []
         )
         unknown = "Not followed, so the zone may miss a file the declaration runs:"
         unread = (
             [unknown, *(f"  {each}" for each in self.unread)] if self.unread else []
         )
-        said = [self.opening(), *joined, *unread, *self.tool, ""]
-        return "\n".join(said) + "\n" + self.changed.diff + self.joined.diff
+        said = [
+            WHY,
+            "",
+            self.before(),
+            f"The tip: {self.commit}.",
+            "",
+            *changed,
+            *joined,
+            *self.tool,
+            *unread,
+        ]
+        return "\n".join(said)
+
+    def diff(self) -> str:
+        """Return the whole diff, coloured: the paths approved before, then those joining the zone."""
+        return self.changed.diff + self.joined.diff
 
     def question(self) -> str:
         """Ask whether to approve the zone, and run its `lup-dev` on the host."""
@@ -457,7 +486,11 @@ type Outcome = Unchanged | Trusted | Kept
 
 
 class Asker(ABC):
-    """Where the operator reads the change and answers: the terminal, until the inbox."""
+    """Where the operator reads the change and answers: the terminal."""
+
+    @abstractmethod
+    def say(self, text: str) -> None:
+        """Print `text` for the operator as it is, its colours kept."""
 
     @abstractmethod
     def show(self, text: str) -> None:
@@ -465,11 +498,15 @@ class Asker(ABC):
 
     @abstractmethod
     def ask(self, question: str) -> bool:
-        """Ask `question` once, and say whether the operator answered yes."""
+        """Ask `question` once, no by default, and say whether the operator answered yes."""
 
 
 class Terminal(Asker):
-    """The terminal: the change through its pager, then a question, no by default."""
+    """The terminal: the summary printed, the diff through its pager, each question no by default."""
+
+    @override
+    def say(self, text: str) -> None:
+        typer.echo(text)
 
     @override
     def show(self, text: str) -> None:
@@ -926,28 +963,49 @@ def declared(tree: Path, covered: list[Path]) -> Named:
     )
 
 
-def diffed(git: Git, start: str, end: str, paths: list[Path]) -> Diffed:
-    """Return git's diff of `paths` from `start` to `end`, coloured, and its count.
+def diffed(
+    git: Git,
+    start: str,
+    end: str,
+    paths: list[Path],
+    *,
+    width: int = 100_000,
+    graph: int = 40,
+) -> Diffed:
+    """Return git's diff of `paths` from `start` to `end`, coloured, and its count of each file.
 
     git's own diff, with no external diff command or text conversion the
-    repository's configuration could name. Text that isn't UTF-8 is shown with
-    replacement characters.
+    repository's configuration could name. The count is git's `--stat`: each
+    file on a line with its lines changed and a bar of those added and removed,
+    a file created or removed marked (`--compact-summary`), then the totals. It's
+    `width` columns wide at most, so git never shortens a path to fit, its bar
+    `graph` columns at most. Text that isn't UTF-8 is shown with replacement
+    characters.
     """
     if not paths:
         return Diffed()
     spec = ["--", *(str(path) for path in paths)]
-    counted = git.text("--literal-pathspecs", "diff", "--shortstat", start, end, *spec)
-    shown = git.run(
+    own = [
         "--literal-pathspecs",
         "diff",
         "--no-ext-diff",
         "--no-textconv",
         "--color=always",
+    ]
+    counted = git.run(
+        *own,
+        f"--stat={width}",
+        f"--stat-graph-width={graph}",
+        "--compact-summary",
         start,
         end,
         *spec,
     )
-    return Diffed(shortstat=counted, diff=shown.stdout.decode(errors="replace"))
+    shown = git.run(*own, start, end, *spec)
+    return Diffed(
+        stat=counted.stdout.decode(errors="replace"),
+        diff=shown.stdout.decode(errors="replace"),
+    )
 
 
 class Trust(Model, arbitrary_types_allowed=True):
@@ -1142,7 +1200,10 @@ class Trust(Model, arbitrary_types_allowed=True):
                 )
                 raise TrustError(message)
             change = self.change(standing)
-            self.asker.show(change.text())
+            self.asker.say(change.summary())
+            whole = change.diff()
+            if whole and self.asker.ask(WHOLE):
+                self.asker.show(whole)
             if not self.asker.ask(change.question()):
                 if approval is None:
                     message = (

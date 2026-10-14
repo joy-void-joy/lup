@@ -20,6 +20,8 @@ from lup_dev.declaration.load import load
 from lup_dev.declaration.resolve import resolve
 from lup_dev.host.client import Detached, HostClient
 from lup_dev.launch.trust import (
+    WHOLE,
+    WHY,
     Asker,
     Kept,
     Lock,
@@ -203,23 +205,30 @@ def audiobook(tmp_path: Path, shell: Shell) -> Path:
 
 
 class Answering(Asker):
-    """Answers each question as told, keeping what it was shown, its colour off."""
+    """Answers whether to approve as told, and whether to show the whole diff; keeps what it printed, paged and asked, its colour off."""
 
-    def __init__(self, answers: list[bool]) -> None:
+    def __init__(self, answers: list[bool], *, whole: bool = False) -> None:
         self.answers = answers
+        self.whole = whole
+        self.said: list[str] = []
         self.shown: list[str] = []
         self.asked: list[str] = []
+
+    def say(self, text: str) -> None:
+        self.said.append(Text.from_ansi(text).plain)
 
     def show(self, text: str) -> None:
         self.shown.append(Text.from_ansi(text).plain)
 
     def ask(self, question: str) -> bool:
         self.asked.append(question)
+        if question == WHOLE:
+            return self.whole
         return self.answers.pop(0)
 
 
-def yes() -> Answering:
-    return Answering([True])
+def yes(*, whole: bool = False) -> Answering:
+    return Answering([True], whole=whole)
 
 
 def no() -> Answering:
@@ -377,11 +386,15 @@ def test_the_first_time_shows_the_zone_whole_then_installs_restarts_and_records(
     outcome = trust.ensure()
     head = shell.git(lup, "rev-parse", "dev")
     assert isinstance(outcome, Trusted)
-    [shown] = answering(trust).shown
-    assert shown.startswith(
-        f"The host zone at {head}, whole, since nothing was approved yet: 8 files "
-        "changed"
-    )
+    [said] = answering(trust).said
+    lines = said.splitlines()
+    assert lines[:5] == [
+        WHY,
+        "",
+        "Approved before: nothing, so the zone is shown whole.",
+        f"The tip: {head}.",
+        "",
+    ]
     carried = [
         "lup_project.py",
         "pyproject.toml",
@@ -392,15 +405,19 @@ def test_the_first_time_shows_the_zone_whole_then_installs_restarts_and_records(
         "packages/lup-dev/src/environment/__init__.py",
         "packages/lup-dev/checker/build.py",
     ]
-    assert all(path in shown for path in carried)
-    assert "docs/note.md" not in shown
-    assert "tests/test_" not in shown
+    counted = [line.split("|")[0].strip() for line in lines[5:-1]]
+    assert sorted(counted) == sorted(f"{path} (new)" for path in carried)
+    assert lines[-1].startswith(" 8 files changed")
+    assert "docs/note.md" not in said
+    assert "tests/test_" not in said
     assert answering(trust).asked == [
+        WHOLE,
         (
             f"Approve the host zone at {head}, and install its `lup-dev` as the one "
             "the host runs?"
-        )
+        ),
     ]
+    assert answering(trust).shown == []
     zone = trust.check().zone
     common = Path(shell.git(lup, "rev-parse", "--absolute-git-dir"))
     assert recording(trust).installed == [
@@ -501,6 +518,7 @@ def test_a_change_outside_the_zone_asks_nothing(
         f"The host zone at {head} is the one you approved at "
         f"{first.approval.commit}: nothing to review."
     )
+    assert answering(trust).said == []
     assert answering(trust).shown == []
     assert recording(trust).installed == []
     assert service(trust).calls == []
@@ -516,14 +534,18 @@ def test_a_change_inside_the_zone_shows_its_diff_since_the_approved_commit(
         {"packages/lup-dev/src/environment/__init__.py": '"""Changed."""\n'},
         shell,
     )
-    trust = trusting(lup, kit, yes())
+    trust = trusting(lup, kit, yes(whole=True))
     outcome = trust.ensure()
     assert isinstance(outcome, Trusted)
+    [said] = answering(trust).said
+    assert said.splitlines()[2:] == [
+        f"Approved before: {first.approval.commit}.",
+        f"The tip: {head}.",
+        "",
+        " packages/lup-dev/src/environment/__init__.py | 2 +-",
+        " 1 file changed, 1 insertion(+), 1 deletion(-)",
+    ]
     [shown] = answering(trust).shown
-    assert shown.startswith(
-        f"The host zone at {head}, since {first.approval.commit}, the commit you "
-        "approved last: 1 file changed, 1 insertion(+), 1 deletion(-)."
-    )
     assert '+"""Changed."""' in shown
     assert '-"""The environment."""' in shown
     assert "packages/lup/src/library/__init__.py" not in shown
@@ -608,21 +630,29 @@ def test_a_releases_change_is_said_by_its_versions(
     changed(audiobook, {"uv.lock": RELEASE_LOCK.format(version="0.5.0")}, shell)
     trust = trusting(audiobook, kit, yes())
     trust.ensure()
-    [shown] = answering(trust).shown
-    lines = shown.splitlines()
-    assert lines[1:3] == [
+    [said] = answering(trust).said
+    assert said.splitlines()[5:] == [
+        "No file of the zone changed.",
         f"`lup-dev` 0.4.0 from {PYPI} becomes 0.5.0 from {PYPI}:",
         "  lup 0.4.0 becomes 0.5.0",
     ]
-    assert "no file of it changed" in lines[0]
-    assert "uv.lock" not in shown
+    assert "uv.lock" not in said
+    # With no file changed there's no diff to offer.
+    assert WHOLE not in answering(trust).asked
 
 
 def test_the_first_release_says_what_it_needs(audiobook: Path, kit: Kit) -> None:
     trust = trusting(audiobook, kit, yes())
     trust.ensure()
-    [shown] = answering(trust).shown
-    assert shown.splitlines()[1:5] == [
+    [said] = answering(trust).said
+    lines = said.splitlines()
+    assert lines[5:9] == [
+        " audiobook/__init__.py (new)   | 1 +",
+        " audiobook/conditions.py (new) | 3 +++",
+        " lup_project.py (new)          | 7 +++++++",
+        " 3 files changed, 11 insertions(+)",
+    ]
+    assert lines[9:] == [
         f"`lup-dev` 0.4.0 from {PYPI}, needing:",
         "  lup 0.4.0",
         "  pydantic 2.12.0",
@@ -639,9 +669,9 @@ def test_the_conditions_module_is_in_the_zone_and_a_module_beside_it_isnt(
     changed(audiobook, {"audiobook/conditions.py": '"""Changed."""\n'}, shell)
     trust = trusting(audiobook, kit, yes())
     assert isinstance(trust.ensure(), Trusted)
-    [shown] = answering(trust).shown
-    assert "audiobook/conditions.py" in shown
-    assert "audiobook/narration.py" not in shown
+    [said] = answering(trust).said
+    assert "audiobook/conditions.py" in said
+    assert "audiobook/narration.py" not in said
 
 
 def test_a_file_joining_the_zone_is_shown_whole(
@@ -654,13 +684,18 @@ def test_a_file_joining_the_zone_is_shown_whole(
         {"lup_project.py": ledger, "audiobook/ledger.py": '"""The ledger."""\n'},
         shell,
     )
-    trust = trusting(audiobook, kit, yes())
+    trust = trusting(audiobook, kit, yes(whole=True))
     trust.ensure()
+    [said] = answering(trust).said
+    assert said.splitlines()[5:] == [
+        " lup_project.py | 2 +-",
+        " 1 file changed, 1 insertion(+), 1 deletion(-)",
+        "Joining the zone, shown whole:",
+        " audiobook/ledger.py (new) | 1 +",
+        " 1 file changed, 1 insertion(+)",
+        f"`lup-dev` 0.4.0 from {PYPI}, as before:",
+    ]
     [shown] = answering(trust).shown
-    lines = shown.splitlines()
-    assert lines[1] == (
-        "Joining the zone, shown whole: 1 file changed, 1 insertion(+)."
-    )
     assert '+"""The ledger."""' in shown
     assert "audiobook/conditions.py" not in shown
 
@@ -674,8 +709,8 @@ def test_a_declaration_that_doesnt_parse_is_said_and_still_asked(
     [said] = zone.unread
     assert said.startswith("`lup_project.py` doesn't parse (")
     trust.ensure()
-    [shown] = answering(trust).shown
-    assert shown.splitlines()[1:3] == [
+    [summary] = answering(trust).said
+    assert summary.splitlines()[-2:] == [
         "Not followed, so the zone may miss a file the declaration runs:",
         f"  {said}",
     ]
@@ -783,7 +818,8 @@ def test_inside_an_agents_session_nothing_is_asked(
     inside = trusting(lup, kit, yes(), inside=["first"])
     with pytest.raises(TrustError, match="inside a first session"):
         inside.ensure()
-    assert answering(inside).shown == []
+    assert answering(inside).said == []
+    assert answering(inside).asked == []
     assert approved(lup, kit, shell) is None
     trusting(lup, kit, yes()).ensure()
     again = trusting(lup, kit, unasked(), inside=["first"])
@@ -818,11 +854,14 @@ def test_an_approved_commit_gone_from_the_repository_shows_everything(
     common = shell.git(lup, "rev-parse", "--path-format=absolute", "--git-common-dir")
     write_model(kit.layout.approved(Path(common)), gone)
     trust.ensure()
-    [shown] = answering(trust).shown
-    assert shown.startswith(
-        f"The host zone at {zone.commit}, whole, since {'0' * 40}, the commit you "
-        "approved last, isn't in the repository: 8 files changed"
-    )
+    [said] = answering(trust).said
+    lines = said.splitlines()
+    assert lines[2:4] == [
+        f"Approved before: {'0' * 40}, which the repository no longer holds, so "
+        "the zone is shown whole.",
+        f"The tip: {zone.commit}.",
+    ]
+    assert lines[-1].startswith(" 8 files changed")
 
 
 def test_a_lock_that_doesnt_pin_lup_dev_or_pins_it_from_elsewhere_refuses() -> None:
