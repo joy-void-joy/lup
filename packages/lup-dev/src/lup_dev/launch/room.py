@@ -61,13 +61,26 @@ class RoomError(LupDevError):
 
 
 def host_needs() -> list[Needed]:
-    """Return what the host needs to run a room, as requirements checked at once: podman, rootless."""
+    """Return what the host needs to run a room, as requirements checked at once.
+
+    Podman, rootless; and, optional, `notify-send`, without which the inbox raises
+    no desktop notice.
+    """
     podman = Requirement(
         tool="podman",
         why="runs each session's room, rootless",
         install="your system's `podman` package, set up for rootless containers",
     )
-    return [Needed(module="lup-dev launch", requirement=podman)]
+    notices = Requirement(
+        tool="notify-send",
+        optional=True,
+        why="raises a desktop notice when something reaches your inbox",
+        install="your system's `libnotify` package",
+    )
+    return [
+        Needed(module="lup-dev launch", requirement=podman),
+        Needed(module="lup-dev inbox", requirement=notices),
+    ]
 
 
 class Repository(Model):

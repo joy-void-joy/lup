@@ -19,11 +19,10 @@ from filelock import FileLock
 from typer.testing import CliRunner
 
 from lup_dev import cli
+from lup_dev.inbox.notices import Notices, NotifySend
 from lup_dev.legacy_dashboard import (
     Host,
     LegacyQueue,
-    Notices,
-    NotifySend,
     Proposal,
     RecordedReply,
     Reply,
@@ -261,7 +260,7 @@ class Raised(Notices):
     def __init__(self) -> None:
         self.raised: list[str] = []
 
-    def notify(self, summary: str, body: str) -> None:
+    async def notify(self, summary: str, body: str) -> None:
         self.raised.append(f"{summary}: {body}")
 
 
@@ -673,32 +672,6 @@ def test_the_keeper_is_started_as_its_own_process(
         str(tmp_path / "work"),
     ]
     assert log.parent.is_dir()
-
-
-def test_a_desktop_notice_goes_through_notify_send_where_its_installed(
-    tmp_path: Path,
-) -> None:
-    told = tmp_path / "told"
-    notifier = tmp_path / "notify-send"
-    notifier.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > {told}\n')
-    notifier.chmod(0o755)
-    NotifySend(executable=str(notifier)).notify("A change waits", "the heading")
-    assert told.read_text().splitlines() == [
-        "--app-name=lup",
-        "A change waits",
-        "the heading",
-    ]
-    NotifySend(executable=str(tmp_path / "absent")).notify("nothing", "shown")
-
-
-def test_a_failing_desktop_notice_is_said_on_standard_error(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    notifier = tmp_path / "notify-send"
-    notifier.write_text("#!/bin/sh\necho 'no display' >&2\nexit 1\n")
-    notifier.chmod(0o755)
-    NotifySend(executable=str(notifier)).notify("A change waits", "the heading")
-    assert "the desktop notice failed: no display" in capsys.readouterr().err
 
 
 def test_a_reviewed_file_says_what_the_change_does_to_it() -> None:

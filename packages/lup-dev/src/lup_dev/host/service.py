@@ -17,7 +17,9 @@ on. It holds three sockets:
   session is judged by the code approved for its repository; one it doesn't is
   answered by the service itself, without starting the judge, as no decision.
   Every answer goes out through the `Courier` again, a call to lup's tools
-  rewritten to carry lup's id for the conversation calling. Hooks for parallel
+  rewritten to carry lup's id for the conversation calling, and what the `Post`
+  says waits for the conversation added: counted told once the answer is
+  written, and put back where the hook was gone first. Hooks for parallel
   calls arrive at once and a hold waits for hours, so each judge is spawned
   through asyncio and awaited on the event loop, which goes on serving meanwhile.
   Where the judge can't answer (its command missing, or ending with a failure, a
@@ -48,7 +50,7 @@ from pydantic import ValidationError, model_validator
 
 from lup.tools.serving import serve
 from lup.types import Model, MutableModel
-from lup_dev.host.courier import Conversations, Courier, Telling
+from lup_dev.host.courier import Conversations, Courier, Post, Posted, Telling
 from lup_dev.host.protocol import (
     Done,
     HostError,
@@ -232,6 +234,13 @@ class Dispatcher(Model, arbitrary_types_allowed=True):
         return Refused(error=error)
 
 
+class Spoken(Model):
+    """What a hook prints, and what it tells the conversation from its inbox."""
+
+    answer: str
+    posted: Posted = Posted()
+
+
 class Served(Model, arbitrary_types_allowed=True):
     """A launch the service serves: its conversations, and the servers on its sockets."""
 
@@ -254,6 +263,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     layout: HostLayout
     answerer: Answerer
     courier: Courier
+    post: Post | None
     judge: Callable[[Asked], Awaitable[Judged]]
     """Runs a launch's judge for one hook; a test gives a stub."""
     tools: list[RoomTools]
@@ -342,34 +352,43 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         The payload is read to the end and answered. Where answering fails even
         so, the failure is said, with its traceback, and the connection closes
         unanswered: the room's hook prints nothing and ends with status 0, which
-        the runtime takes as no decision.
+        the runtime takes as no decision. Where the hook is gone before its
+        answer is written, what it would have told is put back as waiting.
         """
         payload = (await reader.read()).decode()
         try:
-            answer = await self.answered(request, conversations, payload)
+            spoken = await self.answered(request, conversations, payload)
         except Exception as failure:
             told = "".join(traceback.format_exception(failure))
             self.say(f"{request.launch}: answering a hook failed:\n{told}")
-            answer = ""
+            spoken = Spoken(answer="")
         try:
-            writer.write(answer.encode())
+            writer.write(spoken.answer.encode())
             await writer.drain()
             writer.close()
             await writer.wait_closed()
         except ConnectionError as gone:
             self.say(f"{request.launch}: the hook was gone before its answer: {gone}")
+            self.returned(spoken.posted)
             return
         self.say(f"{request.launch}: answered a hook")
 
+    def returned(self, posted: Posted) -> None:
+        """Put back as waiting what an answer that didn't reach its hook would have told."""
+        if self.post is not None and posted.numbers:
+            self.post.returned(posted)
+
     async def answered(
         self, request: Register, conversations: Conversations, payload: str
-    ) -> str:
+    ) -> Spoken:
         """Return what one hook prints: the judge's answer where it reads the hook, none where it doesn't, with what the courier adds.
 
-        The conversation the hook names gets lup's id here the first time. A
-        payload the courier can't read goes to the judge as it is, which answers
-        it or says it couldn't; where the courier can't add to the judge's answer,
-        the answer goes out as the judge gave it. Either is said.
+        The conversation the hook names gets lup's id here the first time, and
+        is told what the post says waits for it, in what room the judge's answer
+        leaves. A payload the courier can't read goes to the judge as it is,
+        which answers it or says it couldn't; where the courier can't add to the
+        judge's answer, the answer goes out as the judge gave it, and what it
+        would have told is put back. Either is said.
         """
         try:
             heard = self.courier.heard(request.runtime, payload)
@@ -378,19 +397,26 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
                 f"{request.launch}: a hook lup couldn't read goes to its judge as it "
                 f"is: {unread}"
             )
-            return await self.judgement(request, payload)
+            return Spoken(answer=await self.judgement(request, payload))
         conversation = conversations.named(heard.session, heard.agent)
         answer = await self.judgement(request, payload) if heard.judged else ""
+        room = heard.fits - len(answer.encode())
+        posted = (
+            Posted()
+            if self.post is None
+            else await self.post.telling(request, conversation, heard, room)
+        )
+        telling = Telling(caller=conversation.id, items=posted.items)
         try:
-            return self.courier.told(
-                request.runtime, payload, answer, Telling(caller=conversation.id)
-            )
+            told = self.courier.told(request.runtime, payload, answer, telling)
         except ValueError as unread:
             self.say(
                 f"{request.launch}: the judge's answer goes out as it gave it, since "
                 f"lup couldn't add to it: {unread}"
             )
-            return answer
+            self.returned(posted)
+            return Spoken(answer=answer)
+        return Spoken(answer=told, posted=posted)
 
     async def judgement(self, request: Register, payload: str) -> str:
         """Return the judge's answer to one hook, or where it can't answer, the runtime's word that it couldn't.
@@ -554,6 +580,9 @@ class HostService(Model, arbitrary_types_allowed=True):
     answerer: Answerer
     courier: Courier
     """Reads each runtime's hooks, and adds to their answers."""
+    post: Post | None = None
+    """What each conversation is told at its hooks, from its inbox; none tells
+    nothing."""
     say: Callable[[str], None]
     """Where the service tells what it does: the terminal, or its log."""
     judge: Callable[[Asked], Awaitable[Judged]] = judged
@@ -618,6 +647,7 @@ class HostService(Model, arbitrary_types_allowed=True):
             layout=self.layout,
             answerer=self.answerer,
             courier=self.courier,
+            post=self.post,
             judge=self.judge,
             tools=self.tools,
             room_routes=self.room_routes,

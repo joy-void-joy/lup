@@ -1,0 +1,299 @@
+"""lup's inbox: its items and its parties, kept one JSON file each in lup's state.
+
+`docs/host-tools.md`, *Parties and items*. Every party has an inbox: the
+operator, and each conversation of each session, its main one or one of its
+subagents. A conversation is keyed by its runtime, its session's id and its own,
+within a repository, rather than by the launch it runs in, so a session resumed
+in a launch of its own finds what waited for it there.
+
+An item has a number, one sequence per user, so the operator answers `12`; a
+reason (a message with its kind, a question with its numbered decisions, an
+answer); a sender and a recipient; when it was made; and its state: waiting,
+told (when, and how), answered, or done. An item for a conversation that has
+ended goes to its session's main conversation, saying whose it was.
+
+The host service is the only writer, on its event loop, and nothing mounts the
+store into a room: the first lup's sessions approved their own questions by
+writing the log they could reach. Each item and each conversation's whereabouts
+is a file of its own, written whole (`stored.py`), rather than one log folded at
+every read. Items are kept once told or answered; clearing old ones goes with
+lup's cleanup.
+"""
+
+import hashlib
+from datetime import datetime
+from pathlib import Path
+from typing import Annotated, Literal
+
+from pydantic import Field, ValidationError
+
+from lup.types import Model, MutableModel
+from lup_dev.host.protocol import HostError
+from lup_dev.layout import InboxLayout
+from lup_dev.stored import read_model, write_model
+
+
+class InboxError(HostError):
+    """An item that isn't there, or can't take what's asked of it, which the host service refuses; or a stored one that doesn't read."""
+
+
+type Verdict = Literal["leaning", "undecided", "leave open"]
+"""The operator's answer to one numbered decision: going with the agent's lean,
+not decided, or left for later."""
+
+type Kind = Literal["note", "problem", "disagreement", "question"]
+"""What a message is: a remark, a problem that stops the work, a disagreement,
+or a question that asks for no answer waited on."""
+
+type How = Literal["call", "start", "turn's end", "held call", "wake"]
+"""How an item was told: beside a call, as its session started, as the reason
+its turn's end was held, as a held call's result, or as a turn started in its
+idle session."""
+
+
+class Operator(Model):
+    """The operator, whose inbox `lup-dev inbox` shows."""
+
+    party: Literal["operator"] = "operator"
+
+
+class Conversation(Model):
+    """A conversation of a session, within a repository: the session's main one, or one of its subagents."""
+
+    party: Literal["conversation"] = "conversation"
+    repository: Path
+    """The repository's git directory, as the launch registered it."""
+    runtime: str
+    session: str
+    """The runtime's id for the session."""
+    agent: str | None = None
+    """The runtime's id for the subagent; none for the session's main conversation."""
+
+    def key(self) -> str:
+        """Name the conversation as a file name, from what keys it."""
+        return hashlib.sha256(self.model_dump_json().encode()).hexdigest()
+
+    def main(self) -> Conversation:
+        """Return its session's main conversation."""
+        return self.model_copy(update={"agent": None})
+
+
+type Party = Annotated[Operator | Conversation, Field(discriminator="party")]
+"""Who an item is from, or for."""
+
+
+class Decision(Model):
+    """One decision a question asks, with the agent's lean."""
+
+    text: str
+    lean: str
+
+
+class Message(Model):
+    """A message, of its kind."""
+
+    reason: Literal["message"] = "message"
+    kind: Kind
+    text: str
+
+
+class Question(Model):
+    """A question for the operator: its numbered decisions, each with the agent's lean; or none, answered in words."""
+
+    reason: Literal["question"] = "question"
+    text: str
+    decisions: list[Decision] = []
+    """Numbered from 1, in this order."""
+
+
+class Ruling(Model):
+    """The operator's answer to one numbered decision, with what they add."""
+
+    decision: int
+    """The decision's number, from 1."""
+    verdict: Verdict
+    comment: str = ""
+
+
+class Answer(Model):
+    """The operator's answer to a question: a verdict on each decision, and a comment on the whole, or a plain question's answer."""
+
+    reason: Literal["answer"] = "answer"
+    question: int
+    """The question's item number."""
+    rulings: list[Ruling] = []
+    comment: str = ""
+
+
+type Reason = Annotated[Message | Question | Answer, Field(discriminator="reason")]
+"""Why an item is there."""
+
+
+class Waiting(Model):
+    """Waiting for its recipient: told at the conversation's next chance, or shown in the operator's inbox."""
+
+    state: Literal["waiting"] = "waiting"
+    announced: datetime | None = None
+    """When it was announced as too long for a hook, waiting for `wait_inbox` to
+    return it whole; none where it wasn't."""
+
+
+class Told(Model):
+    """Told to the conversation it's for, once."""
+
+    state: Literal["told"] = "told"
+    at: datetime
+    how: How
+
+
+class Answered(Model):
+    """A question the operator answered."""
+
+    state: Literal["answered"] = "answered"
+    at: datetime
+    answer: int
+    """The answer's item number."""
+
+
+class Done(Model):
+    """A message the operator read, off their list."""
+
+    state: Literal["done"] = "done"
+    at: datetime
+
+
+type State = Annotated[Waiting | Told | Answered | Done, Field(discriminator="state")]
+"""Where an item stands."""
+
+
+class Item(Model):
+    """One item in a party's inbox."""
+
+    number: int
+    reason: Reason
+    sender: Party
+    recipient: Party
+    """Whose inbox it's in, who's told it."""
+    addressed: Conversation | None = None
+    """Whom it was for, where it was passed on from a conversation that had
+    ended; none where it wasn't."""
+    worktree: Path | None = None
+    """The worktree of the launch it was made in; none for the operator's own."""
+    made: datetime
+    state: State = Waiting()
+
+
+class Whereabouts(Model):
+    """Where a conversation was last heard: the launch its session runs in, and whether it has ended."""
+
+    conversation: Conversation
+    launch: str
+    worktree: Path
+    since: datetime
+    """When it was first heard in that launch."""
+    ended: datetime | None = None
+    """When its conversation ended, at its `conversation-ended` hook; none while
+    it goes on."""
+
+
+def read[M: Model](path: Path, model: type[M]) -> M:
+    """Read a stored file of the inbox as `model`, naming it where it doesn't read."""
+    try:
+        found = read_model(path, model)
+    except (OSError, ValidationError) as unread:
+        message = f"the inbox's {path} doesn't read: {unread}"
+        raise InboxError(message) from unread
+    if found is None:
+        message = f"the inbox's {path} is gone"
+        raise InboxError(message)
+    return found
+
+
+class Inbox(MutableModel):
+    """Every item and every conversation's whereabouts, as the host service holds them, each change written through to its file."""
+
+    layout: InboxLayout
+    items: dict[int, Item] = {}
+    """By number."""
+    whereabouts: dict[str, Whereabouts] = {}
+    """By conversation's key."""
+
+    @classmethod
+    def opened(cls, layout: InboxLayout) -> Inbox:
+        """Read the inbox kept at `layout`; one never written is empty.
+
+        Raise `InboxError` naming a file that doesn't read.
+        """
+        items = [read(path, Item) for path in layout.items.glob("*.json")]
+        places = [read(path, Whereabouts) for path in layout.parties.glob("*.json")]
+        return cls(
+            layout=layout,
+            items={item.number: item for item in items},
+            whereabouts={place.conversation.key(): place for place in places},
+        )
+
+    def kept(self, item: Item) -> Item:
+        """Write `item` through to its file, and hold it."""
+        write_model(self.layout.item(item.number), item)
+        self.items = {**self.items, item.number: item}
+        return item
+
+    def made(
+        self,
+        reason: Reason,
+        sender: Party,
+        recipient: Party,
+        worktree: Path | None,
+        at: datetime,
+    ) -> Item:
+        """Make an item, numbered after every other, and keep it.
+
+        One for a conversation that has ended goes to its session's main
+        conversation, saying whose it was.
+        """
+        addressed = self.passed(recipient)
+        item = Item(
+            number=max(self.items, default=0) + 1,
+            reason=reason,
+            sender=sender,
+            recipient=recipient if addressed is None else addressed.main(),
+            addressed=addressed,
+            worktree=worktree,
+            made=at,
+        )
+        return self.kept(item)
+
+    def passed(self, recipient: Party) -> Conversation | None:
+        """Return `recipient` where it's a conversation that has ended, whose items go to its session's main one; none else."""
+        match recipient:
+            case Conversation(agent=str()) as conversation:
+                place = self.whereabouts.get(conversation.key())
+                if place is not None and place.ended is not None:
+                    return conversation
+                return None
+            case _:
+                return None
+
+    def item(self, number: int) -> Item:
+        """Return item `number`, or say there's none."""
+        found = self.items.get(number)
+        if found is None:
+            message = f"the inbox holds no item {number}"
+            raise InboxError(message)
+        return found
+
+    def waiting(self, recipient: Party) -> list[Item]:
+        """Return the items waiting for `recipient`, oldest first."""
+        ordered = [self.items[number] for number in sorted(self.items)]
+        return [
+            item
+            for item in ordered
+            if item.recipient == recipient and isinstance(item.state, Waiting)
+        ]
+
+    def placed(self, place: Whereabouts) -> Whereabouts:
+        """Write a conversation's whereabouts through to its file, and hold them."""
+        key = place.conversation.key()
+        write_model(self.layout.party(key), place)
+        self.whereabouts = {**self.whereabouts, key: place}
+        return place

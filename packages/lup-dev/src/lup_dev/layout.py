@@ -17,6 +17,7 @@ The homes (`docs/judging-writes.md`, *Where things live*):
   and each runtime's CLIs, as its release channel publishes them, under `clis/`
   (`docs/launch.md`, *The CLIs*);
 - the record of each room image built, in lup's state;
+- lup's inbox, its items and parties one file each, in lup's state;
 - inside a worktree, `.lup/saved/`, where a refused version waits for the agent,
   `.lup/drafts/`, where a change waits to be submitted for review, and
   `.lup/review/<n>/`, where a review keeps its files while it waits;
@@ -350,6 +351,38 @@ class LaunchSockets(Model):
         """The socket the room's programs send requests to: one typed request per connection, one reply."""
         return self.directory / "request.sock"
 
+    @property
+    def messages(self) -> Path:
+        """Where the session's own messaging socket is put, through which the host service starts a turn of an idle session, where its runtime has one."""
+        return self.directory / "messages.sock"
+
+
+class InboxLayout(Model):
+    """Where lup's inbox keeps its items and its parties, one JSON file each (`docs/host-tools.md`, *The inbox*).
+
+    The host service is the only writer; no room mounts it.
+    """
+
+    home: Path
+
+    @property
+    def items(self) -> Path:
+        """Each item, a file named by its number."""
+        return self.home / "items"
+
+    @property
+    def parties(self) -> Path:
+        """Each conversation that has spoken, a file named by its key."""
+        return self.home / "parties"
+
+    def item(self, number: int) -> Path:
+        """Say where item `number` is kept."""
+        return self.items / f"{number}.json"
+
+    def party(self, key: str) -> Path:
+        """Say where the conversation keyed `key` is kept."""
+        return self.parties / f"{key}.json"
+
 
 class HostLayout(Model):
     """Where the host service keeps its sockets and the launches it serves, and its log.
@@ -516,6 +549,11 @@ class Layout(Model):
     def host(self) -> HostLayout:
         """Where the host service, one per user, keeps its sockets, records and log."""
         return HostLayout(sockets=self.runtime / "host", state=self.state / "host")
+
+    @property
+    def inbox(self) -> InboxLayout:
+        """Where lup's inbox keeps its items and its parties, one per user."""
+        return InboxLayout(home=self.state / "inbox")
 
     def judge(self, repository: Path) -> JudgeLayout:
         """Say where a repository's own copy of `lup-dev` is installed, by its git directory."""

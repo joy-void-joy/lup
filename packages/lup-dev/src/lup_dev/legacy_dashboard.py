@@ -28,22 +28,21 @@ records it writes. What it answers is modelled here, read against the host at
   host half's functions.
 """
 
+import asyncio
 import importlib.util
 import shutil
-from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Literal, override
 
-import sh
-import typer
 from filelock import FileLock, Timeout
 from pydantic import TypeAdapter
 
 from lup.types import Model
 from lup_dev.clock import Clock
 from lup_dev.git import Git
+from lup_dev.inbox.notices import Notices, NotifySend
 from lup_dev.layout import CheckoutLayout, Layout, StoreLayout
 from lup_dev.policy.importers import BackgroundSpawner, Spawner
 from lup_dev.review import (
@@ -407,39 +406,6 @@ def legacy_checkout(checkout: Path, settings: LupDevSettings) -> Path:
     return Path(common).parent / settings.lup_interim_review_legacy_checkout
 
 
-class Notices(ABC):
-    """Where the operator is told something at once."""
-
-    @abstractmethod
-    def notify(self, summary: str, body: str) -> None:
-        """Tell the operator `summary`, with `body` beneath it."""
-
-
-class NotifySend(Notices, Model):
-    """The desktop's notices, raised through `notify-send` where it's installed."""
-
-    executable: str = "notify-send"
-    application: str = "lup"
-    """The application the desktop names as raising the notice."""
-
-    @override
-    def notify(self, summary: str, body: str) -> None:
-        """Raise the notice; on a machine without `notify-send`, none is shown.
-
-        A notice that fails is said on standard error, and what it announced
-        stands all the same.
-        """
-        if shutil.which(self.executable) is None:
-            return
-        try:
-            sh.Command(self.executable)(f"--app-name={self.application}", summary, body)
-        except sh.ErrorReturnCode as failure:
-            typer.echo(
-                f"lup-dev: the desktop notice failed: {failure.stderr.decode()}",
-                err=True,
-            )
-
-
 class Kept(Model):
     """One review parked in the first lup's dashboard, as its queue records it."""
 
@@ -650,7 +616,9 @@ class LegacyQueue(Queue, Model, arbitrary_types_allowed=True):
             kept = Kept(call=call, parked=[parked.id])
             write_model(self.store.parked, keeping.recorded(review.number, kept))
             running = self.running()
-        self.notices.notify("A change waits for your review", review.heading)
+        asyncio.run(
+            self.notices.notify("A change waits for your review", review.heading)
+        )
         if not running:
             self.spawner.spawn(self.worktree, self.store.keeper_log)
 
@@ -745,7 +713,9 @@ class LegacyQueue(Queue, Model, arbitrary_types_allowed=True):
                 self.store.parked,
                 keeping.recorded(number, kept.model_copy(update={"frozen": True})),
             )
-        self.notices.notify("An agent waits on your review", kept.call.reason)
+        asyncio.run(
+            self.notices.notify("An agent waits on your review", kept.call.reason)
+        )
 
     def keep(self) -> None:
         """Park each review the dashboard expired again, until none waits.
