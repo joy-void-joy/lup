@@ -345,8 +345,10 @@ def launched(
             launch=launch,
             runtime=runtime,
             worktree=worktree,
+            repository=repository,
             judge=judge,
             container=f"lup-{launch}",
+            limits=declared.resolved.limits,
         )
         own.lock.parent.mkdir(parents=True, exist_ok=True)
         try:

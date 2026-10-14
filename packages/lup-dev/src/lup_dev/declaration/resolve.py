@@ -12,8 +12,9 @@ hold it, by the kind's type (`docs/declaration.md`, *What a module is*):
 - entries placed `before=` or `after=` another go there, whichever module holds
   it, and the rest keep the order of their modules;
 - the runner comes from the one module holding one, `Plain()` where none does,
-  and the session settings from the one holding them, `Core`, with the fields
-  the declaration set, which a launch imposes over the person's own.
+  the session settings from the one holding them, `Core`, with the fields the
+  declaration set, which a launch imposes over the person's own, and the limits
+  on the operator's credentials from the one holding them, `Core` too.
 
 Rule selections are kept as recorded, one per module beside the module's own
 default, for the engine to resolve.
@@ -35,6 +36,7 @@ from lup_dev.catalog.room import CacheLifetime
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.grammar import Named, listed, set_fields
 from lup_dev.declaration.kinds import (
+    Credentials,
     Exemption,
     Exemptions,
     Gate,
@@ -56,6 +58,7 @@ from lup_dev.declaration.modules.shipped import default, shipped
 from lup_dev.declaration.project import Project
 from lup_dev.declaration.requirements import Needed
 from lup_dev.declaration.runner import Plain, Prefixed, Runner
+from lup_dev.host.protocol import Limits
 
 
 class PathRoles(Model, extra="forbid"):
@@ -164,6 +167,10 @@ class Resolved(Model):
     then the one each requirement names. One name from two places is one
     package, the first's."""
     session: SessionChoices
+    limits: Limits
+    """What the host does with the operator's credentials for a launched
+    session without asking, and the refs no push updates: `Core`'s
+    `credentials`, resolved."""
     guidance: list[Section]
     """The sections of guidance, in the order of their modules but where one is
     placed by another's name."""
@@ -280,6 +287,25 @@ def settled(found: list[Part[Session]]) -> SessionChoices:
     )
 
 
+def limited(found: list[Part[Credentials]]) -> Limits:
+    """Return the limits on the operator's credentials, from the one module holding them.
+
+    `Core` holds them, so a module of a project's own holding them too fails,
+    naming both: a launch has one set of limits. With none, they're lup's.
+    """
+    if len(found) > 1:
+        holding = listed([part.module for part in found])
+        message = (
+            f"{holding} each give limits on the operator's credentials, and a "
+            "launch has one set: change `Core`'s with "
+            "`.edit(Core(credentials=Credentials(…)))`"
+        )
+        raise ProjectError(message)
+    credentials = found[0].value if found else Credentials()
+    default = found[0].default if found and found[0].default else Credentials()
+    return credentials.resolve(default)
+
+
 def checked(modules: list[Module]) -> list[Module]:
     """Return `modules` once `Core` and every module required are among them."""
     if not any(type(module) is Core for module in modules):
@@ -379,6 +405,7 @@ def resolve(project: Project) -> Resolved:
         requirements=requirements,
         packages=image(modules, requirements),
         session=settled(parts(modules, Session)),
+        limits=limited(parts(modules, Credentials)),
         guidance=held(Guidance(), parts(modules, Guidance), "Guidance"),
         asks=project.asks,
     )
