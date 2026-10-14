@@ -5,6 +5,7 @@ from pathlib import Path
 from lup_dev.catalog.paths import CorePaths
 from lup_dev.catalog.room import StandardMachine
 from lup_dev.declaration.kinds import (
+    Credentials,
     Guidance,
     Package,
     Packages,
@@ -31,7 +32,7 @@ def standard_machine() -> Packages:
 
 
 class Core(Module):
-    """lup's core: every project's path roles, room and sessions, and what every module talks through."""
+    """lup's core: every project's path roles, room, sessions and limits on the operator's credentials, and what every module talks through."""
 
     name = "core"
 
@@ -54,6 +55,10 @@ class Core(Module):
     compaction, the built-in tools removed from context and the account's
     connectors. lup's, which the person's own runtime settings outrank, unless
     the project says, which outranks theirs."""
+    credentials: Credentials = Credentials()
+    """What the host does with the operator's credentials for a launched session
+    without asking, and the refs no push updates: lup's
+    (`lup_dev.catalog.credentials`), unless the project says."""
     guidance: Guidance = Guidance.of(
         Section(
             name="core",

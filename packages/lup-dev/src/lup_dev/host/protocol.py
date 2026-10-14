@@ -9,7 +9,7 @@ registers for them.
 """
 
 from pathlib import Path, PurePath
-from typing import Annotated, Literal
+from typing import Annotated, Literal, get_args
 
 from pydantic import AfterValidator
 
@@ -37,6 +37,50 @@ def segment(launch: str) -> str:
 type LaunchId = Annotated[str, AfterValidator(segment)]
 """A launch's id: unique among the launches the service serves, it names their directory."""
 
+type Action = Literal[
+    "fetch",
+    "push",
+    "force-push",
+    "delete-ref",
+    "read-issues",
+    "file-issue",
+    "comment",
+    "draft-pull-request",
+]
+"""What the host can do with the operator's credentials for a launch, by name.
+
+Each names a handler lup carries out on the host (`docs/host-tools.md`,
+*Credentials on the host*): fetching from one of the repository's remotes;
+pushing to one, a push that isn't a fast-forward being `force-push`, and one
+removing a branch or tag `delete-ref`; reading the repository's issues and pull
+requests; filing an issue; commenting on one; and opening a draft pull request.
+The handlers arrive with GitHub's tools and git's remote helper.
+"""
+
+
+def actions() -> list[Action]:
+    """List every action, in the order `Action` names them.
+
+    >>> "force-push" in actions()
+    True
+    """
+    return list(get_args(Action.__value__))
+
+
+class Limits(Model):
+    """What the host does with the operator's credentials for a launch without asking.
+
+    The project's declaration says it (`Core`'s `credentials`), resolved at the
+    commit the operator approved. The host's handlers hold each action to it,
+    refusing one beyond it and saying why, as they arrive.
+    """
+
+    actions: list[Action]
+    """The actions allowed, in the order `Action` names them."""
+    protected: list[str]
+    """Patterns over full ref names, such as `refs/tags/*`: the refs no push
+    updates."""
+
 
 class Request(Model):
     """A control request: its `kind` names it, and the handler that answers it."""
@@ -62,6 +106,10 @@ class Register(Request):
     """The runtime the launch runs, by its name: whose hooks its judge answers."""
     worktree: Path
     """The worktree the launch started in."""
+    repository: AbsolutePath
+    """The repository's git directory on the host, which the launcher found
+    before the room started: where the host acts for the launch, never a path
+    the room names."""
     judge: AbsolutePath
     """The command of the launch's repository's approved copy of `lup-dev`: each
     of its hooks runs `<judge> hook <runtime>`, so it's judged by the code
@@ -69,6 +117,10 @@ class Register(Request):
     container: str
     """The name of the launch's container, which tells a later launch whether
     this one is gone."""
+    limits: Limits
+    """What the host does with the operator's credentials for the launch
+    without asking, from the declaration at the commit the operator approved:
+    recorded with the launch, so a service started again keeps them."""
 
 
 class Unregister(Request):

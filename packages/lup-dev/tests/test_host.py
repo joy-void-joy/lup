@@ -21,7 +21,15 @@ from typer.testing import CliRunner
 
 from lup_dev import cli
 from lup_dev.host.client import HostClient, Starter
-from lup_dev.host.protocol import HostError, Refused, Register, Reply, Request, Stop
+from lup_dev.host.protocol import (
+    HostError,
+    Limits,
+    Refused,
+    Register,
+    Reply,
+    Request,
+    Stop,
+)
 from lup_dev.host.service import (
     Answerer,
     Asked,
@@ -196,8 +204,10 @@ def launch(tmp_path: Path, name: str, runtime: str) -> Register:
         launch=name,
         runtime=runtime,
         worktree=tmp_path,
+        repository=tmp_path / ".git",
         judge=judge,
         container=f"lup-{name}",
+        limits=Limits(actions=["fetch", "push"], protected=["refs/heads/main"]),
     )
 
 
@@ -297,13 +307,15 @@ def test_a_service_started_again_serves_the_launches_where_their_rooms_mounted_t
     layout: HostLayout, clock: FakeClock, said: list[str], tmp_path: Path
 ) -> None:
     host = client(layout, clock)
+    registered = launch(tmp_path, "one", "first")
     with served(service(layout, Judge(), said)):
-        directory = host.register(launch(tmp_path, "one", "first"))
+        directory = host.register(registered)
         mounted = directory.stat().st_ino
         host.stop()
     with served(service(layout, Judge(), said)):
         assert directory.stat().st_ino == mounted
         assert send(layout.launch("one").hook, "again") == "first answers again\n"
+        assert host.launches() == [registered]
         host.unregister("one")
 
 
