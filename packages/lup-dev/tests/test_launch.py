@@ -220,6 +220,7 @@ class Engine:
         self.gone = gone
         self.ran = ran
         self.processes: list[Process] = []
+        self.guidance: str | None = None
 
     def __call__(self, process: Process) -> Exited:
         self.processes.append(process)
@@ -234,6 +235,9 @@ class Engine:
                 return Exited(status=1 if name in self.gone else 0)
             case ["run", *_]:
                 self.record("run")
+                flag = "--append-system-prompt-file"
+                if flag in rest:
+                    self.guidance = Path(rest[rest.index(flag) + 1]).read_text()
                 return Exited(status=self.ran)
             case _:
                 message = f"podman asked {process.arguments}"
@@ -257,9 +261,11 @@ class Machine:
         ran: int = 7,
         missing: list[str] | None = None,
         unnamed: str | None = None,
+        local: str | None = None,
     ) -> None:
         self.events = Events()
         self.unnamed = unnamed
+        self.local = local
         record = self.events.record
         self.layout = Layout(
             state=tmp_path / "state",
@@ -324,6 +330,7 @@ class Machine:
                 pins={},
             ),
             time=self.host.clock.now(),
+            local=self.local,
         )
         write_model(self.layout.approved(common), approval)
         return Unchanged(commit=commit, approval=approval)
@@ -477,7 +484,7 @@ def test_a_launch_compiles_the_approved_declarations_guidance_and_hooks(
     directory = tmp_path / "launch"
     hooks = hooked(claude.hooks)
 
-    with approved_declaration(project, commit) as declared:
+    with approved_declaration(project, commit, local=None) as declared:
         settings = terminal_settings(
             declared,
             project,
@@ -485,6 +492,7 @@ def test_a_launch_compiles_the_approved_declarations_guidance_and_hooks(
             Cli(program=Path("/opt/cli")),
             hooks,
             tools=cli.served_tools(),
+            neighbours=[],
         )
         exported = declared.root
         choices = declared.resolved.session
@@ -575,6 +583,71 @@ def test_a_repository_gh_cant_name_is_said_once_and_registered_without_one(
     ]
     [registered] = machine.host.served
     assert registered.github is None
+
+
+MINE = '''"""The person's own layer: the repositories they relate, made up."""
+
+from pathlib import Path
+
+from lup_dev import Module, Modules, Project, Repositories, Repository
+
+
+class Mine(Module):
+    """The repositories beside the project, as this person has them."""
+
+    name = "mine"
+
+    repositories: Repositories = Repositories.of(
+        Repository(
+            name="notes",
+            path=Path("notes.git"),
+            about="the notes",
+            github="someone/notes",
+        ),
+        Repository(name="gone", path=Path("gone.git"), about="not here"),
+    )
+
+
+project = Project(modules=Modules().add(Mine()))
+'''
+
+
+def test_the_approved_layer_s_repositories_are_mounted_said_and_listed(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    notes = tmp_path / "repos" / "notes.git"
+    notes.mkdir()
+    (project / "lup_project.local.py").write_text(
+        MINE.replace('"notes.git"', '"edited-in-a-room.git"')
+    )
+    machine = Machine(tmp_path, clock, local=MINE)
+
+    assert cli.launched(machine.adapter, [], project, machine.launcher) == 7
+
+    here = notes.resolve()
+    gone = (tmp_path / "repos" / "gone.git").resolve()
+    said = machine.events.said
+    assert [each for each in said if "for sessions to read" in each] == [
+        (
+            f"The repository `gone` the declaration names for sessions to read "
+            f"isn't at {gone}, so the room doesn't mount it, and its guidance says "
+            "it's missing."
+        )
+    ]
+    run = machine.engine.run()
+    assert f"--mount=type=bind,source={here},destination={here},ro=true" in run
+    assert not [each for each in run if str(gone) in each]
+    assert not [each for each in run if "edited-in-a-room" in each]
+    guidance = machine.engine.guidance or ""
+    assert "edited-in-a-room" not in guidance
+    assert guidance.index("## lup's tools") < guidance.index("## Other repositories")
+    assert (
+        f"- `notes`, the notes. At `{here}`, mounted. On GitHub as `someone/notes`."
+    ) in guidance
+    assert (
+        f"- `gone`, not here. At `{gone}`, missing: it isn't on this machine, so "
+        "it isn't mounted."
+    ) in guidance
 
 
 def test_the_registration_ends_when_the_cli_fails(

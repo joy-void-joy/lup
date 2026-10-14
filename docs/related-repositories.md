@@ -29,6 +29,14 @@ All answered by the operator on 2026-10-14: each lean below taken as stated.
 - **The guidance** (`launch/guidance.py`): the list, with each repository's state (mounted, or missing).
 - **The person's layer** (`declaration/load.py`, `launch/trust.py`, `approval.py`): `lup_project.local.py` found beside the declaration, loaded after it and layered on top, gitignored (the repository's `.gitignore`) and a protected path (`catalog/paths.py`); its content in the host zone, its approved copy kept with the approval and read by the judge and the launch.
 
+**As built**, where the decisions above left the how open:
+- **The layer binds `project`,** a `Project` written as a layer on the project's (`Project(modules=Modules().add(Mine()))`), applied as a module layers (`applied`); it runs in the same import as the declaration, from its path, so it can import and edit the project's own modules (`load`, `Declared.local`).
+- **The zone takes the layer of the worktree trust runs from,** as the guidance takes `AGENTS.local.md` from the worktree launched: a launch from a worktree whose layer differs from the copy approved, or has none, asks, showing the diff (a removal too).
+- **The approved copy is kept whole in the approval** (`Approval.local`); the judge's export is one per copy (`Layout.exported`), the launch writes it beside its own export (`approved_declaration`), and every export leaves out a layer a commit holds anyway (`read_by_import`).
+- **Its diff is in the summary itself,** git's own over the two copies (`git diff --no-index`, `compared`), since git's count of the zone can't show a file git doesn't hold; what it imports of the commit joins the zone's paths.
+- **A change to the layer alone installs nothing** and restarts no service: the copy is the commit's already, and the judge reads the layer from the approval at each hook.
+- **A repository overlapping the room's own mounts is refused either way:** inside one (the project itself) or holding one, since mounted read-only it would sit over or under what the room writes.
+
 ## Tests
 
 - The declaration: an entry resolved, layered by name, refused when malformed; paths relative and absolute.

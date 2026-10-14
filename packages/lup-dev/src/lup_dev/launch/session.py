@@ -1,8 +1,9 @@
 """A launch's terminal settings: what lup adds to the session its room opens.
 
 `docs/launch.md`, *The command*. A launch reads the declaration at the commit the
-operator approved, as the judge does (`approved_declaration`), so a branch can't
-change the room it runs in or the guidance its session reads. From it, and the
+operator approved, with the person's own layer approved beside it, as the judge
+does (`approved_declaration`), so neither a branch nor an edit made in a room can
+change the room a launch runs in or the guidance its session reads. From it, and the
 worktree launched, come the library's `TerminalSettings` (`terminal_settings`):
 - the hooks, each runtime's own (its adapter's `hooks`), every one running the
   room's pipe to the host service (`piped`), and waiting as long as a hold may;
@@ -17,8 +18,8 @@ worktree launched, come the library's `TerminalSettings` (`terminal_settings`):
   defaults, which theirs outrank (`session_settings`);
 - the guidance, rendered from lup's sections in the installed package, the
   project's own read at the approved commit, and the person's own,
-  `AGENTS.local.md`, from the worktree launched, with lup's tools listed
-  (`launch/guidance.py`);
+  `AGENTS.local.md`, from the worktree launched, with lup's tools and the other
+  repositories named for its sessions listed (`launch/guidance.py`);
 - the paths trusted: the worktree, and its repository's main worktree, which the
   runtimes ask about for a linked one;
 - the launch's own directory, where the compiled files are written.
@@ -54,12 +55,13 @@ from lup_dev.git import Git
 from lup_dev.host.rooms import SERVER
 from lup_dev.launch.guidance import render
 from lup_dev.launch.room import repository
-from lup_dev.layout import ROOM_SOCKETS, LaunchSockets
+from lup_dev.layout import ROOM_SOCKETS, CheckoutLayout, LaunchSockets
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
 
     from lup.tools.tool import ToolSpec
+    from lup_dev.launch.room import RelatedRepository
 
 
 class LaunchError(LupDevError):
@@ -77,19 +79,24 @@ class Approved(Model):
 
 
 @contextmanager
-def approved_declaration(worktree: Path, commit: str) -> Generator[Approved]:
-    """Read the declaration at `commit` in the repository of `worktree`, and resolve it.
+def approved_declaration(
+    worktree: Path, commit: str, *, local: str | None
+) -> Generator[Approved]:
+    """Read the declaration at `commit` in the repository of `worktree`, with `local` on top, and resolve it.
 
     The commit's Python modules and project files are exported from git's
-    objects into a scratch directory and the declaration imported there, as the
-    judge reads it; then the files of the project's own guidance sections. The
-    directory is removed when the context ends. Raise `ProjectError` where the
-    declaration doesn't load or resolve.
+    objects into a scratch directory, `local`, the person's own layer approved
+    with it, written beside them where there's one, and the declaration
+    imported there, as the judge reads it; then the files of the project's own
+    guidance sections. The directory is removed when the context ends. Raise
+    `ProjectError` where the declaration doesn't load or resolve.
     """
     git = Git(cwd=worktree)
     with tempfile.TemporaryDirectory(prefix="lup-launch-") as scratch:
         root = Path(scratch)
         git.export(commit, root, read_by_import)
+        if local is not None:
+            CheckoutLayout(root=root).local_declaration.write_text(local)
         resolved = resolve(load(root).project)
         own = [
             PurePosixPath(section.path)
@@ -197,12 +204,14 @@ def terminal_settings(
     hooks: list[Hook],
     *,
     tools: list[ToolSpec],
+    neighbours: list[RelatedRepository],
 ) -> TerminalSettings:
     """Return what lup adds to the session launched in `worktree`, its files compiled into `directory`.
 
-    `tools` are lup's tools the host service serves it, which its guidance
-    lists. Raise `GuidanceError` naming a section of guidance that can't be
-    read, or doesn't render.
+    `tools` are lup's tools the host service serves it, and `neighbours` the
+    other repositories named for it, as the launch found them, which
+    its guidance lists. Raise `GuidanceError` naming a section of guidance that
+    can't be read, or doesn't render.
     """
     resolved = approved.resolved
     session = session_settings(resolved.session)
@@ -212,7 +221,7 @@ def terminal_settings(
         hooks=hooks,
         servers=served(),
         messages=LaunchSockets(directory=ROOM_SOCKETS).messages,
-        guidance=render(resolved, approved.root, worktree, tools),
+        guidance=render(resolved, approved.root, worktree, tools, neighbours),
         session=session.declared,
         defaults=session.defaults,
         trusted=trusted(worktree),

@@ -99,7 +99,7 @@ from lup_dev.inbox.store import (
 from lup_dev.inbox.tools import InboxTools
 from lup_dev.launch.clis import CliCache
 from lup_dev.launch.images import build
-from lup_dev.launch.room import host_needs, maintaining_room, room_git
+from lup_dev.launch.room import host_needs, maintaining_room, related, room_git
 from lup_dev.launch.session import (
     LaunchError,
     approved_declaration,
@@ -708,9 +708,11 @@ def launched(
     """Launch `adapter`'s runtime in a room for `worktree`, in this terminal, and return its CLI's exit status.
 
     In the order `docs/launch.md` gives (*The command*): trust on launch, its
-    report said; the declaration at the commit approved; the host's requirements,
-    each optional one off said; the repository named on GitHub, or why not said;
-    the host service; the latest CLI, a fallback said; the room, its image built
+    report said; the declaration at the commit approved, with the person's own
+    layer approved beside it; the host's requirements, each optional one off
+    said; the repository named on GitHub, or why not said; the host service; the
+    latest CLI, a fallback said; the other repositories the declaration names
+    for its sessions to read, each missing one said; the room, its image built
     where it's missing; the terminal settings; the repository's `config` checked
     for the room's git; the sweep, then the launch registered, under its
     launcher's lock; the room's git configuration and helper written; the CLI in
@@ -729,7 +731,9 @@ def launched(
         message = f"nothing is approved for {repository}, so nothing launches"
         raise LaunchError(message)
     judge = launcher.layout.judge(repository).command(approval.tool.name)
-    with approved_declaration(worktree, approval.commit) as declared:
+    with approved_declaration(
+        worktree, approval.commit, local=approval.local
+    ) as declared:
         needs = checked(host_needs(), launcher.tools).require()
         for off in needs.off:
             launcher.say(f"Turned off, for want of a tool: {off.described()}")
@@ -743,12 +747,21 @@ def launched(
                 f"{runtime} {cached.version}, kept, runs: its release channel couldn't "
                 f"give the latest. {cached.fallback}"
             )
+        neighbours = related(declared.resolved.repositories, worktree)
+        for each in neighbours:
+            if not each.mounted:
+                launcher.say(
+                    f"The repository `{each.name}` the declaration names for "
+                    f"sessions to read isn't at {each.path}, so the room doesn't "
+                    "mount it, and its guidance says it's missing."
+                )
         room = maintaining_room(
             declared.resolved,
             worktree,
             launcher.layout,
             launcher.terminal,
             launcher.tools,
+            neighbours=neighbours,
         )
         built = build(
             room.image, launcher.podman, launcher.clock, launcher.layout.builds
@@ -764,6 +777,7 @@ def launched(
             cached.cli,
             hooked(adapter.hooks),
             tools=served_tools(),
+            neighbours=neighbours,
         )
         git = room_git(
             repository, own, [*room.mounts, *adapter.agent().terminal(settings).mounts]

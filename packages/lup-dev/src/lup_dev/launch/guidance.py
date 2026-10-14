@@ -19,6 +19,11 @@ runtime defers an MCP server's tools behind its tool search, and the first lup
 found that agents told nothing of deferred tools concluded they didn't exist
 (`docs/host-tools.md`, *Found through tool search, listed in the guidance*).
 
+After lup's tools come the other repositories named for the project's sessions
+to read (`repositories`): each by its name, what it is, its path in the room,
+whether it's mounted or missing on this machine, and its GitHub identity, which
+lup's GitHub tools take (`docs/related-repositories.md`).
+
 The person's own section, `AGENTS.local.md` at the root of the worktree launched,
 which git ignores, is appended after every other where there's one, so it holds
 where they differ. The
@@ -42,6 +47,7 @@ if TYPE_CHECKING:
     from lup.tools.tool import ToolSpec
     from lup_dev.declaration.kinds import Section
     from lup_dev.declaration.resolve import Resolved
+    from lup_dev.launch.room import RelatedRepository
 
 OPENING = (
     "This guidance adds to your runtime's own instructions and replaces none of "
@@ -104,17 +110,69 @@ def listed(tools: list[ToolSpec]) -> str:
     return "\n".join(["## lup's tools", "", opening, "", *lines])
 
 
+def repositories(neighbours: list[RelatedRepository]) -> str:
+    """Return the section listing the other repositories named for the session to read: each by its name, what it is, its path in the room, whether it's mounted, and its GitHub identity.
+
+    >>> from pathlib import Path
+    >>> from lup_dev.launch.room import RelatedRepository
+    >>> print(repositories([
+    ...     RelatedRepository(
+    ...         name="atlas",
+    ...         path=Path("/src/atlas.git"),
+    ...         about="a made-up neighbour",
+    ...         github="someone/atlas",
+    ...         mounted=True,
+    ...     ),
+    ...     RelatedRepository(
+    ...         name="beacon", path=Path("/src/beacon.git"), about="another made-up neighbour",
+    ...         github=None, mounted=False,
+    ...     ),
+    ... ]))
+    ## Other repositories
+    <BLANKLINE>
+    These other repositories are named for you to read. Each one mounted is read-only, at the path given, as it is on the host: read its files, and its history with `git log` and `git show`. Where one is on GitHub, lup's `read_issue` and `find_issues` read its issues and pull requests, given its `owner/name` as `repository`.
+    <BLANKLINE>
+    - `atlas`, a made-up neighbour. At `/src/atlas.git`, mounted. On GitHub as `someone/atlas`.
+    - `beacon`, another made-up neighbour. At `/src/beacon.git`, missing: it isn't on this machine, so it isn't mounted.
+    """
+
+    def entry(each: RelatedRepository) -> str:
+        state = (
+            "mounted"
+            if each.mounted
+            else "missing: it isn't on this machine, so it isn't mounted"
+        )
+        github = [] if each.github is None else [f"On GitHub as `{each.github}`."]
+        said = [f"- `{each.name}`, {each.about}.", f"At `{each.path}`, {state}."]
+        return " ".join([*said, *github])
+
+    opening = (
+        "These other repositories are named for you to read. Each one mounted is "
+        "read-only, at the path given, as it is on the host: read its files, and its "
+        "history with `git log` and `git show`. Where one is on GitHub, lup's "
+        "`read_issue` and `find_issues` read its issues and pull requests, given its "
+        "`owner/name` as `repository`."
+    )
+    lines = [entry(each) for each in neighbours]
+    return "\n".join(["## Other repositories", "", opening, "", *lines])
+
+
 def render(
-    resolved: Resolved, project: Path, worktree: Path, tools: list[ToolSpec]
+    resolved: Resolved,
+    project: Path,
+    worktree: Path,
+    tools: list[ToolSpec],
+    neighbours: list[RelatedRepository],
 ) -> str:
-    """Render the session's guidance from `resolved`'s sections, and the tools it's served.
+    """Render the session's guidance from `resolved`'s sections, the tools it's served, and the other repositories it may read.
 
     The project's own sections are read in `project`, a directory holding the
     project's files at the commit its declaration was read from, and the
     person's own in `worktree`, the worktree launched. The sections go in the
     order the declaration gives them, then lup's `tools` (`listed`), then the
-    person's own, where there's one. Raise `GuidanceError` naming the section
-    that can't be read, or doesn't render.
+    other repositories named for it, as the launch found them
+    (`repositories`), then the person's own, where there's one. Raise
+    `GuidanceError` naming the section that can't be read, or doesn't render.
     """
     runner = resolved.runner
 
@@ -144,10 +202,11 @@ def render(
         for section in resolved.guidance
     ]
     served = [listed(tools)] if tools else []
+    beside = [repositories(neighbours)] if neighbours else []
     local = CheckoutLayout(root=worktree).local_guidance
     own = (
         [rendered(f"the person's own section (`{local}`)", local.read_text())]
         if local.is_file()
         else []
     )
-    return "\n\n".join([OPENING, *declared, *served, *own]) + "\n"
+    return "\n\n".join([OPENING, *declared, *served, *beside, *own]) + "\n"

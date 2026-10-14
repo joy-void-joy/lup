@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, override
 
 import pytest
 
+from lup.tools.speaking import note
 from lup_dev import (
     Core,
     Guidance,
@@ -20,7 +21,8 @@ from lup_dev import (
     Section,
 )
 from lup_dev.declaration.resolve import Resolved, resolve
-from lup_dev.launch.guidance import OPENING, GuidanceError, render
+from lup_dev.launch.guidance import OPENING, GuidanceError, listed, render
+from lup_dev.launch.room import RelatedRepository
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -91,7 +93,7 @@ def root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
 
 
 def test_sections_render_in_module_order_from_a_path_and_a_package(root: Path) -> None:
-    rendered = render(declared(Pipeline()), root, root, [])
+    rendered = render(declared(Pipeline()), root, root, [], [])
     assert rendered == (
         f"{OPENING}\n\n# The project\n\nIts own.\n\nPipeline: stub exec make.\n\n"
         "Stages.\n"
@@ -107,14 +109,14 @@ def test_a_section_placed_before_another_renders_there(root: Path) -> None:
             before="project",
         )
     )
-    rendered = render(declared(placed), root, root, [])
+    rendered = render(declared(placed), root, root, [], [])
     assert rendered.index("Stages.") < rendered.index("Its own.")
     assert rendered.index("Its own.") < rendered.index("Pipeline:")
 
 
 def test_the_person_s_own_section_comes_after_the_project_s(root: Path) -> None:
     (root / "AGENTS.local.md").write_text("Mine: {{ run('pytest -x') }}.\n")
-    rendered = render(declared(Pipeline()), root, root, [])
+    rendered = render(declared(Pipeline()), root, root, [], [])
     assert rendered.endswith("Stages.\n\nMine: stub exec pytest -x.\n")
 
 
@@ -125,7 +127,7 @@ def test_the_person_s_own_section_is_read_in_the_worktree_launched(
     worktree.mkdir()
     (worktree / "AGENTS.local.md").write_text("Mine.\n")
     (root / "AGENTS.local.md").write_text("The commit's, never read.\n")
-    rendered = render(declared(Pipeline()), root, worktree, [])
+    rendered = render(declared(Pipeline()), root, worktree, [], [])
     assert rendered.endswith("Stages.\n\nMine.\n")
     assert "never read" not in rendered
 
@@ -133,16 +135,58 @@ def test_the_person_s_own_section_is_read_in_the_worktree_launched(
 def test_without_a_local_section_the_document_ends_with_the_declared(
     root: Path,
 ) -> None:
-    rendered = render(declared(Pipeline()), root, root, [])
+    rendered = render(declared(Pipeline()), root, root, [], [])
     assert rendered.endswith("Stages.\n")
     assert "Mine" not in rendered
+
+
+def test_the_other_repositories_come_after_lup_s_tools_each_with_its_state(
+    root: Path,
+) -> None:
+    (root / "AGENTS.local.md").write_text("Mine.\n")
+    neighbours = [
+        RelatedRepository(
+            name="atlas",
+            path=Path("/src/atlas.git"),
+            about="a made-up neighbour, read for how it did things",
+            github="someone/atlas",
+            mounted=True,
+        ),
+        RelatedRepository(
+            name="beacon",
+            path=Path("/src/beacon.git"),
+            about="another made-up neighbour",
+            github=None,
+            mounted=False,
+        ),
+    ]
+    rendered = render(declared(Pipeline()), root, root, [note.spec()], neighbours)
+    assert rendered.endswith(
+        f"Stages.\n\n{listed([note.spec()])}\n\n"
+        "## Other repositories\n\n"
+        "These other repositories are named for you to read. Each one mounted is "
+        "read-only, at the path given, as it is on the host: read its files, and its "
+        "history with `git log` and `git show`. Where one is on GitHub, lup's "
+        "`read_issue` and `find_issues` read its issues and pull requests, given its "
+        "`owner/name` as `repository`.\n\n"
+        "- `atlas`, a made-up neighbour, read for how it did things. At "
+        "`/src/atlas.git`, mounted. On GitHub as `someone/atlas`.\n"
+        "- `beacon`, another made-up neighbour. At `/src/beacon.git`, missing: "
+        "it isn't on this machine, so it isn't mounted.\n\n"
+        "Mine.\n"
+    )
+
+
+def test_without_other_repositories_the_guidance_names_none(root: Path) -> None:
+    rendered = render(declared(Pipeline()), root, root, [note.spec()], [])
+    assert "## Other repositories" not in rendered
 
 
 def test_run_spells_a_command_as_the_runner_runs_it(root: Path) -> None:
     (root / "AGENTS.md").write_text(
         '`{{ run("lup-dev check --fix") }}`, `{{ run("pytest -k \'a b\'") }}`'
     )
-    rendered = render(declared(Pipeline()), root, root, [])
+    rendered = render(declared(Pipeline()), root, root, [], [])
     assert "`stub exec lup-dev check --fix`" in rendered
     assert f"`stub exec pytest -k {shlex.quote('a b')}`" in rendered
 
@@ -152,7 +196,7 @@ def test_a_malformed_command_is_refused_naming_the_section(root: Path) -> None:
     with pytest.raises(
         GuidanceError, match=r"`project` \(`AGENTS.md`\).*isn't a command"
     ):
-        render(declared(Pipeline()), root, root, [])
+        render(declared(Pipeline()), root, root, [], [])
 
 
 def test_an_undefined_name_is_refused_naming_the_section(root: Path) -> None:
@@ -162,7 +206,7 @@ def test_an_undefined_name_is_refused_naming_the_section(root: Path) -> None:
         match=r"the section `pipeline` \(`guidance/pipeline.md`\) doesn't render: "
         r"'gate' is undefined",
     ):
-        render(declared(Pipeline()), root, root, [])
+        render(declared(Pipeline()), root, root, [], [])
 
 
 def test_an_undefined_name_in_the_person_s_section_is_refused_naming_it(
@@ -172,13 +216,13 @@ def test_an_undefined_name_in_the_person_s_section_is_refused_naming_it(
     with pytest.raises(
         GuidanceError, match=r"the person's own section .*AGENTS.local.md"
     ):
-        render(declared(Pipeline()), root, root, [])
+        render(declared(Pipeline()), root, root, [], [])
 
 
 def test_a_section_can_t_reach_past_the_sandbox(root: Path) -> None:
     (root / "AGENTS.md").write_text("{{ run.__globals__ }}")
     with pytest.raises(GuidanceError, match=r"unsafe"):
-        render(declared(Pipeline()), root, root, [])
+        render(declared(Pipeline()), root, root, [], [])
 
 
 def test_a_missing_section_file_is_refused_naming_it(root: Path) -> None:
@@ -187,7 +231,7 @@ def test_a_missing_section_file_is_refused_naming_it(root: Path) -> None:
         GuidanceError,
         match=r"the section `pipeline` \(`guidance/pipeline.md`\) has no file",
     ):
-        render(declared(Pipeline()), root, root, [])
+        render(declared(Pipeline()), root, root, [], [])
 
 
 def test_a_missing_package_resource_is_refused_naming_it(root: Path) -> None:
@@ -201,7 +245,7 @@ def test_a_missing_package_resource_is_refused_naming_it(root: Path) -> None:
         GuidanceError,
         match=rf"the section `stages` \(`docs/gone.md` in `{PACKAGE}`\) has no file",
     ):
-        render(declared(missing), root, root, [])
+        render(declared(missing), root, root, [], [])
 
 
 def test_a_missing_package_is_refused_naming_it(root: Path) -> None:
@@ -212,13 +256,13 @@ def test_a_missing_package_is_refused_naming_it(root: Path) -> None:
         )
     )
     with pytest.raises(GuidanceError, match=r"`a.md` in `no_such_package`"):
-        render(declared(missing), root, root, [])
+        render(declared(missing), root, root, [], [])
 
 
 def test_lup_s_own_sections_render_through_the_project_s_runner(
     tmp_path: Path,
 ) -> None:
-    rendered = render(resolve(Project()), tmp_path, tmp_path, [])
+    rendered = render(resolve(Project()), tmp_path, tmp_path, [], [])
     assert rendered.startswith(f"{OPENING}\n\n# The room\n")
     assert "`uv run lup-dev check`" in rendered
     assert "{{" not in rendered
