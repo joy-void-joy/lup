@@ -8,9 +8,17 @@ in a launch of its own finds what waited for it there.
 
 An item has a number, one sequence per user, so the operator answers `12`; a
 reason (a message with its kind, a question with its numbered decisions, an
-answer); a sender and a recipient; when it was made; and its state: waiting,
-told (when, and how), answered, or done. An item for a conversation that has
-ended goes to its session's main conversation, saying whose it was.
+answer, an approval asked yes or no); a sender and a recipient; when it was
+made; and its state: waiting, told (when, and how), answered, done, or for an
+approval decided. An item for a conversation that has ended goes to its
+session's main conversation, saying whose it was.
+
+An approval is trust on launch's: the launch's own question, put to the
+operator's inbox and answered at the launching terminal or any other, whichever
+comes first. It's from the operator's own launch to the operator, and its answer
+is its state, since no party's inbox waits for it: the launches waiting on it
+read it there. Its whole diff, which can run to megabytes, is kept beside it in a
+file of its own, read only when asked for, so listing the inbox never carries it.
 
 The host service is the only writer, on its event loop, and nothing mounts the
 store into a room: the first lup's sessions approved their own questions by
@@ -125,8 +133,35 @@ class Answer(Model):
     comment: str = ""
 
 
-type Reason = Annotated[Message | Question | Answer, Field(discriminator="reason")]
+class Approval(Model):
+    """An approval the operator is asked, yes or no: its question, what they read first, and what it's of.
+
+    Trust on launch's (`lup_dev.launch.trust`): a repository's host zone, the
+    whole diff kept beside the item (`Inbox.diff`), shown on request.
+    """
+
+    reason: Literal["approval"] = "approval"
+    text: str
+    """The question, answered yes or no."""
+    summary: str
+    """What the operator reads first, coloured as git prints it."""
+    repository: Path
+    """The git directory of the repository whose host zone it is."""
+    fingerprint: str
+    """The zone's fingerprint: a launch asking about the same zone joins the
+    approval waiting for it."""
+
+
+type Reason = Annotated[
+    Message | Question | Answer | Approval, Field(discriminator="reason")
+]
 """Why an item is there."""
+
+
+class Diff(Model):
+    """An approval's whole diff, coloured, kept beside its item and read only on request."""
+
+    text: str
 
 
 class Waiting(Model):
@@ -162,7 +197,17 @@ class Done(Model):
     at: datetime
 
 
-type State = Annotated[Waiting | Told | Answered | Done, Field(discriminator="state")]
+class Decided(Model):
+    """An approval the operator answered, wherever they answered it: yes or no."""
+
+    state: Literal["decided"] = "decided"
+    at: datetime
+    approved: bool
+
+
+type State = Annotated[
+    Waiting | Told | Answered | Done | Decided, Field(discriminator="state")
+]
 """Where an item stands."""
 
 
@@ -290,6 +335,27 @@ class Inbox(MutableModel):
             for item in ordered
             if item.recipient == recipient and isinstance(item.state, Waiting)
         ]
+
+    def asking(self, repository: Path, fingerprint: str) -> Item | None:
+        """Return the approval waiting for the operator about one zone: the repository's, at `fingerprint`; none where there's none."""
+        return next(
+            (
+                item
+                for item in self.waiting(Operator())
+                if isinstance(item.reason, Approval)
+                and item.reason.repository == repository
+                and item.reason.fingerprint == fingerprint
+            ),
+            None,
+        )
+
+    def attached(self, number: int, diff: str) -> None:
+        """Keep approval `number`'s whole diff beside it, in a file of its own."""
+        write_model(self.layout.diff(number), Diff(text=diff))
+
+    def diff(self, number: int) -> str:
+        """Return approval `number`'s whole diff, or say it isn't kept."""
+        return read(self.layout.diff(number), Diff).text
 
     def placed(self, place: Whereabouts) -> Whereabouts:
         """Write a conversation's whereabouts through to its file, and hold them."""

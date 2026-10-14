@@ -199,15 +199,20 @@ class Dispatcher(Model, arbitrary_types_allowed=True):
     ) -> None:
         """Answer one request, and close the connection.
 
-        A connection that sends nothing only asks whether the socket answers.
+        A connection that sends nothing only asks whether the socket answers. One
+        whose sender left before its reply, as a terminal waiting on an approval
+        does when it's interrupted, is said, and its reply dropped.
         """
         raw = (await reader.read()).decode()
-        if raw:
-            reply = await self.answered(raw)
-            writer.write(reply.model_dump_json().encode())
-            await writer.drain()
-        writer.close()
-        await writer.wait_closed()
+        try:
+            if raw:
+                reply = await self.answered(raw)
+                writer.write(reply.model_dump_json().encode())
+                await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+        except ConnectionError as gone:
+            self.say(f"a request's sender left before its reply: {gone}")
 
     async def answered(self, raw: str) -> Reply:
         """Answer one request with the route its kind names.

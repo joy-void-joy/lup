@@ -112,13 +112,15 @@ class ReleaseTool(Model):
         match before:
             case ReleaseTool():
                 there = f"{before.version} from {before.registry}"
+                kept = there == here
                 heading = (
                     f"`{self.name}` {here}, as before:"
-                    if there == here
+                    if kept
                     else f"`{self.name}` {there} becomes {here}:"
                 )
                 earlier = before.pins
             case _:
+                kept = False
                 heading = f"`{self.name}` {here}, needing:"
                 earlier = {}
 
@@ -133,6 +135,8 @@ class ReleaseTool(Model):
 
         names = list(dict.fromkeys([*earlier, *self.pins]))
         changed = [name for name in names if earlier.get(name) != self.pins.get(name)]
+        if kept and not changed:
+            return [f"`{self.name}` {here}, as before, needing what it did."]
         return [heading, *(moved(name) for name in changed)]
 
 

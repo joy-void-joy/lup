@@ -5,7 +5,14 @@ installer and the host service's client are stubbed, so nothing reaches uv, the
 network or a real service, and the clock is the test kit's.
 """
 
+import asyncio
+import os
+import select
+import socket
 import sys
+import threading
+from collections.abc import Callable
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -18,11 +25,27 @@ from lup_dev import cli
 from lup_dev.approval import Approval, ReleaseTool, Tool, WorkspaceTool
 from lup_dev.declaration.load import load
 from lup_dev.declaration.resolve import resolve
-from lup_dev.host.client import Detached, HostClient
+from lup_dev.host.client import Detached, HostClient, Starter
+from lup_dev.host.protocol import Stop
+from lup_dev.host.service import HostService
+from lup_dev.inbox import store
+from lup_dev.inbox.delivery import Delivery
+from lup_dev.inbox.notices import Notices
+from lup_dev.inbox.protocol import AskApproval
+from lup_dev.inbox.protocol import routes as inbox_routes
+from lup_dev.inbox.store import Decided, Inbox, InboxError
 from lup_dev.launch.trust import (
+    WHOLE,
+    WHY,
+    Approvals,
     Asker,
+    Elsewhere,
+    Given,
+    InboxApprovals,
     Kept,
     Lock,
+    Outcome,
+    Terminal,
     Toolchain,
     Trust,
     Trusted,
@@ -35,7 +58,9 @@ from lup_dev.layout import JudgeLayout, Layout
 from lup_dev.stored import read_model, write_model
 
 if TYPE_CHECKING:
-    from conftest import Kit, Shell
+    from collections.abc import Generator
+
+    from conftest import FakeClock, Kit, Shell
 
 LUP_LOCK = """\
 version = 1
@@ -202,24 +227,98 @@ def audiobook(tmp_path: Path, shell: Shell) -> Path:
     return repository(tmp_path / "audiobook", RELEASE, shell)
 
 
-class Answering(Asker):
-    """Answers each question as told, keeping what it was shown, its colour off."""
+PATIENCE = 60
+"""Seconds a test waits on another thread before failing, so a broken one ends
+rather than hangs; nothing passes for having waited."""
 
-    def __init__(self, answers: list[bool]) -> None:
+
+def answered_elsewhere(elsewhere: Elsewhere) -> None:
+    """Wait until an answer given elsewhere reaches this terminal."""
+    while elsewhere.given() is None:
+        readable, _, _ = select.select([elsewhere], [], [], PATIENCE)
+        assert readable, "no answer came from elsewhere"
+
+
+class Then(Model, arbitrary_types_allowed=True):
+    """Something done while the terminal asks, then its answer given here."""
+
+    act: Callable[[], object]
+    answer: bool
+
+
+class Meanwhile(Model, arbitrary_types_allowed=True):
+    """Something done at another terminal while this one asks, after which this one waits for the answer given there."""
+
+    act: Callable[[], object]
+
+
+type Reply = bool | Then | Meanwhile
+
+
+class Answering(Asker):
+    """Answers whether to approve as told, and whether to show the whole diff; keeps what it printed, paged and asked, its colour off."""
+
+    def __init__(self, answers: list[Reply], *, whole: Reply = False) -> None:
         self.answers = answers
+        self.whole = whole
+        self.said: list[str] = []
         self.shown: list[str] = []
         self.asked: list[str] = []
+
+    def say(self, text: str) -> None:
+        self.said.append(Text.from_ansi(text).plain)
 
     def show(self, text: str) -> None:
         self.shown.append(Text.from_ansi(text).plain)
 
-    def ask(self, question: str) -> bool:
+    def ask(self, question: str, elsewhere: Elsewhere) -> bool | None:
         self.asked.append(question)
-        return self.answers.pop(0)
+        reply = self.whole if question == WHOLE else self.answers.pop(0)
+        match reply:
+            case Then(act=act, answer=answer):
+                act()
+                return answer
+            case Meanwhile(act=act):
+                act()
+                answered_elsewhere(elsewhere)
+                return None
+            case bool():
+                return reply
 
 
-def yes() -> Answering:
-    return Answering([True])
+class Never(Elsewhere):
+    """An approval nothing answers elsewhere."""
+
+    def fileno(self) -> int:
+        message = "a stub terminal waits on nothing"
+        raise AssertionError(message)
+
+    def given(self) -> bool | None:
+        return None
+
+
+class Here(Approvals):
+    """The inbox, standing in: each approval item 1, answered at this terminal alone."""
+
+    def __init__(self) -> None:
+        self.asking: list[AskApproval] = []
+        self.answers: list[bool] = []
+
+    def asked(self, asking: AskApproval) -> int:
+        self.asking.append(asking)
+        return 1
+
+    @contextmanager
+    def waited(self, number: int) -> Generator[Elsewhere]:
+        yield Never()
+
+    def answer(self, number: int, *, approved: bool) -> Given:
+        self.answers.append(approved)
+        return Given(approved=approved, here=True)
+
+
+def yes(*, whole: bool = False) -> Answering:
+    return Answering([True], whole=whole)
 
 
 def no() -> Answering:
@@ -282,15 +381,19 @@ def trusting(
     *,
     inside: list[str] | None = None,
     running: bool = True,
+    approvals: Approvals | None = None,
+    layout: Layout | None = None,
 ) -> Trust:
+    placed = layout or kit.layout
     return Trust(
         root=root,
-        layout=kit.layout,
+        layout=placed,
         integration="dev",
         asker=asker,
+        approvals=approvals or Here(),
         toolchain=Recording(),
         host=Service(
-            layout=kit.layout.host,
+            layout=placed.host,
             clock=kit.clock,
             starter=Detached(),
             running=running,
@@ -313,6 +416,20 @@ def service(trust: Trust) -> Service:
 def answering(trust: Trust) -> Answering:
     assert isinstance(trust.asker, Answering)
     return trust.asker
+
+
+INBOXED = (
+    "It's item 1 in your inbox too: `lup-dev inbox answer 1` answers it from any "
+    "terminal."
+)
+"""What the launching terminal says after the summary, of the approval's item."""
+
+
+def summarised(trust: Trust) -> list[str]:
+    """The summary the terminal printed first, by its lines, without the line naming the approval's item."""
+    said = answering(trust).said[0].splitlines()
+    assert said[-2:] == ["", INBOXED]
+    return said[:-2]
 
 
 def approved(root: Path, kit: Kit, shell: Shell) -> Approval | None:
@@ -377,11 +494,15 @@ def test_the_first_time_shows_the_zone_whole_then_installs_restarts_and_records(
     outcome = trust.ensure()
     head = shell.git(lup, "rev-parse", "dev")
     assert isinstance(outcome, Trusted)
-    [shown] = answering(trust).shown
-    assert shown.startswith(
-        f"The host zone at {head}, whole, since nothing was approved yet: 8 files "
-        "changed"
-    )
+    lines = summarised(trust)
+    said = "\n".join(lines)
+    assert lines[:5] == [
+        WHY,
+        "",
+        "Approved before: nothing, so the zone is shown whole.",
+        f"The tip: {head}.",
+        "",
+    ]
     carried = [
         "lup_project.py",
         "pyproject.toml",
@@ -392,17 +513,30 @@ def test_the_first_time_shows_the_zone_whole_then_installs_restarts_and_records(
         "packages/lup-dev/src/environment/__init__.py",
         "packages/lup-dev/checker/build.py",
     ]
-    assert all(path in shown for path in carried)
-    assert "docs/note.md" not in shown
-    assert "tests/test_" not in shown
+    counted = [line.split("|")[0].strip() for line in lines[5:-1]]
+    assert sorted(counted) == sorted(f"{path} (new)" for path in carried)
+    assert lines[-1].startswith(" 8 files changed")
+    assert "docs/note.md" not in said
+    assert "tests/test_" not in said
     assert answering(trust).asked == [
+        WHOLE,
         (
             f"Approve the host zone at {head}, and install its `lup-dev` as the one "
             "the host runs?"
-        )
+        ),
     ]
+    assert answering(trust).shown == []
     zone = trust.check().zone
     common = Path(shell.git(lup, "rev-parse", "--absolute-git-dir"))
+    assert isinstance(trust.approvals, Here)
+    [asking] = trust.approvals.asking
+    assert Text.from_ansi(asking.summary).plain == said
+    assert asking.question == answering(trust).asked[-1]
+    assert asking.repository == common
+    assert asking.fingerprint == trust.check().fingerprint
+    assert asking.worktree == lup
+    assert "+++ b/lup_project.py" in Text.from_ansi(asking.diff).plain
+    assert trust.approvals.answers == [True]
     assert recording(trust).installed == [
         Installed(
             tool=zone.tool,
@@ -501,6 +635,7 @@ def test_a_change_outside_the_zone_asks_nothing(
         f"The host zone at {head} is the one you approved at "
         f"{first.approval.commit}: nothing to review."
     )
+    assert answering(trust).said == []
     assert answering(trust).shown == []
     assert recording(trust).installed == []
     assert service(trust).calls == []
@@ -516,14 +651,17 @@ def test_a_change_inside_the_zone_shows_its_diff_since_the_approved_commit(
         {"packages/lup-dev/src/environment/__init__.py": '"""Changed."""\n'},
         shell,
     )
-    trust = trusting(lup, kit, yes())
+    trust = trusting(lup, kit, yes(whole=True))
     outcome = trust.ensure()
     assert isinstance(outcome, Trusted)
+    assert summarised(trust)[2:] == [
+        f"Approved before: {first.approval.commit}.",
+        f"The tip: {head}.",
+        "",
+        " packages/lup-dev/src/environment/__init__.py | 2 +-",
+        " 1 file changed, 1 insertion(+), 1 deletion(-)",
+    ]
     [shown] = answering(trust).shown
-    assert shown.startswith(
-        f"The host zone at {head}, since {first.approval.commit}, the commit you "
-        "approved last: 1 file changed, 1 insertion(+), 1 deletion(-)."
-    )
     assert '+"""Changed."""' in shown
     assert '-"""The environment."""' in shown
     assert "packages/lup/src/library/__init__.py" not in shown
@@ -608,21 +746,29 @@ def test_a_releases_change_is_said_by_its_versions(
     changed(audiobook, {"uv.lock": RELEASE_LOCK.format(version="0.5.0")}, shell)
     trust = trusting(audiobook, kit, yes())
     trust.ensure()
-    [shown] = answering(trust).shown
-    lines = shown.splitlines()
-    assert lines[1:3] == [
+    lines = summarised(trust)
+    said = "\n".join(lines)
+    assert lines[5:] == [
+        "No file of the zone changed.",
         f"`lup-dev` 0.4.0 from {PYPI} becomes 0.5.0 from {PYPI}:",
         "  lup 0.4.0 becomes 0.5.0",
     ]
-    assert "no file of it changed" in lines[0]
-    assert "uv.lock" not in shown
+    assert "uv.lock" not in said
+    # With no file changed there's no diff to offer.
+    assert WHOLE not in answering(trust).asked
 
 
 def test_the_first_release_says_what_it_needs(audiobook: Path, kit: Kit) -> None:
     trust = trusting(audiobook, kit, yes())
     trust.ensure()
-    [shown] = answering(trust).shown
-    assert shown.splitlines()[1:5] == [
+    lines = summarised(trust)
+    assert lines[5:9] == [
+        " audiobook/__init__.py (new)   | 1 +",
+        " audiobook/conditions.py (new) | 3 +++",
+        " lup_project.py (new)          | 7 +++++++",
+        " 3 files changed, 11 insertions(+)",
+    ]
+    assert lines[9:] == [
         f"`lup-dev` 0.4.0 from {PYPI}, needing:",
         "  lup 0.4.0",
         "  pydantic 2.12.0",
@@ -639,9 +785,9 @@ def test_the_conditions_module_is_in_the_zone_and_a_module_beside_it_isnt(
     changed(audiobook, {"audiobook/conditions.py": '"""Changed."""\n'}, shell)
     trust = trusting(audiobook, kit, yes())
     assert isinstance(trust.ensure(), Trusted)
-    [shown] = answering(trust).shown
-    assert "audiobook/conditions.py" in shown
-    assert "audiobook/narration.py" not in shown
+    said = "\n".join(summarised(trust))
+    assert "audiobook/conditions.py" in said
+    assert "audiobook/narration.py" not in said
 
 
 def test_a_file_joining_the_zone_is_shown_whole(
@@ -654,13 +800,17 @@ def test_a_file_joining_the_zone_is_shown_whole(
         {"lup_project.py": ledger, "audiobook/ledger.py": '"""The ledger."""\n'},
         shell,
     )
-    trust = trusting(audiobook, kit, yes())
+    trust = trusting(audiobook, kit, yes(whole=True))
     trust.ensure()
+    assert summarised(trust)[5:] == [
+        " lup_project.py | 2 +-",
+        " 1 file changed, 1 insertion(+), 1 deletion(-)",
+        "Joining the zone, shown whole:",
+        " audiobook/ledger.py (new) | 1 +",
+        " 1 file changed, 1 insertion(+)",
+        f"`lup-dev` 0.4.0 from {PYPI}, as before, needing what it did.",
+    ]
     [shown] = answering(trust).shown
-    lines = shown.splitlines()
-    assert lines[1] == (
-        "Joining the zone, shown whole: 1 file changed, 1 insertion(+)."
-    )
     assert '+"""The ledger."""' in shown
     assert "audiobook/conditions.py" not in shown
 
@@ -674,8 +824,7 @@ def test_a_declaration_that_doesnt_parse_is_said_and_still_asked(
     [said] = zone.unread
     assert said.startswith("`lup_project.py` doesn't parse (")
     trust.ensure()
-    [shown] = answering(trust).shown
-    assert shown.splitlines()[1:3] == [
+    assert summarised(trust)[-2:] == [
         "Not followed, so the zone may miss a file the declaration runs:",
         f"  {said}",
     ]
@@ -783,7 +932,8 @@ def test_inside_an_agents_session_nothing_is_asked(
     inside = trusting(lup, kit, yes(), inside=["first"])
     with pytest.raises(TrustError, match="inside a first session"):
         inside.ensure()
-    assert answering(inside).shown == []
+    assert answering(inside).said == []
+    assert answering(inside).asked == []
     assert approved(lup, kit, shell) is None
     trusting(lup, kit, yes()).ensure()
     again = trusting(lup, kit, unasked(), inside=["first"])
@@ -818,11 +968,15 @@ def test_an_approved_commit_gone_from_the_repository_shows_everything(
     common = shell.git(lup, "rev-parse", "--path-format=absolute", "--git-common-dir")
     write_model(kit.layout.approved(Path(common)), gone)
     trust.ensure()
-    [shown] = answering(trust).shown
-    assert shown.startswith(
-        f"The host zone at {zone.commit}, whole, since {'0' * 40}, the commit you "
-        "approved last, isn't in the repository: 8 files changed"
-    )
+    lines = summarised(trust)
+    assert lines[2:4] == [
+        (
+            f"Approved before: {'0' * 40}, which the repository no longer holds, so "
+            "the zone is shown whole."
+        ),
+        f"The tip: {zone.commit}.",
+    ]
+    assert lines[-1].startswith(" 8 files changed")
 
 
 def test_a_lock_that_doesnt_pin_lup_dev_or_pins_it_from_elsewhere_refuses() -> None:
@@ -1084,3 +1238,443 @@ def test_lup_dev_install_is_gone() -> None:
     result = CliRunner().invoke(cli.app, ["install"])
     assert result.exit_code != 0
     assert "No such command 'install'" in result.output
+
+
+# The approval in lup's inbox: a host service serving in a thread of its own, on
+# sockets under the test's directory, as `test_inbox.py` drives one; the
+# launching terminal stubbed, `lup-dev inbox` run as another terminal would.
+
+
+class Raised(Notices):
+    """Records each desktop notice instead of raising it."""
+
+    def __init__(self) -> None:
+        self.raised: list[str] = []
+
+    async def notify(self, summary: str, body: str) -> None:
+        self.raised.append(f"{summary}\n{body}")
+
+
+class Background:
+    """A host service with lup's inbox, serving in a thread of its own."""
+
+    def __init__(
+        self, machine: Layout, clock: FakeClock, *, inboxed: bool = True
+    ) -> None:
+        known = cli.Adapters(known=cli.adapters())
+        couriers = cli.Couriers(adapters=known)
+        self.notices = Raised()
+        self.said: list[str] = []
+        self.delivery = Delivery(
+            inbox=Inbox.opened(machine.inbox),
+            courier=couriers,
+            layout=machine.host,
+            notices=self.notices,
+            clock=clock,
+            say=self.said.append,
+        )
+        self.service = HostService(
+            layout=machine.host,
+            answerer=known,
+            courier=couriers,
+            post=self.delivery,
+            routes=inbox_routes(self.delivery) if inboxed else [],
+            say=self.said.append,
+        )
+        self.bound = threading.Event()
+        self.failure: BaseException | None = None
+        self.thread = threading.Thread(target=self.run, daemon=True)
+
+    def run(self) -> None:
+        async def serve() -> None:
+            async with self.service.serving() as serving:
+                self.bound.set()
+                await serving.stopped.wait()
+
+        try:
+            asyncio.run(serve())
+        except BaseException as failure:
+            self.failure = failure
+        finally:
+            self.bound.set()
+
+    def start(self) -> Background:
+        self.thread.start()
+        self.bound.wait(PATIENCE)
+        if self.failure is not None:
+            raise self.failure
+        return self
+
+    def stop(self) -> None:
+        if self.thread.is_alive():
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+                connection.connect(str(self.service.layout.control))
+                connection.sendall(Stop().model_dump_json().encode())
+                connection.shutdown(socket.SHUT_WR)
+                connection.recv(4096)
+        self.thread.join(PATIENCE)
+        assert not self.thread.is_alive()
+
+
+@contextmanager
+def served(machine: Layout, clock: FakeClock) -> Generator[Background]:
+    running = Background(machine, clock).start()
+    try:
+        yield running
+    finally:
+        running.stop()
+
+
+class Unstarted(Starter):
+    """Starts nothing: the service runs already."""
+
+    def start(self, log: Path) -> None:
+        message = f"a test's service runs already; nothing logs to {log}"
+        raise AssertionError(message)
+
+
+class Starting(Starter):
+    """Starts the test's service in a thread, as a launch starts `lup-dev host`."""
+
+    def __init__(self, machine: Layout, clock: FakeClock) -> None:
+        self.machine = machine
+        self.clock = clock
+        self.started: list[Background] = []
+
+    def start(self, log: Path) -> None:
+        self.started.append(Background(self.machine, self.clock).start())
+
+
+@pytest.fixture
+def machine(
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+    clock: FakeClock,
+) -> Layout:
+    """lup's state and the host service where the command line places them, outside any session, with the fake clock."""
+    xdg = tmp_path_factory.mktemp("xdg")
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(xdg / "run"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(xdg / "state"))
+    monkeypatch.delenv("CLAUDE_CODE_CHILD_SESSION", raising=False)
+    monkeypatch.delenv("CODEX_THREAD_ID", raising=False)
+    monkeypatch.setattr(cli, "SystemClock", lambda: clock)
+    return Layout(
+        state=xdg / "state" / "lup", runtime=xdg / "run" / "lup", data=xdg / "data"
+    )
+
+
+def inboxed(
+    machine: Layout, clock: FakeClock, starter: Starter | None = None
+) -> InboxApprovals:
+    """lup's inbox through the test's host service, as a launch reaches it."""
+    return InboxApprovals(
+        host=HostClient(
+            layout=machine.host, clock=clock, starter=starter or Unstarted()
+        )
+    )
+
+
+def inbox(*arguments: str) -> str:
+    """Run `lup-dev inbox` with `arguments`, as at another terminal, and return what it printed."""
+    result = CliRunner().invoke(cli.app, ["inbox", *arguments])
+    assert result.exit_code == 0, (result.output, result.exception)
+    return result.output
+
+
+def test_the_approval_is_an_inbox_item_the_launching_terminal_answers(
+    audiobook: Path, kit: Kit, machine: Layout, clock: FakeClock
+) -> None:
+    with served(machine, clock) as running:
+        trust = trusting(
+            audiobook, kit, yes(), approvals=inboxed(machine, clock), layout=machine
+        )
+        outcome = trust.ensure()
+        item = running.delivery.inbox.item(1)
+        shown = inbox("show", "1")
+        whole = inbox("show", "1", "--diff")
+        late = inbox("answer", "1", "--decline")
+        listed = inbox()
+        raised = running.notices.raised
+    assert isinstance(outcome, Trusted)
+    assert isinstance(item.reason, store.Approval)
+    assert item.state == Decided(at=clock.now(), approved=True)
+    summary = "\n".join(summarised(trust))
+    assert Text.from_ansi(item.reason.summary).plain == summary
+    assert item.reason.text == answering(trust).asked[-1]
+    assert item.worktree == audiobook
+    assert shown.splitlines()[1:] == [
+        *summary.splitlines(),
+        "",
+        item.reason.text,
+        "The whole diff: `lup-dev inbox show 1 --diff`.",
+    ]
+    assert shown.startswith(f"Item 1, an approval from the operator in {audiobook}")
+    assert "approved at" in shown.splitlines()[0]
+    assert '+"""Its conditions."""' in whole
+    assert (
+        late == "Item 1 was approved already, elsewhere: your answer changes nothing.\n"
+    )
+    assert listed == "Nothing waits for you.\n"
+    [notice] = raised
+    assert notice.startswith(f"lup: an approval from the operator in {audiobook}")
+    assert notice.endswith("lup-dev inbox show 1")
+
+
+def test_lup_dev_inbox_answer_answers_it_and_the_terminal_stops_asking(
+    audiobook: Path, kit: Kit, machine: Layout, clock: FakeClock
+) -> None:
+    elsewhere: list[str] = []
+    with served(machine, clock):
+        asker = Answering(
+            [],
+            whole=Meanwhile(
+                act=lambda: elsewhere.append(inbox("answer", "1", "--approve"))
+            ),
+        )
+        trust = trusting(
+            audiobook, kit, asker, approvals=inboxed(machine, clock), layout=machine
+        )
+        outcome = trust.ensure()
+    assert isinstance(outcome, Trusted)
+    assert asker.asked == [WHOLE]
+    assert asker.said[-1] == "Item 1 was approved elsewhere."
+    assert elsewhere == ["Item 1 is approved: each launch waiting on it goes on.\n"]
+    assert [each.commit for each in recording(trust).installed] == [
+        outcome.approval.commit
+    ]
+
+
+def test_declined_from_the_inbox_keeps_the_copy_approved_before(
+    audiobook: Path, kit: Kit, machine: Layout, clock: FakeClock, shell: Shell
+) -> None:
+    with served(machine, clock):
+        first = trusting(
+            audiobook, kit, yes(), approvals=inboxed(machine, clock), layout=machine
+        ).ensure()
+        assert isinstance(first, Trusted)
+        head = changed(
+            audiobook, {"audiobook/conditions.py": '"""Changed."""\n'}, shell
+        )
+        asker = Answering([Meanwhile(act=lambda: inbox("answer", "2", "--decline"))])
+        trust = trusting(
+            audiobook, kit, asker, approvals=inboxed(machine, clock), layout=machine
+        )
+        outcome = trust.ensure()
+    assert outcome == Kept(commit=head, approval=first.approval)
+    assert asker.said[-1] == "Item 2 was declined elsewhere."
+    assert recording(trust).installed == []
+
+
+def test_declined_with_nothing_approved_before_launches_nothing(
+    audiobook: Path, kit: Kit, machine: Layout, clock: FakeClock
+) -> None:
+    with served(machine, clock) as running:
+        trust = trusting(
+            audiobook,
+            kit,
+            Answering([Meanwhile(act=lambda: inbox("answer", "1", "--decline"))]),
+            approvals=inboxed(machine, clock),
+            layout=machine,
+        )
+        with pytest.raises(TrustError, match="you declined the host zone"):
+            trust.ensure()
+        item = running.delivery.inbox.item(1)
+    assert item.state == Decided(at=clock.now(), approved=False)
+    assert read_model(machine.approved(audiobook / ".git"), Approval) is None
+
+
+def test_two_launches_wait_on_one_approval_and_one_installs(
+    audiobook: Path, kit: Kit, machine: Layout, clock: FakeClock
+) -> None:
+    joined = threading.Event()
+    second = trusting(
+        audiobook,
+        kit,
+        Answering([Meanwhile(act=joined.set)]),
+        approvals=inboxed(machine, clock),
+        layout=machine,
+    )
+    first = trusting(
+        audiobook,
+        kit,
+        Answering([Then(act=lambda: joined.wait(PATIENCE), answer=True)]),
+        approvals=inboxed(machine, clock),
+        layout=machine,
+    )
+    outcomes: list[Outcome] = []
+    with served(machine, clock) as running:
+        waiting = threading.Thread(target=lambda: outcomes.append(second.ensure()))
+        waiting.start()
+        outcomes.append(first.ensure())
+        waiting.join(PATIENCE)
+        items = list(running.delivery.inbox.items)
+    assert not waiting.is_alive()
+    assert items == [1]
+    assert answering(second).said[-1] == "Item 1 was approved elsewhere."
+    # Whichever takes the approval's lock first installs; the other reads it.
+    [trusted] = [each for each in outcomes if isinstance(each, Trusted)]
+    [unchanged] = [each for each in outcomes if isinstance(each, Unchanged)]
+    assert unchanged == Unchanged(
+        commit=trusted.approval.commit, approval=trusted.approval
+    )
+    installed = [*recording(first).installed, *recording(second).installed]
+    assert [each.commit for each in installed] == [trusted.approval.commit]
+
+
+def test_with_no_host_service_the_approval_starts_one(
+    audiobook: Path, kit: Kit, machine: Layout, clock: FakeClock
+) -> None:
+    starting = Starting(machine, clock)
+    trust = trusting(
+        audiobook,
+        kit,
+        yes(),
+        approvals=inboxed(machine, clock, starting),
+        layout=machine,
+    )
+    try:
+        outcome = trust.ensure()
+    finally:
+        for each in starting.started:
+            each.stop()
+    assert isinstance(outcome, Trusted)
+    [started] = starting.started
+    assert started.delivery.inbox.item(1).state == Decided(
+        at=clock.now(), approved=True
+    )
+
+
+def test_a_wait_outlives_a_service_restart_and_hears_the_next_ones_answer(
+    machine: Layout, clock: FakeClock, tmp_path: Path
+) -> None:
+    approvals = inboxed(machine, clock)
+    asking = AskApproval(
+        question="Approve?",
+        summary="A summary.",
+        diff="A diff.",
+        repository=tmp_path / ".git",
+        fingerprint="zone",
+        worktree=tmp_path,
+    )
+    with served(machine, clock):
+        number = approvals.asked(asking)
+        waiting = approvals.waited(number)
+        elsewhere = waiting.__enter__()
+        assert elsewhere.given() is None
+    try:
+        with served(machine, clock):
+            readable, _, _ = select.select([elsewhere], [], [], PATIENCE)
+            assert readable
+            assert elsewhere.given() is None
+            assert approvals.asked(asking) == number
+            assert inbox("answer", str(number), "--approve").startswith(
+                f"Item {number} is approved"
+            )
+            answered_elsewhere(elsewhere)
+            assert elsewhere.given() is True
+    finally:
+        waiting.__exit__(None, None, None)
+
+
+def test_lup_dev_inbox_answer_asks_an_approval_as_the_launch_does(
+    machine: Layout, clock: FakeClock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    terminal = Answering([True], whole=True)
+    monkeypatch.setattr(cli, "Terminal", lambda: terminal)
+    asking = AskApproval(
+        question="Approve the host zone?",
+        summary="\x1b[32mA summary.\x1b[m",
+        diff="+the whole diff\n",
+        repository=tmp_path / ".git",
+        fingerprint="zone",
+        worktree=tmp_path,
+    )
+    with served(machine, clock) as running:
+        number = inboxed(machine, clock).asked(asking)
+        said = inbox("answer", str(number))
+        item = running.delivery.inbox.item(number)
+    assert said == f"Item {number} is approved: each launch waiting on it goes on.\n"
+    assert item.state == Decided(at=clock.now(), approved=True)
+    [summary] = terminal.said
+    assert summary.splitlines()[1:] == ["A summary."]
+    assert terminal.shown == ["+the whole diff\n"]
+    assert terminal.asked == [WHOLE, "Approve the host zone?"]
+
+
+def test_answering_an_approval_is_refused_inside_an_agents_session(
+    machine: Layout, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CLAUDE_CODE_CHILD_SESSION", "1")
+    result = CliRunner().invoke(cli.app, ["inbox", "answer", "1", "--approve"])
+    assert isinstance(result.exception, InboxError)
+    assert "inside a" in str(result.exception)
+
+
+class Silent(Elsewhere):
+    """An approval nothing answers elsewhere, on a socket never written."""
+
+    def __init__(self) -> None:
+        self.ours, self.theirs = socket.socketpair()
+
+    def fileno(self) -> int:
+        return self.ours.fileno()
+
+    def given(self) -> bool | None:
+        return None
+
+
+class Arrived(Silent):
+    """An approval answered elsewhere already: its socket readable, its answer yes."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.theirs.send(b"answered")
+
+    def given(self) -> bool | None:
+        return True
+
+
+def test_the_terminal_reads_y_or_n_enter_saying_no_and_asks_again_otherwise(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    read, write = os.pipe()
+    os.write(write, b"maybe\ny\n\nno\n")
+    terminal = Terminal(stdin=read)
+    elsewhere = Silent()
+    assert terminal.ask("Approve?", elsewhere) is True
+    assert terminal.ask("Approve?", elsewhere) is False
+    assert terminal.ask("Approve?", elsewhere) is False
+    printed = capsys.readouterr().out
+    assert printed == (
+        "Approve? [y/N]: Answer y or n. Approve? [y/N]: "
+        "Approve? [y/N]: Approve? [y/N]: "
+    )
+
+
+def test_the_terminal_stops_asking_where_the_approval_was_answered_elsewhere(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    read, _ = os.pipe()
+    assert Terminal(stdin=read).ask("Approve?", Arrived()) is None
+    assert capsys.readouterr().out == "Approve? [y/N]: \n"
+
+
+def test_a_service_that_doesnt_know_approvals_is_said_with_what_to_do(
+    audiobook: Path, kit: Kit, machine: Layout, clock: FakeClock
+) -> None:
+    older = Background(machine, clock, inboxed=False).start()
+    try:
+        trust = trusting(
+            audiobook, kit, yes(), approvals=inboxed(machine, clock), layout=machine
+        )
+        with pytest.raises(TrustError) as refused:
+            trust.ensure()
+    finally:
+        older.stop()
+    said = str(refused.value)
+    assert said.startswith(
+        "the host service didn't take the approval into your inbox: no handler for "
+        "`inbox-ask-approval`"
+    )
+    assert said.endswith("`lup-dev host stop`, then ask again")
+    assert answering(trust).said == []

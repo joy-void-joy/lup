@@ -74,13 +74,17 @@ from lup_dev.inbox.protocol import (
     Items,
     ListInbox,
     SendItem,
+    ShowDiff,
     ShowItem,
     Shown,
+    Whole,
 )
 from lup_dev.inbox.protocol import routes as inbox_routes
 from lup_dev.inbox.store import (
     Answer,
     Answered,
+    Approval,
+    Decided,
     Done,
     Inbox,
     InboxError,
@@ -102,7 +106,14 @@ from lup_dev.launch.session import (
     hooked,
     terminal_settings,
 )
-from lup_dev.launch.trust import Outcome, trusted
+from lup_dev.launch.trust import (
+    Approving,
+    Given,
+    InboxApprovals,
+    Outcome,
+    Terminal,
+    trusted,
+)
 from lup_dev.layout import ROOM_SOCKETS, CheckoutLayout, Layout
 from lup_dev.legacy_dashboard import LegacyQueue
 from lup_dev.policy.checkpoint import Bench, Services, Worktree
@@ -365,15 +376,26 @@ def standing(item: Item) -> str:
             return f"answered at {at:%Y-%m-%d %H:%M}, item {answer}"
         case Done(at=at):
             return f"done at {at:%Y-%m-%d %H:%M}"
+        case Decided(at=at, approved=approved):
+            return f"{settled(approved=approved)} at {at:%Y-%m-%d %H:%M}"
 
 
-def shown(item: Item) -> str:
-    """Say an item whole, for the operator."""
+def settled(*, approved: bool) -> str:
+    """Say an approval's answer in a word."""
+    return "approved" if approved else "declined"
+
+
+def heading(item: Item) -> str:
+    """Say what an item is, whose to whom, when it was made and where it stands."""
     where = "" if item.worktree is None else f" in {item.worktree}"
-    heading = (
+    return (
         f"Item {item.number}, {what(item)} from {who(item.sender)}{where} to "
         f"{who(item.recipient)}, made {item.made:%Y-%m-%d %H:%M}, {standing(item)}:"
     )
+
+
+def shown(item: Item) -> str:
+    """Say an item whole, for the operator: an approval by its summary, its whole diff on request."""
     match item.reason:
         case Message(text=text):
             body = [text]
@@ -390,7 +412,14 @@ def shown(item: Item) -> str:
                 for ruling in rulings
             ]
             body = [f"To item {question}.", *decided, comment]
-    return "\n".join([heading, *body])
+        case Approval(text=text, summary=summary):
+            body = [
+                summary,
+                "",
+                text,
+                f"The whole diff: `lup-dev inbox show {item.number} --diff`.",
+            ]
+    return "\n".join([heading(item), *body])
 
 
 def verdict(decision: int) -> Verdict:
@@ -451,14 +480,45 @@ def inbox_list(context: typer.Context) -> None:
 @inbox.command("show")
 def inbox_show(
     number: Annotated[int, typer.Argument(help="The item's number.")],
+    *,
+    diff: Annotated[
+        bool,
+        typer.Option("--diff", help="An approval's whole diff, through your pager."),
+    ] = False,
 ) -> None:
-    """Show one item whole."""
-    typer.echo(shown(answering().ask(ShowItem(number=number), Shown).item))
+    """Show one item whole: an approval by its summary, its whole diff with `--diff`."""
+    client = answering()
+    if diff:
+        Terminal().show(client.ask(ShowDiff(number=number), Whole).text)
+        return
+    typer.echo(shown(client.ask(ShowItem(number=number), Shown).item))
+
+
+def approved_here(number: int, given: Given) -> str:
+    """Say what came of answering approval `number` at this terminal."""
+    if not given.here:
+        return (
+            f"Item {number} was {settled(approved=given.approved)} already, "
+            "elsewhere: your answer changes nothing."
+        )
+    return (
+        f"Item {number} is {settled(approved=given.approved)}: each launch waiting "
+        "on it goes on."
+    )
 
 
 @inbox.command("answer")
 def inbox_answer(
     number: Annotated[int, typer.Argument(help="The question's number.")],
+    *,
+    approve: Annotated[
+        bool | None,
+        typer.Option(
+            "--approve/--decline",
+            help="An approval's answer, without asking.",
+            show_default=False,
+        ),
+    ] = None,
     leaning: Annotated[
         list[int] | None,
         typer.Option(help="A decision you go with the agent's lean on; repeat it."),
@@ -476,25 +536,49 @@ def inbox_answer(
         typer.Option(help="A comment on the whole, or a plain question's answer."),
     ] = None,
 ) -> None:
-    """Answer a question: each decision leaning, undecided or leave open, then a comment.
+    """Answer a question, each decision leaning, undecided or leave open, then a comment; or an approval, yes or no.
 
     At a terminal, each numbered decision is asked in turn, with an optional
     comment, then a comment on the whole; a plain question takes its answer in
     words. `--leaning`, `--undecided` and `--leave-open`, each repeated for
     several decisions, and `--comment` answer without asking. The answer reaches
     the conversation that asked.
+
+    An approval shows its summary, asks whether to show the whole diff, then
+    whether to approve, as the launch asking it does, and stops where the launch's
+    terminal answers first; `--approve` or `--decline` answers without asking.
+    Every launch waiting on it goes on with the answer.
     """
     client = answering()
+    approvals = InboxApprovals(host=client)
+    if approve is not None:
+        typer.echo(approved_here(number, approvals.answer(number, approved=approve)))
+        return
     given = [
         *(Ruling(decision=each, verdict="leaning") for each in leaning or []),
         *(Ruling(decision=each, verdict="undecided") for each in undecided or []),
         *(Ruling(decision=each, verdict="leave open") for each in leave_open or []),
     ]
-    request = (
-        AnswerItem(number=number, rulings=given, comment=comment or "")
-        if given or comment is not None
-        else prompted(client.ask(ShowItem(number=number), Shown).item)
-    )
+    if not given and comment is None:
+        item = client.ask(ShowItem(number=number), Shown).item
+        match item.reason:
+            case Approval(text=text, summary=summary):
+                asking = Approving(
+                    asker=Terminal(),
+                    approvals=approvals,
+                    number=number,
+                    summary=f"{heading(item)}\n{summary}",
+                    question=text,
+                    diff=client.ask(ShowDiff(number=number), Whole).text,
+                )
+                answered = asking.given()
+                if answered.here:
+                    typer.echo(approved_here(number, answered))
+                return
+            case _:
+                request = prompted(item)
+    else:
+        request = AnswerItem(number=number, rulings=given, comment=comment or "")
     answer = client.ask(request, Shown).item
     typer.echo(
         f"Answered item {number}: your answer, item {answer.number}, is for "
@@ -997,8 +1081,11 @@ def trust() -> None:
     Run it yourself, in your own terminal. It reads the host zone at the
     integration branch's tip, running none of it: the declaration, the files it
     runs on the host, and the `lup-dev` the host runs. Where that isn't the zone you
-    approved last, it shows what changed since through your pager and asks once:
-    approved, it installs the tip's `lup-dev` as the host's, restarts the host
+    approved last, it puts the approval in your inbox, starting the host service
+    where none runs, and here prints a summary of what changed since (git's count
+    of each file), offers the whole diff through your pager, and asks; `lup-dev
+    inbox answer` at any other terminal answers it too, whichever comes first.
+    Approved, it installs the tip's `lup-dev` as the host's, restarts the host
     service on it where one runs, and records the approval; declined, the copy you
     approved before keeps running. Where nothing changed, it says so and stops.
     """
