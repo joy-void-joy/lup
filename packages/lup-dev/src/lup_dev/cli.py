@@ -3,9 +3,9 @@
 It stands in for the real `lup` command tree until the declaration and command
 line piece builds it; the commands keep their meaning there, and their final
 names are that piece's call (`docs/judging-writes.md`, *Modules*). It's the one
-place that lists the runtimes' adapters: the host service answers a hook a
-launch's judge couldn't with the answerer built here (`docs/launch.md`), and
-`hook` answers through it.
+place that lists the runtimes' adapters: the host service reads each hook and
+adds to its answer with the courier built here, and answers a hook a launch's
+judge couldn't with the answerer (`docs/launch.md`); `hook` answers through it.
 
 `trust` approves what the host runs for a repository, the check a launch makes
 first (`docs/launch.md`, *Trust on launch*). `launch` opens a runtime's session in
@@ -49,6 +49,7 @@ from lup_dev.errors import LupDevError
 from lup_dev.gate import Check, Shell, failed, report
 from lup_dev.git import Git, nul_separated
 from lup_dev.host.client import Detached, HostClient
+from lup_dev.host.courier import Courier, Heard, Telling
 from lup_dev.host.protocol import HostError, Register
 from lup_dev.host.service import Answerer, HostService
 from lup_dev.launch.clis import CliCache
@@ -153,6 +154,22 @@ class Adapters(Model, Answerer):
         return f"{self.named(runtime).unanswered(payload, failure)}\n"
 
 
+class Couriers(Model, Courier):
+    """Every runtime lup knows, as the host service reads its hooks and adds to their answers."""
+
+    adapters: Adapters
+
+    @override
+    def heard(self, runtime: str, payload: str) -> Heard:
+        return self.adapters.named(runtime).heard(payload)
+
+    @override
+    def told(self, runtime: str, payload: str, answer: str, telling: Telling) -> str:
+        """Return what one of `runtime`'s hooks prints: its adapter's answer with `telling` added, on a line, or `answer` as it is."""
+        added = self.adapters.named(runtime).told(payload, answer, telling)
+        return answer if added is None else f"{added}\n"
+
+
 def services() -> Services:
     """Return what judging reaches, as configured on this machine."""
     settings = LupDevSettings()
@@ -201,9 +218,11 @@ def host_serve(context: typer.Context) -> None:
     """
     if context.invoked_subcommand is not None:
         return
+    known = Adapters(known=adapters())
     service = HostService(
         layout=Layout.of(LupDevSettings()).host,
-        answerer=Adapters(known=adapters()),
+        answerer=known,
+        courier=Couriers(adapters=known),
         say=typer.echo,
     )
     asyncio.run(service.serve())

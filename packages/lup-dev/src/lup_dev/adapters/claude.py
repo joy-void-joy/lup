@@ -18,16 +18,48 @@ ends, and the operator is warned once in `systemMessage`, which also carries wha
 the session's turn's end tells without holding it.
 
 In a launched room (`docs/launch.md`, *The one hook and the host service*), Claude
-Code runs the room's hook on `SessionStart`, and on `PreToolUse` for the file tools
-whose writes are judged before they land (`hooks`, `WRITING`): no checkpoint, as in
-lup's own repository. Where the launch's judge can't answer a hook, the host
-service answers it through `unanswered`: a file tool's write is denied, naming why,
-since a write let through unjudged would land unseen; any other hook warns the
-operator in `systemMessage`, and the call goes on. Where the room's hook can't
-reach the service, it ends with status 1 and says why on standard error: a
-non-blocking error, which Claude Code shows, and the call goes on.
+Code runs the room's hook on `SessionStart`, `PreToolUse` for every call, `Stop`
+and `SubagentStop` (`hooks`), so the host service hears each conversation's start,
+calls and turn's ends (`docs/host-tools.md`, *How an agent is told*). The judge
+reads only `SessionStart` and the file tools' writes, judged before they land
+(`heard`, `WRITING`): no checkpoint, as in lup's own repository, so the turn's ends
+hold back nothing of the judge's. Every other hook the service answers itself,
+without starting the judge, as no decision. Where the launch's judge can't answer
+a hook, the host service answers it through `unanswered`: a file tool's write is
+denied, naming why, since a write let through unjudged would land unseen; any
+other hook warns the operator in `systemMessage`, and the call goes on. Where the
+room's hook can't reach the service, it ends with status 1 and says why on
+standard error: a non-blocking error, which Claude Code shows, and the call goes
+on.
 
-What this relies on, from Claude Code's hooks reference
+The service adds to each answer through `told`: a call to lup's tools
+(`mcp__lup__<tool>`, `TOOL_PREFIX`) is rewritten to carry `caller`, lup's id for
+the conversation calling, as `updatedInput` with no decision, so the call goes
+through the session's own permission mode as it would have; and what the
+conversation is told goes in as `additionalContext` beside a call or a session's
+start, or as the reason a turn's end is held (`decision: "block"`).
+
+What the host's part relies on, from Claude Code's hooks reference
+(code.claude.com/docs/en/hooks, read 2026-10-14):
+- "MCP tools follow the naming pattern `mcp__<server>__<tool>`", and "appear as
+  regular tools in tool events";
+- `PreToolUse`'s `updatedInput` "Modifies the tool's input parameters before
+  execution. Replaces the entire input object, so include unchanged fields
+  alongside modified ones"; the reference pairs it with `allow` or `ask`, and is
+  silent on it alone. The first lup measured on Claude Code 2.1.283 that "a
+  rewrite with no decision reached the server even for a tool with
+  `additionalProperties: false`" (its `docs/platform-differentiation.md`); owed
+  live on the version a launch runs (`docs/host-tools.md`, *Checks owed*);
+- `PreToolUse`'s `additionalContext` is a "String added to Claude's context
+  alongside the tool result", `SessionStart`'s one "added to Claude's context at
+  the start of the conversation", and a hook's `additionalContext` is "capped at
+  10,000 characters", past which Claude Code saves it to a file that "Claude can
+  read ... but Claude Code doesn't ask it to";
+- `Stop` and `SubagentStop`: `decision: "block"` "prevents Claude from
+  stopping", its `reason` "Required when `decision` is `"block"`. Tells Claude
+  why it should continue".
+
+What its judging relies on, from Claude Code's hooks reference
 (code.claude.com/docs/en/hooks):
 - a hook ending with status 0 and printing nothing has "no decision to report";
   with any status but 0 or 2 it's "a non-blocking error": "You see a `<hook
@@ -75,6 +107,8 @@ import lup
 from lup.sessions.terminal import Cli, Hook
 from lup.types import JsonObject, Model, Settings
 from lup_dev.adapters import Adapter
+from lup_dev.host.courier import Heard, Telling
+from lup_dev.host.rooms import SERVER, stamp
 from lup_dev.launch.clis import (
     Channel,
     ChannelError,
@@ -104,10 +138,14 @@ if TYPE_CHECKING:
     import httpx
 
     from lup.sessions.declaration import Declaration
+    from lup.sessions.terminal import Event
 
 WRITING = ["Edit", "Write"]
 """The file tools whose writes are judged before they land: `PreToolUse.proposal`
-reads each, and a launched session's hook matches them."""
+reads each, and in a launched session the judge reads their calls alone."""
+
+TOOL_PREFIX = f"mcp__{SERVER}__"
+"""What Claude Code names each of lup's tools by in a hook: `mcp__lup__report`."""
 
 
 class Variables(Settings):
@@ -183,6 +221,56 @@ class OperatorWarning(Output):
     system_message: str
 
 
+class Context(Output, extra="allow"):
+    """`hookSpecificOutput`, as any hook's answer holds it: what `told` reads and adds to.
+
+    What it doesn't name is kept as it was given.
+    """
+
+    hook_event_name: str
+    permission_decision: str | None = None
+    permission_decision_reason: str | None = None
+    additional_context: str | None = None
+    updated_input: JsonObject | None = None
+
+
+class Said(Output, extra="allow"):
+    """Any answer a Claude Code hook prints, the judge's or none: what `told` reads and adds to.
+
+    What it doesn't name is kept as it was given.
+    """
+
+    decision: str | None = None
+    reason: str | None = None
+    system_message: str | None = None
+    hook_specific_output: Context | None = None
+
+
+def joined(given: str | None, items: list[str]) -> str:
+    """Return what `given` says, then each item, a blank line between each."""
+    return "\n\n".join([*([given] if given else []), *items])
+
+
+def context(said: Said, event: str, items: list[str]) -> Said:
+    """Return `said` with `items` told as `additionalContext` for `event`, after any context it gives."""
+    if not items:
+        return said
+    given = said.hook_specific_output or Context(hook_event_name=event)
+    added = given.model_copy(
+        update={"additional_context": joined(given.additional_context, items)}
+    )
+    return said.model_copy(update={"hook_specific_output": added})
+
+
+def held(said: Said, items: list[str]) -> Said:
+    """Return `said` holding a turn's end on `items`, after any reason it holds it for."""
+    if not items:
+        return said
+    return said.model_copy(
+        update={"decision": "block", "reason": joined(said.reason, items)}
+    )
+
+
 def failure_note(failure: Exception) -> str:
     """Say that judging failed, for the agent to pass on."""
     return f"lup's judge failed, so this wasn't judged: {failure!r}. Tell the operator."
@@ -213,6 +301,19 @@ class SessionStart(Payload):
     """`SessionStart`: a session starts, resumes, or is cleared or compacted."""
 
     hook_event_name: Literal["SessionStart"]
+
+    def heard(self) -> Heard:
+        """Read the session's start: the judge reads it."""
+        return Heard(
+            event="session-started",
+            session=self.session_id,
+            agent=self.agent_id or None,
+            judged=True,
+        )
+
+    def told(self, said: Said, telling: Telling) -> Said:
+        """Tell the conversation its items as it starts."""
+        return context(said, self.hook_event_name, telling.items)
 
     @override
     def answer(self, bench: Bench) -> Output | None:
@@ -277,6 +378,38 @@ class PreToolUse(Payload):
                 )
             case _:
                 return None
+
+    def heard(self) -> Heard:
+        """Read the call's start: the judge reads a file tool's write alone."""
+        return Heard(
+            event="call-started",
+            session=self.session_id,
+            agent=self.agent_id or None,
+            call=self.tool_use_id,
+            tool=self.tool_name,
+            judged=self.tool_name in WRITING,
+        )
+
+    def told(self, said: Said, telling: Telling) -> Said:
+        """Tell the conversation its items beside the call, and stamp a call to lup's tools with its caller.
+
+        The stamp is `updatedInput` with no decision added, so the call goes
+        through the session's own permission mode as it would have. A call the
+        judge refused never runs, so it isn't stamped.
+        """
+        told = context(said, self.hook_event_name, telling.items)
+        given = told.hook_specific_output or Context(
+            hook_event_name=self.hook_event_name
+        )
+        if (
+            not self.tool_name.startswith(TOOL_PREFIX)
+            or given.permission_decision == "deny"
+        ):
+            return told
+        stamped = given.model_copy(
+            update={"updated_input": stamp(self.tool_input, telling.caller)}
+        )
+        return told.model_copy(update={"hook_specific_output": stamped})
 
     def started(self) -> CallStarted:
         """Return the event of this call starting.
@@ -361,6 +494,21 @@ class PostToolUse(Payload):
     tool_name: str
     tool_use_id: str
 
+    def heard(self) -> Heard:
+        """Read the call's finish: the judge reads it, where it's hooked."""
+        return Heard(
+            event="call-finished",
+            session=self.session_id,
+            agent=self.agent_id or None,
+            call=self.tool_use_id,
+            tool=self.tool_name,
+            judged=True,
+        )
+
+    def told(self, said: Said, telling: Telling) -> Said:
+        """Tell the conversation its items beside the call's result."""
+        return context(said, self.hook_event_name, telling.items)
+
     @override
     def answer(self, bench: Bench) -> Output | None:
         finished = CallFinished(
@@ -402,6 +550,19 @@ class Stop(Payload):
     stop_hook_active: bool = False
     """Whether the turn goes on because a `Stop` hook blocked it already."""
 
+    def heard(self) -> Heard:
+        """Read the turn's end: in a room, with no checkpoint, the judge doesn't read it."""
+        return Heard(
+            event="turn-ended",
+            session=self.session_id,
+            agent=self.agent_id or None,
+            judged=False,
+        )
+
+    def told(self, said: Said, telling: Telling) -> Said:
+        """Hold the turn's end on the conversation's items."""
+        return held(said, telling.items)
+
     @override
     def answer(self, bench: Bench) -> Output | None:
         ended = TurnEnded(
@@ -439,6 +600,19 @@ class SubagentStop(Payload):
     """
 
     hook_event_name: Literal["SubagentStop"]
+
+    def heard(self) -> Heard:
+        """Read a subagent's turn's end: in a room, with no checkpoint, the judge doesn't read it."""
+        return Heard(
+            event="conversation-ended",
+            session=self.session_id,
+            agent=self.agent_id or None,
+            judged=False,
+        )
+
+    def told(self, said: Said, telling: Telling) -> Said:
+        """Hold the subagent's turn's end on its items."""
+        return held(said, telling.items)
 
     @override
     def answer(self, bench: Bench) -> Output | None:
@@ -500,21 +674,45 @@ def unanswered(raw: str, failure: str) -> str:
     return output.model_dump_json(by_alias=True, exclude_none=True)
 
 
-def hooks(command: list[str], timeout: timedelta) -> list[Hook]:
-    """Return the hooks a launched Claude Code session runs `command` at: the events the judge reads.
+def heard(raw: str) -> Heard:
+    """Read one Claude Code hook as the host service does: who's speaking, about which call, and whether the judge reads it.
 
-    `SessionStart`, and `PreToolUse` on the file tools, judged before they land.
-    Each waits up to `timeout`, which a hold's wait for the operator needs.
+    Raise `ValidationError` where the payload isn't one of the hooks this adapter
+    reads.
     """
-    return [
-        Hook(event="session-started", command=command, timeout=timeout),
-        Hook(
-            event="call-started",
-            matcher="|".join(WRITING),
-            command=command,
-            timeout=timeout,
-        ),
+    return TypeAdapter[Received](Received).validate_json(raw).heard()
+
+
+def told(raw: str, answer: str, telling: Telling) -> str | None:
+    """Return what a Claude Code hook prints: `answer`, the judge's or none, with `telling` added; none where nothing is.
+
+    Raise `ValidationError` where the payload isn't one of the hooks this adapter
+    reads, or the answer isn't a hook's.
+    """
+    received = TypeAdapter[Received](Received).validate_json(raw)
+    said = Said.model_validate_json(answer) if answer.strip() else Said()
+    added = received.told(said, telling)
+    if added == said:
+        return None
+    return added.model_dump_json(by_alias=True, exclude_none=True)
+
+
+def hooks(command: list[str], timeout: timedelta) -> list[Hook]:
+    """Return the hooks a launched Claude Code session runs `command` at: the events the host service hears.
+
+    `SessionStart`; `PreToolUse` on every call, the file tools' writes judged
+    before they land, every call told what waits for its conversation, and a
+    call to lup's tools stamped with its caller; `Stop` and `SubagentStop`, each
+    conversation's turn's end. Each waits up to `timeout`, which a hold's wait
+    for the operator needs.
+    """
+    events: list[Event] = [
+        "session-started",
+        "call-started",
+        "turn-ended",
+        "conversation-ended",
     ]
+    return [Hook(event=event, command=command, timeout=timeout) for event in events]
 
 
 def agent() -> Declaration:
@@ -586,6 +784,8 @@ def adapter() -> Adapter:
         runtime=Claude(),
         hook=hook,
         unanswered=unanswered,
+        heard=heard,
+        told=told,
         hooks=hooks,
         channel=ClaudeChannel(),
         agent=agent,

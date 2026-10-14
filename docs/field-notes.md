@@ -284,6 +284,22 @@ The check `docs/host-tools.md` owes before `remote` is built (*Running git on th
 
 Responses the note should add: (1) replace the alternates refusal with a **self-contained object store** check — refuse any `objects/info/{,http-}alternates` and any symlink under `objects/` (covers the symlink bypass and the relative/nested cases); (2) extend the launch config check to refuse a committed `extensions.worktreeConfig=true`, since the common dir's `config.worktree` is room-writable; (3) have that config check resolve `include.path` **and** `includeIf` recursively; (4) state that the host runs git with an explicit common git dir and that `safe.directory` is no backstop under keep-id. Unsettled: whether to allow in-tree alternates for general projects (strict refusal fits lup's own repos, which use none) — an operator's call; and the garbage-pack stderr flood (left open, low priority).
 
+## A hook the judge doesn't read (measured, 2026-10-14)
+
+What `docs/host-tools.md` owes before Claude Code hooks every call (*How an agent is told*, decision 6): the cost of a hook the host service answers itself, without starting the judge. On the operator's machine (32 cores, Linux 7.2.6, Python 3.14.0, socat 1.8.1.3), `feat-room-sockets`' `lup-dev host` ran in the background with its XDG directories in a scratch directory, one launch registered for Claude Code, its judge the branch's own `lup-dev`. Each hook was the room's exact command (`launch/session.py`, `piped`: `sh -c 'socat -t 90000 - UNIX-CONNECT:<hook.sock> || …'`), its payload on standard input, timed from spawning `sh` to its exit, 300 runs each from a Python loop on the host. Script in the session's scratchpad.
+
+| Hook | Median | p90 | Min | Max |
+|---|---|---|---|---|
+| A `Bash` call, unjudged: no decision | 4.54 ms | 5.81 ms | 3.78 ms | 7.95 ms |
+| A call to `mcp__lup__report`, unjudged, stamped with its `caller` | 4.68 ms | 6.09 ms | 3.86 ms | 7.36 ms |
+| `Stop`, unjudged | 4.65 ms | 6.01 ms | 3.74 ms | 9.50 ms |
+| `SessionStart`, the judge's process started for it (30 runs) | 665 ms | 722 ms | 620 ms | 782 ms |
+| The same `sh` and `socat` against a bare asyncio server that reads to the end and closes | 3.75 ms | 4.86 ms | 3.07 ms | |
+
+- **The service's own part is under a millisecond** (4.54 against 3.75 ms): reading the payload, the courier's parse, minting or finding the conversation's id, and its answer. Most of a hook is spawning `sh` and `socat`, which a room pays for every hook already.
+- **A hook the judge reads costs about 150 times as much,** almost all of it the judge's process starting (Python and `lup-dev`'s imports), so hooking every call on Claude Code adds about 5 ms a call, where judging every call would add two-thirds of a second. The first lup's guard in the same place took 7.85 ms against its dispatcher's 107 ms (its `17321798b`).
+- Not measured: what Claude Code itself spends around a hook (spawning it, and parsing its answer), the same for a judged hook and an unjudged one; and the room's own overhead, the hook running inside a container whose `sh` and `socat` are the image's. Owed live (`docs/host-tools.md`, *Checks owed*).
+
 ## Rooms
 
 ### podman 6.1.3, rootless: the CLIs in a container (measured)

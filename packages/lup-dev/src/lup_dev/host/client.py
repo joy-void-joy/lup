@@ -1,16 +1,21 @@
-"""Reaching the host service: finding it on its control socket, or starting it.
+"""Reaching the host service: finding it on its control socket, or starting it; and from a room, on its launch's request socket.
 
 `docs/launch.md`, *On the host: the service*: one service per user, started by the
 first launch that finds none answering, and running until it's stopped, as the
 engine is found or started on demand. A client that finds no service starts
 `lup-dev host` as a detached process, and waits through `lup_dev.clock` until its
 control socket answers, so tests drive the time.
+
+A program in a room reaches the service through `RoomClient`, one typed request
+on `/run/lup/request.sock`, which the service answers with the launch it knows by
+the socket (`docs/host-tools.md`, *The room's requests*).
 """
 
 import socket
 import sys
 from abc import ABC, abstractmethod
 from datetime import timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, override
 
 import sh
@@ -31,11 +36,59 @@ from lup_dev.host.protocol import (
     Stop,
     Unregister,
 )
-from lup_dev.layout import HostLayout
+from lup_dev.layout import ROOM_SOCKETS, HostLayout, LaunchSockets
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
+
+
+def asked[R: Reply](
+    path: Path, request: Request, reply: type[R], timeout: timedelta
+) -> R:
+    """Send one request on the host service's socket at `path`, and read its reply as `reply`.
+
+    A refusal raises `HostError` with the service's reason, as does finding no
+    service to ask on `path`, or a connection closed without a reply.
+    """
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+            connection.settimeout(timeout.total_seconds())
+            connection.connect(str(path))
+            connection.sendall(request.model_dump_json().encode())
+            connection.shutdown(socket.SHUT_WR)
+            with connection.makefile("rb") as stream:
+                answer = stream.read()
+    except (FileNotFoundError, ConnectionRefusedError) as gone:
+        message = f"no host service answers on {path}"
+        raise HostError(message) from gone
+    if not answer:
+        message = "the host service closed the connection without answering"
+        raise HostError(message)
+    replied = TypeAdapter[R | Refused](reply | Refused).validate_json(answer)
+    if isinstance(replied, Refused):
+        raise HostError(replied.error)
+    return replied
+
+
+class RoomClient(Model):
+    """Reaches the host service from a room's program, on the launch's `request.sock`.
+
+    The service knows the launch by the socket, so a request names nothing of it;
+    and the room can't start a service, so finding none is said.
+    """
+
+    socket: Path = LaunchSockets(directory=ROOM_SOCKETS).request
+    """The launch's request socket, where the room mounts it."""
+    timeout: timedelta = timedelta(minutes=1)
+    """How long to wait for one reply."""
+
+    def ask[R: Reply](self, request: Request, reply: type[R]) -> R:
+        """Send one request, and read its reply as `reply`.
+
+        A refusal raises `HostError` with the service's reason, as does finding no
+        service to ask: outside a room, or with the host service stopped.
+        """
+        return asked(self.socket, request, reply, self.timeout)
 
 
 class Starter(ABC):
@@ -117,24 +170,7 @@ class HostClient(Model, arbitrary_types_allowed=True):
         A refusal raises `HostError` with the service's reason, as does finding no
         service to ask.
         """
-        try:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
-                connection.settimeout(self.timeout.total_seconds())
-                connection.connect(str(self.layout.control))
-                connection.sendall(request.model_dump_json().encode())
-                connection.shutdown(socket.SHUT_WR)
-                with connection.makefile("rb") as stream:
-                    answer = stream.read()
-        except (FileNotFoundError, ConnectionRefusedError) as gone:
-            message = f"no host service answers on {self.layout.control}"
-            raise HostError(message) from gone
-        if not answer:
-            message = "the host service closed the connection without answering"
-            raise HostError(message)
-        replied = TypeAdapter[R | Refused](reply | Refused).validate_json(answer)
-        if isinstance(replied, Refused):
-            raise HostError(replied.error)
-        return replied
+        return asked(self.layout.control, request, reply, self.timeout)
 
     def register(self, launch: Register) -> Path:
         """Have the service serve a launch, starting it if none runs.

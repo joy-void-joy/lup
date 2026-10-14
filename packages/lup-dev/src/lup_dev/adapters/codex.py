@@ -42,7 +42,35 @@ goes on. Where the room's hook can't reach the service, it ends with status 1:
 Codex marks the hook's run failed, shows "hook exited with code 1" (not what the
 hook wrote to standard error), and the call goes on.
 
-What this relies on, from Codex's hooks documentation and its source at
+The judge reads every hook a launched Codex session runs (`heard`), so the host
+service answers none itself. It adds to each answer through `told`: a call to
+lup's tools (`mcp__lup__<tool>`, `TOOL_PREFIX`) is rewritten to carry `caller`,
+lup's id for the conversation calling, as `updatedInput` beside
+`permissionDecision: "allow"`; and what the conversation is told goes in as
+`additionalContext` beside a call or a session's start, or as the reason a turn's
+end is held (`decision: "block"`). From the source at `rust-v0.162.1`:
+- an MCP tool's hook names it `mcp__<server>__<tool>`: its namespace and name
+  joined by `__`, `mcp__` put before them where they lack it
+  (`core/src/tools/handlers/mcp.rs`, `hook_tool_name`), the server's namespace
+  `mcp__<server>` (`codex-mcp/src/mcp/mod.rs`), and any character outside
+  `[A-Za-z0-9_]` turned to `_`; its `tool_input` is the call's arguments as JSON,
+  or the text as it came where that isn't JSON (`mcp_hook_tool_input`), which
+  isn't stamped;
+- `PreToolUse`'s `updatedInput` is applied only beside `permissionDecision:
+  "allow"`: alone it's refused, "PreToolUse hook returned updatedInput without
+  permissionDecision:allow", and so is `allow` without it ("unsupported
+  permissionDecision:allow"); the `allow` only lets the rewrite through, since
+  the hook's outcome holds nothing else of it (`hooks/src/engine/output_parser.rs`,
+  `parse_pre_tool_use`, `hooks/src/events/pre_tool_use.rs`). The first lup
+  measured on 0.158.0 that the rewrite reached the server so, and that without
+  `allow` it "was dropped — the call ran as the model wrote it"; owed live on
+  0.162.1 (`docs/host-tools.md`, *Checks owed*);
+- `PreToolUse`'s `additionalContext` is collected for the model unless the
+  answer is one it refuses (`pre_tool_use.rs`, `parse_completed`), as are
+  `SessionStart`'s and `PostToolUse`'s; `Stop` and `SubagentStop` hold the turn
+  on `decision: "block"` with a `reason` that isn't blank (`parse_stop`).
+
+What its judging relies on, from Codex's hooks documentation and its source at
 `rust-v0.162.1` (paths under `codex-rs/`), whose hook schemas
 (`hooks/schema/generated/`) are those of `rust-v0.156.1`, file for file; the
 payloads 0.162.1 sent for a patch, a shell command and a turn's end are kept in
@@ -118,13 +146,15 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Literal, override
 
-from pydantic import Field, TypeAdapter, ValidationError
+from pydantic import Field, JsonValue, TypeAdapter, ValidationError
 from pydantic.alias_generators import to_camel
 
 import lup
 from lup.sessions.terminal import Cli, Hook
-from lup.types import Model, Settings
+from lup.types import JsonObject, Model, Settings
 from lup_dev.adapters import Adapter
+from lup_dev.host.courier import Heard, Telling
+from lup_dev.host.rooms import SERVER, stamp
 from lup_dev.launch.clis import (
     Channel,
     ChannelError,
@@ -152,6 +182,10 @@ if TYPE_CHECKING:
 
     from lup.sessions.declaration import Declaration
     from lup.sessions.terminal import Event
+
+
+TOOL_PREFIX = f"mcp__{SERVER}__"
+"""What Codex names each of lup's tools by in a hook: `mcp__lup__report`."""
 
 
 class Variables(Settings):
@@ -218,6 +252,56 @@ class OperatorWarning(Output):
     system_message: str
 
 
+class Context(Output, extra="allow"):
+    """`hookSpecificOutput`, as any hook's answer holds it: what `told` reads and adds to.
+
+    What it doesn't name is kept as it was given.
+    """
+
+    hook_event_name: str
+    permission_decision: str | None = None
+    permission_decision_reason: str | None = None
+    additional_context: str | None = None
+    updated_input: JsonObject | None = None
+
+
+class Said(Output, extra="allow"):
+    """Any answer a Codex hook prints, the judge's or none: what `told` reads and adds to.
+
+    What it doesn't name is kept as it was given.
+    """
+
+    decision: str | None = None
+    reason: str | None = None
+    system_message: str | None = None
+    hook_specific_output: Context | None = None
+
+
+def joined(given: str | None, items: list[str]) -> str:
+    """Return what `given` says, then each item, a blank line between each."""
+    return "\n\n".join([*([given] if given else []), *items])
+
+
+def context(said: Said, event: str, items: list[str]) -> Said:
+    """Return `said` with `items` told as `additionalContext` for `event`, after any context it gives."""
+    if not items:
+        return said
+    given = said.hook_specific_output or Context(hook_event_name=event)
+    added = given.model_copy(
+        update={"additional_context": joined(given.additional_context, items)}
+    )
+    return said.model_copy(update={"hook_specific_output": added})
+
+
+def held(said: Said, items: list[str]) -> Said:
+    """Return `said` holding a turn's end on `items`, after any reason it holds it for."""
+    if not items:
+        return said
+    return said.model_copy(
+        update={"decision": "block", "reason": joined(said.reason, items)}
+    )
+
+
 def failure_note(failure: Exception) -> str:
     """Say that judging failed, for the agent to pass on."""
     return f"lup's judge failed, so this wasn't judged: {failure!r}. Tell the operator."
@@ -249,6 +333,19 @@ class SessionStart(Payload):
 
     hook_event_name: Literal["SessionStart"]
 
+    def heard(self) -> Heard:
+        """Read the session's start: the judge reads it."""
+        return Heard(
+            event="session-started",
+            session=self.session_id,
+            agent=self.agent_id,
+            judged=True,
+        )
+
+    def told(self, said: Said, telling: Telling) -> Said:
+        """Tell the conversation its items as it starts."""
+        return context(said, self.hook_event_name, telling.items)
+
     @override
     def answer(self, bench: Bench) -> Output | None:
         SessionStarted(
@@ -271,6 +368,47 @@ class PreToolUse(Payload):
     hook_event_name: Literal["PreToolUse"]
     tool_name: str
     tool_use_id: str
+    tool_input: JsonValue = None
+    """The call's input: a command's or a patch's `command`, an MCP tool's
+    arguments, or their text where that isn't JSON."""
+
+    def heard(self) -> Heard:
+        """Read the call's start: the judge reads every one."""
+        return Heard(
+            event="call-started",
+            session=self.session_id,
+            agent=self.agent_id,
+            call=self.tool_use_id,
+            tool=self.tool_name,
+            judged=True,
+        )
+
+    def told(self, said: Said, telling: Telling) -> Said:
+        """Tell the conversation its items beside the call, and stamp a call to lup's tools with its caller.
+
+        The stamp is `updatedInput` beside `permissionDecision: "allow"`, which
+        Codex needs to apply it. A call the judge blocked never runs, and one
+        whose arguments aren't a JSON object has nothing to carry the stamp, so
+        neither is stamped.
+        """
+        told = context(said, self.hook_event_name, telling.items)
+        given = told.hook_specific_output or Context(
+            hook_event_name=self.hook_event_name
+        )
+        blocked = told.decision == "block" or given.permission_decision == "deny"
+        if not self.tool_name.startswith(TOOL_PREFIX) or blocked:
+            return told
+        match self.tool_input:
+            case dict():
+                stamped = given.model_copy(
+                    update={
+                        "permission_decision": "allow",
+                        "updated_input": stamp(self.tool_input, telling.caller),
+                    }
+                )
+                return told.model_copy(update={"hook_specific_output": stamped})
+            case _:
+                return told
 
     @override
     def answer(self, bench: Bench) -> Output | None:
@@ -300,6 +438,21 @@ class PostToolUse(Payload):
     hook_event_name: Literal["PostToolUse"]
     tool_name: str
     tool_use_id: str
+
+    def heard(self) -> Heard:
+        """Read the call's finish: the judge reads every one."""
+        return Heard(
+            event="call-finished",
+            session=self.session_id,
+            agent=self.agent_id,
+            call=self.tool_use_id,
+            tool=self.tool_name,
+            judged=True,
+        )
+
+    def told(self, said: Said, telling: Telling) -> Said:
+        """Tell the conversation its items beside the call's result."""
+        return context(said, self.hook_event_name, telling.items)
 
     @override
     def answer(self, bench: Bench) -> Output | None:
@@ -339,6 +492,19 @@ class Stop(Payload):
     stop_hook_active: bool = False
     """Whether the turn goes on because a `Stop` hook blocked it already."""
 
+    def heard(self) -> Heard:
+        """Read the turn's end: the judge reads it."""
+        return Heard(
+            event="turn-ended",
+            session=self.session_id,
+            agent=self.agent_id,
+            judged=True,
+        )
+
+    def told(self, said: Said, telling: Telling) -> Said:
+        """Hold the turn's end on the conversation's items, after any reason the judge holds it for."""
+        return held(said, telling.items)
+
     @override
     def answer(self, bench: Bench) -> Output | None:
         ended = TurnEnded(
@@ -375,6 +541,19 @@ class SubagentStop(Payload):
     """
 
     hook_event_name: Literal["SubagentStop"]
+
+    def heard(self) -> Heard:
+        """Read a subagent's turn's end: the judge reads it."""
+        return Heard(
+            event="conversation-ended",
+            session=self.session_id,
+            agent=self.agent_id,
+            judged=True,
+        )
+
+    def told(self, said: Said, telling: Telling) -> Said:
+        """Hold the subagent's turn's end on its items, after any reason the judge holds it for."""
+        return held(said, telling.items)
 
     @override
     def answer(self, bench: Bench) -> Output | None:
@@ -434,6 +613,29 @@ def unanswered(raw: str, failure: str) -> str:
     else:
         output = received.unanswered(said)
     return output.model_dump_json(by_alias=True, exclude_none=True)
+
+
+def heard(raw: str) -> Heard:
+    """Read one Codex hook as the host service does: who's speaking, about which call, and that the judge reads it.
+
+    Raise `ValidationError` where the payload isn't one of the hooks this adapter
+    reads.
+    """
+    return TypeAdapter[Received](Received).validate_json(raw).heard()
+
+
+def told(raw: str, answer: str, telling: Telling) -> str | None:
+    """Return what a Codex hook prints: `answer`, the judge's or none, with `telling` added; none where nothing is.
+
+    Raise `ValidationError` where the payload isn't one of the hooks this adapter
+    reads, or the answer isn't a hook's.
+    """
+    received = TypeAdapter[Received](Received).validate_json(raw)
+    said = Said.model_validate_json(answer) if answer.strip() else Said()
+    added = received.told(said, telling)
+    if added == said:
+        return None
+    return added.model_dump_json(by_alias=True, exclude_none=True)
 
 
 def hooks(command: list[str], timeout: timedelta) -> list[Hook]:
@@ -555,6 +757,8 @@ def adapter() -> Adapter:
         runtime=Codex(),
         hook=hook,
         unanswered=unanswered,
+        heard=heard,
+        told=told,
         hooks=hooks,
         channel=CodexChannel(),
         agent=agent,

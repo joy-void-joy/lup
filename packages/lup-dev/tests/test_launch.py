@@ -19,7 +19,7 @@ from typer.testing import CliRunner
 
 import lup
 from lup.rooms.engine import Exited, Podman, Process
-from lup.sessions.terminal import Cli, SessionSettings, TerminalSettings
+from lup.sessions.terminal import Cli, SessionSettings, TerminalSettings, ToolServer
 from lup_dev import Core, Modules, Project, Session, cli
 from lup_dev.adapters import Adapter, claude, codex
 from lup_dev.approval import Approval, ReleaseTool
@@ -438,6 +438,13 @@ def test_a_launch_compiles_the_approved_declarations_guidance_and_hooks(
     assert settings.directory == directory
     assert settings.cli == Cli(program=Path("/opt/cli"))
     assert settings.hooks == claude.hooks(piped(), timedelta(hours=25))
+    assert settings.servers == [
+        ToolServer(
+            name="lup",
+            socket=Path("/run/lup/mcp.sock"),
+            timeout=timedelta(hours=25),
+        )
+    ]
     assert settings.trusted == [project]
     assert settings.session == session_settings(choices).declared
     assert settings.defaults == session_settings(choices).defaults

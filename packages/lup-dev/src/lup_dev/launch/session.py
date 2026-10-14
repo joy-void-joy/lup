@@ -6,6 +6,9 @@ change the room it runs in or the guidance its session reads. From it, and the
 worktree launched, come the library's `TerminalSettings` (`terminal_settings`):
 - the hooks, each runtime's own (its adapter's `hooks`), every one running the
   room's pipe to the host service (`piped`), and waiting as long as a hold may;
+- lup's tool server, on the launch's `mcp.sock` in the room, which the host
+  service serves (`served`; `docs/host-tools.md`, *The server*), a call to it
+  waiting as long as a hold may;
 - `Core`'s session settings, in the library's terms: the fields the declaration
   set, imposed over the person's own runtime settings, and the rest as lup's
   defaults, which theirs outrank (`session_settings`);
@@ -32,12 +35,19 @@ from datetime import timedelta
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
-from lup.sessions.terminal import Cli, Hook, SessionSettings, TerminalSettings
+from lup.sessions.terminal import (
+    Cli,
+    Hook,
+    SessionSettings,
+    TerminalSettings,
+    ToolServer,
+)
 from lup.types import Model
 from lup_dev.declaration.load import load, read_by_import
 from lup_dev.declaration.resolve import Resolved, SessionChoices, resolve
 from lup_dev.errors import LupDevError
 from lup_dev.git import Git
+from lup_dev.host.rooms import SERVER
 from lup_dev.launch.guidance import render
 from lup_dev.launch.room import repository
 from lup_dev.layout import ROOM_SOCKETS, LaunchSockets
@@ -117,6 +127,16 @@ def hooked(
     return spelled(piped(hold), hold)
 
 
+def served(hold: timedelta = timedelta(hours=25)) -> list[ToolServer]:
+    """Return the tool servers a launched session loads: lup's, on the launch's `mcp.sock` in the room.
+
+    A call to it may wait for the operator, so the runtime waits on one as long as
+    the hook does: `hold`, above a hold's day.
+    """
+    socket = LaunchSockets(directory=ROOM_SOCKETS).mcp
+    return [ToolServer(name=SERVER, socket=socket, timeout=hold)]
+
+
 class SessionParts(Model):
     """`Core`'s session settings in the library's terms, split by who chose each."""
 
@@ -177,6 +197,7 @@ def terminal_settings(
         directory=directory,
         cli=cli,
         hooks=hooks,
+        servers=served(),
         guidance=render(resolved, approved.root, worktree),
         session=session.declared,
         defaults=session.defaults,
