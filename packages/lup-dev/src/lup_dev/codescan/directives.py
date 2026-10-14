@@ -20,6 +20,7 @@ reported as a `Problem`, which the judge turns into a finding of its own rule:
 import json
 from abc import ABC, abstractmethod
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 from typing import Annotated, Literal, Self, override
 from urllib.parse import urlparse
@@ -35,6 +36,9 @@ from tenacity import (
 
 from lup.types import Model
 from lup_dev.codescan.conditions import Condition
+from lup_dev.forge.protocol import IssueState, Stated
+from lup_dev.host.client import RoomClient
+from lup_dev.host.protocol import HostError
 
 
 class IssueRef(Model):
@@ -73,8 +77,8 @@ class Issues(Model, ABC):
     """Where a deferral's issue is tracked, asked whether it's still open."""
 
     @abstractmethod
-    def state(self, issue: IssueRef) -> Literal["open", "closed"]:
-        """Say whether `issue` is open or closed."""
+    def state(self, issue: IssueRef) -> Literal["open", "closed", "unchecked"]:
+        """Say whether `issue` is open or closed, or that it went unchecked, having said why."""
 
     @abstractmethod
     def unreachable(self) -> str | None:
@@ -91,9 +95,10 @@ class GitHubIssues(Issues):
     def unreachable(self) -> str | None:
         """Say why `gh` can't be asked here: missing, or `gh auth status` failing; none where it can.
 
-        A room holds no GitHub login and no `gh`, and a machine may be offline:
-        there, the gate leaves a deferral's issue unchecked and says why, rather
-        than failing on what it couldn't ask (`docs/launch.md`).
+        A machine may have no `gh` or no GitHub login, or be offline: there, the
+        gate leaves a deferral's issue unchecked and says why, rather than failing
+        on what it couldn't ask (`docs/launch.md`). A room, which holds neither,
+        asks the host instead (`HostIssues`).
         """
         try:
             status = sh.Command("gh")(
@@ -143,6 +148,38 @@ class GitHubIssues(Issues):
                 return "open"
             case "CLOSED":
                 return "closed"
+
+
+class HostIssues(Issues, arbitrary_types_allowed=True):
+    """GitHub's issues as the host service reads them for a room, asked on its launch's request socket.
+
+    A room holds no `gh` and no GitHub login, so the gate there asks the host,
+    which reads an issue's state with the operator's `gh` (`docs/host-tools.md`,
+    *The gate in a room*). Where the host doesn't say (no service answering, an
+    older one that doesn't know the request, `gh` out of reach there, or reading
+    issues beyond the project's limits), the issue goes unchecked, said with the
+    host's reason, and the gate goes on.
+    """
+
+    client: RoomClient
+    say: Callable[[str], None]
+    """Where the gate tells what it left unchecked."""
+
+    @override
+    def unreachable(self) -> str | None:
+        """Say why the host can't be asked here: its request socket isn't there; none where it is."""
+        if self.client.socket.exists():
+            return None
+        return f"the launch's request socket, {self.client.socket}, isn't there"
+
+    @override
+    def state(self, issue: IssueRef) -> Literal["open", "closed", "unchecked"]:
+        asked = IssueState(repository=issue.repository, number=issue.number)
+        try:
+            return self.client.ask(asked, Stated).state
+        except HostError as refused:
+            self.say(f"Issue {issue} went unchecked: the host service said {refused}.")
+            return "unchecked"
 
 
 class Trackers(Model, arbitrary_types_allowed=True):

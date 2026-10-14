@@ -1,9 +1,11 @@
 """The `lup-dev` command: hooks, the rule check, holds and verdicts."""
 
 import json
+import socketserver
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, Self
 
 from typer.testing import CliRunner
 
@@ -12,6 +14,9 @@ from lup_dev.codescan.directives import GitHubIssues, IssueRef, Issues
 from lup_dev.codescan.engine import EngineChecker
 from lup_dev.declaration.modules.code_rules import lup_default
 from lup_dev.declaration.runner import Plain, Prefixed
+from lup_dev.forge.protocol import IssueState, Stated
+from lup_dev.host.client import RoomClient
+from lup_dev.host.protocol import Refused, Reply
 from lup_dev.policy.holds import HeldFile, Hold, HoldError, Holds, waiting
 from lup_dev.policy.importers import Conversation, ImportersPass
 from lup_dev.policy.verdicts import Verdict, VerdictLog
@@ -351,6 +356,80 @@ def test_rules_check_says_it_left_issues_unchecked_where_the_tracker_is_out_of_r
     assert (
         "Deferrals' issues weren't checked: `gh` isn't installed here." in result.output
     )
+
+
+class Host:
+    """A launch's request socket, the host answering every request with one reply, each request kept."""
+
+    def __init__(self, path: Path, reply: Reply) -> None:
+        self.requests: list[str] = []
+        recorded = self.requests
+
+        class Handled(socketserver.StreamRequestHandler):
+            def handle(self) -> None:
+                recorded.append(self.rfile.read().decode())
+                self.wfile.write(reply.model_dump_json().encode())
+
+        self.server = socketserver.UnixStreamServer(str(path), Handled)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+
+    def __enter__(self) -> Self:
+        self.thread.start()
+        return self
+
+    def __exit__(self, *exited: object) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=60)
+
+
+def test_rules_check_in_a_room_asks_the_host_for_each_issues_state(
+    fakes: Kit, repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (repo / "src" / "pkg" / "core.py").write_text(
+        'x = 1  # lup: defer(issue="cli/cli#12", why="retry on reset")\n'
+    )
+    socket = tmp_path / "request.sock"
+
+    def room() -> RoomClient:
+        return RoomClient(socket=socket)
+
+    monkeypatch.setattr(cli, "RoomClient", room)
+    monkeypatch.chdir(repo)
+    with Host(socket, Stated(state="closed")) as host:
+        result = runner.invoke(cli.app, ["rules", "check", "src/pkg/core.py"])
+    assert result.exit_code == 1
+    assert "src/pkg/core.py:1:1 - defer-closed: issue cli/cli#12 is closed" in (
+        result.output
+    )
+    assert [IssueState.model_validate_json(each) for each in host.requests] == [
+        IssueState(repository="cli/cli", number=12)
+    ]
+
+
+def test_rules_check_in_a_room_says_an_issue_the_host_didnt_answer_went_unchecked(
+    fakes: Kit, repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (repo / "src" / "pkg" / "core.py").write_text(
+        'x = 1  # lup: defer(issue=12, why="retry on reset")\n'
+    )
+    socket = tmp_path / "request.sock"
+
+    def room() -> RoomClient:
+        return RoomClient(socket=socket)
+
+    monkeypatch.setattr(cli, "RoomClient", room)
+    monkeypatch.chdir(repo)
+    older = Refused(
+        error="no handler for `issue-state`; a room's request socket answers git-list"
+    )
+    with Host(socket, older):
+        result = runner.invoke(cli.app, ["rules", "check", "src/pkg/core.py"])
+    assert result.exit_code == 0
+    assert (
+        "Issue #12 went unchecked: the host service said no handler for "
+        "`issue-state`; a room's request socket answers git-list."
+    ) in result.output
 
 
 def test_github_is_out_of_reach_without_gh(
