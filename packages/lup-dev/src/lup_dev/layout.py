@@ -8,8 +8,8 @@ The homes (`docs/judging-writes.md`, *Where things live*):
   path is limited in length;
 - the host service's sockets and the launches it serves, under
   `$XDG_RUNTIME_DIR/lup/host/`, and its log under lup's state (`docs/launch.md`);
-  each launch's compiled settings, and the lock its launcher holds, under lup's
-  state;
+  each launch's compiled settings, its room's git configuration and lup's
+  commands there, and the lock its launcher holds, under lup's state;
 - lup's data, under `$XDG_DATA_HOME/lup/`: each repository's own copy of
   `lup-dev`, which trust on launch installs and its launches' hooks run;
 - lup's cache, what can be fetched again, under `$XDG_CACHE_HOME/lup/`: pyright's
@@ -40,6 +40,17 @@ LOCALTIME = Path("/etc/localtime")
 
 ROOM_SOCKETS = Path("/run/lup")
 """Where a room mounts its launch's socket directory, so its hook finds the host service."""
+
+ROOM_PATH = [
+    Path("/usr/local/sbin"),
+    Path("/usr/local/bin"),
+    Path("/usr/sbin"),
+    Path("/usr/bin"),
+    Path("/sbin"),
+    Path("/bin"),
+]
+"""The room's own `PATH`, which a launch puts lup's commands before: the one
+Arch Linux's image sets, and podman's default for an image setting none."""
 
 
 def digest(path: Path) -> str:
@@ -472,6 +483,21 @@ class LaunchLayout(Model):
         may end it once its container is gone too.
         """
         return self.directory.with_name(f"{self.directory.name}.lock")
+
+    @property
+    def gitconfig(self) -> Path:
+        """The room's git configuration, in place of the operator's (`GIT_CONFIG_GLOBAL`), mounted read-only."""
+        return self.directory / "gitconfig"
+
+    @property
+    def bin(self) -> Path:
+        """The commands lup gives the room, first on its `PATH`, mounted read-only."""
+        return self.directory / "bin"
+
+    @property
+    def helper(self) -> Path:
+        """The remote helper git runs for a `lup::` URL, found on the `PATH` by its name."""
+        return self.bin / "git-remote-lup"
 
 
 class CliCacheLayout(Model):

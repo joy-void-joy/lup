@@ -218,7 +218,8 @@ The parsers to reach for: `json`, `tomllib` (`tomlkit` to edit), `csv`, `urllib.
 - the library never imports the environment (`lup` never imports `lup_dev`, and `lup_dev` never imports `lup_dashboard`);
 - a runtime's SDK is imported only in its adapter (`lup.adapters.claude`, `lup.adapters.codex`);
 - a runtime's adapter is imported only where the adapters are listed: in `lup_dev`, the hook adapters (`lup_dev.adapters`) only by `lup_dev.cli`;
-- nothing inside `lup` imports from its front door (`lup/__init__.py`).
+- nothing inside `lup` imports from its front door (`lup/__init__.py`);
+- git's remote helper (`lup_dev.remote.helper`), which runs on a room's own Python, imports the standard library alone: everything else is forbidden, and each standard module it uses is listed in the contract, so a new one is a change to it.
 
 import-linter checks the whole graph at the gate. The engine reads the same contracts and checks each edited file's own imports at the edit, so a wrong import is refused when it's written; that's issue #39 until built. These contracts are lup's; a project declares its own.
 
@@ -235,7 +236,7 @@ import-linter checks the whole graph at the gate. The engine reads the same cont
 - **A word the library uses means the same thing in the environment:** `adapters` holds each runtime's adapter in `lup` and in `lup_dev` alike.
 - **Every subpackage's `__init__.py` docstring says in one line what it is.**
 - **Package-wide modules stay at the root:** errors, settings, layout, the clock, the command line, and the front door a project's declaration imports (`__init__.py`). So do the tools more than one subsystem needs, which belong to none of them: git (`git.py`), which judging and the launch both ask, the models kept in files (`stored.py`), and what the operator approved (`approval.py`), which the launch records and the judge reads.
-- **Subsystems import downwards only,** declared as an import-linter `layers` contract. In `lup_dev`: `adapters` > `launch` > `policy` > `codescan` > `declaration` > `catalog` > `forge` > `inbox` > `host`, so the runtimes' adapters sit on the launch (each spells its CLI's release channel) and on judging, the launch above judging, though it imports none of it, judging on reading code, both on what a project declares, everything on the catalog's data; the forge and the inbox, which need only the host's seams and the library, just above the host, though neither imports the other, the forge where reading code reaches it for the gate's issue states in a room and the launch for the program it names on the host, the inbox where judging reaches it for the rule its turn's end holds by; and the host service, which imports none of them and is handed what it runs, sits lowest, where any of them can reach its client.
+- **Subsystems import downwards only,** declared as an import-linter `layers` contract. In `lup_dev`: `adapters` > `launch` > `policy` > `codescan` > `declaration` > `catalog` > `remote` \| `forge` > `inbox` > `host`, so the runtimes' adapters sit on the launch (each spells its CLI's release channel) and on judging, the launch above judging, though it imports none of it, judging on reading code, both on what a project declares, everything on the catalog's data; git through the host, the forge and the inbox, which need only the host's seams and the library, just above the host, though none imports another (`remote` and `forge` side by side, which the contract holds independent), the remote where the launch reaches it for the room's git configuration, the forge where reading code reaches it for the gate's issue states in a room and the launch for the program it names on the host, the inbox where judging reaches it for the rule its turn's end holds by; and the host service, which imports none of them and is handed what it runs, sits lowest, where any of them can reach its client.
 
 | `lup_dev` | What it is |
 |---|---|
@@ -247,6 +248,7 @@ import-linter checks the whole graph at the gate. The engine reads the same cont
 | `adapters/` | each runtime's hooks, the only code naming a runtime |
 | `forge/` | GitHub from the host, through `gh` and the operator's login: lup's GitHub tools in a launched session, and the room's issue states (`docs/host-tools.md`, *GitHub through `gh`*) |
 | `inbox/` | the inbox in the host service: its store, telling each conversation, its tools in a launched session, the operator's requests, turns' ends held once per thing (`docs/host-tools.md`, *The inbox*) |
+| `remote/` | git through the host (`docs/host-tools.md`): the room's remote helper, on the standard library alone (`helper.py`), the room's git configuration (`config.py`), and the pushes and fetches the host carries out for it, within the limits (`protocol.py`) |
 | `host/` | the host service, which rooms call, and its client (`docs/launch.md`); it imports none of the other subsystems |
 | `launch/` | launching a session (`docs/launch.md`): trust on launch (`trust.py`), the maintaining room and its image (`room.py`, `images.py`), each runtime's latest CLI (`clis.py`), the session's guidance (`guidance.py`) |
 

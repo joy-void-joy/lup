@@ -89,7 +89,7 @@ class Answerer(ABC):
 
 
 class Asked(Model):
-    """One program the service runs: a hook put to a launch's judge, or `gh` for a launch; its command, and what goes on its input."""
+    """One program the service runs: a hook put to a launch's judge, `gh` for a launch, or git for its room; its command, and what goes on its input."""
 
     command: list[str]
     payload: str
@@ -114,11 +114,12 @@ async def judged(asked: Asked) -> Judged:
     Spawned rather than forked: `sh` forks from the service's process and runs
     Python in the child before the program starts, which can deadlock in a
     process with threads, and it would hold a thread per program for as long as
-    it runs: a judge for a hold's hours, `gh` for GitHub's answer.
+    it runs: a judge for a hold's hours, `gh` for GitHub's answer, git for a
+    room's push (`remote/protocol.py`).
     """
     program, *arguments = asked.command
     try:
-        # lup: ignore("subprocess", why="the host service awaits each judge and each gh on its event loop, which sh can't: it forks, and holds a thread per program")
+        # lup: ignore("subprocess", why="the host service awaits each judge, each gh and git for a room on its event loop, which sh can't: it forks, and holds a thread per program")
         process = await asyncio.create_subprocess_exec(
             program,
             *arguments,
