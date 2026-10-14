@@ -1,8 +1,9 @@
 """Each runtime's hooks in lup's own words: the only code that names a runtime.
 
 Each runtime's module builds its `Adapter`, what lup needs of it: how its hooks
-are answered, how the host service reads them and adds to their answers, and
-what a launch of it runs. The command line lists them.
+are answered, how the host service reads them, adds to their answers and starts
+a turn of an idle session, and what a launch of it runs. The command line lists
+them.
 """
 
 from collections.abc import Callable
@@ -34,6 +35,10 @@ class Adapter(Model, arbitrary_types_allowed=True):
     """Adds to a hook's answer: the payload, the answer (the judge's, or none)
     and what to add in, what the hook prints out instead; none where nothing is
     added, so the answer goes out as it is."""
+    woken: Callable[[str, str], str] | None
+    """Starts a turn of an idle session: its id and what to tell it in, the line
+    written to its messaging socket out; none where the runtime has no way, a gap
+    its module declares."""
     hooks: Callable[[list[str], timedelta], list[Hook]]
     """The hooks a launched session runs a command at, each waiting up to a
     timeout: the events the host service hears."""

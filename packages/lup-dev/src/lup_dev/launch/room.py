@@ -64,8 +64,9 @@ class RoomError(LupDevError):
 def host_needs() -> list[Needed]:
     """Return what the host needs to run a room, as requirements checked at once.
 
-    podman, rootless; and `gh`, optional: without it, lup's GitHub tools and the
-    gate's issue states in a room are off.
+    Podman, rootless; and, optional, `gh`, without which lup's GitHub tools and
+    the gate's issue states in a room are off, and `notify-send`, without which
+    the inbox raises no desktop notice.
     """
     podman = Requirement(
         tool="podman",
@@ -81,9 +82,16 @@ def host_needs() -> list[Needed]:
         ),
         install="your system's `github-cli` package, then `gh auth login`",
     )
+    notices = Requirement(
+        tool="notify-send",
+        optional=True,
+        why="raises a desktop notice when something reaches your inbox",
+        install="your system's `libnotify` package",
+    )
     return [
         Needed(module="lup-dev launch", requirement=podman),
         Needed(module="lup-dev launch", requirement=gh),
+        Needed(module="lup-dev inbox", requirement=notices),
     ]
 
 

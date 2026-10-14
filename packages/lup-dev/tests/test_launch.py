@@ -388,6 +388,7 @@ def test_a_launch_runs_each_step_in_order_and_ends_its_registration(
         "trust",
         "found podman",
         "found gh",
+        "found notify-send",
         "github .git",
         "host",
         "cli",
@@ -451,7 +452,12 @@ def test_a_launch_compiles_the_approved_declarations_guidance_and_hooks(
 
     with approved_declaration(project, commit) as declared:
         settings = terminal_settings(
-            declared, project, directory, Cli(program=Path("/opt/cli")), hooks
+            declared,
+            project,
+            directory,
+            Cli(program=Path("/opt/cli")),
+            hooks,
+            tools=cli.served_tools(),
         )
         exported = declared.root
         choices = declared.resolved.session
@@ -469,6 +475,7 @@ def test_a_launch_compiles_the_approved_declarations_guidance_and_hooks(
             timeout=timedelta(hours=25),
         )
     ]
+    assert settings.messages == Path("/run/lup/messages.sock")
     assert settings.trusted == [project]
     assert settings.session == session_settings(choices).declared
     assert settings.defaults == session_settings(choices).defaults
@@ -477,7 +484,28 @@ def test_a_launch_compiles_the_approved_declarations_guidance_and_hooks(
     assert "# The room" in guidance
     assert "As committed." in guidance
     assert "Uncommitted." not in guidance
+    assert "## lup's tools" in guidance
+    assert "- `wait_inbox`: Wait until something reaches your inbox." in guidance
+    assert guidance.index("As committed.") < guidance.index("## lup's tools")
     assert guidance.endswith("Mine.\n")
+
+
+def test_a_launch_says_once_that_desktop_notices_are_off_without_notify_send(
+    project: Path, tmp_path: Path, clock: FakeClock
+) -> None:
+    machine = Machine(tmp_path, clock)
+    machine.launcher = machine.launcher.model_copy(
+        update={"tools": Found(machine.events.record, missing=["notify-send"])}
+    )
+    assert cli.launched(machine.adapter, [], project, machine.launcher) == 7
+    off = [each for each in machine.events.said if each.startswith("Turned off")]
+    assert off == [
+        (
+            "Turned off, for want of a tool: `notify-send`, for `lup-dev inbox` "
+            "(raises a desktop notice when something reaches your inbox): not on "
+            "the `PATH`. Install: your system's `libnotify` package."
+        )
+    ]
 
 
 def test_a_launch_without_gh_says_so_once_and_names_no_repository(
@@ -491,10 +519,10 @@ def test_a_launch_without_gh_says_so_once_and_names_no_repository(
     off = [each for each in said if "gh" in each and not each.startswith("found")]
     assert off == [
         (
-            "Off: `gh`, for `lup-dev launch` (reaches GitHub with your login for "
-            "lup's GitHub tools, and for the gate's issue states in a room): not on "
-            "the `PATH`. Install: your system's `github-cli` package, then `gh auth "
-            "login`."
+            "Turned off, for want of a tool: `gh`, for `lup-dev launch` (reaches "
+            "GitHub with your login for lup's GitHub tools, and for the gate's issue "
+            "states in a room): not on the `PATH`. Install: your system's "
+            "`github-cli` package, then `gh auth login`."
         )
     ]
     assert not [each for each in said if each.startswith("github")]

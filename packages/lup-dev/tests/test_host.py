@@ -75,10 +75,13 @@ class Hears(Courier):
     """Hears every payload as a call of one session's own conversation, which the judge reads, and adds nothing."""
 
     def heard(self, runtime: str, payload: str) -> Heard:
-        return Heard(event="call-started", session="s1", judged=True)
+        return Heard(event="call-started", session="s1", judged=True, fits=10_000)
 
     def told(self, runtime: str, payload: str, answer: str, telling: Telling) -> str:
         return answer
+
+    def woken(self, runtime: str, session: str, text: str) -> str | None:
+        return None
 
 
 class Judge:

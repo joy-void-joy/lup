@@ -9,12 +9,16 @@ worktree launched, come the library's `TerminalSettings` (`terminal_settings`):
 - lup's tool server, on the launch's `mcp.sock` in the room, which the host
   service serves (`served`; `docs/host-tools.md`, *The server*), a call to it
   waiting as long as a hold may;
+- the session's own messaging socket, put in the launch's socket directory, so
+  the host service reaches it to start a turn of the idle session where its
+  runtime has one (`docs/host-tools.md`, *How an agent is told*);
 - `Core`'s session settings, in the library's terms: the fields the declaration
   set, imposed over the person's own runtime settings, and the rest as lup's
   defaults, which theirs outrank (`session_settings`);
 - the guidance, rendered from lup's sections in the installed package, the
   project's own read at the approved commit, and the person's own,
-  `AGENTS.local.md`, from the worktree launched (`launch/guidance.py`);
+  `AGENTS.local.md`, from the worktree launched, with lup's tools listed
+  (`launch/guidance.py`);
 - the paths trusted: the worktree, and its repository's main worktree, which the
   runtimes ask about for a linked one;
 - the launch's own directory, where the compiled files are written.
@@ -54,6 +58,8 @@ from lup_dev.layout import ROOM_SOCKETS, LaunchSockets
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator
+
+    from lup.tools.tool import ToolSpec
 
 
 class LaunchError(LupDevError):
@@ -184,12 +190,19 @@ def trusted(worktree: Path) -> list[Path]:
 
 
 def terminal_settings(
-    approved: Approved, worktree: Path, directory: Path, cli: Cli, hooks: list[Hook]
+    approved: Approved,
+    worktree: Path,
+    directory: Path,
+    cli: Cli,
+    hooks: list[Hook],
+    *,
+    tools: list[ToolSpec],
 ) -> TerminalSettings:
     """Return what lup adds to the session launched in `worktree`, its files compiled into `directory`.
 
-    Raise `GuidanceError` naming a section of guidance that can't be read, or
-    doesn't render.
+    `tools` are lup's tools the host service serves it, which its guidance
+    lists. Raise `GuidanceError` naming a section of guidance that can't be
+    read, or doesn't render.
     """
     resolved = approved.resolved
     session = session_settings(resolved.session)
@@ -198,7 +211,8 @@ def terminal_settings(
         cli=cli,
         hooks=hooks,
         servers=served(),
-        guidance=render(resolved, approved.root, worktree),
+        messages=LaunchSockets(directory=ROOM_SOCKETS).messages,
+        guidance=render(resolved, approved.root, worktree, tools),
         session=session.declared,
         defaults=session.defaults,
         trusted=trusted(worktree),

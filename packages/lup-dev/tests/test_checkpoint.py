@@ -725,20 +725,57 @@ def test_the_same_findings_after_a_block_let_the_turn_end_saying_so(
     assert first.startswith("lup won't end the turn yet")
     let = end(kit, repo, after_block=True)
     assert let.block == ""
-    assert let.note.startswith("lup held the turn's end on these just before")
+    assert let.note.startswith("lup held the turn's end once already, and lets it end")
     assert f"{repo}/src/pkg/core.py:11:" in let.note
-    assert end(kit, repo).block == first
+    # A later turn ends at once: the findings were passed, and haven't changed.
+    assert end(kit, repo) == Reply()
 
 
-def test_different_findings_after_a_block_block_again(kit: Kit, repo: Path) -> None:
+def test_an_end_following_a_hold_ends_whatever_is_left(kit: Kit, repo: Path) -> None:
     start(kit, repo)
     broken = (repo / CORE).read_text() + "y: int = 'a'  # TYPE\n"
     shell_write(kit, repo, "c1", CORE, broken)
     end(kit, repo)
     shell_write(kit, repo, "c2", CORE, broken + "z: str = 1  # TYPE\n")
-    again = end(kit, repo, after_block=True).block
-    assert again.startswith("lup won't end the turn yet")
-    assert end(kit, repo, after_block=True).note.startswith("lup held the turn's end")
+    let = end(kit, repo, after_block=True)
+    assert let.block == ""
+    assert let.note.startswith("lup held the turn's end once already")
+    assert f"{repo}/src/pkg/core.py:12:" in let.note
+    assert end(kit, repo) == Reply()
+
+
+def test_passed_findings_hold_a_later_end_only_where_they_change(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    original = (repo / CORE).read_text()
+    broken = original + "y: int = 'a'  # TYPE\n"
+    shell_write(kit, repo, "c1", CORE, broken)
+    assert end(kit, repo).block.startswith("lup won't end the turn yet")
+    end(kit, repo, after_block=True)
+    assert end(kit, repo) == Reply()
+    shell_write(kit, repo, "c2", CORE, broken + "z: str = 1  # TYPE\n")
+    changed = end(kit, repo).block
+    assert changed.startswith("lup won't end the turn yet")
+    assert f"{repo}/src/pkg/core.py:12:" in changed
+    end(kit, repo, after_block=True)
+    shell_write(kit, repo, "c3", CORE, original)
+    assert end(kit, repo) == Reply()
+    shell_write(kit, repo, "c4", CORE, broken)
+    assert end(kit, repo).block.startswith("lup won't end the turn yet")
+
+
+def test_a_session_starting_again_keeps_what_its_turns_passed(
+    kit: Kit, repo: Path
+) -> None:
+    start(kit, repo)
+    shell_write(
+        kit, repo, "c1", CORE, (repo / CORE).read_text() + "y: int = 'a'  # TYPE\n"
+    )
+    end(kit, repo)
+    end(kit, repo, after_block=True)
+    start(kit, repo)
+    assert end(kit, repo) == Reply()
 
 
 def test_a_session_starting_again_forgets_its_subagents(kit: Kit, repo: Path) -> None:

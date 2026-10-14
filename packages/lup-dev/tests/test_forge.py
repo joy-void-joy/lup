@@ -541,11 +541,16 @@ class Nobody(Answerer):
 
 
 class Deaf(Courier):
+    """No hook reaches these tests' service: what a courier says is never read."""
+
     def heard(self, runtime: str, payload: str) -> Heard:
-        return Heard(event="call-started", session="s1", judged=False)
+        return Heard(event="call-started", session="s1", judged=False, fits=10_000)
 
     def told(self, runtime: str, payload: str, answer: str, telling: Telling) -> str:
         return answer
+
+    def woken(self, runtime: str, session: str, text: str) -> str | None:
+        return None
 
 
 async def unjudged(asked: Asked) -> Judged:
