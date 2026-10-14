@@ -1,6 +1,6 @@
 # Related repositories, read-only in a room
 
-**One sentence:** a project declares the other repositories its sessions may read, each saying what it is, and a launched room mounts each one read-only, while lup's GitHub read tools take any repository the operator's login can read.
+**One sentence:** a person declares, in their own uncommitted layer of the declaration, the other repositories their sessions may read, each saying what it is, and a launched room mounts each one read-only, while lup's GitHub read tools take any repository the operator's login can read.
 
 The operator's request (2026-10-14): "all of our repositories [should be] easily [read-only] accessible", each declared explicitly, "what project is what". It builds on piece 2 (`docs/host-tools.md`): the room's mounts (`docs/launch.md`, *The mounts*), lup's GitHub tools, and the guidance a launch renders.
 
@@ -18,6 +18,8 @@ All answered by the operator on 2026-10-14: each lean below taken as stated.
 4. **Mounted whole, read-only, at its host path (leaning):** the git directory and, for a bare repository with worktrees under it (lup's layout, `tree/<branch>`), its worktrees too, so a session reads files as they stand and history through git. Declaring a repository is the choice to expose it to its rooms: a worktree's untracked files (an `.env`) become readable by anything running there, which open egress could send out. The alternative: committed content only, the worktrees hidden under an empty tmpfs as `docs/field-notes.md` (*Rooms*) measured, reading code through `git show` and `git grep <rev>` alone.
 5. **A declared repository missing on the host (leaning):** the launch says so in one line and goes on, the guidance marking it unavailable; no clone is made for it. The alternative: a read-only clone kept in lup's cache from its `github`, fetched at each launch with the operator's credentials, a later step if a machine needs it.
 6. **The guidance lists them,** after lup's tools: each repository's name, path, what it is, and its GitHub identity.
+7. **A person's own layer, `lup_project.local.py`** (the operator's): which repositories a person relates, and what each is, are theirs, never committed or on GitHub. They go in the person's own declaration, at the root beside `lup_project.py`, gitignored and protected as `AGENTS.local.md` is, in the same grammar, layered on top of the project's: the per-person layer the session settings' order left for later (`docs/launch.md`, *The settings compiled for each runtime*: the runtime's default, lup's defaults, the person's runtime settings, the project's declaration, then the person's own). Repositories are its first use; any part of the declaration a person changes for themselves goes there too.
+8. **Trust on launch covers it** (the operator's): it's Python run on the host, and a room writes the worktree, so an edit made in a room must not run unseen. It joins the host zone by its content, since git holds none of it: approved with the rest, an unchanged file asks nothing, a changed one shows its diff in the trust summary, and nothing new of it runs until approved. The judge reads the approved copy, kept with the approval, as it reads the project's declaration at the approved commit.
 
 ## What's built
 
@@ -25,7 +27,7 @@ All answered by the operator on 2026-10-14: each lean below taken as stated.
 - **The room** (`launch/room.py`): each resolved repository that exists mounted read-only at its host path, after the project's own; one that's missing said once; a repository already inside the project's own mounts (the project itself) refused, naming it. A mounted repository's own `config` and `hooks/` are read-only with the rest, so nothing in the room changes how the operator's git runs there.
 - **The GitHub tools** (`forge/tools.py`): `read_issue` and `find_issues` gain `repository`; `find_issues` keeps dropping results from other repositories than the one asked.
 - **The guidance** (`launch/guidance.py`): the list, with each repository's state (mounted, or missing).
-- **A person's own repositories aren't committed** (the operator's decision): which repositories a person relates, and what each is, are theirs, kept in a local file of their own rather than in a project's declaration, so nothing of them reaches the repository or GitHub. Where that file lives is open.
+- **The person's layer** (`declaration/load.py`, `launch/trust.py`, `approval.py`): `lup_project.local.py` found beside the declaration, loaded after it and layered on top, gitignored (the repository's `.gitignore`) and a protected path (`catalog/paths.py`); its content in the host zone, its approved copy kept with the approval and read by the judge and the launch.
 
 ## Tests
 
@@ -33,6 +35,7 @@ All answered by the operator on 2026-10-14: each lean below taken as stated.
 - The room: a declared repository mounted read-only at its host path, a missing one said, the project itself refused.
 - The GitHub tools: a `repository` passed to `gh` as `--repo`, through the stand-in `gh`.
 - The guidance: the list rendered.
+- The person's layer: layered over the project's declaration; absent, nothing changes; its edit shown and asked at the next launch's trust, unchanged asking nothing; the judge reading the approved copy, not the edited file.
 
 ## Checks owed
 
