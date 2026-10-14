@@ -32,6 +32,8 @@ from lup_dev import (
     Python,
     Refs,
     RemovedTools,
+    Repositories,
+    Repository,
     Requirement,
     Rules,
     Section,
@@ -1123,6 +1125,164 @@ def test_a_project_replaces_one_of_lup_s_sections() -> None:
         Core(guidance=Guidance().replace("core", mine, why="our room differs"))
     )
     assert resolve(Project(modules=modules)).guidance[0] == mine
+
+
+# Other repositories for sessions to read
+
+
+def entry(**fields: str | Path | None) -> Repository:
+    written: dict[str, str | Path | None] = {
+        "name": "atlas",
+        "path": Path("atlas.git"),
+        "about": "a made-up neighbour, read for how it did things",
+        "github": "someone/atlas",
+    }
+    return Repository.model_validate({**written, **fields})
+
+
+def named(repositories: Repositories) -> list[str]:
+    return [each.entry.name for each in repositories.resolve([], [])]
+
+
+class Neighbours(Module):
+    """The repositories beside the project."""
+
+    name = "neighbours"
+
+    repositories: Repositories = Repositories.of(
+        entry(),
+        entry(name="notes", path=Path("/srv/notes"), github=None, about="notes"),
+    )
+
+
+def test_no_module_of_lup_s_holds_other_repositories() -> None:
+    assert not any(
+        isinstance(getattr(module, field), Repositories)
+        for module in resolve(Project()).modules
+        for field in type(module).model_fields
+    )
+    assert resolve(Project()).repositories == []
+
+
+def test_a_module_s_repositories_resolve_as_written() -> None:
+    resolved = resolve(Project(modules=Modules.default().add(Neighbours())))
+    assert resolved.repositories == [
+        entry(),
+        Repository(name="notes", path=Path("/srv/notes"), about="notes"),
+    ]
+
+
+def test_a_layer_changes_a_module_s_repositories_by_name() -> None:
+    later = entry(name="beacon", path=Path("beacon.git"), about="another")
+    modules = (
+        Modules.default()
+        .add(Neighbours())
+        .edit(
+            Neighbours(repositories=Repositories().add(later).drop("notes")),
+            why="beacon is a neighbour; the notes moved",
+        )
+    )
+    resolved = resolve(Project(modules=modules))
+    assert [each.name for each in resolved.repositories] == ["atlas", "beacon"]
+
+
+def test_one_name_from_two_modules_with_one_path_is_one_repository_the_first_s() -> (
+    None
+):
+    class Elsewhere(Module):
+        """Another module naming the same neighbour."""
+
+        name = "elsewhere"
+
+        repositories: Repositories = Repositories.of(entry(about="said again"))
+
+    modules = Modules.default().add(Neighbours()).add(Elsewhere())
+    resolved = resolve(Project(modules=modules))
+    assert [(each.name, each.about) for each in resolved.repositories] == [
+        ("atlas", entry().about),
+        ("notes", "notes"),
+    ]
+
+
+def test_one_name_from_two_modules_with_two_paths_is_refused_naming_both() -> None:
+    class Elsewhere(Module):
+        """Another module naming the same neighbour elsewhere."""
+
+        name = "elsewhere"
+
+        repositories: Repositories = Repositories.of(entry(path=Path("/srv/atlas.git")))
+
+    modules = Modules.default().add(Neighbours()).add(Elsewhere())
+    with pytest.raises(
+        ProjectError,
+        match=(
+            r"two modules give one repository different paths, `atlas` at "
+            r"`atlas.git` and at `/srv/atlas.git`"
+        ),
+    ):
+        resolve(Project(modules=modules))
+
+
+def test_paths_relative_absolute_and_from_the_home_are_kept_as_written() -> None:
+    written = [Path("atlas.git"), Path("../elsewhere/x.git"), Path("/srv/x")]
+    paths = [*written, Path("~/src/x.git")]
+    assert [entry(path=path).path for path in paths] == paths
+
+
+def test_repositories_are_named_and_changed_by_name() -> None:
+    beacon = entry(
+        name="beacon", path=Path("beacon.git"), about="another made-up neighbour"
+    )
+    notes = entry(name="notes", path=Path("/srv/notes"), github=None, about="notes")
+    chosen = Repositories.of(entry(), notes).add(beacon).drop("notes")
+    assert named(chosen) == ["atlas", "beacon"]
+    moved = chosen.replace(
+        "beacon", beacon.model_copy(update={"path": Path("/srv/beacon")})
+    )
+    assert [each.entry.path for each in moved.resolve([], [])] == [
+        Path("atlas.git"),
+        Path("/srv/beacon"),
+    ]
+
+
+def test_one_name_twice_is_refused_naming_it() -> None:
+    with pytest.raises(ProjectError, match=r"starts from `atlas` more than once"):
+        named(Repositories.of(entry(), entry(path=Path("/srv/atlas.git"))))
+    with pytest.raises(ProjectError, match=r"`Repositories.add` names `atlas`"):
+        named(Repositories.of(entry()).add(entry(path=Path("/srv/x.git"))))
+
+
+@pytest.mark.parametrize(
+    ("fields", "refusal"),
+    [
+        ({"name": " "}, r"A `Repository` at `atlas.git` has no name"),
+        ({"path": Path()}, r"`Repository` `atlas` names no path"),
+        ({"about": ""}, r"`Repository` `atlas` says nothing `about` what it is"),
+        (
+            {"github": "atlas"},
+            (
+                r"`Repository` `atlas` gives its GitHub repository as "
+                r"`atlas`: a repository on GitHub is `owner/name`"
+            ),
+        ),
+        (
+            {"github": "someone/atlas/x"},
+            r"as `someone/atlas/x`: a repository on GitHub is `owner/name`",
+        ),
+    ],
+)
+def test_a_malformed_repository_is_refused_naming_it(
+    fields: dict[str, str | Path], refusal: str
+) -> None:
+    with pytest.raises(ProjectError, match=refusal):
+        entry(**fields)
+
+
+def test_a_repository_refuses_fields_it_doesn_t_know() -> None:
+    with pytest.raises(pydantic.ValidationError, match=r"url\b"):
+        Repository.model_validate(
+            {"name": "x", "path": "x.git", "about": "x", "url": "https://x"}
+        )
 
 
 def test_the_front_door_imports_only_the_declaration_s_models() -> None:

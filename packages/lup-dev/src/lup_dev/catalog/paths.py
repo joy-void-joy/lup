@@ -34,6 +34,7 @@ class CorePaths(Model):
         "**/.env*.local",
         "**/.gitignore",
         "AGENTS.local.md",
+        "lup_project.local.py",
     ]
     """Every write to these asks the operator.
 
@@ -45,7 +46,10 @@ class CorePaths(Model):
     - `.gitignore`, since what it ignores the checkpoint never sees;
     - the person's own section of a session's guidance, `AGENTS.local.md` at the
       root, which steers every later session and which git ignores, so nothing
-      else would show the operator a change to it.
+      else would show the operator a change to it;
+    - the person's own layer of the declaration, `lup_project.local.py` at the
+      root, which the host runs once trust on launch approves it, and which git
+      ignores.
     """
     operator_documents: list[str] = ["DESIGN.md", "AGENTS.md"]
     """The operator's documents: changing one is a design decision, so it asks."""

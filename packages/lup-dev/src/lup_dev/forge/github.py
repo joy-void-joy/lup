@@ -9,7 +9,9 @@ through the operator's `gh` and its login:
   registration carries the answer (`Register.github`). Every command then names
   that repository with `--repo`. Never from a worktree: a worktree's `.git` file
   is the room's to write (#54), so reading the repository there would let a room
-  choose which repository the operator's login acts on.
+  choose which repository the operator's login acts on. Reading reaches another
+  repository too, any the operator's login can read, where a call names it
+  (`docs/related-repositories.md`); writing stays on the launch's own.
 - **Spawned, never forked.** `gh` runs through the host service's `judged`,
   awaited on its event loop as each judge is, in the repository's git directory.
 - **Typed answers.** Each command asks for `--json` where `gh` gives it, read
@@ -352,12 +354,16 @@ class GitHub(Model):
     """The repository's git directory on the host, where `gh` runs."""
 
     @classmethod
-    def launched(cls, launch: Register) -> GitHub:
-        """Return GitHub on `launch`'s own repository, run in its git directory.
+    def launched(
+        cls, launch: Register, elsewhere: GitHubRepository | None = None
+    ) -> GitHub:
+        """Return GitHub on `launch`'s own repository, or on `elsewhere` where it's given, run in the launch's git directory.
 
-        Raise `GitHubError` where the launch has none: `gh` couldn't name it when
-        the launch started, which the launch said.
+        Raise `GitHubError` where it's the launch's own and the launch has none:
+        `gh` couldn't name it when the launch started, which the launch said.
         """
+        if elsewhere is not None:
+            return cls(repository=elsewhere, directory=launch.repository)
         if launch.github is None:
             message = (
                 "this launch has no repository on GitHub: `gh` on the host couldn't "

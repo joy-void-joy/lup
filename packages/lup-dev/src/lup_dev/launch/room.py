@@ -24,7 +24,16 @@ A `lup.rooms.Container` on the host's network, its image the declaration's
   mustn't rewrite;
 - the configuration of the editor `$EDITOR` or `$VISUAL` names, read-only, where
   it exists, so Ctrl+G opens it as the operator knows it;
-- `/etc/localtime`, read-only, so the room's clock reads in the operator's zone.
+- `/etc/localtime`, read-only, so the room's clock reads in the operator's zone;
+- after the project's own, each other repository named for its sessions to
+  read (`related`), whole and read-only, where it's on the host: a bare
+  repository's git directory with its worktrees under it, or a clone's working
+  tree with its `.git`, so a session reads its files, and its history through
+  git (`docs/related-repositories.md`). A relative path is from the directory
+  holding the project's own repository. One that's missing is passed over, for
+  the launch to say; one overlapping the room's own mounts, the project itself
+  or a directory holding it, is refused, since mounted it would sit read-only
+  over or under what the room writes.
 
 Its variables are the runner's, the git identity, read from the host's git as
 `GIT_AUTHOR_*` and `GIT_COMMITTER_*` since `~/.gitconfig` isn't mounted, the
@@ -79,6 +88,7 @@ from lup_dev.remote import helper
 from lup_dev.remote.config import room_config
 
 if TYPE_CHECKING:
+    from lup_dev.declaration import kinds
     from lup_dev.declaration.requirements import Tools
     from lup_dev.declaration.resolve import Resolved
     from lup_dev.declaration.runner import Interpreter
@@ -181,19 +191,81 @@ def repository(worktree: Path) -> Repository:
     return Repository(git=common, worktrees=present, main=main, tree=tree)
 
 
+class RelatedRepository(Model):
+    """Another repository named for the project's sessions to read, as a launch finds it on the host."""
+
+    name: str
+    path: Path
+    """Where it is on the host, absolute and resolved: where the room mounts it."""
+    about: str
+    """What it is, and what it's for here, as its entry says."""
+    github: str | None
+    """Its `owner/name` on GitHub, where its entry gives one."""
+    mounted: bool
+    """Whether the room mounts it: false where nothing is at its path, which the
+    launch says once."""
+
+
+def related(named: list[kinds.Repository], worktree: Path) -> list[RelatedRepository]:
+    """Find on the host each other repository `named`, for a launch in the worktree at `worktree`.
+
+    A relative path is from the directory holding the project's own repository:
+    the parent of a bare repository's git directory, or of a clone's working
+    tree. A leading `~` is the operator's home. One is mounted where a
+    directory is at its path.
+    """
+    holding = repository(worktree).main.parent
+
+    def found(declared: kinds.Repository) -> RelatedRepository:
+        path = (holding / declared.path.expanduser()).resolve()
+        return RelatedRepository(
+            name=declared.name,
+            path=path,
+            about=declared.about,
+            github=declared.github,
+            mounted=path.is_dir(),
+        )
+
+    return [found(each) for each in named]
+
+
+def apart(other: RelatedRepository, mounts: list[Mount]) -> None:
+    """Raise `RoomError` where another repository overlaps one of the room's own mounts: inside it, as the project itself is, or holding it."""
+    overlapping = [
+        mount.source
+        for mount in mounts
+        if other.path.is_relative_to(mount.source.resolve())
+        or mount.source.resolve().is_relative_to(other.path)
+    ]
+    if overlapping:
+        message = (
+            f"The repository `{other.name}` named for sessions to read, at "
+            f"{other.path}, overlaps the room's own mount of {overlapping[0]}: "
+            "another repository is mounted read-only beside the project's, so it "
+            "can't be the project itself, sit inside what the room mounts, or "
+            "hold it. Give it its own path, or drop it, to launch"
+        )
+        raise RoomError(message)
+
+
 def maintaining_room(
     resolved: Resolved,
     worktree: Path,
     layout: Layout,
     terminal: TerminalVariables,
     tools: Tools,
+    *,
+    neighbours: list[RelatedRepository],
 ) -> Container:
     """Return the maintaining session's room for the worktree at `worktree`.
 
     `tools` is how the runner asks the host where its environment's parts are;
-    a test stubs it. Raise `RoomError` where the repository's tree would hold
-    the operator's home, where `$EDITOR` or `$VISUAL` isn't a command line, or
-    where the environment's interpreter doesn't resolve under the room's mounts.
+    a test stubs it. `neighbours` are the other repositories named for the
+    project's sessions, as the launch found them (`related`): each mounted one
+    is mounted read-only after the project's own. Raise `RoomError` where the
+    repository's tree would hold the operator's home, where `$EDITOR` or
+    `$VISUAL` isn't a command line, where the environment's interpreter doesn't
+    resolve under the room's mounts, or where another repository overlaps them.
     """
     home = Path.home()
     held = repository(worktree)
@@ -262,6 +334,8 @@ def maintaining_room(
     ]
     if needs.interpreter is not None:
         reached(needs.interpreter, mounts)
+    for each in neighbours:
+        apart(each, mounts)
     name = configured("user.name")
     email = configured("user.email")
     identity = {
@@ -281,7 +355,14 @@ def maintaining_room(
             definition=definition(resolved.packages, RoomBase()),
             project=str(held.git),
         ),
-        mounts=[*mounts],
+        mounts=[
+            *mounts,
+            *(
+                Mount(source=each.path, read_only=True)
+                for each in neighbours
+                if each.mounted
+            ),
+        ],
         env={
             **needs.env,
             **identity,

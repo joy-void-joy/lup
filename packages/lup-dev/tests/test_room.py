@@ -5,25 +5,40 @@ configuration kept out; uv is stubbed through the runner's `Tools`, and no test
 runs podman.
 """
 
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 import sh
 
 from lup.rooms.container import Container, Image, Mount
-from lup_dev import Modules, Plain, Project, Python
+from lup_dev import Modules, Plain, Project, Python, Repository
 from lup_dev.catalog.room import RoomBase
 from lup_dev.declaration.requirements import Printed, Tools
 from lup_dev.declaration.resolve import resolve
 from lup_dev.launch.images import definition
-from lup_dev.launch.room import RoomError, maintaining_room, repository
+from lup_dev.launch.room import (
+    RelatedRepository,
+    RoomError,
+    maintaining_room,
+    related,
+    repository,
+)
 from lup_dev.layout import LOCALTIME, Layout
 from lup_dev.settings import TerminalVariables
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
 REMEDY = "uv sync --managed-python"
+
+
+def naming(*paths: Path) -> list[Repository]:
+    """A repository named at each of `paths`."""
+    return [
+        Repository(name=f"r{at}", path=path, about=f"repository {at}")
+        for at, path in enumerate(paths)
+    ]
+
+
+def plain() -> Project:
+    return Project(modules=Modules.default().edit(Python(runner=Plain())))
 
 
 def git(root: Path, *arguments: str) -> None:
@@ -162,6 +177,7 @@ def test_the_maintaining_room_mounts_and_sets_what_the_note_lists(
             visual="vim",
         ),
         machine.tools(),
+        neighbours=[],
     )
 
     localtime = [Mount(source=LOCALTIME, read_only=True)] if LOCALTIME.exists() else []
@@ -211,7 +227,12 @@ def test_the_room_makes_the_hooks_directory_it_holds_read_only(
     (bare / "hooks").rmdir()
 
     room = maintaining_room(
-        resolve(Project()), worktree, machine.layout, terminal(), machine.tools()
+        resolve(Project()),
+        worktree,
+        machine.layout,
+        terminal(),
+        machine.tools(),
+        neighbours=[],
     )
 
     assert (bare / "hooks").is_dir()
@@ -227,7 +248,12 @@ def test_without_a_git_identity_none_is_passed(
     machine = Machine(tmp_path, worktree)
 
     room = maintaining_room(
-        resolve(Project()), worktree, machine.layout, terminal(), machine.tools()
+        resolve(Project()),
+        worktree,
+        machine.layout,
+        terminal(),
+        machine.tools(),
+        neighbours=[],
     )
 
     assert not any(name.startswith("GIT_") for name in room.env)
@@ -246,6 +272,7 @@ def test_a_plain_runner_mounts_and_checks_nothing_of_uv(
         layout,
         terminal(),
         AskedUv(tmp_path / "none", tmp_path / "none", tmp_path / "none"),
+        neighbours=[],
     )
 
     assert not any(name.startswith("UV_") for name in room.env)
@@ -269,6 +296,7 @@ def test_a_clone_s_git_directory_is_mounted_on_its_own_so_the_room_cant_move_it(
         layout,
         terminal(),
         AskedUv(tmp_path / "none", tmp_path / "none", tmp_path / "none"),
+        neighbours=[],
     )
 
     assert room.mounts[:4] == [
@@ -297,7 +325,12 @@ def test_an_environment_on_a_system_interpreter_is_refused(
         RoomError, match=r"outside every mount of the room, as a system interpreter is"
     ) as refused:
         maintaining_room(
-            resolve(Project()), worktree, machine.layout, terminal(), machine.tools()
+            resolve(Project()),
+            worktree,
+            machine.layout,
+            terminal(),
+            machine.tools(),
+            neighbours=[],
         )
     assert str(system) in str(refused.value)
     assert REMEDY in str(refused.value)
@@ -312,7 +345,12 @@ def test_an_environment_whose_interpreter_is_gone_is_refused(
 
     with pytest.raises(RoomError, match=r"and isn't there") as refused:
         maintaining_room(
-            resolve(Project()), worktree, machine.layout, terminal(), machine.tools()
+            resolve(Project()),
+            worktree,
+            machine.layout,
+            terminal(),
+            machine.tools(),
+            neighbours=[],
         )
     assert REMEDY in str(refused.value)
 
@@ -332,4 +370,116 @@ def test_an_editor_that_isnt_a_command_line_is_refused(
             machine.layout,
             terminal(editor='nvim "unclosed'),
             machine.tools(),
+            neighbours=[],
         )
+
+
+# Other repositories, read-only
+
+
+def test_a_relative_path_is_from_the_directory_holding_a_bare_repository(
+    bare: Path, tmp_path: Path, home: Path
+) -> None:
+    (tmp_path / "notes.git").mkdir()
+    named = naming(Path("notes.git"), Path("gone.git"))
+
+    found = related(named, bare / "tree" / "main")
+
+    assert found == [
+        RelatedRepository(
+            name="r0",
+            path=(tmp_path / "notes.git").resolve(),
+            about="repository 0",
+            github=None,
+            mounted=True,
+        ),
+        RelatedRepository(
+            name="r1",
+            path=(tmp_path / "gone.git").resolve(),
+            about="repository 1",
+            github=None,
+            mounted=False,
+        ),
+    ]
+
+
+def test_a_relative_path_is_from_the_directory_holding_a_clone_s_working_tree(
+    repo: Path, tmp_path: Path
+) -> None:
+    git(repo, "worktree", "add", "-q", "-b", "feat", ".worktrees/feat")
+    (tmp_path / "notes").mkdir()
+
+    [found] = related(naming(Path("notes")), repo / ".worktrees" / "feat")
+
+    assert found.path == (tmp_path / "notes").resolve()
+    assert found.mounted
+
+
+def test_an_absolute_path_and_one_from_the_home_are_where_they_say(
+    bare: Path, tmp_path: Path, home: Path
+) -> None:
+    (home / "src" / "x.git").mkdir(parents=True)
+    elsewhere = tmp_path / "elsewhere" / "y.git"
+
+    found = related(naming(Path("~/src/x.git"), elsewhere), bare / "tree" / "main")
+
+    assert [(each.path, each.mounted) for each in found] == [
+        ((home / "src" / "x.git").resolve(), True),
+        (elsewhere.resolve(), False),
+    ]
+
+
+def test_each_repository_there_is_mounted_read_only_at_its_host_path_after_the_project_s(
+    bare: Path, tmp_path: Path, home: Path
+) -> None:
+    worktree = bare / "tree" / "main"
+    layout = Layout(state=tmp_path / "state", cache=tmp_path / "cache" / "lup")
+    neighbours = related(naming(Path("work"), Path("gone.git")), worktree)
+
+    room = maintaining_room(
+        resolve(plain()),
+        worktree,
+        layout,
+        terminal(),
+        AskedUv(tmp_path / "none", tmp_path / "none", tmp_path / "none"),
+        neighbours=neighbours,
+    )
+
+    localtime = [Mount(source=LOCALTIME, read_only=True)] if LOCALTIME.exists() else []
+    assert room.mounts == [
+        Mount(source=bare),
+        Mount(source=bare / "config", read_only=True),
+        Mount(source=bare / "hooks", read_only=True),
+        Mount(source=tmp_path / "cache" / "lup" / "pyright"),
+        *localtime,
+        Mount(source=(tmp_path / "work").resolve(), read_only=True),
+    ]
+
+
+@pytest.mark.parametrize(
+    "named",
+    [Path("proj.git"), Path("proj.git/tree/main"), Path("..")],
+    ids=["the project itself", "inside the project", "holding the project"],
+)
+def test_a_repository_overlapping_the_room_s_own_mounts_is_refused(
+    bare: Path, tmp_path: Path, home: Path, named: Path
+) -> None:
+    worktree = bare / "tree" / "main"
+    layout = Layout(state=tmp_path / "state", cache=tmp_path / "cache" / "lup")
+
+    with pytest.raises(
+        RoomError,
+        match=(
+            r"The repository `r0` named for sessions to read, at .*, overlaps"
+            r" the room's own mount of "
+        ),
+    ) as refused:
+        maintaining_room(
+            resolve(plain()),
+            worktree,
+            layout,
+            terminal(),
+            AskedUv(tmp_path / "none", tmp_path / "none", tmp_path / "none"),
+            neighbours=related(naming(named), worktree),
+        )
+    assert str((tmp_path / named).resolve()) in str(refused.value)

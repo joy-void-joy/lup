@@ -2,10 +2,10 @@
 
 Trust on launch records it (`lup_dev.launch.trust`; `docs/launch.md`, *Trust on
 launch*), and the judge reads the declaration at its commit (`lup_dev.policy`;
-`docs/judging-writes.md`, *The declaration, from the approved commit*), so what
-runs on the host is what the operator approved. It's here, below both, since the
-judge can't import the launch. Kept per repository in lup's state
-(`Layout.approved`).
+`docs/judging-writes.md`, *The declaration, from the approved commit*), with the
+person's own layer approved beside it, so what runs on the host is what the
+operator approved. It's here, below both, since the judge can't import the
+launch. Kept per repository in lup's state (`Layout.approved`).
 """
 
 from datetime import datetime
@@ -156,6 +156,10 @@ class Approval(Model):
     since, and any path the zone holds beside them whole."""
     tool: Tool
     time: datetime
+    local: str | None = None
+    """The person's own layer approved with it, `lup_project.local.py`, whole,
+    since git holds none of it: the judge and a launch read this copy, put
+    beside the commit's declaration; none where none was there."""
 
 
 def approved(layout: Layout, repository: Path) -> Approval | None:

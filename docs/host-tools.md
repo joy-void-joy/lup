@@ -46,8 +46,8 @@ Answered by the operator on 2026-10-14; where they left a decision to the builde
 | `ask` | `question`, `decisions` (each with the agent's lean), `wait` | Asks the operator. With `wait`, the call holds until they answer and returns the answer; without, it returns at once and the answer reaches the agent at a later call | a question |
 | `send` | `to`, `kind` (`note`, `problem`, `disagreement`, `question`), `text` | Sends a message to a party's inbox: the operator in this piece, other agents once spawn gives them one; never holds | a message of that kind |
 | `wait_inbox` | none | Holds until something reaches the agent's inbox, and returns all of it | none |
-| `read_issue` | `number` | An issue or pull request of this repository, with its comments, and a pull request's checks | none |
-| `find_issues` | `query`, `state` | Searches this repository's issues and pull requests | none |
+| `read_issue` | `number`, `repository` | An issue or pull request of this repository, or of another the operator's login can read (`owner/name`), with its comments, and a pull request's checks | none |
+| `find_issues` | `query`, `state`, `repository` | Searches the issues and pull requests of this repository, or of another the operator's login can read (`owner/name`) | none |
 | `file_issue` | `title`, `body` | Opens an issue | none |
 | `comment` | `number`, `body` | Comments on an issue or pull request | none |
 | `draft_pull_request` | `branch`, `title`, `body` | Opens a draft pull request from a pushed branch into the integration branch | none |
@@ -56,7 +56,7 @@ Answered by the operator on 2026-10-14; where they left a decision to the builde
 - **`ask` takes numbered decisions,** each with the agent's lean, which the operator answers "leaning", "undecided" or "leave open" with a comment (`DESIGN.md`, *The dashboard*), or a plain question answered in words. A question's answer is told to the conversation that asked, once.
 - **`wait_inbox` takes no time limit (leaning):** the runtime's limit on a call bounds it (*Holding a call*), and no loop re-enters a wait to keep the cache warm (`docs/graveyard.md`). It isn't called `wait`: on a Codex model in code mode, Codex has a `wait` tool of its own, which polls a running cell (`docs/library.md`, *No tools but lup's own*), and two tools of one name invite the model to call the wrong one.
 - **`send` is the inbox's general verb** (the operator's decision): every agent has an inbox and can write to another's. `report` and `note` keep their own meanings beside it, as the library's speaking tools: `report` stops the work, `note` attaches a doubt to it. A `question` sent is a message that asks for no answer the agent waits on; a decision of the operator's to wait on is `ask`'s. In this piece `to` is `operator`; spawn adds the agents a session can address.
-- **The GitHub tools** act on this repository alone (*GitHub through `gh`*). There's no merge tool, and none closes or edits an issue **(leaning)**: closing one is the operator's judgement, which a comment can ask for. `draft_pull_request` targets the integration branch, `LUP_INTEGRATION_BRANCH` (`settings.py`, `dev` by default), as trust on launch reads it.
+- **The GitHub tools** write to this repository alone (*GitHub through `gh`*); the two that read reach any the operator's login can read, named by `repository` (`docs/related-repositories.md`). There's no merge tool, and none closes or edits an issue **(leaning)**: closing one is the operator's judgement, which a comment can ask for. `draft_pull_request` targets the integration branch, `LUP_INTEGRATION_BRANCH` (`settings.py`, `dev` by default), as trust on launch reads it.
 - **Not here:** `propose` (piece 3) and `spawn` (later).
 
 ### Found through tool search, listed in the guidance

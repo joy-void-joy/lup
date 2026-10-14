@@ -721,6 +721,171 @@ def test_no_keeps_the_copy_approved_before(lup: Path, kit: Kit, shell: Shell) ->
     assert approved(lup, kit, shell) == first.approval
 
 
+LAYER = '''"""The person's own layer: a made-up neighbour."""
+
+from pathlib import Path
+
+from lup_dev import Module, Modules, Project, Repositories, Repository
+
+
+class Mine(Module):
+    """The repositories beside the project, as this person has them."""
+
+    name = "mine"
+
+    repositories: Repositories = Repositories.of(
+        Repository(name="atlas", path=Path("atlas.git"), about="a made-up neighbour")
+    )
+
+
+project = Project(modules=Modules().add(Mine()))
+'''
+"""The person's own layer, naming a made-up repository."""
+
+
+def layered(root: Path, text: str | None) -> None:
+    """Write the person's own layer at `root`, or remove it where `text` is none; git ignores it, as a project's `.gitignore` says."""
+    layer = root / "lup_project.local.py"
+    exclude = root / ".git" / "info" / "exclude"
+    exclude.parent.mkdir(parents=True, exist_ok=True)
+    exclude.write_text("/lup_project.local.py\n")
+    if text is None:
+        layer.unlink()
+    else:
+        layer.write_text(text)
+
+
+def test_the_person_s_layer_is_approved_by_its_content_shown_first_whole(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    layered(lup, LAYER)
+    trust = trusting(lup, kit, yes())
+    outcome = trust.ensure()
+    assert isinstance(outcome, Trusted)
+    assert outcome.approval.local == LAYER
+    summary = summarised(trust)
+    heading = summary.index(
+        "Your own layer, which git doesn't hold, changed since approved:"
+    )
+    assert summary[heading + 1 :][:4] == [
+        "diff --git worktree/lup_project.local.py worktree/lup_project.local.py",
+        "new file mode 100644",
+        f"index 0000000..{shell.git(lup, 'hash-object', 'lup_project.local.py')[:7]}",
+        "--- /dev/null",
+    ]
+    assert '+        Repository(name="atlas", path=Path("atlas.git"), ' in "\n".join(
+        summary
+    )
+    assert approved(lup, kit, shell) == outcome.approval
+
+
+def test_an_unchanged_layer_asks_nothing(lup: Path, kit: Kit, shell: Shell) -> None:
+    layered(lup, LAYER)
+    first = trusting(lup, kit, yes()).ensure()
+    assert isinstance(first, Trusted)
+    trust = trusting(lup, kit, unasked())
+    assert trust.ensure() == Unchanged(
+        commit=first.approval.commit, approval=first.approval
+    )
+    assert answering(trust).said == []
+
+
+def test_a_changed_layer_shows_its_diff_in_the_summary_and_asks(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    layered(lup, LAYER)
+    first = trusting(lup, kit, yes()).ensure()
+    assert isinstance(first, Trusted)
+    edited = LAYER.replace('"atlas.git"', '"elsewhere/atlas.git"')
+    layered(lup, edited)
+    trust = trusting(lup, kit, yes(whole=True))
+    outcome = trust.ensure()
+    assert isinstance(outcome, Trusted)
+    summary = summarised(trust)
+    assert summary[2:6] == [
+        f"Approved before: {first.approval.commit}.",
+        f"The tip: {first.approval.commit}.",
+        "",
+        "No file of the zone changed.",
+    ]
+    assert summary[6:10] == [
+        "Your own layer, which git doesn't hold, changed since approved:",
+        "diff --git approved/lup_project.local.py worktree/lup_project.local.py",
+        summary[8],
+        "--- approved/lup_project.local.py",
+    ]
+    said = "\n".join(summary)
+    assert '-        Repository(name="atlas", path=Path("atlas.git"), ' in said
+    assert (
+        '+        Repository(name="atlas", path=Path("elsewhere/atlas.git"), ' in said
+    )
+    [shown] = answering(trust).shown
+    assert 'path=Path("elsewhere/atlas.git")' in shown
+    assert outcome.approval.local == edited
+    assert approved(lup, kit, shell) == outcome.approval
+    assert recording(trust).installed == []
+    assert service(trust).calls == []
+    assert outcome.report() == (
+        "Approved: your own layer, which judges this repository's sessions from "
+        f"their next hook, beside `lup-dev` from {first.approval.commit} as before."
+    )
+
+
+def test_a_layer_declined_keeps_the_copy_approved_before(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    layered(lup, LAYER)
+    first = trusting(lup, kit, yes()).ensure()
+    assert isinstance(first, Trusted)
+    layered(lup, LAYER + "\nprint('edited in a room')\n")
+    outcome = trusting(lup, kit, no()).ensure()
+    assert outcome == Kept(commit=first.approval.commit, approval=first.approval)
+    assert approved(lup, kit, shell) == first.approval
+    assert first.approval.local == LAYER
+
+
+def test_a_layer_removed_is_shown_and_asked(lup: Path, kit: Kit, shell: Shell) -> None:
+    layered(lup, LAYER)
+    first = trusting(lup, kit, yes()).ensure()
+    assert isinstance(first, Trusted)
+    layered(lup, None)
+    trust = trusting(lup, kit, yes())
+    outcome = trust.ensure()
+    assert isinstance(outcome, Trusted)
+    said = "\n".join(summarised(trust))
+    assert "deleted file mode 100644" in said
+    assert "+++ /dev/null" in said
+    assert outcome.approval.local is None
+
+
+def test_the_layer_is_the_main_worktree_s_whichever_worktree_trust_runs_from(
+    lup: Path, kit: Kit, shell: Shell, tmp_path: Path
+) -> None:
+    layered(lup, LAYER)
+    first = trusting(lup, kit, yes()).ensure()
+    assert isinstance(first, Trusted)
+    linked = tmp_path / "linked"
+    shell.git(lup, "worktree", "add", "-q", "-b", "elsewhere", str(linked))
+    trust = trusting(linked, kit, unasked())
+    assert trust.check().zone.local == LAYER
+    assert trust.ensure() == Unchanged(
+        commit=first.approval.commit, approval=first.approval
+    )
+
+
+def test_what_the_layer_imports_of_the_commit_joins_the_zone(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    changed(lup, {"neighbours.py": '"""Made-up neighbours."""\n'}, shell)
+    trust = trusting(lup, kit, unasked())
+    assert Path("neighbours.py") not in trust.check().zone.paths
+    layered(lup, f"import neighbours\n{LAYER}")
+    zone = trust.check().zone
+    assert Path("neighbours.py") in zone.paths
+    assert Path("lup_project.local.py") not in zone.paths
+    assert zone.local == f"import neighbours\n{LAYER}"
+
+
 def test_nothing_approved_and_no_refuses_and_records_nothing(
     lup: Path, kit: Kit, shell: Shell
 ) -> None:

@@ -291,6 +291,16 @@ class CheckoutLayout(Model):
         return self.root / "docs" / "rules.md"
 
     @property
+    def local_declaration(self) -> Path:
+        """The person's own layer of the declaration, which git ignores.
+
+        Loaded after the project's declaration and layered on top of it, in the
+        same grammar (`docs/related-repositories.md`, decision 7); trust on
+        launch approves it by its content.
+        """
+        return self.root / f"{self.declaration.stem}.local.py"
+
+    @property
     def local_guidance(self) -> Path:
         """The person's own section of a session's guidance, which git ignores.
 
@@ -636,9 +646,16 @@ class Layout(Model):
         """
         return self.repository(repository) / "last-declaration.json"
 
-    def exported(self, repository: Path, commit: str) -> Path:
-        """Say where a commit's modules are exported, to import its declaration."""
-        return self.repository(repository) / "declarations" / commit
+    def exported(self, repository: Path, commit: str, local: str | None = None) -> Path:
+        """Say where a commit's modules are exported, to import its declaration.
+
+        With `local`, the person's own layer approved with it, which the export
+        holds beside the declaration: one export for each copy of it.
+        """
+        exports = self.repository(repository) / "declarations"
+        if local is None:
+            return exports / commit
+        return exports / f"{commit}-{hashlib.sha256(local.encode()).hexdigest()}"
 
     def session(self, session: str) -> Path:
         """Say where a session's repository and the worktrees it holds are kept."""

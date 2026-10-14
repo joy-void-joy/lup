@@ -32,6 +32,8 @@ The fixed file is chosen over a module named in `pyproject.toml` on three counts
 
 The declaration is protected (`DESIGN.md`, *Policy*): every change to it reaches the operator. The judge reads it at the commit the operator approved (`docs/judging-writes.md`, *The declaration, from the approved commit*), the gate from the worktree.
 
+**A person's own layer, `lup_project.local.py`** (`docs/related-repositories.md`, decisions 7 and 8): one per repository, in its main worktree (beside the declaration at a clone's root, or in a bare repository's own directory), gitignored and protected as `AGENTS.local.md` is (`catalog/paths.py`), it binds `project` too, a `Project` written as a layer on the project's, in the same grammar: what it sets changes the project's as a module layers (`applied`), so `Project(modules=Modules().add(Mine()))` adds a module of the person's to the project's, and `Modules().edit(Ours(…))` edits one of the project's, imported from `lup_project`. The loader runs it after the declaration, in the same import, from its path, since its name holds a dot (`declaration/load.py`, `load`; `Declared.local` names it). Which other repositories a person relates are theirs, so their `Repositories` go in a module of this layer, never in a committed declaration; any part a person changes for themselves goes there too. It's Python the host runs, and a room writes the worktree, so trust on launch approves it by its content (`docs/launch.md`, *Trust on launch*): the judge and a launch read the copy kept with the approval, put beside the commit's export, never the worktree's; a commit holding one anyway has it left out of every export (`read_by_import`). The gate reads the worktree's own, as it reads the worktree's declaration.
+
 ### The declaration
 
 ```python
@@ -159,6 +161,7 @@ The core itself is what every module talks through (`DESIGN.md`, *The environmen
 | Skills | any module | `skills` | the module's own | the launch piece, once a module ships one |
 | The room's packages beyond the standard machine | any module | `packages` | none | the launch piece |
 | Rooms | any module | `rooms` | none | the rooms slice |
+| Other repositories for sessions to read, each mounted read-only in a room | any module, a person's own layer's above all (*Where it lives*) | `repositories` | none: `Core` holds none | the related repositories piece (`docs/related-repositories.md`) |
 | Requirements, each with the package providing it in the room | each module | `requirements` (a class attribute) | the module's own | A; `package` in the launch piece |
 | The modules it depends on | each module | `requires` (a class attribute) | none | with the first module requiring another |
 
@@ -240,7 +243,7 @@ Every kind lup has defaults for (modules, rules, path roles, gate steps, command
 - **References to the project's own code are strings in entry-point form,** as `[project.scripts]` writes them (`"audiobook.cli:app"`). Loading the declaration then imports none of the project's code, which every `lup` call and every hook does; the gate imports each reference and fails on one that doesn't resolve. Objects (`commands=[studio_cli]`) would import the project's command line, and whatever it imports, at every call.
 - **`Project` and every module forbid fields they don't know** (`extra="forbid"`), so a misspelled field fails the load, naming it. `lup.types.Model` keeps pydantic's default and ignores them, so without it a misspelled field is dropped without a word.
 
-`Selection` is generic over the entry; each kind is a subclass binding its entry type: `Modules`, `Rules` (ids), `Patterns` (one role's patterns, which `Paths` holds one of per role), `Gate` (`Step`s), `Packages` (`Package`s), `Guidance` (`Section`s), `RemovedTools` (names), `Actions` (names of what the host does with the operator's credentials), `Refs` (patterns over full ref names), `Commands` (`Command`s), `Rooms` (addresses), later `Skills`, `Runtimes`.
+`Selection` is generic over the entry; each kind is a subclass binding its entry type: `Modules`, `Rules` (ids), `Patterns` (one role's patterns, which `Paths` holds one of per role), `Gate` (`Step`s), `Packages` (`Package`s), `Guidance` (`Section`s), `RemovedTools` (names), `Actions` (names of what the host does with the operator's credentials), `Refs` (patterns over full ref names), `Repositories` (`Repository`s: other repositories for a project's sessions to read, each with its name, path, `about` and GitHub identity, `docs/related-repositories.md`), `Commands` (`Command`s), `Rooms` (addresses), later `Skills`, `Runtimes`.
 
 ## lup declares itself the same way
 
@@ -584,7 +587,7 @@ In `packages/lup-dev/src/lup_dev/`. The declaration is a subsystem of its own (`
 | **`declaration/`** | **What a project declares, and reading it** | |
 | `declaration/grammar.py` | `Selection`: a kind's starting point (the value below, or one it starts over from) and its recorded operations, resolved at load; `Layer`, a model of settings a layer changes field by field, and `applied`, the one rule a module and a `Layer` layer by | A; `Layer` in the launch piece |
 | `declaration/module.py` | `Module`, its parts, its `requires`, and `.edit`; `Modules`, the selection of modules | A |
-| `declaration/kinds.py` | Each kind as a `Selection`, or a `Layer` holding several: `Rules`, `Paths`, `Gate`, `Exemptions`, `TestRoots`; `Packages`, `Session` and its `RemovedTools`, `Guidance`; `Credentials` and its `Actions` and `Refs`; later `Commands`, `Rooms`, `Skills`, `Runtimes` | A; the launch piece; the host tools piece |
+| `declaration/kinds.py` | Each kind as a `Selection`, or a `Layer` holding several: `Rules`, `Paths`, `Gate`, `Exemptions`, `TestRoots`; `Packages`, `Session` and its `RemovedTools`, `Guidance`; `Credentials` and its `Actions` and `Refs`; `Repository` and `Repositories`; later `Commands`, `Rooms`, `Skills`, `Runtimes` | A; the launch piece; the host tools piece |
 | `declaration/project.py` | `Project`, holding `modules`, and `asks` until the judge's asks become proposals | A |
 | `declaration/runner.py` | `Runner`, `Uv`, `Plain`; `Prefixed`, a runner kept as its commands, as the judge keeps one | A |
 | `declaration/requirements.py` | `Requirement`, and checking a declaration's requirements all at once | A |
