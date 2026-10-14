@@ -24,7 +24,12 @@ Where it changed, or nothing was approved, the operator reads a summary first
 approved before and the tip, and git's own count of each file changed since
 (`git diff --stat --compact-summary`), coloured, as git prints it. Then they're
 asked whether to show the whole diff, no by default, a yes showing it through the
-terminal's pager; then whether to approve, no by default (`Asker`):
+terminal's pager; then whether to approve, no by default (`Asker`). The question
+is an item in the operator's inbox from the start (`Approvals`, the host service
+started where none runs), which the launching terminal answers as `lup-dev inbox
+answer` at any other does, whichever comes first; the terminal stops asking where
+another answered first (`Approving`, `Elsewhere`). Launches asking about the same
+zone at once wait on one approval. The answer:
 - yes: the tip's copy is installed as the repository's own (`Toolchain`, into
   `Layout.judge`; for the workspace's source, the engine built first through the
   declaration's own step and runner, as the gate builds it), which the host
@@ -41,9 +46,13 @@ installed there, is installed from the commit approved, asking nothing.
 
 import ast
 import hashlib
+import os
+import select
 import tempfile
+import termios
 import tomllib
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from importlib.machinery import SOURCE_SUFFIXES, FileFinder, SourceFileLoader
 from importlib.util import resolve_name
 from pathlib import Path
@@ -56,7 +65,7 @@ from pydantic import Field, ValidationError
 from rich.console import Console
 from rich.text import Text
 
-from lup.types import Model
+from lup.types import Model, MutableModel
 from lup_dev.approval import Approval, ReleaseTool, Tool, WorkspaceTool, approved
 from lup_dev.clock import Clock, SystemClock
 from lup_dev.declaration.load import Pyproject, import_roots, load, read_by_import
@@ -64,13 +73,23 @@ from lup_dev.declaration.resolve import resolve
 from lup_dev.errors import LupDevError
 from lup_dev.gate import invoked
 from lup_dev.git import Git
-from lup_dev.host.client import Detached, HostClient
+from lup_dev.host.client import Detached, HostClient, Outstanding
+from lup_dev.host.protocol import HostError
+from lup_dev.inbox.protocol import (
+    AnswerApproval,
+    AskApproval,
+    AwaitApproval,
+    Settled,
+    Shown,
+)
+from lup_dev.inbox.store import Decided, Item
 from lup_dev.layout import CheckoutLayout, JudgeLayout, Layout
 from lup_dev.settings import LupDevSettings
 from lup_dev.stored import write_model
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Generator, Iterator
+    from contextlib import AbstractContextManager
 
     from lup_dev.catalog.gate import Step
     from lup_dev.declaration.resolve import Resolved
@@ -485,8 +504,43 @@ type Outcome = Unchanged | Trusted | Kept
 """What `Trust.ensure` came to: approved before, approved at this check, or declined."""
 
 
+class Elsewhere(ABC):
+    """An approval waiting in the inbox, which another terminal may answer: readable once something may have come of it."""
+
+    @abstractmethod
+    def fileno(self) -> int:
+        """Return what turns readable once the approval may have been answered elsewhere, which `select` watches."""
+
+    @abstractmethod
+    def given(self) -> bool | None:
+        """Return the answer given elsewhere, yes or no, without waiting; none while it waits."""
+
+
+class Given(Model):
+    """The operator's answer to an approval, and whether this terminal gave it."""
+
+    approved: bool
+    here: bool
+
+
+class Approvals(ABC):
+    """Where an approval waits for the operator: lup's inbox, which any terminal answers."""
+
+    @abstractmethod
+    def asked(self, asking: AskApproval) -> int:
+        """Put the approval in the inbox, or join the one waiting there about the same zone; return its number."""
+
+    @abstractmethod
+    def waited(self, number: int) -> AbstractContextManager[Elsewhere]:
+        """Wait on approval `number` while the context is open, for an answer given elsewhere."""
+
+    @abstractmethod
+    def answer(self, number: int, *, approved: bool) -> Given:
+        """Answer approval `number` here; return the answer that holds, which another terminal may have given first."""
+
+
 class Asker(ABC):
-    """Where the operator reads the change and answers: the terminal."""
+    """Where the operator reads the change and answers: a terminal."""
 
     @abstractmethod
     def say(self, text: str) -> None:
@@ -497,12 +551,40 @@ class Asker(ABC):
         """Show `text` to the operator, through the terminal's pager."""
 
     @abstractmethod
-    def ask(self, question: str) -> bool:
-        """Ask `question` once, no by default, and say whether the operator answered yes."""
+    def ask(self, question: str, elsewhere: Elsewhere) -> bool | None:
+        """Ask `question`, no by default, until it's answered here or `elsewhere`: whether the operator answered yes here; none where it was answered elsewhere first."""
 
 
-class Terminal(Asker):
-    """The terminal: the summary printed, the diff through its pager, each question no by default."""
+def line(descriptor: int) -> str:
+    """Read one line from `descriptor` a byte at a time, so nothing past it leaves the stream `select` watches; empty at its end."""
+
+    def read() -> Iterator[bytes]:
+        while (byte := os.read(descriptor, 1)) not in [b"", b"\n"]:
+            yield byte
+
+    return b"".join(read()).decode(errors="replace")
+
+
+def yes(said: str) -> bool | None:
+    """Read a yes or a no as `typer.confirm` does, no where nothing is said; none where it's neither.
+
+    >>> yes("Y"), yes(""), yes("maybe")
+    (True, False, None)
+    """
+    match said.strip().lower():
+        case "y" | "yes":
+            return True
+        case "n" | "no" | "":
+            return False
+        case _:
+            return None
+
+
+class Terminal(Model, Asker):
+    """The terminal: the summary printed, the diff through its pager, each question no by default, until it's answered elsewhere."""
+
+    stdin: int = 0
+    """The descriptor the operator's answers are read from."""
 
     @override
     def say(self, text: str) -> None:
@@ -515,8 +597,148 @@ class Terminal(Asker):
             console.print(Text.from_ansi(text), soft_wrap=True)
 
     @override
-    def ask(self, question: str) -> bool:
-        return typer.confirm(question, default=False)
+    def ask(self, question: str, elsewhere: Elsewhere) -> bool | None:
+        """Ask until the operator answers y or n, Enter answering no, while watching for an answer given elsewhere.
+
+        Where one comes first, the question stops, and what was typed of an
+        answer is dropped, so it reaches nothing after.
+        """
+        typer.echo(f"{question} [y/N]: ", nl=False)
+        while True:
+            readable, _, _ = select.select([self.stdin, elsewhere], [], [])
+            if elsewhere in readable and elsewhere.given() is not None:
+                typer.echo()
+                if os.isatty(self.stdin):
+                    termios.tcflush(self.stdin, termios.TCIFLUSH)
+                return None
+            if self.stdin in readable:
+                answer = yes(line(self.stdin))
+                if answer is not None:
+                    return answer
+                typer.echo(f"Answer y or n. {question} [y/N]: ", nl=False)
+
+
+class Approving(Model, arbitrary_types_allowed=True):
+    """An approval as a terminal asks it: the summary, the whole diff only when asked for, then the question; until it's answered here or elsewhere."""
+
+    asker: Asker
+    approvals: Approvals
+    number: int
+    """The approval's item in the inbox."""
+    summary: str
+    question: str
+    diff: str
+    """The whole diff, coloured; empty where no file changed, when it isn't offered."""
+
+    def given(self) -> Given:
+        """Ask, and return the answer that holds: this terminal's, or one given elsewhere first, which is said."""
+        with self.approvals.waited(self.number) as elsewhere:
+            self.asker.say(self.summary)
+            whole = self.asker.ask(WHOLE, elsewhere) if self.diff else False
+            if whole:
+                self.asker.show(self.diff)
+            approve = (
+                None
+                if whole is None or elsewhere.given() is not None
+                else self.asker.ask(self.question, elsewhere)
+            )
+            given = (
+                self.elsewhere(elsewhere)
+                if approve is None
+                else self.approvals.answer(self.number, approved=approve)
+            )
+        if not given.here:
+            said = "approved" if given.approved else "declined"
+            self.asker.say(f"Item {self.number} was {said} elsewhere.")
+        return given
+
+    def elsewhere(self, elsewhere: Elsewhere) -> Given:
+        """Return the answer given elsewhere, once the terminal stopped asking for it."""
+        approved = elsewhere.given()
+        if approved is None:
+            message = (
+                f"the terminal stopped asking about item {self.number} with no "
+                "answer given here or elsewhere"
+            )
+            raise TrustError(message)
+        return Given(approved=approved, here=False)
+
+
+def decision(item: Item) -> bool:
+    """Return an approval's answer, yes or no; refuse where it has none."""
+    match item.state:
+        case Decided(approved=approved):
+            return approved
+        case _:
+            message = f"item {item.number} has no answer, yes or no"
+            raise TrustError(message)
+
+
+class Awaited(MutableModel, Elsewhere, arbitrary_types_allowed=True):
+    """An approval waited on through the host service; waited on again from the service that runs next where one stops."""
+
+    host: HostClient
+    number: int
+    outstanding: Outstanding
+    answer: bool | None = None
+    """The answer given elsewhere, once it came."""
+
+    @override
+    def fileno(self) -> int:
+        return self.outstanding.fileno()
+
+    @override
+    def given(self) -> bool | None:
+        """Read the answer where the service sent it; where the service closed the wait without one, as it does stopping, wait again on the one that runs next."""
+        if self.answer is not None or not self.outstanding.ready():
+            return self.answer
+        replied = self.outstanding.reply(Shown)
+        self.outstanding.close()
+        if replied is None:
+            self.outstanding = self.host.rejoined(AwaitApproval(number=self.number))
+            return None
+        self.answer = decision(replied.item)
+        return self.answer
+
+
+class InboxApprovals(Model, Approvals, arbitrary_types_allowed=True):
+    """lup's inbox, through the host service, which is started where none runs: an approval any terminal answers."""
+
+    host: HostClient
+
+    @override
+    def asked(self, asking: AskApproval) -> int:
+        """Put the approval in the inbox, the service started where none runs; a refusal is said with what may cause it."""
+        self.host.ensure()
+        try:
+            return self.host.ask(asking, Shown).item.number
+        except HostError as refused:
+            message = (
+                f"the host service didn't take the approval into your inbox: "
+                f"{refused}. A service running a `lup-dev` older than this one "
+                "doesn't know approvals: `lup-dev host stop`, then ask again"
+            )
+            raise TrustError(message) from refused
+
+    @override
+    @contextmanager
+    def waited(self, number: int) -> Generator[Elsewhere]:
+        awaited = Awaited(
+            host=self.host,
+            number=number,
+            outstanding=self.host.held(AwaitApproval(number=number)),
+        )
+        try:
+            yield awaited
+        finally:
+            awaited.outstanding.close()
+
+    @override
+    def answer(self, number: int, *, approved: bool) -> Given:
+        settled = self.host.ask(
+            AnswerApproval(number=number, approved=approved), Settled
+        )
+        return Given(approved=decision(settled.item), here=settled.here)
 
 
 class Toolchain(ABC):
@@ -1017,6 +1239,10 @@ class Trust(Model, arbitrary_types_allowed=True):
     integration: str
     """The branch whose tip holds the zone; without one, the worktree's `HEAD`."""
     asker: Asker
+    """The launching terminal, where the operator reads the summary and answers."""
+    approvals: Approvals
+    """The inbox, where the approval waits, answered at the launching terminal or
+    any other."""
     toolchain: Toolchain
     host: HostClient
     clock: Clock
@@ -1169,22 +1395,31 @@ class Trust(Model, arbitrary_types_allowed=True):
         )
 
     def ensure(self) -> Outcome:
-        """Check the tip's host zone; where it isn't the one approved, show and ask.
+        """Check the tip's host zone; where it isn't the one approved, ask, in the inbox and at this terminal.
 
-        Approved, the tip's copy is installed as the repository's own, and on lup's
-        own repository as the user's `lup-dev` too, with the host service, which
-        runs from that, restarted on it where one runs; and the approval recorded.
-        Declined, the copy approved before stays; with none approved, `TrustError`,
-        since nothing approved may run. Inside an agent's session nothing is
-        asked: `TrustError`. Launches at once ask one at a time, so the second
-        reads the first's answer. Where the repository's copy approved is missing,
-        it's installed again, asking nothing: it was approved.
+        The approval is put in the operator's inbox, the host service started
+        where none runs, and the terminal shows the summary and asks; whichever
+        answers first, this terminal or `lup-dev inbox answer` at another, holds,
+        and this terminal stops asking where another answered (`Approving`).
+        Approved, the tip's copy is installed as the repository's own, and on
+        lup's own repository as the user's `lup-dev` too, with the host service,
+        which runs from that, restarted on it where one runs; and the approval
+        recorded. Declined, the copy approved before stays; with none approved,
+        `TrustError`, since nothing approved may run. Inside an agent's session
+        nothing is asked: `TrustError`. Where the repository's copy approved is
+        missing, it's installed again, asking nothing: it was approved.
+
+        Launches at once asking about the same zone wait on one approval, each
+        terminal asking it: the approval's lock is held to read the zone and ask,
+        and again to act on the answer, but not while it's awaited. The first to
+        take it then acts on the answer; the others read what it recorded.
         """
         repository = self.repository()
         kept = self.layout.approved(repository)
         copy = self.layout.judge(repository)
         kept.parent.mkdir(parents=True, exist_ok=True)
-        with FileLock(kept.with_name(f"{kept.name}.lock")):
+        lock = FileLock(kept.with_name(f"{kept.name}.lock"))
+        with lock:
             standing = self.standing(repository)
             zone = standing.zone
             approval = standing.approval
@@ -1200,32 +1435,69 @@ class Trust(Model, arbitrary_types_allowed=True):
                 )
                 raise TrustError(message)
             change = self.change(standing)
-            self.asker.say(change.summary())
-            whole = change.diff()
-            if whole and self.asker.ask(WHOLE):
-                self.asker.show(whole)
-            if not self.asker.ask(change.question()):
-                if approval is None:
-                    message = (
-                        f"you declined the host zone at {zone.commit}, and none was "
-                        "approved before, so there's no `lup-dev` the host may run: "
-                        "nothing launches"
-                    )
-                    raise TrustError(message)
-                again = self.reinstall(approval, approval.commit, copy)
-                return Kept(commit=zone.commit, approval=approval, again=again)
-            own = zone.tool.lups_own()
-            self.toolchain.install(zone.tool, self.root, zone.commit, copy, users=own)
-            restarted = own and self.restart()
-            recorded = Approval(
-                commit=zone.commit,
-                fingerprint=standing.fingerprint,
-                paths=zone.paths,
-                tool=zone.tool,
-                time=self.clock.now(),
+            summary = change.summary()
+            question = change.question()
+            diff = change.diff()
+            number = self.approvals.asked(
+                AskApproval(
+                    question=question,
+                    summary=summary,
+                    diff=diff,
+                    repository=repository,
+                    fingerprint=standing.fingerprint,
+                    worktree=self.root,
+                )
             )
-            write_model(kept, recorded)
-            return Trusted(approval=recorded, restarted=restarted)
+        inboxed = (
+            f"It's item {number} in your inbox too: `lup-dev inbox answer {number}` "
+            "answers it from any terminal."
+        )
+        given = Approving(
+            asker=self.asker,
+            approvals=self.approvals,
+            number=number,
+            summary=f"{summary}\n\n{inboxed}",
+            question=question,
+            diff=diff,
+        ).given()
+        with lock:
+            return self.answered(repository, standing, given)
+
+    def answered(self, repository: Path, standing: Standing, given: Given) -> Outcome:
+        """Act on the operator's answer about the zone `standing` read: install and record it, or keep the copy approved before.
+
+        Where another launch waiting on the same approval acted on it first, its
+        approval is read, and nothing is installed twice.
+        """
+        kept = self.layout.approved(repository)
+        copy = self.layout.judge(repository)
+        zone = standing.zone
+        now = approved(self.layout, repository)
+        if now is not None and now.fingerprint == standing.fingerprint:
+            again = self.reinstall(now, zone.commit, copy)
+            return Unchanged(commit=zone.commit, approval=now, again=again)
+        if not given.approved:
+            if now is None:
+                message = (
+                    f"you declined the host zone at {zone.commit}, and none was "
+                    "approved before, so there's no `lup-dev` the host may run: "
+                    "nothing launches"
+                )
+                raise TrustError(message)
+            again = self.reinstall(now, now.commit, copy)
+            return Kept(commit=zone.commit, approval=now, again=again)
+        own = zone.tool.lups_own()
+        self.toolchain.install(zone.tool, self.root, zone.commit, copy, users=own)
+        restarted = own and self.restart()
+        recorded = Approval(
+            commit=zone.commit,
+            fingerprint=standing.fingerprint,
+            paths=zone.paths,
+            tool=zone.tool,
+            time=self.clock.now(),
+        )
+        write_model(kept, recorded)
+        return Trusted(approval=recorded, restarted=restarted)
 
     def reinstall(self, approval: Approval, commit: str, copy: JudgeLayout) -> bool:
         """Install the repository's copy approved, from `commit`, where it's missing; say whether it was.
@@ -1262,20 +1534,23 @@ class Trust(Model, arbitrary_types_allowed=True):
 def trusted(root: Path, inside: list[str]) -> Outcome:
     """Check what the host runs for the repository at `root`: a launch's first step.
 
-    As `Trust.ensure` does, with this machine's settings, the terminal, uv and the
-    host service's client; `inside` names the runtimes whose session this runs
-    inside. Raise `TrustError` where nothing approved may run.
+    As `Trust.ensure` does, with this machine's settings, the terminal, the inbox
+    in the host service, uv and the service's client; `inside` names the runtimes
+    whose session this runs inside. Raise `TrustError` where nothing approved may
+    run.
     """
     settings = LupDevSettings()
     layout = Layout.of(settings)
     clock = SystemClock()
+    host = HostClient(layout=layout.host, clock=clock, starter=Detached())
     trust = Trust(
         root=root,
         layout=layout,
         integration=settings.lup_integration_branch,
         asker=Terminal(),
+        approvals=InboxApprovals(host=host),
         toolchain=UvToolchain(),
-        host=HostClient(layout=layout.host, clock=clock, starter=Detached()),
+        host=host,
         clock=clock,
         inside=inside,
     )

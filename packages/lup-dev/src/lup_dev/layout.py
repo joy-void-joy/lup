@@ -375,9 +375,18 @@ class InboxLayout(Model):
         """Each conversation that has spoken, a file named by its key."""
         return self.home / "parties"
 
+    @property
+    def diffs(self) -> Path:
+        """Each approval's whole diff, a file named by its item's number."""
+        return self.home / "diffs"
+
     def item(self, number: int) -> Path:
         """Say where item `number` is kept."""
         return self.items / f"{number}.json"
+
+    def diff(self, number: int) -> Path:
+        """Say where approval `number`'s whole diff is kept."""
+        return self.diffs / f"{number}.json"
 
     def party(self, key: str) -> Path:
         """Say where the conversation keyed `key` is kept."""

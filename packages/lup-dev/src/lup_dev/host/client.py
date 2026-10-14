@@ -9,8 +9,13 @@ control socket answers, so tests drive the time.
 A program in a room reaches the service through `RoomClient`, one typed request
 on `/run/lup/request.sock`, which the service answers with the launch it knows by
 the socket (`docs/host-tools.md`, *The room's requests*).
+
+A request whose reply comes only once something happens, such as an approval's
+answer, holds its connection open (`HostClient.held`, `Outstanding`), with no
+time limit: it's waited on for as long as the operator takes.
 """
 
+import select
 import socket
 import sys
 from abc import ABC, abstractmethod
@@ -42,6 +47,36 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
+def read_reply[R: Reply](answer: bytes, reply: type[R]) -> R:
+    """Read the service's answer as `reply`; a refusal raises `HostError` with the service's reason."""
+    replied = TypeAdapter[R | Refused](reply | Refused).validate_json(answer)
+    if isinstance(replied, Refused):
+        raise HostError(replied.error)
+    return replied
+
+
+def sent(path: Path, request: Request, timeout: timedelta | None) -> socket.socket:
+    """Connect to the host service's socket at `path` and send one request, its end marked; return the connection, its reply to read.
+
+    Each read waits `timeout` at most; none waits for as long as it takes.
+    Finding no service to ask on `path` raises `HostError`.
+    """
+    connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        connection.settimeout(None if timeout is None else timeout.total_seconds())
+        connection.connect(str(path))
+        connection.sendall(request.model_dump_json().encode())
+        connection.shutdown(socket.SHUT_WR)
+    except (FileNotFoundError, ConnectionRefusedError) as gone:
+        connection.close()
+        message = f"no host service answers on {path}"
+        raise HostError(message) from gone
+    except OSError:
+        connection.close()
+        raise
+    return connection
+
+
 def asked[R: Reply](
     path: Path, request: Request, reply: type[R], timeout: timedelta
 ) -> R:
@@ -50,24 +85,48 @@ def asked[R: Reply](
     A refusal raises `HostError` with the service's reason, as does finding no
     service to ask on `path`, or a connection closed without a reply.
     """
-    try:
-        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
-            connection.settimeout(timeout.total_seconds())
-            connection.connect(str(path))
-            connection.sendall(request.model_dump_json().encode())
-            connection.shutdown(socket.SHUT_WR)
-            with connection.makefile("rb") as stream:
-                answer = stream.read()
-    except (FileNotFoundError, ConnectionRefusedError) as gone:
-        message = f"no host service answers on {path}"
-        raise HostError(message) from gone
+    with (
+        sent(path, request, timeout) as connection,
+        connection.makefile("rb") as stream,
+    ):
+        answer = stream.read()
     if not answer:
         message = "the host service closed the connection without answering"
         raise HostError(message)
-    replied = TypeAdapter[R | Refused](reply | Refused).validate_json(answer)
-    if isinstance(replied, Refused):
-        raise HostError(replied.error)
-    return replied
+    return read_reply(answer, reply)
+
+
+class Outstanding(Model, arbitrary_types_allowed=True):
+    """A request whose reply comes later, once what it waits for happens: its connection held open.
+
+    The connection is readable once the reply is there, or once the service
+    closed it without one, as a service stopping does; so a terminal can wait on
+    it beside its own input (`select`).
+    """
+
+    connection: socket.socket
+
+    def fileno(self) -> int:
+        """Return the connection's descriptor, which `select` watches."""
+        return self.connection.fileno()
+
+    def ready(self) -> bool:
+        """Say whether the reply is there to read, or the connection closed without one, without waiting."""
+        readable, _, _ = select.select([self.connection], [], [], 0)
+        return bool(readable)
+
+    def reply[R: Reply](self, reply: type[R]) -> R | None:
+        """Read the reply as `reply`, waiting for it; none where the service closed the connection without one.
+
+        A refusal raises `HostError` with the service's reason.
+        """
+        with self.connection.makefile("rb") as stream:
+            answer = stream.read()
+        return read_reply(answer, reply) if answer else None
+
+    def close(self) -> None:
+        """Close the connection; a reply that comes later goes unread."""
+        self.connection.close()
 
 
 class RoomClient(Model):
@@ -171,6 +230,27 @@ class HostClient(Model, arbitrary_types_allowed=True):
         service to ask.
         """
         return asked(self.layout.control, request, reply, self.timeout)
+
+    def held(self, request: Request) -> Outstanding:
+        """Send one request whose reply comes once what it waits for happens, starting the service where none runs.
+
+        Its reply waits on the connection returned, for as long as it takes.
+        """
+        self.ensure()
+        return Outstanding(connection=sent(self.layout.control, request, None))
+
+    def rejoined(self, request: Request) -> Outstanding:
+        """Send a held request again, once the service that held it stopped: to the one that runs next.
+
+        It waits `patience` for one to answer first, as a service restarted by
+        another's hand does, an approval restarting it on the copy just
+        installed, so as not to start one of its own meanwhile; then it starts
+        one where none answers.
+        """
+        began = self.clock.now()
+        while not self.answers() and self.clock.now() - began < self.patience:
+            self.clock.sleep(self.poll.total_seconds())
+        return self.held(request)
 
     def register(self, launch: Register) -> Path:
         """Have the service serve a launch, starting it if none runs.

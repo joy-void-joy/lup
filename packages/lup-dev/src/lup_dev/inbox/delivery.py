@@ -38,6 +38,12 @@ those still waiting when it ends.
 
 The operator hears of each item that reaches them through the desktop's notices.
 
+**An approval** (trust on launch's) is the operator's alone, never told to a
+conversation: a launch puts it in their inbox and waits on it (`settled`), and
+every launch asking about the same zone while it waits joins it (`asked`). It's
+answered once, by whichever terminal answers first (`decided`), which wakes every
+launch waiting on it; an answer after that changes nothing.
+
 What the service knows of a conversation while it serves (whether it's idle,
 the calls it holds) is in memory: a service started again knows a conversation
 idle only once its turn ends again, so an idle session isn't woken until then.
@@ -56,7 +62,9 @@ from lup_dev.inbox.notices import Notices
 from lup_dev.inbox.store import (
     Answer,
     Answered,
+    Approval,
     Conversation,
+    Decided,
     Done,
     How,
     Inbox,
@@ -111,12 +119,14 @@ def what(item: Item) -> str:
             return "a question"
         case Answer():
             return "an answer"
+        case Approval():
+            return "an approval"
 
 
 def opening(item: Item) -> str:
     """Return an item's first line: its text's, or an answer's comment's."""
     match item.reason:
-        case Message(text=text) | Question(text=text):
+        case Message(text=text) | Question(text=text) | Approval(text=text):
             said = text
         case Answer(comment=comment):
             said = comment
@@ -191,6 +201,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
     say: Callable[[str], None]
     presences: dict[str, Presence] = {}
     """By conversation's key, in memory."""
+    settling: dict[int, asyncio.Event] = {}
+    """By approval's number, in memory: set once the approval is answered, which
+    wakes every launch waiting on it."""
 
     def presence(self, conversation: Conversation) -> Presence:
         """Return what the service knows of `conversation` while it serves."""
@@ -284,7 +297,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             else f" (it was for {who(item.addressed)}, whose conversation had ended)"
         )
         match item.reason:
-            case Message(text=text) | Question(text=text):
+            case Message(text=text) | Question(text=text) | Approval(text=text):
                 return f"{head}{passed}:\n{text}"
             case Answer() as answer:
                 return (
@@ -516,9 +529,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             case Item(reason=Message(), recipient=Operator(), state=Waiting()):
                 done = Done(at=self.clock.now())
                 return self.inbox.kept(item.model_copy(update={"state": done}))
-            case Item(reason=Question(), state=Waiting()):
+            case Item(reason=Question() | Approval(), state=Waiting()):
                 message = (
-                    f"item {number} is a question: answer it, `lup-dev inbox answer "
+                    f"item {number} is {what(item)}: answer it, `lup-dev inbox answer "
                     f"{number}`"
                 )
                 raise InboxError(message)
@@ -531,3 +544,58 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         return await self.posted(
             Message(kind="note", text=text), Operator(), self.main_of(launch), None
         )
+
+    async def asked(self, approval: Approval, diff: str, worktree: Path) -> Item:
+        """Put an approval in the operator's inbox, its whole diff kept beside it, and raise its notice.
+
+        Where one waits already about the same zone, a launch asking the same
+        question meanwhile, that one is returned instead, for this launch to
+        wait on too.
+        """
+        joined = self.inbox.asking(approval.repository, approval.fingerprint)
+        if joined is not None:
+            return joined
+        item = self.inbox.made(
+            approval, Operator(), Operator(), worktree, self.clock.now()
+        )
+        self.inbox.attached(item.number, diff)
+        await self.noticed(item)
+        return item
+
+    def approval(self, number: int) -> Item:
+        """Return item `number`, or say it isn't an approval."""
+        item = self.inbox.item(number)
+        if not isinstance(item.reason, Approval):
+            message = f"item {number} isn't an approval, but {what(item)}"
+            raise InboxError(message)
+        return item
+
+    async def settled(self, number: int) -> Item:
+        """Hold until approval `number` is answered, wherever it is, and return it; at once where it's answered already."""
+        self.approval(number)
+        while isinstance(self.inbox.item(number).state, Waiting):
+            if number not in self.settling:
+                self.settling = {**self.settling, number: asyncio.Event()}
+            await self.settling[number].wait()
+        return self.inbox.item(number)
+
+    def decided(self, number: int, *, approved: bool) -> Item:
+        """Answer approval `number`, yes or no, and wake every launch waiting on it.
+
+        One answered already keeps its answer, whichever came first, and is
+        returned as it stands.
+        """
+        item = self.approval(number)
+        if not isinstance(item.state, Waiting):
+            return item
+        decided = Decided(at=self.clock.now(), approved=approved)
+        answered = self.inbox.kept(item.model_copy(update={"state": decided}))
+        settling = self.settling.get(number)
+        self.settling = {
+            each: event for each, event in self.settling.items() if each != number
+        }
+        if settling is not None:
+            settling.set()
+        said = "approved" if approved else "declined"
+        self.say(f"item {number}, an approval, was {said}")
+        return answered
