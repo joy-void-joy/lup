@@ -880,6 +880,26 @@ def test_the_room_sockets_go_with_the_launch_and_are_served_again_after_a_restar
             room.ask(Echo(text="gone"), Echoed)
 
 
+def test_a_session_connected_to_lups_tools_is_closed_with_its_launch(
+    layout: HostLayout, clock: FakeClock, said: list[str], tmp_path: Path
+) -> None:
+    host = client(layout, clock)
+
+    async def connected() -> bytes:
+        reader, writer = await asyncio.open_unix_connection(str(sockets.mcp))
+        await asyncio.to_thread(host.unregister, "one")
+        heard = await reader.read()
+        writer.close()
+        return heard
+
+    sockets = layout.launch("one")
+    with served(service(layout, Judge(), said, tools=[Recording()])):
+        host.register(launch(tmp_path, "one", "first"))
+        assert asyncio.run(connected()) == b""
+    assert "one: ended" in said
+    assert not any("serving lup's tools failed" in line for line in said)
+
+
 def test_two_modules_serving_one_tool_or_answering_one_kind_are_refused(
     layout: HostLayout, said: list[str]
 ) -> None:
