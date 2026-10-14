@@ -11,6 +11,7 @@ from pydantic import TypeAdapter
 from lup.sessions.terminal import Hook
 from lup_dev.adapters import claude, codex
 from lup_dev.codescan.contract import Checker, FileReport, Rule, Source
+from lup_dev.host.courier import Conversations, Heard, Telling
 from lup_dev.policy.checkpoint import Bench, Running, Services
 from lup_dev.policy.holds import Holds, Response, waiting
 from lup_dev.stored import read_model
@@ -807,16 +808,18 @@ def test_codex_clears_a_failed_patchs_call_at_the_turns_end(
 HOOK = ["sh", "-c", "socat …"]
 
 
-def test_claude_hooks_the_judges_events_in_a_room() -> None:
+def test_claude_hooks_every_call_and_each_turns_end_in_a_room() -> None:
     hold = timedelta(hours=25)
 
     assert claude.hooks(HOOK, hold) == [
         Hook(event="session-started", command=HOOK, timeout=hold),
-        Hook(event="call-started", matcher="Edit|Write", command=HOOK, timeout=hold),
+        Hook(event="call-started", command=HOOK, timeout=hold),
+        Hook(event="turn-ended", command=HOOK, timeout=hold),
+        Hook(event="conversation-ended", command=HOOK, timeout=hold),
     ]
 
 
-def test_claudes_hook_matches_the_tools_whose_writes_it_reads(repo: Path) -> None:
+def test_claudes_judge_reads_the_tools_whose_writes_it_proposes(repo: Path) -> None:
     edit: dict[str, object] = {
         "file_path": "a.py",
         "old_string": "a",
@@ -825,14 +828,12 @@ def test_claudes_hook_matches_the_tools_whose_writes_it_reads(repo: Path) -> Non
     write: dict[str, object] = {"file_path": "a.py", "content": "b"}
     inputs = {"Edit": edit, "Write": write}
     for tool in claude.WRITING:
-        read = claude.PreToolUse.model_validate_json(
-            pre_tool_use(repo, tool, inputs[tool])
-        )
-        assert read.proposal() is not None
-    bash = claude.PreToolUse.model_validate_json(
-        pre_tool_use(repo, "Bash", {"command": "ls"})
-    )
-    assert bash.proposal() is None
+        raw = pre_tool_use(repo, tool, inputs[tool])
+        assert claude.PreToolUse.model_validate_json(raw).proposal() is not None
+        assert claude.heard(raw).judged
+    bash = pre_tool_use(repo, "Bash", {"command": "ls"})
+    assert claude.PreToolUse.model_validate_json(bash).proposal() is None
+    assert not claude.heard(bash).judged
 
 
 def test_codex_hooks_the_judges_events_in_a_room() -> None:
@@ -917,3 +918,269 @@ def test_codex_warns_the_operator_of_anything_else_its_judge_couldnt_answer(
 def test_a_launched_session_names_no_model_so_the_operators_holds() -> None:
     assert claude.agent().model is None
     assert codex.agent().model is None
+
+
+# What the host service hears of each hook, and adds to its answer
+
+
+TOLD = Telling(caller="c1")
+ITEMS = Telling(caller="c1", items=["The operator answered.", "And again."])
+BOTH = "The operator answered.\n\nAnd again."
+
+
+@pytest.mark.parametrize(
+    ("raw", "heard"),
+    [
+        (
+            '{"session_id": "s1", "cwd": "/w", "hook_event_name": "SessionStart"}',
+            Heard(event="session-started", session="s1", judged=True),
+        ),
+        (
+            pre_tool_use(Path("/w"), "Write", {"file_path": "a", "content": "b"}),
+            Heard(
+                event="call-started",
+                session="s1",
+                call="t1",
+                tool="Write",
+                judged=True,
+            ),
+        ),
+        (
+            payload(
+                Path("/w"),
+                "PreToolUse",
+                tool_name="Bash",
+                tool_input={"command": "ls"},
+                tool_use_id="t2",
+                agent_id="a1",
+            ),
+            Heard(
+                event="call-started",
+                session="s1",
+                agent="a1",
+                call="t2",
+                tool="Bash",
+                judged=False,
+            ),
+        ),
+        (
+            pre_tool_use(Path("/w"), "mcp__lup__report", {"problem": "x"}, "t3"),
+            Heard(
+                event="call-started",
+                session="s1",
+                call="t3",
+                tool="mcp__lup__report",
+                judged=False,
+            ),
+        ),
+        (
+            payload(Path("/w"), "PostToolUse", tool_name="Bash", tool_use_id="t2"),
+            Heard(
+                event="call-finished",
+                session="s1",
+                call="t2",
+                tool="Bash",
+                judged=True,
+            ),
+        ),
+        (
+            payload(Path("/w"), "Stop", stop_hook_active=False),
+            Heard(event="turn-ended", session="s1", judged=False),
+        ),
+        (
+            payload(Path("/w"), "SubagentStop", agent_id="a1"),
+            Heard(event="conversation-ended", session="s1", agent="a1", judged=False),
+        ),
+    ],
+)
+def test_claude_says_whos_speaking_and_whether_the_judge_reads_it(
+    raw: str, heard: Heard
+) -> None:
+    assert claude.heard(raw) == heard
+
+
+def test_claude_stamps_a_call_to_lups_tools_with_its_caller_and_no_decision() -> None:
+    raw = pre_tool_use(Path("/w"), "mcp__lup__report", {"problem": "stuck"})
+
+    assert json.loads(claude.told(raw, "", TOLD) or "") == {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "updatedInput": {"problem": "stuck", "caller": "c1"},
+        }
+    }
+    other = pre_tool_use(Path("/w"), "mcp__other__report", {"problem": "stuck"})
+    assert claude.told(other, "", TOLD) is None
+    refused = json.dumps(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": "no",
+            }
+        }
+    )
+    assert claude.told(raw, refused, TOLD) is None
+
+
+def test_claude_adds_what_a_conversation_is_told_to_every_answer() -> None:
+    started = '{"session_id": "s1", "cwd": "/w", "hook_event_name": "SessionStart"}'
+    assert json.loads(claude.told(started, "", ITEMS) or "") == {
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": BOTH,
+        }
+    }
+    write = pre_tool_use(Path("/w"), "Write", {"file_path": "a", "content": "b"})
+    for decision in ["allow", "deny"]:
+        judged = json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": decision,
+                    "permissionDecisionReason": "why",
+                }
+            }
+        )
+        assert json.loads(claude.told(write, judged, ITEMS) or "") == {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": decision,
+                "permissionDecisionReason": "why",
+                "additionalContext": BOTH,
+            }
+        }
+    stop = payload(Path("/w"), "Stop", stop_hook_active=False)
+    assert claude.told(stop, "", TOLD) is None
+    assert json.loads(claude.told(stop, "", ITEMS) or "") == {
+        "decision": "block",
+        "reason": BOTH,
+    }
+    noted = json.dumps({"systemMessage": "a note", "suppressOutput": True})
+    assert json.loads(claude.told(stop, noted, ITEMS) or "") == {
+        "systemMessage": "a note",
+        "suppressOutput": True,
+        "decision": "block",
+        "reason": BOTH,
+    }
+
+
+def codex_lups(arguments: object) -> str:
+    """The shell call Codex 0.162.1 sent, as a call to one of lup's tools: an MCP tool's hook carries its arguments as `tool_input`."""
+    sent = json.loads((CAPTURED / "6-pre-tool-use-bash.json").read_text())
+    return json.dumps(
+        {**sent, "tool_name": "mcp__lup__report", "tool_input": arguments}
+    )
+
+
+def test_codex_says_whos_speaking_and_that_the_judge_reads_every_hook() -> None:
+    sent = {
+        name: (CAPTURED / f"{name}.json").read_text()
+        for name in ["1-session-start", "2-pre-tool-use-add", "3-post-tool-use-add"]
+    }
+    session = json.loads(sent["1-session-start"])["session_id"]
+    patch = json.loads(sent["2-pre-tool-use-add"])["tool_use_id"]
+
+    assert [codex.heard(raw) for raw in sent.values()] == [
+        Heard(event="session-started", session=session, judged=True),
+        Heard(
+            event="call-started",
+            session=session,
+            call=patch,
+            tool="apply_patch",
+            judged=True,
+        ),
+        Heard(
+            event="call-finished",
+            session=session,
+            call=patch,
+            tool="apply_patch",
+            judged=True,
+        ),
+    ]
+    stop = codex.heard((CAPTURED / "9-stop.json").read_text())
+    assert stop == Heard(event="turn-ended", session=session, judged=True)
+    subagent = codex.heard(
+        json.dumps(
+            {
+                "session_id": session,
+                "cwd": "/w",
+                "hook_event_name": "SubagentStop",
+                "agent_id": "a1",
+            }
+        )
+    )
+    assert subagent == Heard(
+        event="conversation-ended", session=session, agent="a1", judged=True
+    )
+
+
+def test_codex_stamps_each_call_of_one_conversation_with_one_id_beside_allow() -> None:
+    conversations = Conversations()
+
+    def stamped(problem: str) -> dict[str, object]:
+        raw = codex_lups({"problem": problem})
+        heard = codex.heard(raw)
+        caller = conversations.named(heard.session, heard.agent).id
+        output = json.loads(codex.told(raw, "", Telling(caller=caller)) or "")
+        assert output["hookSpecificOutput"]["permissionDecision"] == "allow"
+        return output["hookSpecificOutput"]["updatedInput"]
+
+    first, second = stamped("stuck"), stamped("still stuck")
+    assert first == {"problem": "stuck", "caller": first["caller"]}
+    assert second == {"problem": "still stuck", "caller": first["caller"]}
+    assert codex.told(codex_lups("not json"), "", TOLD) is None
+    bash = (CAPTURED / "6-pre-tool-use-bash.json").read_text()
+    assert codex.told(bash, "", TOLD) is None
+
+
+def test_codex_stamps_a_call_its_judge_couldnt_answer_and_keeps_the_warning() -> None:
+    raw = codex_lups({"problem": "stuck"})
+
+    output = json.loads(codex.told(raw, codex.unanswered(raw, WHY), TOLD) or "")
+
+    assert output == {
+        "systemMessage": SAID,
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "updatedInput": {"problem": "stuck", "caller": "c1"},
+        },
+    }
+
+
+def test_codex_adds_what_a_conversation_is_told_to_every_answer() -> None:
+    started = (CAPTURED / "1-session-start.json").read_text()
+    assert json.loads(codex.told(started, "", ITEMS) or "") == {
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": BOTH,
+        }
+    }
+    finished = (CAPTURED / "3-post-tool-use-add.json").read_text()
+    reported = json.dumps(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": "PostToolUse",
+                "additionalContext": "lup refused 1 file.",
+            }
+        }
+    )
+    assert json.loads(codex.told(finished, reported, ITEMS) or "") == {
+        "hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "additionalContext": f"lup refused 1 file.\n\n{BOTH}",
+        }
+    }
+    stop = (CAPTURED / "9-stop.json").read_text()
+    assert codex.told(stop, "", TOLD) is None
+    held = json.dumps({"decision": "block", "reason": "Type errors left."})
+    assert json.loads(codex.told(stop, held, ITEMS) or "") == {
+        "decision": "block",
+        "reason": f"Type errors left.\n\n{BOTH}",
+    }
+    noted = json.dumps({"systemMessage": "Findings passed."})
+    assert json.loads(codex.told(stop, noted, ITEMS) or "") == {
+        "systemMessage": "Findings passed.",
+        "decision": "block",
+        "reason": BOTH,
+    }

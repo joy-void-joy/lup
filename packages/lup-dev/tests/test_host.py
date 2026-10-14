@@ -12,16 +12,24 @@ import os
 import socket
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
 from typing import TYPE_CHECKING, Literal, override
 
 import pytest
-from pydantic import ValidationError
+from mcp import Client
+from mcp.shared.memory import create_client_server_memory_streams
+from mcp.shared.message import SessionMessage
+from mcp.types import TextContent, jsonrpc_message_adapter
+from pydantic import JsonValue, ValidationError
 from typer.testing import CliRunner
 
+from lup.tools.serving import Answer
+from lup.tools.tool import ToolSpec
 from lup_dev import cli
-from lup_dev.host.client import HostClient, Starter
+from lup_dev.host.client import HostClient, RoomClient, Starter
+from lup_dev.host.courier import Conversation, Courier, Heard, Telling
 from lup_dev.host.protocol import HostError, Refused, Register, Reply, Request, Stop
+from lup_dev.host.rooms import RoomHandler, RoomRoute, RoomTools
 from lup_dev.host.service import (
     Answerer,
     Asked,
@@ -34,10 +42,11 @@ from lup_dev.host.service import (
 from lup_dev.layout import HostLayout, Layout
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Generator
+    from collections.abc import AsyncGenerator, Awaitable, Callable, Generator
     from pathlib import Path
 
     from conftest import FakeClock, Kit
+    from mcp.client._transport import TransportStreams
 
     from lup_dev.clock import Clock
 
@@ -52,6 +61,16 @@ class Stub(Answerer):
 
     def unanswered(self, runtime: str, payload: str, failure: str) -> str:
         return f"{runtime} unanswered {payload}: {failure}\n"
+
+
+class Hears(Courier):
+    """Hears every payload as a call of one session's own conversation, which the judge reads, and adds nothing."""
+
+    def heard(self, runtime: str, payload: str) -> Heard:
+        return Heard(event="call-started", session="s1", judged=True)
+
+    def told(self, runtime: str, payload: str, answer: str, telling: Telling) -> str:
+        return answer
 
 
 class Judge:
@@ -177,13 +196,20 @@ def service(
     said: list[str],
     routes: list[Route] | None = None,
     answerer: Answerer | None = None,
+    *,
+    courier: Courier | None = None,
+    room_routes: list[RoomRoute] | None = None,
+    tools: list[RoomTools] | None = None,
 ) -> HostService:
     return HostService(
         layout=layout,
         answerer=answerer or Stub(),
+        courier=courier or Hears(),
         judge=judge,
         say=said.append,
         routes=routes or [],
+        room_routes=room_routes or [],
+        tools=tools or [],
     )
 
 
@@ -510,6 +536,358 @@ def test_a_module_registers_the_handler_for_its_kind(
         service(layout, Judge(), said, [Route.to(Echoing()), Route.to(Echoing())])
     with pytest.raises(ValidationError, match="more than one handler for stop"):
         service(layout, Judge(), said, [Route.to(Stopping())])
+
+
+# A launch's room sockets: lup's tools, and the room's requests
+
+
+class Quiet:
+    """A launch's judge that answers every hook with nothing, keeping each payload it was asked."""
+
+    def __init__(self) -> None:
+        self.payloads: list[str] = []
+
+    async def __call__(self, asked: Asked) -> Judged:
+        self.payloads.append(asked.payload)
+        return Judged(status=0, output="", error="")
+
+
+ECHO = ToolSpec(
+    name="echo",
+    description="Say who's calling.\n\nThe launch and the conversation.",
+    input_schema={"type": "object", "properties": {"text": {"type": "string"}}},
+)
+
+
+class Recording(RoomTools):
+    """A module serving `echo`, answering with the launch and the conversation calling, and keeping each call."""
+
+    def __init__(self, names: list[str] | None = None) -> None:
+        self.names = names or ["echo"]
+        self.calls: list[tuple[str, JsonValue, str, Conversation]] = []
+
+    def specs(self) -> list[ToolSpec]:
+        return [ECHO.model_copy(update={"name": name}) for name in self.names]
+
+    async def call(
+        self, name: str, arguments: JsonValue, launch: Register, caller: Conversation
+    ) -> Answer:
+        self.calls.append((name, arguments, launch.launch, caller))
+        return Answer(text=f"{launch.launch} heard {caller.id}")
+
+
+@asynccontextmanager
+async def bridged(path: Path) -> AsyncGenerator[TransportStreams]:
+    """Carry a client's messages over a connection to `path`, one JSON-RPC message a line, as the room's socat does."""
+    reader, writer = await asyncio.open_unix_connection(str(path))
+    async with create_client_server_memory_streams() as (client, ours):
+        sent, received = ours
+
+        async def reading() -> None:
+            async with received:
+                while line := await reader.readline():
+                    message = jsonrpc_message_adapter.validate_json(line, by_name=False)
+                    await received.send(SessionMessage(message))
+
+        async def writing() -> None:
+            async with sent:
+                async for item in sent:
+                    assert isinstance(item, SessionMessage)
+                    line = item.message.model_dump_json(
+                        by_alias=True, exclude_unset=True
+                    )
+                    writer.write(f"{line}\n".encode())
+                    await writer.drain()
+
+        tasks = [asyncio.create_task(reading()), asyncio.create_task(writing())]
+        try:
+            yield client
+        finally:
+            writer.close()
+            for task in tasks:
+                task.cancel()
+            await asyncio.wait(tasks)
+
+
+def call(path: Path, name: str, arguments: dict[str, JsonValue]) -> tuple[str, bool]:
+    """Call the tool `name` through lup's tool server on `path`, as a session would: its text, and whether it's an error."""
+
+    async def called() -> tuple[str, bool]:
+        async with Client(bridged(path), mode="legacy") as client:
+            result = await client.call_tool(name, arguments)
+        [content] = result.content
+        assert isinstance(content, TextContent)
+        return content.text, result.is_error
+
+    return asyncio.run(called())
+
+
+def listed(path: Path) -> list[str]:
+    """List the tools lup's tool server on `path` serves, by name."""
+
+    async def tools() -> list[str]:
+        async with Client(bridged(path), mode="legacy") as client:
+            return [tool.name for tool in (await client.list_tools()).tools]
+
+    return asyncio.run(tools())
+
+
+def claude(event: str, **fields: object) -> str:
+    """A Claude Code hook's payload, of session `s1` unless `fields` name another."""
+    return json.dumps(
+        {"session_id": "s1", "cwd": "/w", "hook_event_name": event, **fields}
+    )
+
+
+def lups(tool: str, call: str, **fields: object) -> str:
+    """A Claude Code call to one of lup's tools, `mcp__lup__<tool>`."""
+    return claude(
+        "PreToolUse",
+        tool_name=f"mcp__lup__{tool}",
+        tool_input={"text": "hi"},
+        tool_use_id=call,
+        **fields,
+    )
+
+
+def stamped(answer: str) -> dict[str, JsonValue]:
+    """The arguments a hook's answer rewrote a call's to."""
+    return json.loads(answer)["hookSpecificOutput"]["updatedInput"]
+
+
+def caller(answer: str) -> str:
+    """The caller a hook's answer stamped a call with."""
+    stamp = stamped(answer)["caller"]
+    assert isinstance(stamp, str)
+    return stamp
+
+
+def on_claude(
+    layout: HostLayout,
+    judge: Callable[[Asked], Awaitable[Judged]],
+    said: list[str],
+    tools: list[RoomTools] | None = None,
+) -> HostService:
+    """A service answering Claude Code's hooks through its own adapter."""
+    known = cli.Adapters(known=cli.adapters())
+    return service(
+        layout,
+        judge,
+        said,
+        answerer=known,
+        courier=cli.Couriers(adapters=known),
+        tools=tools,
+    )
+
+
+def test_a_call_on_a_launchs_mcp_socket_reaches_its_tools_with_its_conversation(
+    layout: HostLayout, clock: FakeClock, said: list[str], tmp_path: Path
+) -> None:
+    host = client(layout, clock)
+    tools = Recording()
+    with served(on_claude(layout, Quiet(), said, [tools])):
+        host.register(launch(tmp_path, "one", "claude"))
+        host.register(launch(tmp_path, "two", "claude"))
+        send(layout.launch("one").hook, claude("SessionStart", source="startup"))
+        arguments = stamped(send(layout.launch("one").hook, lups("echo", "t1")))
+        stamp = arguments["caller"]
+        assert isinstance(stamp, str)
+        assert listed(layout.launch("one").mcp) == ["echo"]
+        heard = call(layout.launch("one").mcp, "echo", arguments)
+        elsewhere = call(layout.launch("two").mcp, "echo", arguments)
+    assert heard == (f"one heard {stamp}", False)
+    assert tools.calls == [
+        ("echo", {"text": "hi"}, "one", Conversation(id=stamp, session="s1"))
+    ]
+    assert elsewhere == (
+        (
+            f"lup doesn't know the conversation `{stamp}` this call names, so it "
+            "wasn't run; calling it again names yours"
+        ),
+        True,
+    )
+
+
+def test_each_conversation_is_stamped_with_one_id_of_lups_own(
+    layout: HostLayout, clock: FakeClock, said: list[str], tmp_path: Path
+) -> None:
+    host = client(layout, clock)
+    with served(on_claude(layout, Quiet(), said)):
+        host.register(launch(tmp_path, "one", "claude"))
+        host.register(launch(tmp_path, "two", "claude"))
+        hook = layout.launch("one").hook
+        first = caller(send(hook, lups("echo", "t1")))
+        again = caller(send(hook, lups("echo", "t2")))
+        subagent = caller(send(hook, lups("echo", "t3", agent_id="a1")))
+        resumed = caller(send(hook, lups("echo", "t4", session_id="s2")))
+        other = caller(send(layout.launch("two").hook, lups("echo", "t5")))
+    assert first == again
+    assert len({first, subagent, resumed, other}) == 4
+
+
+def test_a_hook_the_judge_doesnt_read_is_answered_without_it(
+    layout: HostLayout, clock: FakeClock, said: list[str], tmp_path: Path
+) -> None:
+    host = client(layout, clock)
+    judge = Quiet()
+    started = claude("SessionStart", source="startup")
+    write = claude(
+        "PreToolUse",
+        tool_name="Write",
+        tool_input={"file_path": "a.md", "content": "a"},
+        tool_use_id="t1",
+    )
+    unread = [
+        claude(
+            "PreToolUse",
+            tool_name="Bash",
+            tool_input={"command": "ls"},
+            tool_use_id="t2",
+        ),
+        claude("Stop", stop_hook_active=False),
+        claude("SubagentStop", agent_id="a1"),
+    ]
+    with served(on_claude(layout, judge, said)):
+        host.register(launch(tmp_path, "one", "claude"))
+        hook = layout.launch("one").hook
+        answers = [send(hook, payload) for payload in [started, write, *unread]]
+        lup_tool = json.loads(send(hook, lups("echo", "t3")))
+    assert answers == ["", "", "", "", ""]
+    assert judge.payloads == [started, write]
+    assert lup_tool["hookSpecificOutput"].keys() == {"hookEventName", "updatedInput"}
+
+
+def test_a_call_without_its_caller_is_the_main_conversations(
+    layout: HostLayout, clock: FakeClock, said: list[str], tmp_path: Path
+) -> None:
+    host = client(layout, clock)
+    tools = Recording()
+    with served(on_claude(layout, Quiet(), said, [tools])):
+        host.register(launch(tmp_path, "one", "claude"))
+        mcp = layout.launch("one").mcp
+        before = call(mcp, "echo", {"text": "hi"})
+        send(layout.launch("one").hook, claude("SessionStart", source="startup"))
+        after = call(mcp, "echo", {"text": "hi"})
+        nowhere = call(mcp, "nowhere", {})
+    assert before == (
+        (
+            "lup can't tell who's calling: no hook of this session has reached it, "
+            "so this call wasn't run"
+        ),
+        True,
+    )
+    [(_, _, _, main)] = tools.calls
+    assert after == (f"one heard {main.id}", False)
+    assert main == Conversation(id=main.id, session="s1")
+    assert (
+        f"one: a call to `echo` carried no `caller`, so it's taken as the main "
+        f"conversation's, {main.id}"
+    ) in said
+    assert nowhere == ("lup serves no tool named `nowhere`", True)
+
+
+class Answering(RoomHandler[Echo]):
+    @override
+    def request(self) -> type[Echo]:
+        return Echo
+
+    @override
+    async def answer(self, request: Echo, launch: Register) -> Reply:
+        return Echoed(text=f"{launch.launch}: {request.text}")
+
+
+def test_a_rooms_request_is_answered_with_its_launch(
+    layout: HostLayout, clock: FakeClock, said: list[str], tmp_path: Path
+) -> None:
+    host = client(layout, clock)
+    routes = [RoomRoute.to(Answering())]
+    with served(service(layout, Judge(), said, room_routes=routes)):
+        host.register(launch(tmp_path, "one", "first"))
+        host.register(launch(tmp_path, "two", "first"))
+        one = RoomClient(socket=layout.launch("one").request)
+        two = RoomClient(socket=layout.launch("two").request)
+        assert one.ask(Echo(text="hi"), Echoed).text == "one: hi"
+        assert two.ask(Echo(text="hi"), Echoed).text == "two: hi"
+        with pytest.raises(HostError, match="no handler for `echo`; the service"):
+            host.ask(Echo(text="hi"), Echoed)
+
+
+def test_a_control_kind_sent_from_a_room_is_refused(
+    layout: HostLayout, clock: FakeClock, said: list[str], tmp_path: Path
+) -> None:
+    host = client(layout, clock)
+    with served(
+        service(layout, Judge(), said, room_routes=[RoomRoute.to(Answering())])
+    ):
+        host.register(launch(tmp_path, "one", "first"))
+        room = RoomClient(socket=layout.launch("one").request)
+        for request in [Stop(), launch(tmp_path, "two", "first")]:
+            with pytest.raises(HostError) as refused:
+                room.ask(request, Echoed)
+            assert str(refused.value) == (
+                f"no handler for `{request.kind}`; a room's request socket answers echo"
+            )
+        assert host.launches() == [launch(tmp_path, "one", "first")]
+    assert (
+        "one: refused a request: no handler for `stop`; a room's request "
+        "socket answers echo" in said
+    )
+
+
+def test_a_room_can_reach_no_service_outside_a_room(tmp_path: Path) -> None:
+    room = RoomClient(socket=tmp_path / "request.sock")
+    with pytest.raises(HostError, match="no host service answers on"):
+        room.ask(Echo(text="hi"), Echoed)
+    assert RoomClient().socket.as_posix() == "/run/lup/request.sock"
+
+
+def test_the_room_sockets_go_with_the_launch_and_are_served_again_after_a_restart(
+    layout: HostLayout, clock: FakeClock, said: list[str], tmp_path: Path
+) -> None:
+    host = client(layout, clock)
+    sockets = layout.launch("one")
+    routes = [RoomRoute.to(Answering())]
+    with served(
+        service(layout, Judge(), said, room_routes=routes, tools=[Recording()])
+    ):
+        host.register(launch(tmp_path, "one", "first"))
+        assert sockets.mcp.is_socket()
+        assert sockets.request.is_socket()
+        host.stop()
+    assert not sockets.mcp.exists()
+    assert not sockets.request.exists()
+    with served(
+        service(layout, Judge(), said, room_routes=routes, tools=[Recording()])
+    ):
+        assert listed(sockets.mcp) == ["echo"]
+        room = RoomClient(socket=sockets.request)
+        assert room.ask(Echo(text="again"), Echoed).text == "one: again"
+        host.unregister("one")
+        assert not sockets.directory.exists()
+        with pytest.raises(HostError, match="no host service answers"):
+            room.ask(Echo(text="gone"), Echoed)
+
+
+def test_two_modules_serving_one_tool_or_answering_one_kind_are_refused(
+    layout: HostLayout, said: list[str]
+) -> None:
+    with pytest.raises(ValidationError, match="more than one module serves echo"):
+        service(layout, Judge(), said, tools=[Recording(), Recording(["echo", "x"])])
+    with pytest.raises(ValidationError, match="more than one handler for echo"):
+        service(
+            layout,
+            Judge(),
+            said,
+            routes=[Route.to(Echoing())],
+            room_routes=[RoomRoute.to(Answering())],
+        )
+    with pytest.raises(ValidationError, match="more than one handler for echo"):
+        service(
+            layout,
+            Judge(),
+            said,
+            room_routes=[RoomRoute.to(Answering()), RoomRoute.to(Answering())],
+        )
 
 
 PAYLOAD = {

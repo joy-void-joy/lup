@@ -340,6 +340,16 @@ class LaunchSockets(Model):
         """The socket the room's hook command sends each payload to."""
         return self.directory / "hook.sock"
 
+    @property
+    def mcp(self) -> Path:
+        """The socket lup's tools are served on: one MCP session per connection, bridged from the session's stdio server."""
+        return self.directory / "mcp.sock"
+
+    @property
+    def request(self) -> Path:
+        """The socket the room's programs send requests to: one typed request per connection, one reply."""
+        return self.directory / "request.sock"
+
 
 class HostLayout(Model):
     """Where the host service keeps its sockets and the launches it serves, and its log.
