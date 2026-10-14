@@ -2,7 +2,8 @@
 
 `docs/launch.md`, *Trust on launch*. A repository's host zone is what the host runs
 for it, read at the integration branch's tip, so what's approved is what the judge
-and the host service run, never a branch's own copy (`Zone`):
+and the host service run, never a branch's own copy (`Zone`), with the person's own
+layer beside it:
 - its declaration, `lup_project.py` or the package `lup_project/`, and every file
   importing it runs on the host: each of the project's own modules it imports,
   with the `__init__.py` of each package holding one, and in turn what they
@@ -14,7 +15,14 @@ and the host service run, never a branch's own copy (`Zone`):
   from the repository's own workspace, as lup's does, that source
   (`WorkspaceTool`: uv's files, the project file and modules of each workspace
   package `lup-dev` needs, and the engine's source); otherwise the release the lock
-  pins, with every package it needs at its locked version (`ReleaseTool`).
+  pins, with every package it needs at its locked version (`ReleaseTool`);
+- the person's own layer of the declaration, `lup_project.local.py` in the
+  worktree trust runs from, which git ignores, so it's in the zone by its
+  content (`Zone.local`), and what it imports of the commit with the rest
+  (`docs/related-repositories.md`, decision 8). A room writes the worktree, so
+  an edit made there runs nowhere until approved: the judge and a launch read
+  the copy kept with the approval. Where it changed, its diff is in the summary
+  itself (`compared`).
 
 The zone's fingerprint is kept with the commit the operator approved, per
 repository, in lup's state (`Approval`). `trusted`, which a launch calls before
@@ -308,6 +316,10 @@ class Zone(Model):
     """Each of its paths in the repository, a file or a directory, from the root:
     what its diff and its fingerprint read."""
     tool: Tool
+    local: str | None = None
+    """The person's own layer, `lup_project.local.py` in the worktree trust runs
+    from, whole: git holds none of it, so it's in the zone by its content; none
+    where there's none."""
     unread: list[str] = []
     """What of the declaration couldn't be followed, each said, so a file it runs
     may be missing from `paths`; empty where all of it was."""
@@ -371,6 +383,9 @@ class Change(Model):
     """The paths approved before, since `since`; every path, whole, where it's none."""
     joined: Diffed
     """The paths the zone holds that the approval didn't, whole."""
+    local: Diffed = Diffed()
+    """The person's own layer, from the copy approved before to the worktree's;
+    empty where it's the same."""
     tool: list[str]
     """How the `lup-dev` release changed, line by line; none for the workspace's
     own source, whose change is in the diff."""
@@ -392,14 +407,24 @@ class Change(Model):
         """Return what the operator reads first: what's approved and why, the commits, and git's count of each file.
 
         The count is git's own, as git prints it: the paths approved before,
-        then those joining the zone, shown whole. A release's change is said by
-        its versions, and what of the declaration couldn't be followed is said
-        last.
+        then those joining the zone, shown whole. The person's own layer, which
+        git doesn't hold, is shown whole where it changed: its diff, not a count,
+        since it's short and nothing else shows it. A release's change is said
+        by its versions, and what of the declaration couldn't be followed is
+        said last.
         """
         changed = self.changed.stat.splitlines() or ["No file of the zone changed."]
         joined = (
             ["Joining the zone, shown whole:", *self.joined.stat.splitlines()]
             if self.joined.stat
+            else []
+        )
+        local = (
+            [
+                "Your own layer, which git doesn't hold, changed since approved:",
+                *self.local.diff.splitlines(),
+            ]
+            if self.local.diff
             else []
         )
         unknown = "Not followed, so the zone may miss a file the declaration runs:"
@@ -414,14 +439,15 @@ class Change(Model):
             "",
             *changed,
             *joined,
+            *local,
             *self.tool,
             *unread,
         ]
         return "\n".join(said)
 
     def diff(self) -> str:
-        """Return the whole diff, coloured: the paths approved before, then those joining the zone."""
-        return self.changed.diff + self.joined.diff
+        """Return the whole diff, coloured: the paths approved before, then those joining the zone, then the person's own layer."""
+        return self.changed.diff + self.joined.diff + self.local.diff
 
     def question(self) -> str:
         """Ask whether to approve the zone, and run its `lup-dev` on the host."""
@@ -465,9 +491,18 @@ class Trusted(Model):
     restarted: bool
     """Whether a host service ran, and was restarted on the copy, which it runs
     from only where the copy is lup's own command."""
+    installed: bool = True
+    """Whether the copy was installed: not where only the person's own layer
+    changed, the copy approved before being the commit's already."""
 
     def report(self) -> str:
         """Say what was installed, and where the host service stands."""
+        if not self.installed:
+            return (
+                "Approved: your own layer, which judges this repository's sessions "
+                f"from their next hook, beside `lup-dev` from {self.approval.commit} "
+                "as before."
+            )
         approved = (
             f"Approved: `lup-dev` from {self.approval.commit} judges this "
             "repository's sessions"
@@ -1099,7 +1134,9 @@ class Reached(Model):
 def declared(tree: Path, covered: list[Path]) -> Named:
     """Find the files the declaration in `tree` runs on the host, reading them with `ast`.
 
-    `tree` is a commit's export of what importing its declaration reads. The
+    `tree` is a commit's export of what importing its declaration reads, with
+    the person's own layer beside it where there's one, which runs too and is
+    followed the same way. The
     declaration runs as the judge imports it, from its root, `src/` and each uv
     workspace member (`import_roots`): each module it imports that's found
     there, with each package holding it, and in turn what they import. A
@@ -1171,6 +1208,11 @@ def declared(tree: Path, covered: list[Path]) -> Named:
     starts = [
         *([module(layout.declaration)] if layout.declaration.is_file() else []),
         *(module(file) for file in sorted(layout.declaration_package.rglob("*.py"))),
+        *(
+            [module(layout.local_declaration)]
+            if layout.local_declaration.is_file()
+            else []
+        ),
     ]
     walked = list(walk(starts, []))
     paths = dict.fromkeys(
@@ -1230,6 +1272,47 @@ def diffed(
     )
 
 
+def compared(approved: str | None, current: str | None) -> Diffed:
+    """Return git's diff of the person's own layer, from the copy `approved` to the `current` one, coloured; empty where they're the same.
+
+    Git holds neither copy, so each is written into a scratch directory, as
+    `approved/` and `worktree/`, and git compares them there (`git diff
+    --no-index`), its own diff with no external diff command or text
+    conversion. A copy that's none is no file: the layer created, or removed.
+    """
+    if approved == current:
+        return Diffed()
+    name = CheckoutLayout(root=Path()).local_declaration.name
+    with tempfile.TemporaryDirectory() as scratch:
+        root = Path(scratch)
+
+        def placed(side: str, text: str | None) -> str:
+            if text is None:
+                return os.devnull
+            path = root / side / name
+            path.parent.mkdir()
+            path.write_text(text)
+            return str(path.relative_to(root))
+
+        before = placed("approved", approved)
+        after = placed("worktree", current)
+        own = [
+            "diff",
+            "--no-index",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-prefix",
+            "--color=always",
+        ]
+        git = Git(cwd=root)
+        counted = git.run(*own, "--stat", "--compact-summary", before, after, ok=[1])
+        shown = git.run(*own, before, after, ok=[1])
+    return Diffed(
+        stat=counted.stdout.decode(errors="replace"),
+        diff=shown.stdout.decode(errors="replace"),
+    )
+
+
 class Trust(Model, arbitrary_types_allowed=True):
     """The check, and the question, a launch makes about what the host runs for a repository."""
 
@@ -1273,11 +1356,13 @@ class Trust(Model, arbitrary_types_allowed=True):
         )
 
     def zone(self) -> Zone:
-        """Read the host zone at the integration branch's tip.
+        """Read the host zone at the integration branch's tip, with the person's own layer in the worktree.
 
-        Where the repository has no such branch, at the worktree's `HEAD`. Raise
-        `TrustError` before any commit, or where the lock doesn't say which
-        `lup-dev` the host runs.
+        Where the repository has no such branch, at the worktree's `HEAD`. The
+        person's own layer, which git doesn't hold, is read from the worktree
+        trust runs from, by its content, and what it imports of the commit joins
+        the zone's paths. Raise `TrustError` before any commit, or where the lock
+        doesn't say which `lup-dev` the host runs.
         """
         git = Git(cwd=self.root)
         commit = git.commit(f"refs/heads/{self.integration}") or git.commit("HEAD")
@@ -1288,7 +1373,9 @@ class Trust(Model, arbitrary_types_allowed=True):
             )
             raise TrustError(message)
         tool = self.tool(commit)
-        named = self.named(commit, tool.paths())
+        own = CheckoutLayout(root=self.root).local_declaration
+        local = own.read_text() if own.is_file() else None
+        named = self.named(commit, tool.paths(), local)
         declaration = CheckoutLayout(root=Path())
         listed = list(
             dict.fromkeys(
@@ -1305,7 +1392,9 @@ class Trust(Model, arbitrary_types_allowed=True):
             for path in listed
             if not any(path != other and path.is_relative_to(other) for other in listed)
         ]
-        return Zone(commit=commit, paths=paths, tool=tool, unread=named.unread)
+        return Zone(
+            commit=commit, paths=paths, tool=tool, local=local, unread=named.unread
+        )
 
     def tool(self, commit: str) -> Tool:
         """Read which `lup-dev` the host runs from the commit's `uv.lock`."""
@@ -1321,24 +1410,30 @@ class Trust(Model, arbitrary_types_allowed=True):
             raise TrustError(message)
         return Lock.parse(found.stdout.decode()).tool(self.name)
 
-    def named(self, commit: str, covered: list[Path]) -> Named:
-        """Find the files the commit's declaration runs on the host, and the conditions modules it names.
+    def named(self, commit: str, covered: list[Path], local: str | None) -> Named:
+        """Find the files the commit's declaration, and `local` on top of it, run on the host, and the conditions modules they name.
 
         Read with `ast` from the commit's Python modules and project files,
-        exported from git's objects into a scratch directory (`declared`), so no
-        code of the project runs before the operator is asked. A path under one
-        of `covered`, in the zone whole already, isn't followed.
+        exported from git's objects into a scratch directory, `local`, the
+        person's own layer, written beside them where there's one
+        (`declared`), so no code of the project runs before the operator is
+        asked. A path under one of `covered`, in the zone whole already, isn't
+        followed.
         """
         with tempfile.TemporaryDirectory() as scratch:
             source = Path(scratch)
             Git(cwd=self.root).export(commit, source, read_by_import)
+            if local is not None:
+                CheckoutLayout(root=source).local_declaration.write_text(local)
             return declared(source, covered)
 
     def fingerprint(self, zone: Zone) -> str:
-        """Fingerprint the zone: git's listing of its files, and the `lup-dev` it runs.
+        """Fingerprint the zone: git's listing of its files, the `lup-dev` it runs, and the person's own layer.
 
         The listing names each file's path, mode and object, so any change to one
-        of them, or a file joining or leaving the zone, changes it.
+        of them, or a file joining or leaving the zone, changes it. The person's
+        own layer counts by its content, where there's one, so a zone without one
+        keeps the fingerprint it had before the layer existed.
         """
         listed = Git(cwd=self.root).run(
             "ls-tree",
@@ -1351,14 +1446,19 @@ class Trust(Model, arbitrary_types_allowed=True):
         )
         digest = hashlib.sha256(listed.stdout)
         digest.update(zone.tool.model_dump_json().encode())
+        if zone.local is not None:
+            name = CheckoutLayout(root=Path()).local_declaration.name
+            digest.update(f"\0{name}\0".encode())
+            digest.update(zone.local.encode())
         return digest.hexdigest()
 
     def change(self, standing: Standing) -> Change:
-        """Say what changed since the approved commit: git's diff over the zone.
+        """Say what changed since the approved commit: git's diff over the zone, and the person's own layer's.
 
         The paths the approval held, since its commit; the paths it didn't, whole.
         The first time, or where the repository doesn't hold the approved commit,
-        every path whole.
+        every path whole. The person's own layer, from the copy approved to the
+        worktree's, where they differ (`compared`).
         """
         git = Git(cwd=self.root)
         zone = standing.zone
@@ -1366,6 +1466,7 @@ class Trust(Model, arbitrary_types_allowed=True):
         empty = git.run("hash-object", "-t", "tree", "--stdin", stdin=b"")
         nothing = empty.stdout.decode().strip()
         tool = zone.tool.said(approval.tool if approval is not None else None)
+        local = compared(approval.local if approval is not None else None, zone.local)
         held = approval is not None and (
             git.run(
                 "cat-file", "-e", f"{approval.commit}^{{commit}}", ok=[0, 1, 128]
@@ -1379,6 +1480,7 @@ class Trust(Model, arbitrary_types_allowed=True):
                 since=None,
                 changed=diffed(git, nothing, zone.commit, zone.paths),
                 joined=Diffed(),
+                local=local,
                 tool=tool,
                 unread=zone.unread,
             )
@@ -1390,6 +1492,7 @@ class Trust(Model, arbitrary_types_allowed=True):
             since=approval.commit,
             changed=diffed(git, approval.commit, zone.commit, kept),
             joined=diffed(git, nothing, zone.commit, joined),
+            local=local,
             tool=tool,
             unread=zone.unread,
         )
@@ -1467,7 +1570,9 @@ class Trust(Model, arbitrary_types_allowed=True):
         """Act on the operator's answer about the zone `standing` read: install and record it, or keep the copy approved before.
 
         Where another launch waiting on the same approval acted on it first, its
-        approval is read, and nothing is installed twice.
+        approval is read, and nothing is installed twice. Where only the
+        person's own layer changed, the copy approved before is the commit's
+        already, so the approval is recorded and nothing installed or restarted.
         """
         kept = self.layout.approved(repository)
         copy = self.layout.judge(repository)
@@ -1486,16 +1591,24 @@ class Trust(Model, arbitrary_types_allowed=True):
                 raise TrustError(message)
             again = self.reinstall(now, now.commit, copy)
             return Kept(commit=zone.commit, approval=now, again=again)
-        own = zone.tool.lups_own()
-        self.toolchain.install(zone.tool, self.root, zone.commit, copy, users=own)
-        restarted = own and self.restart()
         recorded = Approval(
             commit=zone.commit,
             fingerprint=standing.fingerprint,
             paths=zone.paths,
             tool=zone.tool,
             time=self.clock.now(),
+            local=zone.local,
         )
+        if now is not None and now.commit == zone.commit and now.tool == zone.tool:
+            # Only the person's own layer changed, which the judge reads from the
+            # approval at each hook: the copy is the commit's already, so nothing
+            # is installed, and no service restarts under running sessions.
+            self.reinstall(now, zone.commit, copy)
+            write_model(kept, recorded)
+            return Trusted(approval=recorded, restarted=False, installed=False)
+        own = zone.tool.lups_own()
+        self.toolchain.install(zone.tool, self.root, zone.commit, copy, users=own)
+        restarted = own and self.restart()
         write_model(kept, recorded)
         return Trusted(approval=recorded, restarted=restarted)
 

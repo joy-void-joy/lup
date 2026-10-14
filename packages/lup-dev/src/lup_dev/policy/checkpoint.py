@@ -61,7 +61,7 @@ from lup_dev.declaration.project import Project
 from lup_dev.declaration.resolve import Declaration
 from lup_dev.git import Git
 from lup_dev.inbox import ends
-from lup_dev.layout import Layout
+from lup_dev.layout import CheckoutLayout, Layout
 from lup_dev.policy.holds import HeldFile, Hold, Holds, answered
 from lup_dev.policy.importers import Conversation, Found, ImportersPass, Spawner
 from lup_dev.policy.judge import Change, Judge, Judgement, RemovedNote
@@ -315,8 +315,10 @@ class Worktree(Model):
         """The declaration it's judged by, loaded when first read.
 
         Read from the commit the operator approved last for the repository
-        (`lup_dev.approval`), so what runs on the host is what they approved.
-        Before any approval, from the integration branch's tip, or where the
+        (`lup_dev.approval`), with the person's own layer approved with it beside
+        the declaration, never the worktree's own copy of it, so what runs on the
+        host is what they approved. Before any approval, from the integration
+        branch's tip, with no layer of the person's, or where the
         repository has no such branch, from the worktree's `HEAD` commit; the
         defaults before any commit. Each that loads is kept for the repository,
         and where one can't load, or the approved commit is gone from the
@@ -334,6 +336,7 @@ class Worktree(Model):
         if commit is None:
             return Loaded(declaration=Declaration.of(Project()), root=self.root)
         kept = judging.layout.declaration(self.repository)
+        local = approval.local if approval is not None else None
 
         def read(commit: str) -> Loaded:
             if approval is not None and self.store.repository().commit(commit) is None:
@@ -342,7 +345,7 @@ class Worktree(Model):
                     "approve the integration branch's tip with `lup-dev trust`"
                 )
                 raise ProjectError(message)
-            source = self.exported(judging.layout, commit)
+            source = self.exported(judging.layout, commit, local)
             return Loaded(
                 declaration=Declaration.read(source), root=source, commit=commit
             )
@@ -361,7 +364,11 @@ class Worktree(Model):
             )
         with FileLock(kept.with_name(f"{kept.name}.lock")):
             last = read_model(kept, LastDeclaration)
-            if last is None or last.commit != commit:
+            if (
+                last is None
+                or last.commit != commit
+                or last.declaration != found.declaration
+            ):
                 told = last.told if last else ""
                 write_model(
                     kept,
@@ -371,17 +378,21 @@ class Worktree(Model):
                 )
         return found
 
-    def exported(self, layout: Layout, commit: str) -> Path:
-        """Return where `commit`'s Python modules are exported, exporting them once.
+    def exported(self, layout: Layout, commit: str, local: str | None = None) -> Path:
+        """Return where `commit`'s Python modules are exported, with `local` beside its declaration, exporting them once.
 
-        A commit's export is written whole before it's moved into place, and the
-        repository's earlier exports are removed: only the latest is read.
+        `local` is the person's own layer approved with the commit, which git
+        holds none of; none where none was approved. A commit's export is
+        written whole before it's moved into place, and the repository's
+        earlier exports are removed: only the latest is read.
         """
-        target = layout.exported(self.repository, commit)
+        target = layout.exported(self.repository, commit, local)
         if target.is_dir():
             return target
         partial = target.with_name(f"{commit}.{secrets.token_hex(4)}.partial")
         self.store.export(commit, partial)
+        if local is not None:
+            CheckoutLayout(root=partial).local_declaration.write_text(local)
         try:
             partial.rename(target)
         except OSError:

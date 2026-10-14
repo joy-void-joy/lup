@@ -7,9 +7,15 @@ lives*). Without either, the defaults apply; with both, or with one that can't b
 imported or binds no `Project`, the load fails, never falling back to the defaults,
 which would judge with the wrong roles. The same function reads a worktree's root
 and a directory a commit was exported to.
+
+Beside it, the person's own layer, `lup_project.local.py`, which git ignores, is
+loaded after it and layered on top, in the same grammar
+(`docs/related-repositories.md`, decision 7). The judge and a launch read the
+copy trust on launch approved, put beside the commit's export.
 """
 
 import importlib
+import importlib.util
 import sys
 import tomllib
 from contextlib import contextmanager
@@ -18,6 +24,7 @@ from typing import TYPE_CHECKING
 
 from lup.types import Model
 from lup_dev.declaration.errors import ProjectError
+from lup_dev.declaration.grammar import applied, set_fields
 from lup_dev.declaration.project import Project
 from lup_dev.layout import CheckoutLayout
 
@@ -30,9 +37,14 @@ class Declared(Model):
     """A project's declaration, with the file it was read from."""
 
     project: Project
+    """The project's declaration, with the person's own layer on top where
+    there's one."""
     source: Path | None = None
     """The declaration's file, relative to the root: `lup_project.py`, or the
     package's `__init__.py`; none for the defaults."""
+    local: Path | None = None
+    """The person's own layer, relative to the root, `lup_project.local.py`,
+    where one was read and layered on top; none otherwise."""
 
 
 class Pyproject(Model):
@@ -84,13 +96,19 @@ def read_by_import(path: PurePath) -> bool:
 
     Its Python modules, and each project file, which says where a workspace's
     packages are (`import_roots`): what a commit's export holds so its declaration
-    can be imported.
+    can be imported. Never the person's own layer, which git ignores: one a
+    commit holds anyway would run unapproved, so only the copy trust on launch
+    approved is put beside an export.
 
     >>> [read_by_import(PurePath(each)) for each in ["a/b.py", "pyproject.toml", "c.md"]]
     [True, True, False]
+    >>> read_by_import(PurePath("lup_project.local.py"))
+    False
     """
-    project = CheckoutLayout(root=Path()).pyproject
-    return path.suffix in [".py", ".pyi"] or path.name == project.name
+    layout = CheckoutLayout(root=Path())
+    if path == layout.local_declaration:
+        return False
+    return path.suffix in [".py", ".pyi"] or path.name == layout.pyproject.name
 
 
 @contextmanager
@@ -142,40 +160,11 @@ def importable(roots: list[Path], root: Path, name: str) -> Generator[None]:
         sys.modules.update(aside)
 
 
-def load(root: Path) -> Declared:
-    """Load the declaration at `root`, or the defaults where there's none.
+def bound(module: ModuleType, shown: Path) -> Project:
+    """Return the `Project` the module read from `shown` binds as `project`.
 
-    Raise `ProjectError` where both forms are there, or where the one there can't
-    be imported or binds no `Project`. Whatever importing it raises (a name the
-    installed `lup_dev` lacks, conflict markers, a module edited with another's
-    class) is that.
+    Raise `ProjectError` where it binds none, or something else.
     """
-    layout = CheckoutLayout(root=root)
-    package = layout.declaration_package
-    match [layout.declaration.is_file(), package.is_dir()]:
-        case [False, False]:
-            return Declared(project=Project())
-        case [True, True]:
-            message = (
-                f"`{layout.declaration.name}` and `{package.name}/` are both at "
-                f"{root}: the declaration is one or the other"
-            )
-            raise ProjectError(message)
-        case [True, False]:
-            source = layout.declaration
-        case _:
-            source = CheckoutLayout(root=package).package
-    shown = source.relative_to(root)
-    if not source.is_file():
-        message = f"`{package.name}/` holds no `{source.name}` binding `project`"
-        raise ProjectError(message)
-    roots = import_roots(root, Pyproject.read(layout.pyproject))
-    with importable(roots, root, layout.declaration.stem):
-        try:
-            module = importlib.import_module(layout.declaration.stem)
-        except Exception as failure:
-            message = f"`{shown}` can't be imported: {failure}"
-            raise ProjectError(message) from failure
     declared = getattr(module, "project", None)
     if declared is None:
         message = f"`{shown}` binds no `project`"
@@ -189,4 +178,85 @@ def load(root: Path) -> Declared:
             f"not a `{Project.__module__}.{Project.__qualname__}`"
         )
         raise ProjectError(message)
-    return Declared(project=declared, source=shown)
+    return declared
+
+
+def executed(path: Path, name: str) -> ModuleType:
+    """Run the Python file at `path` as the module `name`, which no import names.
+
+    The person's own layer is `lup_project.local.py`, whose name holds a dot, so
+    it's run from its path. It's kept in `sys.modules` while it runs, as an
+    import would be, so the models it defines resolve their annotations there.
+    Raise `ProjectError` where it can't be run.
+    """
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        message = f"`{path.name}` isn't a Python file lup can run"
+        raise ProjectError(message)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception as failure:
+        message = f"`{path.name}` can't be imported: {failure}"
+        raise ProjectError(message) from failure
+    return module
+
+
+def load(root: Path) -> Declared:
+    """Load the declaration at `root`, the person's own layer on top where there's one, or the defaults where there's neither.
+
+    The person's own layer, `lup_project.local.py` beside the declaration,
+    binds `project` too, a `Project` written as a layer on the project's: what
+    it sets changes the project's, as a module layers (`applied`), so
+    `Modules().add(…)` adds to the project's modules. It runs in the same import
+    as the declaration, so it can import the project's own modules and edit
+    them. Raise `ProjectError` where both forms of the declaration are there, or
+    where the declaration or the person's layer can't be imported or binds no
+    `Project`. Whatever importing one raises (a name the installed `lup_dev`
+    lacks, conflict markers, a module edited with another's class) is that.
+    """
+    layout = CheckoutLayout(root=root)
+    package = layout.declaration_package
+    local = layout.local_declaration
+    match [layout.declaration.is_file(), package.is_dir()]:
+        case [False, False]:
+            source = None
+        case [True, True]:
+            message = (
+                f"`{layout.declaration.name}` and `{package.name}/` are both at "
+                f"{root}: the declaration is one or the other"
+            )
+            raise ProjectError(message)
+        case [True, False]:
+            source = layout.declaration
+        case _:
+            source = CheckoutLayout(root=package).package
+    if source is not None and not source.is_file():
+        message = f"`{package.name}/` holds no `{source.name}` binding `project`"
+        raise ProjectError(message)
+    if source is None and not local.is_file():
+        return Declared(project=Project())
+    shown = None if source is None else source.relative_to(root)
+    roots = import_roots(root, Pyproject.read(layout.pyproject))
+    with importable(roots, root, layout.declaration.stem):
+        if shown is None:
+            project = Project()
+        else:
+            try:
+                module = importlib.import_module(layout.declaration.stem)
+            except Exception as failure:
+                message = f"`{shown}` can't be imported: {failure}"
+                raise ProjectError(message) from failure
+            project = bound(module, shown)
+        if not local.is_file():
+            return Declared(project=project, source=shown)
+        mine = bound(
+            executed(local, f"{layout.declaration.stem}_local"),
+            local.relative_to(root),
+        )
+    return Declared(
+        project=applied(mine, project, set_fields(mine)),
+        source=shown,
+        local=local.relative_to(root),
+    )

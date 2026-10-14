@@ -1219,16 +1219,64 @@ def test_without_the_integration_branch_a_worktree_is_judged_by_its_head(
     assert before(kit.bench, core_edit(repo), SESSION, repo).outcome == "ask"
 
 
-def approve(kit: Kit, repo: Path, commit: str) -> None:
-    """Record `commit` as the one the operator approved, as trust on launch does."""
+def approve(kit: Kit, repo: Path, commit: str, local: str | None = None) -> None:
+    """Record `commit`, with the person's own layer `local`, as the operator approved, as trust on launch does."""
     approval = Approval(
         commit=commit,
         fingerprint="approved",
         paths=[Path("lup_project.py")],
         tool=ReleaseTool(name="lup-dev", version="0.4.0", registry="index", pins={}),
         time=kit.clock.now(),
+        local=local,
     )
     write_model(kit.layout.approved(repo / ".git"), approval)
+
+
+LOCAL_PROTECTING_CORE = '''
+from lup_dev import Module, Modules, Paths, Project
+
+
+class Mine(Module):
+    """The person's own module, protecting the core for themselves."""
+
+    name = "mine"
+
+    paths: Paths = Paths.of(protected=["src/pkg/core.py"])
+
+
+project = Project(modules=Modules().add(Mine()))
+'''
+"""The person's own layer, adding a module of theirs to the project's."""
+
+
+def test_the_approved_copy_of_the_person_s_layer_judges_not_the_worktree_s(
+    kit: Kit, repo: Path, linked: Path, shell: Shell
+) -> None:
+    shell.git(repo, "switch", "-q", "-c", "dev")
+    declare(repo, PROTECTING_NOTHING)
+    shell.commit(repo, "dev: protect nothing")
+    head = shell.git(repo, "rev-parse", "HEAD")
+    approve(kit, repo, head, LOCAL_PROTECTING_CORE)
+    (repo / "lup_project.local.py").write_text(
+        "from lup_dev import Project\nproject = Project()\n"
+    )
+    start(kit, repo)
+    assert before(kit.bench, core_edit(linked), SESSION, repo).outcome == "ask"
+    approve(kit, repo, head)
+    (repo / "lup_project.local.py").write_text(LOCAL_PROTECTING_CORE)
+    assert before(kit.bench, core_edit(linked), SESSION, repo).outcome == "allow"
+
+
+def test_a_layer_of_the_person_s_a_commit_holds_is_never_read(
+    kit: Kit, repo: Path, linked: Path, shell: Shell
+) -> None:
+    shell.git(repo, "switch", "-q", "-c", "dev")
+    declare(repo, PROTECTING_NOTHING)
+    (repo / "lup_project.local.py").write_text(LOCAL_PROTECTING_CORE)
+    shell.commit(repo, "dev: a layer committed by mistake")
+    approve(kit, repo, shell.git(repo, "rev-parse", "HEAD"))
+    start(kit, repo)
+    assert before(kit.bench, core_edit(linked), SESSION, repo).outcome == "allow"
 
 
 def test_the_approved_commits_declaration_judges_not_the_tip(

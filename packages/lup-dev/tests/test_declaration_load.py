@@ -290,6 +290,140 @@ def test_what_judging_reads_is_kept_as_json_whatever_classes_the_project_brings(
     assert declaration.tests is None
 
 
+# The person's own layer, `lup_project.local.py`
+
+OURS = '''
+from pathlib import Path
+
+from lup_dev import Module, Modules, Project, Repositories, Repository
+
+
+class Ours(Module):
+    """The project's own module, naming a made-up neighbour."""
+
+    name = "ours"
+
+    repositories: Repositories = Repositories.of(
+        Repository(name="atlas", path=Path("atlas.git"), about="a made-up neighbour")
+    )
+
+
+project = Project(asks="protected", modules=Modules.default().add(Ours()))
+'''
+
+MINE = '''
+from pathlib import Path
+
+from lup_dev import Module, Modules, Project, Repositories, Repository
+
+
+class Mine(Module):
+    """The person's own module: the repositories they relate."""
+
+    name = "mine"
+
+    repositories: Repositories = Repositories.of(
+        Repository(
+            name="beacon",
+            path=Path("~/src/beacon"),
+            about="another made-up neighbour",
+            github="someone/beacon",
+        )
+    )
+
+
+project = Project(modules=Modules().add(Mine()))
+'''
+
+
+def test_the_person_s_layer_is_layered_on_the_project_s(tmp_path: Path) -> None:
+    write(tmp_path / "lup_project.py", OURS)
+    write(tmp_path / "lup_project.local.py", MINE)
+    declared = load(tmp_path)
+    assert declared.source == Path("lup_project.py")
+    assert declared.local == Path("lup_project.local.py")
+    resolved = resolve(declared.project)
+    assert [each.name for each in resolved.repositories] == ["atlas", "beacon"]
+    assert [module.name for module in resolved.modules][-2:] == ["ours", "mine"]
+    assert resolved.asks == "protected"
+    assert not any(name.startswith("lup_project") for name in sys.modules)
+    assert not (tmp_path / "__pycache__").exists()
+
+
+def test_without_the_person_s_layer_nothing_changes(tmp_path: Path) -> None:
+    write(tmp_path / "lup_project.py", OURS)
+    declared = load(tmp_path)
+    assert declared.local is None
+    assert [each.name for each in resolve(declared.project).repositories] == ["atlas"]
+
+
+def test_the_person_s_layer_edits_the_project_s_own_module(tmp_path: Path) -> None:
+    write(tmp_path / "lup_project.py", OURS)
+    write(
+        tmp_path / "lup_project.local.py",
+        """
+        from lup_dev import Modules, Project, Repositories
+
+        from lup_project import Ours
+
+        project = Project(
+            asks="every",
+            modules=Modules().edit(Ours(repositories=Repositories().drop("atlas"))),
+        )
+        """,
+    )
+    resolved = resolve(load(tmp_path).project)
+    assert resolved.repositories == []
+    assert resolved.asks == "every"
+
+
+def test_the_person_s_layer_alone_is_layered_on_the_defaults(tmp_path: Path) -> None:
+    write(tmp_path / "lup_project.local.py", MINE)
+    declared = load(tmp_path)
+    assert declared.source is None
+    resolved = resolve(declared.project)
+    assert [module.name for module in resolved.modules] == [
+        *(module.name for module in resolve(Project()).modules),
+        "mine",
+    ]
+
+
+def test_one_name_from_the_project_and_the_person_with_two_paths_fails(
+    tmp_path: Path,
+) -> None:
+    write(tmp_path / "lup_project.py", OURS)
+    write(
+        tmp_path / "lup_project.local.py",
+        MINE.replace('name="beacon"', 'name="atlas"'),
+    )
+    with pytest.raises(
+        ProjectError,
+        match=r"`atlas` at `atlas.git` and at `~/src/beacon`",
+    ):
+        resolve(load(tmp_path).project)
+
+
+@pytest.mark.parametrize(
+    ("text", "failure"),
+    [
+        ("project = Project(\n", "`lup_project.local.py` can't be imported"),
+        ("x = 1\n", "`lup_project.local.py` binds no `project`"),
+        (
+            "project = 3\n",
+            "`project` in `lup_project.local.py` is a `builtins.int`",
+        ),
+    ],
+)
+def test_a_broken_layer_of_the_person_s_fails_the_load_naming_it(
+    tmp_path: Path, text: str, failure: str
+) -> None:
+    write(tmp_path / "lup_project.py", OURS)
+    write(tmp_path / "lup_project.local.py", f"from lup_dev import Project\n{text}")
+    with pytest.raises(ProjectError, match=failure):
+        load(tmp_path)
+    assert not any(name.startswith("lup_project") for name in sys.modules)
+
+
 def test_a_declaration_that_doesnt_resolve_fails_its_reading(tmp_path: Path) -> None:
     write(
         tmp_path / "lup_project.py",
