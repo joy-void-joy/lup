@@ -158,7 +158,7 @@ def test_each_tool_is_summarized_in_fifty_characters_at_most() -> None:
     specs = GitHubTools(integration="dev").specs()
     assert {spec.name: spec.summary for spec in specs} == {
         "read_issue": "Read an issue or pull request, with its comments.",
-        "find_issues": "Search this repository's issues and pull requests.",
+        "find_issues": "Search a repository's issues and pull requests.",
         "file_issue": "File an issue in this repository.",
         "comment": "Comment on an issue or pull request.",
         "draft_pull_request": "Open a draft pull request from a pushed branch.",
@@ -273,8 +273,8 @@ def test_find_issues_searches_this_repository_alone(gh: Gh, tmp_path: Path) -> N
         "claude that doesn't get in the agent's way\n"
         "#65  issue, open, updated 2026-10-13: Keep lup's own copy of each launched "
         "session's transcript\n"
-        "1 matches in other repositories were left out: lup's tools read this "
-        "repository alone."
+        "1 matches in other repositories were left out: a search reads one "
+        "repository, which `repository` names."
     )
     assert gh.arguments() == [
         [
@@ -291,6 +291,114 @@ def test_find_issues_searches_this_repository_alone(gh: Gh, tmp_path: Path) -> N
             "-label:wontfix",
         ]
     ]
+
+
+def test_find_issues_searches_another_repository_named_and_it_alone(
+    gh: Gh, tmp_path: Path
+) -> None:
+    gh.recorded("search issues", "search-issues.json")
+    registered = launch(tmp_path)
+    answer = called(
+        "find_issues", {"query": "token", "repository": "cli/cli"}, registered
+    )
+    assert not answer.error
+    assert answer.text == (
+        "1 open in cli/cli for `token`:\n"
+        "#14673  pull request, open, updated 2026-10-13: Refreshable tokens: "
+        "capture `auth_invocation` telemetry on `login` and `refresh`\n"
+        "2 matches in other repositories were left out: a search reads one "
+        "repository, which `repository` names."
+    )
+    [call] = gh.calls()
+    assert call.arguments[:3] == ["search", "issues", "--repo=cli/cli"]
+    assert call.directory == str(registered.repository)
+
+
+def test_read_issue_reads_another_repository_named(gh: Gh, tmp_path: Path) -> None:
+    gh.recorded("pr view", "pr-view.json")
+    registered = launch(tmp_path)
+    answer = called(
+        "read_issue",
+        {"number": 59, "repository": "someone/atlas"},
+        registered,
+    )
+    assert not answer.error
+    [call] = gh.calls()
+    assert call.arguments[:4] == [
+        "pr",
+        "view",
+        "59",
+        "--repo=someone/atlas",
+    ]
+    assert call.directory == str(registered.repository)
+
+
+def test_reading_another_repository_needs_none_named_for_the_launch(
+    gh: Gh, tmp_path: Path
+) -> None:
+    gh.recorded("search issues", "search-issues.json")
+    answer = called(
+        "find_issues",
+        {"query": "", "repository": "joy-void-joy/lup"},
+        launch(tmp_path, github=None),
+    )
+    assert not answer.error
+    assert answer.text.startswith("2 open in joy-void-joy/lup for ``:")
+    [arguments] = gh.arguments()
+    assert "--repo=joy-void-joy/lup" in arguments
+
+
+@pytest.mark.parametrize(
+    "written", ["atlas", "/atlas", "joy-void-joy/lup/x", "../lup", "a//b"]
+)
+def test_a_repository_that_isnt_owner_and_name_is_refused_before_gh_runs(
+    gh: Gh, tmp_path: Path, written: str
+) -> None:
+    answer = called(
+        "read_issue", {"number": 1, "repository": written}, launch(tmp_path)
+    )
+    assert answer.error
+    assert answer.text.startswith("`read_issue`'s arguments:")
+    assert "a repository on GitHub is `owner/name`" in answer.text
+    assert gh.calls() == []
+
+
+@pytest.mark.parametrize(
+    ("name", "arguments"),
+    [
+        ("file_issue", {"title": "t", "body": "b", "repository": "cli/cli"}),
+        ("comment", {"number": 1, "body": "b", "repository": "cli/cli"}),
+        (
+            "draft_pull_request",
+            {"branch": "b", "title": "t", "body": "b", "repository": "cli/cli"},
+        ),
+    ],
+)
+def test_the_tools_that_write_take_no_other_repository(
+    gh: Gh, tmp_path: Path, name: str, arguments: JsonValue
+) -> None:
+    answer = called(name, arguments, launch(tmp_path))
+    assert answer.error
+    assert answer.text.startswith(f"`{name}`'s arguments:")
+    assert "repository" in answer.text
+    assert gh.calls() == []
+
+
+def test_only_the_tools_that_read_offer_another_repository() -> None:
+    def offers(schema: dict[str, JsonValue]) -> bool:
+        properties = schema["properties"]
+        assert isinstance(properties, dict)
+        return "repository" in properties
+
+    specs = GitHubTools(integration="dev").specs()
+    offered = {spec.name: offers(spec.input_schema) for spec in specs}
+    assert offered == {
+        "read_issue": True,
+        "find_issues": True,
+        "file_issue": False,
+        "comment": False,
+        "draft_pull_request": False,
+    }
 
 
 def test_find_issues_says_where_more_may_match_and_searches_every_state(

@@ -1,8 +1,10 @@
 """lup's GitHub tools in a launched session: reading and finding issues, filing one, commenting, opening a draft pull request.
 
 `docs/host-tools.md`, *lup's tools*. Each acts on the launch's own repository on
-GitHub, named when the launch started (`Register.github`), through the
-operator's `gh` on the host (`forge/github.py`), and only within the limits the
+GitHub, named when the launch started (`Register.github`), but for the two that
+read, which reach another the operator's login can read where a call names it
+(`repository`, `docs/related-repositories.md`); each through the operator's `gh`
+on the host (`forge/github.py`), and only within the limits the
 project's declaration sets (`Register.limits`): a tool's action (`read-issues`,
 `file-issue`, `comment`, `draft-pull-request`) is checked before anything runs,
 and one beyond the limits is refused, saying the declaration doesn't allow it and
@@ -24,21 +26,54 @@ from lup.tools.serving import Answer
 from lup.tools.tool import ToolSpec
 from lup.types import Model
 from lup_dev.forge.github import GitHub, GitHubError, terms
-from lup_dev.host.protocol import Action, Register
+from lup_dev.host.protocol import Action, GitHubRepository, Register
 from lup_dev.host.rooms import RoomTools
 
 if TYPE_CHECKING:
     from lup_dev.host.courier import Conversation
 
 
-class Numbered(Model, extra="forbid"):
-    """An issue or pull request of this repository, by its number."""
+class Arguments(Model, extra="forbid"):
+    """A GitHub tool's arguments: on the launch's own repository, unless they name another."""
 
-    number: PositiveInt = Field(description="Its number in this repository.")
+    def elsewhere(self) -> GitHubRepository | None:
+        """Return the repository on GitHub the call names; none for the launch's own, which a tool that writes always acts on."""
+        return None
 
 
-class Query(Model, extra="forbid"):
-    """A search of this repository's issues and pull requests."""
+class Reading(Arguments):
+    """A reading tool's arguments, which may name another repository on GitHub than the launch's own."""
+
+    repository: str | None = Field(
+        default=None,
+        description=(
+            "Another repository on GitHub to read, as `owner/name`: any the "
+            "operator's login can read, such as one of the other repositories "
+            "your guidance lists. Left out, this one."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def readable(self) -> Self:
+        """Refuse a repository that isn't `owner/name`."""
+        self.elsewhere()
+        return self
+
+    @override
+    def elsewhere(self) -> GitHubRepository | None:
+        if self.repository is None:
+            return None
+        return GitHubRepository.read(self.repository)
+
+
+class Numbered(Reading):
+    """An issue or pull request, by its number: of this repository, or of the one named."""
+
+    number: PositiveInt = Field(description="Its number in its repository.")
+
+
+class Query(Reading):
+    """A search of one repository's issues and pull requests: this one's, or the one named."""
 
     query: str = Field(
         description=(
@@ -62,14 +97,14 @@ class Query(Model, extra="forbid"):
         return self
 
 
-class NewIssue(Model, extra="forbid"):
+class NewIssue(Arguments):
     """An issue to file."""
 
     title: str = Field(min_length=1, description="Its title, one line.")
     body: str = Field(description="What it's about, in GitHub's Markdown.")
 
 
-class NewComment(Model, extra="forbid"):
+class NewComment(Arguments):
     """A comment on an issue or pull request."""
 
     number: PositiveInt = Field(
@@ -78,7 +113,7 @@ class NewComment(Model, extra="forbid"):
     body: str = Field(min_length=1, description="The comment, in GitHub's Markdown.")
 
 
-class NewDraft(Model, extra="forbid"):
+class NewDraft(Arguments):
     """A draft pull request to open."""
 
     branch: str = Field(
@@ -98,7 +133,7 @@ class GitHubTool(Model, arbitrary_types_allowed=True):
     answer: Callable[[JsonValue, Register], Awaitable[Answer]]
 
     @classmethod
-    def of[I: Model](
+    def of[I: Arguments](
         cls,
         action: Action,
         model: type[I],
@@ -107,8 +142,10 @@ class GitHubTool(Model, arbitrary_types_allowed=True):
         """Serve `act` as a tool named after it and described by its docstring, its arguments read as `model`, doing `action` with the operator's credentials.
 
         A call is answered by `act` only where the launch's limits allow
-        `action`, its arguments read as `model`, and the launch's repository on
-        GitHub was named; otherwise, and where `gh` fails, the answer says why.
+        `action`, its arguments read as `model`, and the repository they name
+        is there: another on GitHub where they name one, else the launch's own,
+        named when it started. Otherwise, and where `gh` fails, the answer says
+        why.
         """
         name = act.__name__
         spec = ToolSpec(
@@ -126,7 +163,8 @@ class GitHubTool(Model, arbitrary_types_allowed=True):
             except ValidationError as invalid:
                 return Answer(text=f"`{name}`'s arguments: {invalid}", error=True)
             try:
-                return Answer(text=await act(GitHub.launched(launch), asked))
+                github = GitHub.launched(launch, asked.elsewhere())
+                return Answer(text=await act(github, asked))
             except GitHubError as failed:
                 return Answer(text=f"`{name}` didn't run: {failed}", error=True)
 
@@ -134,7 +172,7 @@ class GitHubTool(Model, arbitrary_types_allowed=True):
 
 
 class GitHubTools(Model, RoomTools):
-    """lup's GitHub tools, served to each launched session: they act on its repository alone."""
+    """lup's GitHub tools, served to each launched session: they write to its repository alone, and read any the operator's login can."""
 
     integration: str
     """The branch a draft pull request goes into: `LUP_INTEGRATION_BRANCH`, as
@@ -171,22 +209,24 @@ class GitHubTools(Model, RoomTools):
     async def read_issue(self, github: GitHub, asked: Numbered) -> str:
         """Read an issue or pull request, with its comments.
 
-        Any issue or pull request of this repository on GitHub, by its number:
-        its title, state, author, labels and description, then each comment
-        whole, oldest first. For a pull request, its branches, whether it's a
-        draft, its review decision, and each check on its head with how it
-        stands and where to look.
+        Any issue or pull request of this repository on GitHub, by its number,
+        or of another the operator's login can read, named by `repository` as
+        `owner/name`: its title, state, author, labels and description, then
+        each comment whole, oldest first. For a pull request, its branches,
+        whether it's a draft, its review decision, and each check on its head
+        with how it stands and where to look.
         """
         return (await github.thread(asked.number)).text()
 
     async def find_issues(self, github: GitHub, asked: Query) -> str:
-        """Search this repository's issues and pull requests.
+        """Search a repository's issues and pull requests.
 
-        GitHub's search over this repository on GitHub: each match's number,
-        whether it's an issue or a pull request, its state, when it was last
-        updated, and its title, in GitHub's order of relevance. `read_issue`
-        reads one whole. Searching before filing an issue finds one already
-        open.
+        GitHub's search over this repository on GitHub, or over another the
+        operator's login can read, named by `repository` as `owner/name`: each
+        match's number, whether it's an issue or a pull request, its state,
+        when it was last updated, and its title, in GitHub's order of
+        relevance. `read_issue` reads one whole. Searching before filing an
+        issue finds one already open.
         """
         search = await github.search(asked.query, asked.state, self.limit)
         found = [each.text() for each in search.found]
@@ -209,7 +249,7 @@ class GitHubTools(Model, RoomTools):
             [
                 (
                     f"{search.elsewhere} matches in other repositories were left "
-                    "out: lup's tools read this repository alone."
+                    "out: a search reads one repository, which `repository` names."
                 )
             ]
             if search.elsewhere

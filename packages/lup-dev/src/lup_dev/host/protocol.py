@@ -8,7 +8,7 @@ stopping the service. A module declares its own kinds beside the handler it
 registers for them.
 """
 
-from pathlib import Path, PurePath
+from pathlib import Path, PurePath, PurePosixPath
 from typing import Annotated, Literal, get_args
 
 from pydantic import AfterValidator
@@ -52,8 +52,9 @@ type Action = Literal[
 Each names a handler lup carries out on the host (`docs/host-tools.md`,
 *Credentials on the host*): fetching from one of the repository's remotes;
 pushing to one, a push that isn't a fast-forward being `force-push`, and one
-removing a branch or tag `delete-ref`; reading the repository's issues and pull
-requests; filing an issue; commenting on one; and opening a draft pull request.
+removing a branch or tag `delete-ref`; reading issues and pull requests, the
+repository's own or another's the operator's login can read; filing an issue;
+commenting on one; and opening a draft pull request.
 The handlers arrive with GitHub's tools and git's remote helper.
 """
 
@@ -104,6 +105,29 @@ class GitHubRepository(Model):
 
     owner: str
     name: str
+
+    @classmethod
+    def read(cls, written: str) -> GitHubRepository:
+        """Read a repository written as `gh --repo` takes it: `owner/name`.
+
+        Raise `ValueError` where it isn't two names, neither `..`, apart by one
+        `/`.
+
+        >>> GitHubRepository.read("someone/atlas")
+        GitHubRepository(owner='someone', name='atlas')
+        >>> GitHubRepository.read("/atlas")
+        Traceback (most recent call last):
+        ...
+        ValueError: a repository on GitHub is `owner/name`, not '/atlas'
+        """
+        path = PurePosixPath(written)
+        plain = str(path) == written and not path.is_absolute()
+        match path.parts:
+            case [owner, name] if plain and ".." not in path.parts:
+                return cls(owner=owner, name=name)
+            case _:
+                message = f"a repository on GitHub is `owner/name`, not {written!r}"
+                raise ValueError(message)
 
     def __str__(self) -> str:
         """Spell it as `gh --repo` takes it: `owner/name`."""
