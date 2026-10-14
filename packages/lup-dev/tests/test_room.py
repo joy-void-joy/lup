@@ -257,6 +257,28 @@ def test_a_plain_runner_mounts_and_checks_nothing_of_uv(
     ]
 
 
+def test_a_clone_s_git_directory_is_mounted_on_its_own_so_the_room_cant_move_it(
+    repo: Path, tmp_path: Path, home: Path
+) -> None:
+    layout = Layout(state=tmp_path / "state", cache=tmp_path / "cache" / "lup")
+    resolved = resolve(Project(modules=Modules.default().edit(Python(runner=Plain()))))
+
+    room = maintaining_room(
+        resolved,
+        repo,
+        layout,
+        terminal(),
+        AskedUv(tmp_path / "none", tmp_path / "none", tmp_path / "none"),
+    )
+
+    assert room.mounts[:4] == [
+        Mount(source=repo),
+        Mount(source=repo / ".git"),
+        Mount(source=repo / ".git" / "config", read_only=True),
+        Mount(source=repo / ".git" / "hooks", read_only=True),
+    ]
+
+
 # Refusals
 
 

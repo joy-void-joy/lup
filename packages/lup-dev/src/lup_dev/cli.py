@@ -95,7 +95,7 @@ from lup_dev.inbox.store import (
 from lup_dev.inbox.tools import InboxTools
 from lup_dev.launch.clis import CliCache
 from lup_dev.launch.images import build
-from lup_dev.launch.room import host_needs, maintaining_room
+from lup_dev.launch.room import host_needs, maintaining_room, room_git
 from lup_dev.launch.session import (
     LaunchError,
     approved_declaration,
@@ -121,6 +121,8 @@ from lup_dev.policy.submissions import (
     OneReview,
 )
 from lup_dev.policy.verdicts import VerdictLog
+from lup_dev.remote.protocol import Remotes
+from lup_dev.remote.protocol import routes as remote_routes
 from lup_dev.settings import LupDevSettings, TerminalVariables
 
 if TYPE_CHECKING:
@@ -286,7 +288,10 @@ def host_serve(context: typer.Context) -> None:
         post=delivery,
         routes=inbox_routes(delivery),
         tools=room_tools(delivery),
-        room_routes=[RoomRoute.to(Stating())],
+        room_routes=[
+            RoomRoute.to(Stating()),
+            *remote_routes(Remotes(say=typer.echo)),
+        ],
         say=typer.echo,
     )
     asyncio.run(service.serve())
@@ -616,9 +621,10 @@ def launched(
     report said; the declaration at the commit approved; the host's requirements,
     each optional one off said; the repository named on GitHub, or why not said;
     the host service; the latest CLI, a fallback said; the room, its image built
-    where it's missing; the terminal settings; the sweep, then the launch
-    registered, under its launcher's lock; the CLI in the room, with `arguments`
-    after lup's own. The registration ends, and the launch's directory goes,
+    where it's missing; the terminal settings; the repository's `config` checked
+    for the room's git; the sweep, then the launch registered, under its
+    launcher's lock; the room's git configuration and helper written; the CLI in
+    the room, with `arguments` after lup's own. The registration ends, and the launch's directory goes,
     whatever the CLI did.
     """
     runtime = adapter.runtime.name()
@@ -669,6 +675,9 @@ def launched(
             hooked(adapter.hooks),
             tools=served_tools(),
         )
+        git = room_git(
+            repository, own, [*room.mounts, *adapter.agent().terminal(settings).mounts]
+        )
         registered = Register(
             launch=launch,
             runtime=runtime,
@@ -685,13 +694,16 @@ def launched(
                 swept(launcher)
                 sockets = launcher.host.register(registered)
                 try:
+                    git.write()
                     walled = room.model_copy(
                         update={
                             "name": registered.container,
                             "mounts": [
                                 *room.mounts,
+                                *git.mounts,
                                 Mount(source=sockets, target=ROOM_SOCKETS),
                             ],
+                            "env": {**room.env, **git.env},
                         }
                     )
                     opened = Room(

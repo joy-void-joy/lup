@@ -11,7 +11,13 @@ A `lup.rooms.Container` on the host's network, its image the declaration's
 - the git directory's `config` and `hooks/` read-only over it: they run on the
   host, so a hook or a `core.fsmonitor` written there would run at the
   operator's next git command. `hooks/` is made if it's missing, so the room
-  can't make it;
+  can't make it. Where the git directory isn't the tree's root (a clone's
+  `.git`), it's mounted on its own too, read-write as the tree is: a mount can't
+  be moved from inside, where a plain directory holding the read-only mounts
+  could be moved aside, and one of the room's own, its `config` among it, put
+  in its place for the host's git to read (measured: `mv .git .git-real`
+  succeeded under the mounts alone, and failed with "Device or resource busy"
+  once `.git` was mounted on its own);
 - what the project's runner needs for its environment (`Runner.room`);
 - pyright's source in lup's cache, read-write, which the gate builds the engine
   from. Only that part: the cache holds the CLIs rooms run, which a room
@@ -33,13 +39,28 @@ The environment's interpreter must resolve under the room's mounts, or the room
 refuses with the runner's remedy: without it, `uv run` in the room set about
 remaking the shared `.venv` (`docs/launch.md`, *The project's environment,
 shared with the host*). A system interpreter is outside every mount.
+
+The room's git (`room_git`, `docs/host-tools.md`, *git through a remote
+helper*): its own configuration in place of the operator's (`GIT_CONFIG_GLOBAL`,
+`remote/config.py`), and lup's remote helper first on its `PATH`, both written
+into the launch's directory and mounted read-only on every runtime, since not
+every terminal mounts that directory. The host runs git in the repository's git
+directory for the room, so a launch refuses a repository whose `config` would
+have that git read what the room writes: one setting `extensions.worktreeConfig`,
+under which git reads the git directory's `config.worktree` too, a file the room
+writes; or one including, through `include.path` or any `includeIf` whatever its
+condition, a file inside one of the room's mounts, each include resolved as git
+resolves it (relative to the file holding it, `~` the operator's home, an
+`:(optional)` one too) and followed through every file it includes
+(`docs/field-notes.md`, *Host-side git in a repository the room writes*).
 """
 
+import inspect
 from pathlib import Path
 from shlex import split
 from typing import TYPE_CHECKING
 
-from lup.rooms.container import Container, Image, Mount
+from lup.rooms.container import Container, Image, Mask, Mount
 from lup.types import Model
 from lup_dev.catalog.room import Editors, RoomBase
 from lup_dev.declaration.requirements import Needed, Requirement
@@ -47,7 +68,15 @@ from lup_dev.errors import LupDevError
 from lup_dev.forge.github import PROGRAM
 from lup_dev.git import Git, nul_separated
 from lup_dev.launch.images import definition
-from lup_dev.layout import LOCALTIME
+from lup_dev.layout import (
+    LOCALTIME,
+    ROOM_PATH,
+    ROOM_SOCKETS,
+    LaunchLayout,
+    LaunchSockets,
+)
+from lup_dev.remote import helper
+from lup_dev.remote.config import room_config
 
 if TYPE_CHECKING:
     from lup_dev.declaration.requirements import Tools
@@ -64,14 +93,20 @@ class RoomError(LupDevError):
 def host_needs() -> list[Needed]:
     """Return what the host needs to run a room, as requirements checked at once.
 
-    Podman, rootless; and, optional, `gh`, without which lup's GitHub tools and
-    the gate's issue states in a room are off, and `notify-send`, without which
-    the inbox raises no desktop notice.
+    Podman, rootless; git, which pushes and fetches for each room; and,
+    optional, `gh`, without which lup's GitHub tools and the gate's issue states
+    in a room are off, and `notify-send`, without which the inbox raises no
+    desktop notice.
     """
     podman = Requirement(
         tool="podman",
         why="runs each session's room, rootless",
         install="your system's `podman` package, set up for rootless containers",
+    )
+    git = Requirement(
+        tool="git",
+        why="pushes and fetches for each room, with your credentials",
+        install="your system's `git` package",
     )
     gh = Requirement(
         tool=PROGRAM,
@@ -90,6 +125,7 @@ def host_needs() -> list[Needed]:
     )
     return [
         Needed(module="lup-dev launch", requirement=podman),
+        Needed(module="lup-dev launch", requirement=git),
         Needed(module="lup-dev launch", requirement=gh),
         Needed(module="lup-dev inbox", requirement=notices),
     ]
@@ -216,6 +252,7 @@ def maintaining_room(
     pyright.mkdir(parents=True, exist_ok=True)
     mounts = [
         Mount(source=held.tree),
+        *([] if held.git == held.tree else [Mount(source=held.git)]),
         Mount(source=held.git / "config", read_only=True),
         Mount(source=hooks, read_only=True),
         *needs.mounts,
@@ -253,3 +290,127 @@ def maintaining_room(
         },
         network="host",
     )
+
+
+class RoomGit(Model):
+    """What a room gets for git beside the tree: its own git configuration, and lup's remote helper first on its `PATH`."""
+
+    repository: Path
+    """The repository's git directory on the host, whose remotes the
+    configuration names."""
+    launch: LaunchLayout
+    """The launch's own places, where both are written."""
+
+    @property
+    def mounts(self) -> list[Mount]:
+        """Both, read-only, at their host paths."""
+        return [
+            Mount(source=self.launch.bin, read_only=True),
+            Mount(source=self.launch.gitconfig, read_only=True),
+        ]
+
+    @property
+    def env(self) -> dict[str, str]:
+        """The room's variables for git: the configuration in place of the operator's, and the helper's directory first on the `PATH`."""
+        return {
+            "GIT_CONFIG_GLOBAL": str(self.launch.gitconfig),
+            "PATH": ":".join(str(each) for each in [self.launch.bin, *ROOM_PATH]),
+        }
+
+    def write(self) -> None:
+        """Write the room's git configuration and the helper into the launch's directory, the helper executable."""
+        room_config(
+            self.repository,
+            self.launch.gitconfig,
+            LaunchSockets(directory=ROOM_SOCKETS).request,
+        )
+        self.launch.bin.mkdir(parents=True, exist_ok=True)
+        self.launch.helper.write_text(inspect.getsource(helper))
+        self.launch.helper.chmod(0o755)
+
+
+def room_git(
+    repository: Path, launch: LaunchLayout, mounts: list[Mount | Mask]
+) -> RoomGit:
+    """Return what a room gets for git, for the repository whose git directory is `repository`, once its `config` is checked.
+
+    `mounts` is everything else the room mounts: the room's own and its
+    terminal's. Raise `RoomError` where the repository's `config` would have the
+    host's git read what the room writes: setting `extensions.worktreeConfig`,
+    or including a file inside one of the room's mounts, through any file it
+    includes in turn.
+    """
+    git = Git(cwd=repository)
+    room = RoomGit(repository=repository, launch=launch)
+    sources = [
+        each.source for each in [*mounts, *room.mounts] if isinstance(each, Mount)
+    ]
+
+    def holding(path: Path) -> list[Path]:
+        places = [path, path.resolve()]
+        return [
+            source
+            for source in sources
+            if any(place.is_relative_to(source) for place in places)
+        ]
+
+    def read(config: Path, *arguments: str) -> list[str]:
+        """Read `config` alone, its includes not followed: each value, or each key."""
+        found = git.run(
+            "config",
+            "--file",
+            str(config),
+            "--no-includes",
+            "-z",
+            *arguments,
+            ok=[0, 1],
+        )
+        return nul_separated(found.stdout)
+
+    def included(config: Path) -> list[Path]:
+        keys = read(config, "--name-only", "--get-regexp", r"^include(if\..*)?\.path$")
+        written = [
+            value
+            for key in dict.fromkeys(keys)
+            for value in read(config, "--get-all", key)
+        ]
+        named = [
+            Path(each).expanduser()
+            for value in written
+            for each in dict.fromkeys([value, value.removeprefix(":(optional)")])
+        ]
+        return [each if each.is_absolute() else config.parent / each for each in named]
+
+    def walked(config: Path, seen: list[Path]) -> list[Path]:
+        here = config.resolve()
+        if here in seen:
+            return seen
+        if "true" in read(
+            config, "--type=bool", "--get-all", "extensions.worktreeConfig"
+        ):
+            message = (
+                f"{config} sets `extensions.worktreeConfig`, under which git reads the "
+                f"git directory's `config.worktree` too ({repository / 'config.worktree'}), "
+                "a file the room writes: the host's git, pushing and fetching for the "
+                "room, would read what the room put there. Unset it to launch"
+            )
+            raise RoomError(message)
+        files = included(config)
+        for each in files:
+            held = holding(each)
+            if held:
+                message = (
+                    f"{config} includes {each}, inside the room's mount of {held[0]}: "
+                    "the host's git, pushing and fetching for the room, would read "
+                    "what the room wrote there. Move the included file out of the "
+                    "room's mounts, or drop the include, to launch"
+                )
+                raise RoomError(message)
+        checked = [*seen, here]
+        for each in files:
+            if each.is_file():
+                checked = walked(each, checked)
+        return checked
+
+    walked(repository / "config", [])
+    return room
