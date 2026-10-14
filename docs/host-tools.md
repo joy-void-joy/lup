@@ -337,25 +337,11 @@ await serve(LaunchTools(...), reader, writer)   # one MCP session over one conne
 
 ## Checks owed
 
-One short live room per runtime settles most of them; they're runtime behaviour, so they're checked live rather than in tests, and what they find goes into `docs/field-notes.md`.
-- **Claude Code 2.1.296:**
-  - a `PreToolUse` answer rewriting a call to lup's tools (`updatedInput` adding `caller`, no decision) reaching the server, the call otherwise as the model wrote it;
-  - the `socat` bridge under `--mcp-config` and `--strict-mcp-config` in an interactive room, and the agent finding lup's tools through tool search by the names its guidance lists;
-  - a call held past the 30-minute idle limit, and for hours, with the entry's `timeout`;
-  - Esc on a held call: whether it sends `notifications/cancelled`;
-  - `--messaging-socket-path` in the socket directory, `crossSessionInbound: "accept"` from `--settings` under `bypassPermissions`, the message's frame, and an idle session starting a turn;
-  - `/mcp` reconnecting lup's server after a service restart;
-  - what a `PreToolUse` hook on every call costs, measured;
-  - that `--resume` keeps the session's id.
-- **Codex 0.162.1:**
-  - a `PreToolUse` answer rewriting a call to lup's tools beside `permissionDecision: "allow"` reaching the server, as the first lup measured on 0.158.0;
-  - the `socat` bridge under `-c mcp_servers.lup=…`, and the agent finding lup's tools through tool search, in code mode too;
-  - a call held for hours with `tool_timeout_sec`;
-  - a `PreToolUse` answer's `additionalContext`, with no decision, reaching the model;
-  - in code mode, what the model sees of a held call answered after its turn ended;
-  - that resuming keeps the thread's id.
-- **git:** a fetch by name from GitHub through the host; the service's SSH agent when a launch started it. (The review of host-side git in a repository the room writes is done, *Running git on the host*.)
-- **GitHub:** `gh repo view` in a bare repository's git directory naming the repository behind an SSH alias such as `jvj:`.
+Seen live on 2026-10-14 (`docs/field-notes.md`, *Piece 2, live*): on Claude Code 2.1.299 and Codex 0.162.1, lup's tools found through tool search by the names the guidance lists and called through the `socat` bridge, each call stamped with its conversation (Claude Code's `updatedInput` with no decision, Codex's beside `allow`); an item told at the next call without interrupting the one running (Claude Code's hook context, Codex's developer message); an idle Claude Code session woken by the operator's message through its messaging socket; a held `ask` answered after 36 minutes on Claude Code (past its 30-minute idle limit) and after 6 minutes 53 seconds on Codex (past its 300-second default); `git fetch` and a branch's push to GitHub through the host, a deletion refused by the limits; `read_issue` and `find_issues`; `gh repo view` naming the repository behind the `jvj:` alias; an unjudged hook's cost, 4.5 ms. Still owed:
+- **Claude Code:** Esc on a held call (whether it sends `notifications/cancelled`); `/mcp` reconnecting lup's server after a service restart; `--resume` keeping the session's id, so a resumed session finds what waited.
+- **Codex:** in code mode, what the model sees of a held call answered after its turn ended (the hold above stayed a direct call); resuming keeping the thread's id.
+- **GitHub's write tools,** at their first real use from a launched session (the operator's choice): `file_issue`, `comment` (on a pull request's number too), `draft_pull_request`.
+- **A protected ref refused by lup live:** a push to `main` met git's own fast-forward refusal first; lup's rule is tested, and was seen against a stand-in forge in a room.
 
 ## Building it
 
