@@ -186,6 +186,7 @@ class World:
             repository=self.project,
             judge=judge,
             container="lup-one",
+            github=None,
             limits=limits,
         )
 
@@ -342,13 +343,14 @@ def test_a_force_a_lease_a_deletion_and_a_protected_ref_are_refused_with_their_r
         assert refused.exit_code != 0
     forcing = (
         "a forced update of `refs/heads/feat` (`+`, `--force` or `--force-with-lease`): "
-        "`force-push` isn't among the actions the project's declaration allows "
-        "(`Core.credentials`): it's the operator's"
+        "the project's declaration doesn't allow `force-push` with the operator's "
+        "credentials (`Core.credentials`), and allowing it is the operator's call"
     )
     assert forcing in stderr(forced)
     assert forcing in stderr(leased)
-    assert "deleting `refs/heads/feat`: `delete-ref` isn't among the actions" in stderr(
-        deleted
+    assert (
+        "deleting `refs/heads/feat`: the project's declaration doesn't allow "
+        "`delete-ref`" in stderr(deleted)
     )
     assert (
         "`refs/heads/main` is protected by the project's declaration "
@@ -534,7 +536,7 @@ def test_a_fetch_the_limits_dont_allow_is_refused(
         fetched = world.room_git("fetch", "origin", "main")
 
     assert fetched.exit_code != 0
-    assert "`fetch` isn't among the actions" in stderr(fetched)
+    assert "the project's declaration doesn't allow `fetch`" in stderr(fetched)
 
 
 def test_a_fetch_request_writes_no_ref_and_needs_the_object_listed(

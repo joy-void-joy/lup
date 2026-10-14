@@ -42,18 +42,29 @@ from lup_dev.approval import approved
 from lup_dev.clock import Clock, SystemClock
 from lup_dev.codescan.conditions import loaded
 from lup_dev.codescan.contract import Checker, Finding, Source
-from lup_dev.codescan.directives import Checking, Fired, GitHubIssues, Trackers
+from lup_dev.codescan.directives import (
+    Checking,
+    Fired,
+    GitHubIssues,
+    HostIssues,
+    Issues,
+    Trackers,
+)
 from lup_dev.codescan.engine import EngineChecker
 from lup_dev.codescan.reference import reference
 from lup_dev.codescan.ruff import Ruff
-from lup_dev.declaration.requirements import Machine, Tools
+from lup_dev.declaration.requirements import Machine, Report, Tools
 from lup_dev.declaration.requirements import check as checked
 from lup_dev.errors import LupDevError
+from lup_dev.forge.github import PROGRAM, GitHubError, named
+from lup_dev.forge.protocol import Stating
+from lup_dev.forge.tools import GitHubTools
 from lup_dev.gate import Check, Shell, failed, report
 from lup_dev.git import Git, nul_separated
-from lup_dev.host.client import Detached, HostClient
+from lup_dev.host.client import Detached, HostClient, RoomClient
 from lup_dev.host.courier import Courier, Heard, Telling
-from lup_dev.host.protocol import HostError, Register
+from lup_dev.host.protocol import GitHubRepository, HostError, Register
+from lup_dev.host.rooms import RoomRoute
 from lup_dev.host.service import Answerer, HostService
 from lup_dev.inbox.delivery import Delivery, opening, what, who
 from lup_dev.inbox.notices import NotifySend
@@ -277,15 +288,21 @@ def host_serve(context: typer.Context) -> None:
         post=delivery,
         routes=inbox_routes(delivery),
         tools=room_tools(delivery),
+        room_routes=[
+            RoomRoute.to(Stating()),
+            *remote_routes(Remotes(say=typer.echo)),
+        ],
         say=typer.echo,
-        room_routes=remote_routes(Remotes(say=typer.echo)),
     )
     asyncio.run(service.serve())
 
 
 def room_tools(delivery: Delivery) -> list[RoomTools]:
     """List the modules' tools the host service serves each launched session."""
-    return [InboxTools(delivery=delivery)]
+    return [
+        InboxTools(delivery=delivery),
+        GitHubTools(integration=LupDevSettings().lup_integration_branch),
+    ]
 
 
 def served_tools() -> list[ToolSpec]:
@@ -536,6 +553,28 @@ class Launcher(Model, arbitrary_types_allowed=True):
     terminal: TerminalVariables
     say: Callable[[str], None]
     """Where the launch tells the operator what it does."""
+    github: Callable[[Path], GitHubRepository]
+    """Names the repository on GitHub whose git directory it's given, from its own
+    remotes, raising `GitHubError` where `gh` can't."""
+
+
+def on_github(
+    launcher: Launcher, repository: Path, needs: Report
+) -> GitHubRepository | None:
+    """Name the repository on GitHub for a launch, from its git directory `repository`; where it can't be, say why once and return none.
+
+    Where `gh` is off on the host, which the launch said with its requirements,
+    it isn't asked again.
+    """
+    if any(PROGRAM in each.needed.requirement.programs() for each in needs.off):
+        return None
+    try:
+        return launcher.github(repository)
+    except GitHubError as unnamed:
+        launcher.say(
+            f"lup's GitHub tools won't reach GitHub from this launch: {unnamed}."
+        )
+        return None
 
 
 def swept(launcher: Launcher) -> None:
@@ -579,7 +618,8 @@ def launched(
     """Launch `adapter`'s runtime in a room for `worktree`, in this terminal, and return its CLI's exit status.
 
     In the order `docs/launch.md` gives (*The command*): trust on launch, its
-    report said; the declaration at the commit approved; the host's requirements;
+    report said; the declaration at the commit approved; the host's requirements,
+    each optional one off said; the repository named on GitHub, or why not said;
     the host service; the latest CLI, a fallback said; the room, its image built
     where it's missing; the terminal settings; the repository's `config` checked
     for the room's git; the sweep, then the launch registered, under its
@@ -603,6 +643,7 @@ def launched(
         needs = checked(host_needs(), launcher.tools).require()
         for off in needs.off:
             launcher.say(f"Turned off, for want of a tool: {off.described()}")
+        github = on_github(launcher, repository, needs)
         launcher.host.ensure()
         cached = CliCache(
             layout=launcher.layout.clis(runtime), channel=adapter.channel
@@ -645,6 +686,7 @@ def launched(
             judge=judge,
             container=f"lup-{launch}",
             limits=declared.resolved.limits,
+            github=github,
         )
         own.lock.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -703,6 +745,9 @@ def launching(say: Callable[[str], None]) -> Launcher:
     def trust(root: Path) -> Outcome:
         return trusted(root, [])
 
+    def github(repository: Path) -> GitHubRepository:
+        return asyncio.run(named(repository))
+
     return Launcher(
         layout=layout,
         trust=trust,
@@ -712,6 +757,7 @@ def launching(say: Callable[[str], None]) -> Launcher:
         clock=clock,
         terminal=TerminalVariables(),
         say=say,
+        github=github,
     )
 
 
@@ -772,7 +818,9 @@ def rules_check(
     judge runs them. `# lup: ignore` applies to every owner's findings. A
     deferral whose issue is closed, or whose condition holds, fails the check;
     where the issue tracker can't be reached (no `gh`, no login, offline), the
-    issues go unchecked and the check says why. lup's rules read production and
+    issues go unchecked and the check says why. In a room, which holds no `gh`,
+    the host service is asked each issue's state on the launch's request socket,
+    and an issue it doesn't answer goes unchecked, said. lup's rules read production and
     protected modules; tests are checked by
     pyright and ruff only; what the declaration excludes isn't checked. With no
     paths, it checks every such file in the worktree, as the gate's `rules` step
@@ -803,7 +851,12 @@ def rules_check(
     reports = engine().check(root, sources, declaration.rules, declaration.runner)
     ruff = Ruff().findings(root, sources, declaration.runner)
     conditions = loaded(root, declaration.conditions)
-    issues = GitHubIssues(root=root)
+    room = RoomClient()
+    issues: Issues = (
+        HostIssues(client=room, say=typer.echo)
+        if room.socket.exists()
+        else GitHubIssues(root=root)
+    )
     unreachable = issues.unreachable()
     gate = Trackers(
         issues=issues if unreachable is None else None, conditions=conditions

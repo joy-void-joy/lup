@@ -247,14 +247,11 @@ def stray(objects: Path) -> list[Path]:
     return [*alternates, *linked]
 
 
-def denied(action: Action, launch: Register) -> str | None:
-    """Say why `launch`'s limits don't allow `action`, or none where they do."""
-    if action in launch.limits.actions:
-        return None
-    return (
-        f"`{action}` isn't among the actions the project's declaration allows "
-        "(`Core.credentials`): it's the operator's"
-    )
+def require(action: Action, launch: Register) -> None:
+    """Refuse, with `HostError`, an action `launch`'s limits leave out, saying why (`Limits.refusal`)."""
+    denial = launch.limits.refusal(action)
+    if denial is not None:
+        raise HostError(denial)
 
 
 def refusal(update: Update, *, forced: bool, launch: Register) -> str | None:
@@ -262,7 +259,8 @@ def refusal(update: Update, *, forced: bool, launch: Register) -> str | None:
 
     `forced` is whether it's forced: its own `+`, git's `option force`, or a
     lease on its ref. A protected ref's pattern is read as git's own glob, `*`
-    spanning `/`, case and all.
+    spanning `/`, case and all. An action beyond the limits is said as
+    `Limits.refusal` says it.
     """
     protected = [
         pattern
@@ -275,10 +273,10 @@ def refusal(update: Update, *, forced: bool, launch: Register) -> str | None:
             f"(`Core.credentials`, `{protected[0]}`): updating it is the operator's"
         )
     if update.source is None:
-        denial = denied("delete-ref", launch)
+        denial = launch.limits.refusal("delete-ref")
         return None if denial is None else f"deleting `{update.destination}`: {denial}"
     if forced:
-        denial = denied("force-push", launch)
+        denial = launch.limits.refusal("force-push")
         return (
             None
             if denial is None
@@ -314,8 +312,6 @@ class Remotes(Model, arbitrary_types_allowed=True):
             Asked(
                 command=[
                     "git",
-                    "-C",
-                    repository,
                     f"--git-dir={repository}",
                     "--no-replace-objects",
                     "-c",
@@ -329,6 +325,7 @@ class Remotes(Model, arbitrary_types_allowed=True):
                     *arguments,
                 ],
                 payload="",
+                directory=launch.repository,
             )
         )
 
@@ -390,9 +387,7 @@ class ListHandler(Model, RoomHandler[Listing]):
 
     @override
     async def answer(self, request: Listing, launch: Register) -> Reply:
-        denial = denied("push" if request.for_push else "fetch", launch)
-        if denial is not None:
-            raise HostError(denial)
+        require("push" if request.for_push else "fetch", launch)
         url = await self.remotes.url(launch, request.remote, push=request.for_push)
         ran = await self.remotes.git(launch, "ls-remote", "--end-of-options", url)
         if ran.status != 0:
@@ -430,9 +425,7 @@ class PushHandler(Model, RoomHandler[Pushing]):
 
         An atomic push with an update refused pushes none of them.
         """
-        denial = denied("push", launch)
-        if denial is not None:
-            raise HostError(denial)
+        require("push", launch)
         leases = {lease.ref: lease for lease in request.leases}
 
         async def why(update: Update) -> str | None:
@@ -544,9 +537,7 @@ class FetchHandler(Model, RoomHandler[Fetching]):
 
     @override
     async def answer(self, request: Fetching, launch: Register) -> Reply:
-        denial = denied("fetch", launch)
-        if denial is not None:
-            raise HostError(denial)
+        require("fetch", launch)
         await self.remotes.contained(launch)
         url = await self.remotes.url(launch, request.remote, push=False)
         names = list(dict.fromkeys(each.name for each in request.wanted))

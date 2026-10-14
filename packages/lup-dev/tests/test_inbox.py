@@ -25,6 +25,7 @@ from typer.testing import CliRunner
 
 from lup.tools.speaking import Problem, Remark
 from lup_dev import cli
+from lup_dev.forge.tools import GitHubTools
 from lup_dev.host.client import HostClient, Starter
 from lup_dev.host.courier import Conversation as Caller
 from lup_dev.host.courier import Heard, Posted
@@ -279,6 +280,7 @@ def launched(
         judge=judge,
         container=f"lup-{name}",
         limits=Limits(actions=["fetch"], protected=[]),
+        github=None,
     )
     client(machine.host, clock).register(registered)
     return registered
@@ -944,7 +946,8 @@ def test_the_inbox_tools_take_the_speaking_tools_names_and_inputs() -> None:
         "Wait until something reaches your inbox.",
     ]
     assert "inbox as a problem" in served[0].description
-    assert cli.served_tools() == served
+    github = GitHubTools(integration="dev").specs()
+    assert cli.served_tools() == [*served, *github]
 
 
 class Silent(Notices):
@@ -977,6 +980,7 @@ def registration(tmp_path: Path) -> Register:
         judge=tmp_path / "lup-dev",
         container="lup-one",
         limits=Limits(actions=[], protected=[]),
+        github=None,
     )
 
 

@@ -158,7 +158,7 @@ allowed_importers = ["lup_dev.cli"]
 name = "lup_dev's subsystems import downwards"
 type = "layers"
 containers = ["lup_dev"]
-layers = ["adapters", "launch", "policy", "codescan", "declaration", "catalog", "remote", "inbox", "host"]
+layers = ["adapters", "launch", "policy", "codescan", "declaration", "catalog", "remote | forge", "inbox", "host"]
 
 # git's remote helper runs on a room's own Python, which has the standard library
 # alone (`docs/host-tools.md`, *git through a remote helper*): it imports nothing

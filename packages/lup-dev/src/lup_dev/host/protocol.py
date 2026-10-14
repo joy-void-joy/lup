@@ -81,6 +81,34 @@ class Limits(Model):
     """Patterns over full ref names, such as `refs/tags/*`: the refs no push
     updates."""
 
+    def refusal(self, action: Action) -> str | None:
+        """Say why the host doesn't do `action` for the launch, where these limits leave it out; none where they allow it.
+
+        >>> print(Limits(actions=["fetch"], protected=[]).refusal("comment"))
+        the project's declaration doesn't allow `comment` with the operator's credentials (`Core.credentials`), and allowing it is the operator's call
+        """
+        if action in self.actions:
+            return None
+        return (
+            f"the project's declaration doesn't allow `{action}` with the operator's "
+            "credentials (`Core.credentials`), and allowing it is the operator's call"
+        )
+
+
+class GitHubRepository(Model):
+    """A repository on GitHub, by its owner's login and its own name.
+
+    >>> str(GitHubRepository(owner="joy-void-joy", name="lup"))
+    'joy-void-joy/lup'
+    """
+
+    owner: str
+    name: str
+
+    def __str__(self) -> str:
+        """Spell it as `gh --repo` takes it: `owner/name`."""
+        return f"{self.owner}/{self.name}"
+
 
 class Request(Model):
     """A control request: its `kind` names it, and the handler that answers it."""
@@ -121,6 +149,11 @@ class Register(Request):
     """What the host does with the operator's credentials for the launch
     without asking, from the declaration at the commit the operator approved:
     recorded with the launch, so a service started again keeps them."""
+    github: GitHubRepository | None
+    """The repository on GitHub, as `gh` named it from the repository's own
+    remote, in its git directory, when the launch started: the one repository
+    lup's GitHub tools act on for the launch, never one the room names. None
+    where it couldn't be named, which the launch said."""
 
 
 class Unregister(Request):

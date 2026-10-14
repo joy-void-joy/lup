@@ -43,6 +43,7 @@ from abc import ABC, abstractmethod
 from collections import Counter
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack, asynccontextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING, Self, override
 
 from filelock import FileLock, Timeout
@@ -69,7 +70,6 @@ from lup_dev.layout import HostLayout
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
-    from pathlib import Path
 
 
 class Answerer(ABC):
@@ -89,14 +89,17 @@ class Answerer(ABC):
 
 
 class Asked(Model):
-    """One hook put to a launch's judge: the command running it, and the payload on its input."""
+    """One program the service runs: a hook put to a launch's judge, `gh` for a launch, or git for its room; its command, and what goes on its input."""
 
     command: list[str]
     payload: str
+    """What goes on its standard input: a hook's payload, or a body for `gh`."""
+    directory: Path | None = None
+    """Where it runs; none for the service's own directory."""
 
 
 class Judged(Model):
-    """How a judge's process ended: its status, what it printed, and what it said beside."""
+    """How a program the service ran ended: its status, what it printed, and what it said beside."""
 
     status: int
     output: str
@@ -106,22 +109,24 @@ class Judged(Model):
 
 
 async def judged(asked: Asked) -> Judged:
-    """Run the judge's process to its end, the payload on its input; kill it where the wait is cancelled.
+    """Run the program to its end, `asked.payload` on its input; kill it where the wait is cancelled.
 
     Spawned rather than forked: `sh` forks from the service's process and runs
-    Python in the child before the judge starts, which can deadlock in a process
-    with threads, and it would hold a thread per hook for a hold's hours. git's
-    pushes and fetches for a room run through it too (`remote/protocol.py`).
+    Python in the child before the program starts, which can deadlock in a
+    process with threads, and it would hold a thread per program for as long as
+    it runs: a judge for a hold's hours, `gh` for GitHub's answer, git for a
+    room's push (`remote/protocol.py`).
     """
     program, *arguments = asked.command
     try:
-        # lup: ignore("subprocess", why="the host service awaits each judge, and git for a room, on its event loop, which sh can't: it forks, and holds a thread per process")
+        # lup: ignore("subprocess", why="the host service awaits each judge, each gh and git for a room on its event loop, which sh can't: it forks, and holds a thread per program")
         process = await asyncio.create_subprocess_exec(
             program,
             *arguments,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            cwd=asked.directory,
         )
     except OSError as missing:
         return Judged(
