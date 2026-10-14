@@ -396,6 +396,7 @@ class PreToolUse(Payload):
             agent=self.agent_id,
             call=self.tool_use_id,
             tool=self.tool_name,
+            served=self.tool_name.startswith(TOOL_PREFIX),
             judged=True,
             fits=fits,
         )

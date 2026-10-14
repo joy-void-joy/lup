@@ -50,6 +50,11 @@ class Heard(Model):
     """The call's id, at a call's start or finish."""
     tool: str | None = None
     """The tool called, by the runtime's name for it."""
+    served: bool = False
+    """Whether the call is to one of lup's tools, served on the launch's
+    `mcp.sock`: its own result tells the conversation what waits, so its start
+    doesn't, where what's told beside it would reach the model only once a held
+    call returns."""
     judged: bool
     """Whether the launch's judge reads it; one it doesn't is answered without
     starting the judge."""

@@ -457,6 +457,24 @@ def test_wait_inbox_holds_until_something_arrives_and_returns_it_whole(
     assert after == ""
 
 
+def test_a_call_to_lups_tools_tells_nothing_at_its_start_and_its_result_does(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path, "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        inbox("send", "one", "Already here.")
+        started = json.loads(send(hook, lup_call("wait_inbox", {}, "w1")))
+        returned = call(
+            machine.host.launch("one").mcp,
+            "wait_inbox",
+            started["hookSpecificOutput"]["updatedInput"],
+        )
+    assert "additionalContext" not in started["hookSpecificOutput"]
+    assert returned == (first_note("Already here."), False)
+
+
 def test_ask_with_wait_holds_until_the_operator_answers_each_decision(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
@@ -589,7 +607,7 @@ def test_an_idle_session_is_woken_once_through_its_messaging_socket(
     assert frames[0].endswith("\n")
     assert woken.state == Told(at=clock.now(), how="wake")
     assert context(told) == "lup's inbox, item 2: a note from the operator:\nAnd this."
-    assert "one: woke claude session s1 with 1 items" in said
+    assert "one: woke claude session s1, telling items 1" in said
 
 
 def test_an_idle_session_whose_socket_is_gone_is_told_at_its_next_call(

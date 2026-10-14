@@ -56,7 +56,10 @@ message as the session's own user turn, started an idle background session's
 turn, through a socket moved by `--messaging-socket-path` too (its
 `coordination/wake.py`, `195ff73f3`); and a frame naming another session in
 `session_id` was dropped, only the one carrying the receiver's own id arriving
-(`68eaa2e2e`). Owed live on the version a launch runs (`docs/host-tools.md`,
+(`68eaa2e2e`). The 2.1.296 binary agrees (a byte search, `docs/field-notes.md`):
+a `user` frame's `message.content` must be a non-empty string, a `session_id`
+other than the session's own drops it, and a missing `priority` is `next`, which
+interrupts nothing. Owed live on the version a launch runs (`docs/host-tools.md`,
 *Checks owed*).
 
 What the host's part relies on, from Claude Code's hooks reference
@@ -409,6 +412,7 @@ class PreToolUse(Payload):
             agent=self.agent_id or None,
             call=self.tool_use_id,
             tool=self.tool_name,
+            served=self.tool_name.startswith(TOOL_PREFIX),
             judged=self.tool_name in WRITING,
             fits=fits,
         )

@@ -3,7 +3,10 @@
 `docs/host-tools.md`, *How an agent is told*. Every item waiting for a
 conversation is told together, oldest first, by whichever comes first:
 - **its next call,** beside it, as the hook's context (`telling`, which the host
-  service asks at every hook, the `Post` it's handed);
+  service asks at every hook, the `Post` it's handed); but not at the start of a
+  call to lup's own tools (`Heard.served`), whose result tells it: told beside
+  `wait_inbox`, an item would reach the model only once the call returned, and
+  the call would wait for the next;
 - **its turn's end,** where some are still waiting: the end is held once, the
   items its reason, so they never hold an end again (`inbox/ends.py`);
 - **`wait_inbox`,** or `ask` with `wait`, a call held until something arrives,
@@ -233,6 +236,9 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             case "session-started":
                 presence.idle = False
                 return self.told(party, room, heard.fits, "start")
+            case "call-started" if heard.served:
+                presence.idle = False
+                return Posted()
             case "call-started" | "call-finished":
                 presence.idle = False
                 return self.told(party, room, heard.fits, "call")
@@ -409,8 +415,10 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         """Start a turn of `party`'s idle session with everything waiting for it, where its runtime has a way.
 
         Only a session's main conversation is idle; one that isn't, or whose
-        runtime has no way, is told at its next hook. Where the session's
-        messaging socket can't be reached, that's said, and the items wait.
+        runtime has no way, is told at its next hook. What the wake tells is
+        counted told before it's written, so a hook meanwhile doesn't tell it
+        again; where the session's messaging socket can't be reached, that's
+        said, and the items wait again.
         """
         presence = self.presence(party)
         place = self.inbox.whereabouts.get(party.key())
@@ -421,6 +429,10 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         line = self.courier.woken(party.runtime, party.session, text)
         if line is None:
             return
+        told = Told(at=self.clock.now(), how="wake")
+        for item in waiting:
+            self.inbox.kept(item.model_copy(update={"state": told}))
+        presence.idle = False
         socket = self.layout.launch(place.launch).messages
         try:
             _, writer = await asyncio.open_unix_connection(str(socket))
@@ -429,14 +441,14 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
             writer.close()
             await writer.wait_closed()
         except OSError as unreached:
+            self.returned(Posted(numbers=[item.number for item in waiting]))
             self.say(
                 f"{place.launch}: {who(party)} wasn't woken through {socket}, so "
                 f"what waits for it is told at its next call: {unreached}"
             )
             return
-        presence.idle = False
-        self.whole(party, "wake")
-        self.say(f"{place.launch}: woke {who(party)} with {len(waiting)} items")
+        numbers = ", ".join(str(item.number) for item in waiting)
+        self.say(f"{place.launch}: woke {who(party)}, telling items {numbers}")
 
     def main_of(self, launch: str) -> Conversation:
         """Return the main conversation of the session `launch` runs, the latest heard there."""

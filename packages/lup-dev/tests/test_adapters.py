@@ -588,7 +588,9 @@ def test_codex_agent_stops_is_told_an_item_and_stops_again_ending_at_once(
         tool_use_id="b9",
     )
     item = "lup's inbox, item 1: a note from the operator:\nCarry on."
-    told = codex.told(call, codex.hook(call, on_codex), Telling(caller="c", items=[item]))
+    told = codex.told(
+        call, codex.hook(call, on_codex), Telling(caller="c", items=[item])
+    )
     assert json.loads(told or "")["hookSpecificOutput"]["additionalContext"] == item
     codex.hook(post(repo, "", call="b9"), on_codex)
     assert codex.hook(codex_stop(repo, after_block=False), on_codex) == ""
@@ -604,7 +606,7 @@ def test_a_turns_end_following_a_hold_is_heard_so_on_both_runtimes() -> None:
     assert not claude.heard(payload(Path("/w"), "Stop")).after_block
 
 
-def test_claude_wakes_an_idle_session_with_a_user_turn_naming_it_and_codex_cant() -> None:
+def test_claude_wakes_an_idle_session_naming_it_and_codex_cant() -> None:
     assert json.loads(claude.woken("s1", "Hello.")) == {
         "type": "user",
         "message": {"role": "user", "content": "Hello."},
@@ -1016,6 +1018,7 @@ BOTH = "The operator answered.\n\nAnd again."
                 session="s1",
                 call="t3",
                 tool="mcp__lup__report",
+                served=True,
                 judged=False,
             ),
         ),

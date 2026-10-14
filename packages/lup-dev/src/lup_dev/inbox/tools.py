@@ -119,7 +119,7 @@ class Speaker(Model, arbitrary_types_allowed=True):
         Call it when the work can't go on: the task can't be done as asked,
         something you need is missing, or an instruction seems wrong. Say what's
         wrong, and what would let the work go on. It lands in the operator's
-        inbox as a problem, and they're told on their desktop. Then end your turn.
+        inbox as a problem, and they're notified. Then end your turn.
         """
         number = await self.said(Message(kind="problem", text=said.problem))
         return Said(
@@ -139,10 +139,10 @@ class Speaker(Model, arbitrary_types_allowed=True):
     async def ask(self, asked: Asking) -> Said:
         """Ask the operator, with numbered decisions.
 
-        For a decision that's the operator's. Number the decisions, each with
-        your lean; they answer each "leaning" (they go with your lean),
-        "undecided" or "leave open", with a comment; or ask a plain question,
-        answered in words. With `wait`, this call holds until they answer and
+        For a decision that's the operator's. List its decisions, each with your
+        lean: they're numbered in order, and the operator answers each
+        "leaning" (they go with your lean), "undecided" or "leave open", with a
+        comment; or ask a plain question, answered in words. With `wait`, this call holds until they answer and
         returns the answer, which may take hours. Without it, the call returns
         at once, and the answer reaches you at a later call, or through
         `wait_inbox`.
