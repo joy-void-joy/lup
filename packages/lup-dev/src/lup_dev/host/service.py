@@ -289,7 +289,9 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
 
         A launch served already, running a runtime the answerer doesn't know, or
         whose judge isn't there, is refused. A directory left by a service before
-        is used as it is, since the launch's room mounted it.
+        is used as it is, since the launch's room mounted it. Either way it's the
+        operator's alone (mode 0700): a runtime's own messaging socket, placed in
+        it, refuses a directory anyone else could reach (its adapter says which).
         """
         if request.launch in self.served:
             message = f"a launch named `{request.launch}` is served already"
@@ -308,7 +310,8 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             )
             raise HostError(message)
         sockets = self.layout.launch(request.launch)
-        sockets.directory.mkdir(parents=True, exist_ok=True)
+        sockets.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        sockets.directory.chmod(0o700)
         conversations = Conversations()
 
         def said(line: str) -> None:
