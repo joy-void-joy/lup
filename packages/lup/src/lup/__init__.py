@@ -1,8 +1,8 @@
 """Build with Claude and Codex agents from code.
 
-`lup` is what a project's production code imports, as opposed to `lup_dev`, which
-the project uses only while it's being developed. It grows to hold
-(`DESIGN.md`, *Calling agents from code*):
+`lup` is the library core: what code calling agents imports, wherever it runs, as
+opposed to `lup_dev`, the environment, which only a project's sessions need. It
+grows to hold (`DESIGN.md`, *Calling agents*):
 - clients for Claude and Codex, whose `ask` returns a typed answer, and
   conversations with their history;
 - tools written as plain Python functions;

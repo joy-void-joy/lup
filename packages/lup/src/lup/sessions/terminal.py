@@ -1,7 +1,7 @@
 """A declaration compiled for a terminal, in lup's own terms, which each adapter spells.
 
 `Declaration.terminal(settings)` turns a declaration into what starts its runtime's
-CLI for a person at a terminal (`DESIGN.md`, *The library*): the command line, the
+CLI for a person at a terminal (`DESIGN.md`, *Calling agents*): the command line, the
 variables, the files to write before it runs, and what to mount for it. The
 settings say what lup adds to the session: the hooks, the tool servers, the
 guidance, the session's settings, the paths to trust, and where its messaging

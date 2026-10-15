@@ -18,7 +18,7 @@ Each entry is something the first lup did, or this one proposed, that the design
 - **"Equal on both runtimes" with nothing that runs regularly:** Codex rotted between uses.
 - **Turtle mode:** a one-key slowdown, replaced by budget shares and pace.
 - **A proxy replaying requests to keep caches warm:** Anthropic's terms forbid intermediating subscription tokens.
-- **Explicit roster describe calls and path locks:** 251 describe calls in nine days; replaced by a roster that fills itself and conflict detection at merge.
+- **Explicit roster describe calls and path locks:** 251 describe calls in nine days; replaced by a roster that fills itself, a status line set when work starts or changes, claims on work, and two sessions' writes to one file found as they happen (`docs/modules.md`, *Coordination*).
 - **Informational-only code rules:** they'd be bypassed.
 - **The feedback loop's five-skill chain built on the template's agent:** it had no place for outcomes, and the loop never closed.
 - **Guidance grown by patches:** 18 KB of bare imperatives, overriding the runtime's own advice and contradicting skills.
@@ -43,3 +43,7 @@ Each entry is something the first lup did, or this one proposed, that the design
 - **Modules that never depend on each other:** everything two modules share went into the core. Dependencies are declared instead, and the loader refuses a broken drop.
 - **Dashboard views as data only:** the first lup's hardcoded views pushed projects to build their own pages (adlib's preview server). Modules ship panels as code.
 - **A style rule refusing at every edit** (`elif`, collection loops, private names): it made agents rewrite correct code into a house style; such rules are checked at the gate.
+- **Two packages split by when code is used** (`lup` for production code, `lup-dev` for development): "used in production" didn't mean small and standalone. swarm-search's product is a swarm sharing a ledger, messaging and asking the operator, so the ledger, the inbox and coordination each fell across the line. Every part is a module instead, with a library side, an environment side, or both, each its own distribution; what a project's consumers download is split by the project's dependencies and its development group (`docs/modules.md`, *The unit*).
+- **The ledger as a view over what exists, storing nothing:** the downstream projects each stored kinds of their own in the first lup's ledger (swarm-search's eleven), and coordination needs a shared durable store. It's the generic typed store again.
+- **A judge module, or the judge inside `CodeRules`:** dropping it would drop every other module's judgement of a write, and `Proposals` would have to require it. Judging is a pipeline of the core that modules feed, with nothing built in.
+- **Checking installed modules against selected ones both ways:** refusing a module installed but not selected would refuse a project whose code uses a module's library side while its sessions don't get its environment side. Only a selected module that isn't installed is refused.

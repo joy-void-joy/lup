@@ -2,7 +2,7 @@
 
 **One sentence:** `lup` lets production code ask Claude or Codex a question and get a typed answer back, and lets that code's tests run without reaching a real agent.
 
-This is the first step of `DESIGN.md`'s build order. `DESIGN.md` (*The library*) is the design; this note is the slice as built. It covers:
+This is the first step of `DESIGN.md`'s build order. `DESIGN.md` (*Calling agents*) is the design; this note is the slice as built. It covers:
 - the `Claude` and `Codex` declarations, `Agent`, and `ask`;
 - typed answers through `submit`, a lup tool that validates and reviews each answer, and the guard that keeps a typed turn open until one is accepted;
 - the speaking tools, `report` and `note`, served on every ask;
@@ -143,7 +143,7 @@ The alternative, `lup_submit`, would repeat the server's name on Claude (`mcp__l
 
 ## The speaking tools
 
-Every ask serves `report` and `note` (`lup/tools/speaking.py`), typed or not. They act on nothing, so they're served even where an agent has no other tool (`DESIGN.md`, *The library*).
+Every ask serves `report` and `note` (`lup/tools/speaking.py`), typed or not. They act on nothing, so they're served even where an agent has no other tool (`DESIGN.md`, *Calling agents*).
 - **`report(problem)`** stops the turn without an answer and says what's wrong: the question can't be answered, something needed is missing, an instruction seems wrong. The ask raises `ProblemReportedError` with the agent's words and the notes it attached, so a caller tells "the agent says this can't be done" from a failure. It isn't retried: asking again gets the same problem. A report lets a typed turn end as an accepted answer does, and a turn that both answered and reported raises the report.
 - **`note(remark)`** attaches an assumption, a doubt or a counterargument to the answer without ending the turn. The caller reads it in `TurnResult.notes`, or `ProblemReportedError.notes`; the trace keeps it.
 
@@ -193,7 +193,7 @@ Recovery is tenacity's, not a retry loop of lup's own.
 
 ## No tools but lup's own
 
-The guarantee is about what can happen: an ask from code can't run commands, touch files, reach the network or start agents; it can only call lup's tools (`DESIGN.md`, *The library*). Each adapter configures its runtime for it, and checks it on every call where the runtime lets it.
+The guarantee is about what can happen: an ask from code can't run commands, touch files, reach the network or start agents; it can only call lup's tools (`DESIGN.md`, *Calling agents*). Each adapter configures its runtime for it, and checks it on every call where the runtime lets it.
 
 - **Claude** (`adapters/claude/runtime.py`):
   - **Configuration.** No built-in tools (`tools=[]`, which the SDK passes as `--tools ""`); no MCP server but lup's own (`strict_mcp_config`); no skills or plugins (`skills=[]`, `plugins=[]`); lup's tools pre-approved (`allowed_tools`), and every other call denied (`permission_mode="dontAsk"`).
@@ -216,7 +216,7 @@ The guarantee is about what can happen: an ask from code can't run commands, tou
 
 ## Out of the operator's history
 
-Calls from code persist no session and load no user settings (`DESIGN.md`, *The library*).
+Calls from code persist no session and load no user settings (`DESIGN.md`, *Calling agents*).
 - **Claude:**
   - no session persistence: `--no-session-persistence`, which has no SDK field, passed through `extra_args`. No transcript is written, so nothing reaches the operator's history or resume list;
   - no settings files, and no auto memory (*No tools but lup's own*);
@@ -227,7 +227,7 @@ Calls from code persist no session and load no user settings (`DESIGN.md`, *The 
   - credentials pinned to the file store **(leaning)**: under `keyring` or `auto`, a refresh deletes `auth.json`, which in lup's home is the link;
   - the login checked before the thread starts (`account/read`). Without one, the ask raises `AuthMissingError` naming both homes. A login kept in the system keyring can't be seen from lup's home, since the keyring's key derives from the home's path, so the error says to switch to the file store and log in again. A provider that needs no login goes ahead.
 
-Sessions that are kept run under their own config home (`DESIGN.md`, *Calling agents from code*); on Claude that arrives with conversations (*Later slices*).
+Sessions that are kept run under their own config home (`DESIGN.md`, *Calling agents*); on Claude that arrives with conversations (*Later slices*).
 
 **Logins and terms.** The operator's CLI login is the default, which fits their own use. A product other people use declares an API key: Anthropic's terms reserve subscription logins for ordinary individual use, and Codex's docs say app-server authentication "has never been permitted for commercial or hosted services". How a declaration names one comes with the connection (*Later slices*).
 
@@ -369,6 +369,8 @@ The tests are in `packages/lup/tests/`: `test_ask.py` (an ask through the real l
 
 ## Repository layout and packages
 
+As built for this slice. `DESIGN.md` (*What a module is*) turns it into a distribution per module, the library core a package requiring its modules, with each runtime and the test kit modules of their own, pulled in by the same extras (`docs/modules.md`, *Packaging*).
+
 One repository, a uv workspace sharing one lock file, whose packages are versioned and installed separately, rather than one distribution with extras:
 - `packages/lup/`: the library, `lup`;
 - `packages/lup-dev/`: the environment, `lup-dev` (imported as `lup_dev`);
@@ -390,7 +392,7 @@ Each SDK ships its runtime's binary (about 240 MB and 360 MB installed), so a pr
 ## Later slices
 
 On the same declarations:
-- **Conversations** (`DESIGN.md`, *Sessions (leaning)*): `async with agent.open(resume=None)` gives a fresh session, and `session.ask()` returns a lazy `Turn[T]`, awaited for its result or iterated for its content, with `live()` and `interrupt()`. History comes from the runtime's own record, with lup's writer keeping a scrubbed copy, and a refused resume raises. Sessions that are kept run under their own config home, on Claude too. On Codex a conversation declares its output types when it opens, since a thread's tools are fixed when it starts. Forking at a turn needs a turn id, which `TurnResult` doesn't carry yet.
+- **Conversations** (`DESIGN.md`, *Calling agents*): `async with agent.open(resume=None)` gives a fresh session, and `session.ask()` returns a lazy `Turn[T]`, awaited for its result or iterated for its content, with `live()` and `interrupt()`. History comes from the runtime's own record, with lup's writer keeping a scrubbed copy, and a refused resume raises. Sessions that are kept run under their own config home, on Claude too. On Codex a conversation declares its output types when it opens, since a thread's tools are fixed when it starts. Forking at a turn needs a turn id, which `TurnResult` doesn't carry yet.
 - **Tools and events:** project tools, their groups and the declaration's `tools` field, each tool declaring where it runs (`runs="inside"` or `"outside"`); the neutral hooks on the runtime's own tools; a large result written to a file, the agent getting its path and a preview; keeping a tool server out of tool search; passing a third-party MCP server through; the result's messages, once a turn has something in it; the events anything long-running emits.
 - **Checked model ids,** with portable tiers, and an effort a model can't take refused at declaration.
 - **The usage-limit wait (leaning):** waiting for a spent window to reset, on by default and bounded by the timeout.
