@@ -147,7 +147,12 @@ class Paths(Layer, extra="forbid"):
         )
 
     def resolve(self, defaults: Paths) -> dict[str, list[str]]:
-        """Resolve each role's patterns, `defaults` being the module's own."""
+        """Resolve each role's patterns, `defaults` being the module's own.
+
+        A role starting from `Patterns.default()` starts from the module's own,
+        resolved, and one from `Patterns()` from nothing beneath it, so a default
+        written `Paths().add(…)` adds its patterns once.
+        """
 
         def resolved(role: str) -> list[str]:
             own = [each.entry for each in defaults.role(role).resolve([], [])]

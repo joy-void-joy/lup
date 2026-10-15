@@ -135,9 +135,11 @@ class Part[K](Model):
     module: str
     """The module's name."""
     value: K
+    """Every layer applied over the module's own default, as `Modules` places
+    it, so its operations begin with the default's where none starts over."""
     default: K | None
     """The module's own default for the field holding it: what `Kind.default()`
-    and `Kind()` start from there."""
+    starts from there. `Kind()` starts from nothing beneath it."""
 
 
 class Owned(Model):
@@ -219,8 +221,11 @@ def held[E](
 ) -> list[E]:
     """Resolve each module's selection of a kind, check its names, and order it.
 
-    With `shared`, a name is shared across modules, so one from two modules fails;
-    without, each module's entries stand beside the others', as an exemption's do.
+    `Kind.default()` in a selection starts from the module's own default,
+    resolved, and `Kind()` from nothing beneath it, so the default's operations
+    run once. With `shared`, a name is shared across modules, so one from two
+    modules fails; without, each module's entries stand beside the others', as
+    an exemption's do.
     """
 
     def own(part: Part[Named[E]]) -> list[E]:
@@ -386,8 +391,13 @@ def checked(modules: list[Module]) -> list[Module]:
 
 
 def resolve(project: Project) -> Resolved:
-    """Resolve `project`'s declaration, or raise `ProjectError` saying what's wrong."""
-    selection = project.modules
+    """Resolve `project`'s declaration, or raise `ProjectError` saying what's wrong.
+
+    Its modules are a layer on lup's default ones, `Project`'s own default, as
+    each module is a layer on its own defaults (`Modules.placed`), so
+    `Modules()` there starts from lup's.
+    """
+    selection = project.modules.over(Project().modules)
     modules = checked(selection.ordered(selection.resolve(default(), shipped())))
 
     def role(name: str) -> list[str]:

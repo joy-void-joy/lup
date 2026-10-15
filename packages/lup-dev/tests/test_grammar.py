@@ -38,8 +38,23 @@ def step(name: str) -> Step:
 # Starts
 
 
-def test_the_value_below_with_nothing_below_is_the_default() -> None:
-    assert names(Rules().resolve(DEFAULTS, KNOWN)) == DEFAULTS
+def test_the_value_below_with_nothing_composed_beneath_is_nothing() -> None:
+    assert names(Rules().resolve(DEFAULTS, KNOWN)) == []
+    assert names(Rules().add("mine").resolve(DEFAULTS, KNOWN)) == ["mine"]
+
+
+def test_a_layer_over_a_default_written_from_below_applies_the_default_once() -> None:
+    own = Rules().add("mine")
+    layered = Rules().add("yours").over(own)
+    assert names(layered.resolve(names(own.resolve([], [])), KNOWN)) == [
+        "mine",
+        "yours",
+    ]
+    restarted = Rules.default().add("yours").over(own)
+    assert names(restarted.resolve(names(own.resolve([], [])), KNOWN)) == [
+        "mine",
+        "yours",
+    ]
 
 
 def test_default_starts_from_the_defaults() -> None:

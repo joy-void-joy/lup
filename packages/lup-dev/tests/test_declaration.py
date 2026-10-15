@@ -26,6 +26,7 @@ from lup_dev import (
     Package,
     Packages,
     Paths,
+    Patterns,
     Plain,
     Project,
     Pytest,
@@ -177,6 +178,77 @@ def test_a_class_variable_list_is_not_a_field() -> None:
         requirements = [Requirement(tool="ffmpeg")]
 
     assert Needing.requires == [Ledger]
+
+
+def test_a_default_starting_from_itself_is_refused_at_the_class_definition() -> None:
+    def declared() -> type[Module]:
+        class Circular(Module):
+            """Its own default, and a step more."""
+
+            name = "circular"
+
+            gate: Gate = Gate.default().add(Step(name="x", command=["true"]))
+
+        return Circular
+
+    with pytest.raises(ProjectError) as refused:
+        declared()
+    message = str(refused.value)
+    assert (
+        "`Circular` starts its own default for `gate` from `Gate.default()`, "
+        "which is that default itself"
+    ) in message
+    assert "Start each from `Kind.of(…)` or `Kind()`" in message
+
+
+@pytest.mark.parametrize(
+    ("field", "default", "named"),
+    [
+        ("gate", Gate.default(), "`gate` from `Gate.default()`"),
+        (
+            "paths",
+            Paths.default().add(data=["episodes/**"]),
+            "`paths.data` from `Patterns.default()`",
+        ),
+        (
+            "paths",
+            Paths(scratch=Patterns.default().add("renders/**")),
+            "`paths.scratch` from `Patterns.default()`",
+        ),
+        (
+            "session",
+            Session(removed_tools=RemovedTools.default().add("Bash")),
+            "`session.removed_tools` from `RemovedTools.default()`",
+        ),
+    ],
+)
+def test_a_default_starting_from_itself_is_refused_naming_the_field(
+    field: str, default: Gate | Paths | Session, named: str
+) -> None:
+    namespace: dict[str, object] = {
+        "__doc__": "A module.",
+        "__annotations__": {field: type(default)},
+        field: default,
+        "name": "circular",
+    }
+    with pytest.raises(
+        ProjectError, match=r"`Circular` starts its own default"
+    ) as refused:
+        defined("Circular", namespace)
+    assert named in str(refused.value)
+
+
+def test_a_default_starting_from_nothing_or_over_is_accepted() -> None:
+    class Own(Module):
+        """Its own entries, written each way."""
+
+        name = "own"
+
+        gate: Gate = Gate().add(Step(name="x", command=["true"]))
+        paths: Paths = Paths().add(data=["episodes/**"])
+        rules: Rules = Rules.all().drop("regex")
+
+    assert Own().gate.start.kind == "below"
 
 
 def test_a_module_without_a_name_or_sentence_or_default_is_refused() -> None:
@@ -476,6 +548,77 @@ def test_replace_puts_another_module_in_place_from_its_own_defaults() -> None:
     assert [each.name for each in resolved.gate] == ["lake"]
     assert resolved.runner == Plain()
     assert "**/pyproject.toml" not in resolved.paths.protected
+
+
+class Mine(Module):
+    """A module whose own defaults are written from the value below."""
+
+    name = "mine"
+
+    gate: Gate = Gate().add(Step(name="x", command=["true"]))
+
+
+class Episodes(Module):
+    """Episodes as data, renders as scratch, written from the value below."""
+
+    name = "episodes"
+
+    paths: Paths = Paths().add(data=["episodes/**"], scratch=["renders/**"])
+
+
+def own_steps(resolved: Resolved) -> list[str]:
+    """Return the gate's steps that aren't lup's own, in order."""
+    lups = [each.name for each in resolve(Project()).gate]
+    return [each.name for each in resolved.gate if each.name not in lups]
+
+
+def test_a_module_s_own_default_written_from_below_applies_once() -> None:
+    resolved = resolve(Project(modules=Modules.default().add(Mine())))
+    assert own_steps(resolved) == ["x"]
+
+
+def test_a_module_s_own_paths_written_from_below_apply_once() -> None:
+    own = Episodes().paths
+    assert own.resolve(own)["data"] == ["episodes/**"]
+    resolved = resolve(Project(modules=Modules.default().add(Episodes())))
+    assert resolved.paths.data.count("episodes/**") == 1
+    assert resolved.paths.scratch[-1:] == ["renders/**"]
+
+
+@pytest.mark.parametrize(
+    ("layer", "steps"),
+    [
+        (Gate().add(Step(name="y", command=["true"])), ["x", "y"]),
+        (Gate.default().add(Step(name="y", command=["true"])), ["x", "y"]),
+        (Gate().drop("x"), []),
+        (Gate.of(Step(name="y", command=["true"])), ["y"]),
+    ],
+)
+def test_a_project_s_edit_on_a_default_written_from_below_applies_once(
+    layer: Gate, steps: list[str]
+) -> None:
+    modules = Modules.default().add(Mine()).edit(Mine(gate=layer))
+    assert own_steps(resolve(Project(modules=modules))) == steps
+
+
+def test_a_project_s_edit_on_paths_written_from_below_applies_once() -> None:
+    modules = (
+        Modules.default()
+        .add(Episodes())
+        .edit(Episodes(paths=Paths().add(data=["takes/**"])))
+        .edit(Episodes(paths=Paths().drop(scratch=["renders/**"])))
+    )
+    resolved = resolve(Project(modules=modules))
+    assert resolved.paths.data[-2:] == ["episodes/**", "takes/**"]
+    assert "renders/**" not in resolved.paths.scratch
+
+
+def test_a_project_s_modules_from_below_start_from_lup_s() -> None:
+    resolved = resolve(Project(modules=Modules().add(Ledger())))
+    assert [each.name for each in resolved.modules] == [
+        *(each.name for each in resolve(Project()).modules),
+        "ledger",
+    ]
 
 
 def test_steps_from_another_module_go_where_they_re_placed() -> None:
