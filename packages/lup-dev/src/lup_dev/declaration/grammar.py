@@ -16,7 +16,10 @@ starting from below keeps below's start and adds its operations after below's,
 and one starting over replaces it. It's resolved into entries only when the
 declaration is read, against the defaults of the module holding it, so
 `Rules.default().drop(…)` takes whatever a later release adds to the default, and
-`Rules.only(…)` doesn't.
+`Rules.only(…)` doesn't. By then every layer is composed over what's below it, the
+module's own default beneath them all, so a start still from below has nothing
+beneath it, and the default's operations, which the selection's begin with, run
+once, as the engine resolves a rule selection (`checker/src/catalog.ts`).
 """
 
 from functools import reduce
@@ -260,10 +263,11 @@ class Selection[E](Model):
     def resolve(self, defaults: list[E], known: list[E]) -> list[Placed[E]]:
         """Resolve this selection into its entries, each with where it goes.
 
-        `defaults` are what `Kind()` and `Kind.default()` start from, `known` what
-        `Kind.all()` starts from and `Kind.only(…)` picks from. Raise
-        `ProjectError` on a name that isn't there, naming the ones that are, and
-        on adding a name that's already there.
+        `defaults` are what `Kind.default()` starts from, `known` what
+        `Kind.all()` starts from and `Kind.only(…)` picks from; `Kind()` starts
+        from nothing (`started`). Raise `ProjectError` on a name that isn't
+        there, naming the ones that are, and on adding a name that's already
+        there.
         """
         entries = self.started(defaults, known)
         for position, operation in enumerate(self.operations, start=1):
@@ -271,9 +275,18 @@ class Selection[E](Model):
         return entries
 
     def started(self, defaults: list[E], known: list[E]) -> list[Placed[E]]:
-        """Return the entries this selection starts from, as its start says."""
+        """Return the entries this selection starts from, as its start says.
+
+        From below, that's nothing: a selection is resolved once every layer is
+        composed over the one below it, the defaults beneath them all (a
+        module's own, as `Modules.placed` puts it; lup's modules, under a
+        project's), so a start still from below is the defaults' own, and its
+        operations already hold theirs.
+        """
         match self.start:
-            case Below() | Default():
+            case Below():
+                chosen: list[Placed[E]] = []
+            case Default():
                 chosen = [Placed(entry=entry) for entry in defaults]
             case All():
                 chosen = [Placed(entry=entry) for entry in known]
@@ -464,3 +477,32 @@ class Named[E](Selection[E]):
     def only(cls, *names: str) -> Self:
         """Start from the known entries named `names`, and no other."""
         return cls.starting(Only(names=list(names)))
+
+
+def defaulted[E](field: str, default: Selection[E] | Layer) -> list[str]:
+    """Name each selection in `default`, a module's own for `field`, that starts from `Kind.default()`, for a message.
+
+    Such a default would start from itself. A `Layer`'s selections are named by
+    a dotted field, each with its kind.
+
+    >>> class Ids(Named[str]):
+    ...     '''Names.'''
+    >>> class Settings(Layer):
+    ...     ids: Ids = Ids()
+    >>> defaulted("ids", Ids.default().add("mine"))
+    ['`ids` from `Ids.default()`']
+    >>> defaulted("settings", Settings(ids=Ids.default())), defaulted("ids", Ids())
+    (['`settings.ids` from `Ids.default()`'], [])
+    """
+    match default:
+        case Selection(start=Default()):
+            return [f"`{field}` from `{type(default).__name__}.default()`"]
+        case Selection():
+            return []
+        case Layer():
+            return [
+                found
+                for inner in type(default).model_fields
+                if issubclass(type(held := getattr(default, inner)), Selection | Layer)
+                for found in defaulted(f"{field}.{inner}", held)
+            ]

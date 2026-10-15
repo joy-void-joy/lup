@@ -25,10 +25,12 @@ from lup.types import Model
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.grammar import (
     Edit,
+    Layer,
     Of,
     Placed,
     Selection,
     applied,
+    defaulted,
     set_fields,
 )
 from lup_dev.declaration.requirements import Requirement
@@ -113,10 +115,13 @@ class Module(Model, extra="forbid"):
 
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: object) -> None:
-        """Refuse a module without a name or a sentence, or with a plain collection.
+        """Refuse a module without a name or a sentence, with a plain collection, or with a default starting from itself.
 
         Every collection in a module is a selection: a layer would replace a
         plain list whole, so a base couldn't be extended without restating it.
+        A module's own default for a selection has nothing beneath it, so one
+        starting from `Kind.default()` would start from itself, as the engine
+        refuses a rule default so started (`checker/src/catalog.ts`).
         """
         super().__pydantic_init_subclass__(**kwargs)
         declared = cls.__name__
@@ -145,6 +150,20 @@ class Module(Model, extra="forbid"):
                 "couldn't be extended without restating it. Make each a selection: a "
                 "kind of `lup_dev.declaration.kinds`, or a `Named` selection of "
                 "its own entries"
+            )
+            raise ProjectError(message)
+        circular = [
+            found
+            for field, info in cls.model_fields.items()
+            if issubclass(type(default := info.default), Selection | Layer)
+            for found in defaulted(field, default)
+        ]
+        if circular:
+            message = (
+                f"`{declared}` starts its own default for {', '.join(circular)}, "
+                "which is that default itself: nothing is beneath a module's own "
+                "default to start from. Start each from `Kind.of(…)` or `Kind()`, "
+                "which start from nothing there, `Kind.all()` or `Kind.only(…)`"
             )
             raise ProjectError(message)
 
