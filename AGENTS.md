@@ -1,6 +1,6 @@
 # Working on lup
 
-lup is two packages: a library for code that calls agents (Claude Code and Codex), and an environment for developing projects with agents, built on that library. `DESIGN.md` is the design. Read the parts your work touches before you start, and treat it as the operator's: changing it is a design decision.
+lup is a set of modules for working with agents (Claude Code and Codex): a small library core any project's code calls agents with, an environment core where agents do a project's work and develop its code, and modules that each bring a library side, an environment side, or both (`DESIGN.md`, *Modules*). It's built today as two packages, `lup` and `lup-dev`, which the next step splits into modules. `DESIGN.md` is the design. Read the parts your work touches before you start, and treat it as the operator's: changing it is a design decision.
 
 This repository is the second lup. The first (`joy-void-joy/lup-legacy`, archived) is evidence you may read (how something behaved, what a measurement found), never code to copy. Everything here is written anew from the design.
 
@@ -33,7 +33,7 @@ lup's code rules enforce most of these, at the edit and in the gate (`docs/rules
 - **Errors:** raise on what can't be recovered, retry what's transient, validate early, never swallow an error silently.
 - **Don't truncate** data to make it fit. Where a format forces a limit, keep the full copy and point at it.
 - **Code reads as if it was always this way:** no compatibility shims, and no "new" or "fixed" in comments; that belongs in commit messages.
-- **The library never imports the environment.** What production code calling agents needs is the library's; what only developing a project needs is the environment's.
+- **A library side never imports an environment side.** What code calling agents imports, wherever it runs, is a module's library side; what only a project's sessions get is an environment side. As built, `lup` never imports `lup_dev`.
 - **Both runtimes.** A shared construct is done when it works on Claude Code and on Codex, shown by their tests, or when the runtime that can't do it declares the gap with evidence. Codex rotted in the first lup because features were built per runtime above the adapter.
 
 ## Tests

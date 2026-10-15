@@ -119,7 +119,7 @@ In its home, a constant needs no suppression. The rule reads the constant's type
 - **No hand-splitting a `str` or `bytes`:** `.split(sep)`, `.rsplit(sep)`, `.partition`, `.rpartition`. `.split()` with no separator and `.splitlines()` are fine.
 - **No slicing a `str` or `bytes`** to take it apart by position.
 - **No `.strip(chars)` or `.replace` on a `str` or `bytes`** to take it apart or rewrite it: same reason. `.strip()` with no argument trims whitespace and is fine.
-- An agent's output is never hand-parsed: typed answers come through lup's `submit` tool (`DESIGN.md`, *The library*; `docs/library.md`).
+- An agent's output is never hand-parsed: typed answers come through lup's `submit` tool (`DESIGN.md`, *Calling agents*; `docs/library.md`).
 
 The parsers to reach for: `json`, `tomllib` (`tomlkit` to edit), `csv`, `urllib.parse`, `pathlib`, `email`, `shlex`, `ast`, `datetime.fromisoformat`, `packaging.version` and `packaging.requirements`, `trafilatura` or `beautifulsoup4` for web pages. A grammar of our own gets a parser library.
 

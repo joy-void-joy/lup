@@ -17,7 +17,7 @@ failed; the command exits non-zero when any did, so the gate's verdict is its ex
 code rather than something read off its output. With `--fix`, ruff's safe fixes
 and the formatter rewrite the worktree first (`Fixes`); without, it only checks.
 
-This is the gate's first shape (`DESIGN.md`, *The gate*): comparing against a
+This is the gate's first shape (`DESIGN.md`, *Code rules and the gate*): comparing against a
 branch's base (`--changed`), nested projects' own environments and bounds in time
 and memory come later.
 """

@@ -180,7 +180,7 @@ class Credentials(Layer):
 
 - **Actions** are names from a fixed set, each a handler lup carries out: `fetch`, `push`, `force-push`, `delete-ref`, `read-issues`, `file-issue`, `comment`, `draft-pull-request`. `Actions.all()` is all of them; `Actions.default()` leaves out `force-push` and `delete-ref`, each with its reason, as `catalog/rules.py` leaves rules out. A name that isn't an action fails the load, naming those that are.
 - **Protected refs** are patterns over full ref names. lup's default: `main`, after `DESIGN.md`'s own example and `AGENTS.md` ("Never merge into `main` or push to it yourself"), and tags, since a tag marks a release, the operator's **(leaning)**.
-- **Everything is a selection** (`DESIGN.md`, *The environment: core and modules*), so allowing force pushes is an `.add` with its reason rather than a switch.
+- **Everything is a selection** (`DESIGN.md`, *Modules*), so allowing force pushes is an `.add` with its reason rather than a switch.
 - **Beyond the limits, refused, saying why (leaning):** that the project's declaration doesn't allow it (`Core.credentials`), and that it's the operator's. Asking instead, an action held for the operator's answer, is a proposal, piece 3's.
 - **How the host knows them (leaning):** the launch resolves `Core.credentials` from the declaration at the approved commit, as it does the session settings, and sends them with the registration as plain data (`Register.limits`), beside the judge's command; the service records them with the launch, so a restarted service keeps them. Set aside: the service loading a project's declaration itself, which would run the project's code in the per-user service; and asking the repository's judge copy at each action, a second way for the host to read a declaration.
 
@@ -284,7 +284,7 @@ await serve(LaunchTools(...), reader, writer)   # one MCP session over one conne
 | `adapters/claude/terminal.py` | `--mcp-config <launch>/mcp.json` and `--strict-mcp-config`, each server a stdio entry running `socat` to its socket, with `timeout` in milliseconds; `--messaging-socket-path` and `crossSessionInbound: "accept"` in the launch's settings | none beyond `terminal` |
 | `adapters/codex/terminal.py` | each server in the `mcp_servers` inline table that turns the operator's off: `socat STDIO UNIX-CONNECT:<socket>`, `tool_timeout_sec`, `default_tools_approval_mode = "approve"`; no messaging socket, the gap declared with its evidence | none beyond `terminal` |
 
-- **Each runtime's tool search is left as it is,** so `ToolServer` has no field for it; loading a server's tools upfront (`DESIGN.md`, *The library*: "a tool server can be kept out of tool search") arrives with the tools slice, as a field arrives with the slice that uses it.
+- **Each runtime's tool search is left as it is,** so `ToolServer` has no field for it; loading a server's tools upfront (`DESIGN.md`, *Calling agents*: "a tool server can be kept out of tool search") arrives with the tools slice, as a field arrives with the slice that uses it.
 - **Which bridge a room runs is the adapter's,** since only it knows its runtime has one of its own; the neutral form is a server reached on a Unix socket in the room.
 
 ### The environment
