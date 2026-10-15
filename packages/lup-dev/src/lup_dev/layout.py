@@ -18,9 +18,7 @@ The homes (`docs/judging-writes.md`, *Where things live*):
   (`docs/launch.md`, *The CLIs*);
 - the record of each room image built, in lup's state;
 - lup's inbox, its items and parties one file each, in lup's state;
-- inside a worktree, `.lup/saved/`, where a refused version waits for the agent,
-  `.lup/drafts/`, where a change waits to be submitted for review, and
-  `.lup/review/<n>/`, where a review keeps its files while it waits;
+- inside a worktree, `.lup/saved/`, where a refused version waits for the agent;
 - inside `lup_dev`, the built engine (`Bundle`).
 """
 
@@ -154,47 +152,6 @@ class StoreLayout(Model):
         return self.home / "importers.log"
 
     @property
-    def parked(self) -> Path:
-        """The reviews parked in the first lup's dashboard, kept under `parked_lock`.
-
-        Each with what parks it and every id the dashboard gave it, so the keeper
-        parks it again after it expires. It goes with the bridge.
-        """
-        return self.home / "parked.json"
-
-    @property
-    def parked_lock(self) -> Path:
-        """The lock guarding `parked`."""
-        return self.home / "parked.lock"
-
-    @property
-    def drafts(self) -> Path:
-        """What lup knows of the worktree's drafts: each one's file, base and author.
-
-        Kept under the store's lock (`lock`), which a checkpoint holds too.
-        """
-        return self.home / "drafts.json"
-
-    @property
-    def submissions(self) -> Path:
-        """Every review submitted from the worktree, by number, with how it stands.
-
-        Kept under the store's lock (`lock`), since an approval is carried out
-        under it.
-        """
-        return self.home / "submissions.json"
-
-    @property
-    def keeper(self) -> Path:
-        """The lock the running keeper holds for its whole life, which the OS frees."""
-        return self.home / "keeper.lock"
-
-    @property
-    def keeper_log(self) -> Path:
-        """What the keeper prints, kept for when it fails."""
-        return self.home / "keeper.log"
-
-    @property
     def engine_lock(self) -> Path:
         """The lock a client holds while it starts the worktree's engine."""
         return self.home / "engine.lock"
@@ -211,31 +168,6 @@ class StoreLayout(Model):
     def hold(self, hold: str) -> Path:
         """Say where one hold is kept."""
         return self.holds / f"{hold}.json"
-
-
-class ReviewLayout(Model):
-    """Where one review keeps its files in the worktree: `.lup/review/<n>/`."""
-
-    home: Path
-
-    @property
-    def before(self) -> Path:
-        """Each file's text before the change, at its path below, while it's parked.
-
-        The first lup's dashboard retires a waiting review whose recorded files
-        don't stand on disk as recorded, so the review records each file here. It
-        goes with the bridge.
-        """
-        return self.home / "before"
-
-    @property
-    def submitted(self) -> Path:
-        """Each file's version as submitted, at its path below, until it's applied.
-
-        A line comment on the after side counts lines in this version, which the
-        file's draft may have moved on from.
-        """
-        return self.home / "submitted"
 
 
 class CheckoutLayout(Model):
@@ -277,15 +209,6 @@ class CheckoutLayout(Model):
         return self.home / "saved"
 
     @property
-    def drafts(self) -> Path:
-        """Where each draft is written, at its file's path below, escaped.
-
-        Git ignores it, so no snapshot, commit or test sees a draft, and the
-        agent's file tools and its shell reach it.
-        """
-        return self.home / "drafts"
-
-    @property
     def rules_reference(self) -> Path:
         """The reference to lup's rules, compiled from the engine's table: lup's own."""
         return self.root / "docs" / "rules.md"
@@ -317,10 +240,6 @@ class CheckoutLayout(Model):
     def saved_copy(self, number: int, path: Path) -> Path:
         """Say where the version refused in refusal `number` is saved, by its path."""
         return self.saved / str(number) / path
-
-    def review(self, number: int) -> ReviewLayout:
-        """Say where review `number` keeps its files in the worktree."""
-        return ReviewLayout(home=self.home / "review" / str(number))
 
 
 class PackageLayout(Model):

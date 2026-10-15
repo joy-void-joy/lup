@@ -2,7 +2,7 @@
 
 Where each lives is `layout.py`'s; this is how one is read and written, by every
 subsystem keeping one: the judge's store and records (`lup_dev.policy`), trust on
-launch's approval (`lup_dev.launch`), and the first lup's dashboard's bridge.
+launch's approval (`lup_dev.launch`), and the inbox (`lup_dev.inbox`).
 """
 
 from typing import TYPE_CHECKING

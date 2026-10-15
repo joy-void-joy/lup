@@ -7,7 +7,7 @@ This is the second of #56's four pieces (`docs/launch.md`): lup's MCP server in 
 The facts it rests on were read or measured for it on 2026-10-13: Claude Code's docs and its 2.1.296 binary (a byte search, no model called), Codex's source at `rust-v0.162.1`, git 2.56.0's man pages and a logging remote helper run on the host and in the room's image, and the first lup's history. Each is cited where it's used; they go into `docs/field-notes.md` with the first branch (*Building it*). A choice the operator hasn't confirmed is marked **(leaning)**.
 
 What it leaves to other pieces:
-- **`propose` and holds** (piece 3), which replace the drafts flow (`docs/review-flow.md`), the checkpoint and its mail; the judge's own tellings then become inbox items. #66 (another session's writes under an open hold) is piece 3's, decided with holds; the inbox is how the session whose edit a decline puts back would be told.
+- **`propose` and holds** (piece 3), which replace the checkpoint and its mail; the judge's own tellings then become inbox items. #66 (another session's writes under an open hold) is piece 3's, decided with holds; the inbox is how the session whose edit a decline puts back would be told.
 - **The dependency guard** (piece 4).
 - **Spawn,** and with it messages between agents, the roster, and the native `Agent` denied by default.
 - **The dashboard,** whose inbox view `lup-dev inbox` is the command-line counterpart of; reminders and follow-ups; notification channels beyond the desktop's.
@@ -153,8 +153,8 @@ lup-dev inbox send <launch> <text>    a message to the session a launch runs
 - **Answering:** at a terminal, `answer` takes each numbered decision in turn, "leaning", "undecided" or "leave open", each with an optional comment, then a comment on the whole; a plain question takes a text. `--leaning 1 3`, `--undecided 2`, `--leave-open 4` and `--comment` answer without prompts **(leaning)**. The answer becomes an item for the conversation that asked.
 - **`send`** names a launch by its id or its worktree, and reaches the session's main conversation.
 - **Each is a request on the control socket,** the inbox's own kinds, starting the service where none runs, as a launch does. Each refuses inside an agent's session (`Runtime.inside`), as `trust` does; the room can't reach the control socket at all, and the store isn't mounted.
-- **A desktop notice** when an item for the operator arrives, through `notify-send`: the repository's worktree, the kind, and the item's first line. `Notices` and `NotifySend` move out of `legacy_dashboard.py` into the inbox, which the drafts flow uses until piece 3. `notify-send` is an optional requirement of the host, said once where it's missing.
-- **Set aside:** bridging into the first lup's dashboard (#56 suggested it as the inbox's first face), which `docs/review-flow.md` (*The first lup's dashboard*) shows costs a keeper re-parking every 15 seconds and a bridge loaded by path: the stopgap lup stops building on.
+- **A desktop notice** when an item for the operator arrives, through `notify-send`: the repository's worktree, the kind, and the item's first line. `Notices` and `NotifySend` are the inbox's (`inbox/notices.py`). `notify-send` is an optional requirement of the host, said once where it's missing.
+- **Set aside:** bridging into the first lup's dashboard (#56 suggested it as the inbox's first face), which costs a keeper parking each review again as the dashboard expires it, an hour after it's parked, and a bridge loaded by path: the stopgap lup stops building on.
 
 ## Credentials on the host
 
@@ -301,7 +301,7 @@ await serve(LaunchTools(...), reader, writer)   # one MCP session over one conne
 | `inbox/tools.py` | `report`, `note`, `ask`, `send` and `wait_inbox` in a launched session, a `RoomTools` |
 | `inbox/ends.py` | A turn's end held once per thing, across turns: what a hold held it for, an item told or the judge's findings passed, remembered per conversation |
 | `inbox/protocol.py` | The operator's requests on the control socket (list, show, answer, done, send) and their handlers |
-| `inbox/notices.py` | `Notices` and `NotifySend`, moved from `legacy_dashboard.py` |
+| `inbox/notices.py` | The desktop's notices: `Notices`, and `NotifySend` through `notify-send` |
 | `forge/github.py` | GitHub through `gh --json`, on one named repository: `GitHub` |
 | `forge/tools.py` | `read_issue`, `find_issues`, `file_issue`, `comment`, `draft_pull_request`, a `RoomTools` |
 | `forge/protocol.py` | `IssueState`, the room's request for an issue's state, and its handler |
