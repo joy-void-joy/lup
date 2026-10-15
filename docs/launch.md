@@ -5,7 +5,7 @@
 This is the first of #56's four pieces, each a note and a branch, each on both runtimes:
 1. **this one:** the room, the compiled settings and guidance, the one hook, and the host service it reaches;
 2. lup's MCP server in a launched session, the inbox and `lup inbox`, and the credential actions (git through a remote helper, GitHub through lup's tools);
-3. `propose` and holds, replacing the drafts flow and the checkpoint;
+3. `propose` and holds, replacing the checkpoint;
 4. the dependency guard.
 
 It pulls `DESIGN.md`'s build steps 3 (rooms) and 5 (launch) ahead of tools and runs, scoped to what a maintaining session needs, with the host service's skeleton from step 6. `DESIGN.md` is the design; the facts this note rests on, measured or read for it, are in `docs/field-notes.md` (*Claude Code 2.1.296: launching a session*, *Codex 0.162.1: launching a session*, *Rooms*). A choice the operator hasn't confirmed is marked **(leaning)** where it's stated.
@@ -89,7 +89,6 @@ The code that runs on the operator's machine, outside every room, is approved be
   - **No:** the session launches on the copy approved before, and the launch says the tip isn't the code judging it. With no copy approved yet, it doesn't launch.
 - **What it costs:** each repository's copy is a Python environment of its own, about the size of the per-user install, and a hook pays a process's start (Python and `lup-dev`'s imports) on top of judging. After a large merge, the next launch's diff is large (the declaration's slice A was about 5,000 lines of the judge). That is the review; it comes at launch rather than at a separate step, a summary first. The first approval in lup's own repository holds its whole zone: about 110 files and 24,000 lines at `dev`'s tip when this was built, its summary a line for each file.
 - **Until `launch` exists,** `lup-dev trust` runs the same check and question with no session after it, so the operator approves a judge on lup's own repository.
-- The installer's review parked in the first lup's dashboard (`legacy_dashboard.py`'s `LegacyDashboard`) goes with `lup-dev install`.
 
 ## The room
 

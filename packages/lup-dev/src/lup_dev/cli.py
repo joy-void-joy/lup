@@ -1,4 +1,4 @@
-"""The `lup-dev` command: the hooks, the gate's rule check, holds, verdicts, reviews.
+"""The `lup-dev` command: the hooks, the gate's rule check, holds and verdicts.
 
 It stands in for the real `lup` command tree until the declaration and command
 line piece builds it; the commands keep their meaning there, and their final
@@ -12,9 +12,7 @@ first (`docs/launch.md`, *Trust on launch*). `launch` opens a runtime's session 
 a room for the worktree (*The command*). `host` runs the host service, handed
 the inbox as what each conversation is told at its hooks, its tools and its
 requests; `inbox` is the operator's face on it (`docs/host-tools.md`, *The
-operator's face*). `submit`, `wait`, `reviews` and
-`reply` serve the built drafts flow (`docs/review-flow.md`). Who calls one is a
-conversation of its own, `operator`, in the directory it runs in.
+operator's face*).
 """
 
 import asyncio
@@ -115,22 +113,11 @@ from lup_dev.launch.trust import (
     trusted,
 )
 from lup_dev.layout import ROOM_SOCKETS, CheckoutLayout, Layout
-from lup_dev.legacy_dashboard import LegacyQueue
 from lup_dev.policy.checkpoint import Bench, Services, Worktree
 from lup_dev.policy.holds import Hold, Response, answer, waiting
 from lup_dev.policy.importers import BackgroundSpawner
 from lup_dev.policy.judge import finding
 from lup_dev.policy.report import finding_lines
-from lup_dev.policy.submissions import (
-    AllReviews,
-    AnyReview,
-    Awaited,
-    Caller,
-    Desk,
-    FileApplied,
-    Offered,
-    OneReview,
-)
 from lup_dev.policy.verdicts import VerdictLog
 from lup_dev.remote.protocol import Remotes
 from lup_dev.remote.protocol import routes as remote_routes
@@ -140,17 +127,14 @@ if TYPE_CHECKING:
     from lup.tools.tool import ToolSpec
     from lup_dev.host.rooms import RoomTools
     from lup_dev.policy.runtime import Runtime
-    from lup_dev.review import Queue
 
 app = typer.Typer(no_args_is_help=True, help="Develop a project with agents.")
 rules = typer.Typer(no_args_is_help=True, help="lup's code rules.")
 holds = typer.Typer(help="Changes waiting for your answer.")
-review = typer.Typer(no_args_is_help=True, help="Reviews parked for your answer.")
 host = typer.Typer(help="lup's host service, which rooms call.")
 inbox = typer.Typer(help="What your agents tell and ask you, and your answers.")
 app.add_typer(rules, name="rules")
 app.add_typer(holds, name="holds")
-app.add_typer(review, name="review", hidden=True)
 app.add_typer(host, name="host")
 app.add_typer(inbox, name="inbox")
 
@@ -1149,152 +1133,6 @@ def importers(worktree: Path) -> None:
     repository = Worktree.at(worktree, judging.layout).repository
     judged = Worktree.of(worktree, repository, judging)
     judged.importers().run(judging.checker, judged.declaration.runner)
-
-
-@review.command("keep", hidden=True)
-def review_keep(worktree: Path) -> None:
-    """Keep a worktree's reviews in the first lup's dashboard; parking starts it."""
-    LegacyQueue.configured(worktree, LupDevSettings(), SystemClock()).keep()
-
-
-def queue(worktree: Path) -> Queue:
-    """Return where the worktree's reviews are parked, as this machine sets it."""
-    return LegacyQueue.configured(worktree, LupDevSettings(), SystemClock())
-
-
-def desk(directory: Path) -> Desk:
-    """Return the reviews of the worktree holding `directory`."""
-    root = toplevel(directory)
-    configured = services()
-    common = Git(cwd=root).text(
-        "rev-parse", "--path-format=absolute", "--git-common-dir"
-    )
-    return Desk(
-        worktree=Worktree.of(root, Path(common), configured),
-        services=configured,
-        queue=queue(root),
-    )
-
-
-def caller() -> Caller:
-    """Name who calls from the command line: the operator, where they run it."""
-    return Caller(session="operator", call=secrets.token_hex(8), cwd=Path.cwd())
-
-
-def duration(text: str | None) -> timedelta | None:
-    """Read a timeout given as `HH:MM:SS` or ISO 8601 (`PT30M`); none for none."""
-    if text is None:
-        return None
-    try:
-        return TypeAdapter(timedelta).validate_python(text)
-    except ValidationError as failure:
-        message = f"a timeout is `HH:MM:SS` or ISO 8601 (`PT30M`), not {text!r}"
-        raise typer.BadParameter(message) from failure
-
-
-Timeout = Annotated[
-    str | None,
-    typer.Option(
-        help="Say what still waits after at most this long: `HH:MM:SS`, or `PT30M`."
-    ),
-]
-
-
-@app.command("submit")
-def submit(
-    why: Annotated[
-        str,
-        typer.Option(help="What the whole change does; optional with one file."),
-    ] = "",
-    *,
-    wait_for_answer: Annotated[
-        bool, typer.Option("--wait", help="Wait for its answer, as `wait` does.")
-    ] = False,
-    timeout: Timeout = None,
-) -> None:
-    """Submit drafts for review as one review, its files as JSON on standard input.
-
-    Standard input holds a list of the files, each with its `path` (the file, or
-    its draft's path), its `context` (what changes in it and why, in plain
-    words), and for a rename, `renamed_from`, the old path, which the approval
-    removes: `[{"path": "src/a.py", "context": "..."}]`. A draft is written at
-    `.lup/drafts/<path>`, a dot starting a segment of the path written `%2E` and a
-    `%` starting one written `%25`; a file landed since the session started is
-    shown as context.
-    """
-    try:
-        files = TypeAdapter(list[Offered]).validate_json(sys.stdin.read())
-    except ValidationError as failure:
-        message = f"standard input isn't a list of files to submit: {failure}"
-        raise typer.BadParameter(message) from failure
-    submitted = desk(Path.cwd()).submit(
-        caller(), files, why, wait=wait_for_answer, timeout=duration(timeout)
-    )
-    typer.echo(submitted.text())
-
-
-def awaited(
-    numbers: list[int], *, first: bool, every: bool, file: Path | None
-) -> Awaited:
-    """Read what `wait` waits for from its arguments: exactly one form."""
-    forms = int(bool(numbers) or first) + int(every) + int(file is not None)
-    if forms != 1:
-        message = "name one review, several with --any, or give --all or --file"
-        raise typer.BadParameter(message)
-    if every:
-        return AllReviews()
-    if file is not None:
-        return FileApplied(path=file)
-    if first:
-        return AnyReview(numbers=numbers)
-    if len(numbers) != 1:
-        message = "several reviews are waited on with --any"
-        raise typer.BadParameter(message)
-    [number] = numbers
-    return OneReview(number=number)
-
-
-@app.command("wait")
-def wait(
-    numbers: Annotated[
-        list[int] | None,
-        typer.Argument(help="The review to wait on, or with --any, several."),
-    ] = None,
-    *,
-    first: Annotated[
-        bool, typer.Option("--any", help="Wait for the first of these to end.")
-    ] = False,
-    every: Annotated[
-        bool, typer.Option("--all", help="Wait for every review you submitted.")
-    ] = False,
-    file: Annotated[
-        Path | None,
-        typer.Option(help="Wait for the review submitted last holding this file."),
-    ] = None,
-    timeout: Timeout = None,
-) -> None:
-    """Wait for the answers to reviews, carrying out each approval as it's read.
-
-    Each answer, and each remark the operator sends before answering, is said
-    once; a remark ends the wait too.
-    """
-    chosen = awaited(numbers or [], first=first, every=every, file=file)
-    typer.echo(desk(Path.cwd()).wait(caller(), chosen, duration(timeout)).text())
-
-
-@app.command("reviews")
-def reviews() -> None:
-    """List the worktree's drafts, and every review submitted with how it stands."""
-    typer.echo(desk(Path.cwd()).reviews().text())
-
-
-@app.command("reply")
-def reply(
-    number: Annotated[int, typer.Argument(help="The review, which waits.")],
-    text: Annotated[str, typer.Argument(help="What to say in its thread.")],
-) -> None:
-    """Answer in the thread of a review you submitted; the review waits as it did."""
-    typer.echo(desk(Path.cwd()).reply(caller(), number, text))
 
 
 def main() -> None:

@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 
 
 class Spawner(ABC):
-    """Starts a worktree's background pass: the importers pass, or the keeper."""
+    """Starts a worktree's background importers pass."""
 
     @abstractmethod
     def spawn(self, worktree: Path, log: Path) -> None:

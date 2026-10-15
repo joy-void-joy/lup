@@ -1,9 +1,8 @@
 """Where the operator is told something at once: the desktop's notices.
 
 The inbox raises one for each item that reaches the operator
-(`docs/host-tools.md`, *The operator's face*); the drafts flow raises its own,
-through the same notices, until proposals replace it. `notify-send` is an
-optional requirement of the host (`launch/room.py`, `host_needs`): where it isn't
+(`docs/host-tools.md`, *The operator's face*). `notify-send` is an optional
+requirement of the host (`launch/room.py`, `host_needs`): where it isn't
 installed, no notice is raised, and a launch says so once.
 
 A notice is raised through asyncio, as the host service runs every program, and

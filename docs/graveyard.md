@@ -35,7 +35,7 @@ Each entry is something the first lup did, or this one proposed, that the design
 - **Contribution branches in lup's repository:** a project fixes locally and declares a candidate instead, so it never touches lup's repository or points at a branch.
 - **Running a half-built judge on its own construction** (the bridge, October 2026): each of its bugs blocked the work it guarded. 12 of the 18 open issues were the judge's; workers built in scratch clones and retyped 1,400-line files to land them. A piece of the environment goes live in lup's own sessions once it's finished.
 - **Parking reviews: refuse, wait, repeat the exact call** (the bridge's interim review): agents routed around long waits, and repeats went stale or failed ("File has not been read yet").
-- **The drafts flow** (a write needing review landing in a draft, `docs/review-flow.md`): the write was invisible but not its use; a test importing a drafted module failed to import, so each new file was a wait.
+- **The drafts flow** (a write needing review landing in a draft under `.lup/drafts/`, submitted to the first lup's dashboard and carried out once approved): the write was invisible but not its use; a test importing a drafted module failed to import, so each new file was a wait.
 - **Asking on a new file's first write:** it showed the operator a half-written file. The agent proposes a coherent design instead.
 - **Approval at landing** (judging branches, not writes): the agent built a whole architecture on an early choice, and when told late, changed only the flagged thing.
 - **A cap on unproposed code:** it would ping the agent; the dashboard shows unproposed work instead.

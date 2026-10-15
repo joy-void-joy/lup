@@ -240,7 +240,7 @@ import-linter checks the whole graph at the gate. The engine reads the same cont
 
 | `lup_dev` | What it is |
 |---|---|
-| root | `errors.py`, `settings.py`, `layout.py`, `clock.py`, `cli.py`; the front door for a project's declaration (`__init__.py`); the gate as one command (`gate.py`); git, run with what could run code turned off (`git.py`); the models kept in files, read and written whole (`stored.py`); what the operator approved for a repository (`approval.py`); what reviews share (`review.py`) and the bridge parking them in the first lup's dashboard (`legacy_dashboard.py`) |
+| root | `errors.py`, `settings.py`, `layout.py`, `clock.py`, `cli.py`; the front door for a project's declaration (`__init__.py`); the gate as one command (`gate.py`); git, run with what could run code turned off (`git.py`); the models kept in files, read and written whole (`stored.py`); what the operator approved for a repository (`approval.py`) |
 | `declaration/` | what a project declares, and reading it: the grammar, `Module`, the kinds, lup's modules, loading `lup_project.py` and resolving it (`docs/declaration.md`) |
 | `catalog/` | the data that sets lup's policy, protected: path patterns (`paths.py`), the gate's steps (`gate.py`), the rule table (`rules.ts`) |
 | `codescan/` | reading code: the engine's contract and client, the `# lup:` directives, conditions, ruff, and `docs/rules.md` compiled from the rule table |
