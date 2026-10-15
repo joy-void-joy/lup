@@ -45,6 +45,7 @@ from lup_dev.codescan.directives import (
     Note,
 )
 from lup_dev.codescan.ruff import Linter
+from lup_dev.host.client import RoomClient
 from lup_dev.layout import Layout
 from lup_dev.policy.checkpoint import Bench, Services
 from lup_dev.policy.importers import Spawner
@@ -307,6 +308,22 @@ def reachable_issues(monkeypatch: pytest.MonkeyPatch) -> None:
         return None
 
     monkeypatch.setattr(GitHubIssues, "unreachable", reachable)
+
+
+@pytest.fixture(autouse=True)
+def outside_a_room(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run `lup-dev` as on the host, where no room's request socket is mounted.
+
+    Where the suite itself runs in a room, `/run/lup/request.sock` is there, and
+    `rules check` would ask the real host service each issue's state, which asks
+    GitHub. A test of the room's path gives `cli.RoomClient` a socket of its own.
+    """
+    unmounted = tmp_path / "room" / "request.sock"
+
+    def room() -> RoomClient:
+        return RoomClient(socket=unmounted)
+
+    monkeypatch.setattr(cli, "RoomClient", room)
 
 
 @pytest.fixture(autouse=True)
