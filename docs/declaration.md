@@ -261,7 +261,6 @@ class LupDevelopment(Module):
     paths: Paths = Paths.of(
         protected=["packages/lup-dev/src/lup_dev/catalog/**"],
         excluded=[
-            ".claude/hooks/**",
             "packages/lup-dev/checker/pyright/**",
             "packages/lup-dev/src/lup_dev/codescan/bundle/**",
         ],
@@ -339,7 +338,7 @@ ruff and the engine are given the runner with each call (`Linter.findings`, `Che
 
 `gate.py`'s own seam for running a command, which its tests stub (`Shell` running it as a process), is `Processes`, so `Runner` means one thing in `lup_dev`.
 
-What it doesn't cover: the narrow `Bash` allow rules in `.claude/settings.json` (the launch piece compiles them from the runner and the gate's steps); `PythonAvailable`'s `uv python list` (`codescan/conditions.py`), which asks uv as a Python provider, not as the project's runner; `uv tool install` in trust on launch (how lup installs the host's `lup-dev`, not how a project runs its tools); and Windows (lup runs in a Linux container).
+What it doesn't cover: `PythonAvailable`'s `uv python list` (`codescan/conditions.py`), which asks uv as a Python provider, not as the project's runner; `uv tool install` in trust on launch (how lup installs the host's `lup-dev`, not how a project runs its tools); and Windows (lup runs in a Linux container).
 
 ## Requirements
 
@@ -555,7 +554,7 @@ Built in C. Until then `lup-dev` (`cli.py`) stands in: a Typer app importing eve
 - **A published command never imports `lup_dev` (leaning).** A step of `Python`'s builds the import graph with grimp, import-linter's own graph library, and fails when any `[project.scripts]` target's module reaches `lup_dev` (`chain_exists(importer=…, imported="lup_dev", as_packages=True)`), naming the chain (`find_shortest_chain`). Checked: grimp 3.17 comes with import-linter 2.15 in lup's environment, and both calls answered on lup's own packages. Using it directly makes it `lup-dev`'s declared dependency, the operator's to approve. The alternative, a `forbidden` contract lup writes into `[tool.importlinter]`, writes into a table the project owns.
 - **`lup new <name>`** makes a project: `uv init --lib --build-backend uv --vcs git` (checked: it writes `pyproject.toml`, `src/<name>/__init__.py` and `py.typed`, `.python-version`, `.gitignore`, a README, and a git repository), then lup's part: the package's `__init__.py` rewritten to a module docstring (uv's `hello()` has none, which ruff refuses), `lup_project.py` binding `Project(modules=Modules.default())`, `tests/` with one test, the two pointers and `[tool.pytest]` in `pyproject.toml` (tomlkit, keeping uv's layout), `/.lup/*`, `!/.lup/settings/` and `tmp/` in `.gitignore`, `uv add --dev lup-dev` at the running lup's release, lup's settings files, and a first commit. It passes the gate as made. The alternative, lup's own templates for every file, is the first lup's scaffold again, and Jinja would be a new dependency.
 - **`lup docs rules [<rule>]`** prints the reference from the installed engine (`codescan/reference.py`), which refusals already point at. The hand-written docs (`conventions`, `declaration`) need packaging, since they live outside the package, and come with guidance.
-- **The rename:** the package's script becomes `lup`. The hooks in `.claude/settings.json` and `.codex/hooks.json` call the installed `lup-dev` by path, so they switch in a commit landed once the operator has installed the judge carrying `lup`; switched first, every hook would fail open until then. The alternative timing, keeping `lup-dev` until the launch piece compiles the hooks, means a second rename later. `AGENTS.md` (`uv run lup-dev check`) is the operator's to change, and CI's command switches with the script.
+- **The rename:** the package's script becomes `lup`. The host service answers a launch's hooks by running the repository's approved copy by its command's name (`JudgeLayout.command`, `docs/launch.md`, *On the host: the service*), so that name switches with the script. `AGENTS.md` (`uv run lup-dev check`) is the operator's to change, and CI's command switches with the script.
 - **A test, not a timer:** the command line's tests check which Python modules `lup --help` and `lup hook` import (`sys.modules` after the call), so no test depends on wall-clock time.
 
 `cli.py` becomes the lazy root; each command group is a file of `lup_dev/commands/`, the top layer; the list of adapters moves into `commands/runtimes.py`, which the import contract keeping the adapters behind one place then names.
