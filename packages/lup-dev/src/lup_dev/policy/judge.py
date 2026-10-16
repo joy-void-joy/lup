@@ -16,8 +16,8 @@ so a change gets the same outcome whichever way it was made (`docs/judging-write
 | Any other production change | allow, once the rules pass it |
 
 Refuse wins over ask: the operator never reviews a version that would be refused.
-A project declaring `asks="protected"` has only a protected path's asks reach the
-operator, and allows the rest. Type errors and ruff's findings are information, never a refusal, and a finding
+A project declaring `asks="protected"` has only a protected path's and an operator's
+document's asks reach the operator, and allows the rest. Type errors and ruff's findings are information, never a refusal, and a finding
 ruff fixes safely isn't reported at all. Removing a note present when the session
 started is allowed and reported.
 """
@@ -301,10 +301,11 @@ class Judge(Model, arbitrary_types_allowed=True):
                 return self.ruled(change, versions, removed, [ask])
             case "operator":
                 reason = f"{self.root / change.path} is one of the operator's documents"
-                asks = self.asking([Ask(kind="operator-document", reason=reason)])
-                outcome = "ask" if asks else "allow"
                 return Judgement(
-                    path=change.path, role=role, outcome=outcome, asks=asks
+                    path=change.path,
+                    role=role,
+                    outcome="ask",
+                    asks=[Ask(kind="operator-document", reason=reason)],
                 )
             case "production":
                 if change.after is None:
@@ -323,7 +324,8 @@ class Judge(Model, arbitrary_types_allowed=True):
     def asking(self, asks: list[Ask]) -> list[Ask]:
         """Return the asks that reach the operator, as the declaration's `asks` says.
 
-        A project asking only about protected paths has every other ask allowed.
+        A project asking only about protected paths has every other ask allowed. An
+        operator's document asks either way, and never comes through here.
         """
         match self.roles.declaration.asks:
             case "every":

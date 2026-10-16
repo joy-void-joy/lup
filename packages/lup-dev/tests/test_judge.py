@@ -360,7 +360,6 @@ def test_asking_only_about_protected_paths_allows_every_other_ask(
         edit("src/pkg/core.py", CORE, CORE + "\n", whole=True),
         edit("src/pkg/core.py", CORE, CORE + "\n\nclass Room:\n    pass\n"),
         edit("src/pkg/core.py", CORE, ignored),
-        edit("DESIGN.md", "a\n", "b\n"),
     ]
     for change in changes:
         judgement = judge(change, project=ONLY_PROTECTED)
@@ -378,6 +377,15 @@ def test_asking_only_about_protected_paths_still_asks_about_them(
     )
     assert created.outcome == "ask"
     assert [ask.kind for ask in created.asks] == ["protected"]
+
+
+def test_asking_only_about_protected_paths_still_asks_about_the_operators_documents(
+    judge: Judging,
+) -> None:
+    for path in ["DESIGN.md", "AGENTS.md"]:
+        judgement = judge(edit(path, "a\n", "b\n"), project=ONLY_PROTECTED)
+        assert judgement.outcome == "ask", path
+        assert [ask.kind for ask in judgement.asks] == ["operator-document"]
 
 
 def test_asking_only_about_protected_paths_still_refuses_a_finding(
