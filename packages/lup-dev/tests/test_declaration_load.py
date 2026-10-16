@@ -191,7 +191,7 @@ def test_lups_own_declaration_is_its_modules_with_its_changes() -> None:
     assert resolved.asks == "protected"
     assert [each.name for each in resolved.gate][:2] == ["engine", "rules"]
     assert "packages/lup-dev/src/lup_dev/catalog/**" in resolved.paths.protected
-    assert resolved.paths.excluded == [".claude/hooks/**"]
+    assert resolved.paths.excluded == []
     assert [each.root for each in resolved.tests] == [Path("packages/*/tests")]
     assert [(each.rule, each.paths) for each in resolved.exempt] == [
         ("runtime-mention", ["packages/lup/src/lup/__init__.py"]),

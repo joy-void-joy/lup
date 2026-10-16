@@ -40,10 +40,6 @@ class LupDevelopment(Module):
       room's image as Arch's `npm`.
     - The data that sets lup's policy (`lup_dev.catalog`) is protected, so the
       operator reviews every change to it before it lands.
-    - The bridge's interim hooks are excluded: uv scripts with their own
-      dependencies, outside the conventions, which go with the bridge. They stay
-      protected, as everything in a runtime's own directory is, so a change to one
-      still asks.
     - Working on lup is `AGENTS.md`, the project's own section of the guidance,
       after the sections of lup's modules.
     """
@@ -58,11 +54,7 @@ class LupDevelopment(Module):
         )
     ]
 
-    paths: Paths = Paths.of(
-        protected=["packages/lup-dev/src/lup_dev/catalog/**"],
-        # lup: ignore("runtime-mention", why="data naming a runtime's own files")
-        excluded=[".claude/hooks/**"],
-    )
+    paths: Paths = Paths.of(protected=["packages/lup-dev/src/lup_dev/catalog/**"])
     gate: Gate = Gate.of(
         Step(
             name="engine",
