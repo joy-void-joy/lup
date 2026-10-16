@@ -35,10 +35,10 @@ A module has up to three parts (`docs/modules.md`, *The unit*):
 
 A module may have one side only: the code rules are all environment, the test fake all library.
 
-- **Packaging (the operator's):** lup is one monorepo, a uv workspace, each module a distribution of its own, all released together at one version. The two cores are packages requiring their modules (*The two cores*); every other module is an extra on them (`lup[ledger]` installs `lup-ledger`). A project, or anyone, publishes a module of its own exactly as lup publishes its.
-- **What a project installs, and what its consumers download (leaning):** the project's `dependencies` list the modules its own code imports; its development group lists `lup-dev` and the modules only development needs. A consumer of the project downloads library sides alone: a module's environment side travels in its distribution but can't run without `lup-dev`, which never ships, and the modules that are all environment (the code rules and their engine, 38 MB) aren't there at all.
+- **Packaging (the operator's):** lup is one monorepo, a uv workspace, released together at one version, and its distributions are split by what installing costs, not by module, as pytest's built-in plugins live in pytest. Every module is a directory of `lup` holding both its sides and its dashboard panel (`lup/ledger/`); a third-party package a module needs is an extra (`lup[claude]` brings Claude's SDK). Beside `lup` are `lup-dev`, the environment core, which requires `lup-engine` (the 38 MB code-rules engine) and `lup-dashboard` (the page). A project, or anyone, writes a module exactly as lup does, an importable package with a `Module`, in its own code or in a distribution it publishes (`docs/modules.md`, *Packaging*).
+- **What a project installs, and what its consumers download (leaning):** the project's `dependencies` name `lup` with the extras its own code needs; its development group lists `lup-dev`. A consumer of the project downloads `lup`: every module's code, a few kilobytes each, environment sides and panels inert, since they can't run without `lup-dev` and the dashboard, which never ship.
 - **Two import contracts hold the line (leaning):** inside lup, a module's library side never imports an environment side, and a module imports only the modules it requires; in each project, its shipped code imports no environment side, a contract lup generates from the project's path roles for its gate.
-- **Selected and installed (leaning):** the declaration selects environment sides; `pyproject.toml` says what's installed. A selected module that isn't installed fails the load, naming the extra to add, since lup never writes a project's `pyproject.toml` after `lup new`. An installed module the declaration doesn't select is fine: the project's code may use its library side while its sessions don't get its environment side.
+- **Selected and installed (leaning):** the declaration selects environment sides; every module of lup's is installed with `lup`. A module whose extra is missing fails where it's imported, naming the extra to add, since lup never writes a project's `pyproject.toml` after `lup new`. A module the declaration doesn't select is fine: the project's code may use its library side while its sessions don't get its environment side.
 - **Modules depend on modules, declared** (`requires = [Ledger]`). The loader refuses a selection missing a module that another requires, whether it was dropped or never added, naming both, and refuses a cycle: it never adds or drops a module behind the project's back. Dropping each module is tested together with whatever requires it.
 - **A module can declare a kind other modules fill** (the operator's): the ledger declares node kinds, which coordination and a project's code fill; budgets will declare shares; judging a write is a kind every judging module fills. A kind a module declares exists only where that module is selected.
 - **Nothing is built in** (the operator's): where lup runs a pipeline (judging a write, the gate, the guidance, the dashboard), the pipeline decides nothing itself. Everything it decides with comes from modules, lup's own included, and a project's module adds, drops or replaces any of it, so a project changes how its writes are judged or what its dashboard shows with a module of its own, never by forking lup.
@@ -49,7 +49,7 @@ Python 3.14 or later, for its lazily evaluated annotations.
 
 ### The two cores
 
-Each core is a package requiring a few modules, which every other module builds on and none can drop (`docs/modules.md`, *The cores*).
+Each core is what every module builds on and none can drop (`docs/modules.md`, *The cores*): the library core is `lup`'s own top level, beside its modules' directories, and the environment core is `lup-dev`.
 
 **`lup`, the library core:** what calling an agent from code needs, small enough that a product shipping it carries little. Asking an agent, typed answers, the speaking tools, tools and their serving, the layers, typed events, and each runtime as a module of its own (`lup[claude]`, `lup[codex]`), since each SDK ships its runtime's binary; `lup[testing]` brings the fake and the guard.
 
@@ -60,9 +60,10 @@ Each core is a package requiring a few modules, which every other module builds 
 - the inbox's delivery, to launched sessions and to the operator;
 - launch and trust on launch. Trust approves a module's code before the host runs it, so it can't itself be a module; and the wall is policy, which a project configures through its modules but never drops;
 - the limits on the operator's credentials, with git through the host;
-- the pipelines modules feed: judging a write, the gate's runner, rendering the guidance, the dashboard's protocol.
+- the pipelines modules feed: judging a write, the gate's runner, rendering the guidance, the dashboard's protocol;
+- `transcripts`, a module it requires (the operator's), so no project drops it: every session's record kept whole, every branch of it, out of the runtime's own cleanup; resuming, the dashboard and feedback read from it.
 
-**The dashboard** is a distribution of its own, the one part with its own stack, behind the typed protocol; the environment core never imports it.
+**The dashboard** is a distribution of its own, `lup-dashboard`, the one part with its own stack, behind the typed protocol; `lup-dev` requires it (the operator's), and never imports it.
 
 ### The modules
 
@@ -77,12 +78,12 @@ Each with its sentence; `docs/modules.md` holds each one's sides, what it requir
 - `budgets` (requires `accounts`): shares, pace, pauses and spawn caps (*Budgets*); `SharedBudget` for request rates across processes.
 - the outcome loop, off by default, for graded projects: attaching outcomes to runs, grouping runs into arms, comparing them; the project decides what success is.
 - reflection, requiring the outcome loop: *Open questions*.
-- realtime: an agent present over time, sleeping and waking on events, every timing a tool.
+- realtime: an agent present over time, sleeping and waking on events, every timing a tool; it pairs a fast decision model with Claude, Jev, as a dependency of its own (the operator's), never as a runtime.
 
 **Environment-side:**
 - `Python`: how a Python project is run, tested and checked: the runner, test roots, the gate's Python steps, lup's settings for ruff and pyright.
-- `CodeRules`: lup's rule selection and exemptions, and their judgement of each write.
-- `Proposals` **(leaning)**: `propose`, holds, and the dependency guard (*Sessions*).
+- `CodeRules`: lup's rule selection and exemptions, and their judgement of each write; it requires `lup-engine`.
+- `Proposals` (open, *Open questions*): `propose`, holds, and the dependency guard (*Sessions*); it requires `lup-engine`, which reads a file's shape and imports.
 - `spawn` **(leaning)**: lup's workers, which replace the native `Agent`, and isolation: a worktree for each agent, which it can move between with a tool.
 - `git-workflow`: landing, pull requests, and checking a merge resolution kept both sides. It retires a worktree at landing through a hook, never requiring the module that made it.
 - `GitHub` **(leaning)**: lup's GitHub tools, and the gate's issue states in a room, through `gh` on the host.
@@ -90,8 +91,10 @@ Each with its sentence; `docs/modules.md` holds each one's sides, what it requir
 - `setup`: the integrations a project declares, set up from the command line or a dashboard pane, their secrets kept in the host's secret store.
 - `release`: version bumps and the release flow.
 - `resolver` (likely requiring `git-workflow`): open work grouped into concerns, each approved by the operator, worked in its own worktree, merged onto one branch and rechecked: a planner plus a run.
-- feedback, on by default: "how it felt", telemetry and the pooling pass (*Feedback*).
-- `meta`: *Open questions*.
+- feedback, on by default: "how it felt", telemetry and the pooling pass (*Feedback*), reading sessions from `transcripts`.
+- `meta` **(leaning: it goes)**: each kind's authoring tool lives with its kind (*Open questions*).
+
+Each boundary between modules is tested by one question (the operator's): would a project take one without the other, or replace one with its own? Where they always come together, they're one module (`docs/modules.md`, *To discuss*).
 
 ## How lup reaches a project
 
@@ -133,7 +136,7 @@ narrator.launch()                                                        # a ter
   - **What an ask can do is a guarantee about what can happen:** an ask from code can't run commands, touch files, reach the network or start agents; it can only call lup's tools. Each adapter configures its runtime for it and checks it on every call where the runtime lets it.
   - **Out of the operator's history:** calls from code persist no session and load no user settings; sessions started from code that are kept run under their own config home, so they never appear among the operator's own.
   - **(leaning)** Model ids are checked types with portable tiers, and an effort a model can't take is refused at declaration.
-- **Sessions (leaning):** `async with agent.open(resume=None)` gives a fresh session. `session.ask()` returns a lazy `Turn[T]`: awaited for its result, iterated for its content, with `live()` and `interrupt()`. An ability only one runtime has is a type (`steer()` exists only on Codex's turn). History comes from the runtime's own record; lup's writer keeps the copy with secrets scrubbed. A refused resume raises. On Codex, a conversation declares its output types when it opens, since a thread's tools are fixed when it starts.
+- **Sessions (leaning):** `async with agent.open(resume=None)` gives a fresh session. `session.ask()` returns a lazy `Turn[T]`: awaited for its result, iterated for its content, with `live()` and `interrupt()`. An ability only one runtime has is a type (`steer()` exists only on Codex's turn). History comes from the runtime's own record; `transcripts` keeps the copy whole, with secrets scrubbed. A refused resume raises. On Codex, a conversation declares its output types when it opens, since a thread's tools are fixed when it starts.
 - **Tools:** `@lup_tool` makes a typed async Python function a tool, with `before` hooks; it's the one way to write a tool, whether an ask from code, a room or a module serves it. Where it runs is declared on the tool: `runs="inside"` (the default) is the agent's side of the wall, which with no container is the caller's process; `runs="outside"` is the caller's process on the host, the deliberate openings in the wall (`submit`, publishing, anything needing a credential). lup serves its tools through its own MCP server, so its handler sees and counts every call. **(leaning)** Toolsets group tools in any file, and a tool reaches its module's settings, its caller and its launch through parameters typed with them (part of *Open questions*, how a module refers to code). **(leaning)** A large result is written to a file and the agent gets its path and a preview; a tool server can be kept out of tool search; a third-party MCP server can be passed through.
 - **Rooms (leaning),** the `rooms` module: a room wraps an agent with a wall: `Room(agent=…, container=…)`. Both are `Agent`s with the same verbs, so swapping runtimes is one field and `lup launch claude audiobook` picks the runtime at launch. A room's image is built with the project installed. Its own toolkit is the image's CLIs and scripts, which the agent runs and may extend. Publishing stays outside the room, in host code. Rooms and anything long-running appear on the dashboard and fall under budgets; a quick call with no tools records only its cost.
 - **Runs (leaning),** the `runs` module: durable work in a directory that can't report the wrong run:
@@ -245,6 +248,7 @@ lup cleans up after itself: containers, images (retired with their checkout) and
 - **Every gate, rule and hold names why it exists and where it steers:** one line in each refusal, the full reason in the docs.
 - **Guidance gives each rule with its reason,** says what's the agent's to decide, what's the operator's and where the walls are, contradicts neither the runtime's own prompt nor any skill, and is written once the system it describes exists. Each module brings its own section; the guidance is rendered from the sections of the modules selected.
 - **The operator likes numbered questions in plain text,** each with a stated lean; the structured question tool is for a quick single choice.
+- **Aim at the real thing:** the guidance asks a session to build toward the real shape from the start (the interface the code will have, or the real target an idea must work on) rather than a stopgap or a chain of small tests, with throwaway spikes for facts (`Core`'s section; `docs/graveyard.md`).
 - **Skills are reference:** what the work is for, what good output looks like, the known traps; fixed steps only where the order is mechanical.
 - **One template serves lup and the projects using it,** with the project's own section and lup's, rendered with Jinja.
 
@@ -261,6 +265,7 @@ The operator's to decide; the agent's lean where it has one.
 8. **Native `Agent` for short jobs, beside lup's spawn.** Leaning deny; to settle by measuring the new spawn's start time and first request for a short worker, and whether a fork reads its parent's cache.
 9. **Carrying the operator's preferences across containers,** or seeding from the personal config only.
 10. **The verbs** (tentatively settled), each named for what comes back: `ask` returns the answer while the caller waits, whatever the target; `spawn` returns a handle to a session that outlives the caller; `launch` gives a person a terminal; `open` starts a session from code.
+11. **Proposals: what's held, and when** (the operator's, kept open on 2026-10-16). The operator's concern: approving a shape after its code is written is back and forth that holding first would have avoided, and a systematic refusal is friction where a hold isn't. Proposed and not settled: refuse what the agent can fix alone, hold what needs the operator; a shape is free to write and building on an unapproved one is held; `propose` holds by default; the operator approves the shape, not the code. The agent's main worry is on the operator's side: small public additions each becoming an item (`docs/modules.md`, *To discuss*).
 
 **Still to discuss:** each module's sides and boundaries (`docs/modules.md`, *To discuss*); the dashboard's design (readability, lag, filtering, keys and buttons, spawning, budget controls, how the inbox's items look and are answered); the CLI's naming; one standard for warnings and diagnostics, with the actionable part parseable; guidance on fan-out, and budget defaults keeping a day of work inside a week; Codex specifics; a security review for downstream users (age gates, sudo, mounts, egress, secrets, capabilities); the feedback modules' design; moving the downstream projects onto lup; why the first lup's gate and runs grew so large in time and memory.
 
@@ -286,9 +291,10 @@ The operator's to decide; the agent's lean where it has one.
 - launch on rooms with the host service, trust on launch, the inbox and lup's tools, git and GitHub through the host, related repositories (`docs/launch.md`, `docs/host-tools.md`, `docs/related-repositories.md`).
 
 **Next, in order (leaning):**
-1. **The module system made solid:** modules bring what they do (tools, commands, answers to the room's requests, what they do at the hook's events), declare kinds for others to fill, and feed the pipelines with nothing built in; the cores split into their modules, each a distribution; GitHub, git through the host, the inbox and the judge moved into their modules, each with its drop test.
-2. **The bird's-eye view** (`docs/modules.md`): each module discussed with the operator until its sides and boundaries are settled. At its most cohesive, it gives the dependency graph, and the order of what follows.
-3. **The modules rebuilt** in that order, each against the first lup's evidence: among them the ledger with the inbox on it, coordination, spawn with isolation, proposals and the dependency guard (replacing the checkpoint's holds), git-workflow, the dashboard and budgets.
-4. **The downstream projects move onto lup,** each dropping its copy of the first lup.
+1. **The wall's gaps closed,** since the repository is public and a room may run hostile code: the host checks every worktree's links before it runs git (#54), what leaves through the operator's credentials is checked for details of their machine, and a conversation carried into a new launch learns what changed in its guidance (#73). Each has its note.
+2. **The bird's-eye view** (`docs/modules.md`): each module discussed with the operator until its sides and boundaries are settled, every boundary tested by whether a project would take one module without the other. At its most cohesive, it gives the dependency graph, and the order of what follows.
+3. **The module system made solid,** on the packaging decided: modules bring what they do (tools, commands, answers to the room's requests, what they do at the hook's events, panels), declare kinds for others to fill, and feed the pipelines with nothing built in; every module a directory of `lup`, beside `lup-dev`, `lup-engine` and `lup-dashboard`; GitHub, git through the host, the inbox and the judge moved into their modules, each with its drop test.
+4. **The modules rebuilt** in the graph's order, each against the first lup's evidence: `transcripts` and proposals first, then among them the ledger with the inbox on it, coordination, spawn with isolation, git-workflow, the dashboard and budgets.
+5. **The downstream projects move onto lup,** each dropping its copy of the first lup.
 
 **While lup is being built,** its own sessions run only the code rules at the edit, and only protected paths ask (`AGENTS.md`, *How work goes*); a piece of the environment goes live in lup's own sessions once it's finished.
