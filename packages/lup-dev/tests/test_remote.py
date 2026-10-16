@@ -735,7 +735,7 @@ def test_a_protected_pattern_is_git_s_glob_its_star_spanning_slashes(
 def test_the_room_s_configuration_sends_every_remote_url_through_the_helper(
     bare: Path, tmp_path: Path
 ) -> None:
-    git(bare, "remote", "set-url", "origin", "jvj:owner/project")
+    git(bare, "remote", "set-url", "origin", "alias:owner/project")
     git(
         bare,
         "remote",
@@ -754,7 +754,7 @@ def test_the_room_s_configuration_sends_every_remote_url_through_the_helper(
             "\n"
         )
 
-    assert read("url.lup::jvj:owner/project.insteadOf") == ["jvj:owner/project"]
+    assert read("url.lup::alias:owner/project.insteadOf") == ["alias:owner/project"]
     assert read("url.lup::ssh://push.example/owner/project.insteadOf") == [
         "ssh://push.example/owner/project"
     ]

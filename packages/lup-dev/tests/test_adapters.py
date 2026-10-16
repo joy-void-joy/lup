@@ -725,10 +725,11 @@ def test_codex_holds_only_the_worktree_it_started_in(
     assert "# BAD regex" in (linked / CORE).read_text()
 
 
-# What Codex 0.162.1 sent, captured from `codex exec` in a scratch repository: a
-# patch adding `livecheck.py` holding `import subprocess`, a patch updating it, a
-# shell `test -e livecheck.py`, a patch that fails to apply (a `PreToolUse` and no
-# `PostToolUse`), then the turn's end.
+# What Codex 0.162.1 sent, captured from `codex exec` in a scratch repository
+# (each `cwd` replaced by a neutral path): a patch adding `livecheck.py` holding
+# `import subprocess`, a patch updating it, a shell `test -e livecheck.py`, a
+# patch that fails to apply (a `PreToolUse` and no `PostToolUse`), then the
+# turn's end.
 
 CAPTURED = Path(__file__).parent / "payloads" / "codex-0.162.1"
 LIVECHECK = "import subprocess  # BAD subprocess\n"
