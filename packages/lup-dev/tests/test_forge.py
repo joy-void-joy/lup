@@ -11,6 +11,8 @@ service the gate asks runs on sockets under the test's directory.
 import asyncio
 import json
 import os
+import shutil
+import subprocess
 import sys
 import threading
 from contextlib import contextmanager
@@ -61,6 +63,9 @@ with (here / "calls.jsonl").open("a") as log:
         "arguments": sys.argv[1:],
         "input": sys.stdin.read(),
         "directory": os.getcwd(),
+        "pinned": {{
+            name: os.environ.get(name) for name in ["GIT_DIR", "GIT_COMMON_DIR"]
+        }},
     }}) + "\\n")
 words = " ".join(sys.argv[1:3])
 answers = json.loads((here / "answers.json").read_text())
@@ -80,6 +85,13 @@ class Call(BaseModel):
     arguments: list[str]
     input: str
     directory: str
+    pinned: dict[str, str | None]
+    """`GIT_DIR` and `GIT_COMMON_DIR` as `gh`, and the git it runs, had them."""
+
+
+def pinned_to(directory: Path) -> dict[str, str | None]:
+    """`GIT_DIR` and `GIT_COMMON_DIR` both naming `directory`."""
+    return {"GIT_DIR": str(directory), "GIT_COMMON_DIR": str(directory)}
 
 
 class Gh:
@@ -565,11 +577,17 @@ def test_a_launch_whose_repository_wasnt_named_reaches_no_github(
 def test_each_tool_says_why_without_gh(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("PATH", str(tmp_path / "nowhere"))
+    # `env` alone on the `PATH`, which pins the git directory before `gh` runs.
+    only = tmp_path / "only-env"
+    only.mkdir()
+    env = shutil.which("env")
+    assert env is not None
+    (only / "env").symlink_to(env)
+    monkeypatch.setenv("PATH", str(only))
     answer = called("comment", {"number": 1, "body": "b"}, launch(tmp_path))
     assert answer.error
     assert answer.text.startswith(
-        "`comment` didn't run: `gh` couldn't run on the host: `gh` doesn't run:"
+        "`comment` didn't run: `gh` couldn't run on the host: "
     )
 
 
@@ -616,11 +634,21 @@ def test_every_call_names_the_registered_repository(gh: Gh, tmp_path: Path) -> N
             "--raw-field=owner=joy-void-joy"
         ]
         assert call.directory == str(registered.repository)
+        assert call.pinned == pinned_to(registered.repository)
 
 
-def test_the_repository_is_named_from_its_git_directory(gh: Gh, tmp_path: Path) -> None:
+def test_the_repository_is_named_from_its_git_directory_pinned_past_a_planted_commondir(
+    gh: Gh, tmp_path: Path
+) -> None:
     directory = tmp_path / "lup.git"
-    directory.mkdir()
+    planted = tmp_path / "planted.git"
+    for each, probe in [(directory, "the repository's"), (planted, "the room's")]:
+        subprocess.run(["git", "init", "-q", "--bare", str(each)], check=True)
+        subprocess.run(
+            ["git", "config", "--file", str(each / "config"), "lup.probe", probe],
+            check=True,
+        )
+    (directory / "commondir").write_text(f"{planted}\n")
     gh.answer(
         "repo view",
         '{"name":"lup","owner":{"id":"MDQ6VXNlcjU2MjU3NDA1","login":"joy-void-joy"}}\n',
@@ -631,7 +659,19 @@ def test_the_repository_is_named_from_its_git_directory(gh: Gh, tmp_path: Path) 
         arguments=["repo", "view", "--json=owner,name"],
         input="",
         directory=str(directory),
+        pinned=pinned_to(directory),
     )
+    # The git `gh` runs, given what `gh` was, reads the repository's own `config`.
+    given = {name: value for name, value in call.pinned.items() if value is not None}
+    probed = subprocess.run(
+        ["git", "config", "lup.probe"],
+        cwd=call.directory,
+        env={**os.environ, **given},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert probed.stdout.strip() == "the repository's"
 
 
 def test_naming_says_gh_s_own_words_where_it_cant(gh: Gh, tmp_path: Path) -> None:

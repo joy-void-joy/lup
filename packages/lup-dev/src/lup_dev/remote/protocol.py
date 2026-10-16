@@ -5,8 +5,11 @@
 `request.sock`, and the service answers with the launch it knows by the socket
 (`host/rooms.py`). Where git runs, and to which remote, is the host's word:
 - git runs in the repository's own git directory, which the launcher found
-  before the room started (`Register.repository`), named explicitly, never
-  discovered from a directory the room writes;
+  before the room started (`Register.repository`), never discovered from a
+  directory the room writes, and pinned there: `GIT_DIR` and `GIT_COMMON_DIR`
+  both name it (`lup_dev.git`, `pinning`), since git told only `--git-dir`
+  follows a `commondir` the room plants at its top to a git directory of the
+  room's, and reads that one's `config`;
 - the remote is one the repository's `config` names, which the room can't
   write, and its URL is git's for it there (`git remote get-url`). Anything else
   is refused: a URL, or a name only a file of the room's defines, since git
@@ -27,8 +30,11 @@
   the room writes*).
 
 git runs with replace refs ignored, automatic maintenance, hooks and
-`core.fsmonitor` off, and submodules never followed, each spawned through
-asyncio and awaited on the service's event loop, as each judge is
+`core.fsmonitor` off, and submodules never followed. `core.sshCommand` is left
+as the repository's `config` sets it: pinned, that `config` is the only one of
+the repository's git reads, read-only in every room and the operator's to
+write, so a project's own `core.sshCommand` there holds. Each git is spawned
+through asyncio and awaited on the service's event loop, as each judge is
 (`host/service.py`, `judged`). The operator's credentials are the service's
 environment. Each push and fetch is said in the service's log, with git's
 standard error once.
@@ -43,6 +49,7 @@ from typing import TYPE_CHECKING, Annotated, Literal, override
 from pydantic import AfterValidator
 
 from lup.types import Model
+from lup_dev.git import pinning
 from lup_dev.host.protocol import Action, HostError, Register, Reply, Request
 from lup_dev.host.rooms import RoomHandler, RoomRoute
 from lup_dev.host.service import Asked, Judged, judged
@@ -306,13 +313,12 @@ class Remotes(Model, arbitrary_types_allowed=True):
     """Runs one git command to its end on the service's event loop."""
 
     async def git(self, launch: Register, *arguments: str) -> Judged:
-        """Run git in `launch`'s repository's own git directory, named, with what it could be led into turned off."""
-        repository = str(launch.repository)
+        """Run git in `launch`'s repository's own git directory, pinned there (`pinning`), with what it could be led into turned off."""
         return await self.run(
             Asked(
                 command=[
+                    *pinning(launch.repository),
                     "git",
-                    f"--git-dir={repository}",
                     "--no-replace-objects",
                     "-c",
                     "gc.auto=0",

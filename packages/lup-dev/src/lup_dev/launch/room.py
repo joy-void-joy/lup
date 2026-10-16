@@ -421,7 +421,7 @@ def room_git(
     or including a file inside one of the room's mounts, through any file it
     includes in turn.
     """
-    git = Git(cwd=repository)
+    git = Git.pinned(repository)
     room = RoomGit(repository=repository, launch=launch)
     sources = [
         each.source for each in [*mounts, *room.mounts] if isinstance(each, Mount)
