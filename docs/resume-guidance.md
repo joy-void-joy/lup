@@ -15,7 +15,7 @@ Issue #73. A launch puts its guidance at system level (`docs/launch.md`, *Guidan
 - **Claude Code: `--system-prompt-snapshot off`** beside `--append-system-prompt-file` (`adapters/claude/terminal.py`), so every request, a resumed conversation's too, carries this launch's guidance, and this CLI's own prompt. A resume after the guidance changed writes the conversation's cache again once; across launches it has usually expired anyway, which Claude Code says at the resume (`prompt_cache_likely_expired`). Within a launch the prompt should render the same each time, so the cache holds: owed live.
 - **Codex: the guidance as `additional_developer_instructions`,** in the requirements file the launch already mounts for its hooks (`/etc/codex/requirements.toml`, `adapters/codex/terminal.py`), in place of the `developer_instructions` override. Codex then replaces it itself, whole, at a resume where it changed. The costs:
   - the whole guidance again in the conversation at each such resume: about 19 KB for lup's own repository (17.4 KB of its four sections' files at `dev`'s tip, before lup's tools and the other repositories are listed);
-  - Codex refuses to start past "a limit of 10,000 estimated tokens, including context markers" (*config-reference*), 4 bytes a token (`utils/string`, `approx_bytes_for_tokens`), so a launch refuses a render past it first, naming its size and the limit, rather than fall back to `developer_instructions` and the stale guidance with them;
+  - Codex refuses to start past "a limit of 10,000 estimated tokens, including context markers" (*config-reference*), 4 bytes a token (`utils/string`, `approx_bytes_for_tokens`), so a launch refuses a render past it first, naming its size and the limit, rather than fall back to `developer_instructions` and the stale guidance with them. Codex counts the instructions as it would send them at a resume where they changed: the `<managed_developer_instructions>` markers and the notice opening them, 169 bytes, beside the render (`validate_managed_developer_instructions`), which the launch's count follows (`adapters/codex/terminal.py`, `managed`);
   - a workspace's own managed requirements outrank the system file (*config-reference*), so an account whose workspace sets managed instructions would drop lup's.
 - `docs/launch.md`'s *Guidance* and its table of compiled settings change with these.
 
@@ -45,7 +45,7 @@ Each has what this needs, so neither declares a gap: `SessionStart` saying it's 
 
 A paragraph of `Core`'s section (`declaration/modules/guidance/core.md`), after *What isn't*:
 
-> **As of this launch.** This guidance was rendered when this session's launch started, and a conversation continued from an earlier launch may remember another; where either disagrees with the room itself (a path, a mount, a tool), the room holds, so look before concluding something isn't there.
+> **As of this launch.** This guidance was rendered when this session's launch started, and a conversation continued from an earlier launch may remember another. Where either disagrees with the room itself (a path, a mount, a tool), the room holds: look before concluding something isn't there.
 
 ## Modules and public API (leaning)
 

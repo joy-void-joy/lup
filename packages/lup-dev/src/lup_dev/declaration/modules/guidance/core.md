@@ -10,6 +10,8 @@ This session runs in a container lup started for the project: the room. Its wall
 
 **What isn't:** the rest of the operator's home, their git configuration (your git identity is set for you), an SSH key and a GitHub login. Your home directory is the room's own and goes when the session ends, so what's worth keeping goes in the repository, and scratch work under `tmp/`.
 
+**As of this launch.** This guidance was rendered when this session's launch started, and a conversation continued from an earlier launch may remember another. Where either disagrees with the room itself (a path, a mount, a tool), the room holds: look before concluding something isn't there.
+
 **Where the walls are:**
 - **git's `config` and `hooks/` are read-only,** since a hook written there would run on the host. A command that writes git's configuration, such as setting a branch's upstream, fails with "Device or resource busy".
 - **`git push` and `git fetch` work as usual, through the operator's credentials on the host,** within what the project's declaration allows (`Core.credentials`): by default no force push, no deleting a branch, and nothing pushed to `main` or a tag. What's refused says why, and allowing it is the operator's call: ask rather than work around it. `git push -u` pushes but records no upstream (the configuration is read-only), and a plain `git push` pushes the current branch.

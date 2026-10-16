@@ -19,7 +19,13 @@ from typer.testing import CliRunner
 
 import lup
 from lup.rooms.engine import Exited, Podman, Process
-from lup.sessions.terminal import Cli, SessionSettings, TerminalSettings, ToolServer
+from lup.sessions.terminal import (
+    Cli,
+    SessionSettings,
+    TerminalError,
+    TerminalSettings,
+    ToolServer,
+)
 from lup_dev import Core, Modules, Project, Session, cli
 from lup_dev.adapters import Adapter, claude, codex
 from lup_dev.approval import Approval, ReleaseTool
@@ -648,6 +654,31 @@ def test_the_approved_layer_s_repositories_are_mounted_said_and_listed(
         f"- `gone`, not here. At `{gone}`, missing: it isn't on this machine, so "
         "it isn't mounted."
     ) in guidance
+
+
+def test_a_codex_launch_refuses_guidance_past_what_codex_takes_before_registering(
+    project: Path, tmp_path: Path, clock: FakeClock, shell: Shell
+) -> None:
+    (project / "AGENTS.md").write_text(
+        "# The project\n\n" + "A long section.\n" * 3_000
+    )
+    shell.commit(project, "a long guidance")
+    machine = Machine(tmp_path, clock)
+    kept = machine.layout.clis("codex").version("0.163.0")
+    kept.mkdir(parents=True)
+    (kept / "cli").write_text("")
+    on_codex = codex.adapter().model_copy(
+        update={"channel": Offline(events=machine.events)}
+    )
+
+    with pytest.raises(
+        TerminalError, match=r"^the guidance is [\d,]+ bytes.* past the 10,000 Codex"
+    ):
+        cli.launched(on_codex, [], project, machine.launcher)
+
+    said = machine.events.said
+    assert not [each for each in said if each.startswith("register")]
+    assert "run" not in said
 
 
 def test_the_registration_ends_when_the_cli_fails(

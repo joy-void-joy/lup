@@ -143,6 +143,8 @@ def test_claude_compiles_its_flags_settings_state_and_mounts(
         "high",
         "--append-system-prompt-file",
         str(launch / "guidance.md"),
+        "--system-prompt-snapshot",
+        "off",
     ]
     assert terminal.env == {
         "CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS": "0",
@@ -250,6 +252,7 @@ def test_claude_replaces_its_prompt_only_when_the_declaration_gives_one(
 
     assert "--system-prompt-file" not in kept.command
     assert "--append-system-prompt-file" not in kept.command
+    assert "--system-prompt-snapshot" not in kept.command
     assert "--effort" not in kept.command
     assert replaced.command[-2:] == [
         "--system-prompt-file",
@@ -515,8 +518,6 @@ def test_codex_compiles_its_flags_overrides_requirements_and_mounts(
             'tool_timeout_sec = 90000,default_tools_approval_mode = "approve"}}'
         ),
         "-c",
-        "developer_instructions=" + json.dumps(GUIDANCE),
-        "-c",
         "project_doc_max_bytes=0",
     ]
     assert terminal.env == {"CODEX_HOME": str(codex_home)}
@@ -525,6 +526,7 @@ def test_codex_compiles_its_flags_overrides_requirements_and_mounts(
     assert decoded(terminal.files) == {
         launch / "requirements.toml": {
             "allow_managed_hooks_only": True,
+            "additional_developer_instructions": GUIDANCE,
             "hooks": {
                 "SessionStart": [{"hooks": [timed]}],
                 "PreToolUse": [{"matcher": "Edit|Write", "hooks": [timed]}],
@@ -580,7 +582,6 @@ def test_every_codex_override_parses_as_toml_rather_than_falling_back_to_text(
                 "default_tools_approval_mode": "approve",
             },
         },
-        "developer_instructions": GUIDANCE,
         "project_doc_max_bytes": 0,
     }
 
@@ -619,6 +620,40 @@ def test_codex_refuses_a_server_of_the_operator_s_named_as_lup_s(
 
     with pytest.raises(TerminalError, match="names an MCP server lup, as lup's own"):
         Codex().terminal(settings(tmp_path / "launch", CODEX_CLI))
+
+
+CODEX_MARKERS = len(
+    "<managed_developer_instructions>\n"
+    "These managed developer instructions replace all previously provided managed "
+    "developer instructions.\n\n"
+    "\n</managed_developer_instructions>"
+)
+"""The bytes Codex counts around its managed instructions toward their limit:
+the markers it sends them between, and the notice opening them at a resume where
+they changed (`validate_managed_developer_instructions`, rust-v0.163.0)."""
+
+
+def test_codex_refuses_guidance_past_what_it_takes_naming_its_size_and_the_limit(
+    tmp_path: Path, codex_home: Path
+) -> None:
+    most = 10_000 * 4 - CODEX_MARKERS
+    fits = "é" * (most // 2) + "a" * (most % 2)
+    past = f"{fits}a"
+    launch = tmp_path / "launch"
+
+    terminal = Codex().terminal(settings(launch, CODEX_CLI, guidance=fits))
+    with pytest.raises(TerminalError) as refused:
+        Codex().terminal(settings(launch, CODEX_CLI, guidance=past))
+
+    written = tomllib.loads(terminal.files[launch / "requirements.toml"])
+    assert written["additional_developer_instructions"] == fits
+    assert len(fits.encode()) == most
+    assert str(refused.value) == (
+        "the guidance is 39,832 bytes, 40,001 as Codex sends it between its "
+        "markers: about 10,001 estimated tokens at 4 bytes each, past the 10,000 "
+        "Codex takes as managed developer instructions, so it wouldn't start. "
+        "Shorten the guidance's sections to launch Codex."
+    )
 
 
 def test_codex_without_an_operator_config_or_settings_turns_off_only_its_own(

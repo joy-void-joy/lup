@@ -19,12 +19,13 @@ each runtime*):
   name, since they're set up for the host;
 - lup's tool servers, in the same `mcp_servers` table that turns theirs off
   (below);
-- the guidance as `developer_instructions`, with `project_doc_max_bytes = 0`, so
-  the repository's `AGENTS.md` isn't loaded beside it;
+- `project_doc_max_bytes = 0`, so the repository's `AGENTS.md` isn't loaded
+  beside the guidance;
 - lup's hooks as managed hooks, in a requirements file mounted at
   `/etc/codex/requirements.toml`, with `allow_managed_hooks_only` so no other hook
   runs **(leaning)**: managed hooks need no review, where hooks from any other
   source run only once trusted;
+- the guidance as `additional_developer_instructions` in the same file (below);
 - `CODEX_HOME`, the operator's home, mounted read-write at its path for their
   login, settings and history.
 
@@ -58,6 +59,18 @@ named as one of lup's would lend lup's its other keys (`enabled_tools`, `env`,
 `url`, which Codex then refuses beside `command`): such a configuration is
 refused, naming the server. Their tools stay behind Codex's tool search where
 the model has it: no `omit_tools_from`.
+
+**The guidance** is Codex's managed developer instructions, which it keeps in a
+thread's state by their hash and, at a resume where they changed, sends again
+whole as replacing the earlier ones, so a conversation from an earlier launch
+runs under this launch's guidance. `developer_instructions` reach a thread once,
+in its first context, and a resumed thread again only once it's compacted.
+Codex refuses to start where the managed instructions pass 10,000 estimated
+tokens, counted as it would send them at such a resume, at 4 bytes a token, so
+the compile refuses guidance past that first, naming its size, rather than fall
+back to `developer_instructions` and leave a resumed thread the stale guidance.
+A workspace's own managed requirements outrank the system file, so a workspace
+setting managed instructions of its own drops lup's.
 
 **Declared gaps.** Codex 0.162.1 has no setting for the prompt cache's lifetime,
 and can't remove a built-in tool by name, only whole feature groups, so a
@@ -100,6 +113,22 @@ What this relies on, read in Codex's source at `rust-v0.162.1` (paths under
   (`config/src/loader/mod.rs`); its `hooks` table holds the events' matcher
   groups as a `hooks.json` does, and `allow_managed_hooks_only` there skips every
   hook that isn't managed (`hooks/src/engine/discovery.rs`);
+- at `rust-v0.163.0`: `additional_developer_instructions` is a string of the
+  requirements (`config/src/config_requirements.rs`), whose sources merge in
+  ascending precedence, the system file lowest, below a workspace's cloud
+  requirements and managed preferences (`config/src/loader/mod.rs`). The
+  managed instructions are a developer message of their own between
+  `<managed_developer_instructions>` markers, kept in the thread's world state
+  by their hash: unchanged, nothing is sent; changed, they're sent whole,
+  opening "These managed developer instructions replace all previously provided
+  managed developer instructions." Codex refuses them past "the model-context
+  limit of 10000 estimated tokens", counted with that notice and the markers
+  (`core/src/context/world_state/managed_developer_instructions.rs`), at 4 bytes
+  a token (`utils/string/src/truncate.rs`, `approx_bytes_for_tokens`).
+  `developer_instructions` are part of a thread's initial context, written only
+  to a thread with no recorded turn context, which a resumed thread has from its
+  rollout, and again at a compaction (`core/src/session/mod.rs`,
+  `core/src/compact.rs`);
 - `instructions` becomes the base instructions when nothing else sets them
   (`core/src/config/mod.rs`); `features.memories` is the memories feature's
   switch, off by default, and `features.apps` the apps', on by default
@@ -114,6 +143,7 @@ What this relies on, read in Codex's source at `rust-v0.162.1` (paths under
 
 import tomllib
 from datetime import timedelta
+from math import ceil
 from shlex import join
 from typing import TYPE_CHECKING
 
@@ -240,10 +270,50 @@ class HookGroup(Model):
     hooks: list[CommandHook]
 
 
+MANAGED_OPENS = "<managed_developer_instructions>"
+"""The marker Codex opens its managed developer instructions with."""
+
+MANAGED_CLOSES = "</managed_developer_instructions>"
+"""The marker Codex closes its managed developer instructions with."""
+
+MANAGED_REPLACES = (
+    "These managed developer instructions replace all previously provided managed "
+    "developer instructions."
+)
+"""The notice opening the managed instructions where they're sent again, changed."""
+
+
+def managed(guidance: str, tokens: int = 10_000, bytes_per_token: int = 4) -> str:
+    """Return `guidance` as Codex's managed developer instructions, held to the size Codex takes.
+
+    Codex counts them as it would send them at a resume where they changed,
+    between its markers and after its notice, and refuses to start where that
+    passes `tokens` estimated tokens of `bytes_per_token` bytes. Raise
+    `TerminalError` there, naming the guidance's size and the limit, rather than
+    launch a session Codex would refuse.
+    """
+    wrapped = f"{MANAGED_OPENS}\n{MANAGED_REPLACES}\n\n{guidance}\n{MANAGED_CLOSES}"
+    sent = len(wrapped.encode())
+    if sent > tokens * bytes_per_token:
+        message = (
+            f"the guidance is {len(guidance.encode()):,} bytes, {sent:,} as Codex "
+            f"sends it between its markers: about {ceil(sent / bytes_per_token):,} "
+            f"estimated tokens at {bytes_per_token} bytes each, past the "
+            f"{tokens:,} Codex takes as managed developer instructions, so it "
+            "wouldn't start. Shorten the guidance's sections to launch Codex."
+        )
+        raise TerminalError(message)
+    return guidance
+
+
 class Requirements(Model):
-    """The launch's managed requirements: lup's hooks, and no others."""
+    """The launch's managed requirements: lup's hooks, and no others; and the guidance."""
 
     allow_managed_hooks_only: bool = True
+    additional_developer_instructions: str | None = None
+    """The guidance, as Codex's managed developer instructions: a developer
+    message of their own, which Codex sends again whole at a resume where they
+    changed; none gives none."""
     hooks: dict[str, list[HookGroup]]
 
 
@@ -335,12 +405,15 @@ def compiled(
 
     events = dict.fromkeys(spelled(hook.event) for hook in settings.hooks)
     requirements = Requirements(
+        additional_developer_instructions=None
+        if settings.guidance is None
+        else managed(settings.guidance),
         hooks={
             name: [
                 group(hook) for hook in settings.hooks if spelled(hook.event) == name
             ]
             for name in events
-        }
+        },
     )
     written = tomlkit.dumps(requirements.model_dump(mode="json", exclude_none=True))
     overrides = [
@@ -372,11 +445,6 @@ def compiled(
         *switching(APPS, theirs, on=session.account_connectors),
         Override(key="features.plugins", value=False),
         *([Override(key="mcp_servers", value=servers)] if servers else []),
-        *(
-            []
-            if settings.guidance is None
-            else [Override(key="developer_instructions", value=settings.guidance)]
-        ),
         Override(key="project_doc_max_bytes", value=0),
     ]
     return Terminal(

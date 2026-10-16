@@ -18,7 +18,9 @@ settings compiled for each runtime*):
   choose, which `/model` saves there (`model-config`, *Setting your model*), so a
   declaration naming none leaves theirs to Claude Code, which reads it itself;
 - the declaration's system prompt with `--system-prompt-file`, and the guidance
-  with `--append-system-prompt-file`;
+  with `--append-system-prompt-file` and `--system-prompt-snapshot off`, so the
+  system prompt is rendered afresh at every request, a resumed conversation's
+  too, and carries this launch's guidance;
 - the variables: `CLAUDE_CODE_MCP_AUTO_BACKGROUND_MS=0` so a held call isn't
   moved to the background after two minutes, `DISABLE_AUTOUPDATER` since the
   CLI's file is read-only, and `CLAUDE_CONFIG_DIR` where the operator set it;
@@ -80,9 +82,16 @@ other Claude Code sessions can then start a turn in the room too.
 
 What this relies on, from Claude Code's docs (code.claude.com, `cli-reference`,
 `permissions`, `env-vars`, `settings`, `settings-reference`, `mcp`, `hooks`) and
-its 2.1.294 and 2.1.296 binaries:
+its 2.1.294, 2.1.296 and 2.1.301 binaries:
 - the system prompt flags work interactively; `--system-prompt-file` replaces the
   prompt, `--append-system-prompt-file` appends to it;
+- by default Claude Code records the system prompt on a conversation's first
+  request, those flags' text included, and "every later request and resume
+  sends the record as-is, even when a later launch passes different text, until
+  the conversation is compacted"; with `--system-prompt-snapshot off` (2.1.257
+  and later) it records none, and "the prompt is rendered fresh every request"
+  (the 2.1.301 binary's help; `cli-reference`, *System prompt flags in resumed
+  conversations*);
 - `--settings` is a level above user settings, and "an `env` block inside a
   settings file is an ordinary key and follows the levels above"; lists "merge
   instead of overriding" (`settings`, *Settings precedence*). The 2.1.296 binary
@@ -411,7 +420,12 @@ def compiled(
             *(
                 []
                 if settings.guidance is None
-                else ["--append-system-prompt-file", str(launch.guidance)]
+                else [
+                    "--append-system-prompt-file",
+                    str(launch.guidance),
+                    "--system-prompt-snapshot",
+                    "off",
+                ]
             ),
         ],
         env={KEEP_CALLS: "0", NO_UPDATES: "1", **moved},
