@@ -2,7 +2,7 @@
 
 **One sentence:** before a launch starts and before any host-side git runs, the host checks that each worktree's link files name the repository's own git directory and nothing else, and refuses and tells the operator where one points away, so a room can't make the host's git read a git directory the room wrote (#54).
 
-This designs the check the operator decided on (2026-10-16), to be built next. The full fix is spawn's: worktrees created and removed through the host, each worktree's link files mounted read-only (`DESIGN.md`, *Open questions*, isolation; *Modules*, `spawn`). Until that lands, and as a check that stays after it, the host verifies the links. The note states spawn's part only as far as the check needs it. It rests on #54 and its comment, `docs/field-notes.md` (*Host-side git in a repository the room writes*), and scratch checks for this note on the room's git 2.55.0, the `commondir` redirect repeated by the session that reviewed it (*Checks owed*: the host's 2.56.0 still owed). A choice the operator hasn't confirmed is marked **(leaning)**.
+This designs the check the operator decided on (2026-10-16), to be built next. The full fix is spawn's: worktrees created and removed through the host, each worktree's link files mounted read-only (`DESIGN.md`, *Open questions*, isolation; *Modules*, `spawn`). Until that lands, and as a check that stays after it, the host verifies the links. The note states spawn's part only as far as the check needs it. It rests on #54 and its comment, `docs/field-notes.md` (*Host-side git in a repository the room writes*), and scratch checks for this note on the room's git 2.55.0, the `commondir` redirect repeated by the session that reviewed it (*Checks owed*: the host's 2.56.0 still owed). The operator took every lean below on 2026-10-16, and had the pin on each host-side git that names the git directory land first, ahead of the check.
 
 ## Why the host is exposed today
 
@@ -52,33 +52,33 @@ A link that is absent where git would keep one, or present where it shouldn't be
 
 ## Where the check runs
 
-- **At launch,** in trust and the launcher, before the common directory is discovered for the registration: the launcher verifies the launched worktree's links and the common directory, then registers the **verified** common directory, so every later host git (the judge, `gh`, the remote helper) is handed a directory already checked. **(leaning)**
+- **At launch,** in trust and the launcher, before the common directory is discovered for the registration: the launcher verifies the launched worktree's links and the common directory, then registers the **verified** common directory, so every later host git (the judge, `gh`, the remote helper) is handed a directory already checked. **(decided)**
 - **Before each host-side git that reads a worktree,** since a room runs between launches and can plant a link afterward: the judge's `place`/checkpoint/store, the remote helper's host handler (push, fetch, `ls-remote`), and `gh` naming and the GitHub tools verify the worktree (or the common directory) they are about to read before they run git there. lup's host git is short-lived, one process per call, so "before each" and "at launch" are the same gate applied per operation.
 - **And pin the directory when running git (leaning):** run every host git with `GIT_COMMON_DIR` (with `GIT_DIR`) set to the verified common directory, and extend `git.py`'s safe list to turn off `core.sshCommand`, `core.pager`, `core.fsmonitor` (already) and filter/attribute drivers it doesn't need. Pinning alone doesn't choose *which* directory to pin — a redirected worktree `.git` still misdirects the discovery of the common directory — so pinning is the belt and the link check the suspenders; neither replaces the other.
   - **Alternatives:** pin `GIT_COMMON_DIR` only, no link check — rejected: it can't decide the common directory from a poisoned worktree, and doesn't tell the operator their own shell is exposed. Check only at launch — rejected: a room plants a link after launch, before the next host git.
 
 ## When a link is wrong
 
-- **The host git refuses to run,** and says precisely which file is wrong, what it reads, and what it should read (`<git dir>/worktrees/<name>`, or `../..`), in lup's host-error voice. At launch, the launch is refused with nothing started, as trust's refusals are (`docs/launch.md`). **(leaning)**
+- **The host git refuses to run,** and says precisely which file is wrong, what it reads, and what it should read (`<git dir>/worktrees/<name>`, or `../..`), in lup's host-error voice. At launch, the launch is refused with nothing started, as trust's refusals are (`docs/launch.md`). **(decided)**
 - **The operator is told through the inbox** (`docs/host-tools.md`, *The operator's face*), with a desktop notice: a room wrote a worktree link that would have aimed the operator's git at a directory it chose. One item per repository, said once until repaired.
   - **Alternatives:** warn and proceed — rejected, that is the exposure. Repair silently — rejected, repair is the operator's to see (below). Refuse only at the gate — rejected, the harm is at the operator's next git, not at landing.
 
 ## Repairing it, without running the room's configuration
 
 The repair must not itself run the room's `config` — so it is **not** `git` run from inside the suspect tree, which would read the planted `core.sshCommand` before it could fix anything.
-- lup (or the operator) rewrites the link files with plain file writes, and removes a stray `<git dir>/commondir`/`gitdir` with a plain unlink: a worktree's `.git` back to `gitdir: <git dir>/worktrees/<name>`, `<git dir>/worktrees/<name>/commondir` back to `../..`. These are known strings; no git reads a planted config to produce them. **(leaning)**
+- lup (or the operator) rewrites the link files with plain file writes, and removes a stray `<git dir>/commondir`/`gitdir` with a plain unlink: a worktree's `.git` back to `gitdir: <git dir>/worktrees/<name>`, `<git dir>/worktrees/<name>/commondir` back to `../..`. These are known strings; no git reads a planted config to produce them. **(decided)**
 - `git worktree repair` is allowed only with `GIT_DIR` and `GIT_COMMON_DIR` pinned to the verified common directory, so it reads lup's directory and not a redirected one; absent the pin it is refused.
 - **Spawn removes the need:** once worktrees are created and removed through the host with their link files mounted read-only, a room can't write them, so there is nothing to repair; the check then only confirms the mounts held.
 
 ## Between checks: the operator's own shell and editor
 
-Nothing lup does protects a `git` the operator, or their editor's git integration, runs in a worktree between a check and the next: a running room can plant a link after lup checked, and the operator's shell reads it before lup checks again. lup tells the operator this in guidance (`docs/launch.md`, *Guidance*): lup verifies the links at launch and before its own host git, but a worktree a room is or was running in is the room's until re-checked, so treat the operator's own `git` there as the room's command until spawn mounts the link files read-only. **(leaning)** A host-side wrapper over the operator's own git is out of scope; the wall is for lup's host git, and the standing fix is the read-only mount.
+Nothing lup does protects a `git` the operator, or their editor's git integration, runs in a worktree between a check and the next: a running room can plant a link after lup checked, and the operator's shell reads it before lup checks again. lup tells the operator this in guidance (`docs/launch.md`, *Guidance*): lup verifies the links at launch and before its own host git, but a worktree a room is or was running in is the room's until re-checked, so treat the operator's own `git` there as the room's command until spawn mounts the link files read-only. **(decided)** A host-side wrapper over the operator's own git is out of scope; the wall is for lup's host git, and the standing fix is the read-only mount.
 
 ## Where it lives, and its public API
 
 The wall and the limits on the operator's credentials are the environment core's (`docs/modules.md`, *The cores*; *Settled so far*, *GitHub, and git through the host*), so the check is too: a small verifier in `policy/` beside `policy/worktrees.py` (which already asks git where a path is), called by `launch/trust.py` and `cli.py` `launched` at launch, and by the judge, the remote handler and the forge before they run git. The full fix is spawn's, which owns isolation and the worktree's lifecycle (`docs/modules.md`, *Spawn and isolation*).
 
-**Public API:** none **(leaning)** — an internal check and a pinned `Git`. A module gains nothing to call. Alternative: a `Links` seam a project's module could extend, deferred until a second judging module needs it (`DESIGN.md`, *Modules*, nothing built in).
+**Public API:** none **(decided)** — an internal check and a pinned `Git`. A module gains nothing to call. Alternative: a `Links` seam a project's module could extend, deferred until a second judging module needs it (`DESIGN.md`, *Modules*, nothing built in).
 
 ## Tests
 
@@ -95,7 +95,9 @@ Stubbed, no real clock, no agent and no network (`AGENTS.md`, *Tests*):
 - that pinning `GIT_COMMON_DIR` on `Remotes.git` and `gh`'s git leaves push, fetch, `ls-remote` and `gh repo view` working against lup's own remote behind its SSH alias;
 - that extending `git.py`'s safe list (`core.sshCommand`, pager, filters off) changes nothing lup's host git relies on.
 
-## Decisions for the operator
+## Decisions
+
+All six answered by the operator on 2026-10-16: each lean taken as stated.
 
 1. **What "right" requires, and the stray `commondir`.** Lean: check #54's two files **and** refuse a `commondir`/`gitdir` in a bare common directory (and a clone's `.git` being a file, not a directory), since a planted `<git dir>/commondir` redirects even an explicitly-named git directory (found for this note, git 2.55.0). Alternative: only the worktree `.git` and `worktrees/<name>/commondir` the issue names, leaving the common-directory redirect to the `GIT_COMMON_DIR` pin alone.
 2. **Where it runs.** Lean: at launch (feeding the registration a verified common directory) and before each host git that reads a worktree, **and** pin `GIT_COMMON_DIR` on every host git. Alternative: pin only (can't decide the directory from a poisoned worktree); or check only at launch (leaves the window to the next room).
