@@ -2,58 +2,66 @@
 
 **One sentence:** every part of lup is a module, with a library side a project's code imports, an environment side a project's sessions get, or both, and this note is the map of them: what each holds, what it requires, and what's settled, leaning, or still to discuss.
 
-It comes from the conversation of 2026-10-15 between the operator and the session that wrote it, from the first lup's modules (lup-legacy, `packages/lup/src/lup/harness/content/modules/`), and from how the downstream projects used them. `DESIGN.md` (*Modules*) holds the shape; this note holds each module's detail until the module has a note of its own. Marks: **(decided)**, the operator's answer; **(leaning)**, proposed and not yet confirmed; **to discuss**, not yet talked through.
+It comes from the conversations of 2026-10-15 and 2026-10-16 between the operator and the sessions that wrote it, from the first lup's modules (lup-legacy, `packages/lup/src/lup/harness/content/modules/`), and from how the downstream projects used them. `DESIGN.md` (*Modules*) holds the shape; this note holds each module's detail until the module has a note of its own. Marks: **(decided)**, the operator's answer; **(to confirm)**, agreed in the conversation of 2026-10-16 and waiting for a confirming pass; **(leaning)**, proposed and not yet confirmed; **to discuss**, not yet talked through.
 
 The order of work it serves (`DESIGN.md`, *Build order*): discuss each module until its sides and boundaries are settled; then, with the map at its most cohesive, read the dependency graph and the build order off it.
 
 ## The unit
 
-A module has up to three parts **(decided)**. Taking the ledger as the example, `lup-ledger` is one distribution holding:
-- **`lup_ledger`, its library side:** the store. swarm-search's own code imports it to declare `Evidence`, `Claim` and its other kinds, and to record them;
-- **`lup_ledger.environment`, its environment side:** the `Ledger` module a project selects in `lup_project.py`, giving its sessions tools to record and read nodes, a `lup ledger` command and a dashboard panel;
-- **its dependencies,** in its own `pyproject.toml`.
+A module has up to three parts **(decided)**, all in one directory of `lup` **(to confirm)**. Taking the ledger as the example, `lup/ledger/` holds:
+- **`lup.ledger`, its library side:** the store. swarm-search's own code imports it to declare `Evidence`, `Claim` and its other kinds, and to record them;
+- **`lup.ledger.environment`, its environment side:** the `Ledger` module a project selects in `lup_project.py`, giving its sessions tools to record and read nodes, a `lup ledger` command, and its dashboard panel, built beside it and registered by its path;
+- **what it requires:** the modules it builds on, declared on its `Module` (`requires = [...]`), and any third-party package, as an extra of `lup`'s.
 
-Installing it makes both sides available; the project's code uses the first, and its declaration turns on the second. A module may have one side only: the code rules are all environment, the test fake all library.
+A module adds to the environment, or to the dashboard, from its own directory, through the cores' interfaces: its environment side subclasses `lup_dev`'s `Module`, and its panel is a file the dashboard loads. A module may have one side only: the code rules are all environment, the test fake all library.
 
-### Packaging (decided)
+### Packaging (to confirm)
 
-One monorepo, a uv workspace, each module its own distribution, all built and released together at one version. The two cores are packages requiring their modules, and every other module is an extra on them; the names below are illustrative until the packaging step:
+One monorepo, a uv workspace, every distribution built and released together at one version. Distributions are split by what installing them costs, not by module **(to confirm)**:
 
 ```
 packages/
-  lup/                 # requires the library core's modules; nothing of its own
-  lup-asking/  lup-tools/  lup-testing/  lup-claude/  lup-codex/
-  lup-ledger/  lup-inbox/  lup-coordination/  lup-rooms/  lup-runs/  lup-outcomes/  …
-  lup-dev/             # requires the environment core's modules
-  lup-declaration/  lup-host/  lup-launch/  …
-  lup-code-rules/      # with the 38 MB engine; nothing a project's code imports
-  lup-dashboard/       # its own stack, behind the typed protocol
+  lup/             # the library core, and every module, both sides in its directory:
+                   #   lup/ledger/__init__.py     its library side
+                   #   lup/ledger/environment.py  its environment side
+                   #   lup/ledger/panel/          its dashboard panel, built at release
+                   # extras for third-party packages: lup[claude], lup[codex], lup[testing]
+  lup-dev/         # the environment core; requires lup-engine and lup-dashboard
+  lup-engine/      # the 38 MB code-rules engine, which CodeRules and Proposals require
+  lup-dashboard/   # the page: its shell, the typed protocol's client, the components panels use
 ```
 
-`lup[ledger]` means lup with the `lup-ledger` distribution, as Airflow's extras pull in its providers. A project, or anyone, publishes a module of its own the same way.
+It's how pytest is built: its own features are "builtin plugins which provide pytest's own functionality", loaded from its own package through the hooks third parties use, and "even builtin plugins can be blocked" (`-p no:name`), while a third party's plugin is a distribution of its own. pydantic-ai is one distribution, `pydantic-ai-slim`, whose extras pull only third-party SDKs. Airflow's way, a distribution per provider ("more than 80", "released and versioned separately from the Airflow releases"), fits providers that wrap third-party services, each with its own SDK, maintainers and release cadence; lup's modules are lup's own, released together, and mostly pure Python on pydantic. A distribution per module is in `docs/graveyard.md`.
+
+So:
+- **a module is a directory:** moving code between modules, or splitting one, moves files, and its import name is `lup.ledger`;
+- **lup's modules take the path a project's do:** a module is an importable package with a `Module` class, whether it's in `lup`, in a project's own code, or in a distribution someone publishes; which distribution holds it doesn't change its API;
+- **a module that needs a third-party package declares it as an extra:** `lup[claude]` brings Claude's SDK, with its CLI;
+- **`lup-dev` requires `lup-dashboard` (to confirm):** the dashboard is the operator's main place of interaction, and CI pays a download.
 
 ### What a consumer downloads (leaning)
 
 ```toml
 # swarm-search's pyproject.toml
 [project]
-dependencies = ["lup[claude, codex, ledger, coordination, rooms]"]   # what its consumers download
+dependencies = ["lup[claude, codex]"]   # what its consumers download
 
 [dependency-groups]
-dev = ["lup-dev[github, git-workflow]"]                              # only while developing; never shipped
+dev = ["lup-dev"]                       # only while developing; never shipped
 ```
 
-A consumer gets the library core and those modules. Their environment sides' files come along, a few kilobytes, inert, since they need `lup-dev`, which a consumer never installs; the modules that are all environment (the code rules and their engine, the gate, proposals) are only in the development group. The old split between `lup` and `lup-dev` survives as a split in what's installed, not as two packages (`docs/graveyard.md`).
+A consumer gets `lup` with the extras its code needs: every module's code, a few kilobytes each, environment sides and built panels included, inert, since nothing imports an environment side without `lup-dev`, and nothing serves a panel without the dashboard. The environment core, the engine and the dashboard come only with the development group.
 
 Two import contracts make it safe:
-- **inside lup,** a module's library side never imports an environment side, so `import lup_ledger` works without `lup-dev`; and a module imports only the modules it requires;
+- **inside lup,** a module's library side never imports an environment side, so `import lup.ledger` works without `lup-dev`; and a module imports only the modules it requires;
 - **in each project,** its shipped code (by its path roles, `src/`) imports no environment side, so it never needs the development group to run. lup generates that contract for the project's gate.
 
 ### Selected and installed (leaning)
 
-Two places say which modules a project uses: `pyproject.toml` says what's installed, whose code is importable; `lup_project.py` says what's selected, which environment sides its sessions get. They're checked one way only:
-- **selected but not installed** fails the load: "`Coordination` is selected but `lup-coordination` isn't installed: add `coordination` to lup's extras in `pyproject.toml`." lup never writes a project's `pyproject.toml` after `lup new`, so it can't add it itself;
-- **installed but not selected** is fine: swarm-search's code can use the ledger's store while its sessions don't get the ledger's tools. Refusing it, as first proposed, would have refused that.
+Every module of lup's is installed with `lup`, and `lup_project.py` says which environment sides a project's sessions get. What can be missing is a third-party package behind an extra, or a module from another distribution:
+- **a module whose extra is missing** fails where it's imported, naming the extra: "`lup.claude` needs Claude's SDK: add `claude` to lup's extras in `pyproject.toml`." lup never writes a project's `pyproject.toml` after `lup new`, so it can't add it itself;
+- **a module from another distribution,** a project's or one someone published, is imported by the declaration, so one that isn't installed fails the declaration's import;
+- **installed but not selected** is fine: swarm-search's code uses the ledger's store while its sessions don't get the ledger's tools.
 
 ### Kinds a module declares (decided)
 
@@ -114,9 +122,9 @@ Considered and set aside:
 
 ## The cores
 
-Each core is a package requiring a few modules, which every other module builds on and none can drop (`DESIGN.md`, *The two cores*). Their modules' names come with the packaging step.
+Each core is what every module builds on and none can drop (`DESIGN.md`, *The two cores*): the library core is `lup`'s own top level, beside its modules' directories, and the environment core is `lup-dev`.
 
-- **The library core, `lup`:** asking an agent and typed answers, the speaking tools, tools and their serving, the layers, typed events; the runtimes (`claude`, `codex`) and the fake and the guard (`testing`) as modules of their own.
+- **The library core, `lup`:** asking an agent and typed answers, the speaking tools, tools and their serving, the layers, typed events; the runtimes (`claude`, `codex`) and the fake and the guard (`testing`) as modules of their own, each behind an extra for its third-party package.
 - **The environment core, `lup-dev`:** the declaration and its modules, with a person's own layer; the one hook; the host service and its handlers; the inbox's delivery; launch and trust on launch; the limits on the operator's credentials, with git through the host; and the pipelines modules feed (judging a write, the gate's runner, rendering the guidance, the dashboard's protocol).
 - **Why launch and trust are core (decided):** trust approves a module's code before the host runs it, so something must vet the modules first; and the wall is policy (`DESIGN.md` requires a container whenever an agent can run code), which a project configures through its modules but never drops.
 
@@ -127,7 +135,8 @@ Each core is a package requiring a few modules, which every other module builds 
 | library core | asking, typed answers, speaking tools, tools and serving, layers, events | | | built: the library's first slice |
 | `claude`, `codex` | each runtime's adapter | | | built |
 | `testing` | the fake, the guard | | | built |
-| environment core | | declaration, hook, host service, inbox delivery, launch, trust, credentials and git, the pipelines | | built, as one package |
+| environment core | | declaration, hook, host service, inbox delivery, launch, trust, credentials and git, the pipelines | `transcripts` | built, as one package |
+| `transcripts` | | each session's record kept whole, every branch of it; resuming through it | | to confirm; to build (#65) |
 | `rooms` | `Room`, `Container`, the engine | | | partly built (`lup.rooms`); leaning |
 | `runs` | the run directory, its log, its units | panel | | to discuss |
 | `ledger` | the typed store, blobs, snapshots | tools, `lup ledger`, panel | | leaning |
@@ -136,10 +145,10 @@ Each core is a package requiring a few modules, which every other module builds 
 | `budgets` | `SharedBudget` | shares, pace, pauses, spawn caps, panel | `accounts` | to discuss |
 | outcome loop | outcomes, arms, comparing them | panel, command | | library side decided; to discuss |
 | reflection | | | outcome loop | open (`DESIGN.md`, *Open questions*) |
-| realtime | a present agent: sleep, wake, timing tools | | | library side decided; to discuss |
+| realtime | a present agent: sleep, wake, timing tools | | Jev, a decision model, as a dependency | library side decided; to discuss |
 | `Python` | | runner, test roots, the gate's steps, lup's settings for ruff and pyright | | built |
-| `CodeRules` | | selection, exemptions, the engine, judging writes, `rules` commands | | built, but the judge isn't in it yet |
-| `Proposals` | | `propose`, holds, the dependency guard | the engine (to discuss) | to build (leaning) |
+| `CodeRules` | | selection, exemptions, judging writes, `rules` commands | `lup-engine` | built, but the judge isn't in it yet |
+| `Proposals` | | `propose`, holds, the dependency guard | `lup-engine` | open (*To discuss*) |
 | `spawn` | | lup's workers, isolation, moving between worktrees | | to discuss |
 | `git-workflow` | | landing, pull requests, merge-resolution check | | to discuss |
 | `GitHub` | | GitHub tools, the gate's issue states in a room | | built in the core; leaves it (leaning) |
@@ -147,9 +156,9 @@ Each core is a package requiring a few modules, which every other module builds 
 | `setup` | | integrations and their secrets | | to discuss |
 | `release` | | version bumps, the release flow | | to discuss |
 | `resolver` | | concerns, their worktrees, one integration branch | `git-workflow`, `runs` | to discuss |
-| feedback | | "how it felt", telemetry, the pooling pass, transcripts (#65) | `ledger` | to discuss |
-| `meta` | | authoring tools | | open |
-| the dashboard | | its own distribution; every panel a module's | | to build |
+| feedback | | "how it felt", telemetry, the pooling pass | `ledger`, `transcripts` | to discuss |
+| `meta` | | authoring tools | | leaning: goes (*To discuss*) |
+| the dashboard | | `lup-dashboard`, which `lup-dev` requires (to confirm); every panel a module's | | to build |
 
 ## Settled so far
 
@@ -168,6 +177,14 @@ The generic store the first lup had, kept **(the operator's)**: downstream proje
 - **Every party's (decided):** the operator's and each agent's. Agents message each other through the same inbox they ask the operator through, as the first lup's did ("a message to a peer and a message to a spawned worker travel one stream").
 - **Stored on the ledger (decided):** an item is a node; "answered" is an answer pointing at it, "told" a delivery to that party pointing at it. Two things to design for: the inbox spans every project, held in the host's own state and never mounted, so a ledger store takes a location (a repository's committed or local store, or the host's); and it's read at every hook ("what hasn't this party been told?"), so the ledger needs an index for it, not a scan. The first lup kept mail apart from its ledger, for reasons not found yet. The ledger comes first; the inbox, which works today, then moves onto it.
 - **Mailboxes as a library side (leaning),** so agents started from code message each other; delivery into launched sessions, and to the operator, is the environment core's (`DESIGN.md`, *Open questions*, shared state where no host runs).
+
+### Transcripts
+
+Keeping every session's record isn't feedback's **(to confirm)**: it's for seeing what went wrong, for not losing the traces of past agents, and for resuming reliably, which the runtime's own record doesn't always allow (after a rewind; Claude Code sets a transcript aside as `superseded` or `orphaned`, out of its session picker).
+- **A module the environment core requires (to confirm),** so no project drops it; resuming, the dashboard and feedback read from it.
+- **Sessions on the operator's machine are kept whole (to confirm):** launched, spawned and kept sessions, with every branch of a rewound conversation, the set-aside files, subagents' transcripts, large tool results, the file history and Codex's rollouts. Resuming goes through lup, from any point of any branch.
+- **An ask from code keeps its turn whole where its declaration says so (to confirm),** on by default for code running in the operator's own projects; a product shipping lup to other people decides for its users.
+- **Until it's built:** Claude Code deletes transcripts after `cleanupPeriodDays` (30 by default, at least 1, no maximum in its schema; `0` is a validation error), which the operator raised in their own settings; Codex's configuration has no key that deletes rollouts. When the copy is taken is #65's open question.
 
 ### Coordination
 
@@ -195,21 +212,29 @@ A pipeline of the environment core, fed by modules, with nothing built in **(dec
 
 Mainly library-side modules **(decided)**: aib's forecasts and harmon's waiting agent use them from code; each gets an environment face (a panel, a command) where it needs one. What reflection is stays open: `DESIGN.md` has it recording data from each run for the outcome loop, while the first lup's was a reviewer an agent's output met before it was submitted.
 
+Realtime pairs a fast decision model with Claude, as many harnesses do **(to confirm)**: Jev (and openjev) make decisions in real time. Jev is a dependency of realtime, not a runtime: it sits nearer the model than the runtime, so if the library ever takes it in, it's as a class of decision models beside the agents, never as a third runtime beside Claude and Codex.
+
 ### GitHub, and git through the host
 
 The limits on the operator's credentials, and git through the host, stay in the environment core (`docs/host-tools.md`, decision 11). GitHub's tools leave it as a module of their own **(leaning)**, the first to prove that modules bring what they do.
 
 ## To discuss
 
+Every boundary is tested by one question **(to confirm)**: would a project take this module without its neighbour, or replace one of them with its own? Where it would, they stay apart; where they always come together, they're one module. Most pass (`accounts` without `budgets`, `inbox` without `coordination`, `rooms` without `runs`); `meta` fails, holding nothing once each authoring tool lives with its kind.
+
 Each remaining module, with the question it raises first:
 - **`rooms` and `runs`:** what of a room is the library's and what launch's; a run's panel; whether a run's log is a ledger.
 - **`spawn`:** lup's spawn on both runtimes; workers' identity and budget share; cross-project spawns through the host; moving between worktrees.
-- **`Proposals`, and where the engine lives:** the dependency guard reads imports through the engine, so the engine is `CodeRules`' and `Proposals` requires it, or the engine is a module both require.
+- **`Proposals`, open, as the operator asked (2026-10-16).** The engine is `lup-engine`, which it and `CodeRules` both require. Discussed on 2026-10-16, nothing settled:
+  - the operator's concern: approving a shape after its code is written is back and forth that holding first would have avoided, as the code rules exist so a bad pattern is caught before code is built on it; a hold costs the agent nothing it notices, while a systematic refusal is friction;
+  - one principle proposed: refuse what the agent can fix alone (a code rule's finding), hold what needs the operator (the design);
+  - one flow proposed: a shape (docstrings, public signatures, models' fields) is free to write; a body for an unapproved public signature, or a use of an unapproved name from other production code, is held; `propose` holds by default; building without proposing becomes a hold whose item lup writes itself, the shape it read marked "not proposed"; the operator approves the shape, not the code;
+  - the friction the agent named: small public additions mid-work each becoming an item for the operator (the real risk, on the operator's side), a body showing the approved signature was wrong, the habit of writing a whole file at once, names public only by having no underscore, agents waiting overnight at their first new shape, and Codex's patch held only at the next call.
 - **`budgets` and `accounts`:** the kinds budgets declares; usage windows; logins kept in step across rooms.
 - **`setup`, `release`, `resolver`:** each against the first lup's version (setup's wizard, version's two reviewing agents, the resolver's supervisor).
-- **Feedback:** "how it felt", telemetry, the pooling pass and transcripts (#65) as one module or several; upstream candidates (`DESIGN.md`, *Open questions*).
+- **Feedback:** "how it felt", telemetry and the pooling pass as one module or several; upstream candidates (`DESIGN.md`, *Open questions*).
 - **The outcome loop, reflection, realtime:** their library APIs, and what each shows on the dashboard.
-- **`meta`:** whether it exists, or each kind's authoring tool lives with its kind.
+- **`meta`:** leaning that it goes, each kind's authoring tool living with its kind (`lup rules new` with `CodeRules`).
 - **The dashboard's panels:** which module brings each of lup's.
 
 ## What the first lup's modules became
