@@ -12,7 +12,7 @@ A room mounts the repository's git directory read-write, except `config` and `ho
 
 A room points either at a git directory it wrote, whose `config` sets `core.sshCommand`, `core.fsmonitor`, `core.hooksPath`, a pager or a filter driver. The next host git that finds the repository from that worktree runs the room's command with the operator's hands: the operator's own `git status`, an editor's git integration, or lup's own host git (the inventory below). `safe.directory` is no backstop: under `--userns=keep-id` the room's files are the operator's (`docs/field-notes.md`).
 
-**Beyond #54's two files (found for this note, benign probe on git 2.55.0):** naming the common git directory explicitly is not by itself enough. A room-planted file `<git dir>/commondir` — a file a bare common directory never has — turns that directory into a linked-worktree pointer, and `git --git-dir=<git dir>`, `git -C <git dir>` and `GIT_DIR=<git dir>` all follow it to the git directory `commondir` names and read its `config`. Only `GIT_DIR` **and** `GIT_COMMON_DIR` set together resist it. So `remote/protocol.py`'s host git, which names `--git-dir=<common>` (and sets `core.fsmonitor`/`core.hooksPath` off but not `core.sshCommand`), is still exposed through `<git dir>/commondir`; and `git.py`'s runner, which turns off `core.fsmonitor` and hooks but not `core.sshCommand`, a pager or filters, reads a redirected directory's `config` whenever it discovers the directory from a worktree.
+**Beyond #54's two files (found for this note, benign probe on git 2.55.0):** naming the common git directory explicitly is not by itself enough. A room-planted file `<git dir>/commondir` — a file a bare common directory never has — turns that directory into a linked-worktree pointer, and `git --git-dir=<git dir>`, `git -C <git dir>` and `GIT_DIR=<git dir>` all follow it to the git directory `commondir` names and read its `config`. Only `GIT_DIR` **and** `GIT_COMMON_DIR` set together resist it. So every host git that names the common directory is pinned there with both (`git.py`, `pinning`, landed first, ahead of this check): the remote helper's host side, `gh`, and the launch's `git config` reads. `git.py`'s runner, which turns off `core.fsmonitor` and hooks but not `core.sshCommand`, a pager or filters, still reads a redirected directory's `config` wherever it discovers the directory from a worktree, which this check closes.
 
 ## The inventory: where lup runs git on the host
 
@@ -25,16 +25,16 @@ Every host-side git goes through `Git` (`git.py`), which runs `git -c core.fsmon
 | `cli.py` (`toplevel` 235, verdict 927, 1106) | discovers from cwd/worktree | yes |
 | `launch/room.py` `repository`, `related`, `maintaining_room` | discovers from the worktree (`rev-parse --git-common-dir`, `worktree list`, `config --get user.*`) | yes |
 | `launch/session.py` `approved_declaration` | discovers from the worktree, then `export` | yes |
-| `forge/github.py` `named`/`ran` (`gh repo view`, and every GitHub tool) | runs `gh` (which runs git) in the common directory resolved at launch | the worktree `.git` vector is closed (it uses the common directory, "never from a worktree", #54); still follows a planted `<git dir>/commondir`, and inherits a tainted common directory if the launch discovery above was redirected |
-| `remote/protocol.py` `Remotes.git` (push, fetch, `ls-remote`, `get-url`) | names `--git-dir=<common>` | the worktree `.git` vector is closed; still follows a planted `<git dir>/commondir`; still reads a redirected `config`'s `core.sshCommand` |
-| `remote/config.py` `room_config` | `config --file <common>/config` (named file) | reads that file alone; the common directory comes from the launch discovery above |
+| `forge/github.py` `named`/`ran` (`gh repo view`, and every GitHub tool) | runs `gh` (which runs git) pinned to the common directory resolved at launch | no planted `commondir` is followed; inherits a tainted common directory if the launch discovery above was redirected |
+| `remote/protocol.py` `Remotes.git` (push, fetch, `ls-remote`, `get-url`) | pinned to the common directory | no planted `commondir` is followed; the common directory comes from the launch discovery above |
+| `remote/config.py` `room_config`, `launch/room.py` `room_git` | `git config` pinned to the common directory | as above |
 | `policy/worktrees.py` `place` | discovers from the file's nearest directory | yes — the judge reads which repository/worktree a path is in |
 | `policy/store.py` `Store.repository` (`head`, `moved`, `merges`, `committed`, …) | discovers from the worktree | yes |
 | `policy/store.py` `Store.snapshots`, `ensure` | names `--git-dir=<store>` under lup's state (not room-writable), `--work-tree=<worktree>` | no — the store is lup's own |
 | `policy/checkpoint.py`, `policy/holds.py` | discover from the worktree (`rev-parse --git-common-dir`) | yes |
 | `remote/helper.py` | runs in the room on git's `GIT_DIR`; not host-side | n/a |
 
-So almost every host git discovers its directory from a worktree the room writes; only the snapshot store names a directory the room can't reach. This is the evidence for where the check must run: at launch, where the discovered common directory becomes the registration all later host git trusts, and before each host git that reads a worktree.
+So almost every host git discovers its directory from a worktree the room writes, and the pinned ones trust the directory the launch discovered; only the snapshot store names a directory the room can't reach. This is the evidence for where the check must run: at launch, where the discovered common directory becomes the registration all later host git trusts, and before each host git that reads a worktree.
 
 ## What "a worktree's links are right" means
 
