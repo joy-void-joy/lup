@@ -24,7 +24,8 @@ class Project(Model, extra="forbid"):
     """Which of the judge's asks reach the operator.
 
     `every` asks each one. `protected` asks only a protected path's, whose change
-    takes effect outside the agent's reach before anything lands, and allows the
-    rest, the design reviewed in notes before the code and at landing instead.
-    lup's rules refuse either way. It goes when the judge's asks become proposals.
+    takes effect outside the agent's reach before anything lands, and an edit to
+    one of the operator's documents, and allows the rest: the design is asked in
+    the conversation before the code and seen at landing instead. lup's rules
+    refuse either way. It goes when the judge's asks become proposals.
     """

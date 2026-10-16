@@ -1,25 +1,32 @@
 # Working on lup
 
-lup is a set of modules for working with agents (Claude Code and Codex): a small library core any project's code calls agents with, an environment core where agents do a project's work and develop its code, and modules that each bring a library side, an environment side, or both (`DESIGN.md`, *Modules*). It's built today as two packages, `lup` and `lup-dev`, which the next step splits into modules. `DESIGN.md` is the design. Read the parts your work touches before you start, and treat it as the operator's: changing it is a design decision.
+lup is where the operator's way of working with agents lives: the workflows, skills, defaults and patterns that make sessions on Claude Code and Codex better, as modules every project can use. It's built today as two packages, `lup` and `lup-dev`, which the module system will split. `DESIGN.md` describes what lup is for and how it works: read it to know what you're working on. It isn't a record of decisions, so where your work reaches a choice, ask.
 
-This repository is the second lup. The first (`joy-void-joy/lup-legacy`, archived) is evidence you may read (how something behaved, what a measurement found), never code to copy. Everything here is written anew from the design.
+This repository is the second lup. The first (`joy-void-joy/lup-legacy`, archived) is evidence you may read (how something behaved, what a measurement found), never code to copy. Everything here is written anew.
 
 ## What's yours, what's the operator's
 
-- **Yours:** how to build a piece once its design note is approved: the implementation, its tests, commits, branches, whether to delegate, and scratch work under `tmp/` (gitignored). Decide these without asking.
-- **The operator's:** the shape. A piece's modules, what each is for and its public API; a new dependency or module; anything in `DESIGN.md`; merging.
-- **When you meet a shape decision mid-implementation,** put it where the operator will see it: update the design note, list it in the pull request, or ask. Never let it ride inside a file. Before lup, files that looked fine but carried a design direction, or a regex where a parser belonged, are exactly what manual review missed.
+- **Yours:** how to build a piece once the operator has answered its decisions: the implementation, its tests, commits, branches, whether to delegate, and scratch work under `tmp/` (gitignored). Decide these without asking.
+- **The operator's:** the shape. A piece's modules, what each is for and its public API; a new dependency or module; `DESIGN.md` and this file; merging.
+- **When you meet a shape decision mid-implementation,** ask, and keep going where you can. Never let it ride inside a file. Before lup, files that looked fine but carried a design direction, or a regex where a parser belonged, are exactly what manual review missed.
+
+## Decisions are live
+
+The operator decides in the conversation, with the problem in front of them. Their answer is for the work at hand.
+- **Never write down a decision as the operator's,** in a document, a docstring, an issue, a commit or a pull request: no "the operator decided", "said", "leans" or "agreed", and no "settled" or "to confirm". A recorded decision reads to the next session as more than it was, a slight lean as a ruling.
+- **When the operator's view matters, ask them,** even if a similar question was asked before. A document, an issue or `git log` tells you what exists, not what they want.
+- **What you write down describes what exists:** the code, how it behaves, why it works the way it does. Not who chose it, when, or what was set aside.
 
 ## How work goes
 
-1. **A design note first.** For each piece, write `docs/<piece>.md`: its modules, what each is for, its public API, and the choices it makes with their alternatives. Put its decisions to the operator in the conversation, numbered, each with your lean, and record their take on each in the note. Land it on `dev` once they've answered, and implement from there. The note stays as that piece's documentation, kept true as the code changes.
+1. **Decisions first, in the conversation.** Before building a piece, put its decisions to the operator, numbered, each with your lean: what it's for, its modules and public API, and the choices that shape it. Implement once they've answered. When the piece is built, its documentation in `docs/` describes it briefly, with no history, and is kept true as the code changes.
 2. **One concern per branch, landed on `dev` by the session that started the work.**
    - Branch from `dev`. When the gate passes (`uv run lup-dev check`: the engine rebuilt if stale, lup's rules, ruff, the formatter, pyright, the tests and the import contracts, judged by its exit code), merge the branch into `dev` with a merge commit, and push.
    - **A worker doesn't land its own branch.** It commits on its branch, leaves it unpushed, and hands it back. The session that delegated it reviews it, runs `uv run lup-dev check --fix` on the merged result (ruff's safe fixes and the formatter, which the judge never reports to an agent, then the gate), and lands it with what the fixes changed in the merge commit, one merge at a time, so the shared `dev` checkout never takes two merges at once and every branch is looked at before it lands.
-   - The merge commit's message is the branch's record: every design decision taken, with its alternative and the file it lives in; every new file and public-API change; then what changed and why, how it was tested, and a short note on how the work felt (see *Delegating*).
+   - The merge commit's message says what changed and why the code works that way, every new file and public-API change, how it was tested, and a short note on how the work felt (see *Delegating*).
    - A simple doc change skips the branch and lands on `dev` directly.
-3. **A release is a pull request from `dev` to `main`,** which the operator reviews and merges. Its description gathers the decisions landed since the last release. Never merge into `main` or push to it yourself.
-4. **Write with your file tools.** While lup is being built, the judge runs only before an Edit or Write lands: it refuses a write with a finding of lup's code rules, before the file changes, and asks the operator only about a protected path, as a prompt in their terminal (`asks` in `lup_project.py`). On Codex, whose hooks can't see a patch before it lands, the same judgement runs just after each call. What the shell writes meets the rules only in the gate, later than an Edit would have. The design reaches the operator through the design note before the code and the merge commit after it. A piece of the environment goes live in lup's own sessions once it's finished, never while it's being built.
+3. **A release is a pull request from `dev` to `main`,** which the operator reviews and merges. Its description says what changed since the last release. Never merge into `main` or push to it yourself.
+4. **Write with your file tools.** While lup is being built, the judge runs only before an Edit or Write lands: it refuses a write with a finding of lup's code rules, before the file changes, and asks the operator only about a protected path or one of their documents (`DESIGN.md`, this file), as a prompt in their terminal (`asks` in `lup_project.py`). On Codex, whose hooks can't see a patch before it lands, the same judgement runs just after each call. What the shell writes meets the rules only in the gate, later than an Edit would have. The operator sees the shape through the decisions they answer before the code and the merge commit after it. A piece of the environment goes live in lup's own sessions once it's finished, never while it's being built.
 5. **Commit early and atomically**, before you report: `type(scope): what changed and why`.
 
 ## Code

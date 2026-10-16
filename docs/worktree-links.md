@@ -76,7 +76,7 @@ Nothing lup does protects a `git` the operator, or their editor's git integratio
 
 ## Where it lives, and its public API
 
-The wall and the limits on the operator's credentials are the environment core's (`docs/modules.md`, *The cores*; *Settled so far*, *GitHub, and git through the host*), so the check is too: a small verifier in `policy/` beside `policy/worktrees.py` (which already asks git where a path is), called by `launch/trust.py` and `cli.py` `launched` at launch, and by the judge, the remote handler and the forge before they run git. The full fix is spawn's, which owns isolation and the worktree's lifecycle (`docs/modules.md`, *Spawn and isolation*).
+The wall and the limits on the operator's credentials are the environment core's, so the check is too: a small verifier in `policy/` beside `policy/worktrees.py` (which already asks git where a path is), called by `launch/trust.py` and `cli.py` `launched` at launch, and by the judge, the remote handler and the forge before they run git. The full fix is spawn's, which owns isolation and the worktree's lifecycle.
 
 **Public API:** none **(decided)** — an internal check and a pinned `Git`. A module gains nothing to call. Alternative: a `Links` seam a project's module could extend, deferred until a second judging module needs it (`DESIGN.md`, *Modules*, nothing built in).
 

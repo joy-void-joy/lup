@@ -369,7 +369,7 @@ The tests are in `packages/lup/tests/`: `test_ask.py` (an ask through the real l
 
 ## Repository layout and packages
 
-As built for this slice. `DESIGN.md` (*What a module is*) turns it into a distribution per module, the library core a package requiring its modules, with each runtime and the test kit modules of their own, pulled in by the same extras (`docs/modules.md`, *Packaging*).
+As built for this slice. `DESIGN.md` (*What a module is*) turns it into a distribution per module, the library core a package requiring its modules, with each runtime and the test kit modules of their own, pulled in by the same extras.
 
 One repository, a uv workspace sharing one lock file, whose packages are versioned and installed separately, rather than one distribution with extras:
 - `packages/lup/`: the library, `lup`;
