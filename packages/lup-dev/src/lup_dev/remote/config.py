@@ -22,6 +22,8 @@ mounts*): "if `GIT_CONFIG_GLOBAL` is set, neither `$HOME/.gitconfig` nor
 
 The URLs are read from the repository's `config` as written, which is what the
 room's git rewrites; git writes each value (`git config --file`), quoting it.
+git runs in the repository's git directory pinned there (`Git.pinned`), so a
+`commondir` a room planted at its top leads it to no other `config`.
 """
 
 from typing import TYPE_CHECKING
@@ -37,7 +39,7 @@ def room_config(repository: Path, path: Path, requests: Path) -> None:
 
     `requests` is the launch's request socket, where the room mounts it.
     """
-    git = Git(cwd=repository)
+    git = Git.pinned(repository)
     own = ["config", "--file", str(repository / "config"), "--no-includes", "-z"]
     keys = nul_separated(
         git.run(

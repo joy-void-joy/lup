@@ -14,6 +14,11 @@ through the operator's `gh` and its login:
   (`docs/related-repositories.md`); writing stays on the launch's own.
 - **Spawned, never forked.** `gh` runs through the host service's `judged`,
   awaited on its event loop as each judge is, in the repository's git directory.
+- **Its git pinned there.** `gh` runs with `GIT_DIR` and `GIT_COMMON_DIR` both
+  naming that directory (`lup_dev.git`, `pinning`), which the git it runs
+  inherits: run in the directory alone, git follows a `commondir` the room
+  plants at its top to a git directory of the room's, and reads that one's
+  remotes and `config`.
 - **Typed answers.** Each command asks for `--json` where `gh` gives it, read
   into a model here, which names the fields asked for. A command that answers
   with a link alone, as filing an issue does, is passed on as `gh` printed it.
@@ -36,6 +41,7 @@ from pydantic.alias_generators import to_camel
 
 from lup.types import Model
 from lup_dev.errors import LupDevError
+from lup_dev.git import pinning
 from lup_dev.host.protocol import GitHubRepository, Register
 from lup_dev.host.service import Asked, judged
 
@@ -57,13 +63,16 @@ class GitHubError(LupDevError):
 
 
 async def ran(arguments: list[str], directory: Path, given: str = "") -> str:
-    """Run `gh` with `arguments` in `directory`, `given` on its input, and return what it printed.
+    """Run `gh` with `arguments` in the git directory `directory`, the git it runs pinned there, `given` on its input, and return what it printed.
 
     Raise `GitHubError` where it fails, saying why: `gh` that couldn't run (not
     installed, or `directory` gone), without a GitHub login, or ending with a
     failure, in its own words.
     """
-    asked = Asked(command=[PROGRAM, *arguments], payload=given, directory=directory)
+    command = [PROGRAM, *arguments]
+    asked = Asked(
+        command=[*pinning(directory), *command], payload=given, directory=directory
+    )
     answer = await judged(asked)
     error = answer.error.strip()
     match answer.status:
@@ -77,9 +86,7 @@ async def ran(arguments: list[str], directory: Path, given: str = "") -> str:
         case 127:
             message = f"`gh` couldn't run on the host: {error}"
         case status:
-            message = (
-                f"`{shlex.join(asked.command)}` ended with status {status}: {error}"
-            )
+            message = f"`{shlex.join(command)}` ended with status {status}: {error}"
     raise GitHubError(message)
 
 

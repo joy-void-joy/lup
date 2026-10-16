@@ -867,3 +867,84 @@ def test_a_link_outside_the_mounts_into_them_is_refused_and_an_include_outside_t
     assert f"includes {outside / 'linked.cfg'}" in refused(
         bare, tmp_path, [Mount(source=bare)]
     )
+
+
+# A `commondir` the room plants in the git directory
+
+
+def planted(project: Path, tmp_path: Path, url: str) -> Path:
+    """Plant a `commondir` at the top of `project`, as a room can, naming a git directory of the room's.
+
+    Its `config` names `origin` at `url` and sets `lup.probe`. git reads a git
+    directory holding a `commondir` as a pointer to the one it names, so git
+    told only `--git-dir=<project>` reads that one's `config`.
+    """
+    theirs = tmp_path / "planted.git"
+    git(tmp_path, "init", "-q", "--bare", str(theirs))
+    git(theirs, "config", "remote.origin.url", url)
+    git(theirs, "config", "lup.probe", "the room's")
+    (project / "commondir").write_text(f"{theirs}\n")
+    return theirs
+
+
+def test_host_git_reads_the_repository_s_own_config_past_a_planted_commondir(
+    world: World, tmp_path: Path
+) -> None:
+    git(world.project, "config", "lup.probe", "the repository's")
+    planted(world.project, tmp_path, str(tmp_path / "elsewhere.git"))
+    launch = world.registered()
+    remotes = Remotes(say=world.said.append)
+
+    async def read() -> list[str]:
+        probe = await remotes.git(launch, "config", "lup.probe")
+        return [
+            probe.output.strip(),
+            await remotes.url(launch, "origin", push=True),
+            await remotes.url(launch, "origin", push=False),
+        ]
+
+    assert asyncio.run(read()) == [
+        "the repository's",
+        str(world.forge),
+        str(world.forge),
+    ]
+
+
+def test_a_push_past_a_planted_commondir_lands_on_the_repository_s_own_forge(
+    world: World, clock: FakeClock, tmp_path: Path
+) -> None:
+    tip = world.commit("first")
+    elsewhere = tmp_path / "elsewhere.git"
+    git(tmp_path, "init", "-q", "--bare", str(elsewhere))
+    planted(world.project, tmp_path, str(elsewhere))
+
+    with world.served(clock):
+        pushed = world.room_git("push", "origin", "HEAD:refs/heads/feat")
+
+    assert pushed.exit_code == 0, stderr(pushed)
+    assert world.on_forge("refs/heads/feat") == tip
+    assert git(elsewhere, "for-each-ref") == ""
+
+
+def test_the_room_s_git_is_written_from_the_repository_s_own_config_past_a_planted_commondir(
+    bare: Path, tmp_path: Path
+) -> None:
+    origin = git(bare, "config", "remote.origin.url")
+    theirs = planted(bare, tmp_path, "planted:owner/elsewhere")
+    # Including itself, the planted `config` fails any git that reads it.
+    git(theirs, "config", "include.path", "config")
+    launch = LaunchLayout(directory=tmp_path / "launch")
+
+    room_git(bare, launch, [Mount(source=bare)]).write()
+
+    assert (
+        git(
+            tmp_path,
+            "config",
+            "--file",
+            str(launch.gitconfig),
+            "--get-regexp",
+            r"^url\..*\.insteadof$",
+        )
+        == f"url.lup::{origin}.insteadof {origin}"
+    )
