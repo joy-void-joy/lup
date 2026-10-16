@@ -1,6 +1,6 @@
 # lup: the design
 
-lup is a set of modules for working with agents (Claude Code and Codex): a small library any project's code can call agents with, and an environment on the operator's machine where agents do a project's work and develop its code, each made of the modules a project selects. This document is the design as it stands, and it's the operator's: changing it is a design decision. Items not yet confirmed by the operator are marked **(leaning)**; anything undecided is under *Open questions*. Each module's sides and boundaries are in `docs/modules.md`, each piece's detail in its note under `docs/`, facts that were expensive to learn in `docs/field-notes.md`, and what was tried and left behind, with why, in `docs/graveyard.md`.
+lup is a set of modules for working with agents (Claude Code and Codex): a small library any project's code can call agents with, and an environment on the operator's machine where agents do a project's work and develop its code, each made of the modules a project selects. This document is the design as it stands, and it's the operator's: changing it is a design decision. Items not yet confirmed by the operator are marked **(leaning)**; what was agreed in conversation and waits for a confirming pass is marked **(to confirm)**; anything undecided is under *Open questions*. Each module's sides and boundaries are in `docs/modules.md`, each piece's detail in its note under `docs/`, facts that were expensive to learn in `docs/field-notes.md`, and what was tried and left behind, with why, in `docs/graveyard.md`.
 
 ## Purpose
 
@@ -35,7 +35,7 @@ A module has up to three parts (`docs/modules.md`, *The unit*):
 
 A module may have one side only: the code rules are all environment, the test fake all library.
 
-- **Packaging (the operator's):** lup is one monorepo, a uv workspace, released together at one version, and its distributions are split by what installing costs, not by module, as pytest's built-in plugins live in pytest. Every module is a directory of `lup` holding both its sides and its dashboard panel (`lup/ledger/`); a third-party package a module needs is an extra (`lup[claude]` brings Claude's SDK). Beside `lup` are `lup-dev`, the environment core, which requires `lup-engine` (the 38 MB code-rules engine) and `lup-dashboard` (the page). A project, or anyone, writes a module exactly as lup does, an importable package with a `Module`, in its own code or in a distribution it publishes (`docs/modules.md`, *Packaging*).
+- **Packaging (to confirm):** lup is one monorepo, a uv workspace, released together at one version, and its distributions are split by what installing costs, not by module, as pytest's built-in plugins live in pytest. Every module is a directory of `lup` holding both its sides and its dashboard panel (`lup/ledger/`); a third-party package a module needs is an extra (`lup[claude]` brings Claude's SDK). Beside `lup` are `lup-dev`, the environment core, which requires `lup-engine` (the 38 MB code-rules engine) and `lup-dashboard` (the page). A project, or anyone, writes a module exactly as lup does, an importable package with a `Module`, in its own code or in a distribution it publishes (`docs/modules.md`, *Packaging*).
 - **What a project installs, and what its consumers download (leaning):** the project's `dependencies` name `lup` with the extras its own code needs; its development group lists `lup-dev`. A consumer of the project downloads `lup`: every module's code, a few kilobytes each, environment sides and panels inert, since they can't run without `lup-dev` and the dashboard, which never ship.
 - **Two import contracts hold the line (leaning):** inside lup, a module's library side never imports an environment side, and a module imports only the modules it requires; in each project, its shipped code imports no environment side, a contract lup generates from the project's path roles for its gate.
 - **Selected and installed (leaning):** the declaration selects environment sides; every module of lup's is installed with `lup`. A module whose extra is missing fails where it's imported, naming the extra to add, since lup never writes a project's `pyproject.toml` after `lup new`. A module the declaration doesn't select is fine: the project's code may use its library side while its sessions don't get its environment side.
@@ -61,9 +61,9 @@ Each core is what every module builds on and none can drop (`docs/modules.md`, *
 - launch and trust on launch. Trust approves a module's code before the host runs it, so it can't itself be a module; and the wall is policy, which a project configures through its modules but never drops;
 - the limits on the operator's credentials, with git through the host;
 - the pipelines modules feed: judging a write, the gate's runner, rendering the guidance, the dashboard's protocol;
-- `transcripts`, a module it requires (the operator's), so no project drops it: every session's record kept whole, every branch of it, out of the runtime's own cleanup; resuming, the dashboard and feedback read from it.
+- `transcripts`, a module it requires **(to confirm)**, so no project drops it: every session's record kept whole, every branch of it, out of the runtime's own cleanup; resuming, the dashboard and feedback read from it.
 
-**The dashboard** is a distribution of its own, `lup-dashboard`, the one part with its own stack, behind the typed protocol; `lup-dev` requires it (the operator's), and never imports it.
+**The dashboard** is a distribution of its own, `lup-dashboard`, the one part with its own stack, behind the typed protocol; `lup-dev` requires it **(to confirm)**, and never imports it.
 
 ### The modules
 
@@ -78,7 +78,7 @@ Each with its sentence; `docs/modules.md` holds each one's sides, what it requir
 - `budgets` (requires `accounts`): shares, pace, pauses and spawn caps (*Budgets*); `SharedBudget` for request rates across processes.
 - the outcome loop, off by default, for graded projects: attaching outcomes to runs, grouping runs into arms, comparing them; the project decides what success is.
 - reflection, requiring the outcome loop: *Open questions*.
-- realtime: an agent present over time, sleeping and waking on events, every timing a tool; it pairs a fast decision model with Claude, Jev, as a dependency of its own (the operator's), never as a runtime.
+- realtime: an agent present over time, sleeping and waking on events, every timing a tool; it pairs a fast decision model with Claude, Jev, as a dependency of its own, never as a runtime **(to confirm)**.
 
 **Environment-side:**
 - `Python`: how a Python project is run, tested and checked: the runner, test roots, the gate's Python steps, lup's settings for ruff and pyright.
@@ -94,7 +94,7 @@ Each with its sentence; `docs/modules.md` holds each one's sides, what it requir
 - feedback, on by default: "how it felt", telemetry and the pooling pass (*Feedback*), reading sessions from `transcripts`.
 - `meta` **(leaning: it goes)**: each kind's authoring tool lives with its kind (*Open questions*).
 
-Each boundary between modules is tested by one question (the operator's): would a project take one without the other, or replace one with its own? Where they always come together, they're one module (`docs/modules.md`, *To discuss*).
+Each boundary between modules is tested by one question **(to confirm)**: would a project take one without the other, or replace one with its own? Where they always come together, they're one module (`docs/modules.md`, *To discuss*).
 
 ## How lup reaches a project
 
