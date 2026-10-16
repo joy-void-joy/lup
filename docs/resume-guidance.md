@@ -45,7 +45,7 @@ Each has what this needs, so neither declares a gap: `SessionStart` saying it's 
 
 A paragraph of `Core`'s section (`declaration/modules/guidance/core.md`), after *What isn't*:
 
-> **As of this launch.** This guidance was rendered when this session's launch started, and a conversation continued from an earlier launch may remember another; where either disagrees with the room itself (a path, a mount, a tool), the room holds, so look before concluding something isn't there.
+> **As of this launch.** This guidance was rendered when this session's launch started, and a conversation continued from an earlier launch may remember another. Where either disagrees with the room itself (a path, a mount, a tool), the room holds: look before concluding something isn't there.
 
 ## Modules and public API (leaning)
 
