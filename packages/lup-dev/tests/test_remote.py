@@ -177,6 +177,7 @@ class World:
         gate.write_text(GATE)
         self.log = tmp_path / "gate" / "ran.jsonl"
         self.log.parent.mkdir()
+        self.landed: list[list[str]] = []
         self.room = RoomGit(
             repository=bare,
             launch=self.launch,
@@ -226,7 +227,7 @@ class World:
             courier=Deaf(),
             judge=no_judge,
             say=self.said.append,
-            room_routes=routes(Remotes(say=self.said.append)),
+            room_routes=routes(Remotes(say=self.said.append, landed=self.landing)),
         )
         running = Background(service)
         running.thread.start()
@@ -239,6 +240,10 @@ class World:
             yield
         finally:
             running.stop()
+
+    async def landing(self, launch: Register, refs: list[str]) -> None:
+        assert launch.launch == "one"
+        self.landed.append(refs)
 
     def room_git(self, *arguments: str) -> Ran:
         """Run git in the room's worktree, as the room runs it, whatever its status.
@@ -328,6 +333,19 @@ def test_a_push_lands_on_the_forge_by_object_id(world: World, clock: FakeClock) 
         in line
         for line in world.said
     )
+
+
+def test_each_push_tells_which_refs_it_updated_and_a_dry_run_or_a_refusal_none(
+    world: World, clock: FakeClock
+) -> None:
+    world.commit("first")
+
+    with world.served(clock):
+        world.room_git("push", "origin", "HEAD:refs/heads/feat", "HEAD:refs/heads/dev")
+        world.room_git("push", "--dry-run", "origin", "HEAD:refs/heads/other")
+        world.room_git("push", "origin", "HEAD:refs/heads/main")
+
+    assert world.landed == [["refs/heads/feat", "refs/heads/dev"]]
 
 
 def test_git_push_u_still_ends_well_where_the_room_cant_write_config(

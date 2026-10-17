@@ -33,6 +33,7 @@ from lup_dev.inbox.delivery import Delivery
 from lup_dev.inbox.notices import Notices
 from lup_dev.inbox.protocol import AskApproval
 from lup_dev.inbox.protocol import routes as inbox_routes
+from lup_dev.inbox.store import Approval as StoredApproval
 from lup_dev.inbox.store import Decided, Inbox, InboxError
 from lup_dev.launch.trust import (
     WHOLE,
@@ -719,6 +720,72 @@ def test_no_keeps_the_copy_approved_before(lup: Path, kit: Kit, shell: Shell) ->
     assert recording(trust).installed == []
     assert service(trust).calls == []
     assert approved(lup, kit, shell) == first.approval
+
+
+# Approving from the inbox, with nobody waiting
+
+
+def test_a_zone_proposed_puts_its_approval_in_the_inbox_and_asks_nothing_here(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    trust = trusting(lup, kit, unasked())
+    number = trust.proposed()
+    assert number == 1
+    assert isinstance(trust.approvals, Here)
+    [asking] = trust.approvals.asking
+    assert asking.fingerprint == trust.check().fingerprint
+    assert answering(trust).asked == []
+    assert recording(trust).installed == []
+    assert approved(lup, kit, shell) is None
+
+
+def test_a_zone_approved_already_proposes_nothing(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    trusting(lup, kit, yes()).ensure()
+    trust = trusting(lup, kit, unasked())
+    assert trust.proposed() is None
+    assert isinstance(trust.approvals, Here)
+    assert trust.approvals.asking == []
+
+
+def test_an_answer_given_in_the_inbox_installs_and_records_once(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    proposing = trusting(lup, kit, unasked())
+    proposing.proposed()
+    fingerprint = proposing.check().fingerprint
+    trust = trusting(lup, kit, unasked())
+
+    outcome = trust.settle(fingerprint, Given(approved=True, here=True))
+    again = trusting(lup, kit, unasked()).settle(
+        fingerprint, Given(approved=True, here=False)
+    )
+
+    head = shell.git(lup, "rev-parse", "dev")
+    assert isinstance(outcome, Trusted)
+    assert outcome.approval.commit == head
+    assert len(recording(trust).installed) == 1
+    assert service(trust).calls == ["stop", "/tools/lup-dev host"]
+    assert approved(lup, kit, shell) == outcome.approval
+    assert isinstance(again, Unchanged)
+    assert answering(trust).asked == []
+
+
+def test_an_answer_about_a_tip_that_moved_since_installs_nothing(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    proposing = trusting(lup, kit, unasked())
+    proposing.proposed()
+    fingerprint = proposing.check().fingerprint
+    changed(lup, {"lup_project.py": DECLARED + "# changed since\n"}, shell)
+    trust = trusting(lup, kit, unasked())
+
+    outcome = trust.settle(fingerprint, Given(approved=True, here=True))
+
+    assert outcome is None
+    assert recording(trust).installed == []
+    assert approved(lup, kit, shell) is None
 
 
 LAYER = '''"""The person's own layer: a made-up neighbour."""
@@ -1528,6 +1595,26 @@ def machine(
     )
 
 
+class Acted(Model):
+    """One approval `lup-dev inbox answer` acted on, and the answer."""
+
+    fingerprint: str
+    approved: bool
+
+
+@pytest.fixture(autouse=True)
+def acting(monkeypatch: pytest.MonkeyPatch) -> list[Acted]:
+    """`lup-dev inbox answer` acting on an approval's answer, recorded rather than run: `Trust.settle`, which it runs, is tested on its own."""
+    acted: list[Acted] = []
+
+    def recorded(approval: StoredApproval, given: Given) -> str | None:
+        acted.append(Acted(fingerprint=approval.fingerprint, approved=given.approved))
+        return None
+
+    monkeypatch.setattr(cli, "acted_on", recorded)
+    return acted
+
+
 def inboxed(
     machine: Layout, clock: FakeClock, starter: Starter | None = None
 ) -> InboxApprovals:
@@ -1586,7 +1673,7 @@ def test_the_approval_is_an_inbox_item_the_launching_terminal_answers(
 
 
 def test_lup_dev_inbox_answer_answers_it_and_the_terminal_stops_asking(
-    audiobook: Path, kit: Kit, machine: Layout, clock: FakeClock
+    audiobook: Path, kit: Kit, machine: Layout, clock: FakeClock, acting: list[Acted]
 ) -> None:
     elsewhere: list[str] = []
     with served(machine, clock):
@@ -1607,6 +1694,7 @@ def test_lup_dev_inbox_answer_answers_it_and_the_terminal_stops_asking(
     assert [each.commit for each in recording(trust).installed] == [
         outcome.approval.commit
     ]
+    assert acting == [Acted(fingerprint=trust.check().fingerprint, approved=True)]
 
 
 def test_declined_from_the_inbox_keeps_the_copy_approved_before(
@@ -1742,7 +1830,11 @@ def test_a_wait_outlives_a_service_restart_and_hears_the_next_ones_answer(
 
 
 def test_lup_dev_inbox_answer_asks_an_approval_as_the_launch_does(
-    machine: Layout, clock: FakeClock, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    machine: Layout,
+    clock: FakeClock,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    acting: list[Acted],
 ) -> None:
     terminal = Answering([True], whole=True)
     monkeypatch.setattr(cli, "Terminal", lambda: terminal)
@@ -1760,6 +1852,7 @@ def test_lup_dev_inbox_answer_asks_an_approval_as_the_launch_does(
         item = running.delivery.inbox.item(number)
     assert said == f"Item {number} is approved: each launch waiting on it goes on.\n"
     assert item.state == Decided(at=clock.now(), approved=True)
+    assert acting == [Acted(fingerprint="zone", approved=True)]
     [summary] = terminal.said
     assert summary.splitlines()[1:] == ["A summary."]
     assert terminal.shown == ["+the whole diff\n"]

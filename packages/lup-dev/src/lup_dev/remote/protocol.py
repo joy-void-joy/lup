@@ -311,6 +311,11 @@ class Remotes(Model, arbitrary_types_allowed=True):
     """Where each push and fetch is said: the service's log."""
     run: Callable[[Asked], Awaitable[Judged]] = judged
     """Runs one git command to its end on the service's event loop."""
+    landed: Callable[[Register, list[str]], Awaitable[None]] | None = None
+    """Told which refs a launch's push updated, once it's done and before its
+    room hears: a push moving the integration branch puts the approval of the
+    host zone at its tip in the operator's inbox (`cli.py`). None tells
+    nothing."""
 
     async def git(self, launch: Register, *arguments: str) -> Judged:
         """Run git in `launch`'s repository's own git directory, pinned there (`pinning`), with what it could be led into turned off."""
@@ -478,7 +483,7 @@ class PushHandler(Model, RoomHandler[Pushing]):
             for batch, error in zip(batches, errors, strict=True)
             for each in batch
         }
-        return Pushed(
+        outcome = Pushed(
             updates=[
                 Updated(
                     destination=each.destination,
@@ -487,6 +492,10 @@ class PushHandler(Model, RoomHandler[Pushing]):
                 for each in request.updates
             ]
         )
+        updated = [each.destination for each in outcome.updates if each.error is None]
+        if self.remotes.landed is not None and updated and not request.dry_run:
+            await self.remotes.landed(launch, updated)
+        return outcome
 
     async def pushed(
         self,
