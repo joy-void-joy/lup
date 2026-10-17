@@ -36,6 +36,8 @@ from lup_dev.host.protocol import (
     Refused,
     Register,
     Registered,
+    Rename,
+    Renamed,
     Reply,
     Request,
     Stop,
@@ -243,21 +245,30 @@ class HostClient(Model, arbitrary_types_allowed=True):
             self.clock.sleep(self.poll.total_seconds())
         return self.held(request)
 
-    def register(self, launch: Register) -> Path:
+    def register(self, launch: Register) -> Registered:
         """Have the service serve a launch, starting it if none runs.
 
-        Return the launch's socket directory, which its room mounts.
+        Return the launch's socket directory, which its room mounts, and the name
+        it took.
         """
         self.ensure()
-        return self.ask(launch, Registered).directory
+        return self.ask(launch, Registered)
 
     def launches(self) -> list[Register]:
         """List the launches the service serves, starting it if none runs.
 
         A service started serves every launch recorded, so none recorded is missed.
         """
+        return self.listed().launches
+
+    def listed(self) -> Listed:
+        """List the launches the service serves, and the name each session last had, starting it if none runs."""
         self.ensure()
-        return self.ask(ListLaunches(), Listed).launches
+        return self.ask(ListLaunches(), Listed)
+
+    def rename(self, launch: str, name: str) -> Register:
+        """Rename the launch `launch`; return it as it stands. The service refuses a name another launch holds."""
+        return self.ask(Rename(launch=launch, name=name), Renamed).launch
 
     def unregister(self, launch: str) -> None:
         """End a launch: its sockets closed, its directory removed.

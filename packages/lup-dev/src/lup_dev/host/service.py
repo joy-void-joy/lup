@@ -49,11 +49,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Self, override
 
 from filelock import FileLock, Timeout
-from pydantic import JsonValue, ValidationError, model_validator
+from pydantic import Field, JsonValue, ValidationError, model_validator
 
 from lup.tools.serving import Answer, serve
+from lup.tools.tool import Accepted, AgentTool, ToolSpec, lup_tool
+from lup.tools.tool import Refused as Rejected
 from lup.types import Model, MutableModel
 from lup_dev.host.courier import Conversations, Courier, Post, Posted, Telling
+from lup_dev.host.names import Names, claimed, held, shaped, taken
 from lup_dev.host.protocol import (
     Done,
     HostError,
@@ -62,10 +65,13 @@ from lup_dev.host.protocol import (
     Refused,
     Register,
     Registered,
+    Rename,
+    Renamed,
     Reply,
     Request,
     Stop,
     Unregister,
+    handle,
 )
 from lup_dev.host.rooms import SERVER, LaunchTools, RoomRoute, RoomTools
 from lup_dev.host.workers import (
@@ -85,7 +91,6 @@ from lup_dev.layout import HostLayout
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
-    from lup.tools.tool import ToolSpec
     from lup_dev.host.courier import Conversation
 
 
@@ -312,6 +317,15 @@ def relayed(modules: LaunchModules, launch: Register, kind: str) -> Route:
     return Route(kind=kind, answer=answered)
 
 
+def named_here(name: str) -> str:
+    """Tell a session starting its launch's name."""
+    return (
+        f"lup: this session is `{name}`: how the operator, lup's commands and "
+        "other sessions call it. Once you know your task, name it after it with "
+        "lup's `rename` tool, unless the operator named it."
+    )
+
+
 class Spoken(Model):
     """What a hook prints, and what it tells the conversation from its inbox."""
 
@@ -353,6 +367,8 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     line_limit: int
     """The longest line lup's tool server reads: one MCP message."""
     say: Callable[[str], None]
+    names: Names
+    """The name each session last had, so a session resumed takes it back."""
     refresh: Callable[[Register], list[Path]] | None = None
     """Brings the programs a recorded launch's room runs up to this copy's,
     returning those it rewrote; none leaves them as the launch wrote them."""
@@ -360,18 +376,22 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     pending: list[asyncio.Task[None]] = []
     """What the launches' modules' hooks are running that nothing waits on."""
 
-    async def open(self, request: Register) -> Path:
-        """Serve a launch: its directory, its sockets inside, its record.
+    async def open(self, registering: Register) -> Register:
+        """Serve a launch: its name, its directory, its sockets inside, its record; and return it as it stands, named.
 
-        A launch served already, running a runtime the answerer doesn't know, or
-        whose judge isn't there, is refused. A directory left by a service before
+        Its name is the one it asks, made unique among those served (`claimed`).
+        A launch served already, running a runtime the answerer doesn't know,
+        whose judge isn't there, or asking exactly a name another holds, is
+        refused. A directory left by a service before
         is used as it is, since the launch's room mounted it. Either way it's the
         operator's alone (mode 0700): a runtime's own messaging socket, placed in
         it, refuses a directory anyone else could reach (its adapter says which).
         """
-        if request.launch in self.served:
-            message = f"a launch named `{request.launch}` is served already"
+        if registering.launch in self.served:
+            message = f"a launch with the id `{registering.launch}` is served already"
             raise HostError(message)
+        others = [served.launch for served in self.served.values()]
+        request = registering.model_copy(update={"name": claimed(registering, others)})
         known = self.answerer.runtimes()
         if request.runtime not in known:
             message = (
@@ -438,10 +458,58 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         if "launched" in offered.occasions:
             self.background(self.happened(request, Happening(occasion="launched")))
         self.say(
-            f"{request.launch}: served, {request.runtime} in {request.worktree}, "
-            f"judged by {request.judge}, its sockets in {sockets.directory}"
+            f"{request.launch}: served as `{request.name}`, {request.runtime} in "
+            f"{request.worktree}, judged by {request.judge}, its sockets in "
+            f"{sockets.directory}"
         )
-        return sockets.directory
+        return request
+
+    def renamed(self, launch: str, name: str) -> Register:
+        """Rename launch `launch`, its record and its session's kept name with it, and return it as it stands.
+
+        Raise `HostError` where no launch is served by that id, or another holds
+        the name, saying which.
+        """
+        served = self.served.get(launch)
+        if served is None:
+            message = f"no launch served is `{launch}`"
+            raise HostError(message)
+        others = [each.launch for each in self.served.values()]
+        holder = held(name, others, launch)
+        if holder is not None:
+            raise HostError(taken(holder))
+        before = served.launch.name
+        named = served.launch.model_copy(update={"name": name})
+        self.served[launch] = served.model_copy(update={"launch": named})
+        self.layout.record(launch).write_text(named.model_dump_json(indent=2))
+        session = served.conversations.session
+        if session is not None:
+            self.names.keep(session, name)
+        self.say(f"{launch}: renamed from `{before}` to `{name}`")
+        return named
+
+    def started(self, launch: str, session: str, title: str | None) -> str:
+        """Name launch `launch` as its session `session` starts, and return its name.
+
+        A name the runtime gives the session (`title`, as the operator renamed it
+        in the runtime) is taken in a name's shape (`shaped`) where it's free; otherwise
+        the name `session` last had, where it's free, as a session resumed in a
+        later launch; otherwise the launch keeps its own. The name is kept as
+        `session`'s.
+        """
+        current = self.served[launch].launch
+        others = [each.launch for each in self.served.values()]
+        given = None if title is None else shaped(title)
+        wanted = [
+            each
+            for each in [given, self.names.last(session)]
+            if each is not None and held(each, others, launch) is None
+        ]
+        name = next(iter(wanted), current.name or "")
+        if name != current.name:
+            self.renamed(launch, name)
+        self.names.keep(session, name)
+        return name
 
     async def offered(self, request: Register) -> Offered:
         """Start serving the launch's modules, and return what they serve that the core doesn't.
@@ -568,13 +636,26 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             )
             self.background(self.happened(request, happening))
         answer = await self.judgement(request, payload) if heard.judged else ""
-        room = heard.fits - len(answer.encode())
+        starting = heard.event == "session-started" and heard.agent is None
+        name = (
+            self.started(request.launch, heard.session, heard.title)
+            if starting
+            else None
+        )
+        naming = [] if name is None else [named_here(name)]
+        room = (
+            heard.fits
+            - len(answer.encode())
+            - sum(len(each.encode()) for each in naming)
+        )
         posted = (
             Posted()
             if self.post is None
             else await self.post.telling(request, conversation, heard, room)
         )
-        telling = Telling(caller=conversation.id, items=posted.items)
+        telling = Telling(
+            caller=conversation.id, items=[*naming, *posted.items], title=name
+        )
         try:
             told = self.courier.told(request.runtime, payload, answer, telling)
         except ValueError as unread:
@@ -631,7 +712,7 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         )
         toolset = LaunchTools(
             launch=request,
-            tools=[*self.tools, *modules],
+            tools=[*self.tools, Naming(launches=self), *modules],
             conversations=conversations,
             say=self.say,
         )
@@ -694,6 +775,67 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         self.served = {}
 
 
+class NewName(Model):
+    """The name a session takes."""
+
+    name: str = Field(
+        description=(
+            "This session's name from now on: letters, digits, `-`, `_` and `.`, "
+            "after its task, such as `gate-on-push`."
+        )
+    )
+
+
+class Namer(Model, arbitrary_types_allowed=True):
+    """One launch's session, renaming itself."""
+
+    launches: Launches
+    launch: str
+
+    async def rename(self, new: NewName) -> str:
+        """Name this session after its task.
+
+        Its name is how the operator, lup's commands and other sessions call
+        it, and what the operator's inbox says items come from. Call it once
+        you know your task, unless the operator named the session; call it
+        again when the task changes. A name another session holds is refused,
+        saying whose; pick another.
+        """
+        try:
+            named = self.launches.renamed(self.launch, handle(new.name))
+        except (HostError, ValueError) as refused:
+            return f"Not renamed: {refused}"
+        return f"This session is `{named.name}`."
+
+    def tools(self) -> list[AgentTool]:
+        """Return the naming tool, bound to this launch."""
+        return [lup_tool(self.rename)]
+
+
+class Naming(Model, RoomTools, arbitrary_types_allowed=True):
+    """The tool a session renames itself with, which the service serves beside the inbox's."""
+
+    launches: Launches
+
+    @override
+    def specs(self) -> list[ToolSpec]:
+        return [tool.spec() for tool in Namer.model_construct().tools()]
+
+    @override
+    async def call(
+        self, name: str, arguments: JsonValue, launch: Register, caller: Conversation
+    ) -> Answer:
+        """Rename `launch` as its session asks; arguments that don't validate are refused, saying why."""
+        del caller
+        namer = Namer(launches=self.launches, launch=launch.launch)
+        [tool] = [tool for tool in namer.tools() if tool.spec().name == name]
+        match await tool.call(arguments):
+            case Accepted(answer=answer):
+                return Answer(text=answer)
+            case Rejected(rejection=rejection):
+                return Answer(text=f"Refused: {rejection.reason}", error=True)
+
+
 class Registering(Model, Handler[Register]):
     """Answers `Register`: the launch served, its socket directory replied."""
 
@@ -705,7 +847,25 @@ class Registering(Model, Handler[Register]):
 
     @override
     async def answer(self, request: Register) -> Reply:
-        return Registered(directory=await self.launches.open(request))
+        served = await self.launches.open(request)
+        return Registered(
+            directory=self.launches.layout.launch(served.launch).directory,
+            name=served.name or "",
+        )
+
+
+class Renaming(Model, Handler[Rename]):
+    """Answers `Rename`: the launch renamed, as it stands replied."""
+
+    launches: Launches
+
+    @override
+    def request(self) -> type[Rename]:
+        return Rename
+
+    @override
+    async def answer(self, request: Rename) -> Reply:
+        return Renamed(launch=self.launches.renamed(request.launch, request.name))
 
 
 class Ending(Model, Handler[Unregister]):
@@ -735,7 +895,8 @@ class Listing(Model, Handler[ListLaunches]):
     @override
     async def answer(self, request: ListLaunches) -> Reply:
         return Listed(
-            launches=[served.launch for served in self.launches.served.values()]
+            launches=[served.launch for served in self.launches.served.values()],
+            sessions=self.launches.names.all(),
         )
 
 
@@ -849,6 +1010,7 @@ class HostService(Model, arbitrary_types_allowed=True):
             modules=self.modules,
             line_limit=self.line_limit,
             say=self.say,
+            names=Names(path=self.layout.names),
             refresh=self.refresh,
         )
         stopped = asyncio.Event()
@@ -856,6 +1018,7 @@ class HostService(Model, arbitrary_types_allowed=True):
             Route.to(Registering(launches=launches)),
             Route.to(Ending(launches=launches)),
             Route.to(Listing(launches=launches)),
+            Route.to(Renaming(launches=launches)),
             Route.to(Stopping(stopped=stopped)),
         ]
         control = Dispatcher(

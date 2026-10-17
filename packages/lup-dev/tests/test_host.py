@@ -257,6 +257,7 @@ def launch(tmp_path: Path, name: str, runtime: str) -> Register:
         container=f"lup-{name}",
         limits=Limits(actions=["fetch", "push"], protected=["refs/heads/main"]),
         github=None,
+        name=name,
     )
 
 
@@ -271,7 +272,7 @@ def test_a_hook_is_answered_on_its_launchs_socket(
 ) -> None:
     host = client(layout, clock)
     with served(service(layout, Judge(), said)):
-        directory = host.register(launch(tmp_path, "one", "first"))
+        directory = host.register(launch(tmp_path, "one", "first")).directory
         assert directory == layout.launch("one").directory
         assert directory.stat().st_mode & 0o777 == 0o700
         assert layout.launch("one").hook.is_socket()
@@ -279,7 +280,7 @@ def test_a_hook_is_answered_on_its_launchs_socket(
         assert send(layout.launch("one").hook, payload) == f"first answers {payload}\n"
     judge = tmp_path / "judges" / "bin" / "lup-dev"
     assert (
-        f"one: served, first in {tmp_path}, judged by {judge}, its sockets in "
+        f"one: served as `one`, first in {tmp_path}, judged by {judge}, its sockets in "
         f"{directory}"
     ) in said
     assert "one: answered a hook" in said
@@ -323,7 +324,7 @@ def test_a_launchs_directory_goes_with_it(
 ) -> None:
     host = client(layout, clock)
     with served(service(layout, Judge(), said)):
-        directory = host.register(launch(tmp_path, "one", "first"))
+        directory = host.register(launch(tmp_path, "one", "first")).directory
         (directory / "left.txt").write_text("what the room left\n")
         host.unregister("one")
         assert not directory.exists()
@@ -340,7 +341,7 @@ def test_stopping_closes_the_sockets_and_keeps_the_launches(
 ) -> None:
     host = client(layout, clock)
     with served(service(layout, Judge(), said)) as running:
-        directory = host.register(launch(tmp_path, "one", "first"))
+        directory = host.register(launch(tmp_path, "one", "first")).directory
         assert host.stop()
         running.thread.join(timeout=60)
     assert clock.slept == 0
@@ -359,7 +360,7 @@ def test_a_service_started_again_serves_the_launches_where_their_rooms_mounted_t
     host = client(layout, clock)
     registered = launch(tmp_path, "one", "first")
     with served(service(layout, Judge(), said)):
-        directory = host.register(registered)
+        directory = host.register(registered).directory
         mounted = directory.stat().st_ino
         host.stop()
     with served(service(layout, Judge(), said)):
@@ -470,7 +471,9 @@ def test_what_the_service_cant_carry_out_is_refused(
     host = client(layout, clock)
     with served(service(layout, Judge(), said)):
         host.register(launch(tmp_path, "one", "first"))
-        with pytest.raises(HostError, match="a launch named `one` is served already"):
+        with pytest.raises(
+            HostError, match="a launch with the id `one` is served already"
+        ):
             host.register(launch(tmp_path, "one", "second"))
         with pytest.raises(
             HostError,
@@ -487,8 +490,8 @@ def test_what_the_service_cant_carry_out_is_refused(
         assert "one path segment" in refused.error
         unknown = Refused.model_validate_json(send(layout.control, '{"kind": "nope"}'))
         assert unknown.error == (
-            "no handler for `nope`; the service answers list, register, stop, "
-            "unregister"
+            "no handler for `nope`; the service answers list, register, rename, "
+            "stop, unregister"
         )
         garbled = Refused.model_validate_json(send(layout.control, "hello"))
         assert garbled.error.startswith("a request is a JSON object with its kind")
@@ -536,7 +539,7 @@ def test_a_hook_its_judge_cant_answer_is_answered_in_the_runtimes_terms(
         f"one: `{command}` couldn't answer a hook (status 1). What it said:\n"
         "Traceback: it broke\n"
     ) in said
-    assert registered.is_dir()
+    assert registered.directory.is_dir()
 
 
 def test_a_failed_answer_is_said_and_the_hook_hears_nothing(
@@ -751,7 +754,7 @@ def test_a_call_on_a_launchs_mcp_socket_reaches_its_tools_with_its_conversation(
         arguments = stamped(send(layout.launch("one").hook, lups("echo", "t1")))
         stamp = arguments["caller"]
         assert isinstance(stamp, str)
-        assert listed(layout.launch("one").mcp) == ["echo"]
+        assert listed(layout.launch("one").mcp) == ["echo", "rename"]
         heard = call(layout.launch("one").mcp, "echo", arguments)
         elsewhere = call(layout.launch("two").mcp, "echo", arguments)
     assert heard == (f"one heard {stamp}", False)
@@ -811,7 +814,10 @@ def test_a_hook_the_judge_doesnt_read_is_answered_without_it(
         hook = layout.launch("one").hook
         answers = [send(hook, payload) for payload in [started, write, *unread]]
         lup_tool = json.loads(send(hook, lups("echo", "t3")))
-    assert answers == ["", "", "", "", ""]
+    assert answers[1:] == ["", "", "", ""]
+    named = json.loads(answers[0])["hookSpecificOutput"]
+    assert named["sessionTitle"] == "one"
+    assert named["additionalContext"].startswith("lup: this session is `one`")
     assert judge.payloads == [started, write]
     assert lup_tool["hookSpecificOutput"].keys() == {"hookEventName", "updatedInput"}
 
@@ -918,7 +924,7 @@ def test_the_room_sockets_go_with_the_launch_and_are_served_again_after_a_restar
     with served(
         service(layout, Judge(), said, room_routes=routes, tools=[Recording()])
     ):
-        assert listed(sockets.mcp) == ["echo"]
+        assert listed(sockets.mcp) == ["echo", "rename"]
         room = RoomClient(socket=sockets.request)
         assert room.ask(Echo(text="again"), Echoed).text == "one: again"
         host.unregister("one")
@@ -1144,7 +1150,7 @@ def test_a_launch_s_modules_tools_are_served_beside_the_core_s_with_the_caller(
         send(layout.launch("one").hook, claude("SessionStart", source="startup"))
         arguments = stamped(send(layout.launch("one").hook, lups("shout", "t1")))
         stamp = arguments["caller"]
-        assert listed(layout.launch("one").mcp) == ["echo", "shout"]
+        assert listed(layout.launch("one").mcp) == ["echo", "rename", "shout"]
         heard = call(layout.launch("one").mcp, "shout", arguments)
         host.unregister("one")
     assert heard == (f"HI, {stamp} of one", False)
@@ -1157,7 +1163,7 @@ def test_a_launch_whose_modules_cant_be_served_gets_the_core_s_tools_alone(
     host = client(layout, clock)
     with served(service(layout, Judge(), said, tools=[Recording()], modules=Broken())):
         host.register(launch(tmp_path, "one", "first"))
-        assert listed(layout.launch("one").mcp) == ["echo"]
+        assert listed(layout.launch("one").mcp) == ["echo", "rename"]
     assert "one: its modules aren't served: its copy predates `worker`" in said
 
 
@@ -1177,7 +1183,7 @@ def test_a_module_s_tool_named_like_a_core_tool_is_left_to_the_core(
         host.register(launch(tmp_path, "one", "claude"))
         send(layout.launch("one").hook, claude("SessionStart", source="startup"))
         arguments = stamped(send(layout.launch("one").hook, lups("shout", "t1")))
-        assert listed(layout.launch("one").mcp) == ["shout"]
+        assert listed(layout.launch("one").mcp) == ["shout", "rename"]
         heard = call(layout.launch("one").mcp, "shout", arguments)
     assert heard == (f"one heard {arguments['caller']}", False)
     assert any("which the core serves already" in line for line in said)

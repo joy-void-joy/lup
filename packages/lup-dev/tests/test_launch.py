@@ -34,7 +34,13 @@ from lup_dev.declaration.requirements import Printed, Tools
 from lup_dev.declaration.resolve import resolve
 from lup_dev.forge.github import GitHubError
 from lup_dev.host.client import HostClient, Starter
-from lup_dev.host.protocol import GitHubRepository, HostError, Limits, Register
+from lup_dev.host.protocol import (
+    GitHubRepository,
+    HostError,
+    Limits,
+    Register,
+    Registered,
+)
 from lup_dev.launch.clis import Channel, ChannelError
 from lup_dev.launch.guidance import OPENING
 from lup_dev.launch.room import RoomError
@@ -158,10 +164,10 @@ class Host(HostClient):
         return self.served
 
     @override
-    def register(self, launch: Register) -> Path:
+    def register(self, launch: Register) -> Registered:
         self.events.record(f"register {launch.runtime} {launch.container}")
         self.served.append(launch)
-        return self.sockets
+        return Registered(directory=self.sockets, name=launch.name or "")
 
     @override
     def unregister(self, launch: str) -> None:
@@ -434,6 +440,7 @@ def test_a_launch_runs_each_step_in_order_and_ends_its_registration(
             "container, lup-dead, are gone."
         ),
         f"register claude {container}",
+        "This launch is `dev`.",
         "image",
         "run",
         f"unregister {launch}",
@@ -463,6 +470,7 @@ def test_a_launch_runs_each_step_in_order_and_ends_its_registration(
             gated=["refs/heads/dev"],
         ),
         github=GitHubRepository(owner="someone", name="work"),
+        name="dev",
     )
     run = machine.engine.run()
     assert f"--name={container}" in run

@@ -263,6 +263,10 @@ class Context(Output, extra="allow"):
     permission_decision_reason: str | None = None
     additional_context: str | None = None
     updated_input: JsonObject | None = None
+    session_title: str | None = None
+    """At a session's start, the name Claude Code gives the session, as `/rename`
+    does (its `hooks` docs: "Sets the session title, with the same effect as
+    `/rename`")."""
 
 
 class Said(Output, extra="allow"):
@@ -332,20 +336,31 @@ class SessionStart(Payload):
     """`SessionStart`: a session starts, resumes, or is cleared or compacted."""
 
     hook_event_name: Literal["SessionStart"]
+    session_title: str | None = None
+    """The session's custom title, where one is set (`--name`, `/rename`, a
+    hook's `sessionTitle`); not the title Claude Code generates."""
 
     def heard(self, fits: int) -> Heard:
-        """Read the session's start: the judge reads it."""
+        """Read the session's start, and the name the operator gave it in Claude Code: the judge reads it."""
         return Heard(
             event="session-started",
             session=self.session_id,
             agent=self.agent_id or None,
             judged=True,
             fits=fits,
+            title=self.session_title,
         )
 
     def told(self, said: Said, telling: Telling) -> Said:
-        """Tell the conversation its items as it starts."""
-        return context(said, self.hook_event_name, telling.items)
+        """Tell the conversation its items as it starts, and name the session as its launch is named."""
+        told = context(said, self.hook_event_name, telling.items)
+        if telling.title is None:
+            return told
+        given = told.hook_specific_output or Context(
+            hook_event_name=self.hook_event_name
+        )
+        titled = given.model_copy(update={"session_title": telling.title})
+        return told.model_copy(update={"hook_specific_output": titled})
 
     @override
     def answer(self, bench: Bench) -> Output | None:

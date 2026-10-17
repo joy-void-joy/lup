@@ -62,8 +62,9 @@ from lup_dev.gate import Ran as GateRan
 from lup_dev.git import Git, nul_separated
 from lup_dev.host.client import Detached, HostClient, RoomClient
 from lup_dev.host.courier import Courier, Heard, Telling
+from lup_dev.host.names import shaped
 from lup_dev.host.protocol import GitHubRepository, HostError, Register
-from lup_dev.host.service import Answerer, HostService
+from lup_dev.host.service import Answerer, HostService, Naming
 from lup_dev.host.workers import Workers
 from lup_dev.inbox.delivery import Delivery, opening, what, who
 from lup_dev.inbox.notices import NotifySend
@@ -89,6 +90,7 @@ from lup_dev.inbox.store import (
     InboxError,
     Item,
     Message,
+    Party,
     Question,
     Ruling,
     Superseded,
@@ -96,6 +98,7 @@ from lup_dev.inbox.store import (
     Verdict,
     Waiting,
 )
+from lup_dev.inbox.store import Conversation as InboxConversation
 from lup_dev.inbox.tools import InboxTools
 from lup_dev.launch.clis import CliCache
 from lup_dev.launch.images import build
@@ -255,6 +258,25 @@ def toplevel(directory: Path) -> Path:
     return Path(Git(cwd=directory).text("rev-parse", "--show-toplevel"))
 
 
+def branch_name(worktree: Path) -> str:
+    """Return a launch's name by default: the branch the worktree at `worktree` has checked out, in a name's shape (`feat/x` is `feat-x`), or the worktree's directory's where none is."""
+    found = Git(cwd=worktree).run("symbolic-ref", "--short", "-q", "HEAD", ok=[0, 1])
+    branch = found.output.decode().strip() if found.status == 0 else ""
+    return shaped(branch) or shaped(worktree.name) or "session"
+
+
+def addressed(launches: list[Register], to: str) -> list[Register]:
+    """Return the launches `to` names: by id, else by name, else those whose worktree holds the path it is."""
+    by_id = [each for each in launches if each.launch == to]
+    if by_id:
+        return by_id
+    by_name = [each for each in launches if each.name == to]
+    if by_name:
+        return by_name
+    place = Path(to).expanduser().resolve()
+    return [each for each in launches if place.is_relative_to(each.worktree)]
+
+
 @app.command("hook")
 def hook(
     runtime: Annotated[
@@ -363,8 +385,9 @@ def served_tools(resolved: Resolved) -> list[ToolSpec]:
         for tools in room_tools(Delivery.model_construct())
         for spec in tools.specs()
     ]
+    naming = Naming.model_construct().specs()
     modules = [spec for each in resolved.served for spec in each.tools.specs()]
-    return [*core, *modules]
+    return [*core, *naming, *modules]
 
 
 @app.command("worker", hidden=True)
@@ -407,8 +430,8 @@ def clocked(at: datetime) -> str:
     return f"{at.astimezone():%Y-%m-%d %H:%M}"
 
 
-def line(item: Item) -> str:
-    """Say an item in a line: its number, when it was made, what it is, from whom, and its first line; for an approval, how to read it whole and answer it."""
+def line(item: Item, sessions: dict[str, str] | None = None) -> str:
+    """Say an item in a line: its number, when it was made, what it is, from whom (by its launch's name where `sessions` names its session), and its first line; for an approval, how to read it whole and answer it."""
     where = "" if item.worktree is None else f" in {item.worktree}"
     reading = (
         f" (`answer {item.number}` shows its summary, offers its whole diff, and "
@@ -418,8 +441,17 @@ def line(item: Item) -> str:
     )
     return (
         f"{item.number:>4}  {clocked(item.made)}  {what(item)} from "
-        f"{who(item.sender)}{where}: {opening(item)}{reading}"
+        f"{sender_named(item.sender, sessions or {})}{where}: {opening(item)}{reading}"
     )
+
+
+def sender_named(party: Party, sessions: dict[str, str]) -> str:
+    """Say who `party` is: a conversation by its launch's name first, where `sessions` names its session."""
+    match party:
+        case InboxConversation(session=session) if session in sessions:
+            return f"`{sessions[session]}` ({who(party)})"
+        case _:
+            return who(party)
 
 
 def standing(item: Item) -> str:
@@ -532,12 +564,14 @@ def inbox_list(context: typer.Context) -> None:
     """
     if context.invoked_subcommand is not None:
         return
-    items = answering().ask(ListInbox(), Items).items
+    client = answering()
+    items = client.ask(ListInbox(), Items).items
     if not items:
         typer.echo("Nothing waits for you.")
         return
+    sessions = client.listed().sessions
     for item in items:
-        typer.echo(line(item))
+        typer.echo(line(item, sessions))
 
 
 @inbox.command("show")
@@ -689,30 +723,59 @@ def inbox_done(
 
 @inbox.command("send")
 def inbox_send(
-    to: Annotated[str, typer.Argument(help="The launch, by its id or its worktree.")],
+    to: Annotated[
+        str, typer.Argument(help="The launch, by its name, its id or its worktree.")
+    ],
     text: Annotated[str, typer.Argument(help="What to tell its session.")],
 ) -> None:
     """Send a message to the session a launch runs, its main conversation."""
     client = answering()
-    named = Path(to).resolve()
-    found = [
-        each.launch
-        for each in client.launches()
-        if to == each.launch or named == each.worktree
-    ]
+    launch = the_launch(client.launches(), to)
+    sent = client.ask(SendItem(launch=launch.launch, text=text), Shown).item
+    typer.echo(f"Sent item {sent.number} to `{launch.name}`, {who(sent.recipient)}.")
+
+
+def the_launch(launches: list[Register], to: str | None) -> Register:
+    """Return the one launch `to` names (`addressed`); where it's none, the one whose worktree holds this directory, or the only one running.
+
+    Raise `InboxError` where none is, or several are, naming them.
+    """
+    found = (
+        addressed(launches, to)
+        if to is not None
+        else addressed(launches, str(Path.cwd())) or launches
+    )
     match found:
         case [launch]:
-            sent = client.ask(SendItem(launch=launch, text=text), Shown).item
-            typer.echo(f"Sent item {sent.number} to {who(sent.recipient)}.")
+            return launch
         case []:
-            message = f"no launch served is `{to}`, by its id or its worktree"
+            message = f"no launch served is `{to}`, by its name, its id or its worktree"
             raise InboxError(message)
         case _:
-            message = (
-                f"several launches run in {named}: {', '.join(found)}; name one by "
-                "its id"
+            named = ", ".join(
+                f"`{each.name}` ({each.launch}, in {each.worktree})" for each in found
             )
+            message = f"several launches run: {named}; name one"
             raise InboxError(message)
+
+
+@app.command("rename")
+def rename(
+    to: Annotated[
+        str, typer.Argument(help="The launch, by its name, its id or its worktree.")
+    ],
+    name: Annotated[str, typer.Argument(help="Its name from now on.")],
+) -> None:
+    """Rename a running launch: how you, lup's commands and its session call it.
+
+    Run it yourself, in your own terminal. A name another launch holds is
+    refused, saying whose. The session hears its name at its next start, where
+    its runtime takes it as its own title, where the runtime has a way.
+    """
+    client = answering()
+    launch = the_launch(client.launches(), to)
+    renamed = client.rename(launch.launch, name)
+    typer.echo(f"Launch {renamed.launch} is `{renamed.name}`.")
 
 
 class Launcher(Model, arbitrary_types_allowed=True):
@@ -797,6 +860,7 @@ def launched(
     lending: list[Lent] | None = None,
     *,
     modules: list[str] | None = None,
+    name: str | None = None,
 ) -> int:
     """Launch `adapter`'s runtime in a room for `worktree`, in this terminal, and return its CLI's exit status.
 
@@ -910,12 +974,16 @@ def launched(
             container=f"lup-{launch}",
             limits=declared.resolved.limits,
             github=github,
+            name=name or branch_name(worktree),
+            exact=name is not None,
         )
         own.lock.parent.mkdir(parents=True, exist_ok=True)
         try:
             with FileLock(own.lock):
                 swept(launcher)
-                sockets = launcher.host.register(registered)
+                served = launcher.host.register(registered)
+                sockets = served.directory
+                launcher.say(f"This launch is `{served.name}`.")
                 try:
                     git.write()
                     receives = receiving(launcher.podman, own)
@@ -1023,6 +1091,16 @@ def launch(
             help="A directory this session may read and write, at its path; repeat it.",
         ),
     ] = None,
+    name: Annotated[
+        str | None,
+        typer.Option(
+            "--name",
+            help=(
+                "Name this launch as it is, refused where another holds it; by "
+                "default, its worktree's branch, numbered where that's taken."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Launch a runtime's session in a room for this worktree, in this terminal.
 
@@ -1056,6 +1134,7 @@ def launch(
         launcher,
         lending,
         modules=named,
+        name=name,
     )
     raise typer.Exit(code=status)
 
@@ -1080,7 +1159,10 @@ def mount(
         str | None,
         typer.Option(
             "--launch",
-            help="The launch, by its id or its worktree; by default, the one here.",
+            help=(
+                "The launch, by its name, its id or its worktree; by default, the "
+                "one here."
+            ),
         ),
     ] = None,
 ) -> None:
@@ -1092,27 +1174,7 @@ def mount(
     where there's one, or the one `--launch` names.
     """
     client = answering()
-    launches = client.launches()
-    named = Path(to or ".").resolve()
-    here = [
-        each
-        for each in launches
-        if to == each.launch or named.is_relative_to(each.worktree)
-    ]
-    found = here if here or to is not None else launches
-    match found:
-        case [launch]:
-            pass
-        case []:
-            message = f"no launch served is `{to or named}`, by its id or its worktree"
-            raise InboxError(message)
-        case _:
-            message = (
-                "several launches run: "
-                f"{', '.join(f'{each.launch} in {each.worktree}' for each in found)}; "
-                "name one with `--launch`"
-            )
-            raise InboxError(message)
+    launch = the_launch(client.launches(), to)
     layout = Layout.of(LupDevSettings())
     given = Path(lending).expanduser()
     data = layout.module_data(lending, launch.repository)

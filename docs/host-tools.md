@@ -152,7 +152,7 @@ lup-dev inbox                         what's waiting for you, oldest first; an a
 lup-dev inbox show <number>           one item whole
 lup-dev inbox answer <number>         a question: each decision in turn, then a comment
 lup-dev inbox done <number>           a message read, off the list
-lup-dev inbox send <launch> <text>    a message to the session a launch runs
+lup-dev inbox send <launch> <text>    a message to the session a launch runs, by its name, id or worktree
 ```
 
 - **The command-line counterpart `DESIGN.md` asks for** (*The dashboard*: "`lup inbox` for the inbox"); its final name is the command-line piece's (`docs/declaration.md`, *The command line*), a command of `Core`'s.

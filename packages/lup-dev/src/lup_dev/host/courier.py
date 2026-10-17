@@ -65,6 +65,10 @@ class Heard(Model):
     fits: int
     """The most this hook's answer tells the model whole, in bytes of UTF-8: past
     it, the runtime keeps the text in a file the model isn't asked to read."""
+    title: str | None = None
+    """At a session's start, the name the runtime has for it, where the operator
+    gave one in the runtime (a rename there), and the runtime says so; none
+    otherwise."""
 
 
 class Telling(Model):
@@ -77,6 +81,9 @@ class Telling(Model):
     """What the conversation is told at this hook, each whole, oldest first: as
     context beside the call or the session's start, or as the reason its turn's
     end is held. When to tell what is the inbox's; none adds nothing."""
+    title: str | None = None
+    """At a session's start, its launch's name, which the runtime takes as its
+    own name for the session where it has a way; none leaves it."""
 
 
 class Courier(ABC):
