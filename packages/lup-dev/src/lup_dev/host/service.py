@@ -27,7 +27,9 @@ on. It holds three sockets:
   terms through the `Answerer`, rather than closing empty, which the runtime
   would take as no decision.
 - `mcp.sock` serves lup's tools, and `request.sock` the room's requests, each
-  routed to the modules that registered them (`host/rooms.py`).
+  routed to the core's own (`host/rooms.py`) or to the launch's modules, which
+  run in a process of the launch's own, of its repository's approved copy,
+  started when the launch opens and stopped when it ends (`host/workers.py`).
 
 Each launch is recorded beside its directory, so a service started after one
 stopped serves the same launches, in the directories their rooms mounted. The
@@ -47,9 +49,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Self, override
 
 from filelock import FileLock, Timeout
-from pydantic import ValidationError, model_validator
+from pydantic import JsonValue, ValidationError, model_validator
 
-from lup.tools.serving import serve
+from lup.tools.serving import Answer, serve
 from lup.types import Model, MutableModel
 from lup_dev.host.courier import Conversations, Courier, Post, Posted, Telling
 from lup_dev.host.protocol import (
@@ -66,10 +68,23 @@ from lup_dev.host.protocol import (
     Unregister,
 )
 from lup_dev.host.rooms import SERVER, LaunchTools, RoomRoute, RoomTools
+from lup_dev.host.workers import (
+    Called,
+    Calling,
+    LaunchModules,
+    Offered,
+    Passed,
+    Relayed,
+    Relaying,
+    Sent,
+)
 from lup_dev.layout import HostLayout
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
+
+    from lup.tools.tool import ToolSpec
+    from lup_dev.host.courier import Conversation
 
 
 class Answerer(ABC):
@@ -245,6 +260,56 @@ class Dispatcher(Model, arbitrary_types_allowed=True):
         return Refused(error=error)
 
 
+class ModuleTools(Model, RoomTools, arbitrary_types_allowed=True):
+    """A launch's modules' tools, as its session is served them: each call passed to the launch's modules' process."""
+
+    modules: LaunchModules
+    offered: Offered
+
+    @override
+    def specs(self) -> list[ToolSpec]:
+        return self.offered.tools
+
+    @override
+    async def call(
+        self, name: str, arguments: JsonValue, launch: Register, caller: Conversation
+    ) -> Answer:
+        """Pass the call to the launch's modules, and return what their tool answered.
+
+        Where they can't answer, the answer says why.
+        """
+        try:
+            reply = await self.modules.ask(
+                launch, Calling(name=name, arguments=arguments, caller=caller)
+            )
+        except HostError as failed:
+            return Answer(text=f"`{name}` didn't run: {failed}", error=True)
+        match reply:
+            case Called(answer=answer):
+                return answer
+            case _:
+                return Answer(
+                    text=f"`{name}` didn't run: its module replied {reply.kind}",
+                    error=True,
+                )
+
+
+def relayed(modules: LaunchModules, launch: Register, kind: str) -> Route:
+    """Route a room's requests of `kind` to `launch`'s modules, their reply passed back whole."""
+
+    async def answered(raw: str) -> Reply:
+        sent = Sent.model_validate_json(raw).model_dump()
+        reply = await modules.ask(launch, Relaying(request=sent))
+        match reply:
+            case Relayed(reply=passed):
+                return Passed.model_validate(passed)
+            case _:
+                message = f"the module answering `{kind}` replied {reply.kind}"
+                raise HostError(message)
+
+    return Route(kind=kind, answer=answered)
+
+
 class Spoken(Model):
     """What a hook prints, and what it tells the conversation from its inbox."""
 
@@ -259,6 +324,8 @@ class Served(Model, arbitrary_types_allowed=True):
     conversations: Conversations
     servers: list[asyncio.Server]
     """Its hook socket's, its tool server's and its requests' socket's."""
+    offered: Offered = Offered()
+    """What the launch's modules serve, in its process."""
 
 
 async def closed(server: asyncio.Server) -> None:
@@ -279,6 +346,8 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
     """Runs a launch's judge for one hook; a test gives a stub."""
     tools: list[RoomTools]
     room_routes: list[RoomRoute]
+    modules: LaunchModules | None
+    """Serves each launch's modules in a process of its own; none serves none."""
     line_limit: int
     """The longest line lup's tool server reads: one MCP message."""
     say: Callable[[str], None]
@@ -317,8 +386,16 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         def said(line: str) -> None:
             self.say(f"{request.launch}: {line}")
 
+        offered = await self.offered(request)
+        own = {room.kind: bound(room, request) for room in self.room_routes}
+        modules = self.modules
+        relaying = (
+            {}
+            if modules is None
+            else {kind: relayed(modules, request, kind) for kind in offered.kinds}
+        )
         requests = Dispatcher(
-            routes={room.kind: bound(room, request) for room in self.room_routes},
+            routes={**relaying, **own},
             answering="a room's request socket",
             say=said,
         )
@@ -345,7 +422,10 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             )
             opening.pop_all()
         self.served[request.launch] = Served(
-            launch=request, conversations=conversations, servers=[hooks, served, asked]
+            launch=request,
+            conversations=conversations,
+            servers=[hooks, served, asked],
+            offered=offered,
         )
         self.layout.record(request.launch).write_text(request.model_dump_json(indent=2))
         self.say(
@@ -353,6 +433,35 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             f"judged by {request.judge}, its sockets in {sockets.directory}"
         )
         return sockets.directory
+
+    async def offered(self, request: Register) -> Offered:
+        """Start serving the launch's modules, and return what they serve that the core doesn't.
+
+        Where they can't be served, it's said and the launch goes on with the
+        core's tools alone; a tool or a kind of request the core serves already is
+        said and left to the core.
+        """
+        if self.modules is None:
+            return Offered()
+        try:
+            offered = await self.modules.open(request)
+        except HostError as failed:
+            self.say(f"{request.launch}: its modules aren't served: {failed}")
+            return Offered()
+        names = [spec.name for tools in self.tools for spec in tools.specs()]
+        kinds = [room.kind for room in self.room_routes]
+        taken = [spec.name for spec in offered.tools if spec.name in names] + [
+            kind for kind in offered.kinds if kind in kinds
+        ]
+        if taken:
+            self.say(
+                f"{request.launch}: its modules serve {', '.join(taken)}, which the "
+                "core serves already, so the core's answer them"
+            )
+        return Offered(
+            tools=[spec for spec in offered.tools if spec.name not in names],
+            kinds=[kind for kind in offered.kinds if kind not in kinds],
+        )
 
     async def hook(
         self,
@@ -469,8 +578,17 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
         Where serving breaks (a line past the limit, a connection reset), it's
         said with its traceback, and the connection closes.
         """
+        offered = self.served[request.launch].offered
+        modules = (
+            []
+            if self.modules is None
+            else [ModuleTools(modules=self.modules, offered=offered)]
+        )
         toolset = LaunchTools(
-            launch=request, tools=self.tools, conversations=conversations, say=self.say
+            launch=request,
+            tools=[*self.tools, *modules],
+            conversations=conversations,
+            say=self.say,
         )
         try:
             await serve(toolset, reader, writer, name=SERVER)
@@ -496,6 +614,8 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
             raise HostError(message)
         for server in served.servers:
             await closed(server)
+        if self.modules is not None:
+            await self.modules.close(served.launch)
         self.layout.record(launch).unlink(missing_ok=True)
         shutil.rmtree(self.layout.launch(launch).directory)
         self.say(f"{launch}: ended")
@@ -514,10 +634,12 @@ class Launches(MutableModel, arbitrary_types_allowed=True):
                 self.say(f"{record} isn't served again: {failure}")
 
     async def shut(self) -> None:
-        """Close every launch's sockets, keeping its record and its directory."""
+        """Close every launch's sockets and stop its modules, keeping its record and its directory."""
         for served in self.served.values():
             for server in served.servers:
                 await closed(server)
+            if self.modules is not None:
+                await self.modules.close(served.launch)
         self.served = {}
 
 
@@ -607,7 +729,10 @@ class HostService(Model, arbitrary_types_allowed=True):
     """The handlers modules register for the room's requests, on each launch's
     `request.sock`."""
     tools: list[RoomTools] = []
-    """The tools modules serve each launched session, on its `mcp.sock`."""
+    """The core's tools, served each launched session on its `mcp.sock`."""
+    modules: LaunchModules | None = None
+    """Serves each launch's modules, their tools and their answers to the room's
+    requests, in a process of its own; none serves the core's alone."""
     line_limit: int = 16 * 1024 * 1024
     """The longest line lup's tool server reads, one MCP message: well above
     asyncio's 64 KiB, which a long message to the operator could pass."""
@@ -665,6 +790,7 @@ class HostService(Model, arbitrary_types_allowed=True):
             judge=self.judge,
             tools=self.tools,
             room_routes=self.room_routes,
+            modules=self.modules,
             line_limit=self.line_limit,
             say=self.say,
         )

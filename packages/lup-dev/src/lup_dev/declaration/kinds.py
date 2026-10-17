@@ -34,6 +34,7 @@ from lup_dev.declaration.grammar import (
     listed,
 )
 from lup_dev.host.protocol import GitHubRepository, Limits, actions
+from lup_dev.declaration.serving import ModuleHandler, ModuleTools
 
 
 class Rules(Named[str]):
@@ -519,3 +520,24 @@ class Repositories(Named[Repository]):
     @override
     def named(self, entry: Repository) -> str:
         return entry.name
+
+
+class Toolsets(Named[type[ModuleTools]]):
+    """The classes of tools a module serves a launched session, each named by its class's name.
+
+    `Toolsets.of(GitHubTools)`; a module may hold several, and a project drops
+    one by its class's name. Each is made with the module holding it, so its class
+    narrows `module` to that module's class.
+    """
+
+    @override
+    def named(self, entry: type[ModuleTools]) -> str:
+        return entry.__name__
+
+
+class Handlers(Named[type[ModuleHandler]]):
+    """A module's answers to its launch's room's requests, each named by its class's name."""
+
+    @override
+    def named(self, entry: type[ModuleHandler]) -> str:
+        return entry.__name__
