@@ -8,6 +8,7 @@ This document describes lup, so a session knows what it's working on. It isn't a
 
 - **The operator stays in the loop.** They see the shape of what agents build while it forms, they're shown risky patterns (a regex, string parsing, `Any`) where they appear, and they can comment and redirect early. Reviewing often is welcome.
 - **Agents work comfortably.** lup doesn't repeat itself, reports instead of denying where it can, and lets an agent choose when it's paused or interrupted. Anything that makes the work more comfortable for an agent is allowed, as long as the operator can still pace the work and check on it.
+- **The operator can let agents run without watching.** The container and the limits on the operator's credentials are there so nothing explodes: not when an agent is prompt-injected, nor when a package it installs is malicious. They aren't there to contain an agent that tries to escape, or to make poor code impossible: code rules and the gate steer toward solid work, and an agent has wide autonomy over its own workflow and GitHub. What changes the walls themselves (the declaration, protected paths, the code the host runs) goes through the operator, so they see it.
 
 ## Modules
 

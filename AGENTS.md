@@ -35,7 +35,7 @@ lup's code rules enforce most of these, at the edit and in the gate (`docs/rules
 
 - **Parse structured data with a parser or a pydantic model,** never `re`, `split` or slicing, and never hand-parse an agent's output. Quick regex patches often silently didn't work, and the bugs were hard to find.
 - **Name the fields.** No tuple or set carrying several meanings by position: a reviewer shouldn't have to work out what field 5 is.
-- **Libraries first:** build on pydantic and existing libraries rather than hand-rolled HTTP or parsing.
+- **Libraries first:** build on pydantic and well-known, well-supported libraries rather than hand-rolling HTTP or parsing; where the right one isn't a dependency yet, add it.
 - **One source of truth:** where two things must agree, derive one from the other.
 - **Errors:** raise on what can't be recovered, retry what's transient, validate early, never swallow an error silently.
 - **Don't truncate** data to make it fit. Where a format forces a limit, keep the full copy and point at it.
