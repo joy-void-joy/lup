@@ -1,6 +1,8 @@
 # Conventions: how code in lup is written
 
-**One sentence:** every convention lup's code follows is decided once, here, with its reason and what enforces it, so no session has to pick between two ways of doing the same thing.
+**One sentence:** every convention lup's code follows is written once, here, with its reason and what enforces it, so no session has to pick between two ways of doing the same thing.
+
+Many of these are a pick between two good ways, made so sessions don't split between them, rather than a claim that the other way is wrong. Where one gets in your way, say so: a convention that costs more than the divergence it prevents is worth changing.
 
 ## Why this comes first
 
@@ -44,7 +46,7 @@ Every concern has exactly one owner, so two tools never report the same thing in
 - **Frozen by default, without saying so.** Every model derives from `lup.types.Model`, which is frozen. A model that must change derives from `lup.types.MutableModel` instead, so mutability is a choice written in the header. Settings derive from `lup.types.Settings`, also frozen. No model writes `frozen` itself.
   - **Why the bases are built this way.** pyright reads a model's frozenness from its own header, defaulting to not frozen, and refuses a not-frozen class inheriting a frozen one, so without help every model would have to write `frozen=True`. `Model`'s metaclass tells pyright that its subclasses are frozen by default (PEP 681's `frozen_default`), so silence means frozen and pyright still refuses `point.x = 2`. The metaclass extends pydantic's own, from a private module: the lockfile pins pydantic, and `lup`'s tests fail at once if an upgrade moves it.
   - **Why `Settings` differs.** pyright also refuses a frozen class over pydantic-settings' base, so `Settings` freezes through `model_config`, the one place it's set. pyright doesn't see that freeze; pydantic enforces it.
-- **`BaseModel` everywhere; no `TypedDict` of our own,** not even where pydantic feels too heavy. A `TypedDict` appears only where a third-party API is typed with one, and then it's theirs: Anthropic's SDK, for one, takes its request parameters as `TypedDict`s (`MessageParam`) and returns pydantic models.
+- **`BaseModel` everywhere; no `TypedDict` of our own,** including where pydantic feels heavy, so a shape has one way to be declared. A `TypedDict` appears only where a third-party API is typed with one, and then it's theirs: Anthropic's SDK, for one, takes its request parameters as `TypedDict`s (`MessageParam`) and returns pydantic models.
 
 **Why.** One way to declare a shape, validated where it's declared. Configuration in the class header reads with the class.
 
@@ -64,7 +66,7 @@ Every concern has exactly one owner, so two tools never report the same thing in
 ## Dispatch
 
 **Decision.**
-- **No `elif`,** however short the chain. A decision on a value's structure is a `match`. A comparison with no pattern to write is a guard clause that returns:
+- **No `elif`.** A decision on a value's structure is a `match`. A comparison with no pattern to write is a guard clause that returns:
   ```python
   if seconds < 60:
       return "s"
