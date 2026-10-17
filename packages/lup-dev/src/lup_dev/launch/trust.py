@@ -76,7 +76,13 @@ from lup.programs import run
 from lup.types import Model, MutableModel
 from lup_dev.approval import Approval, ReleaseTool, Tool, WorkspaceTool, approved
 from lup_dev.clock import Clock, SystemClock
-from lup_dev.declaration.load import Pyproject, import_roots, load, read_by_import
+from lup_dev.declaration.load import (
+    Pyproject,
+    import_roots,
+    load,
+    person_layer,
+    read_by_import,
+)
 from lup_dev.declaration.resolve import resolve
 from lup_dev.errors import LupDevError
 from lup_dev.gate import invoked
@@ -1379,7 +1385,7 @@ class Trust(Model, arbitrary_types_allowed=True):
             )
             raise TrustError(message)
         tool = self.tool(commit)
-        own = CheckoutLayout(root=git.main_worktree()).local_declaration
+        own = person_layer(self.root)
         local = own.read_text() if own.is_file() else None
         named = self.named(commit, tool.paths(), local)
         declaration = CheckoutLayout(root=Path())

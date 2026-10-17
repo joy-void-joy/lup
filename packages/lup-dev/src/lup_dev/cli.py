@@ -51,7 +51,7 @@ from lup_dev.codescan.directives import (
 from lup_dev.codescan.engine import EngineChecker, EngineError
 from lup_dev.codescan.reference import reference
 from lup_dev.codescan.ruff import Ruff
-from lup_dev.declaration.load import load
+from lup_dev.declaration.load import load, person_layer
 from lup_dev.declaration.requirements import Machine, Report, Tools
 from lup_dev.declaration.requirements import check as checked
 from lup_dev.declaration.resolve import resolve
@@ -1199,7 +1199,7 @@ def check(
             "files as committed"
         )
         raise typer.BadParameter(message, param_hint="'--fix'")
-    runner = resolve(load(root).project).runner
+    runner = resolve(load(root, local=person_layer(root)).project).runner
 
     def stop(made: Path) -> None:
         scrapped(made, runner)
