@@ -192,11 +192,14 @@ class Hooked(Model):
 
 
 class Shared(Model):
-    """A module whose own data directory for the repository each room mounts."""
+    """A module whose own data directory for the repository a room mounts: every room, or a launch lending it."""
 
     module: str
     """The module's name."""
     read_only: bool
+    always: bool = False
+    """Whether every room mounts it; otherwise only a launch lending it by the
+    module's name."""
 
 
 class Resolved(Model):
@@ -601,7 +604,11 @@ def resolve(project: Project) -> Resolved:
         handled=handled(modules),
         hooked=hooked(modules),
         shared=[
-            Shared(module=part.module, read_only=part.value.read_only)
+            Shared(
+                module=part.module,
+                read_only=part.value.read_only,
+                always=part.value.always,
+            )
             for part in parts(modules, Mounted)
         ],
     )

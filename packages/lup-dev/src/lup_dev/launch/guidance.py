@@ -9,7 +9,9 @@ installed `lup_dev` for lup's own, and rendered with Jinja (`docs/launch.md`,
 - a section names the project's commands through its runner, `{{ run("lup-dev
   check") }}`, which the runner spells, so no section spells uv;
 - a module's section names where its own data is mounted in the room,
-  `{{ data("transcripts") }}`, for a module whose data each room mounts;
+  `{{ data("transcripts") }}`, and asks whether it's mounted, `{% if
+  mounted("transcripts") %}`, for a module whose data a launch may lend; a
+  section rendering to nothing is left out;
 - a name the section doesn't have is refused, rather than rendered as nothing;
 - the environment is Jinja's sandbox, since an agent can write a section's file
   and the rendering runs on the host, outside every room.
@@ -216,7 +218,7 @@ def render(
     (`lent_here`), then the person's own, where there's one. Raise
     `GuidanceError` naming the section that can't be read, or doesn't render.
     `shared` is where each module whose data the room mounts has it, by the
-    module's name.
+    module's name: every room's, and those this launch lends.
     """
     runner = resolved.runner
     mounted = shared or {}
@@ -242,11 +244,19 @@ def render(
             raise TemplateRuntimeError(message) from error
         return shlex.join(runner.command(tool))
 
+    def lent_data(module: str) -> bool:
+        """Say whether the room mounts module `module`'s own data, every room or this launch lending it."""
+        return module in mounted
+
     sandbox = SandboxedEnvironment(undefined=StrictUndefined, autoescape=False)
 
     def rendered(where: str, text: str) -> str:
         try:
-            return sandbox.from_string(text).render(run=run, data=data).strip()
+            return (
+                sandbox.from_string(text)
+                .render(run=run, data=data, mounted=lent_data)
+                .strip()
+            )
         except TemplateError as error:
             message = (
                 f"Guidance: {where} doesn't render: {error}. A section can use "
@@ -255,8 +265,9 @@ def render(
             raise GuidanceError(message) from error
 
     declared = [
-        rendered(described(section), read(section, project))
+        text
         for section in resolved.guidance
+        if (text := rendered(described(section), read(section, project)))
     ]
     served = [listed(tools)] if tools else []
     beside = [repositories(neighbours)] if neighbours else []
