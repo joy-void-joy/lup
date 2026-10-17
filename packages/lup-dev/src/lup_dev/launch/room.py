@@ -164,7 +164,7 @@ def repository(worktree: Path) -> Repository:
     """
     git = Git(cwd=worktree)
     common = Path(git.text("rev-parse", "--path-format=absolute", "--git-common-dir"))
-    listed = git.run("worktree", "list", "--porcelain", "-z").stdout
+    listed = git.run("worktree", "list", "--porcelain", "-z").output
     roots = [
         Path(field.removeprefix("worktree "))
         for field in nul_separated(listed)
@@ -277,7 +277,7 @@ def maintaining_room(
 
     def configured(key: str) -> str | None:
         found = git.run("config", "--get", key, ok=[0, 1])
-        return found.stdout.decode().strip() if found.exit_code == 0 else None
+        return found.output.decode().strip() if found.status == 0 else None
 
     def editors() -> list[Mount]:
         named = [command for command in [terminal.editor, terminal.visual] if command]
@@ -454,7 +454,7 @@ def room_git(
             *arguments,
             ok=[0, 1],
         )
-        return nul_separated(found.stdout)
+        return nul_separated(found.output)
 
     def included(config: Path) -> list[Path]:
         keys = read(config, "--name-only", "--get-regexp", r"^include(if\..*)?\.path$")

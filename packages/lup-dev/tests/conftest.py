@@ -21,8 +21,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import pytest
-import sh
 
+from lup.programs import run
 from lup.types import MutableModel
 from lup_dev import Project, cli
 from lup_dev.clock import Clock
@@ -385,7 +385,7 @@ class FakeRuntime(Runtime):
 
 
 def git(root: Path, *arguments: str) -> str:
-    return str(sh.git(*arguments, _cwd=str(root), _tty_out=False)).strip()
+    return run("git", *arguments, cwd=root).text().strip()
 
 
 def commit(root: Path, message: str = "change") -> None:
@@ -413,11 +413,11 @@ class Uv:
 
     def lock(self, root: Path) -> None:
         """Lock a scratch project, as a worktree's `uv.lock` is committed."""
-        sh.uv("lock", "--quiet", _cwd=str(root))
+        run("uv", "lock", "--quiet", cwd=root)
 
     def sync(self, root: Path) -> None:
         """Make a scratch project's environment, as `uv sync` does."""
-        sh.uv("sync", "--frozen", "--quiet", _cwd=str(root))
+        run("uv", "sync", "--frozen", "--quiet", cwd=root)
 
 
 @pytest.fixture(scope="module")

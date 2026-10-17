@@ -8,8 +8,8 @@ runs podman.
 from pathlib import Path
 
 import pytest
-import sh
 
+from lup.programs import run
 from lup.rooms.container import Container, Image, Mount
 from lup_dev import Modules, Plain, Project, Python, Repository
 from lup_dev.catalog.room import RoomBase
@@ -42,7 +42,7 @@ def plain() -> Project:
 
 
 def git(root: Path, *arguments: str) -> None:
-    sh.git(*arguments, _cwd=str(root), _tty_out=False)
+    run("git", *arguments, cwd=root)
 
 
 @pytest.fixture(autouse=True)

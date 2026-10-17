@@ -30,8 +30,7 @@ from itertools import batched
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal
 
-import sh
-
+from lup.programs import ProgramError, Ran, run
 from lup.types import Model
 from lup_dev.errors import LupDevError
 
@@ -108,8 +107,8 @@ class Git(Model):
 
     def run(
         self, *arguments: str, stdin: bytes | None = None, ok: list[int] | None = None
-    ) -> sh.RunningCommand:
-        """Run git with `arguments`; raise `GitError` on an exit code not in `ok`."""
+    ) -> Ran:
+        """Run git with `arguments`; raise `GitError` on an exit status not in `ok`, or where git can't run."""
         safe = [
             "-c",
             "core.fsmonitor=false",
@@ -123,25 +122,18 @@ class Git(Model):
         pinned = [] if self.common is None else pinning(self.common)
         program, *words = [*pinned, "git", *safe, *self.arguments, *arguments]
         try:
-            return sh.Command(program)(
-                *words,
-                _in=stdin,
-                _cwd=str(self.cwd),
-                _ok_code=ok or [0],
-                _tty_out=False,
-                _return_cmd=True,
-            )
-        except sh.ErrorReturnCode as failed:
-            message = f"git {' '.join(arguments)} failed: {failed.stderr.decode()}"
+            return run(program, *words, cwd=self.cwd, stdin=stdin, ok=ok)
+        except ProgramError as failed:
+            message = f"git {' '.join(arguments)} failed: {failed}"
             raise GitError(message) from failed
 
     def text(self, *arguments: str) -> str:
         """Run git and return what it printed, without the trailing newline."""
-        return self.run(*arguments).stdout.decode().strip()
+        return self.run(*arguments).output.decode().strip()
 
     def worktrees(self) -> list[Path]:
         """Return the repository's worktrees, as `git worktree list` gives them: its main one first, a clone's root or a bare repository's own directory."""
-        listed = self.run("worktree", "list", "--porcelain", "-z").stdout
+        listed = self.run("worktree", "list", "--porcelain", "-z").output
         return [
             Path(field.removeprefix("worktree "))
             for field in nul_separated(listed)
@@ -158,7 +150,7 @@ class Git(Model):
         found = self.run(
             "rev-parse", "--verify", "--quiet", f"{revision}^{{commit}}", ok=[0, 1]
         )
-        return found.stdout.decode().strip() if found.exit_code == 0 else None
+        return found.output.decode().strip() if found.status == 0 else None
 
     def tracked(self, commit: str) -> list[Tracked]:
         """List every entry of `commit`'s tree, its directories walked."""
@@ -170,7 +162,7 @@ class Git(Model):
                 {"mode": mode, "kind": kind, "object": blob, "path": path}
             )
             for mode, kind, blob, path in batched(
-                nul_separated(listed.stdout), 4, strict=True
+                nul_separated(listed.output), 4, strict=True
             )
         ]
 
@@ -183,7 +175,7 @@ class Git(Model):
             return []
         asked = "".join(f"{each}\n" for each in objects).encode()
         answered = io.BytesIO(
-            self.run("cat-file", "--batch=%(objectsize)", stdin=asked).stdout
+            self.run("cat-file", "--batch=%(objectsize)", stdin=asked).output
         )
 
         def read(each: str) -> bytes:

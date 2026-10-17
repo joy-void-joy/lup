@@ -18,9 +18,9 @@ from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 
-import sh
 from filelock import FileLock, Timeout
 
+from lup.programs import detached
 from lup.types import Model, MutableModel
 from lup_dev.codescan.contract import Checker, FileReport
 from lup_dev.layout import StoreLayout
@@ -47,17 +47,8 @@ class BackgroundSpawner(Spawner, Model):
 
     @override
     def spawn(self, worktree: Path, log: Path) -> None:
-        log.parent.mkdir(parents=True, exist_ok=True)
-        sh.Command(sys.executable)(
-            "-m",
-            "lup_dev.cli",
-            *self.command,
-            str(worktree),
-            _bg=True,
-            _bg_exc=False,
-            _new_session=True,
-            _out=str(log),
-            _err=str(log),
+        detached(
+            sys.executable, "-m", "lup_dev.cli", *self.command, str(worktree), log=log
         )
 
 

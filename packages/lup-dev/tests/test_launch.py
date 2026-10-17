@@ -13,11 +13,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, override
 
 import pytest
-import sh
 from filelock import FileLock
 from typer.testing import CliRunner
 
 import lup
+from lup.programs import Ran, run
 from lup.rooms.engine import Exited, Podman, Process
 from lup.sessions.terminal import (
     Cli,
@@ -316,14 +316,17 @@ class Machine:
 
     def trust(self, root: Path) -> Outcome:
         self.events.record("trust")
-        commit = sh.git("rev-parse", "dev", _cwd=str(root)).strip()
+        commit = run("git", "rev-parse", "dev", cwd=root).text().strip()
         common = Path(
-            sh.git(
+            run(
+                "git",
                 "rev-parse",
                 "--path-format=absolute",
                 "--git-common-dir",
-                _cwd=str(root),
-            ).strip()
+                cwd=root,
+            )
+            .text()
+            .strip()
         )
         approval = Approval(
             commit=commit,
@@ -486,7 +489,7 @@ def test_a_launch_compiles_the_approved_declarations_guidance_and_hooks(
 ) -> None:
     (project / "AGENTS.md").write_text("# The project\n\nUncommitted.\n")
     (project / "AGENTS.local.md").write_text("Mine.\n")
-    commit = sh.git("rev-parse", "dev", _cwd=str(project)).strip()
+    commit = run("git", "rev-parse", "dev", cwd=project).text().strip()
     directory = tmp_path / "launch"
     hooks = hooked(claude.hooks)
 
@@ -831,14 +834,14 @@ def socat(tmp_path: Path, script: str) -> Path:
     return bin_dir
 
 
-def hook(path: Path, payload: str) -> sh.RunningCommand:
+def hook(path: Path, payload: str) -> Ran:
     program, *arguments = piped()
-    return sh.Command(program)(
+    return run(
+        program,
         *arguments,
-        _in=payload,
-        _env={"PATH": f"{path}:/usr/bin:/bin"},
-        _ok_code=list(range(256)),
-        _return_cmd=True,
+        stdin=payload,
+        env={"PATH": f"{path}:/usr/bin:/bin"},
+        checked=False,
     )
 
 
@@ -846,9 +849,9 @@ def test_the_hook_prints_the_answer_unchanged(tmp_path: Path) -> None:
     path = socat(tmp_path, 'cat > "$0.payload"\nprintf \'{"answer": 1}\\n\'')
     ran = hook(path, '{"hook_event_name": "SessionStart"}')
 
-    assert ran.exit_code == 0
-    assert ran.stdout.decode() == '{"answer": 1}\n'
-    assert ran.stderr.decode() == ""
+    assert ran.status == 0
+    assert ran.output.decode() == '{"answer": 1}\n'
+    assert ran.error.decode() == ""
     assert (tmp_path / "arguments").read_text() == (
         "-t 90000 - UNIX-CONNECT:/run/lup/hook.sock\n"
     )
@@ -864,9 +867,9 @@ def test_a_hook_that_cant_reach_the_service_ends_with_status_1_and_says_why(
     path = socat(tmp_path, f"echo 'socat: connect failed' >&2\nexit {status}")
     ran = hook(path, "{}")
 
-    assert ran.exit_code == 1
-    assert ran.stdout.decode() == ""
-    assert ran.stderr.decode().splitlines() == [
+    assert ran.status == 1
+    assert ran.output.decode() == ""
+    assert ran.error.decode().splitlines() == [
         "socat: connect failed",
         (
             "lup: this hook couldn't reach lup's host service on /run/lup/hook.sock, "

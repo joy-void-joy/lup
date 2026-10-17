@@ -50,8 +50,8 @@ def place(path: Path) -> Place | None:
         "--git-common-dir",
         ok=[0, 128],
     )
-    if top.exit_code == 0:
-        worktree, common = top.stdout.decode().splitlines()
+    if top.status == 0:
+        worktree, common = top.output.decode().splitlines()
         root = Path(worktree)
         return Place(
             repository=Path(common), worktree=root, path=resolved.relative_to(root)
@@ -59,9 +59,9 @@ def place(path: Path) -> Place | None:
     common = git.run(
         "rev-parse", "--path-format=absolute", "--git-common-dir", ok=[0, 128]
     )
-    if common.exit_code != 0:
+    if common.status != 0:
         return None
-    repository = Path(common.stdout.decode().strip())
+    repository = Path(common.output.decode().strip())
     return Place(
         repository=repository, worktree=None, path=resolved.relative_to(repository)
     )

@@ -17,9 +17,9 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, override
 
-import sh
 from pydantic import TypeAdapter
 
+from lup.programs import ProgramFailedError, ProgramMissingError, run
 from lup.types import Model
 from lup_dev.codescan.contract import Finding, Position, Source, Span
 from lup_dev.errors import LupDevError
@@ -119,25 +119,18 @@ class Ruff(Linter):
 
         def ran(*arguments: str, content: str | None = None) -> list[Finding]:
             try:
-                output = sh.Command(program)(
-                    *fixed,
-                    *arguments,
-                    _in=content,
-                    _cwd=str(root),
-                    _tty_out=False,
-                    _return_cmd=True,
-                )
-            except sh.CommandNotFound as missing:
+                output = run(program, *fixed, *arguments, cwd=root, stdin=content)
+            except ProgramMissingError as missing:
                 message = (
                     f"`{program}` isn't on the `PATH`, so ruff can't run in {root}"
                 )
                 raise RuffError(message) from missing
-            except sh.ErrorReturnCode as failed:
+            except ProgramFailedError as failed:
                 shown = shlex.join(command)
-                message = f"`{shown}` failed in {root}: {failed.stderr.decode()}"
+                message = f"`{shown}` failed in {root}: {failed.ran.said()}"
                 raise RuffError(message) from failed
             return [
-                message.finding() for message in messages.validate_json(output.stdout)
+                message.finding() for message in messages.validate_json(output.output)
             ]
 
         on_disk = [

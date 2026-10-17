@@ -227,7 +227,7 @@ class Credentials(Layer):
 
 ### GitHub through `gh`
 
-- **From the host, through `gh`** (2.102.0 on this machine, logged in as the operator), already lup's through `sh` for issue states (`codescan/directives.py`, `GitHubIssues`), each answer read with `--json` into a pydantic model.
+- **From the host, through `gh`** (2.102.0 on this machine, logged in as the operator), already lup's through `lup.programs.run` for issue states (`codescan/directives.py`, `GitHubIssues`), each answer read with `--json` into a pydantic model.
 - **The repository is named once,** by the launcher, from the repository's own remote, read in its git directory (`gh repo view --json owner,name` there), carried in the registration (`Register.github`), and passed to every call as `--repo`. Every `gh` runs in that git directory with `GIT_DIR` and `GIT_COMMON_DIR` both naming it, which the git it runs inherits, so a `commondir` the room plants there leads it to no remote of the room's (*Running git on the host*). A worktree's `.git` file is the room's to write (#54), so resolving the repository from the worktree would let a room choose which repository the operator's login acts on.
 - **Each tool's action is checked against the limits** (`read-issues`, `file-issue`, `comment`, `draft-pull-request`) before `gh` runs.
 - **`draft_pull_request`** runs `gh pr create --draft --base <integration branch> --head <branch>`; the branch must already be on the remote, pushed through the helper, or the tool says so.

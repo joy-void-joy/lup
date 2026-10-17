@@ -48,12 +48,12 @@ def room_config(repository: Path, path: Path, requests: Path) -> None:
             "--get-regexp",
             r"^remote\..*\.(url|pushurl)$",
             ok=[0, 1],
-        ).stdout
+        ).output
     )
     urls = dict.fromkeys(
         url
         for key in dict.fromkeys(keys)
-        for url in nul_separated(git.run(*own, "--get-all", key).stdout)
+        for url in nul_separated(git.run(*own, "--get-all", key).output)
     )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("")

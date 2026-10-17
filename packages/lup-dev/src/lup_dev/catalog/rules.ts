@@ -360,9 +360,12 @@ export const rules = {
         mistake:
             'A second library for running programs, beside the one the rest of the code uses, splits how ' +
             'commands are run, checked and reported.',
-        steer: 'Run programs with `sh`: `sh.git("status")`, or `sh.Command(path)(…)` for one found by path.',
+        steer:
+            'Run programs with `lup.programs`: `run("git", "status", cwd=root)`, which starts them safely beside ' +
+            'threads and raises on a status the caller doesn\'t accept, or `detached(…)` for one that outlives ' +
+            'its caller.',
         check(file) {
-            for (const imported of file.importsOf(['subprocess'])) {
+            for (const imported of file.importsOf(['subprocess', 'sh'])) {
                 file.report(imported.node, `this import brings in \`${imported.module}\``);
             }
             const spawners = ['create_subprocess_exec', 'create_subprocess_shell'];
@@ -382,12 +385,12 @@ export const rules = {
                             return subprocess.run(["git", "status"], capture_output=True, text=True).stdout
                     `,
                     rewritten: python`
-                        import sh
+                        from lup.programs import run
 
 
                         def status() -> str:
                             """Return the working tree's status."""
-                            return str(sh.git("status"))
+                            return run("git", "status").text()
                     `,
                 },
             ],
@@ -408,7 +411,9 @@ export const rules = {
         mistake:
             "Running a program through the shell, or in place of this process, hides its arguments from the " +
             'reader and its failure from the caller.',
-        steer: 'Run programs with `sh`, which takes the arguments as a list and raises when the program fails.',
+        steer:
+            'Run programs with `lup.programs.run`, which takes the arguments as a list and raises when the ' +
+            'program fails.',
         check(file) {
             const runners = ['system', 'popen', 'posix_spawn', 'posix_spawnp', 'startfile'];
             const execs = ['execl', 'execle', 'execlp', 'execlpe', 'execv', 'execve', 'execvp', 'execvpe'];
@@ -429,12 +434,12 @@ export const rules = {
                             return os.system("git fetch")
                     `,
                     rewritten: python`
-                        import sh
+                        from lup.programs import run
 
 
                         def fetch() -> None:
                             """Fetch the remote's commits."""
-                            sh.git("fetch")
+                            run("git", "fetch")
                     `,
                 },
             ],

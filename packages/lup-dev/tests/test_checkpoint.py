@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-import sh
 from filelock import FileLock
 
+from lup.programs import run
 from lup_dev import Project
 from lup_dev.approval import Approval, ReleaseTool
 from lup_dev.codescan.contract import FileReport, Finding, Position, Span
@@ -397,7 +397,7 @@ def test_a_merge_in_progress_sets_aside_what_git_merged_cleanly(
     shell.commit(repo, "main")
     start(kit, repo)
     call(kit, repo, "c1")
-    sh.git("merge", "-q", "--no-edit", "feature", _cwd=str(repo), _ok_code=[1])
+    run("git", "merge", "-q", "--no-edit", "feature", cwd=repo, ok=[1])
     assert finish(kit, repo, "c1").context == ""
     [verdict] = log(kit, repo).read()
     assert (verdict.path, verdict.role) == (Path("README.md"), "docs")

@@ -102,7 +102,7 @@ In its home, a constant needs no suppression. The rule reads the constant's type
 ## Collections and loops
 
 **Decision.**
-- **No tuple types; `list[X]` is the one spelling of a sequence.** `tuple[str, int]` becomes a model naming each field, and `tuple[X, ...]` becomes `list[X]`. Two spellings of "a sequence" would be one more fork for each session to pick. Where a third-party API takes a tuple (`sh`'s positional keywords) or hashing needs one, an `ignore` says so. A frozen model's list field can still be appended to; that's left to review. Aliases are caught where they're defined.
+- **No tuple types; `list[X]` is the one spelling of a sequence.** `tuple[str, int]` becomes a model naming each field, and `tuple[X, ...]` becomes `list[X]`. Two spellings of "a sequence" would be one more fork for each session to pick. Where a third-party API takes a tuple or hashing needs one, an `ignore` says so. A frozen model's list field can still be appended to; that's left to review. Aliases are caught where they're defined.
 - **No sets as records.** `set`, `frozenset` and their aliases, declared or built, steer to a dict keyed by the members or a list of models. A set that truly has nothing to record (things already seen) takes an `ignore` with its reason.
 - **No collection filled in a loop.** A collection created empty and then filled by `append`, `add`, `extend`, `update` or item assignment in a loop steers to a comprehension, or to a nested function that `yield`s when the loop has control flow a comprehension can't hold. The rule fires on the loop, not on the empty literal, which can't tell a seed from an object's state or a model default.
 - **Dicts are for tables, not records.** Reading a dict or mapping by a literal key (`payload.get("name")`, `payload["name"]`) is refused: the keys are known, so it's a record; validate it once into a model and read its fields. The rule tells a mapping by its type, rather than spotting `.get("literal")` by syntax alone. A dict read by a computed key is a real lookup table and is fine. Declaring dicts is fine, `dict[str, object]` and `dict[str, <scalar>]` included: how a dict is read, not how it's typed, says whether it's a record. A `TypedDict` read by its keys is fine, since it's already the typed shape.
@@ -166,7 +166,7 @@ The parsers to reach for: `json`, `tomllib` (`tomlkit` to edit), `csv`, `urllib.
 
 | Job | Use | Not |
 |---|---|---|
-| Running a program | `sh` | `subprocess`, `os.system`, `os.popen`, `os.exec*` |
+| Running a program | `lup.programs` (`run`, `detached`), which spawns rather than forks, so it's safe beside threads | `sh`, `subprocess`, `os.system`, `os.popen`, `os.exec*` |
 | A command line | `typer` | `argparse` |
 | Paths and files | `pathlib` | `os.path`, `os` file functions |
 | Configuration and environment | `pydantic-settings` | `os.environ`, `os.getenv`, `dotenv` for reading |

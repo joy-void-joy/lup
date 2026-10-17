@@ -66,13 +66,13 @@ from importlib.util import resolve_name
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 
-import sh
 import typer
 from filelock import FileLock
 from pydantic import Field, ValidationError
 from rich.console import Console
 from rich.text import Text
 
+from lup.programs import run
 from lup.types import Model, MutableModel
 from lup_dev.approval import Approval, ReleaseTool, Tool, WorkspaceTool, approved
 from lup_dev.clock import Clock, SystemClock
@@ -865,8 +865,8 @@ class UvToolchain(Model, Toolchain):
     @override
     def command(self, name: str) -> list[str]:
         """Return the copy uv installed, in its directory of tools' commands."""
-        found = sh.Command(self.executable)("tool", "dir", "--bin", _tty_out=False)
-        return [str(Path(str(found).strip()) / name)]
+        found = run(self.executable, "tool", "dir", "--bin")
+        return [str(Path(found.text().strip()) / name)]
 
     def build(self, tree: Path) -> None:
         """Run the tree's own step building the engine, as the gate runs it.
@@ -876,7 +876,7 @@ class UvToolchain(Model, Toolchain):
         """
         resolved = resolve(load(tree).project)
         program, *arguments = invoked(engine(resolved), resolved.runner)
-        sh.Command(program)(*arguments, _cwd=str(tree), _fg=True)
+        run(program, *arguments, cwd=tree, shown=True)
 
     def built(
         self, tool: WorkspaceTool, tree: Path, places: list[JudgeLayout | None]
@@ -889,7 +889,8 @@ class UvToolchain(Model, Toolchain):
         """
         with tempfile.TemporaryDirectory() as scratch:
             constraints = Path(scratch) / "constraints.txt"
-            sh.Command(self.executable)(
+            run(
+                self.executable,
                 "export",
                 "--package",
                 tool.name,
@@ -902,11 +903,12 @@ class UvToolchain(Model, Toolchain):
                 "--quiet",
                 "--output-file",
                 str(constraints),
-                _cwd=str(tree),
+                cwd=tree,
             )
             for place in places:
                 program, *arguments = self.uv(place)
-                sh.Command(program)(
+                run(
+                    program,
                     *arguments,
                     "tool",
                     "install",
@@ -914,8 +916,8 @@ class UvToolchain(Model, Toolchain):
                     "--constraints",
                     str(constraints),
                     str(tree / tool.package),
-                    _cwd=str(tree),
-                    _fg=True,
+                    cwd=tree,
+                    shown=True,
                 )
 
     def released(self, tool: ReleaseTool, places: list[JudgeLayout | None]) -> None:
@@ -925,7 +927,8 @@ class UvToolchain(Model, Toolchain):
             constraints.write_text(tool.constraints())
             for place in places:
                 program, *arguments = self.uv(place)
-                sh.Command(program)(
+                run(
+                    program,
                     *arguments,
                     "tool",
                     "install",
@@ -935,7 +938,7 @@ class UvToolchain(Model, Toolchain):
                     "--default-index",
                     tool.registry,
                     tool.requirement(),
-                    _fg=True,
+                    shown=True,
                 )
 
 
@@ -1267,8 +1270,8 @@ def diffed(
     )
     shown = git.run(*own, start, end, *spec)
     return Diffed(
-        stat=counted.stdout.decode(errors="replace"),
-        diff=shown.stdout.decode(errors="replace"),
+        stat=counted.output.decode(errors="replace"),
+        diff=shown.output.decode(errors="replace"),
     )
 
 
@@ -1308,8 +1311,8 @@ def compared(approved: str | None, current: str | None) -> Diffed:
         counted = git.run(*own, "--stat", "--compact-summary", before, after, ok=[1])
         shown = git.run(*own, before, after, ok=[1])
     return Diffed(
-        stat=counted.stdout.decode(errors="replace"),
-        diff=shown.stdout.decode(errors="replace"),
+        stat=counted.output.decode(errors="replace"),
+        diff=shown.output.decode(errors="replace"),
     )
 
 
@@ -1405,13 +1408,13 @@ class Trust(Model, arbitrary_types_allowed=True):
         found = Git(cwd=self.root).run(
             "cat-file", "blob", f"{commit}:{lock}", ok=[0, 128]
         )
-        if found.exit_code != 0:
+        if found.status != 0:
             message = (
                 f"{commit} holds no `{lock}`, so which `{self.name}` the host runs "
                 "isn't pinned"
             )
             raise TrustError(message)
-        return Lock.parse(found.stdout.decode()).tool(self.name)
+        return Lock.parse(found.output.decode()).tool(self.name)
 
     def named(self, commit: str, covered: list[Path], local: str | None) -> Named:
         """Find the files the commit's declaration, and `local` on top of it, run on the host, and the conditions modules they name.
@@ -1447,7 +1450,7 @@ class Trust(Model, arbitrary_types_allowed=True):
             "--",
             *(str(path) for path in zone.paths),
         )
-        digest = hashlib.sha256(listed.stdout)
+        digest = hashlib.sha256(listed.output)
         digest.update(zone.tool.model_dump_json().encode())
         if zone.local is not None:
             name = CheckoutLayout(root=Path()).local_declaration.name
@@ -1467,13 +1470,13 @@ class Trust(Model, arbitrary_types_allowed=True):
         zone = standing.zone
         approval = standing.approval
         empty = git.run("hash-object", "-t", "tree", "--stdin", stdin=b"")
-        nothing = empty.stdout.decode().strip()
+        nothing = empty.output.decode().strip()
         tool = zone.tool.said(approval.tool if approval is not None else None)
         local = compared(approval.local if approval is not None else None, zone.local)
         held = approval is not None and (
             git.run(
                 "cat-file", "-e", f"{approval.commit}^{{commit}}", ok=[0, 1, 128]
-            ).exit_code
+            ).status
             == 0
         )
         if approval is None or not held:

@@ -23,9 +23,9 @@ from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 
-import sh
 from pydantic import TypeAdapter
 
+from lup.programs import detached
 from lup.types import Model
 from lup_dev.clock import Clock
 from lup_dev.host.protocol import (
@@ -166,17 +166,8 @@ class Detached(Model, Starter):
 
     @override
     def start(self, log: Path) -> None:
-        log.parent.mkdir(parents=True, exist_ok=True)
         program, *arguments = self.command
-        with log.open("ab") as appended:
-            sh.Command(program)(
-                *arguments,
-                _bg=True,
-                _bg_exc=False,
-                _new_session=True,
-                _out=appended,
-                _err=appended,
-            )
+        detached(program, *arguments, log=log)
 
 
 class HostClient(Model, arbitrary_types_allowed=True):

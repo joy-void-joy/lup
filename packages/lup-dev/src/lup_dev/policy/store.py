@@ -145,7 +145,7 @@ class Store(Model):
         found = self.snapshots().run(
             "rev-parse", "--verify", "--quiet", name, ok=[0, 1]
         )
-        return found.stdout.decode().strip() if found.exit_code == 0 else None
+        return found.output.decode().strip() if found.status == 0 else None
 
     def accepted(self) -> str | None:
         """Return the last tree lup accepted, or none before the first."""
@@ -180,7 +180,7 @@ class Store(Model):
             )
             return [
                 Changed(path=Path(path), kind=kind)
-                for path in nul_separated(listed.stdout)
+                for path in nul_separated(listed.output)
             ]
 
         return sorted(
@@ -193,7 +193,7 @@ class Store(Model):
         if tree is None:
             return None
         found = self.snapshots().run("cat-file", "blob", f"{tree}:{path}", ok=[0, 128])
-        return found.stdout if found.exit_code == 0 else None
+        return found.output if found.status == 0 else None
 
     def blob(self, tree: str, path: Path) -> str | None:
         """Return the object id of `path` in `tree`, or none where it isn't there."""
@@ -203,12 +203,12 @@ class Store(Model):
         """Store `content` as an object, and return its id."""
         self.ensure()
         stored = self.snapshots().run("hash-object", "-w", "--stdin", stdin=content)
-        return stored.stdout.decode().strip()
+        return stored.output.decode().strip()
 
     def object(self, blob: str) -> bytes | None:
         """Return the content of stored object `blob`, or none if it isn't stored."""
         found = self.snapshots().run("cat-file", "blob", blob, ok=[0, 128])
-        return found.stdout if found.exit_code == 0 else None
+        return found.output if found.status == 0 else None
 
     def unstage(self, tree: str, paths: list[Path], entries: list[Entry]) -> str:
         """Put paths back in the private index, and write it as a tree.
@@ -281,7 +281,7 @@ class Store(Model):
         """List the paths that differ between two commits; none is no commit at all."""
         repository = self.repository()
         empty = repository.run("hash-object", "-t", "tree", "--stdin", stdin=b"")
-        nothing = empty.stdout.decode().strip()
+        nothing = empty.output.decode().strip()
         listed = repository.run(
             "diff-tree",
             "-r",
@@ -291,7 +291,7 @@ class Store(Model):
             before or nothing,
             after or nothing,
         )
-        return [Path(path) for path in nul_separated(listed.stdout)]
+        return [Path(path) for path in nul_separated(listed.output)]
 
     def entry(self, commit: str | None, path: Path) -> Entry:
         """Return `path` as `commit` has it, its content copied into the store."""
@@ -299,12 +299,12 @@ class Store(Model):
             return Entry(path=path)
         repository = self.repository()
         found = repository.run("cat-file", "blob", f"{commit}:{path}", ok=[0, 128])
-        if found.exit_code != 0:
+        if found.status != 0:
             return Entry(path=path)
         mode = repository.text(
             "ls-tree", "--format=%(objectmode)", commit, "--", str(path)
         )
-        return Entry(path=path, mode=mode, blob=self.keep(found.stdout))
+        return Entry(path=path, mode=mode, blob=self.keep(found.output))
 
     def merges(self, commits: list[str]) -> list[Merge]:
         """Remake git's merges of two commits from the history of `commits`.
@@ -328,9 +328,7 @@ class Store(Model):
             "rev-parse", "--verify", "--quiet", "MERGE_HEAD", ok=[0, 1]
         )
         merging = (
-            [[head, progress.stdout.decode().strip()]]
-            if progress.exit_code == 0
-            else []
+            [[head, progress.output.decode().strip()]] if progress.status == 0 else []
         )
 
         def judged(parents: list[str]) -> bool:
@@ -353,7 +351,7 @@ class Store(Model):
                 theirs,
                 ok=[0, 1],
             )
-            tree, *conflicted = nul_separated(merged.stdout)
+            tree, *conflicted = nul_separated(merged.output)
             return Merge(tree=tree, conflicted=[Path(path) for path in conflicted])
 
         return [remade(parents) for parents in [*made, *merging] if judged(parents)]
@@ -368,9 +366,9 @@ class Store(Model):
         found = self.repository().run(
             "rev-parse", "--verify", "--quiet", f"{merge.tree}:{path}", ok=[0, 1, 128]
         )
-        if found.exit_code != 0:
+        if found.status != 0:
             return blob is None
-        return found.stdout.decode().strip() == blob
+        return found.output.decode().strip() == blob
 
     def remote_tips(self) -> list[str]:
         """List the commits the worktree's remote-tracking refs name."""
@@ -392,9 +390,7 @@ class Store(Model):
             if self.head() is None:
                 return False
             newer = repository.text("rev-list", "--max-count=1", "HEAD", "--not", *tips)
-            lacks = repository.run(
-                "cat-file", "-e", f"HEAD:{path}", ok=[0, 128]
-            ).exit_code
+            lacks = repository.run("cat-file", "-e", f"HEAD:{path}", ok=[0, 128]).status
             return not newer and lacks != 0
         found = repository.text(
             "log",
