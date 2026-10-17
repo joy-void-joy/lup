@@ -3,11 +3,13 @@
 One request per connection, its JSON read to the end, and one JSON reply. A request
 is a model told apart by its `kind`, which names the handler that answers it
 (`host/service.py`); a reply is told apart by its own. The kinds here are the
-service's own: a launch's registration, its end, listing the launches served, and
-stopping the service. A module declares its own kinds beside the handler it
-registers for them.
+service's own: a launch's registration, its end, listing the launches served,
+and stopping the service. A module declares its own kinds beside the handler it
+registers for them. Any of them can also be watched, on the service's watch
+socket (`host/watch.py`).
 """
 
+from datetime import datetime
 from pathlib import Path, PurePath, PurePosixPath
 from typing import Annotated, Literal, get_args
 
@@ -268,8 +270,22 @@ class Renamed(Reply):
     launch: Register
 
 
+class Activity(Model):
+    """What a conversation is doing, as its latest hook said, and since when."""
+
+    state: Literal["calling", "idle", "ended"]
+    """Running a call; between calls, its turn running or ended; or ended, a
+    subagent whose conversation is over."""
+    since: datetime
+    tool: str | None = None
+    """The tool its running call calls, by its runtime's name; none between calls."""
+    lups: bool = False
+    """Whether its running call is to one of lup's tools, which may hold it
+    until the operator answers."""
+
+
 class Talker(Model):
-    """A conversation of a launch, as the operator is shown it: how it's called, the runtime's ids, its kind and its parent."""
+    """A conversation of a launch, as the operator is shown it: how it's called, the runtime's ids, its kind, its parent and what it's doing."""
 
     path: str
     """Its launch's name, then each subagent's down to it (`dev/explore-auth`);
@@ -283,6 +299,9 @@ class Talker(Model):
     depth: int = 0
     """How many spawns below its session's own conversation it is: 0 for that
     conversation, 1 for a subagent it spawned."""
+    activity: Activity | None = None
+    """None until the service hears one of its hooks; a service started again
+    knows it from its next."""
 
 
 class Listed(Reply):

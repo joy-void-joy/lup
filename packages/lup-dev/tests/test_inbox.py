@@ -34,8 +34,10 @@ from lup_dev.host.courier import Conversation as Caller
 from lup_dev.host.courier import Heard, Posted
 from lup_dev.host.protocol import HostError, Limits, Register, Stop
 from lup_dev.host.service import Asked, HostService, Judged, Naming
-from lup_dev.inbox.delivery import Delivery
+from lup_dev.host.watch import Changes
+from lup_dev.inbox.delivery import Delivery, opening
 from lup_dev.inbox.notices import Notices, NotifySend
+from lup_dev.inbox.protocol import Items, ListInbox
 from lup_dev.inbox.protocol import routes as inbox_routes
 from lup_dev.inbox.store import (
     Answered,
@@ -252,8 +254,9 @@ def inboxed(
     """A host service with lup's inbox, its delivery yielded, until the context ends."""
     known = cli.Adapters(known=cli.adapters())
     couriers = cli.Couriers(adapters=known)
+    changes = Changes()
     delivery = Watched(
-        inbox=Inbox.opened(machine.inbox),
+        inbox=Inbox.opened(machine.inbox, changes),
         courier=couriers,
         layout=machine.host,
         notices=notices,
@@ -270,6 +273,7 @@ def inboxed(
         tools=cli.room_tools(delivery),
         judge=Quiet(),
         say=said.append,
+        changes=changes,
     )
     with served(service):
         yield delivery
@@ -490,6 +494,34 @@ def test_a_call_to_lups_tools_tells_nothing_at_its_start_and_its_result_does(
         )
     assert "additionalContext" not in started["hookSpecificOutput"]
     assert returned == (first_note("Already here."), False)
+
+
+def test_a_question_held_for_its_answer_reaches_a_watch_of_the_inbox_at_once(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    question: dict[str, JsonValue] = {"question": "Which parser?", "wait": True}
+    with (
+        inboxed(machine, clock, notices, said),
+        socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as watch,
+    ):
+        launched(machine, clock, tmp_path, "one", "claude")
+        send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
+        watch.settimeout(60)
+        watch.connect(str(machine.host.watch))
+        watch.sendall(f"{ListInbox().model_dump_json()}\n".encode())
+        with (
+            watch.makefile("rb") as following,
+            ThreadPoolExecutor(max_workers=1) as pool,
+        ):
+            empty = Items.model_validate_json(following.readline())
+            asking = pool.submit(call, machine.host.launch("one").mcp, "ask", question)
+            held = Items.model_validate_json(following.readline())
+            inbox("answer", "1", "--comment", "Lark.")
+            answered = Items.model_validate_json(following.readline())
+            asking.result(timeout=60)
+    assert empty.items == []
+    assert [opening(each) for each in held.items] == ["Which parser?"]
+    assert answered.items == []
 
 
 def test_ask_with_wait_holds_until_the_operator_answers_each_decision(
