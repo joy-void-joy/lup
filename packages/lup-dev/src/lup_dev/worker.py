@@ -16,9 +16,7 @@ fails is told the host service's way, its traceback said.
 
 import asyncio
 import sys
-from collections.abc import Callable
-from pathlib import Path
-from typing import override
+from typing import TYPE_CHECKING, override
 
 from lup.tools.serving import Answer
 from lup.tools.tool import Accepted, Refused
@@ -39,6 +37,10 @@ from lup_dev.host.workers import (
     Sent,
 )
 from lup_dev.policy.checkpoint import Services, Worktree
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
 
 
 class Serving(Model):
@@ -106,7 +108,9 @@ class Serving(Model):
             case Accepted(answer=answer):
                 return Answer(text=answer)
             case Refused(rejection=rejection):
-                return Answer(text=f"Refused: {rejection.reason}", error=True)
+                return Answer(
+                    text=f"`{name}` refused the call: {rejection.reason}", error=True
+                )
 
     async def answer(self, sent: Sent) -> Reply:
         """Answer one room's request with the module's handler for its kind.
@@ -189,7 +193,6 @@ async def serve(modules: Serving, socket: Path, say: Callable[[str], None]) -> N
     finally:
         server.close()
         await server.wait_closed()
-        socket.unlink(missing_ok=True)
 
 
 def worked(socket: Path, services: Services) -> None:
@@ -199,4 +202,7 @@ def worked(socket: Path, services: Services) -> None:
         sys.stderr.write(f"{line}\n")
 
     launch = Register.model_validate_json(sys.stdin.readline())
-    asyncio.run(serve(Serving.loaded(launch, services), socket, said))
+    try:
+        asyncio.run(serve(Serving.loaded(launch, services), socket, said))
+    finally:
+        socket.unlink(missing_ok=True)

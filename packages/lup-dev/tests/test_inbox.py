@@ -23,9 +23,10 @@ from mcp.types import TextContent, jsonrpc_message_adapter
 from pydantic import Field
 from typer.testing import CliRunner
 
+from lup.github.tools import GitHubTools
 from lup.tools.speaking import Problem, Remark
-from lup_dev import cli
-from lup_dev.forge.tools import GitHubTools
+from lup_dev import Modules, Project, cli
+from lup_dev.declaration.resolve import resolve
 from lup_dev.host.client import HostClient, Starter
 from lup_dev.host.courier import Conversation as Caller
 from lup_dev.host.courier import Heard, Posted
@@ -946,8 +947,10 @@ def test_the_inbox_tools_take_the_speaking_tools_names_and_inputs() -> None:
         "Wait until something reaches your inbox.",
     ]
     assert "inbox as a problem" in served[0].description
-    github = GitHubTools(integration="dev").specs()
-    assert cli.served_tools() == [*served, *github]
+    github = GitHubTools.specs()
+    assert cli.served_tools(resolve(Project())) == [*served, *github]
+    dropped = Project(modules=Modules.default().drop("github"))
+    assert cli.served_tools(resolve(dropped)) == served
 
 
 class Silent(Notices):

@@ -24,8 +24,10 @@ from pydantic import JsonValue, ValidationError
 from typer.testing import CliRunner
 
 from lup.tools.serving import Answer
-from lup.tools.tool import ToolSpec
-from lup_dev import cli
+from lup.tools.tool import ToolSpec, lup_tool
+from lup.types import Model
+from lup_dev import Core, Module, Modules, ModuleTools, Project, Toolsets, cli
+from lup_dev.declaration.resolve import resolve
 from lup_dev.host.client import HostClient, RoomClient, Starter
 from lup_dev.host.courier import Conversation, Courier, Heard, Telling
 from lup_dev.host.protocol import (
@@ -47,13 +49,14 @@ from lup_dev.host.service import (
     Route,
     judged,
 )
+from lup_dev.host.workers import LaunchModules, Offered
 from lup_dev.layout import HostLayout, Layout
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Awaitable, Callable, Generator
     from pathlib import Path
 
-    from conftest import FakeClock, Kit
+    from conftest import FakeClock, InProcess, Kit
     from mcp.client._transport import TransportStreams
 
     from lup_dev.clock import Clock
@@ -211,6 +214,7 @@ def service(
     courier: Courier | None = None,
     room_routes: list[RoomRoute] | None = None,
     tools: list[RoomTools] | None = None,
+    modules: LaunchModules | None = None,
 ) -> HostService:
     return HostService(
         layout=layout,
@@ -221,6 +225,7 @@ def service(
         routes=routes or [],
         room_routes=room_routes or [],
         tools=tools or [],
+        modules=modules,
     )
 
 
@@ -684,6 +689,7 @@ def on_claude(
     judge: Callable[[Asked], Awaitable[Judged]],
     said: list[str],
     tools: list[RoomTools] | None = None,
+    modules: LaunchModules | None = None,
 ) -> HostService:
     """A service answering Claude Code's hooks through its own adapter."""
     known = cli.Adapters(known=cli.adapters())
@@ -694,6 +700,7 @@ def on_claude(
         answerer=known,
         courier=cli.Couriers(adapters=known),
         tools=tools,
+        modules=modules,
     )
 
 
@@ -1038,3 +1045,104 @@ def test_host_refuses_to_serve_beside_a_running_service(
         result = runner.invoke(cli.app, ["host"])
     assert isinstance(result.exception, HostError)
     assert "a host service runs already" in str(result.exception)
+
+
+# A launch's modules, served beside the core's tools.
+
+
+class Words(Model):
+    """What to shout."""
+
+    text: str
+
+
+class LoudTools(ModuleTools):
+    """Loud's tool."""
+
+    module: Loud
+
+    @lup_tool
+    async def shout(self, said: Words) -> str:
+        """Shout, naming who's calling."""
+        return f"{said.text.upper()}, {self.caller.id} of {self.launch.launch}"
+
+
+class Loud(Module):
+    """Shouting."""
+
+    name = "loud"
+
+    tools: Toolsets = Toolsets.of(LoudTools)
+
+
+class Broken(LaunchModules):
+    """A launch's modules that can't be served: its copy predates them."""
+
+    @override
+    async def open(self, launch: Register) -> Offered:
+        message = "its copy predates `worker`"
+        raise HostError(message)
+
+    @override
+    async def ask(self, launch: Register, request: Request) -> Reply:
+        message = "nothing is served to ask"
+        raise AssertionError(message)
+
+    @override
+    async def close(self, launch: Register) -> None:
+        return None
+
+
+def test_a_launch_s_modules_tools_are_served_beside_the_core_s_with_the_caller(
+    layout: HostLayout,
+    clock: FakeClock,
+    said: list[str],
+    tmp_path: Path,
+    in_process: type[InProcess],
+) -> None:
+    host = client(layout, clock)
+    modules = in_process(
+        resolved=resolve(Project(modules=Modules.only(Core(), Loud())))
+    )
+    with served(on_claude(layout, Quiet(), said, [Recording()], modules)):
+        host.register(launch(tmp_path, "one", "claude"))
+        send(layout.launch("one").hook, claude("SessionStart", source="startup"))
+        arguments = stamped(send(layout.launch("one").hook, lups("shout", "t1")))
+        stamp = arguments["caller"]
+        assert listed(layout.launch("one").mcp) == ["echo", "shout"]
+        heard = call(layout.launch("one").mcp, "shout", arguments)
+        host.unregister("one")
+    assert heard == (f"HI, {stamp} of one", False)
+    assert modules.closed == ["one"]
+
+
+def test_a_launch_whose_modules_cant_be_served_gets_the_core_s_tools_alone(
+    layout: HostLayout, clock: FakeClock, said: list[str], tmp_path: Path
+) -> None:
+    host = client(layout, clock)
+    with served(service(layout, Judge(), said, tools=[Recording()], modules=Broken())):
+        host.register(launch(tmp_path, "one", "first"))
+        assert listed(layout.launch("one").mcp) == ["echo"]
+    assert "one: its modules aren't served: its copy predates `worker`" in said
+
+
+def test_a_module_s_tool_named_like_a_core_tool_is_left_to_the_core(
+    layout: HostLayout,
+    clock: FakeClock,
+    said: list[str],
+    tmp_path: Path,
+    in_process: type[InProcess],
+) -> None:
+    host = client(layout, clock)
+    core = Recording(["shout"])
+    modules = in_process(
+        resolved=resolve(Project(modules=Modules.only(Core(), Loud())))
+    )
+    with served(on_claude(layout, Quiet(), said, [core], modules)):
+        host.register(launch(tmp_path, "one", "claude"))
+        send(layout.launch("one").hook, claude("SessionStart", source="startup"))
+        arguments = stamped(send(layout.launch("one").hook, lups("shout", "t1")))
+        assert listed(layout.launch("one").mcp) == ["shout"]
+        heard = call(layout.launch("one").mcp, "shout", arguments)
+    assert heard == (f"one heard {arguments['caller']}", False)
+    assert any("which the core serves already" in line for line in said)

@@ -23,11 +23,13 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import BaseModel
 
+from lup.github.module import GitHub
+from lup.github.tools import GitHubTools
 from lup.tools.serving import Answer
+from lup_dev import Modules, Project
 from lup_dev.codescan.directives import HostIssues, IssueRef
+from lup_dev.declaration.resolve import resolve
 from lup_dev.forge.github import GitHubError, named
-from lup_dev.forge.protocol import Stating
-from lup_dev.forge.tools import GitHubTools
 from lup_dev.host.client import RoomClient, asked
 from lup_dev.host.courier import Conversation, Courier, Heard, Telling
 from lup_dev.host.protocol import (
@@ -40,14 +42,18 @@ from lup_dev.host.protocol import (
     Stop,
     actions,
 )
-from lup_dev.host.rooms import RoomRoute
 from lup_dev.host.service import Answerer, Asked, HostService, Judged
+from lup_dev.host.workers import Calling
 from lup_dev.layout import HostLayout
+from lup_dev.worker import Serving
 
 if TYPE_CHECKING:
     from collections.abc import Generator
 
+    from conftest import InProcess
     from pydantic import JsonValue
+
+    from lup_dev.host.workers import LaunchModules
 
 RECORDED = Path(__file__).parent / "payloads" / "gh-2.102.0"
 LUP = GitHubRepository(owner="joy-void-joy", name="lup")
@@ -160,14 +166,17 @@ def launch(
 
 
 def called(
-    name: str, arguments: JsonValue, registered: Register, integration: str = "dev"
+    name: str, arguments: JsonValue, registered: Register, limit: int = 100
 ) -> Answer:
-    tools = GitHubTools(integration=integration)
-    return asyncio.run(tools.call(name, arguments, registered, CALLER))
+    """Call one of the GitHub module's tools as a launch's own process calls it."""
+    declared = Project(modules=Modules.default().edit(GitHub(limit=limit)))
+    serving = Serving(launch=registered, resolved=resolve(declared))
+    calling = Calling(name=name, arguments=arguments, caller=CALLER)
+    return asyncio.run(serving.call(calling))
 
 
 def test_each_tool_is_summarized_in_fifty_characters_at_most() -> None:
-    specs = GitHubTools(integration="dev").specs()
+    specs = GitHubTools.specs()
     assert {spec.name: spec.summary for spec in specs} == {
         "read_issue": "Read an issue or pull request, with its comments.",
         "find_issues": "Search a repository's issues and pull requests.",
@@ -183,7 +192,7 @@ def test_a_call_with_an_argument_no_tool_takes_is_refused(
 ) -> None:
     answer = called("find_issues", {"query": "x", "limit": 5}, launch(tmp_path))
     assert answer.error
-    assert answer.text.startswith("`find_issues`'s arguments:")
+    assert answer.text.startswith("`find_issues` refused the call:")
     assert "limit" in answer.text
     assert gh.calls() == []
 
@@ -370,7 +379,7 @@ def test_a_repository_that_isnt_owner_and_name_is_refused_before_gh_runs(
         "read_issue", {"number": 1, "repository": written}, launch(tmp_path)
     )
     assert answer.error
-    assert answer.text.startswith("`read_issue`'s arguments:")
+    assert answer.text.startswith("`read_issue` refused the call:")
     assert "a repository on GitHub is `owner/name`" in answer.text
     assert gh.calls() == []
 
@@ -391,7 +400,7 @@ def test_the_tools_that_write_take_no_other_repository(
 ) -> None:
     answer = called(name, arguments, launch(tmp_path))
     assert answer.error
-    assert answer.text.startswith(f"`{name}`'s arguments:")
+    assert answer.text.startswith(f"`{name}` refused the call:")
     assert "repository" in answer.text
     assert gh.calls() == []
 
@@ -402,7 +411,7 @@ def test_only_the_tools_that_read_offer_another_repository() -> None:
         assert isinstance(properties, dict)
         return "repository" in properties
 
-    specs = GitHubTools(integration="dev").specs()
+    specs = GitHubTools.specs()
     offered = {spec.name: offers(spec.input_schema) for spec in specs}
     assert offered == {
         "read_issue": True,
@@ -417,11 +426,8 @@ def test_find_issues_says_where_more_may_match_and_searches_every_state(
     gh: Gh, tmp_path: Path
 ) -> None:
     gh.recorded("search issues", "search-issues.json")
-    tools = GitHubTools(integration="dev", limit=3)
-    answer = asyncio.run(
-        tools.call(
-            "find_issues", {"query": "", "state": "all"}, launch(tmp_path), CALLER
-        )
+    answer = called(
+        "find_issues", {"query": "", "state": "all"}, launch(tmp_path), limit=3
     )
     assert "GitHub gave the first 3 matches it found; more may match" in answer.text
     [arguments] = gh.arguments()
@@ -435,7 +441,7 @@ def test_find_issues_refuses_a_query_whose_quotes_dont_close(
 ) -> None:
     answer = called("find_issues", {"query": 'the "held call'}, launch(tmp_path))
     assert answer.error
-    assert answer.text.startswith("`find_issues`'s arguments:")
+    assert answer.text.startswith("`find_issues` refused the call:")
     assert "No closing quotation" in answer.text
     assert gh.calls() == []
 
@@ -477,15 +483,15 @@ def test_comment_gives_its_body_on_standard_input(gh: Gh, tmp_path: Path) -> Non
 
 
 def test_draft_pull_request_opens_a_draft_into_the_integration_branch(
-    gh: Gh, tmp_path: Path
+    gh: Gh, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setenv("LUP_INTEGRATION_BRANCH", "next")
     gh.answer("api graphql", '{"data":{"repository":{"ref":{"name":"feat-forge"}}}}')
     gh.answer("pr create", "https://github.com/joy-void-joy/lup/pull/70\n")
     answer = called(
         "draft_pull_request",
         {"branch": "feat-forge", "title": "GitHub's tools", "body": "Why."},
         launch(tmp_path),
-        integration="next",
     )
     assert answer == Answer(
         text=(
@@ -554,9 +560,9 @@ def test_an_action_beyond_the_limits_is_refused_before_gh_runs(
     answer = called(name, arguments, launch(tmp_path, allowed))
     assert answer == Answer(
         text=(
-            f"lup didn't run `{name}`: the project's declaration doesn't allow "
+            f"`{name}` didn't run: the project's declaration doesn't allow "
             f"`{action}` with the operator's credentials (`Core.credentials`), and "
-            "allowing it is the operator's call."
+            "allowing it is the operator's call"
         ),
         error=True,
     )
@@ -708,9 +714,11 @@ async def unjudged(asked: Asked) -> Judged:
 
 @contextmanager
 def hosting(
-    tmp_path_factory: pytest.TempPathFactory, registered: Register, *, forge: bool
+    tmp_path_factory: pytest.TempPathFactory,
+    registered: Register,
+    modules: LaunchModules | None,
 ) -> Generator[RoomClient]:
-    """Serve `registered` in a host service of its own thread, with the forge's room handler or without, as an older service; yield its room's client."""
+    """Serve `registered` in a host service of its own thread, with lup's default modules, the GitHub module among them, or without any, as an older service; yield its room's client."""
     base = tmp_path_factory.mktemp("host")
     layout = HostLayout(sockets=base / "run", state=base / "state")
     service = HostService(
@@ -719,7 +727,7 @@ def hosting(
         courier=Deaf(),
         judge=unjudged,
         say=lambda line: None,
-        room_routes=[RoomRoute.to(Stating())] if forge else [],
+        modules=modules,
     )
     bound = threading.Event()
     failures: list[BaseException] = []
@@ -751,11 +759,14 @@ def hosting(
 
 
 def test_the_host_answers_the_gate_s_issue_states_in_a_room(
-    gh: Gh, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory
+    gh: Gh,
+    tmp_path: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    default_modules: InProcess,
 ) -> None:
     said: list[str] = []
     registered = launch(tmp_path)
-    with hosting(tmp_path_factory, registered, forge=True) as room:
+    with hosting(tmp_path_factory, registered, default_modules) as room:
         issues = HostIssues(client=room, say=said.append)
         assert issues.unreachable() is None
         gh.answer("issue view", '{"state":"CLOSED"}\n')
@@ -770,11 +781,15 @@ def test_the_host_answers_the_gate_s_issue_states_in_a_room(
 
 
 def test_an_issue_the_host_wont_read_goes_unchecked_and_says_why(
-    gh: Gh, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory
+    gh: Gh,
+    tmp_path: Path,
+    tmp_path_factory: pytest.TempPathFactory,
+    default_modules: InProcess,
 ) -> None:
     said: list[str] = []
     allowed: list[Action] = [each for each in actions() if each != "read-issues"]
-    with hosting(tmp_path_factory, launch(tmp_path, allowed), forge=True) as room:
+    registered = launch(tmp_path, allowed)
+    with hosting(tmp_path_factory, registered, default_modules) as room:
         state = HostIssues(client=room, say=said.append).state(IssueRef(number=50))
     assert state == "unchecked"
     assert said == [
@@ -792,7 +807,7 @@ def test_an_older_service_refuses_the_kind_by_its_name_and_the_issue_goes_unchec
     gh: Gh, tmp_path: Path, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
     said: list[str] = []
-    with hosting(tmp_path_factory, launch(tmp_path), forge=False) as room:
+    with hosting(tmp_path_factory, launch(tmp_path), None) as room:
         state = HostIssues(client=room, say=said.append).state(IssueRef(number=50))
     assert state == "unchecked"
     assert said == [

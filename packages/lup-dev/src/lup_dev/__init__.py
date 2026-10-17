@@ -27,6 +27,7 @@ from lup_dev.declaration.kinds import (
     Exemptions,
     Gate,
     Guidance,
+    Handlers,
     Package,
     Packages,
     Paths,
@@ -40,6 +41,7 @@ from lup_dev.declaration.kinds import (
     Section,
     Session,
     TestRoots,
+    Toolsets,
 )
 from lup_dev.declaration.module import Module, Modules
 from lup_dev.declaration.modules.code_rules import CodeRules
@@ -48,6 +50,7 @@ from lup_dev.declaration.modules.python import Python
 from lup_dev.declaration.project import Project
 from lup_dev.declaration.requirements import Requirement, Tools
 from lup_dev.declaration.runner import Interpreter, Plain, RoomNeeds, Runner, Uv
+from lup_dev.declaration.serving import ModuleHandler, ModuleTools
 
 __all__ = [
     "Actions",
@@ -58,8 +61,11 @@ __all__ = [
     "Exemptions",
     "Gate",
     "Guidance",
+    "Handlers",
     "Interpreter",
     "Module",
+    "ModuleHandler",
+    "ModuleTools",
     "Modules",
     "Named",
     "Package",
@@ -84,5 +90,6 @@ __all__ = [
     "Step",
     "TestRoots",
     "Tools",
+    "Toolsets",
     "Uv",
 ]

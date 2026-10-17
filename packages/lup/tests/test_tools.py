@@ -9,7 +9,7 @@ from lup.sessions.submission import End, GiveUp, KeepGoing, Toolbox
 from lup.tools import Allow, Deny, Submit, Tool, lup_tool
 from lup.tools.serving import Answer
 from lup.tools.speaking import Heard, Problem, note, report
-from lup.tools.tool import Accepted, Refused, ToolError, ToolSpec
+from lup.tools.tool import Accepted, Refused, ToolError, ToolSpec, bound, declared
 
 
 class Query(BaseModel):
@@ -140,6 +140,49 @@ def test_a_function_without_a_docstring_isnt_a_tool() -> None:
 
     with pytest.raises(ToolError, match="docstring"):
         lup_tool(bare)
+
+
+class Forecaster(BaseModel):
+    """A class of tools: each reads what they share through `self`."""
+
+    region: str
+
+    @lup_tool
+    async def forecast(self, query: Query) -> Weather:
+        """Forecast a city's weather in this region."""
+        return Weather(summary=f"rain in {query.city}, {self.region}")
+
+    @lup_tool
+    async def say(self, query: Query) -> str:
+        """Say a city's weather in words."""
+        return f"{query.city}: dry"
+
+
+def test_a_method_is_each_instance_s_tool_and_its_class_s_description() -> None:
+    assert list(declared(Forecaster)) == ["forecast", "say"]
+    assert declared(Forecaster)["forecast"].summary == (
+        "Forecast a city's weather in this region."
+    )
+    north = Forecaster(region="north")
+    assert asyncio.run(north.forecast.call({"city": "Oslo"})) == Accepted(
+        value=Query(city="Oslo"), answer='{"summary":"rain in Oslo, north"}'
+    )
+    assert [tool.spec().name for tool in bound(north)] == ["forecast", "say"]
+
+
+def test_a_tool_returning_words_answers_in_them() -> None:
+    accepted = asyncio.run(Forecaster(region="x").say.call({"city": "Oslo"}))
+    assert isinstance(accepted, Accepted)
+    assert accepted.answer == "Oslo: dry"
+
+
+def test_a_method_taking_two_models_isnt_a_tool() -> None:
+    async def two(self: Forecaster, a: Query, b: Query = NOWHERE) -> Weather:
+        """Two inputs."""
+        return Weather(summary="")
+
+    with pytest.raises(ToolError, match="takes 2 parameters besides `self`"):
+        lup_tool(two)
 
 
 def test_a_typed_turn_ends_only_once_an_answer_is_accepted() -> None:

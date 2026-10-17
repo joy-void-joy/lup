@@ -497,7 +497,7 @@ def test_a_launch_compiles_the_approved_declarations_guidance_and_hooks(
             directory,
             Cli(program=Path("/opt/cli")),
             hooks,
-            tools=cli.served_tools(),
+            tools=cli.served_tools(declared.resolved),
             neighbours=[],
         )
         exported = declared.root

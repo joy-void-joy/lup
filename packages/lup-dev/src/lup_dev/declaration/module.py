@@ -115,7 +115,11 @@ class Module(Model, extra="forbid"):
 
     @classmethod
     def __pydantic_init_subclass__(cls, **kwargs: object) -> None:
-        """Refuse a module without a name or a sentence, with a plain collection, or with a default starting from itself.
+        """Refuse a module without a name or a sentence, with a plain collection, or with a default starting from itself; complete the classes its defaults list.
+
+        A class its defaults list may name the module, as its tools narrow
+        `module` to it, before the module is defined: each is completed here, the
+        module's name resolved, while the file declaring it is still imported.
 
         Every collection in a module is a selection: a layer would replace a
         plain list whole, so a base couldn't be extended without restating it.
@@ -166,6 +170,9 @@ class Module(Model, extra="forbid"):
                 "which start from nothing there, `Kind.all()` or `Kind.only(…)`"
             )
             raise ProjectError(message)
+        for info in cls.model_fields.values():
+            if isinstance(default := info.default, Selection):
+                default.complete({declared: cls})
 
     @classmethod
     def sentence(cls) -> str:

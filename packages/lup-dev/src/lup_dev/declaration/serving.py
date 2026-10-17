@@ -18,7 +18,7 @@ copy (`lup_dev.worker`), never in the host service that serves every launch.
 
 from abc import ABC, abstractmethod
 
-from pydantic import BaseModel
+from pydantic import BaseModel, PydanticUndefinedAnnotation
 
 from lup.tools.tool import AgentTool, ToolSpec, bound, declared
 from lup.types import Model
@@ -31,8 +31,19 @@ from lup_dev.host.protocol import Register, Reply, Request
 def narrowed(owner: type[BaseModel], field: str) -> type:
     """Return the type `owner` gives `field`, as its class narrows its base's.
 
-    Raise `ProjectError` where it isn't a class.
+    A class naming its module before the module is defined, in the same file, is
+    completed here, once it is. Raise `ProjectError` where it can't be, or where
+    the type isn't a class.
     """
+    try:
+        owner.model_rebuild()
+    except PydanticUndefinedAnnotation as undefined:
+        message = (
+            f"`{owner.__name__}` names `{undefined.name}`, which its file doesn't "
+            "define: where the module it's made with is in another file, that file "
+            f"completes it with `{owner.__name__}.model_rebuild(_types_namespace=…)`"
+        )
+        raise ProjectError(message) from undefined
     annotation = owner.model_fields[field].annotation
     if not isinstance(annotation, type):
         message = (

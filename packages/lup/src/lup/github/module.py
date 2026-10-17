@@ -18,9 +18,3 @@ class GitHub(Module):
     request."""
     handlers: Handlers = Handlers.of(Stating)
     """Whether an issue is open, which the gate asks from a room."""
-
-
-# The tools and the handler narrow `module` to this class, which they can't import
-# without importing themselves through it: they're completed here, beside it.
-GitHubTools.model_rebuild(_types_namespace={"GitHub": GitHub})
-Stating.model_rebuild(_types_namespace={"GitHub": GitHub})

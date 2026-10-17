@@ -33,8 +33,8 @@ from lup_dev.declaration.grammar import (
     Replace,
     listed,
 )
-from lup_dev.host.protocol import GitHubRepository, Limits, actions
 from lup_dev.declaration.serving import ModuleHandler, ModuleTools
+from lup_dev.host.protocol import GitHubRepository, Limits, actions
 
 
 class Rules(Named[str]):

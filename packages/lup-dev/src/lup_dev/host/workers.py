@@ -15,21 +15,20 @@ the launch ends, and started again where it died.
 import asyncio
 import shlex
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Literal, override
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Annotated, Literal, override
 
-from pydantic import JsonValue, ValidationError
+from pydantic import Field, JsonValue, TypeAdapter, ValidationError
 
 from lup.tools.serving import Answer
 from lup.tools.tool import ToolSpec
 from lup.types import JsonObject, MutableModel
 from lup_dev.host.courier import Conversation
 from lup_dev.host.protocol import HostError, Refused, Register, Reply, Request
+from lup_dev.layout import HostLayout
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from pathlib import Path
-
-    from lup_dev.layout import HostLayout
 
 
 async def exchanged(path: Path, request: Request) -> str:
@@ -89,6 +88,10 @@ class Relayed(Reply):
 
     kind: Literal["module-relayed"] = "module-relayed"
     reply: JsonObject
+
+
+type Answered = Annotated[Offered | Called | Relayed, Field(discriminator="kind")]
+"""Whatever a launch's modules reply, told apart by its `kind`."""
 
 
 class Sent(Request, extra="allow"):
@@ -165,7 +168,10 @@ class Workers(MutableModel, LaunchModules, arbitrary_types_allowed=True):
                 "the launch's modules; what it said is in the host service's output"
             )
             raise HostError(message)
-        offered = await self.exchange(launch, Listing(), Offered)
+        offered = await self.exchange(launch, Listing())
+        if not isinstance(offered, Offered):
+            message = f"`{shlex.join(command)}` listed its modules as {offered.kind}"
+            raise HostError(message)
         self.running[launch.launch] = Worker(process=process, offered=offered)
         self.say(
             f"{launch.launch}: its modules serve {len(offered.tools)} tools and "
@@ -181,12 +187,10 @@ class Workers(MutableModel, LaunchModules, arbitrary_types_allowed=True):
                 f"{launch.launch}: its modules' process is gone; starting it again"
             )
             await self.open(launch)
-        return await self.exchange(launch, request, Reply)
+        return await self.exchange(launch, request)
 
-    async def exchange[R: Reply](
-        self, launch: Register, request: Request, model: type[R]
-    ) -> R:
-        """Send one request on `launch`'s modules' socket, and read its reply as `model`.
+    async def exchange(self, launch: Register, request: Request) -> Answered:
+        """Send one request on `launch`'s modules' socket, and read its reply by its kind.
 
         A refusal is raised as the `HostError` it says.
         """
@@ -194,7 +198,7 @@ class Workers(MutableModel, LaunchModules, arbitrary_types_allowed=True):
         try:
             refused = Refused.model_validate_json(raw)
         except ValidationError:
-            return model.model_validate_json(raw)
+            return TypeAdapter[Answered](Answered).validate_json(raw)
         raise HostError(refused.error)
 
     @override

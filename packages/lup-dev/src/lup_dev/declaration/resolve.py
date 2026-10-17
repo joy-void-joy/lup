@@ -65,13 +65,13 @@ from lup_dev.declaration.modules.core import Core
 from lup_dev.declaration.modules.shipped import default, shipped
 from lup_dev.declaration.project import Project
 from lup_dev.declaration.requirements import Needed
+from lup_dev.declaration.runner import Plain, Prefixed, Runner
 from lup_dev.declaration.serving import (
     ModuleHandler,
     ModuleTools,
     answering,
     made_with,
 )
-from lup_dev.declaration.runner import Plain, Prefixed, Runner
 from lup_dev.host.protocol import Limits
 
 
@@ -337,7 +337,6 @@ def held[E](
     modules fails; without, each module's entries stand beside the others', as
     an exemption's do.
     """
-
     resolved = [part.value.resolve(own(part), own(part)) for part in found]
     if shared:
         distinct(
