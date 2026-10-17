@@ -31,10 +31,18 @@ class Gate(Model):
     steps: list[Step] = [
         Step(name="rules", command=["lup-dev", "rules", "check"]),
         Step(name="format", command=["ruff", "format", "--check"]),
-        Step(name="pytest", command=["pytest"]),
+        Step(name="pytest", command=["pytest", "-n", "8", "--dist", "worksteal"]),
         Step(name="lint-imports", command=["lint-imports"]),
     ]
     """Each the tool alone, which the gate runs through the project's runner.
+
+    The tests run on eight workers (pytest-xdist, which `lup-dev` depends on, so
+    it's wherever the gate runs): a project's tests mostly wait on processes
+    and files rather than compute, and on lup's own eight took the suite from
+    161 s to 47 s, sixteen only to 41 s. Fewer than every core leaves room for
+    other sessions' gates, which made the first lup's slowest runs. Work
+    stealing keeps one slow file from holding the run. A project whose tests
+    can't share a machine replaces the step.
 
     lup's rules first: `lup-dev rules check` with no paths checks every file its
     declaration's roles say is checked, lup's rules on the production and protected
