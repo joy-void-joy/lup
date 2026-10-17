@@ -325,7 +325,10 @@ class Check(Model, arbitrary_types_allowed=True):
         """Check every requirement at once, then run the fixes and every step, in order.
 
         Raise `RequirementError` naming every required one missing, before
-        anything runs. Every step runs whatever the ones before gave.
+        anything runs. Every step runs whatever the ones before gave. With
+        fixes, the steps that build a file run first where it's stale, since a
+        fix may read what they build (`lup-dev rules fix` reads lup's engine),
+        and again in their place only where a fix made it stale again.
 
         With `passes`, a pass recorded for the worktree's files as they stand
         answers, and nothing runs, unless `again`: the fixes too, since on files
@@ -339,10 +342,16 @@ class Check(Model, arbitrary_types_allowed=True):
             if found is not None:
                 return Gated(outcomes=[], found=found)
         report = check(self.requirements, self.tools).require()
+        building = [
+            step
+            for step in self.steps
+            if self.fixes and step.builds is not None and self.stale(step)
+        ]
+        built = [self.one(step) for step in building]
         fixed = [self.one(step) for step in self.fixes]
         checked = None if passes is None else standing(self.root)
         outcomes = [self.one(step) for step in self.steps]
-        gated = Gated(off=report.off, outcomes=[*fixed, *outcomes])
+        gated = Gated(off=report.off, outcomes=[*built, *fixed, *outcomes])
         if passes is None or checked is None or failed(gated.outcomes):
             return gated
         if standing(self.root) != checked:
