@@ -223,7 +223,7 @@ class Lent(Model):
 
 
 def lent(paths: list[Path], *, read_only: bool) -> list[Lent]:
-    """Describe each directory at `paths`, lent to a launch from its command line: `--mount-ro` read-only, `--mount` writable.
+    """Describe each directory at `paths`, lent to a launch from its command line: `--mount` read-only, `--mount-rw` writable.
 
     Each is what the launch found there: whether git sees a repository, and its
     `pyproject.toml`'s description. Nothing is asked of the operator beyond
@@ -516,7 +516,7 @@ def lend(
         message = (
             "this launch's room started before a running room could be lent a "
             "directory: lend it at the next launch, `lup-dev launch <runtime> "
-            f"--mount-ro {source}`"
+            f"--mount {source}`"
         )
         raise RoomError(message)
     wanted = name or source.name

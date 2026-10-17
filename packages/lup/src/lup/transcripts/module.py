@@ -16,7 +16,7 @@ class Transcripts(Module):
     """Copying what the runtime added or grew, when a launch opens and when it stops."""
     data: Mounted = Mounted()
     """The copies, read-only in a room whose launch lends them
-    (`lup-dev launch <runtime> --mount-ro transcripts`), or in every room where
+    (`lup-dev launch <runtime> --mount transcripts`), or in every room where
     the person's own layer says `Transcripts(data=Mounted(always=True))`: an old
     discussion read there can pass for a decision, and the operator's history
     isn't every session's to read."""

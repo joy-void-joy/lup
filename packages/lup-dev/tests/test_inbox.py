@@ -1023,8 +1023,8 @@ def test_lup_dev_mount_lends_a_directory_to_a_running_room_and_tells_its_session
     with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path, "one", "claude")
         send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
-        sealed = runner.invoke(cli.app, ["mount", "--ro", str(atlas)])
-        open_ = runner.invoke(cli.app, ["mount", str(atlas), "--launch", "one"])
+        sealed = runner.invoke(cli.app, ["mount", str(atlas)])
+        open_ = runner.invoke(cli.app, ["mount", "--rw", str(atlas), "--launch", "one"])
         module = runner.invoke(cli.app, ["mount", "transcripts", "--launch", "one"])
         nothing = runner.invoke(cli.app, ["mount", "nowhere", "--launch", "one"])
         texts = [delivery.inbox.item(number).reason for number in [1, 2, 3]]

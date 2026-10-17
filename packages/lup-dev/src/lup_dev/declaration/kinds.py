@@ -563,7 +563,7 @@ class Mounted(Model, extra="forbid"):
     At its host path, read-only unless it says, so a session reads what the
     module keeps (`Transcripts`' copies of past sessions); the guidance says
     where. In every room where `always`; otherwise in a launch that lends it by
-    the module's name (`lup-dev launch <runtime> --mount-ro transcripts`).
+    the module's name (`lup-dev launch <runtime> --mount transcripts`).
     """
 
     read_only: bool = True
