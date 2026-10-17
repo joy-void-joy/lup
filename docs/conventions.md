@@ -16,7 +16,7 @@ A convention a rule enforces is followed; one written only in prose splits, each
 
 Every concern has exactly one owner, so two tools never report the same thing in two ways or steer in opposite directions.
 
-- **lup's rules** own the conventions in this document. They live only in lup's typed engine (`docs/judging-writes.md`, *The engine*) and read one typed tree, not as ruff `banned-api` entries beside a syntax checker, which would split where they live and grow into a patchwork. Each rule names the mistake it prevents and where it steers, and has a timing (`DESIGN.md`, *Code rules and the gate*):
+- **lup's rules** own the conventions in this document. They live only in lup's typed engine (`docs/judging-writes.md`, *The engine: one typed tree*) and read one typed tree, not as ruff `banned-api` entries beside a syntax checker, which would split where they live and grow into a patchwork. Each rule names the mistake it prevents and where it steers, and has a timing (`DESIGN.md`, *Keeping the operator in the loop*):
   - **at the edit,** the rules that pick an approach other code gets built on (parsers over regex and splitting, named fields over tuples and sets, the library for each job, errors and types, suppressions, truncation, historical voice): a finding on the lines an edit touches refuses it before it lands;
   - **at the gate,** the rules about how a correct thing is spelled (`elif`, `collection-loop`, `private-name`, `docstring-code`, `constant-home`): reported once before landing, and fixed silently where ruff has a fixer. A gate rule still blocks landing.
 
@@ -121,7 +121,7 @@ In its home, a constant needs no suppression. The rule reads the constant's type
 - **No hand-splitting a `str` or `bytes`:** `.split(sep)`, `.rsplit(sep)`, `.partition`, `.rpartition`. `.split()` with no separator and `.splitlines()` are fine.
 - **No slicing a `str` or `bytes`** to take it apart by position.
 - **No `.strip(chars)` or `.replace` on a `str` or `bytes`** to take it apart or rewrite it: same reason. `.strip()` with no argument trims whitespace and is fine.
-- An agent's output is never hand-parsed: typed answers come through lup's `submit` tool (`DESIGN.md`, *Calling agents*; `docs/library.md`).
+- An agent's output is never hand-parsed: typed answers come through lup's `submit` tool (`DESIGN.md`, *Calling agents from code*; `docs/library.md`).
 
 The parsers to reach for: `json`, `tomllib` (`tomlkit` to edit), `csv`, `urllib.parse`, `pathlib`, `email`, `shlex`, `ast`, `datetime.fromisoformat`, `packaging.version` and `packaging.requirements`, `trafilatura` or `beautifulsoup4` for web pages. A grammar of our own gets a parser library.
 

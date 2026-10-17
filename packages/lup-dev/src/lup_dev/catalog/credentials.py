@@ -42,8 +42,7 @@ class CredentialDefaults(Model):
     """Refs no push updates, as patterns over full ref names.
 
     - `refs/heads/main`: what reaches `main` is the operator's to merge
-      (`DESIGN.md`, *Policy*: "no push to `main`"; `AGENTS.md`: "Never merge
-      into `main` or push to it yourself");
+      (`AGENTS.md`: "Never merge into `main` or push to it yourself");
     - `refs/tags/*`: a tag marks a release, which is the operator's too.
     """
     gated: list[str] = ["refs/heads/dev"]

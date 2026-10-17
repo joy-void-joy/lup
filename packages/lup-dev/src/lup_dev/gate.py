@@ -28,7 +28,7 @@ commit, in a worktree made at it and removed after (`at_commit`), unless a pass 
 recorded for its files: lup's remote helper runs it before a push updates the
 integration branch (`lup_dev.remote.helper`).
 
-This is the gate's first shape (`DESIGN.md`, *Code rules and the gate*): comparing against a
+This is the gate's first shape (`DESIGN.md`, *Keeping the operator in the loop*): comparing against a
 branch's base (`--changed`), nested projects' own environments and bounds in time
 and memory come later.
 """
