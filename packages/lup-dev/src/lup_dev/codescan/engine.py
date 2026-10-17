@@ -18,10 +18,10 @@ import socket
 from datetime import timedelta
 from typing import TYPE_CHECKING, Literal
 
-import sh
 from filelock import FileLock
 from tenacity import Retrying, retry_if_exception_type, stop_after_attempt
 
+from lup.programs import ProgramError, run
 from lup.types import Model
 from lup_dev.codescan.contract import Checker, FileReport, Rule, Source
 from lup_dev.declaration.resolve import Selected
@@ -304,9 +304,9 @@ class EngineChecker(Model, Checker):
     def run_engine(self, *arguments: str) -> str:
         """Run the engine's command line, and return what it printed."""
         try:
-            return str(sh.Command(self.node)(str(self.script()), *arguments))
-        except sh.ErrorReturnCode as failure:
-            message = f"the engine's `{arguments[0]}` failed: {failure.stderr.decode()}"
+            return run(self.node, str(self.script()), *arguments).output.decode()
+        except ProgramError as failure:
+            message = f"the engine's `{arguments[0]}` failed: {failure}"
             raise EngineError(message) from failure
 
     def exchange(

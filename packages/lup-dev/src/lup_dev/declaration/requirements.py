@@ -12,11 +12,11 @@ import shutil
 from abc import ABC, abstractmethod
 from typing import Literal, Self, override
 
-import sh
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 from pydantic import model_validator
 
+from lup.programs import ProgramMissingError, run
 from lup.types import Model
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.errors import LupDevError
@@ -118,15 +118,10 @@ class Machine(Tools):
     def run(self, command: list[str]) -> Printed:
         program, *arguments = command
         try:
-            ran = sh.Command(program)(
-                *arguments,
-                _ok_code=list(range(256)),
-                _tty_out=False,
-                _return_cmd=True,
-            )
-        except sh.CommandNotFound:
+            ran = run(program, *arguments, checked=False)
+        except ProgramMissingError:
             return Printed(code=127, output="")
-        return Printed(code=ran.exit_code, output=ran.stdout.decode(errors="replace"))
+        return Printed(code=ran.status, output=ran.output.decode(errors="replace"))
 
 
 class Needed(Model):

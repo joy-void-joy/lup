@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import override
 
 import httpx
-import sh
 from packaging.specifiers import SpecifierSet
 from packaging.version import InvalidVersion, Version
 from pydantic import Field, TypeAdapter
@@ -31,6 +30,7 @@ from tenacity import (
     wait_exponential,
 )
 
+from lup.programs import run
 from lup.types import Model
 from lup_dev.declaration.load import Pyproject, import_roots, importable
 from lup_dev.errors import LupDevError
@@ -67,16 +67,10 @@ class UvPythons(Pythons):
 
             version: str
 
-        listed = sh.Command("uv")(
-            "python",
-            "list",
-            "--all-versions",
-            "--output-format",
-            "json",
-            _tty_out=False,
-            _return_cmd=True,
+        listed = run(
+            "uv", "python", "list", "--all-versions", "--output-format", "json"
         )
-        found = TypeAdapter(list[Listed]).validate_json(listed.stdout)
+        found = TypeAdapter(list[Listed]).validate_json(listed.output)
         return [python.version for python in found]
 
 

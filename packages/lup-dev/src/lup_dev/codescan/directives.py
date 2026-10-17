@@ -29,7 +29,6 @@ from pathlib import Path, PurePosixPath
 from typing import Annotated, Literal, Self, override
 from urllib.parse import urlparse
 
-import sh
 from pydantic import Field, model_validator
 from tenacity import (
     retry,
@@ -38,6 +37,7 @@ from tenacity import (
     wait_exponential,
 )
 
+from lup.programs import ProgramFailedError, ProgramMissingError, run
 from lup.types import Model
 from lup_dev.codescan.conditions import Condition
 from lup_dev.forge.protocol import IssueState, Stated
@@ -105,26 +105,19 @@ class GitHubIssues(Issues):
         asks the host instead (`HostIssues`).
         """
         try:
-            status = sh.Command("gh")(
-                "auth",
-                "status",
-                _cwd=str(self.root),
-                _ok_code=list(range(256)),
-                _tty_out=False,
-                _return_cmd=True,
-            )
-        except sh.CommandNotFound:
+            status = run("gh", "auth", "status", cwd=self.root, checked=False)
+        except ProgramMissingError:
             return "`gh` isn't installed here"
-        if status.exit_code != 0:
+        if status.status != 0:
             return (
-                f"`gh auth status` ended with status {status.exit_code}: no GitHub "
+                f"`gh auth status` ended with status {status.status}: no GitHub "
                 "login here, or GitHub is out of reach"
             )
         return None
 
     @override
     @retry(
-        retry=retry_if_exception_type(sh.ErrorReturnCode),
+        retry=retry_if_exception_type(ProgramFailedError),
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, max=10),
         reraise=True,
@@ -136,18 +129,17 @@ class GitHubIssues(Issues):
             state: Literal["OPEN", "CLOSED"]
 
         elsewhere = ["--repo", issue.repository] if issue.repository else []
-        viewed = sh.Command("gh")(
+        viewed = run(
+            "gh",
             "issue",
             "view",
             str(issue.number),
             *elsewhere,
             "--json",
             "state",
-            _cwd=str(self.root),
-            _tty_out=False,
-            _return_cmd=True,
+            cwd=self.root,
         )
-        match Viewed.model_validate_json(viewed.stdout).state:
+        match Viewed.model_validate_json(viewed.output).state:
             case "OPEN":
                 return "open"
             case "CLOSED":

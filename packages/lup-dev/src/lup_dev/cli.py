@@ -24,7 +24,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, override
 
-import sh
 import typer
 from filelock import FileLock
 from filelock import Timeout as Held
@@ -938,7 +937,7 @@ def scanned(paths: list[Path] | None, *, issues: bool) -> Scanned:
         for name in nul_separated(
             Git(cwd=root)
             .run("ls-files", "-z", "--cached", "--others", "--exclude-standard")
-            .stdout
+            .output
         )
         if (root / name).is_file()
     ]
@@ -1220,11 +1219,6 @@ def main() -> None:
         app()
     except (LupDevError, LupError) as failure:
         typer.echo(f"lup-dev: {failure}", err=True)
-        raise SystemExit(1) from failure
-    except sh.ErrorReturnCode as failure:
-        typer.echo(
-            f"lup-dev: {failure.full_cmd} failed: {failure.stderr.decode()}", err=True
-        )
         raise SystemExit(1) from failure
 
 

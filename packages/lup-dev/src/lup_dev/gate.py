@@ -26,8 +26,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Literal, override
 
-import sh
-
+from lup import programs
 from lup.types import Model
 from lup_dev.catalog.gate import Step
 from lup_dev.declaration.load import load
@@ -59,19 +58,12 @@ class Shell(Processes):
     def run(self, command: list[str], cwd: Path) -> Ran:
         program, *arguments = command
         try:
-            ran = sh.Command(program)(
-                *arguments,
-                _cwd=str(cwd),
-                _ok_code=list(range(256)),
-                _err_to_out=True,
-                _tty_out=False,
-                _return_cmd=True,
-            )
-        except sh.CommandNotFound:
+            ran = programs.run(program, *arguments, cwd=cwd, checked=False, merged=True)
+        except programs.ProgramMissingError:
             return Ran(
                 code=127, output=f"`{program}` isn't installed, or not on PATH\n"
             )
-        return Ran(code=ran.exit_code, output=ran.stdout.decode(errors="replace"))
+        return Ran(code=ran.status, output=ran.output.decode(errors="replace"))
 
 
 class Fixes(Model):

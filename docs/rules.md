@@ -298,7 +298,7 @@ def price(prices: dict[str, int], item: str, first: list[int]) -> int:
 
 A second library for running programs, beside the one the rest of the code uses, splits how commands are run, checked and reported.
 
-**Steer:** Run programs with `sh`: `sh.git("status")`, or `sh.Command(path)(…)` for one found by path.
+**Steer:** Run programs with `lup.programs`: `run("git", "status", cwd=root)`, which starts them safely beside threads and raises on a status the caller doesn't accept, or `detached(…)` for one that outlives its caller.
 
 **Flags:**
 
@@ -314,12 +314,12 @@ def status() -> str:
 Done the steer's way:
 
 ```python
-import sh
+from lup.programs import run
 
 
 def status() -> str:
     """Return the working tree's status."""
-    return str(sh.git("status"))
+    return run("git", "status").text()
 ```
 
 **Leaves alone:**
@@ -338,7 +338,7 @@ async def pause() -> None:
 
 Running a program through the shell, or in place of this process, hides its arguments from the reader and its failure from the caller.
 
-**Steer:** Run programs with `sh`, which takes the arguments as a list and raises when the program fails.
+**Steer:** Run programs with `lup.programs.run`, which takes the arguments as a list and raises when the program fails.
 
 **Flags:**
 
@@ -354,12 +354,12 @@ def fetch() -> int:
 Done the steer's way:
 
 ```python
-import sh
+from lup.programs import run
 
 
 def fetch() -> None:
     """Fetch the remote's commits."""
-    sh.git("fetch")
+    run("git", "fetch")
 ```
 
 **Leaves alone:**

@@ -13,8 +13,8 @@ from pathlib import Path
 from typing import Literal, override
 
 import pytest
-import sh
 
+from lup.programs import run
 from lup.tools.hook import lup_hook
 from lup.tools.tool import ToolError, lup_tool
 from lup.types import Model
@@ -284,8 +284,8 @@ def test_a_launch_s_own_process_serves_its_committed_declaration_s_modules(
     repo: Path, state: object, host: HostLayout, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     (repo / "lup_project.py").write_text(DECLARATION)
-    sh.git("add", "-A", _cwd=str(repo))
-    sh.git("commit", "-q", "-m", "a module of its own", _cwd=str(repo))
+    run("git", "add", "-A", cwd=repo)
+    run("git", "commit", "-q", "-m", "a module of its own", cwd=repo)
     host.launches.mkdir(parents=True)
     # The worktree's own copy changes after the commit: the process reads the commit.
     (repo / "lup_project.py").write_text("raise SystemExit('not this one')\n")
@@ -296,7 +296,7 @@ def test_a_launch_s_own_process_serves_its_committed_declaration_s_modules(
     )
     said: list[str] = []
 
-    async def run() -> tuple[list[str], Called, Called, bool]:
+    async def exercised() -> tuple[list[str], Called, Called, bool]:
         workers = Workers(layout=host, say=said.append)
         offered = await workers.open(registered)
         calling = Calling(name="shout", arguments={"text": "hi"}, caller=CALLER)
@@ -311,7 +311,7 @@ def test_a_launch_s_own_process_serves_its_committed_declaration_s_modules(
         assert isinstance(again, Called)
         return [spec.name for spec in offered.tools], first, again, gone
 
-    names, first, again, gone = asyncio.run(run())
+    names, first, again, gone = asyncio.run(exercised())
     assert "shout" in names
     assert "read_issue" in names
     assert first.answer.text == "HI from loud"

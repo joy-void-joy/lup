@@ -18,8 +18,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, override
 
 import pytest
-import sh
 
+from lup.programs import run
 from lup_dev import CodeRules, Module, Modules, Rules
 from lup_dev import Project as Declaration
 from lup_dev.codescan.contract import FileReport, Rule, Source
@@ -209,8 +209,8 @@ def test_a_rewritten_example_passes_every_rule_ruff_and_pyright(
         f for f in pyright(report) if not f.startswith("reportMissingModuleSource")
     ]
     assert typed == []
-    ruff = sh.Command(str(Path(sys.executable).parent / "ruff"))
-    ruff(
+    run(
+        Path(sys.executable).parent / "ruff",
         "check",
         "--ignore-noqa",
         "--config",
@@ -550,7 +550,7 @@ CALLING = Source(path=Path("packages/pkg/src/pkg/caller.py"), content=CALLER)
 
 def environment(at: Path, source: Path) -> Path:
     """Make a virtual environment with `source` installed editable, as uv does."""
-    sh.Command(sys.executable)("-m", "venv", "--without-pip", str(at))
+    run(sys.executable, "-m", "venv", "--without-pip", str(at))
     [site] = (at / "lib").glob("python*/site-packages")
     (site / "_pkg.pth").write_text(str(source))
     return at / "bin"

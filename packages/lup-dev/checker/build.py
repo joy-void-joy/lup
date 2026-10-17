@@ -20,9 +20,9 @@ import shutil
 import tomllib
 from pathlib import Path
 
-import sh
 from pydantic import Field
 
+from lup.programs import ProgramFailedError, run
 from lup.types import Model
 from lup_dev.layout import Bundle, Layout
 from lup_dev.settings import LupDevSettings
@@ -100,7 +100,8 @@ def fetch(release: str, cache: Path, repository: str) -> Path:
         cache.mkdir(parents=True, exist_ok=True)
         partial = cache / f"{release}.partial"
         shutil.rmtree(partial, ignore_errors=True)
-        sh.git(
+        run(
+            "git",
             "clone",
             "--quiet",
             "--depth",
@@ -113,7 +114,8 @@ def fetch(release: str, cache: Path, repository: str) -> Path:
         partial.rename(source)
     manifest = Manifest.model_validate_json((source / "package.json").read_text())
     log.info("installing pyright's dependencies with %s", manifest.package_manager)
-    sh.npm(
+    run(
+        "npm",
         "exec",
         "--yes",
         manifest.package_manager,
@@ -122,7 +124,7 @@ def fetch(release: str, cache: Path, repository: str) -> Path:
         "--frozen-lockfile",
         "--filter",
         "pyright-internal",
-        _cwd=str(source),
+        cwd=source,
     )
     installed.write_text(release + "\n")
     return source
@@ -143,20 +145,23 @@ def install_bundler(places: Places) -> None:
     if installed.is_file() and installed.stat().st_mtime >= lock.stat().st_mtime:
         return
     log.info("installing the engine's bundler")
-    sh.npm("ci", "--no-audit", "--no-fund", _cwd=str(places.checker))
+    run("npm", "ci", "--no-audit", "--no-fund", cwd=places.checker)
 
 
 def bundle(places: Places, source: Path) -> None:
     """Type-check the engine and its table, bundle them, and place the stubs beside."""
     log.info("type-checking the engine")
-    sh.Command(str(source / "node_modules" / ".bin" / "tsc"))(
-        "-p", str(places.checker / "tsconfig.json")
+    run(
+        source / "node_modules" / ".bin" / "tsc",
+        "-p",
+        str(places.checker / "tsconfig.json"),
     )
     target = places.bundle.script
     target.parent.mkdir(parents=True, exist_ok=True)
     partial = target.with_name(target.name + ".partial")
     log.info("bundling the engine into %s", target)
-    sh.Command(str(places.tools / "esbuild"))(
+    run(
+        places.tools / "esbuild",
         "src/main.ts",
         "--bundle",
         "--platform=node",
@@ -165,7 +170,7 @@ def bundle(places: Places, source: Path) -> None:
         "--tsconfig=tsconfig.json",
         f"--outfile={partial}",
         "--log-level=warning",
-        _cwd=str(places.checker),
+        cwd=places.checker,
     )
     stubs = source / "packages" / "pyright-internal" / "typeshed-fallback"
     shutil.rmtree(places.bundle.stubs, ignore_errors=True)
@@ -184,9 +189,12 @@ def main() -> None:
         link(places, source)
         install_bundler(places)
         bundle(places, source)
-    except sh.ErrorReturnCode as failure:
-        output = failure.stdout.decode() + failure.stderr.decode()
-        message = f"build: {failure.full_cmd} failed:\n{output}"
+    except ProgramFailedError as failure:
+        ran = failure.ran
+        output = ran.output.decode(errors="replace") + ran.error.decode(
+            errors="replace"
+        )
+        message = f"build: `{' '.join(ran.command)}` failed:\n{output}"
         raise SystemExit(message) from failure
     log.info("built %s", places.bundle.script)
 
