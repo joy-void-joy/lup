@@ -12,12 +12,15 @@ conversation is told together, oldest first, by whichever comes first:
 - **`wait_inbox`,** or `ask` with `wait`, a call held until something arrives,
   whose result is the items (`held`);
 - **its session's start or resumption,** in the start's answer;
-- **while it's idle,** where its runtime's adapter spells a way to start a turn
-  of an idle session (the courier's `woken`), through the session's own
-  messaging socket: only for an item the operator's own act made, and a burst
-  of them once, since the turn it starts tells the rest at its first call.
-  Where a runtime has no way, the item waits for the session's next call, a gap
-  its adapter declares.
+- **through its session's own messaging socket,** where its runtime's adapter
+  spells a way (the courier's `woken`), for an item the operator's own act
+  made: at once, unless a call of its is running, whose hook comes soon. An
+  idle session starts a turn with it, a busy one takes it at its next
+  boundary, so the service needn't know which: a session just started, one
+  interrupted, and every one after the service starts again are reached. A
+  burst is written once, since the turn it starts tells the rest at its first
+  call. Where a runtime has no way, the item waits for the session's next
+  call, a gap its adapter declares.
 
 **Told once.** An item is told when it's written into a hook's answer, a held
 call's result or the messaging socket, and never again:
@@ -44,9 +47,9 @@ every launch asking about the same zone while it waits joins it (`asked`). It's
 answered once, by whichever terminal answers first (`decided`), which wakes every
 launch waiting on it; an answer after that changes nothing.
 
-What the service knows of a conversation while it serves (whether it's idle,
-the calls it holds) is in memory: a service started again knows a conversation
-idle only once its turn ends again, so an idle session isn't woken until then.
+What the service knows of a conversation while it serves (whether a call of
+its runs, the calls it holds) is in memory: a service started again knows of
+no call running, and wakes.
 """
 
 import asyncio
@@ -180,11 +183,14 @@ class Held(MutableModel, arbitrary_types_allowed=True):
 
 
 class Presence(MutableModel):
-    """What the service knows of a conversation while it serves: whether it's idle, and the calls it holds."""
+    """What the service knows of a conversation while it serves: whether a call of its runs, whether it was woken since its last hook, and the calls it holds."""
 
-    idle: bool = False
-    """Whether its turn ended, its end let through, with no hook since: a turn
-    started in its session reaches it."""
+    calling: bool = False
+    """Whether a call of its started and hasn't finished: its next hook comes
+    soon, and tells what waits."""
+    woken: bool = False
+    """Whether it was woken since its last hook: the turn the wake starts tells
+    what arrives meanwhile at its first call."""
     held: list[Held] = []
 
 
@@ -231,8 +237,10 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         )
         self.heard_in(party, launch)
         presence = self.presence(party)
+        presence.woken = False
         match heard.event:
             case "turn-ended" | "conversation-ended":
+                presence.calling = False
                 for each in presence.held:
                     each.ended = True
                 fresh = [
@@ -244,16 +252,18 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
                         return posted
                 if heard.event == "conversation-ended" and party.agent is not None:
                     self.ended(party)
-                presence.idle = party.agent is None
                 return Posted()
             case "session-started":
-                presence.idle = False
+                presence.calling = False
                 return self.told(party, room, heard.fits, "start")
             case "call-started" if heard.served:
-                presence.idle = False
+                presence.calling = True
                 return Posted()
-            case "call-started" | "call-finished":
-                presence.idle = False
+            case "call-started":
+                presence.calling = True
+                return self.told(party, room, heard.fits, "call")
+            case "call-finished":
+                presence.calling = False
                 return self.told(party, room, heard.fits, "call")
 
     @override
@@ -425,18 +435,26 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         await self.notices.notify(summary, body)
 
     async def wake(self, party: Conversation) -> None:
-        """Start a turn of `party`'s idle session with everything waiting for it, where its runtime has a way.
+        """Write everything waiting for `party`'s session to its messaging socket, unless a call of its is running, where its runtime has a way.
 
-        Only a session's main conversation is idle; one that isn't, or whose
-        runtime has no way, is told at its next hook. What the wake tells is
-        counted told before it's written, so a hook meanwhile doesn't tell it
-        again; where the session's messaging socket can't be reached, that's
-        said, and the items wait again.
+        Only a session's main conversation is woken. A call of its running
+        (`Presence.calling`) means a hook comes soon and tells it there; a call
+        it holds is given it; a wake since its last hook started a turn whose
+        first call tells it; and a runtime with no way waits for its next hook.
+        Otherwise it's written to the socket whatever the service knows of the
+        session: just started, idle, generating, or unknown since the service
+        started again or since the operator interrupted it. An idle session
+        starts a turn with it, and a busy one takes it at its next boundary, as
+        measured on the runtime that has a way (`docs/field-notes.md`, *Waking
+        a session*). What the wake tells is counted told before it's written,
+        so a hook meanwhile doesn't tell it again; where the session's messaging
+        socket can't be reached, that's said, and the items wait again.
         """
         presence = self.presence(party)
         place = self.inbox.whereabouts.get(party.key())
         waiting = self.inbox.waiting(party)
-        if not presence.idle or presence.held or place is None or not waiting:
+        quiet = presence.calling or presence.woken or presence.held
+        if party.agent is not None or quiet or place is None or not waiting:
             return
         text = SEPARATOR.join(self.said(item) for item in waiting)
         line = self.courier.woken(party.runtime, party.session, text)
@@ -445,7 +463,7 @@ class Delivery(MutableModel, Post, arbitrary_types_allowed=True):
         told = Told(at=self.clock.now(), how="wake")
         for item in waiting:
             self.inbox.kept(item.model_copy(update={"state": told}))
-        presence.idle = False
+        presence.woken = True
         socket = self.layout.launch(place.launch).messages
         try:
             _, writer = await asyncio.open_unix_connection(str(socket))

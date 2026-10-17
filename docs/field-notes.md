@@ -416,6 +416,11 @@ Read in its code and history (`lup-legacy`), with each commit there:
 - **The network:** lup's own sessions ran on the host's network, for sign-in callbacks and ssh; the default was an internal network behind a squid proxy, whose DNS and staleness caused failures of their own.
 - **Its hooks** ran inside the container on the image's Python, from generated files in the checkout, which a session could rewrite unless they were held read-only.
 
+### Waking a session (Claude Code, from the first lup, 2.1.285)
+
+- **A message to a busy session is queued, not lost.** Measured by the first lup in an interactive session (its `04f4d1594`, `482768107`): a frame written to the messaging socket while a tool call runs is taken right after the call; while the model generates, a frame without a `priority` (taken as `next`) lets the turn finish and is taken then, and a `now` frame ends the generating turn within milliseconds and is taken at once. An idle session starts a turn with it. The 2.1.296 binary still names the queue ("Routed user message to queue (priority=…)"). So lup writes the operator's items at once, unless a call is running, without tracking idleness (`inbox/delivery.py`, `wake`).
+- **Sockets that collide.** The first lup's sessions met each other's sockets: the runtime's default `/tmp/cc-socks/<pid>.sock` names a live socket of another container's session wherever both are pid 7, and paths keyed by display names met an earlier session's stale socket; Claude Code refuses `--messaging-socket-path` at a live socket (its `06b544585`). lup's sockets are per launch, under a fresh id.
+
 ### Lending to a running room (podman 6.1.3, util-linux 2.42.4, kernel 7.2.6, measured 2026-10-17)
 
 Probed on the operator's host with throwaway containers from the room's base image, run as lup runs a room (`--userns=keep-id`):

@@ -621,6 +621,90 @@ def test_an_idle_session_is_woken_once_through_its_messaging_socket(
     assert "one: woke claude session s1, telling items 1" in said
 
 
+def frames_of(written: list[str]) -> list[str]:
+    """The text each frame written to a messaging socket carries."""
+    return [json.loads(frame)["message"]["content"] for frame in written]
+
+
+def test_a_session_that_just_started_is_woken(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path, "one", "claude")
+        hook = machine.host.launch("one").hook
+        messages = Socket(machine.host.launch("one").messages)
+        send(hook, claude("SessionStart", source="startup"))
+        inbox("send", "one", "Before your first turn.")
+        frames = messages.close()
+    assert frames_of(frames) == [first_note("Before your first turn.")]
+
+
+def test_a_session_with_a_call_running_is_told_when_it_finishes_not_woken(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path, "one", "claude")
+        hook = machine.host.launch("one").hook
+        messages = Socket(machine.host.launch("one").messages)
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, bash("b1"))
+        inbox("send", "one", "While you run.")
+        finished = send(
+            hook,
+            claude(
+                "PostToolUse",
+                tool_name="Bash",
+                tool_input={"command": "ls"},
+                tool_use_id="b1",
+                tool_response={"stdout": ""},
+            ),
+        )
+        inbox("send", "one", "Between calls.")
+        frames = messages.close()
+    assert context(finished) == first_note("While you run.")
+    assert frames_of(frames) == [
+        "lup's inbox, item 2: a note from the operator:\nBetween calls."
+    ]
+
+
+def test_a_service_started_again_wakes_a_session_it_hasn_t_heard_since(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path, "one", "claude")
+        send(machine.host.launch("one").hook, bash("b1"))
+    with inboxed(machine, clock, notices, said):
+        messages = Socket(machine.host.launch("one").messages)
+        inbox("send", "one", "After a restart.")
+        frames = messages.close()
+    assert frames_of(frames) == [first_note("After a restart.")]
+
+
+def test_two_launches_in_one_worktree_each_wake_through_their_own_socket(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path, "one", "claude")
+        launched(machine, clock, tmp_path, "two", "claude")
+        first = Socket(machine.host.launch("one").messages)
+        second = Socket(machine.host.launch("two").messages)
+        send(machine.host.launch("one").hook, claude("SessionStart", session_id="s1"))
+        send(machine.host.launch("two").hook, claude("SessionStart", session_id="s2"))
+        inbox("send", "one", "For one.")
+        inbox("send", "two", "For two.")
+        to_first = first.close()
+        to_second = second.close()
+    assert machine.host.launch("one").messages != machine.host.launch("two").messages
+    assert frames_of(to_first) == [first_note("For one.")]
+    assert frames_of(to_second) == [
+        "lup's inbox, item 2: a note from the operator:\nFor two."
+    ]
+    assert [json.loads(each)["session_id"] for each in [*to_first, *to_second]] == [
+        "s1",
+        "s2",
+    ]
+
+
 def test_an_idle_session_whose_socket_is_gone_is_told_at_its_next_call(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
