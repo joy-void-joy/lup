@@ -30,9 +30,7 @@ class Gate(Model):
 
     steps: list[Step] = [
         Step(name="rules", command=["lup-dev", "rules", "check"]),
-        Step(name="ruff", command=["ruff", "check", "--ignore-noqa"]),
         Step(name="format", command=["ruff", "format", "--check"]),
-        Step(name="pyright", command=["pyright", "--warnings"]),
         Step(name="pytest", command=["pytest"]),
         Step(name="lint-imports", command=["lint-imports"]),
     ]
@@ -40,8 +38,11 @@ class Gate(Model):
 
     lup's rules first: `lup-dev rules check` with no paths checks every file its
     declaration's roles say is checked, lup's rules on the production and protected
-    modules, as the judge does at each write, so the gate holds them wherever it
-    runs, the judge running or not.
+    modules, and pyright's errors and warnings and ruff's findings on those and the
+    tests, as the judge does at each write, so the gate holds them wherever it
+    runs, the judge running or not. It's the one step reading `# lup: ignore`, so
+    ruff and pyright aren't steps of their own, which would fail on a finding an
+    `ignore` keeps.
 
     Building lup's own engine isn't among them: only lup's repository has one to
     build, so its step is that repository's own (`LupDevelopment`, in its

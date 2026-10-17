@@ -319,11 +319,12 @@ def test_an_added_ignore_asks_naming_its_rule_and_reason(judge: Judging) -> None
     assert judgement.refusing == []
 
 
-def test_an_ignore_whose_rule_doesnt_fire_is_a_finding(judge: Judging) -> None:
+def test_an_ignore_whose_rule_doesnt_fire_is_never_refused(judge: Judging) -> None:
     after = CORE + 'y = 1  # lup: ignore("tuple-shape", why="nothing here")\n'
     judgement = judge(edit("src/pkg/core.py", CORE, after))
-    assert judgement.outcome == "refuse"
-    assert [finding.rule for finding in judgement.refusing] == ["unused-ignore"]
+    assert judgement.outcome == "ask"
+    assert judgement.refusing == []
+    assert judgement.untouched == []
 
 
 def test_refuse_wins_over_ask(judge: Judging) -> None:

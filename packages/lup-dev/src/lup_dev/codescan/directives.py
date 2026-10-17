@@ -9,7 +9,9 @@ directives*.
 Each kind answers for itself (`docs/conventions.md`, *Dispatch*): which finding it
 keeps, what's wrong with it, and what identifies it across edits. What's wrong is
 reported as a `Problem`, which the judge turns into a finding of its own rule:
-- `unused-ignore`: an `ignore` whose rule doesn't fire on the line it covers;
+- `unused-ignore`: an `ignore` whose rule doesn't fire on the line it covers,
+  fixable: never told to an agent, removed by `lup-dev rules fix`, which
+  `lup-dev check --fix` runs, and reported by the gate until it's removed;
 - `malformed-directive`: a call the grammar refuses, unknown or incomplete;
 - `defer-issue`: a deferral's `issue` that's neither a number nor `owner/repo#7`;
 - `defer-condition`: a deferral's `when` naming no declared condition;
@@ -17,7 +19,9 @@ reported as a `Problem`, which the judge turns into a finding of its own rule:
 - `defer-due`, at the gate: a deferral whose condition holds.
 """
 
+import io
 import json
+import tokenize
 from abc import ABC, abstractmethod
 from collections import Counter
 from collections.abc import Callable
@@ -217,6 +221,8 @@ class Problem(Model):
     rule: str
     message: str
     steer: str = ""
+    fixable: bool = False
+    """Whether `lup-dev rules fix` removes it, so no agent is told of it."""
 
 
 class Identity(Model):
@@ -270,7 +276,13 @@ class Ignore(Comment):
         message = f"`{self.rule}` doesn't fire on line {self.covers}, which this covers"
         steer = "remove the ignore, or move it to the line the finding is on"
         return [
-            Problem(line=self.line, rule="unused-ignore", message=message, steer=steer)
+            Problem(
+                line=self.line,
+                rule="unused-ignore",
+                message=message,
+                steer=steer,
+                fixable=True,
+            )
         ]
 
     @override
@@ -437,3 +449,35 @@ def added_suppressions(
     return [
         directive for directive in missing(before, after) if directive.identity().asked
     ]
+
+
+def without(text: str, lines: list[int]) -> str:
+    r"""Return `text` without the comment on each of `lines`, a line left holding nothing removed whole.
+
+    Where each comment starts is read with Python's tokenizer, so a `#` inside a
+    string is never taken for one. A `# lup:` comment runs to the end of its line,
+    so what's left of a line is what comes before it, its trailing spaces dropped.
+
+    >>> without('x = 1  # lup: ignore("E1", why="w")\n# lup: ignore("E2", why="w")\ny = 2\n', [1, 2])
+    'x = 1\ny = 2\n'
+    """
+    starts = {
+        row: column
+        for token in tokenize.generate_tokens(io.StringIO(text).readline)
+        for row, column in [token.start]
+        if token.type == tokenize.COMMENT and row in lines
+    }
+
+    def kept(number: int, line: str) -> list[str]:
+        column = starts.get(number)
+        if column is None:
+            return [line]
+        # lup: ignore("string-slice", why="the column is Python's tokenizer's, where the line's comment starts")
+        before = line[:column].rstrip()
+        return [f"{before}\n"] if before else []
+
+    return "".join(
+        each
+        for number, line in enumerate(io.StringIO(text).readlines(), start=1)
+        for each in kept(number, line)
+    )

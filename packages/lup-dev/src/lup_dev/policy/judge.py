@@ -178,6 +178,7 @@ def finding(path: Path, problem: Problem) -> Finding:
         rule=problem.rule,
         message=problem.message,
         steer=problem.steer,
+        fixable=problem.fixable,
     )
 
 
@@ -407,7 +408,12 @@ class Judge(Model, arbitrary_types_allowed=True):
         )
 
     def lup_findings(self, path: Path, versions: Versions) -> list[Finding]:
-        """Return lup's findings once `ignore`s apply, and the directives' problems."""
+        """Return lup's findings once `ignore`s apply, and the directives' problems.
+
+        A problem `lup-dev rules fix` removes, an unused `ignore`, isn't among
+        them: the session landing the work removes it, as it applies ruff's safe
+        fixes.
+        """
         if versions.after is None:
             return []
         fired = [*versions.after.findings, *versions.ruff]
@@ -422,6 +428,7 @@ class Judge(Model, arbitrary_types_allowed=True):
             finding(path, problem)
             for directive in directives
             for problem in directive.problems(checking)
+            if not problem.fixable
         ]
         kept = [found for found in self.kept(versions) if found.owner == "lup"]
         return [*kept, *problems]
