@@ -34,7 +34,7 @@ from lup_dev.inbox.notices import Notices
 from lup_dev.inbox.protocol import AskApproval
 from lup_dev.inbox.protocol import routes as inbox_routes
 from lup_dev.inbox.store import Approval as StoredApproval
-from lup_dev.inbox.store import Decided, Inbox, InboxError
+from lup_dev.inbox.store import Decided, Inbox, InboxError, Superseded, Waiting
 from lup_dev.launch.trust import (
     WHOLE,
     WHY,
@@ -46,6 +46,7 @@ from lup_dev.launch.trust import (
     Kept,
     Lock,
     Outcome,
+    SupersededError,
     Terminal,
     Toolchain,
     Trust,
@@ -1857,6 +1858,73 @@ def test_lup_dev_inbox_answer_asks_an_approval_as_the_launch_does(
     assert summary.splitlines()[1:] == ["A summary."]
     assert terminal.shown == ["+the whole diff\n"]
     assert terminal.asked == [WHOLE, "Approve the host zone?"]
+
+
+def approval_of(tmp_path: Path, fingerprint: str) -> AskApproval:
+    """An approval of the repository at `tmp_path`, its zone at `fingerprint`."""
+    return AskApproval(
+        question=f"Approve the host zone {fingerprint}?",
+        summary="A summary.",
+        diff="",
+        repository=tmp_path / ".git",
+        fingerprint=fingerprint,
+        worktree=tmp_path,
+    )
+
+
+def test_an_approval_of_a_newer_zone_supersedes_the_one_waiting(
+    machine: Layout, clock: FakeClock, tmp_path: Path, acting: list[Acted]
+) -> None:
+    elsewhere = tmp_path / "elsewhere"
+    with served(machine, clock) as running:
+        approvals = inboxed(machine, clock)
+        older = approvals.asked(approval_of(tmp_path, "older"))
+        other = approvals.asked(approval_of(elsewhere, "theirs"))
+        again = approvals.asked(approval_of(tmp_path, "older"))
+        newer = approvals.asked(approval_of(tmp_path, "newer"))
+        listed = inbox()
+        replaced = running.delivery.inbox.item(older)
+        late = CliRunner().invoke(cli.app, ["inbox", "answer", str(older), "--approve"])
+    assert again == older
+    assert replaced.state == Superseded(at=clock.now(), by=newer)
+    assert isinstance(running.delivery.inbox.item(other).state, Waiting)
+    assert f"{older:>4}  " not in listed
+    assert f"{newer:>4}  " in listed
+    assert isinstance(late.exception, SupersededError)
+    assert str(late.exception) == (
+        f"Item {older} was superseded by item {newer}, an approval of the host zone "
+        "at the integration branch's tip."
+    )
+    assert acting == []
+
+
+class SupersededOnce(Here):
+    """The inbox, standing in: the first answer finds its approval superseded."""
+
+    def answer(self, number: int, *, approved: bool) -> Given:
+        if not self.answers:
+            self.answers.append(approved)
+            message = f"Item {number} was superseded by item 2."
+            raise SupersededError(message)
+        return super().answer(number, approved=approved)
+
+
+def test_a_launch_whose_approval_is_superseded_asks_about_the_tip_instead(
+    lup: Path, kit: Kit, shell: Shell
+) -> None:
+    asker = Answering([True, True])
+    trust = trusting(lup, kit, asker, approvals=SupersededOnce())
+
+    outcome = trust.ensure()
+
+    assert isinstance(outcome, Trusted)
+    assert isinstance(trust.approvals, SupersededOnce)
+    assert len(trust.approvals.asking) == 2
+    assert (
+        "Item 1 was superseded by item 2. The tip moved: asking about it instead."
+        in (asker.said)
+    )
+    assert approved(lup, kit, shell) == outcome.approval
 
 
 def test_answering_an_approval_is_refused_inside_an_agents_session(

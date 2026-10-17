@@ -205,8 +205,18 @@ class Decided(Model):
     approved: bool
 
 
+class Superseded(Model):
+    """An approval of a host zone a later approval of the same repository replaced, the integration branch's tip having moved."""
+
+    state: Literal["superseded"] = "superseded"
+    at: datetime
+    by: int
+    """The approval replacing it."""
+
+
 type State = Annotated[
-    Waiting | Told | Answered | Done | Decided, Field(discriminator="state")
+    Waiting | Told | Answered | Done | Decided | Superseded,
+    Field(discriminator="state"),
 ]
 """Where an item stands."""
 

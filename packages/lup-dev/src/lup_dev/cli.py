@@ -91,6 +91,7 @@ from lup_dev.inbox.store import (
     Message,
     Question,
     Ruling,
+    Superseded,
     Told,
     Verdict,
     Waiting,
@@ -430,6 +431,8 @@ def standing(item: Item) -> str:
             return f"done at {clocked(at)}"
         case Decided(at=at, approved=approved):
             return f"{settled(approved=approved)} at {clocked(at)}"
+        case Superseded(at=at, by=by):
+            return f"superseded at {clocked(at)} by item {by}"
 
 
 def settled(*, approved: bool) -> str:

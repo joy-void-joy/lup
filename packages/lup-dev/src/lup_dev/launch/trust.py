@@ -103,7 +103,7 @@ from lup_dev.inbox.protocol import (
     Settled,
     Shown,
 )
-from lup_dev.inbox.store import Decided, Item
+from lup_dev.inbox.store import Decided, Item, Superseded
 from lup_dev.layout import CheckoutLayout, JudgeLayout, Layout
 from lup_dev.settings import LupDevSettings
 from lup_dev.stored import write_model
@@ -118,6 +118,10 @@ if TYPE_CHECKING:
 
 class TrustError(LupDevError):
     """The host zone can't be read, or no approved copy is there for the host to run."""
+
+
+class SupersededError(TrustError):
+    """An approval a later one of the same repository replaced, the integration branch's tip having moved: the later one is asked."""
 
 
 class LockSource(Model):
@@ -713,10 +717,16 @@ class Approving(Model, arbitrary_types_allowed=True):
 
 
 def decision(item: Item) -> bool:
-    """Return an approval's answer, yes or no; refuse where it has none."""
+    """Return an approval's answer, yes or no; refuse where it has none, with `SupersededError` where a later one replaced it."""
     match item.state:
         case Decided(approved=approved):
             return approved
+        case Superseded(by=by):
+            message = (
+                f"Item {item.number} was superseded by item {by}, an approval of "
+                "the host zone at the integration branch's tip."
+            )
+            raise SupersededError(message)
         case _:
             message = f"item {item.number} has no answer, yes or no"
             raise TrustError(message)
@@ -1574,14 +1584,18 @@ class Trust(Model, arbitrary_types_allowed=True):
             f"It's item {number} in your inbox too: `lup-dev inbox answer {number}` "
             "answers it from any terminal."
         )
-        given = Approving(
-            asker=self.asker,
-            approvals=self.approvals,
-            number=number,
-            summary=f"{summary}\n\n{inboxed}",
-            question=question,
-            diff=diff,
-        ).given()
+        try:
+            given = Approving(
+                asker=self.asker,
+                approvals=self.approvals,
+                number=number,
+                summary=f"{summary}\n\n{inboxed}",
+                question=question,
+                diff=diff,
+            ).given()
+        except SupersededError as replaced:
+            self.asker.say(f"{replaced} The tip moved: asking about it instead.")
+            return self.ensure()
         with lock:
             return self.answered(repository, standing, given)
 
