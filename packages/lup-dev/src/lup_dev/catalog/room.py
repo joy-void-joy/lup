@@ -100,6 +100,22 @@ class StandardMachine(Model):
                 "fd",
             ],
         ),
+        Group(
+            why=(
+                "searching code by its syntax rather than its text, and applying "
+                "or unpacking what an agent downloads: a patch, a zip archive"
+            ),
+            names=["ast-grep", "patch", "unzip", "zip"],
+        ),
+        Group(
+            why=(
+                "measuring and debugging: timing a command properly, arithmetic in "
+                "the shell, tracing what a process does, waiting on a file to "
+                "change rather than polling it"
+            ),
+            names=["hyperfine", "bc", "strace", "inotify-tools"],
+        ),
+        Group(why="runs a project's Makefile", names=["make"]),
         Group(why="runs a script outside a project's environment", names=["python"]),
         Group(
             why="carries each hook event from the room to lup's host service",
