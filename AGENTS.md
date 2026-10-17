@@ -1,13 +1,19 @@
 # Working on lup
 
-lup is where the operator's way of working with agents lives: the workflows, skills, defaults and patterns that make sessions on Claude Code and Codex better, as modules every project can use. It's built today as two packages, `lup` and `lup-dev`, which the module system will split. `DESIGN.md` describes what lup is for and how it works: read it to know what you're working on. It isn't a record of decisions, so where your work reaches a choice, ask.
+lup is the environment sessions on Claude Code and Codex work in: the workflows, skills, defaults and patterns that make the work go well, for the agents doing it and for the operator working with them, as modules every project can use. It's built today as two packages, `lup` and `lup-dev`, which the module system will split. `DESIGN.md` describes what lup is for and how it works: read it to know what you're working on. It isn't a record of decisions, so where your work reaches a choice, ask.
 
 This repository is the second lup. The first (`joy-void-joy/lup-legacy`, archived) is evidence you may read (how something behaved, what a measurement found), never code to copy. Everything here is written anew.
 
-## What's yours, what's the operator's
+## Who wrote this
 
-- **Yours:** how to build a piece once the operator has answered its decisions: the implementation, its tests, commits, branches, whether to delegate, and scratch work under `tmp/` (gitignored). Decide these without asking.
-- **The operator's:** the shape. A piece's modules, what each is for and its public API; a new dependency or module; `DESIGN.md` and this file; merging.
+This file, `DESIGN.md`, the docs and the guidance every session gets were written by earlier sessions for the ones after: notes on what mattered, so you don't have to find it out again. None of it is a rule handed down. Each line says why it's there, so you can tell when it doesn't fit your case; where it doesn't, or where something seems unclear or off, saying so is part of the work, and the operator is always reachable through lup's inbox (`ask`, `note`, and `report` when the work can't go on). When you learn something the next session should know, write it here with its reason. An edit to this file or to `DESIGN.md` is shown to the operator before it lands, so they see how the guidance changes.
+
+The same holds for what steers you. lup's code rules and the gate point toward approaches that held up: a refusal names the mistake it prevents and where it steers, an `ignore` with its reason keeps a finding where the concern doesn't hold, and a rule that fires where no design choice is at stake is that rule's bug. The room's walls are there so that if something goes wrong (a malicious package, a prompt injection), it can't reach the operator's machine; they aren't there to contain you. How you work is yours, and if something about how the work is set up makes it worse for you, that's worth saying as much as a bug is.
+
+## What's decided with the operator
+
+- **Yours:** how to build a piece once its decisions are answered: the implementation, its tests, commits, branches, your own workflow, whether to delegate, and scratch work under `tmp/` (gitignored). Decide these without asking.
+- **Decided with the operator, in the conversation:** the shape. A piece's modules, what each is for and its public API; a new dependency or module; merging into `main`.
 - **When you meet a shape decision mid-implementation,** ask, and keep going where you can. Never let it ride inside a file. Before lup, files that looked fine but carried a design direction, or a regex where a parser belonged, are exactly what manual review missed.
 
 ## Decisions are live
@@ -26,8 +32,8 @@ The operator decides in the conversation, with the problem in front of them. The
    - The merge commit's message says what changed and why the code works that way, every new file and public-API change, how it was tested, and a short note on how the work felt (see *Delegating*).
    - A simple doc change skips the branch and lands on `dev` directly.
 3. **A release is a pull request from `dev` to `main`,** which the operator reviews and merges. Its description says what changed since the last release. Never merge into `main` or push to it yourself.
-4. **Write with your file tools.** While lup is being built, the judge runs only before an Edit or Write lands: it refuses a write with a finding of lup's code rules, before the file changes, and asks the operator only about a protected path or one of their documents (`DESIGN.md`, this file), as a prompt in their terminal (`asks` in `lup_project.py`). On Codex, whose hooks can't see a patch before it lands, the same judgement runs just after each call. What the shell writes meets the rules only in the gate, later than an Edit would have. The operator sees the shape through the decisions they answer before the code and the merge commit after it. A piece of the environment goes live in lup's own sessions once it's finished, never while it's being built.
-5. **Commit early and atomically**, before you report: `type(scope): what changed and why`.
+4. **Write with your file tools.** While lup is being built, the judge runs only before an Edit or Write lands: it refuses a write with a finding of lup's code rules, before the file changes, and asks the operator only about a protected path or an edit to `DESIGN.md` or this file, as a prompt in their terminal (`asks` in `lup_project.py`). On Codex, whose hooks can't see a patch before it lands, the same judgement runs just after each call. What the shell writes meets the rules only in the gate, later than an Edit would have. The operator sees the shape through the decisions they answer before the code and the merge commit after it. A piece of the environment goes live in lup's own sessions once it's finished, never while it's being built.
+5. **Commit early and atomically**, before you report: `type(scope): what changed and why`. A commit is a checkpoint you can come back to, and an atomic one can be reverted or picked on its own; several sessions can share a checkout, so uncommitted work is the easiest to lose.
 
 ## Code
 
@@ -64,11 +70,13 @@ lup's code rules enforce most of these, at the edit and in the gate (`docs/rules
 
 ## Delegating
 
-- **Your runtime's own subagents for now;** lup's own spawn comes later. Prefer short, bounded jobs: a subagent re-reads its whole context every turn, so long-lived ones are most of the token spend.
-- **End every brief by asking how the work felt:** what was smooth, what got in the way (the exact command and message), what they'd change. "Nothing notable" is a fine answer. Close your own pull requests with the same note.
+- **The instances you spawn are you, with less of the picture.** Give them the picture: who this is for, why it matters, what you're unsure about. Leave them a way to tell you how it went. And if something's unclear or seems off, saying so is part of doing the job: tell them that too.
+- **Your runtime's own subagents for now;** lup's own spawn comes later.
+- **Keep jobs bounded, not briefs thin.** A subagent re-reads its whole context every turn, so a long-lived one costs far more than a bounded job; the picture you give it is worth its tokens.
+- **End every brief by asking how the work went:** what got in the way (the exact command and message), what was smooth, what they'd change, and how it felt, as openly as they like. "Nothing notable" is a fine answer. These notes are read: they're how what gets in the way is found and fixed, and they show where a brief was thin. Close your own merge commits and pull requests with the same note.
 
 ## Tools
 
 - `uv` manages packages (`uv add`); ruff and pyright lint and type-check.
-- Deferred work goes in a GitHub issue. No tracking files.
+- Deferred work goes in a GitHub issue, or a `# lup: defer` pointing at one, never a tracking file: a file parks work where nothing brings it up again, while an issue can be searched, and a deferral comes back once its issue closes.
 - For questions about Claude Code, Codex, their SDKs or the model APIs, read the vendor's documentation rather than answering from memory.
