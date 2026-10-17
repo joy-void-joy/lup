@@ -46,9 +46,9 @@ class Gating(Model):
     """The command running the gate on a commit, whose object id the helper
     gives after it: `lup-dev check --at`, through the project's runner."""
     refs: list[str]
-    """Full ref names: the refs a push updates only once the gate passed on the
-    commit, the integration branch's. Names, not patterns: one branch needs
-    none, and the helper's import contract names each module it may import."""
+    """Patterns over full ref names: the refs a push updates only once the gate
+    passed on the commit, the declaration's (`Core.credentials.gated`), read as
+    git's glob, as the host reads a protected ref's."""
 
 
 def room_config(repository: Path, path: Path, requests: Path, gating: Gating) -> None:

@@ -456,6 +456,7 @@ def test_a_launch_runs_each_step_in_order_and_ends_its_registration(
                 "draft-pull-request",
             ],
             protected=["refs/heads/main", "refs/tags/*", "refs/heads/release/*"],
+            gated=["refs/heads/dev"],
         ),
         github=GitHubRepository(owner="someone", name="work"),
     )

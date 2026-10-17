@@ -46,3 +46,10 @@ class CredentialDefaults(Model):
       into `main` or push to it yourself");
     - `refs/tags/*`: a tag marks a release, which is the operator's too.
     """
+    gated: list[str] = ["refs/heads/dev"]
+    """Refs a push from a room updates only once the gate passed on the commit it
+    would put there, as patterns over full ref names: lup's integration branch,
+    `dev`, so it never takes a commit the gate fails on. A project whose
+    integration branch is another names that one. The gate runs in the room,
+    before the host is asked: it steers, and guards nothing
+    (`docs/host-tools.md`, *git through a remote helper*)."""

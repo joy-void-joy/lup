@@ -402,9 +402,13 @@ class Credentials(Layer, extra="forbid"):
     protected: Refs = Refs.of(*CredentialDefaults().protected)
     """The refs no push updates, as patterns over full ref names: `main` and
     every tag (`lup_dev.catalog.credentials`), unless the project says."""
+    gated: Refs = Refs.of(*CredentialDefaults().gated)
+    """The refs a push from a room updates only once the gate passed on its
+    commit, as patterns over full ref names: the integration branch, `dev`
+    (`lup_dev.catalog.credentials`), unless the project says."""
 
     def resolve(self, defaults: Credentials) -> Limits:
-        """Resolve the actions allowed and the refs protected, `defaults` being the module's own.
+        """Resolve the actions allowed, the refs protected and the refs gated, `defaults` being the module's own.
 
         The actions come in the order `Action` names them, whatever order the
         layers gave them in.
@@ -413,9 +417,11 @@ class Credentials(Layer, extra="forbid"):
         own = [each.entry for each in defaults.actions.resolve([], every)]
         allowed = [each.entry for each in self.actions.resolve(own, every)]
         lups = [each.entry for each in defaults.protected.resolve([], [])]
+        gates = [each.entry for each in defaults.gated.resolve([], [])]
         return Limits(
             actions=[action for action in actions() if action in allowed],
             protected=Refs().ordered(self.protected.resolve(lups, lups)),
+            gated=Refs().ordered(self.gated.resolve(gates, gates)),
         )
 
 

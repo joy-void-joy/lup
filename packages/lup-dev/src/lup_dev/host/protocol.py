@@ -81,6 +81,10 @@ class Limits(Model):
     protected: list[str]
     """Patterns over full ref names, such as `refs/tags/*`: the refs no push
     updates."""
+    gated: list[str] = []
+    """Patterns over full ref names: the refs a push from the room updates only
+    once the gate passed on its commit, which the room's git helper runs first
+    (`remote/helper.py`); the host checks nothing of it."""
 
     def refusal(self, action: Action) -> str | None:
         """Say why the host doesn't do `action` for the launch, where these limits leave it out; none where they allow it.

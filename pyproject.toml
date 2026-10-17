@@ -182,6 +182,7 @@ forbidden_modules = ["*", "lup.**", "lup_dev.**"]
 as_packages = false
 ignore_imports = [
     "lup_dev.remote.helper -> collections",
+    "lup_dev.remote.helper -> fnmatch",
     "lup_dev.remote.helper -> itertools",
     "lup_dev.remote.helper -> json",
     "lup_dev.remote.helper -> pathlib",
