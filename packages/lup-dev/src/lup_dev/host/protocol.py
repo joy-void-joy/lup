@@ -37,6 +37,34 @@ def segment(launch: str) -> str:
 type LaunchId = Annotated[str, AfterValidator(segment)]
 """A launch's id: unique among the launches the service serves, it names their directory."""
 
+
+def handle(name: str, longest: int = 64) -> str:
+    """Return `name` if a launch can take it: letters, digits, `-`, `_` and `.`, not starting with `-`, at most `longest` long.
+
+    >>> handle("gate-on-push")
+    'gate-on-push'
+    >>> handle("two words")
+    Traceback (most recent call last):
+    ...
+    ValueError: a launch's name is letters, digits, `-`, `_` and `.`, not starting with `-`, at most 64 long: not 'two words'
+    """
+    allowed = all(each.isalnum() or each in "-_." for each in name)
+    if not name or not allowed or name.startswith("-") or len(name) > longest:
+        message = (
+            "a launch's name is letters, digits, `-`, `_` and `.`, not starting with "
+            f"`-`, at most {longest} long: not {name!r}"
+        )
+        raise ValueError(message)
+    return name
+
+
+type Name = Annotated[str, AfterValidator(handle)]
+"""A launch's name: how the operator, lup's commands and the session itself call it.
+
+Unique among the launches the service serves, and changeable while it runs;
+nothing is kept by it, so a rename takes effect wherever the name is next used.
+The launch's id stays the same."""
+
 type Action = Literal[
     "fetch",
     "push",
@@ -182,6 +210,22 @@ class Register(Request):
     remote, in its git directory, when the launch started: the one repository
     lup's GitHub tools act on for the launch, never one the room names. None
     where it couldn't be named, which the launch said."""
+    name: Name | None = None
+    """Its name, as it stands: the one asked at registration, made unique
+    (`exact`), and each rename since. None in a record from before launches
+    had names, which the service names after its worktree."""
+    exact: bool = False
+    """Whether the name was asked for as it is (`--name`), so registering
+    refuses where another launch holds it; otherwise `-2`, `-3` is added until
+    it's free."""
+
+
+class Rename(Request):
+    """Rename a launch the service serves, refused where another holds the name."""
+
+    kind: Literal["rename"] = "rename"
+    launch: LaunchId
+    name: Name
 
 
 class Unregister(Request):
@@ -210,17 +254,29 @@ class Reply(Model):
 
 
 class Registered(Reply):
-    """The launch is served: its socket directory, which its room mounts."""
+    """The launch is served: its socket directory, which its room mounts, and the name it took."""
 
     kind: Literal["registered"] = "registered"
     directory: Path
+    name: Name
+
+
+class Renamed(Reply):
+    """The launch is renamed: as it stands."""
+
+    kind: Literal["renamed"] = "renamed"
+    launch: Register
 
 
 class Listed(Reply):
-    """The launches the service serves, each as it was registered."""
+    """The launches the service serves, each as it stands, and the name each session of theirs last had."""
 
     kind: Literal["listed"] = "listed"
     launches: list[Register]
+    sessions: dict[str, Name] = {}
+    """By the runtime's id for each session the service has heard start, the
+    name of its launch as it last stood: how the operator's inbox names who
+    sent an item."""
 
 
 class Done(Reply):

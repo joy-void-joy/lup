@@ -33,7 +33,7 @@ from lup_dev.host.client import HostClient, Starter
 from lup_dev.host.courier import Conversation as Caller
 from lup_dev.host.courier import Heard, Posted
 from lup_dev.host.protocol import HostError, Limits, Register, Stop
-from lup_dev.host.service import Asked, HostService, Judged
+from lup_dev.host.service import Asked, HostService, Judged, Naming
 from lup_dev.inbox.delivery import Delivery
 from lup_dev.inbox.notices import Notices, NotifySend
 from lup_dev.inbox.protocol import routes as inbox_routes
@@ -327,10 +327,12 @@ def codex(event: str, **fields: object) -> str:
 
 
 def context(answer: str) -> str:
-    """What a hook's answer tells the model beside its call or its start."""
+    """What a hook's answer tells the model beside its call or its start, the line naming a session at its start left out."""
     told = json.loads(answer)["hookSpecificOutput"]["additionalContext"]
     assert isinstance(told, str)
-    return told
+    if not told.startswith("lup: this session is"):
+        return told
+    return told.partition("\n\n")[2]
 
 
 def inbox(*arguments: str) -> str:
@@ -358,9 +360,12 @@ def test_an_item_is_told_at_the_conversations_next_call_and_never_again(
     with inboxed(machine, clock, notices, said) as delivery:
         launched(machine, clock, tmp_path, "one", "claude")
         hook = machine.host.launch("one").hook
-        assert send(hook, claude("SessionStart", source="startup")) == ""
+        started = json.loads(send(hook, claude("SessionStart", source="startup")))
+        assert started["hookSpecificOutput"]["additionalContext"].startswith(
+            "lup: this session is `"
+        )
         assert inbox("send", "one", "Look at the cache.") == (
-            "Sent item 1 to claude session s1.\n"
+            f"Sent item 1 to `{tmp_path.name}`, claude session s1.\n"
         )
         told = send(hook, bash("b1"))
         again = send(hook, bash("b2"))
@@ -511,7 +516,8 @@ def test_ask_with_wait_holds_until_the_operator_answers_each_decision(
             returned = asking.result(timeout=60)
         asked = delivery.inbox.item(1)
     assert listed == (
-        f"   1  2026-10-01 12:00  a question from claude session s1 in {tmp_path}: "
+        f"   1  2026-10-01 12:00  a question from `{tmp_path.name}` (claude session s1) "
+        f"in {tmp_path}: "
         "Which parser?\n"
     )
     assert shown == (
@@ -847,8 +853,8 @@ def test_items_survive_a_restart_and_reach_a_session_resumed_in_a_launch_of_its_
         )
         where = delivery.inbox.whereabouts
     assert listed == (
-        f"   1  2026-10-01 12:00  a note from claude session s1 in {tmp_path}: "
-        "A doubt.\n"
+        f"   1  2026-10-01 12:00  a note from `{tmp_path.name}` (claude session s1) "
+        f"in {tmp_path}: A doubt.\n"
     )
     assert context(resumed) == "lup's inbox, item 2: a note from the operator:\nKept."
     assert [place.launch for place in where.values()] == ["two"]
@@ -880,16 +886,18 @@ def test_report_note_and_send_reach_the_operator_with_a_desktop_notice(
     assert invalid[0].startswith("Refused: 1 validation error for Sending")
     assert listed.splitlines() == [
         (
-            f"   1  2026-10-01 12:00  a problem from claude session s1 in {tmp_path}: "
+            f"   1  2026-10-01 12:00  a problem from `{tmp_path.name}` (claude session "
+            f"s1) in {tmp_path}: "
             "The build is broken."
         ),
         (
-            f"   2  2026-10-01 12:00  a note from claude session s1 in {tmp_path}: "
+            f"   2  2026-10-01 12:00  a note from `{tmp_path.name}` (claude session "
+            f"s1) in {tmp_path}: "
             "I assumed UTF-8."
         ),
         (
-            f"   3  2026-10-01 12:00  a disagreement from claude session s1 in "
-            f"{tmp_path}: Not this way."
+            f"   3  2026-10-01 12:00  a disagreement from `{tmp_path.name}` (claude "
+            f"session s1) in {tmp_path}: Not this way."
         ),
     ]
     assert notices.raised[0] == (
@@ -974,6 +982,90 @@ def test_lup_dev_inbox_answer_asks_each_decision_in_turn_at_a_terminal(
     }
 
 
+def named_at_start(answer: str) -> tuple[str, str]:
+    """The name a session's start told it, and the title it gave the runtime."""
+    said = json.loads(answer)["hookSpecificOutput"]
+    told = said["additionalContext"]
+    assert told.startswith("lup: this session is `")
+    return told.removeprefix("lup: this session is `").partition("`")[0], said[
+        "sessionTitle"
+    ]
+
+
+def test_a_session_renames_itself_and_a_name_another_holds_is_refused(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path / "a", "one", "claude")
+        launched(machine, clock, tmp_path / "b", "two", "claude")
+        first = machine.host.launch("one")
+        named_at_start(send(first.hook, claude("SessionStart", source="startup")))
+        send(machine.host.launch("two").hook, claude("SessionStart", session_id="s2"))
+        renamed = call(first.mcp, "rename", {"name": "gate-on-push"})
+        taken = call(machine.host.launch("two").mcp, "rename", {"name": "gate-on-push"})
+        shaped = call(first.mcp, "rename", {"name": "two words"})
+        listed = HostClient(
+            layout=machine.host, clock=clock, starter=Unstarted()
+        ).listed()
+    assert renamed == ("This session is `gate-on-push`.", False)
+    assert taken[0] == (
+        f"Not renamed: `gate-on-push` is launch one's, claude in {tmp_path / 'a'}: "
+        "pick another name"
+    )
+    assert shaped[0].startswith("Not renamed: a launch's name is letters, digits")
+    assert {each.launch: each.name for each in listed.launches} == {
+        "one": "gate-on-push",
+        "two": "b",
+    }
+    assert listed.sessions == {"s1": "gate-on-push", "s2": "b"}
+    assert "one: renamed from `a` to `gate-on-push`" in said
+
+
+def test_a_session_resumed_in_a_later_launch_takes_its_name_back(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path, "one", "claude")
+        send(machine.host.launch("one").hook, claude("SessionStart", source="startup"))
+        call(machine.host.launch("one").mcp, "rename", {"name": "parser-work"})
+        HostClient(layout=machine.host, clock=clock, starter=Unstarted()).unregister(
+            "one"
+        )
+        launched(machine, clock, tmp_path, "two", "claude")
+        resumed = send(
+            machine.host.launch("two").hook, claude("SessionStart", source="resume")
+        )
+    assert named_at_start(resumed) == ("parser-work", "parser-work")
+
+
+def test_a_title_the_operator_gave_in_the_runtime_is_taken_in_a_name_s_shape(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path, "one", "claude")
+        started = send(
+            machine.host.launch("one").hook,
+            claude("SessionStart", source="resume", session_title="Naming Review"),
+        )
+    assert named_at_start(started) == ("naming-review", "naming-review")
+
+
+def test_lup_dev_rename_and_send_name_a_launch_by_its_name(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path / "a", "one", "claude")
+        launched(machine, clock, tmp_path / "b", "two", "claude")
+        send(machine.host.launch("two").hook, claude("SessionStart", session_id="s2"))
+        renamed = runner.invoke(cli.app, ["rename", "b", "reviewer"])
+        held = runner.invoke(cli.app, ["rename", "a", "reviewer"])
+        sent = inbox("send", "reviewer", "Look.")
+    assert renamed.output == "Launch two is `reviewer`.\n"
+    assert isinstance(held.exception, HostError)
+    assert "`reviewer` is launch two's" in str(held.exception)
+    assert sent == "Sent item 1 to `reviewer`, claude session s2.\n"
+
+
 def test_lup_dev_inbox_send_names_a_launch_by_its_id_or_its_worktree(
     machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
 ) -> None:
@@ -985,14 +1077,15 @@ def test_lup_dev_inbox_send_names_a_launch_by_its_id_or_its_worktree(
         launched(machine, clock, tmp_path, "two", "claude")
         several = runner.invoke(cli.app, ["inbox", "send", str(tmp_path), "x"])
         unheard = refused("send", "two", "x")
-    assert by_worktree == "Sent item 1 to claude session s1.\n"
+    assert by_worktree == f"Sent item 1 to `{tmp_path.name}`, claude session s1.\n"
     assert isinstance(nowhere.exception, InboxError)
     assert (
         str(nowhere.exception)
-        == "no launch served is `nowhere`, by its id or its worktree"
+        == "no launch served is `nowhere`, by its name, its id or its worktree"
     )
     assert str(several.exception) == (
-        f"several launches run in {tmp_path}: one, two; name one by its id"
+        f"several launches run: `{tmp_path.name}` (one, in {tmp_path}), "
+        f"`{tmp_path.name}-2` (two, in {tmp_path}); name one"
     )
     assert unheard == (
         "no session of launch `two` has reached lup yet, so nothing there can be told"
@@ -1124,9 +1217,11 @@ def test_the_inbox_tools_take_the_speaking_tools_names_and_inputs() -> None:
     ]
     assert "inbox as a problem" in served[0].description
     github = GitHubTools.specs()
-    assert cli.served_tools(resolve(Project())) == [*served, *github]
+    naming = Naming.model_construct().specs()
+    assert [spec.name for spec in naming] == ["rename"]
+    assert cli.served_tools(resolve(Project())) == [*served, *naming, *github]
     dropped = Project(modules=Modules.default().drop("github"))
-    assert cli.served_tools(resolve(dropped)) == served
+    assert cli.served_tools(resolve(dropped)) == [*served, *naming]
 
 
 class Silent(Notices):

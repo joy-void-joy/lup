@@ -391,6 +391,11 @@ class HostLayout(Model):
         """What a service started in the background prints, kept for when it fails."""
         return self.state / "service.log"
 
+    @property
+    def names(self) -> Path:
+        """The name each session last had, by the runtime's id for it, kept in lup's state so a session resumed in a later launch takes it back."""
+        return self.state / "session-names.json"
+
     def launch(self, launch: str) -> LaunchSockets:
         """Say where launch `launch`'s sockets are."""
         return LaunchSockets(directory=self.launches / launch)
