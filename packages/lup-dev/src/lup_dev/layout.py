@@ -404,6 +404,10 @@ class HostLayout(Model):
         """Say where launch `launch` is recorded, so a restarted service serves it."""
         return self.launches / f"{launch}.json"
 
+    def conversations(self, launch: str) -> Path:
+        """Say where launch `launch`'s conversations are kept, their names, their parents and the spawns not yet linked, so a restarted service knows them."""
+        return self.launches / f"{launch}.conversations.json"
+
     def modules(self, launch: str) -> Path:
         """Say where launch `launch`'s modules are served: beside its record, outside the directory its room mounts."""
         return self.launches / f"{launch}.modules.sock"

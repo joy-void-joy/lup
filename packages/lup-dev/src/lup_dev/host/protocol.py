@@ -268,8 +268,25 @@ class Renamed(Reply):
     launch: Register
 
 
+class Talker(Model):
+    """A conversation of a launch, as the operator is shown it: how it's called, the runtime's ids, its kind and its parent."""
+
+    path: str
+    """Its launch's name, then each subagent's down to it (`dev/explore-auth`);
+    an unnamed subagent by its kind and id."""
+    session: str
+    agent: str | None = None
+    """The runtime's id for the subagent; none for the session's own conversation."""
+    kind: str | None = None
+    parent: str | None = None
+    """Its parent's path; none for the session's own conversation."""
+    depth: int = 0
+    """How many spawns below its session's own conversation it is: 0 for that
+    conversation, 1 for a subagent it spawned."""
+
+
 class Listed(Reply):
-    """The launches the service serves, each as it stands, and the name each session of theirs last had."""
+    """The launches the service serves, each as it stands, the name each session of theirs last had, and each launch's conversations."""
 
     kind: Literal["listed"] = "listed"
     launches: list[Register]
@@ -277,6 +294,9 @@ class Listed(Reply):
     """By the runtime's id for each session the service has heard start, the
     name of its launch as it last stood: how the operator's inbox names who
     sent an item."""
+    talkers: dict[str, list[Talker]] = {}
+    """By launch id, its latest session's conversations: the session's own
+    first, then each subagent under its parent."""
 
 
 class Done(Reply):

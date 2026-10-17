@@ -264,6 +264,7 @@ def inboxed(
         layout=machine.host,
         answerer=known,
         courier=couriers,
+        spawns=cli.SpawnRecords(adapters=known),
         post=delivery,
         routes=inbox_routes(delivery),
         tools=cli.room_tools(delivery),
@@ -1064,6 +1065,190 @@ def test_lup_dev_rename_and_send_name_a_launch_by_its_name(
     assert isinstance(held.exception, HostError)
     assert "`reviewer` is launch two's" in str(held.exception)
     assert sent == "Sent item 1 to `reviewer`, claude session s2.\n"
+
+
+class Subagents:
+    """A Claude Code session's transcript and its subagents' records beside it, as Claude Code keeps them."""
+
+    def __init__(self, tmp_path: Path) -> None:
+        self.transcript = tmp_path / "projects" / "s1.jsonl"
+        self.folder = tmp_path / "projects" / "s1" / "subagents"
+        self.folder.mkdir(parents=True)
+
+    def recorded(
+        self,
+        agent: str,
+        kind: str,
+        call: str,
+        name: str | None = None,
+        parent: str | None = None,
+    ) -> None:
+        """Record subagent `agent`, of `kind`, spawned by `call`: named `name` where its parent named it, by subagent `parent` where one spawned it."""
+        kept: dict[str, JsonValue] = {
+            "agentType": kind,
+            "toolUseId": call,
+            "spawnDepth": 1 if parent is None else 2,
+        }
+        if name is not None:
+            kept["name"] = name
+        if parent is not None:
+            kept["parentAgentId"] = parent
+        (self.folder / f"agent-{agent}.meta.json").write_text(json.dumps(kept))
+
+    def spawn(self, call: str, name: str | None = None, agent: str = "") -> str:
+        """An `Agent` call starting, made by the session's own conversation or by subagent `agent`."""
+        given: dict[str, JsonValue] = {"description": "look", "prompt": "look"}
+        if name is not None:
+            given["name"] = name
+        return claude(
+            "PreToolUse",
+            tool_name="Agent",
+            tool_input=given,
+            tool_use_id=call,
+            transcript_path=str(self.transcript),
+            **({"agent_id": agent} if agent else {}),
+        )
+
+    def call(self, agent: str, kind: str, call: str) -> str:
+        """A call of subagent `agent`'s starting."""
+        return bash(
+            call,
+            agent_id=agent,
+            agent_type=kind,
+            transcript_path=str(self.transcript),
+        )
+
+    def lup(
+        self,
+        hooks: tuple[Path, Path],
+        tool: str,
+        arguments: dict[str, JsonValue],
+        agent: str,
+        kind: str,
+    ) -> tuple[str, bool]:
+        """Call lup's `tool` as subagent `agent` does: its start stamped by the hook on `hooks[0]`, then the call through the tool server on `hooks[1]`."""
+        hook, mcp = hooks
+        started = lup_call(
+            tool,
+            arguments,
+            f"{agent}-{tool}",
+            agent_id=agent,
+            agent_type=kind,
+            transcript_path=str(self.transcript),
+        )
+        stamped = json.loads(send(hook, started))["hookSpecificOutput"]["updatedInput"]
+        return call(mcp, tool, stamped)
+
+
+def named_talkers(
+    machine: Layout, clock: FakeClock
+) -> list[tuple[str, str | None, int]]:
+    """Each conversation of launch `one` as the operator is shown it: its path, its parent's, its depth."""
+    listed = HostClient(layout=machine.host, clock=clock, starter=Unstarted()).listed()
+    return [(each.path, each.parent, each.depth) for each in listed.talkers["one"]]
+
+
+def test_a_subagent_is_shown_under_the_conversation_that_spawned_it_nested_ones_too(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    records = Subagents(tmp_path)
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path / "w", "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        spawned = send(hook, records.spawn("t1", name="explore-auth"))
+        records.recorded("a1", "Explore", "t1", name="explore-auth")
+        first = send(hook, records.call("a1", "Explore", "c1"))
+        nested = send(hook, records.spawn("t2", agent="a1"))
+        records.recorded("a2", "general-purpose", "t2", parent="a1")
+        asked = context(send(hook, records.call("a2", "general-purpose", "c2")))
+        sockets = (hook, machine.host.launch("one").mcp)
+        renamed = records.lup(
+            sockets, "rename", {"name": "grep-tokens"}, "a2", "general-purpose"
+        )
+        records.lup(sockets, "note", {"remark": "Found it."}, "a2", "general-purpose")
+        shown = named_talkers(machine, clock)
+        listing = runner.invoke(cli.app, ["sessions"])
+        listed = inbox()
+    assert spawned == ""
+    assert first == ""
+    assert nested == ""
+    assert asked.startswith(
+        "lup: this subagent is `w/explore-auth/general-purpose·a2` for now"
+    )
+    assert renamed[0].startswith("This subagent is `w/explore-auth/grep-tokens`")
+    assert shown == [
+        ("w", None, 0),
+        ("w/explore-auth", "w", 1),
+        ("w/explore-auth/grep-tokens", "w/explore-auth", 2),
+    ]
+    assert listing.output.splitlines()[1:] == [
+        "  w",
+        "    w/explore-auth  Explore",
+        "      w/explore-auth/grep-tokens  general-purpose",
+    ]
+    assert listed == (
+        "   1  2026-10-01 12:00  a note from `w/explore-auth/grep-tokens` "
+        f"(subagent a2 of claude session s1) in {tmp_path / 'w'}: Found it.\n"
+    )
+
+
+def test_a_subagent_spawned_without_a_name_is_asked_and_its_parent_told_once(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    records = Subagents(tmp_path)
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path / "w", "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        first_spawn = context(send(hook, records.spawn("t1")))
+        second_spawn = send(hook, records.spawn("t2"))
+        records.recorded("a1", "Explore", "t1")
+        records.recorded("a2", "Explore", "t2")
+        asked = context(send(hook, records.call("a1", "Explore", "c1")))
+        before = named_talkers(machine, clock)
+        sockets = (hook, machine.host.launch("one").mcp)
+        send(hook, records.call("a2", "Explore", "c2"))
+        renamed = records.lup(sockets, "rename", {"name": "parser"}, "a1", "Explore")
+        held = records.lup(sockets, "rename", {"name": "parser"}, "a2", "Explore")
+        after = named_talkers(machine, clock)
+        launches = HostClient(
+            layout=machine.host, clock=clock, starter=Unstarted()
+        ).launches()
+    assert first_spawn == (
+        "lup: that subagent goes without a name, so you and the operator can't call "
+        "it by one: give each subagent you spawn a name after its task (`name` on "
+        "`Agent`). It's asked to name itself meanwhile."
+    )
+    assert second_spawn == ""
+    assert asked.startswith(
+        "lup: this subagent is `w/Explore·a1` for now, with no name of its own"
+    )
+    assert before[1] == ("w/Explore·a1", "w", 1)
+    assert renamed[0].startswith("This subagent is `w/parser` to lup and the operator.")
+    assert held[0] == "Not renamed: `parser` is `w/parser`'s: pick another name"
+    assert [each[0] for each in after] == ["w", "w/parser", "w/Explore·a2"]
+    assert [each.name for each in launches] == ["w"]
+
+
+def test_a_subagents_name_and_place_outlast_a_restart_of_lups_host(
+    machine: Layout, clock: FakeClock, notices: Raised, said: list[str], tmp_path: Path
+) -> None:
+    records = Subagents(tmp_path)
+    with inboxed(machine, clock, notices, said):
+        launched(machine, clock, tmp_path / "w", "one", "claude")
+        hook = machine.host.launch("one").hook
+        send(hook, claude("SessionStart", source="startup"))
+        send(hook, records.spawn("t1"))
+        records.recorded("a1", "Explore", "t1")
+        send(hook, records.call("a1", "Explore", "c1"))
+        sockets = (hook, machine.host.launch("one").mcp)
+        records.lup(sockets, "rename", {"name": "parser"}, "a1", "Explore")
+    with inboxed(machine, clock, notices, said):
+        told = send(hook, records.call("a1", "Explore", "c2"))
+        shown = named_talkers(machine, clock)
+    assert told == ""
+    assert shown == [("w", None, 0), ("w/parser", "w", 1)]
 
 
 def test_lup_dev_inbox_send_names_a_launch_by_its_id_or_its_worktree(

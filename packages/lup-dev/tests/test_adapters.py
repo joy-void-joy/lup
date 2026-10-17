@@ -11,7 +11,7 @@ from pydantic import TypeAdapter
 from lup.sessions.terminal import Hook
 from lup_dev.adapters import claude, codex
 from lup_dev.codescan.contract import Checker, FileReport, Rule, Source
-from lup_dev.host.courier import Conversations, Heard, Telling
+from lup_dev.host.courier import Conversations, Heard, Spawned, Spawning, Telling
 from lup_dev.policy.checkpoint import Bench, Running, Services
 from lup_dev.policy.holds import Holds, Response, waiting
 from lup_dev.stored import read_model
@@ -1247,3 +1247,146 @@ def test_codex_adds_what_a_conversation_is_told_to_every_answer() -> None:
         "decision": "block",
         "reason": BOTH,
     }
+
+
+def test_claude_reads_a_subagents_name_kind_and_spawn_from_its_record(
+    tmp_path: Path,
+) -> None:
+    transcript = tmp_path / "s1.jsonl"
+    records = tmp_path / "s1" / "subagents"
+    records.mkdir(parents=True)
+    (records / "agent-a1.meta.json").write_text(
+        json.dumps(
+            {
+                "agentType": "Explore",
+                "description": "Find the auth code",
+                "name": "explore-auth",
+                "toolUseId": "toolu_1",
+                "spawnDepth": 1,
+            }
+        )
+    )
+    (records / "agent-a2.meta.json").write_text(
+        json.dumps(
+            {
+                "agentType": "general-purpose",
+                "description": "Nested probe",
+                "toolUseId": "toolu_2",
+                "parentAgentId": "a1",
+                "spawnDepth": 2,
+            }
+        )
+    )
+
+    def subagent(agent: str, kind: str) -> str:
+        return payload(
+            Path("/w"),
+            "PreToolUse",
+            tool_name="Bash",
+            tool_input={"command": "ls"},
+            tool_use_id="c1",
+            agent_id=agent,
+            agent_type=kind,
+            transcript_path=str(transcript),
+        )
+
+    assert claude.spawned(subagent("a1", "Explore")) == Spawned(
+        name="explore-auth", kind="Explore"
+    )
+    assert claude.spawned(subagent("a2", "general-purpose")) == Spawned(
+        parent="a1", kind="general-purpose"
+    )
+    assert claude.spawned(subagent("a3", "Plan")) == Spawned(kind="Plan")
+    assert claude.spawned(pre_tool_use(Path("/w"), "Bash", {"command": "ls"})) is None
+
+
+def test_claude_hears_the_sessions_own_agent_call_with_the_name_it_gives() -> None:
+    def spawning(
+        tool: str, given: dict[str, object], **fields: object
+    ) -> Spawning | None:
+        raw = payload(
+            Path("/w"),
+            "PreToolUse",
+            tool_name=tool,
+            tool_input=given,
+            tool_use_id="t1",
+            **fields,
+        )
+        return claude.heard(raw).spawning
+
+    naming = "`name` on `Agent`"
+    assert spawning("Agent", {"prompt": "look", "name": "explore-auth"}) == Spawning(
+        name="explore-auth", naming=naming
+    )
+    assert spawning("Task", {"prompt": "look"}) == Spawning(naming=naming)
+    assert spawning("Bash", {"command": "ls", "name": "x"}) is None
+    assert spawning("Agent", {"prompt": "look"}, agent_id="a1") is None
+
+
+def test_codex_reads_a_subagents_name_parent_and_role_from_its_rollout(
+    tmp_path: Path,
+) -> None:
+    def rollout(thread: str, parent: str, path: str | None) -> Path:
+        meta: dict[str, object] = {
+            "id": thread,
+            "session_id": "root",
+            "parent_thread_id": parent,
+            "agent_role": "explorer",
+        }
+        if path is not None:
+            meta["agent_path"] = path
+        written = tmp_path / f"rollout-{thread}.jsonl"
+        lines = [
+            json.dumps({"type": "session_meta", "payload": meta}),
+            json.dumps({"type": "turn_context", "payload": {}}),
+        ]
+        written.write_text("\n".join(lines) + "\n")
+        return written
+
+    def subagent(thread: str, transcript: Path | None) -> str:
+        return json.dumps(
+            {
+                "session_id": "root",
+                "cwd": "/w",
+                "hook_event_name": "PreToolUse",
+                "agent_id": thread,
+                "agent_type": "explorer",
+                "transcript_path": None if transcript is None else str(transcript),
+            }
+        )
+
+    child = rollout("th-a1", "root", "/root/explore_auth")
+    grandchild = rollout("th-a2", "th-a1", "/root/explore_auth/grep_tokens")
+    unnamed = rollout("th-a3", "root", None)
+    roots = tmp_path / "rollout-root.jsonl"
+    roots.write_text(
+        json.dumps(
+            {"type": "session_meta", "payload": {"id": "root", "session_id": "root"}}
+        )
+        + "\n"
+    )
+
+    assert codex.spawned(subagent("th-a1", child)) == Spawned(
+        name="explore_auth", kind="explorer"
+    )
+    assert codex.spawned(subagent("th-a2", grandchild)) == Spawned(
+        name="grep_tokens", parent="th-a1", kind="explorer"
+    )
+    assert codex.spawned(subagent("th-a3", unnamed)) == Spawned(kind="explorer")
+    assert codex.spawned(subagent("th-a4", None)) == Spawned(kind="explorer")
+    assert codex.spawned(subagent("th-a1", roots)) == Spawned(kind="explorer")
+    assert codex.spawned((CAPTURED / "6-pre-tool-use-bash.json").read_text()) is None
+
+
+def test_codex_hears_no_spawn_since_no_caller_could_name_one() -> None:
+    sent = json.loads((CAPTURED / "6-pre-tool-use-bash.json").read_text())
+
+    def spawning(tool: str, given: dict[str, object]) -> Spawning | None:
+        raw = json.dumps({**sent, "tool_name": tool, "tool_input": given})
+        return codex.heard(raw).spawning
+
+    assert spawning("spawn_agent", {"message": "look"}) is None
+    assert (
+        spawning("collaborationspawn_agent", {"task_name": "x", "message": "look"})
+        is None
+    )

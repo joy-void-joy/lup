@@ -61,9 +61,9 @@ from lup_dev.gate import Check, Passed, Passes, Shell, at_commit, failed, report
 from lup_dev.gate import Ran as GateRan
 from lup_dev.git import Git, nul_separated
 from lup_dev.host.client import Detached, HostClient, RoomClient
-from lup_dev.host.courier import Courier, Heard, Telling
+from lup_dev.host.courier import Courier, Heard, Spawned, Spawns, Telling
 from lup_dev.host.names import shaped
-from lup_dev.host.protocol import GitHubRepository, HostError, Register
+from lup_dev.host.protocol import GitHubRepository, HostError, Listed, Register
 from lup_dev.host.service import Answerer, HostService, Naming
 from lup_dev.host.workers import Workers
 from lup_dev.inbox.delivery import Delivery, opening, what, who
@@ -219,6 +219,16 @@ class Adapters(Model, Answerer):
         return f"{self.named(runtime).unanswered(payload, failure)}\n"
 
 
+class SpawnRecords(Model, Spawns):
+    """How every runtime lup knows recorded its subagents' spawns, as its adapter reads them."""
+
+    adapters: Adapters
+
+    @override
+    def spawned(self, runtime: str, payload: str) -> Spawned | None:
+        return self.adapters.named(runtime).spawned(payload)
+
+
 class Couriers(Model, Courier):
     """Every runtime lup knows, as the host service reads its hooks and adds to their answers."""
 
@@ -322,6 +332,7 @@ def host_serve(context: typer.Context) -> None:
         layout=layout.host,
         answerer=known,
         courier=couriers,
+        spawns=SpawnRecords(adapters=known),
         post=delivery,
         routes=inbox_routes(delivery),
         tools=room_tools(delivery),
@@ -430,8 +441,8 @@ def clocked(at: datetime) -> str:
     return f"{at.astimezone():%Y-%m-%d %H:%M}"
 
 
-def line(item: Item, sessions: dict[str, str] | None = None) -> str:
-    """Say an item in a line: its number, when it was made, what it is, from whom (by its launch's name where `sessions` names its session), and its first line; for an approval, how to read it whole and answer it."""
+def line(item: Item, listed: Listed | None = None) -> str:
+    """Say an item in a line: its number, when it was made, what it is, from whom (as it's called, where `listed` knows it), and its first line; for an approval, how to read it whole and answer it."""
     where = "" if item.worktree is None else f" in {item.worktree}"
     reading = (
         f" (`answer {item.number}` shows its summary, offers its whole diff, and "
@@ -441,15 +452,24 @@ def line(item: Item, sessions: dict[str, str] | None = None) -> str:
     )
     return (
         f"{item.number:>4}  {clocked(item.made)}  {what(item)} from "
-        f"{sender_named(item.sender, sessions or {})}{where}: {opening(item)}{reading}"
+        f"{sender_named(item.sender, listed or Listed(launches=[]))}{where}: "
+        f"{opening(item)}{reading}"
     )
 
 
-def sender_named(party: Party, sessions: dict[str, str]) -> str:
-    """Say who `party` is: a conversation by its launch's name first, where `sessions` names its session."""
+def sender_named(party: Party, listed: Listed) -> str:
+    """Say who `party` is: a conversation as it's called first, where `listed` knows it: a subagent by its path while its launch runs, a session's own by its launch's name."""
+    talkers = [each for launch in listed.talkers.values() for each in launch]
     match party:
-        case InboxConversation(session=session) if session in sessions:
-            return f"`{sessions[session]}` ({who(party)})"
+        case InboxConversation(session=session, agent=str() as agent):
+            found = [
+                each
+                for each in talkers
+                if each.session == session and each.agent == agent
+            ]
+            return f"`{found[0].path}` ({who(party)})" if found else who(party)
+        case InboxConversation(session=session) if session in listed.sessions:
+            return f"`{listed.sessions[session]}` ({who(party)})"
         case _:
             return who(party)
 
@@ -555,6 +575,28 @@ def prompted(item: Item) -> AnswerItem:
             raise InboxError(message)
 
 
+@app.command("sessions")
+def sessions() -> None:
+    """List the sessions the host service serves, each with its subagents under it.
+
+    Run it yourself, in your own terminal. Each launch by its name, its runtime,
+    its worktree and its id; under it, its session and each subagent beneath
+    the conversation that spawned it, by its path (`dev/explore-auth`) and its
+    kind; an unnamed one by its kind and its id, until it names itself.
+    """
+    listed = answering().listed()
+    if not listed.launches:
+        typer.echo("No session runs.")
+        return
+    for launch in listed.launches:
+        typer.echo(
+            f"`{launch.name}`  {launch.runtime} in {launch.worktree}  ({launch.launch})"
+        )
+        for talker in listed.talkers.get(launch.launch, []):
+            kind = "" if talker.kind is None else f"  {talker.kind}"
+            typer.echo(f"{'  ' * (talker.depth + 1)}{talker.path}{kind}")
+
+
 @inbox.callback(invoke_without_command=True)
 def inbox_list(context: typer.Context) -> None:
     """List what waits for you from your agents, oldest first.
@@ -569,9 +611,9 @@ def inbox_list(context: typer.Context) -> None:
     if not items:
         typer.echo("Nothing waits for you.")
         return
-    sessions = client.listed().sessions
+    listed = client.listed()
     for item in items:
-        typer.echo(line(item, sessions))
+        typer.echo(line(item, listed))
 
 
 @inbox.command("show")
