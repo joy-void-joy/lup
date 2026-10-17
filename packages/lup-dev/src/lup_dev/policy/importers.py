@@ -2,8 +2,8 @@
 
 The rules read only the changed files, so their findings come at the edit; the
 files importing them are re-checked for type errors in the background, and their
-errors arrive at the next checkpoint (`docs/judging-writes.md`, *The engine*,
-question 5). One pass at a time per worktree, and the turn's end waits for it, so
+errors arrive at the next checkpoint (`docs/judging-writes.md`, *The engine: one
+typed tree*). One pass at a time per worktree, and the turn's end waits for it, so
 no type error surfaces after the session.
 
 Each request names the conversations that wrote what changed, and what the pass
