@@ -1,0 +1,23 @@
+[project]
+name = "lup-dashboard"
+version = "0.1.0"
+description = "Where the operator works with lup: every agent, its inbox, in one page."
+requires-python = ">=3.14"
+dependencies = [
+    # Serves the page and its API, described from the host's own models.
+    "fastapi>=0.120",
+    "lup-dev",
+    "pydantic>=2.12",
+    "typer>=0.27.2",
+    "uvicorn>=0.54",
+]
+
+[project.scripts]
+lup-dashboard = "lup_dashboard.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.23,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+lup-dev = { workspace = true }

@@ -54,7 +54,7 @@ from lup_dev.launch.trust import (
     TrustError,
     Unchanged,
     UvToolchain,
-    engine,
+    building,
 )
 from lup_dev.layout import JudgeLayout, Layout
 from lup_dev.stored import read_model, write_model
@@ -1260,13 +1260,16 @@ LUP_ROOT = Path(__file__).resolve().parents[3]
 """lup's own checkout, whose declaration gives the step building the engine."""
 
 
-def test_the_engine_is_built_with_lups_own_gate_step() -> None:
+def test_the_engine_and_the_dashboards_page_are_built_with_lups_own_gate_steps() -> None:
     resolved = resolve(load(LUP_ROOT).project)
-    step = engine(resolved)
-    assert step.name == "engine"
-    assert step.command == ["python", "packages/lup-dev/checker/build.py"]
-    assert step.in_environment
-    assert resolved.gate[0] == step
+    engine, page = building(resolved)
+    assert engine.name == "engine"
+    assert engine.command == ["python", "packages/lup-dev/checker/build.py"]
+    assert page.name == "dashboard"
+    assert page.command == ["python", "packages/lup-dashboard/build.py"]
+    assert engine.in_environment
+    assert page.in_environment
+    assert resolved.gate[:2] == [engine, page]
 
 
 BUILDING = '''

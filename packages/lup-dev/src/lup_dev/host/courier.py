@@ -263,11 +263,16 @@ class Conversations(MutableModel):
             None if conversation.parent is None else self.calling(conversation.parent)
         )
         above = launch if parent is None else self.path(parent, launch)
-        own = (
+        return f"{above}/{self.own(conversation, launch)}"
+
+    def own(self, conversation: Conversation, launch: str) -> str:
+        """Say a conversation's own part of its path: its launch's name for the session's own, a subagent's name, an unnamed one by its kind and its runtime's id."""
+        if conversation.agent is None:
+            return launch
+        return (
             conversation.name
             or f"{conversation.kind or 'subagent'}·{conversation.agent}"
         )
-        return f"{above}/{own}"
 
     def holder(self, name: str, asking: str) -> Conversation | None:
         """Return the subagent other than `asking` named `name` in this launch, or none."""

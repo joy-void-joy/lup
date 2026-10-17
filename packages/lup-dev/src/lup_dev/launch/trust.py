@@ -817,29 +817,21 @@ class Toolchain(ABC):
         """Return the command running the user's own copy of package `name`."""
 
 
-def engine(resolved: Resolved) -> Step:
-    """Return the declaration's step that builds the engine, which a copy carries.
+def building(resolved: Resolved) -> list[Step]:
+    """Return the declaration's steps that build what a copy carries, in the gate's order: the engine, and the dashboard's page.
 
-    It's lup's own repository's (`LupDevelopment`, in its `lup_project.py`): the
-    one step of its gate that builds a file. Raise `TrustError` where there's none,
-    or more than one.
+    They're lup's own repository's (`LupDevelopment`, in its `lup_project.py`):
+    the steps of its gate that build a file. Raise `TrustError` where there's
+    none, since a copy can't be built without its engine.
     """
-    building = [step for step in resolved.gate if step.builds is not None]
-    match building:
-        case [step]:
-            return step
-        case []:
-            message = (
-                "the declaration has no step building the engine, which lup's own "
-                "declares, so its `lup-dev` can't be built"
-            )
-        case _:
-            names = ", ".join(f"`{step.name}`" for step in building)
-            message = (
-                f"the declaration has several steps that build a file, {names}, so "
-                "which builds the engine isn't clear"
-            )
-    raise TrustError(message)
+    steps = [step for step in resolved.gate if step.builds is not None]
+    if not steps:
+        message = (
+            "the declaration has no step building the engine, which lup's own "
+            "declares, so its `lup-dev` can't be built"
+        )
+        raise TrustError(message)
+    return steps
 
 
 class UvToolchain(Model, Toolchain):
@@ -892,14 +884,16 @@ class UvToolchain(Model, Toolchain):
         return [str(Path(found.text().strip()) / name)]
 
     def build(self, tree: Path) -> None:
-        """Run the tree's own step building the engine, as the gate runs it.
+        """Run the tree's own steps building what the copy carries, as the gate runs them.
 
-        The step is read from the tree's declaration and runs through its runner,
-        unless it says not, so the gate and trust build the engine one way.
+        The steps are read from the tree's declaration and run through its runner,
+        unless they say not, so the gate and trust build the engine, and the
+        dashboard's page, one way.
         """
         resolved = resolve(load(tree).project)
-        program, *arguments = invoked(engine(resolved), resolved.runner)
-        run(program, *arguments, cwd=tree, shown=True)
+        for step in building(resolved):
+            program, *arguments = invoked(step, resolved.runner)
+            run(program, *arguments, cwd=tree, shown=True)
 
     def built(
         self, tool: WorkspaceTool, tree: Path, places: list[JudgeLayout | None]

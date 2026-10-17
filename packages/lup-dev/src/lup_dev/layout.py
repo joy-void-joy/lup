@@ -401,6 +401,11 @@ class HostLayout(Model):
         """The name each session last had, by the runtime's id for it, kept in lup's state so a session resumed in a later launch takes it back."""
         return self.state / "session-names.json"
 
+    @property
+    def dashboard_token(self) -> Path:
+        """The token the dashboard's API wants (`host/dashboard.py`), kept in lup's state, which no room mounts, so a page left open outlasts a restart."""
+        return self.state / "dashboard.token"
+
     def launch(self, launch: str) -> LaunchSockets:
         """Say where launch `launch`'s sockets are."""
         return LaunchSockets(directory=self.launches / launch)

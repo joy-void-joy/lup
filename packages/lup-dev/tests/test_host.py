@@ -10,6 +10,7 @@ import asyncio
 import json
 import os
 import socket
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager, contextmanager
@@ -48,6 +49,12 @@ from lup_dev.host.client import (
     watching,
 )
 from lup_dev.host.courier import Conversation, Courier, Heard, Telling
+from lup_dev.host.dashboard import (
+    DashboardProcess,
+    DashboardShown,
+    ShowDashboard,
+    Showing,
+)
 from lup_dev.host.protocol import (
     Activity,
     Done,
@@ -66,6 +73,7 @@ from lup_dev.host.rooms import RoomHandler, RoomRoute, RoomTools
 from lup_dev.host.service import (
     Answerer,
     Asked,
+    Companion,
     Handler,
     HostService,
     Judged,
@@ -241,6 +249,7 @@ def service(
     modules: LaunchModules | None = None,
     refresh: Callable[[Register], list[Path]] | None = None,
     clock: Clock | None = None,
+    companions: list[Companion] | None = None,
 ) -> HostService:
     built = HostService(
         layout=layout,
@@ -253,6 +262,7 @@ def service(
         tools=tools or [],
         modules=modules,
         refresh=refresh,
+        companions=companions or [],
     )
     return built if clock is None else built.model_copy(update={"clock": clock})
 
@@ -1385,3 +1395,100 @@ def test_a_client_on_an_event_loop_asks_watches_and_hears_the_service_stop(
         seen, closed = asyncio.run(watching_launches())
     assert seen == [[], ["one"]]
     assert closed == "the host service closed the watch"
+
+
+STAND_IN = """
+import sys
+from pathlib import Path
+
+record = Path(sys.argv[1])
+token = sys.stdin.readline().strip()
+port = sys.argv[-1]
+if port == "1":
+    sys.exit(3)
+with record.open("a") as kept:
+    kept.write(f"started with {token} on {port}\\n")
+print(f"http://127.0.0.1:{port}", flush=True)
+sys.stdin.read()
+with record.open("a") as kept:
+    kept.write("ended\\n")
+"""
+
+
+def stand_in(tmp_path: Path, port: int = 8766) -> tuple[DashboardProcess, Path]:
+    """A dashboard whose command is a stand-in script, recording how it was started and that it ended."""
+    script = tmp_path / "dashboard.py"
+    script.write_text(STAND_IN)
+    record = tmp_path / "record"
+    dashboard = DashboardProcess(
+        command=[sys.executable, str(script), str(record)],
+        port=port,
+        token=tmp_path / "state" / "dashboard.token",
+    )
+    return dashboard, record
+
+
+def shown(dashboard: DashboardProcess | None) -> Route:
+    return Route.to(Showing(dashboard=dashboard, missing="no dashboard here"))
+
+
+def test_the_dashboard_starts_with_the_service_its_token_kept_and_ends_with_it(
+    layout: HostLayout, said: list[str], tmp_path: Path, clock: FakeClock
+) -> None:
+    dashboard, record = stand_in(tmp_path)
+    with served(
+        service(layout, Judge(), said, routes=[shown(dashboard)], companions=[dashboard])
+    ):
+        first = client(layout, clock).ask(ShowDashboard(), DashboardShown)
+    with served(
+        service(layout, Judge(), said, routes=[shown(dashboard)], companions=[dashboard])
+    ):
+        second = client(layout, clock).ask(ShowDashboard(), DashboardShown)
+    token = dashboard.token.read_text()
+    assert first.address == f"http://127.0.0.1:8766/#token={token}"
+    assert second.address == first.address
+    assert dashboard.token.stat().st_mode & 0o777 == 0o600
+    assert record.read_text() == (
+        f"started with {token} on 8766\nended\nstarted with {token} on 8766\nended\n"
+    )
+
+
+def test_a_dashboard_gone_is_started_again_when_its_address_is_asked(
+    layout: HostLayout, said: list[str], tmp_path: Path, clock: FakeClock
+) -> None:
+    dashboard, record = stand_in(tmp_path)
+    with served(
+        service(layout, Judge(), said, routes=[shown(dashboard)], companions=[dashboard])
+    ):
+        process = dashboard.process
+        assert process is not None
+        assert process.stdin is not None
+        process.stdin.close()
+        own = client(layout, clock)
+        while process.returncode is None:
+            own.listed()
+        again = own.ask(ShowDashboard(), DashboardShown)
+    assert again.address.startswith("http://127.0.0.1:8766/#token=")
+    assert record.read_text().count("started with") == 2
+
+
+def test_a_dashboard_that_cant_listen_or_isnt_there_is_said_and_the_service_goes_on(
+    layout: HostLayout, said: list[str], tmp_path: Path, clock: FakeClock
+) -> None:
+    dashboard, _ = stand_in(tmp_path, port=1)
+    with served(
+        service(layout, Judge(), said, routes=[shown(dashboard)], companions=[dashboard])
+    ):
+        listed = client(layout, clock).listed()
+    with (
+        served(service(layout, Judge(), said, routes=[shown(None)])),
+        pytest.raises(HostError) as missing,
+    ):
+        client(layout, clock).ask(ShowDashboard(), DashboardShown)
+    assert listed.launches == []
+    [failed] = [line for line in said if "without a program beside it" in line]
+    assert failed.endswith(
+        "ended with status 3 before listening, as on a port another program holds "
+        "(1, `LUP_DASHBOARD_PORT`); what it said is in the host service's output"
+    )
+    assert str(missing.value) == "no dashboard here"

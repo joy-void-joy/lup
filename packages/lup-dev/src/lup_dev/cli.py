@@ -19,6 +19,7 @@ import asyncio
 import secrets
 import shutil
 import sys
+import webbrowser
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -62,9 +63,15 @@ from lup_dev.gate import Ran as GateRan
 from lup_dev.git import Git, nul_separated
 from lup_dev.host.client import Detached, HostClient, RoomClient
 from lup_dev.host.courier import Courier, Heard, Spawned, Spawns, Telling
+from lup_dev.host.dashboard import (
+    DashboardProcess,
+    DashboardShown,
+    ShowDashboard,
+    Showing,
+)
 from lup_dev.host.names import shaped
 from lup_dev.host.protocol import GitHubRepository, HostError, Listed, Register
-from lup_dev.host.service import Answerer, HostService, Naming
+from lup_dev.host.service import Answerer, HostService, Naming, Route
 from lup_dev.host.watch import Changes
 from lup_dev.host.workers import Workers
 from lup_dev.inbox.delivery import Delivery, opening, what, who
@@ -131,7 +138,13 @@ from lup_dev.launch.trust import (
     machine_trust,
     trusted,
 )
-from lup_dev.layout import ROOM_SOCKETS, CheckoutLayout, GitDirectoryLayout, Layout
+from lup_dev.layout import (
+    ROOM_SOCKETS,
+    CheckoutLayout,
+    GitDirectoryLayout,
+    HostLayout,
+    Layout,
+)
 from lup_dev.policy.checkpoint import Bench, Services, Worktree
 from lup_dev.policy.holds import Hold, Response, answer, waiting
 from lup_dev.policy.importers import BackgroundSpawner
@@ -308,6 +321,31 @@ def host_client() -> HostClient:
     )
 
 
+def installed_dashboard(
+    settings: LupDevSettings, layout: HostLayout
+) -> DashboardProcess | None:
+    """Return the dashboard the host service runs, where its command is installed beside the interpreter running it; none where it isn't."""
+    command = Path(sys.executable).parent / "lup-dashboard"
+    if not command.is_file():
+        return None
+    return DashboardProcess(
+        command=[str(command), "serve"],
+        port=settings.lup_dashboard_port,
+        token=layout.dashboard_token,
+    )
+
+
+def dashboard_shown(dashboard: DashboardProcess | None) -> Showing:
+    """Answer the operator's `lup-dev dashboard` with `dashboard`'s address, or why there's none."""
+    return Showing(
+        dashboard=dashboard,
+        missing=(
+            f"the dashboard isn't installed beside this lup-dev: no `lup-dashboard` "
+            f"in {Path(sys.executable).parent}, which lup's own approval installs"
+        ),
+    )
+
+
 @host.callback(invoke_without_command=True)
 def host_serve(context: typer.Context) -> None:
     """Run the host service in the foreground, until it's stopped.
@@ -320,8 +358,10 @@ def host_serve(context: typer.Context) -> None:
         return
     known = Adapters(known=adapters())
     couriers = Couriers(adapters=known)
-    layout = Layout.of(LupDevSettings())
+    settings = LupDevSettings()
+    layout = Layout.of(settings)
     changes = Changes()
+    dashboard = installed_dashboard(settings, layout.host)
     delivery = Delivery(
         inbox=Inbox.opened(layout.inbox, changes),
         courier=couriers,
@@ -336,13 +376,14 @@ def host_serve(context: typer.Context) -> None:
         courier=couriers,
         spawns=SpawnRecords(adapters=known),
         post=delivery,
-        routes=inbox_routes(delivery),
+        routes=[*inbox_routes(delivery), Route.to(dashboard_shown(dashboard))],
         tools=room_tools(delivery),
         room_routes=remote_routes(Remotes(say=typer.echo, landed=proposed_after)),
         modules=Workers(layout=layout.host, say=typer.echo),
         say=typer.echo,
         refresh=lambda launch: refreshed(layout.launch(launch.launch)),
         changes=changes,
+        companions=[] if dashboard is None else [dashboard],
     )
     asyncio.run(service.serve())
 
@@ -422,12 +463,12 @@ def host_stop() -> None:
     typer.echo("No host service runs.")
 
 
-def answering() -> HostClient:
-    """Reach the host service for the operator's inbox, starting it where none runs; refuse inside an agent's session."""
+def answering(what: str = "the inbox") -> HostClient:
+    """Reach the host service for the operator's `what`, starting it where none runs; refuse inside an agent's session."""
     inside = [runtime.name() for runtime in runtimes() if runtime.inside()]
     if inside:
         message = (
-            f"this runs inside a {inside[0]} session, and the inbox is the "
+            f"this runs inside a {inside[0]} session, and {what} is the "
             "operator's: run it in your own terminal"
         )
         raise InboxError(message)
@@ -598,6 +639,29 @@ def sessions() -> None:
         for talker in listed.talkers.get(launch.launch, []):
             kind = "" if talker.kind is None else f"  {talker.kind}"
             typer.echo(f"{'  ' * (talker.depth + 1)}{talker.path}{kind}")
+
+
+@app.command("dashboard")
+def dashboard_open(
+    *,
+    opened: Annotated[
+        bool,
+        typer.Option(
+            "--open/--no-open",
+            help="Open it in your browser, or only print where it is.",
+        ),
+    ] = True,
+) -> None:
+    """Open the dashboard: every agent, what each is doing, and your inbox, in one page.
+
+    Run it yourself, in your own terminal. It prints the dashboard's address, its
+    token after the `#`, and opens it in your browser; the host service runs the
+    dashboard, starting it again where it's gone.
+    """
+    shown = answering("the dashboard").ask(ShowDashboard(), DashboardShown)
+    typer.echo(shown.address)
+    if opened:
+        webbrowser.open(shown.address)
 
 
 @inbox.callback(invoke_without_command=True)
