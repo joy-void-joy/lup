@@ -108,6 +108,7 @@ def test_at_the_gate_a_closed_issue_is_reported() -> None:
     gate = Trackers(issues=FakeIssues(closed=[12]), conditions={})
     [problem] = Defer(line=1, issue=12, why="x").problems(Checking(gate=gate))
     assert problem.rule == "defer-closed"
+    assert problem.reminder
     assert Defer(line=1, issue=13, why="x").problems(Checking(gate=gate)) == []
 
 
@@ -129,6 +130,7 @@ def test_at_the_gate_a_condition_that_holds_makes_the_defer_due() -> None:
     checking = Checking(conditions=["ready", "later"], gate=gate)
     [problem] = Defer(line=1, when="ready", why="x").problems(checking)
     assert problem.rule == "defer-due"
+    assert problem.reminder
     assert Defer(line=1, when="later", why="x").problems(checking) == []
 
 

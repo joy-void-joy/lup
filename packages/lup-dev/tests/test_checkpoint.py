@@ -11,7 +11,7 @@ from filelock import FileLock
 from lup.programs import run
 from lup_dev import Project
 from lup_dev.approval import Approval, ReleaseTool
-from lup_dev.codescan.contract import FileReport, Finding, Position, Span
+from lup_dev.codescan.contract import Due, FileReport, Finding, Position, Span
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.grammar import Drop
 from lup_dev.declaration.resolve import Declaration, Selected
@@ -1375,6 +1375,35 @@ def test_a_session_started_in_a_bare_repositorys_directory_is_judged(
     call(kit, bare, "c1")
     bad(main)
     assert finish(kit, bare, "c1").context.startswith("lup refused 1 file.")
+
+
+def test_a_session_s_start_tells_what_came_due_and_a_subagent_s_doesn_t(
+    kit: Kit, repo: Path
+) -> None:
+    reminder = Finding(
+        path=CORE,
+        span=Span(start=Position(line=3, column=1), end=Position(line=3, column=1)),
+        owner="lup",
+        rule="defer-closed",
+        message="issue #12 is closed",
+        steer="finish the work here",
+        reminder=True,
+    )
+    write_model(repo / ".git" / "lup" / "due.json", Due(reminders=[reminder]))
+
+    told = SessionStarted(session=SESSION, cwd=repo).apply(kit.bench)
+    sub = SessionStarted(session=SESSION, cwd=repo, agent="a1").apply(kit.bench)
+
+    assert told.context == (
+        "Work deferred in this repository came due, as the gate last found it (it "
+        "doesn't fail the gate):\n- src/pkg/core.py:3: issue #12 is closed; finish "
+        "the work here"
+    )
+    assert sub.context == ""
+
+
+def test_a_session_s_start_with_nothing_due_tells_nothing(kit: Kit, repo: Path) -> None:
+    assert SessionStarted(session=SESSION, cwd=repo).apply(kit.bench).context == ""
 
 
 def test_a_write_in_the_repositorys_git_directory_asks(kit: Kit, bare: Path) -> None:

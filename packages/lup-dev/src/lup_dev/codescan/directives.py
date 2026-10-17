@@ -17,6 +17,10 @@ reported as a `Problem`, which the judge turns into a finding of its own rule:
 - `defer-condition`: a deferral's `when` naming no declared condition;
 - `defer-closed`, at the gate: a deferral whose issue is closed;
 - `defer-due`, at the gate: a deferral whose condition holds.
+
+The last two are reminders (`Problem.reminder`): work that came due rather than
+something wrong with the code, which the gate lists without failing, and a
+session is told at its start.
 """
 
 import io
@@ -215,6 +219,9 @@ class Problem(Model):
     steer: str = ""
     fixable: bool = False
     """Whether `lup-dev rules fix` removes it, so no agent is told of it."""
+    reminder: bool = False
+    """Whether it's work that came due, which the gate lists without failing
+    (`Finding.reminder`)."""
 
 
 class Identity(Model):
@@ -341,10 +348,16 @@ class Defer(Comment):
         )
         due = self.when is not None and gate.conditions[self.when].holds()
         finish = "finish the work here, or point at the issue tracking what's left"
-        closing = [problem("defer-closed", f"issue {issue} is closed", finish)]
+        closing = [
+            problem("defer-closed", f"issue {issue} is closed", finish).model_copy(
+                update={"reminder": True}
+            )
+        ]
         message = f"`{self.when}` holds, so the work deferred here is due"
         steer = "do the work, then remove the deferral"
-        waking = [problem("defer-due", message, steer)]
+        waking = [
+            problem("defer-due", message, steer).model_copy(update={"reminder": True})
+        ]
         return [*(closing if closed else []), *(waking if due else [])]
 
     @override

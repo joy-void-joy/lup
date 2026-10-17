@@ -179,6 +179,7 @@ def finding(path: Path, problem: Problem) -> Finding:
         message=problem.message,
         steer=problem.steer,
         fixable=problem.fixable,
+        reminder=problem.reminder,
     )
 
 

@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Literal, Self
 from typer.testing import CliRunner
 
 from lup_dev import Rules, cli
+from lup_dev.codescan.contract import Due
 from lup_dev.codescan.directives import GitHubIssues, IssueRef, Issues
 from lup_dev.codescan.engine import EngineChecker
 from lup_dev.declaration.modules.code_rules import lup_default
@@ -20,6 +21,7 @@ from lup_dev.host.protocol import Refused, Reply
 from lup_dev.policy.holds import HeldFile, Hold, HoldError, Holds, waiting
 from lup_dev.policy.importers import Conversation, ImportersPass
 from lup_dev.policy.verdicts import Verdict, VerdictLog
+from lup_dev.stored import read_model
 
 if TYPE_CHECKING:
     import pytest
@@ -345,7 +347,7 @@ class Unreachable(Issues):
         return "`gh` isn't installed here"
 
 
-def test_rules_check_fails_on_a_deferral_whose_issue_closed(
+def test_rules_check_lists_a_deferral_whose_issue_closed_without_failing(
     fakes: Kit, repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     (repo / "src" / "pkg" / "core.py").write_text(
@@ -358,9 +360,40 @@ def test_rules_check_fails_on_a_deferral_whose_issue_closed(
     monkeypatch.setattr(cli, "GitHubIssues", issues)
     monkeypatch.chdir(repo)
     result = runner.invoke(cli.app, ["rules", "check", "src/pkg/core.py"])
-    assert result.exit_code == 1
-    assert "src/pkg/core.py:1:1 - defer-closed: issue #12 is closed" in result.output
+    assert result.exit_code == 0, result.output
+    assert (
+        "Work deferred in this repository came due, as the gate last found it (it "
+        "doesn't fail the gate):\n- src/pkg/core.py:1: issue #12 is closed; finish "
+        "the work here, or point at the issue tracking what's left\n"
+    ) in result.output
+    assert result.output.endswith("lup checked 1 files: 0 findings.\n")
     assert "weren't checked" not in result.output
+    common = repo / ".git"
+    assert not (common / "lup" / "due.json").exists()
+
+
+def test_rules_check_over_every_file_keeps_what_came_due_for_a_session(
+    fakes: Kit, repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (repo / "src" / "pkg" / "core.py").write_text(
+        'x = 1  # lup: defer(issue=12, why="retry on reset")\n'
+    )
+
+    def issues(root: Path) -> Issues:
+        return Closed()
+
+    monkeypatch.setattr(cli, "GitHubIssues", issues)
+    monkeypatch.chdir(repo)
+    first = runner.invoke(cli.app, ["rules", "check"])
+    kept = read_model(repo / ".git" / "lup" / "due.json", Due)
+    (repo / "src" / "pkg" / "core.py").write_text("x = 1\n")
+    second = runner.invoke(cli.app, ["rules", "check"])
+    cleared = read_model(repo / ".git" / "lup" / "due.json", Due)
+
+    assert (first.exit_code, second.exit_code) == (0, 0)
+    assert kept is not None
+    assert [each.rule for each in kept.reminders] == ["defer-closed"]
+    assert cleared == Due()
 
 
 def test_rules_check_says_it_left_issues_unchecked_where_the_tracker_is_out_of_reach(
@@ -422,10 +455,8 @@ def test_rules_check_in_a_room_asks_the_host_for_each_issues_state(
     monkeypatch.chdir(repo)
     with Host(socket, Stated(state="closed")) as host:
         result = runner.invoke(cli.app, ["rules", "check", "src/pkg/core.py"])
-    assert result.exit_code == 1
-    assert "src/pkg/core.py:1:1 - defer-closed: issue cli/cli#12 is closed" in (
-        result.output
-    )
+    assert result.exit_code == 0
+    assert "- src/pkg/core.py:1: issue cli/cli#12 is closed;" in result.output
     assert [IssueState.model_validate_json(each) for each in host.requests] == [
         IssueState(repository="cli/cli", number=12)
     ]
