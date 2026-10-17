@@ -16,6 +16,8 @@ from lup_dev import (
     Guidance,
     Module,
     Modules,
+    Package,
+    Packages,
     Paths,
     Project,
     Pytest,
@@ -46,6 +48,9 @@ class LupDevelopment(Module):
       operator reviews every change to it before it lands.
     - Working on lup is `AGENTS.md`, the project's own section of the guidance,
       after the sections of lup's modules.
+    - Chromium is in the room alone, for sessions to drive the dashboard's page
+      headless with Playwright, looking at what they build; nothing on the host
+      needs it, so it's a package of the room's image rather than a requirement.
     """
 
     name = "lup-development"
@@ -58,6 +63,9 @@ class LupDevelopment(Module):
         )
     ]
 
+    packages: Packages = Packages.of(
+        Package(name="chromium", why="Playwright drives it to look at the dashboard")
+    )
     paths: Paths = Paths.of(protected=["packages/lup-dev/src/lup_dev/catalog/**"])
     gate: Gate = Gate.of(
         Step(
