@@ -17,7 +17,7 @@ layer beside it:
   package `lup-dev` needs, and the engine's source); otherwise the release the lock
   pins, with every package it needs at its locked version (`ReleaseTool`);
 - the person's own layer of the declaration, `lup_project.local.py` in the
-  worktree trust runs from, which git ignores, so it's in the zone by its
+  repository's main worktree (`person_layer`), which git ignores, so it's in the zone by its
   content (`Zone.local`), and what it imports of the commit with the rest
   (`docs/related-repositories.md`, decision 8). A room writes the worktree, so
   an edit made there runs nowhere until approved: the judge and a launch read
@@ -50,6 +50,13 @@ zone at once wait on one approval. The answer:
 
 A repository's copy approved but missing from its place, removed or never
 installed there, is installed from the commit approved, asking nothing.
+
+A push from a room that moves the integration branch puts the approval of the
+zone at its tip in the inbox too, asking nothing at any terminal (`proposed`),
+so the operator isn't left to notice that the code the host runs changed. The
+terminal answering it with `lup-dev inbox answer` then acts on a yes as a
+launch waiting on it would (`settle`), once between them, unless the branch
+moved again since it was asked, which `lup-dev trust` asks about anew.
 """
 
 import ast
@@ -1578,6 +1585,50 @@ class Trust(Model, arbitrary_types_allowed=True):
         with lock:
             return self.answered(repository, standing, given)
 
+    def proposed(self) -> int | None:
+        """Put the approval of the tip's host zone in the operator's inbox where it isn't the one approved, asking nothing here, and return its number; none where it's approved.
+
+        What a push that moves the integration branch starts, on the host
+        (`cli.py`): nobody waits on the approval, and the terminal answering it
+        acts on the answer (`settle`). An approval waiting about the same zone is
+        joined, as a launch joins it.
+        """
+        repository = self.repository()
+        kept = self.layout.approved(repository)
+        kept.parent.mkdir(parents=True, exist_ok=True)
+        with FileLock(kept.with_name(f"{kept.name}.lock")):
+            standing = self.standing(repository)
+            if standing.approval is not None and standing.approved():
+                return None
+            change = self.change(standing)
+            return self.approvals.asked(
+                AskApproval(
+                    question=change.question(),
+                    summary=change.summary(),
+                    diff=change.diff(),
+                    repository=repository,
+                    fingerprint=standing.fingerprint,
+                    worktree=self.root,
+                )
+            )
+
+    def settle(self, fingerprint: str, given: Given) -> Outcome | None:
+        """Act on the operator's answer to the approval of the zone `fingerprint`, given in the inbox: install and record it, or keep the copy approved before.
+
+        As a launch waiting on it acts (`answered`), and only once between them.
+        Return none where the tip's zone isn't that one any more, the
+        integration branch having moved since it was asked: approving it would
+        approve what the operator didn't read, so `lup-dev trust` asks anew.
+        """
+        repository = self.repository()
+        kept = self.layout.approved(repository)
+        kept.parent.mkdir(parents=True, exist_ok=True)
+        with FileLock(kept.with_name(f"{kept.name}.lock")):
+            standing = self.standing(repository)
+            if standing.fingerprint != fingerprint:
+                return None
+            return self.answered(repository, standing, given)
+
     def answered(self, repository: Path, standing: Standing, given: Given) -> Outcome:
         """Act on the operator's answer about the zone `standing` read: install and record it, or keep the copy approved before.
 
@@ -1656,19 +1707,16 @@ class Trust(Model, arbitrary_types_allowed=True):
         return True
 
 
-def trusted(root: Path, inside: list[str]) -> Outcome:
-    """Check what the host runs for the repository at `root`: a launch's first step.
+def machine_trust(root: Path, inside: list[str]) -> Trust:
+    """Return trust on launch for the repository at `root`, with this machine's settings, the terminal, the inbox in the host service, uv and the service's client.
 
-    As `Trust.ensure` does, with this machine's settings, the terminal, the inbox
-    in the host service, uv and the service's client; `inside` names the runtimes
-    whose session this runs inside. Raise `TrustError` where nothing approved may
-    run.
+    `inside` names the runtimes whose session this runs inside.
     """
     settings = LupDevSettings()
     layout = Layout.of(settings)
     clock = SystemClock()
     host = HostClient(layout=layout.host, clock=clock, starter=Detached())
-    trust = Trust(
+    return Trust(
         root=root,
         layout=layout,
         integration=settings.lup_integration_branch,
@@ -1679,4 +1727,12 @@ def trusted(root: Path, inside: list[str]) -> Outcome:
         clock=clock,
         inside=inside,
     )
-    return trust.ensure()
+
+
+def trusted(root: Path, inside: list[str]) -> Outcome:
+    """Check what the host runs for the repository at `root`: a launch's first step.
+
+    As `Trust.ensure` does, on this machine (`machine_trust`). Raise
+    `TrustError` where nothing approved may run.
+    """
+    return machine_trust(root, inside).ensure()

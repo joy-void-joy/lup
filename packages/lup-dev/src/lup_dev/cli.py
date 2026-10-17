@@ -117,6 +117,7 @@ from lup_dev.launch.trust import (
     InboxApprovals,
     Outcome,
     Terminal,
+    machine_trust,
     trusted,
 )
 from lup_dev.layout import ROOM_SOCKETS, CheckoutLayout, Layout
@@ -294,12 +295,47 @@ def host_serve(context: typer.Context) -> None:
         post=delivery,
         routes=inbox_routes(delivery),
         tools=room_tools(delivery),
-        room_routes=remote_routes(Remotes(say=typer.echo)),
+        room_routes=remote_routes(Remotes(say=typer.echo, landed=proposed_after)),
         modules=Workers(layout=layout.host, say=typer.echo),
         say=typer.echo,
         refresh=lambda launch: refreshed(layout.launch(launch.launch)),
     )
     asyncio.run(service.serve())
+
+
+async def proposed_after(launch: Register, refs: list[str]) -> None:
+    """Put the approval of the host zone at the integration branch's tip in the operator's inbox, where a launch's push moved that branch and the zone isn't the one approved.
+
+    Trust reads the zone with git and asks the service itself, so it runs off
+    the event loop. Its repository is the launch's git directory, found
+    through git from its main worktree; one holding a `commondir`, which would
+    lead git elsewhere, isn't read (`docs/host-tools.md`, *Running git on the
+    host*). What fails is said in the service's log, and the push stands.
+    """
+    integration = LupDevSettings().lup_integration_branch
+    if f"refs/heads/{integration}" not in refs:
+        return
+    if (launch.repository / "commondir").exists():
+        typer.echo(
+            f"{launch.launch}: the push moved {integration}, but its approval "
+            f"wasn't asked: {launch.repository} holds a `commondir`, which would "
+            "lead git to another repository"
+        )
+        return
+    root = Git.pinned(launch.repository).main_worktree()
+    try:
+        number = await asyncio.to_thread(machine_trust(root, []).proposed)
+    except (LupDevError, LupError) as failure:
+        typer.echo(
+            f"{launch.launch}: the push moved {integration}, but its approval "
+            f"wasn't asked: {failure}"
+        )
+        return
+    if number is not None:
+        typer.echo(
+            f"{launch.launch}: the push moved {integration}, and with it the code "
+            f"the host runs: approval item {number} is in the inbox"
+        )
 
 
 def room_tools(delivery: Delivery) -> list[RoomTools]:
@@ -516,6 +552,24 @@ def approved_here(number: int, given: Given) -> str:
     )
 
 
+def acted_on(approval: Approval, given: Given) -> str | None:
+    """Act on an approval approved at this terminal, as a launch waiting on it would, once between them, and say what came of it; none for an approval declined, which leaves the copy approved before.
+
+    An approval may have nobody waiting on it: a push that moved the
+    integration branch asks it from the host (`proposed_after`).
+    """
+    if not given.approved:
+        return None
+    root = Git.pinned(approval.repository).main_worktree()
+    outcome = machine_trust(root, []).settle(approval.fingerprint, given)
+    if outcome is None:
+        return (
+            "The integration branch moved since this was asked, so its tip isn't "
+            "the code you read: `lup-dev trust` asks about it."
+        )
+    return outcome.report()
+
+
 @inbox.command("answer")
 def inbox_answer(
     number: Annotated[int, typer.Argument(help="The question's number.")],
@@ -556,12 +610,20 @@ def inbox_answer(
     An approval shows its summary, asks whether to show the whole diff, then
     whether to approve, as the launch asking it does, and stops where the launch's
     terminal answers first; `--approve` or `--decline` answers without asking.
-    Every launch waiting on it goes on with the answer.
+    Every launch waiting on it goes on with the answer; approved, the copy is
+    installed here where no launch did it first, the host service restarted on
+    it for lup's own repository.
     """
     client = answering()
     approvals = InboxApprovals(host=client)
     if approve is not None:
-        typer.echo(approved_here(number, approvals.answer(number, approved=approve)))
+        item = client.ask(ShowItem(number=number), Shown).item
+        given_here = approvals.answer(number, approved=approve)
+        typer.echo(approved_here(number, given_here))
+        if isinstance(item.reason, Approval):
+            acted = acted_on(item.reason, given_here)
+            if acted is not None:
+                typer.echo(acted)
         return
     given = [
         *(Ruling(decision=each, verdict="leaning") for each in leaning or []),
@@ -571,7 +633,7 @@ def inbox_answer(
     if not given and comment is None:
         item = client.ask(ShowItem(number=number), Shown).item
         match item.reason:
-            case Approval(text=text, summary=summary):
+            case Approval(text=text, summary=summary) as approval:
                 asking = Approving(
                     asker=Terminal(),
                     approvals=approvals,
@@ -583,6 +645,9 @@ def inbox_answer(
                 answered = asking.given()
                 if answered.here:
                     typer.echo(approved_here(number, answered))
+                acted = acted_on(approval, answered)
+                if acted is not None:
+                    typer.echo(acted)
                 return
             case _:
                 request = prompted(item)
