@@ -65,7 +65,9 @@ resolves it (relative to the file holding it, `~` the operator's home, an
 """
 
 import inspect
+import shutil
 import tomllib
+from itertools import chain, count
 from pathlib import Path
 from shlex import split
 from typing import TYPE_CHECKING
@@ -82,6 +84,7 @@ from lup_dev.git import Git, nul_separated
 from lup_dev.launch.images import definition
 from lup_dev.layout import (
     LOCALTIME,
+    ROOM_LENT,
     ROOM_PATH,
     ROOM_SOCKETS,
     LaunchLayout,
@@ -91,6 +94,7 @@ from lup_dev.remote import helper
 from lup_dev.remote.config import Gating, room_config
 
 if TYPE_CHECKING:
+    from lup.rooms.engine import Podman
     from lup_dev.declaration import kinds
     from lup_dev.declaration.requirements import Tools
     from lup_dev.declaration.resolve import Resolved
@@ -478,6 +482,63 @@ class RoomGit(Model):
         self.launch.bin.mkdir(parents=True, exist_ok=True)
         self.launch.helper.write_text(programs(self.launch)[self.launch.helper])
         self.launch.helper.chmod(0o755)
+
+
+def receiving(podman: Podman, launch: LaunchLayout) -> Mount:
+    """Prepare a launch's room to receive what the operator lends it while it runs, and return the room's mount doing so.
+
+    Its two places (`LaunchLayout.lent`, `.stage`) are made, the first shared and
+    the second private in podman's namespace, before the room starts: a room
+    receives only what's mounted under a mount that was shared when it started
+    (measured, `docs/field-notes.md`, *Lending to a running room*).
+    """
+    for each in [launch.lent, launch.stage]:
+        each.mkdir(parents=True, exist_ok=True)
+    podman.shared(launch.lent)
+    podman.private(launch.stage)
+    return Mount(source=launch.lent, target=ROOM_LENT, receives=True)
+
+
+def lend(
+    podman: Podman,
+    launch: LaunchLayout,
+    source: Path,
+    *,
+    read_only: bool,
+    name: str | None = None,
+) -> Path:
+    """Lend the host's directory `source` to a launch's running room, and return where the room finds it: under `ROOM_LENT`, by `name`, the directory's own by default, numbered where that's taken.
+
+    Raise `RoomError` where the launch's room can't receive it, started before
+    rooms could.
+    """
+    if not launch.lent.is_dir():
+        message = (
+            "this launch's room started before a running room could be lent a "
+            "directory: lend it at the next launch, `lup-dev launch <runtime> "
+            f"--mount-ro {source}`"
+        )
+        raise RoomError(message)
+    wanted = name or source.name
+    taken = [each.name for each in launch.lent.iterdir()]
+    named = chain([wanted], (f"{wanted}-{n}" for n in count(2)))
+    free = next(each for each in named if each not in taken)
+    at = launch.lent / free
+    at.mkdir()
+    podman.lend(source, at, launch.stage, read_only=read_only)
+    return ROOM_LENT / free
+
+
+def unlent(podman: Podman, launch: LaunchLayout) -> None:
+    """Unmount everything lent to a launch's room, and remove its places.
+
+    The host's own view of them holds only the empty directories mounted on in
+    podman's namespace, so removing them removes nothing lent.
+    """
+    for each in [launch.lent, launch.stage]:
+        if each.is_dir():
+            podman.released(each)
+            shutil.rmtree(each)
 
 
 def programs(launch: LaunchLayout) -> dict[Path, str]:

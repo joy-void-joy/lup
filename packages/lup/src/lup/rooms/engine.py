@@ -49,7 +49,7 @@ import tempfile
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from datetime import datetime
-from typing import override
+from typing import TYPE_CHECKING, override
 
 from pydantic import TypeAdapter, model_validator
 from pydantic.alias_generators import to_pascal
@@ -59,6 +59,9 @@ from lup.rooms.container import AbsolutePath, Container, Image, Mask, Mount
 from lup.sessions.contract import guarded
 from lup.sessions.errors import RealCallInTestError
 from lup.types import Model
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 PROJECT_LABEL = "lup.project"
 """The label naming the project an image is built for."""
@@ -222,13 +225,15 @@ class Podman(Model, ContainerEngine):
 
         def option(mount: Mount | Mask) -> str:
             match mount:
-                case Mount(read_only=read_only):
+                case Mount(read_only=read_only, receives=receives):
                     fields = [
                         "type=bind",
                         f"source={mount.source}",
                         f"destination={mount.destination}",
+                        *(["ro=true"] if read_only else []),
+                        *(["bind-propagation=rslave"] if receives else []),
                     ]
-                    return mount_option([*fields, "ro=true"] if read_only else fields)
+                    return mount_option(fields)
                 case Mask(target=target):
                     return mount_option(
                         ["type=tmpfs", f"destination={target}", "notmpcopyup"]
@@ -286,6 +291,53 @@ class Podman(Model, ContainerEngine):
             )
             raise ContainerError(message)
         return exited.status
+
+    def unshared(self, *arguments: str) -> None:
+        """Run a command in podman's own user and mount namespace, where its rootless containers' mounts come from (`podman unshare`).
+
+        Raise `ContainerError` where it fails.
+        """
+        ran = self.execute(Process(arguments=[self.program, "unshare", *arguments]))
+        if ran.status != 0:
+            message = (
+                f"`podman unshare {' '.join(arguments)}` failed (status {ran.status}); "
+                "what it said is above"
+            )
+            raise ContainerError(message)
+
+    def shared(self, directory: Path) -> None:
+        """Make `directory` a shared mount in podman's namespace, before a container mounts it, so what's mounted under it later reaches that container (`Mount.receives`)."""
+        self.unshared("mount", "--bind", str(directory), str(directory))
+        self.unshared("mount", "--make-shared", str(directory))
+
+    def private(self, directory: Path) -> None:
+        """Make `directory` a private mount in podman's namespace, where nothing mounted under it reaches anywhere: `lend`'s stage."""
+        self.unshared("mount", "--bind", str(directory), str(directory))
+        self.unshared("mount", "--make-private", str(directory))
+
+    def lend(self, source: Path, at: Path, stage: Path, *, read_only: bool) -> None:
+        """Mount the host's `source` at `at`, a directory under one made shared (`shared`), so it reaches the containers mounting that one, while they run.
+
+        A read-only one is mounted first in `stage`, a private directory
+        (`private`), made read-only there, and only then mounted at `at`: a
+        mount made read-only after it reached a container stays writable there
+        (measured, `docs/field-notes.md`, *Lending to a running room*). Both
+        directories exist; `at` is empty.
+        """
+        if not read_only:
+            self.unshared("mount", "--bind", str(source), str(at))
+            return
+        staged = stage / at.name
+        staged.mkdir(exist_ok=True)
+        self.unshared("mount", "--bind", str(source), str(staged))
+        self.unshared("mount", "-o", "remount,bind,ro", str(staged))
+        self.unshared("mount", "--bind", str(staged), str(at))
+        self.unshared("umount", str(staged))
+        staged.rmdir()
+
+    def released(self, directory: Path) -> None:
+        """Unmount `directory` in podman's namespace, with everything mounted under it."""
+        self.unshared("umount", "--recursive", str(directory))
 
     def exists(self, container: str) -> bool:
         """Say whether a container named `container` is there, running or stopped.

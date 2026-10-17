@@ -228,6 +228,7 @@ class Engine:
         self.processes: list[Process] = []
         self.guidance: str | None = None
         self.gitconfig: str | None = None
+        self.unshared: list[list[str]] = []
 
     def __call__(self, process: Process) -> Exited:
         self.processes.append(process)
@@ -240,6 +241,9 @@ class Engine:
             case ["container", "exists", name]:
                 self.record(f"container {name}")
                 return Exited(status=1 if name in self.gone else 0)
+            case ["unshare", *unshared]:
+                self.unshared.append(unshared)
+                return Exited(status=0)
             case ["run", *_]:
                 self.record("run")
                 flag = "--append-system-prompt-file"
@@ -466,6 +470,22 @@ def test_a_launch_runs_each_step_in_order_and_ends_its_registration(
     assert run[-1] == "--resume"
     assert str(machine.layout.clis("claude").version("2.1.300") / "cli") in run
     directory = machine.layout.launch(launch).directory
+    lent = machine.layout.launch(launch).lent
+    stage = machine.layout.launch(launch).stage
+    assert (
+        f"--mount=type=bind,source={lent},destination=/lent,bind-propagation=rslave"
+        in run
+    )
+    assert machine.engine.unshared == [
+        ["mount", "--bind", str(lent), str(lent)],
+        ["mount", "--make-shared", str(lent)],
+        ["mount", "--bind", str(stage), str(stage)],
+        ["mount", "--make-private", str(stage)],
+        ["umount", "--recursive", str(lent)],
+        ["umount", "--recursive", str(stage)],
+    ]
+    assert not lent.exists()
+    assert not stage.exists()
     assert f"--env=GIT_CONFIG_GLOBAL={directory / 'gitconfig'}" in run
     assert (
         f"--env=PATH={directory / 'bin'}:/usr/local/sbin:/usr/local/bin:/usr/sbin:"

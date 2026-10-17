@@ -416,6 +416,12 @@ Read in its code and history (`lup-legacy`), with each commit there:
 - **The network:** lup's own sessions ran on the host's network, for sign-in callbacks and ssh; the default was an internal network behind a squid proxy, whose DNS and staleness caused failures of their own.
 - **Its hooks** ran inside the container on the image's Python, from generated files in the checkout, which a session could rewrite unless they were held read-only.
 
+### Lending to a running room (podman 6.1.3, util-linux 2.42.4, kernel 7.2.6, measured 2026-10-17)
+
+Probed on the operator's host with throwaway containers from the room's base image, run as lup runs a room (`--userns=keep-id`):
+- **A mount reaches a running container only under a mount that was shared when it started.** A directory bound to itself and made shared in podman's namespace (`podman unshare mount --bind D D`, `mount --make-shared D`), then mounted into the container with `bind-propagation=rslave` (or `rshared`): a directory mounted under it afterwards (`podman unshare mount --bind SRC D/data`) was visible in the running container, and unmounting it on the host removed it there. Without propagation, as rooms were mounted before, nothing mounted later reached the container.
+- **Read-only has to be set before the mount spreads.** Bound, then remounted read-only (`mount -o remount,bind,ro`), the mount was read-only on the host's side and writable in the container: a remount's flags don't propagate to a slave's copy. Two ways gave a read-only mount there: `mount --bind -o ro` in one step (util-linux 2.42 applies the flag before attaching the mount; older versions remount after, which would spread it writable), and binding into a private directory, remounting read-only there, then binding that into the shared one. lup uses the second (`lup.rooms.engine.Podman.lend`), whatever the host's util-linux.
+
 ## Isolation and effects
 
 - An overlay mounts over 300k files in 13 ms and lists its changes in 12 ms, without root, in lup's container (kernel 7.2).

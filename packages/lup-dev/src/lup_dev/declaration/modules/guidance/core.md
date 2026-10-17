@@ -8,7 +8,7 @@ This session runs in a container lup started for the project: the room. Its wall
 - the same standard machine in every room: bash and the usual tools, without the operator's own shell setup;
 - your runtime's login and history, which are the operator's own.
 
-**What isn't:** the rest of the operator's home, their git configuration (your git identity is set for you), an SSH key and a GitHub login. Your home directory is the room's own and goes when the session ends, so what's worth keeping goes in the repository, and scratch work under `tmp/`.
+**What isn't:** the rest of the operator's home, their git configuration (your git identity is set for you), an SSH key and a GitHub login. Your home directory is the room's own and goes when the session ends, so what's worth keeping goes in the repository, and scratch work under `tmp/`. A directory of theirs you need can be lent while you run: ask, and once they lend it (`lup-dev mount`), it's under `/lent` and you're told where.
 
 **As of this launch.** This guidance was rendered when this session's launch started, and a conversation continued from an earlier launch may remember another. Where either disagrees with the room itself (a path, a mount, a tool), the room holds: look before concluding something isn't there.
 

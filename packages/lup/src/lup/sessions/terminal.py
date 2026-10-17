@@ -34,7 +34,7 @@ class Cli(Model):
     directory it ships in, at its path, so it finds them in the room as on the host.
 
     >>> Cli(program=Path("/opt/cli/bin/agent"), directory=Path("/opt/cli")).mount
-    Mount(source=PosixPath('/opt/cli'), target=None, read_only=True)
+    Mount(source=PosixPath('/opt/cli'), target=None, read_only=True, receives=False)
     """
 
     program: AbsolutePath

@@ -178,6 +178,80 @@ def test_a_run_without_a_terminal_on_its_own_network() -> None:
     assert "--network=private" in command
 
 
+def test_a_mount_receiving_what_s_mounted_later_is_a_slave() -> None:
+    engine, _ = podman()
+    invocation = Invocation(
+        container=Container(
+            image=IMAGE,
+            mounts=[
+                Mount(source=Path("/srv/lent"), target=Path("/lent"), receives=True)
+            ],
+        ),
+        command=["true"],
+        workdir=Path("/srv/lent"),
+        home=Path("/home/op"),
+    )
+    assert (
+        "--mount=type=bind,source=/srv/lent,destination=/lent,bind-propagation=rslave"
+        in engine.command(invocation)
+    )
+
+
+def unshared(recorder: Recorder) -> list[list[str]]:
+    """The commands run in podman's namespace, without `podman unshare`."""
+    return [
+        each.arguments[2:]
+        for each in recorder.processes
+        if each.arguments[:2] == ["podman", "unshare"]
+    ]
+
+
+def test_a_directory_shared_then_lent_read_only_is_made_so_before_it_spreads(
+    tmp_path: Path,
+) -> None:
+    lent = tmp_path / "lent"
+    stage = tmp_path / "stage"
+    at = lent / "atlas"
+    for each in [lent, stage, at]:
+        each.mkdir()
+    engine, recorder = podman(*[Exited(status=0)] * 10)
+
+    engine.shared(lent)
+    engine.private(stage)
+    engine.lend(Path("/src/atlas"), at, stage, read_only=True)
+    engine.released(lent)
+
+    staged = str(stage / "atlas")
+    assert unshared(recorder) == [
+        ["mount", "--bind", str(lent), str(lent)],
+        ["mount", "--make-shared", str(lent)],
+        ["mount", "--bind", str(stage), str(stage)],
+        ["mount", "--make-private", str(stage)],
+        ["mount", "--bind", "/src/atlas", staged],
+        ["mount", "-o", "remount,bind,ro", staged],
+        ["mount", "--bind", staged, str(at)],
+        ["umount", staged],
+        ["umount", "--recursive", str(lent)],
+    ]
+    assert not (stage / "atlas").exists()
+
+
+def test_a_directory_lent_writable_is_mounted_where_it_spreads_at_once(
+    tmp_path: Path,
+) -> None:
+    engine, recorder = podman(Exited(status=0))
+    engine.lend(Path("/src/atlas"), tmp_path / "atlas", tmp_path, read_only=False)
+    assert unshared(recorder) == [
+        ["mount", "--bind", "/src/atlas", str(tmp_path / "atlas")]
+    ]
+
+
+def test_a_command_in_podman_s_namespace_that_fails_raises(tmp_path: Path) -> None:
+    engine, _ = podman(Exited(status=32))
+    with pytest.raises(ContainerError, match="`podman unshare umount --recursive"):
+        engine.released(tmp_path)
+
+
 def test_a_mount_at_a_directory_inside_the_home_isnt_a_tmpfs_too() -> None:
     engine, _ = podman()
     invocation = Invocation(
