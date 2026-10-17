@@ -253,8 +253,13 @@ class GitDirectoryLayout(Model):
 
     @property
     def passes(self) -> Path:
-        """The gate's passes, one file each, named by the files it passed on (`lup_dev.gate`, `GitPasses`)."""
+        """The gate's passes, one file each, named by the files it passed on (`lup_dev.gate`, `Passes`)."""
         return self.common / "lup" / "passes"
+
+    @property
+    def due(self) -> Path:
+        """The deferred work the gate last found due, which a session is told at its start (`codescan.contract.Due`)."""
+        return self.common / "lup" / "due.json"
 
 
 class PackageLayout(Model):

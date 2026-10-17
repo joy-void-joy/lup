@@ -54,14 +54,14 @@ from lup.types import Model, MutableModel
 from lup_dev.approval import approved
 from lup_dev.clock import Clock
 from lup_dev.codescan.conditions import declared
-from lup_dev.codescan.contract import Checker, FileReport, Finding, Source
+from lup_dev.codescan.contract import Checker, Due, FileReport, Finding, Source
 from lup_dev.codescan.ruff import Linter
 from lup_dev.declaration.errors import ProjectError
 from lup_dev.declaration.project import Project
 from lup_dev.declaration.resolve import Declaration
 from lup_dev.git import Git
 from lup_dev.inbox import ends
-from lup_dev.layout import CheckoutLayout, Layout
+from lup_dev.layout import CheckoutLayout, GitDirectoryLayout, Layout
 from lup_dev.policy.holds import HeldFile, Hold, Holds, answered
 from lup_dev.policy.importers import Conversation, Found, ImportersPass, Spawner
 from lup_dev.policy.judge import Change, Judge, Judgement, RemovedNote
@@ -1668,18 +1668,20 @@ class Event(Model, ABC):
 class SessionStarted(Event):
     """A session started, or resumed: it begins again in each worktree it holds.
 
-    Its record of the subagents at work starts again too.
+    Its record of the subagents at work starts again too, and its main
+    conversation is told the deferred work its repository's gate last found due
+    (`Due`), once at each start, since the gate doesn't fail on it.
     """
 
     @override
     def apply(self, bench: Bench) -> Reply:
         held = holding(bench, self.session, self.cwd, starts=True)
-        if held is not None and not self.agent:
-            record = ConversationRecord(
-                layout=bench.services.layout, session=self.session
-            )
-            record.restarted()
-        return Reply()
+        if held is None or self.agent:
+            return Reply()
+        record = ConversationRecord(layout=bench.services.layout, session=self.session)
+        record.restarted()
+        due = read_model(GitDirectoryLayout(common=held.repository).due, Due)
+        return Reply(context="" if due is None else due.told())
 
 
 class CallStarted(Event):

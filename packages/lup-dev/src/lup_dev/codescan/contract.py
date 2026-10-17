@@ -64,6 +64,35 @@ class Finding(Model):
     The agent never hears of such a finding: the session landing the work applies
     the fix (`lup-dev check --fix`).
     """
+    reminder: bool = False
+    """Whether it's work that came due rather than something wrong with the
+    code: a deferral whose issue closed or whose condition holds. The gate lists
+    it without failing, so its verdict depends on the files alone, and a
+    session is told it at its start."""
+
+
+class Due(Model):
+    """The deferred work a repository's gate last found due: each reminder, where it is and what came due.
+
+    `lup-dev rules check` over every file writes it, where it could ask about
+    every deferral's issue; a session's start tells it (`GitDirectoryLayout.due`).
+    """
+
+    reminders: list[Finding] = []
+
+    def told(self) -> str:
+        """Say the reminders to a session, or nothing where there are none."""
+        if not self.reminders:
+            return ""
+        heading = (
+            "Work deferred in this repository came due, as the gate last found it "
+            "(it doesn't fail the gate):"
+        )
+        lines = [
+            f"- {each.path}:{each.span.start.line}: {each.message}; {each.steer}"
+            for each in self.reminders
+        ]
+        return "\n".join([heading, *lines])
 
 
 class Parameter(Model):

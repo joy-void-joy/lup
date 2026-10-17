@@ -38,7 +38,7 @@ from lup_dev.adapters import Adapter, claude, codex
 from lup_dev.approval import approved
 from lup_dev.clock import Clock, SystemClock
 from lup_dev.codescan.conditions import loaded
-from lup_dev.codescan.contract import Checker, Finding, Source
+from lup_dev.codescan.contract import Checker, Due, Finding, Source
 from lup_dev.codescan.directives import (
     Checking,
     Fired,
@@ -120,7 +120,7 @@ from lup_dev.launch.trust import (
     machine_trust,
     trusted,
 )
-from lup_dev.layout import ROOM_SOCKETS, CheckoutLayout, Layout
+from lup_dev.layout import ROOM_SOCKETS, CheckoutLayout, GitDirectoryLayout, Layout
 from lup_dev.policy.checkpoint import Bench, Services, Worktree
 from lup_dev.policy.holds import Hold, Response, answer, waiting
 from lup_dev.policy.importers import BackgroundSpawner
@@ -131,6 +131,7 @@ from lup_dev.remote.config import Gating
 from lup_dev.remote.protocol import Remotes
 from lup_dev.remote.protocol import routes as remote_routes
 from lup_dev.settings import LupDevSettings, TerminalVariables
+from lup_dev.stored import write_model
 from lup_dev.worker import worked
 
 if TYPE_CHECKING:
@@ -1090,8 +1091,9 @@ def rules_check(
     lup's rules are those the worktree's declaration selects, sent to the engine
     as the judge sends them, and pyright and ruff run through its runner as the
     judge runs them. `# lup: ignore` applies to every owner's findings. A
-    deferral whose issue is closed, or whose condition holds, fails the check;
-    where the issue tracker can't be reached (no `gh`, no login, offline), the
+    deferral whose issue is closed, or whose condition holds, is due, which is
+    listed and doesn't fail the check; where the issue tracker can't be
+    reached (no `gh`, no login, offline), the
     issues go unchecked and the check says why. In a room, which holds no `gh`,
     the host service is asked each issue's state on the launch's request socket,
     and an issue it doesn't answer goes unchecked, said. lup's rules read production and
@@ -1099,19 +1101,28 @@ def rules_check(
     pyright and ruff only; what the declaration excludes isn't checked. With no
     paths, it checks every such file in the worktree, as the gate's `rules` step
     runs it. An `ignore` that keeps nothing fails it too, until `lup-dev rules
-    fix` removes it.
+    fix` removes it. What came due is kept, over every file and where every
+    issue was asked, for a session to be told at its start.
     """
     found = scanned(paths, issues=True)
     if not found.files:
         typer.echo("lup checked no files.")
         return
-    lines = (line for each in found.findings for line in finding_lines(each, ""))
-    for line in lines:
+    failing = [each for each in found.findings if not each.reminder]
+    due = Due(reminders=[each for each in found.findings if each.reminder])
+    for line in (line for each in failing for line in finding_lines(each, "")):
         typer.echo(line)
+    if due.reminders:
+        typer.echo(due.told())
     if found.unreachable is not None:
         typer.echo(f"Deferrals' issues weren't checked: {found.unreachable}.")
-    typer.echo(f"lup checked {len(found.files)} files: {len(found.findings)} findings.")
-    if found.findings:
+    if paths is None and found.unreachable is None:
+        common = Git(cwd=toplevel(Path.cwd())).text(
+            "rev-parse", "--path-format=absolute", "--git-common-dir"
+        )
+        write_model(GitDirectoryLayout(common=Path(common)).due, due)
+    typer.echo(f"lup checked {len(found.files)} files: {len(failing)} findings.")
+    if failing:
         raise typer.Exit(code=1)
 
 
