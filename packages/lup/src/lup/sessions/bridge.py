@@ -17,10 +17,13 @@ for good, since no runtime starts a stdio server again.
   a minute without it (`patience`).
 - Once it's reached again, the bridge introduces the runtime to it as the
   runtime introduced itself the first time: its `initialize` request, under an
-  id of the bridge's whose answer it keeps to itself, then
-  `notifications/initialized`. Then what waited goes across, and the runtime is
-  told the server's tools changed (`notifications/tools/list_changed`), so it
-  lists them again and finds what the restarted copy serves.
+  id of the bridge's whose answer it keeps to itself. Only the answer makes
+  the server back: a server going away can still take a connection it never
+  answers, its socket listening a moment longer, and a connection that closes
+  before the answer is tried again with nothing sent but the introduction.
+  Then `notifications/initialized` and what waited go across, and the runtime
+  is told the server's tools changed (`notifications/tools/list_changed`), so
+  it lists them again and finds what the restarted copy serves.
 
 It runs on the room's Python with the standard library alone (an import contract
 keeps it so), as git's remote helper does.
@@ -100,6 +103,16 @@ class Waiting:
         self.since = since
 
 
+class Replay:
+    """The runtime's introduction, for a server reached again: the bridge's own `initialize`, its id, and what follows once it's answered."""
+
+    def __init__(self, ident: str, initialize: str, after: list[str]) -> None:
+        """Keep the `initialize` line under `ident`, and the lines `after` it: `notifications/initialized`, where the runtime sent it."""
+        self.ident = ident
+        self.initialize = initialize
+        self.after = after
+
+
 class Bridge:
     """One runtime's bridge to lup's server on one socket."""
 
@@ -172,17 +185,18 @@ class Bridge:
     def serving(self) -> None:
         """Keep a connection to the server, carrying its lines to the runtime, and reach it again whenever it goes."""
         while True:
-            connection = self.connected()
+            connection = self.reached()
             with connection.makefile("r", encoding="utf-8", newline="\n") as lines:
                 try:
-                    for text in lines:
-                        self.received(text)
+                    if self.joined(connection, lines):
+                        for text in lines:
+                            self.received(text)
                 except OSError:
                     pass
             self.lost(connection)
 
-    def connected(self) -> socket.socket:
-        """Return a connection to the server once it answers, the runtime introduced to it and what waited sent."""
+    def reached(self) -> socket.socket:
+        """Return a connection to the server's socket once one is taken, trying again every `retry` seconds meanwhile."""
         while True:
             self.expired()
             connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -192,49 +206,60 @@ class Bridge:
                 connection.close()
                 time.sleep(self.retry)
                 continue
-            with self.lock:
-                again = self.introduced
-                waited = self.waiting
-                sending = [
-                    *(self.replayed() if again else []),
-                    *(each.text for each in waited),
-                ]
-                try:
-                    connection.sendall("".join(sending).encode())
-                except OSError:
-                    connection.close()
-                    continue
-                self.waiting = []
-                self.answering = [
-                    *self.answering,
-                    *(each.ident for each in waited if each.ident is not None),
-                ]
-                self.introduced = again or any(
-                    each.text == self.initialize for each in waited
-                )
-                self.connection = connection
-            if again:
-                self.told(
-                    line(
-                        {
-                            "jsonrpc": "2.0",
-                            "method": "notifications/tools/list_changed",
-                        }
-                    )
-                )
             return connection
 
-    def replayed(self) -> list[str]:
-        """Return the runtime's introduction for a server reached again: its `initialize` under an id of the bridge's, then `notifications/initialized`."""
+    def joined(self, connection: socket.socket, lines: Iterator[str]) -> bool:
+        """Join the server on `connection`, and say whether it answered: the runtime introduced to it again where it was before, then what waited sent.
+
+        A server reached again is introduced to the runtime with the bridge's own
+        `initialize` first, and is joined only once it answers it; one that
+        closes the connection first isn't, and nothing else was sent to it.
+        """
+        with self.lock:
+            again = self.introduced
+            replay = self.replayed() if again else None
+        if replay is not None:
+            connection.sendall(replay.initialize.encode())
+            heard = next(
+                (each for each in lines if answered(read(each)) == replay.ident),
+                None,
+            )
+            if heard is None:
+                return False
+        with self.lock:
+            waited = self.waiting
+            sending = [
+                *([] if replay is None else replay.after),
+                *(each.text for each in waited),
+            ]
+            connection.sendall("".join(sending).encode())
+            self.waiting = []
+            self.answering = [
+                *self.answering,
+                *(each.ident for each in waited if each.ident is not None),
+            ]
+            self.introduced = again or any(
+                each.text == self.initialize for each in waited
+            )
+            self.connection = connection
+        if again:
+            self.told(
+                line({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
+            )
+        return True
+
+    def replayed(self) -> Replay | None:
+        """Return the runtime's introduction for a server reached again, its `initialize` under an id of the bridge's; none where the runtime gave none."""
         match read(self.initialize or ""):
             case {"method": "initialize", **rest}:
                 ident = f"{OURS}-{next(self.ids)}"
-                return [
-                    line({**rest, "method": "initialize", "id": ident}),
-                    *([] if self.initialized is None else [self.initialized]),
-                ]
+                return Replay(
+                    ident=ident,
+                    initialize=line({**rest, "method": "initialize", "id": ident}),
+                    after=[] if self.initialized is None else [self.initialized],
+                )
             case _:
-                return []
+                return None
 
     def received(self, text: str) -> None:
         """Carry one line from the server to the runtime, but the answer to the bridge's own request."""
